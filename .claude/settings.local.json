@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/lucasm/Documents/**)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git config:*)"
     ]
   }
 }
