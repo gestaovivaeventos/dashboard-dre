@@ -40,18 +40,14 @@ export interface RawOmieMovimento {
   cCodCateg?: string;
   cDescricao?: string;
 
-  // Categoria com rateio (campos cCodCateg1..5 e nDistrValor1..5)
-  cCodCateg1?: string;
-  cCodCateg2?: string;
-  cCodCateg3?: string;
-  cCodCateg4?: string;
-  cCodCateg5?: string;
-
-  nDistrValor1?: string | number;
-  nDistrValor2?: string | number;
-  nDistrValor3?: string | number;
-  nDistrValor4?: string | number;
-  nDistrValor5?: string | number;
+  // Rateio: array "categorias" na RAIZ do registro da API
+  // Cada item: { cCodCateg, nDistrPercentual, nDistrValor, nValorFixo }
+  categorias?: Array<{
+    cCodCateg?: string;
+    nDistrPercentual?: number;
+    nDistrValor?: number;
+    nValorFixo?: string;
+  }>;
 
   // Dados complementares
   cNomeCliente?: string;
@@ -190,31 +186,16 @@ function flattenMovimento(raw: RawOmieMovimento): RawOmieMovimento {
 // ============================================================================
 // REGRA 3: VERIFICADOR_RATEIO
 // ============================================================================
-// Identifica quantas categorias rateadas existem verificando cCodCateg1..5
+// Identifica quantas categorias rateadas existem verificando o array "categorias"
+// que a API ListarMovimentos retorna na RAIZ do registro (ao lado de detalhes/resumo).
 // Retorna:
-//   0 = sem rateio (cCodCateg1 está vazio)
-//   1 = 1 categoria (cCodCateg2 está vazio)
-//   2 = 2 categorias (cCodCateg3 está vazio)
-//   ... e assim por diante até 5
+//   0 = sem rateio (array não existe ou vazio)
+//   N = número de categorias rateadas (1 a 5)
 // ============================================================================
 function detectVerificadorRateio(record: RawOmieMovimento): number {
-  const cat1 = getString(record as Record<string, unknown>, ["cCodCateg1"]);
-  if (!cat1) return 0; // Sem rateio
-
-  const cat2 = getString(record as Record<string, unknown>, ["cCodCateg2"]);
-  if (!cat2) return 1;
-
-  const cat3 = getString(record as Record<string, unknown>, ["cCodCateg3"]);
-  if (!cat3) return 2;
-
-  const cat4 = getString(record as Record<string, unknown>, ["cCodCateg4"]);
-  if (!cat4) return 3;
-
-  const cat5 = getString(record as Record<string, unknown>, ["cCodCateg5"]);
-  if (!cat5) return 4;
-
-  // Todas as 5 categorias preenchidas
-  return 5;
+  const categorias = record.categorias;
+  if (!Array.isArray(categorias) || categorias.length === 0) return 0;
+  return categorias.length;
 }
 
 // ============================================================================
@@ -267,30 +248,32 @@ function selectValueByCorretor(
 // ============================================================================
 // REGRA 7: QUEBRA DE RATEIO
 // ============================================================================
-// Para lançamentos com rateio, quebra em até 5 parcelas
-// Cada parcela recebe:
-//   - cCodCategN (categoria)
-//   - nDistrValorN (valor específico dessa parcela)
+// Para lançamentos com rateio, quebra em parcelas usando o array "categorias"
+// da API. Cada item do array possui:
+//   - cCodCateg (código da categoria)
+//   - nDistrValor (valor distribuído para esta categoria)
+//   - nDistrPercentual (percentual)
+//   - nValorFixo ("S"/"N")
 // ============================================================================
 interface RateioParcela {
   categoria: string;
   valor: number;
-  posicao: number; // 1-5
+  posicao: number; // 1-based
 }
 
 function extrairRateioParcelas(record: RawOmieMovimento): RateioParcela[] {
   const parcelas: RateioParcela[] = [];
+  const categorias = record.categorias;
+  if (!Array.isArray(categorias)) return parcelas;
 
-  const categorias = ["cCodCateg1", "cCodCateg2", "cCodCateg3", "cCodCateg4", "cCodCateg5"];
-  const valores = ["nDistrValor1", "nDistrValor2", "nDistrValor3", "nDistrValor4", "nDistrValor5"];
+  for (let i = 0; i < categorias.length; i++) {
+    const item = categorias[i];
+    const categoria = item.cCodCateg;
+    if (!categoria || (typeof categoria === "string" && !categoria.trim())) continue;
 
-  for (let i = 0; i < 5; i++) {
-    const categoria = getString(record as Record<string, unknown>, [categorias[i]]);
-    if (!categoria) break; // Para na primeira vazia
-
-    const valor = parseNumber((record as Record<string, unknown>)[valores[i]]);
+    const valor = parseNumber(item.nDistrValor);
     parcelas.push({
-      categoria,
+      categoria: typeof categoria === "string" ? categoria.trim() : String(categoria),
       valor,
       posicao: i + 1,
     });

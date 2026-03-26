@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/lucasm/Documents/**)"
+      "Read(//c/Users/lucasm/Documents/**)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

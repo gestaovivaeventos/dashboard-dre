@@ -2,7 +2,7 @@
 
 Aplicacao Next.js 14 (App Router) com Supabase (Auth + Postgres), shadcn/ui e integracao Omie para DRE gerencial, KPIs, sincronizacao financeira e administracao de usuarios.
 
-## 1. Setup local.
+## 1. Setup local..
 
 ### 1.1 Requisitos
 
