@@ -1,0 +1,144 @@
+import { redirect } from "next/navigation";
+
+import { DashboardDreView } from "@/components/app/dashboard-dre-view";
+import { getCurrentSessionContext } from "@/lib/auth/session";
+import {
+  buildAccumulatedBucket,
+  buildDashboardRows,
+  buildDateRange,
+  buildFilterState,
+  buildVisibleBuckets,
+  filterCoreDreAccounts,
+  resolveAllowedCompanyIds,
+  type DreAccountBase,
+  type DashboardPeriodBucket,
+} from "@/lib/dashboard/dre";
+
+interface DashboardPageProps {
+  searchParams: Record<string, string | string[] | undefined>;
+}
+
+interface DashboardDisplayRow extends DreAccountBase {
+  hasChildren: boolean;
+  percentageOverNetRevenue: number;
+  valuesByBucket: Record<string, number>;
+  accumulatedValue: number;
+  variationPercentage: number;
+}
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const { supabase, user, profile } = await getCurrentSessionContext();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const [{ data: companiesData }, { data: accountsData }] = await Promise.all([
+    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    supabase
+      .from("dre_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .eq("active", true)
+      .order("code"),
+  ]);
+
+  const companies = (companiesData ?? []).map((company) => ({
+    id: company.id as string,
+    name: company.name as string,
+  }));
+  const allowedCompanyIds = resolveAllowedCompanyIds(
+    profile,
+    companies.map((company) => company.id),
+  );
+
+  const filter = buildFilterState(searchParams, allowedCompanyIds);
+  if (profile?.role === "gestor_unidade") {
+    filter.selectedCompanyIds = allowedCompanyIds;
+  }
+
+  const range = buildDateRange(filter);
+  const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
+  const visibleBuckets = buildVisibleBuckets(filter);
+  const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
+
+  const aggregateBucket = async (bucket: DashboardPeriodBucket) => {
+    const { data, error } = await supabase.rpc("dashboard_dre_aggregate", {
+      p_company_ids: filter.selectedCompanyIds,
+      p_date_from: bucket.dateFrom,
+      p_date_to: bucket.dateTo,
+    });
+    if (error) {
+      throw new Error(`Falha ao carregar agregados DRE: ${error.message}`);
+    }
+
+    const amountsByAccountId = new Map<string, number>();
+    (
+      data as Array<{ dre_account_id: string; amount: number | string | null }> | null
+    ?? []
+    ).forEach((item) => {
+      amountsByAccountId.set(item.dre_account_id, Number(item.amount ?? 0));
+    });
+
+    return buildDashboardRows(accounts, amountsByAccountId).rows;
+  };
+
+  const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([
+    Promise.all(visibleBuckets.map((bucket) => aggregateBucket(bucket))),
+    aggregateBucket(accumulatedBucket),
+    Promise.resolve(buildDashboardRows(accounts, new Map()).rows),
+  ]);
+
+  const valuesPerBucket = new Map<string, Record<string, number>>();
+  visibleBuckets.forEach((bucket, index) => {
+    const byRowId: Record<string, number> = {};
+    bucketRows[index].forEach((row) => {
+      byRowId[row.id] = row.value;
+    });
+    valuesPerBucket.set(bucket.key, byRowId);
+  });
+
+  const accumulatedMap: Record<string, number> = {};
+  accumulatedRows.forEach((row) => {
+    accumulatedMap[row.id] = row.value;
+  });
+
+  const simplePercentMap: Record<string, number> = {};
+  (bucketRows[0] ?? []).forEach((row) => {
+    simplePercentMap[row.id] = row.percentageOverNetRevenue;
+  });
+
+  const displayRows = zeroRows.map((row) => {
+    const valuesByBucket: Record<string, number> = {};
+    visibleBuckets.forEach((bucket) => {
+      valuesByBucket[bucket.key] = valuesPerBucket.get(bucket.key)?.[row.id] ?? 0;
+    });
+    const lastBucket = visibleBuckets[visibleBuckets.length - 1];
+    const previousBucket = visibleBuckets.length > 1 ? visibleBuckets[visibleBuckets.length - 2] : null;
+    const lastValue = valuesByBucket[lastBucket.key] ?? 0;
+    const previousValue = previousBucket ? valuesByBucket[previousBucket.key] ?? 0 : 0;
+    const variation =
+      previousBucket && previousValue !== 0
+        ? ((lastValue - previousValue) / Math.abs(previousValue)) * 100
+        : 0;
+
+    return {
+      ...row,
+      valuesByBucket,
+      accumulatedValue: accumulatedMap[row.id] ?? 0,
+      variationPercentage: variation,
+      percentageOverNetRevenue: simplePercentMap[row.id] ?? 0,
+    } satisfies DashboardDisplayRow;
+  });
+
+  return (
+    <DashboardDreView
+      filter={filter}
+      range={range}
+      rows={displayRows}
+      companies={companies.filter((company) => allowedCompanyIds.includes(company.id))}
+      role={profile?.role ?? "gestor_hero"}
+      visibleBuckets={visibleBuckets}
+      accumulatedBucket={accumulatedBucket}
+      selectedCompanyIds={filter.selectedCompanyIds}
+    />
+  );
+}
