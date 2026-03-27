@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   const chunks: Buffer[] = [];
   doc.on("data", (chunk) => chunks.push(chunk as Buffer));
 
-  doc.fontSize(16).text("Hero DRE Dashboard", { continued: false });
+  doc.fontSize(16).text("Controll Hub", { continued: false });
   doc.moveDown(0.2);
   doc.fontSize(11).text(body.title ?? "DRE Gerencial");
   doc.fontSize(9).fillColor("#555").text(`Periodo: ${body.periodLabel ?? "-"}`);

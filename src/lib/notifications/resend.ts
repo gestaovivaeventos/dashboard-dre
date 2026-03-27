@@ -41,11 +41,11 @@ export async function sendSyncFailureEmail(failures: SyncFailureItem[]) {
     .join("");
 
   await resend.emails.send({
-    from: "Hero DRE Dashboard <onboarding@resend.dev>",
+    from: "Controll Hub <onboarding@resend.dev>",
     to: config.adminEmail,
-    subject: "Sincronizacao Hero DRE Dashboard - Falhas",
+    subject: "Sincronizacao Controll Hub - Falhas",
     html: `
-      <h2>Sincronizacao Hero DRE Dashboard</h2>
+      <h2>Sincronizacao Controll Hub</h2>
       <p>Uma ou mais empresas falharam no processo de sincronizacao diaria.</p>
       <ul>${list}</ul>
       <p><a href="${config.appUrl}/conexoes">Abrir painel de conexoes</a></p>
@@ -78,11 +78,11 @@ export async function sendUnmappedCategoriesEmail(items: UnmappedCategoryItem[])
     .join("");
 
   await resend.emails.send({
-    from: "Hero DRE Dashboard <onboarding@resend.dev>",
+    from: "Controll Hub <onboarding@resend.dev>",
     to: config.adminEmail,
-    subject: "Sincronizacao Hero DRE Dashboard - Novas categorias sem mapeamento",
+    subject: "Sincronizacao Controll Hub - Novas categorias sem mapeamento",
     html: `
-      <h2>Sincronizacao Hero DRE Dashboard</h2>
+      <h2>Sincronizacao Controll Hub</h2>
       <p>Foram encontradas novas categorias OMIE sem mapeamento.</p>
       ${sections}
       <p><a href="${config.appUrl}/mapeamento">Abrir tela de mapeamento</a></p>

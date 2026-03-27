@@ -133,7 +133,7 @@ export function KpiRankingView({
       XLSX.utils.book_append_sheet(wb, ws, "KPIs");
       XLSX.writeFile(
         wb,
-        `KPIs_Hero_${(selectedKpi?.name ?? "KPI").replace(/\s+/g, "_")}_${periodType}_${year}.xlsx`,
+        `KPIs_ControllHub_${(selectedKpi?.name ?? "KPI").replace(/\s+/g, "_")}_${periodType}_${year}.xlsx`,
       );
       showToast({
         title: "Exportacao concluida",

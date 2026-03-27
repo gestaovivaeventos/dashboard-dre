@@ -3,6 +3,7 @@
 import { Menu } from "lucide-react";
 import { useState } from "react";
 
+import { LogoFull } from "@/components/app/logo";
 import { NavLinks } from "@/components/app/nav-links";
 import { SignOutButton } from "@/components/app/sign-out-button";
 import { ThemeToggle } from "@/components/app/theme-toggle";
@@ -26,8 +27,7 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
     <div className="min-h-screen bg-slate-50 dark:bg-background">
       <aside className="fixed inset-y-0 left-0 hidden w-72 border-r bg-background p-4 md:block">
         <div className="mb-6">
-          <p className="text-sm text-muted-foreground">Hero DRE</p>
-          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <LogoFull />
         </div>
         <NavLinks role={userRole} segments={segments} />
       </aside>
@@ -44,13 +44,12 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
               </SheetTrigger>
               <SheetContent>
                 <div className="mb-6">
-                  <p className="text-sm text-muted-foreground">Hero DRE</p>
-                  <h1 className="text-xl font-semibold">Dashboard</h1>
+                  <LogoFull />
                 </div>
-                <NavLinks role={userRole} onNavigate={() => setOpen(false)} />
+                <NavLinks role={userRole} segments={segments} onNavigate={() => setOpen(false)} />
               </SheetContent>
             </Sheet>
-            <span className="text-sm font-medium">Hero DRE Dashboard</span>
+            <span className="text-sm font-bold">Controll Hub</span>
           </div>
 
           <div className="ml-auto flex items-center gap-4">

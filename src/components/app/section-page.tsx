@@ -16,7 +16,7 @@ export function SectionPage({ title, description }: SectionPageProps) {
       <Card>
         <CardHeader>
           <CardTitle>{title}</CardTitle>
-          <CardDescription>Área em construção para o Hero DRE Dashboard.</CardDescription>
+          <CardDescription>Area em construcao.</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">

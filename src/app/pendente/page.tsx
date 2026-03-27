@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 
+import { LogoFull } from "@/components/app/logo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/client";
 
 export default function PendentePage() {
@@ -16,23 +16,22 @@ export default function PendentePage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <Card className="w-full max-w-md text-center">
-        <CardHeader>
-          <CardTitle>Cadastro pendente</CardTitle>
-          <CardDescription>
+    <div className="flex min-h-screen flex-col items-center justify-center px-6">
+      <div className="w-full max-w-md space-y-8 text-center">
+        <LogoFull className="justify-center" />
+
+        <div className="space-y-3">
+          <h1 className="text-2xl font-bold tracking-tight">Cadastro pendente</h1>
+          <p className="text-muted-foreground">
             Sua conta foi criada e esta aguardando aprovacao de um administrador.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Voce recebera acesso assim que um administrador aprovar seu cadastro.
+            Voce recebera acesso assim que seu cadastro for aprovado.
           </p>
-          <Button variant="outline" onClick={() => void handleLogout()}>
-            Sair
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+
+        <Button variant="outline" onClick={() => void handleLogout()} className="h-11">
+          Sair
+        </Button>
+      </div>
     </div>
   );
 }

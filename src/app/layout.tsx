@@ -16,7 +16,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Hero DRE Dashboard",
+  title: "Controll Hub",
   description: "Painel DRE com autenticação Supabase",
 };
 
