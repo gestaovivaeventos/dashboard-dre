@@ -31,6 +31,7 @@ export async function updateSession(request: NextRequest) {
 
   const isAuthRoute =
     request.nextUrl.pathname === "/login" ||
+    request.nextUrl.pathname === "/signup" ||
     request.nextUrl.pathname.startsWith("/auth/callback");
   const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
   const isPublicRoot = request.nextUrl.pathname === "/";
@@ -42,7 +43,7 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/login";
     url.searchParams.set("redirectedFrom", request.nextUrl.pathname);
     supabaseResponse = NextResponse.redirect(url);
-  } else if (user && request.nextUrl.pathname === "/login") {
+  } else if (user && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/signup")) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     supabaseResponse = NextResponse.redirect(url);

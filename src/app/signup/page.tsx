@@ -9,10 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -21,10 +22,25 @@ export default function LoginPage() {
     setLoading(true);
     setStatus(null);
 
+    if (password.length < 6) {
+      setStatus("A senha deve ter pelo menos 6 caracteres.");
+      setLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setStatus("As senhas nao coincidem.");
+      setLoading(false);
+      return;
+    }
+
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
+      },
     });
 
     if (error) {
@@ -33,7 +49,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    setStatus("Conta criada! Verifique seu e-mail para confirmar o cadastro.");
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -52,8 +69,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Hero DRE Dashboard</CardTitle>
-          <CardDescription>Acesse com seu e-mail e senha.</CardDescription>
+          <CardTitle>Criar conta</CardTitle>
+          <CardDescription>Preencha os dados para se cadastrar.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -66,20 +83,27 @@ export default function LoginPage() {
             />
             <Input
               type="password"
-              placeholder="Sua senha"
+              placeholder="Senha (min. 6 caracteres)"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
             />
+            <Input
+              type="password"
+              placeholder="Confirme a senha"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+            />
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Entrando..." : "Entrar"}
+              {loading ? "Criando..." : "Criar conta"}
             </Button>
-            {status ? <p className="text-sm text-red-600">{status}</p> : null}
+            {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Ainda nao tem conta?{" "}
-            <Link href="/signup" className="text-primary underline hover:no-underline">
-              Criar conta
+            Ja tem uma conta?{" "}
+            <Link href="/login" className="text-primary underline hover:no-underline">
+              Entrar
             </Link>
           </p>
         </CardContent>
