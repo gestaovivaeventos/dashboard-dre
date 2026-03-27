@@ -10,13 +10,28 @@ export async function GET(request: Request) {
   if (profile.role !== "admin" && profile.role !== "gestor_hero") {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
-  const statusFilter = new URL(request.url).searchParams.get("status");
+  const url = new URL(request.url);
+  const statusFilter = url.searchParams.get("status");
+  const segmentSlug = url.searchParams.get("segment");
 
-  const companyQuery = supabase
+  let companyQuery = supabase
     .from("companies")
-    .select("id,name,active")
-    .eq("active", true)
-    .order("name");
+    .select("id,name,active,segment_id")
+    .eq("active", true);
+
+  if (segmentSlug) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("id")
+      .eq("slug", segmentSlug)
+      .eq("active", true)
+      .maybeSingle<{ id: string }>();
+    if (seg) {
+      companyQuery = companyQuery.eq("segment_id", seg.id);
+    }
+  }
+
+  companyQuery = companyQuery.order("name");
 
   const { data: companies, error: companiesError } = await companyQuery;
   if (companiesError) {

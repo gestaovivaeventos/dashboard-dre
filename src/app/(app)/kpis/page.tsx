@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { KpiRankingView } from "@/components/app/kpi-ranking-view";
+import { KpiAllView } from "@/components/app/kpi-all-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
   buildDateRange,
@@ -10,24 +10,39 @@ import {
 } from "@/lib/dashboard/dre";
 import {
   buildAccountValuesByCompany,
-  buildLastSixMonthRanges,
   evaluateKpiValue,
-  median,
   type KpiDefinition,
 } from "@/lib/kpi/calc";
 
 interface KpisPageProps {
   searchParams: Record<string, string | string[] | undefined>;
+  params?: { segmentSlug?: string };
 }
 
-export default async function KpisPage({ searchParams }: KpisPageProps) {
+export default async function KpisPage({ searchParams, params }: KpisPageProps) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     redirect("/login");
   }
 
+  let segmentId: string | null = null;
+  if (params?.segmentSlug) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("id")
+      .eq("slug", params.segmentSlug)
+      .eq("active", true)
+      .maybeSingle<{ id: string }>();
+    segmentId = seg?.id ?? null;
+  }
+
+  let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
+  if (segmentId) {
+    companiesQuery = companiesQuery.eq("segment_id", segmentId);
+  }
+
   const [{ data: companiesData }, { data: accountsData }, { data: kpisData }] = await Promise.all([
-    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    companiesQuery.order("name"),
     supabase.from("dre_accounts").select("id,code").eq("active", true),
     supabase
       .from("kpi_definitions")
@@ -58,14 +73,16 @@ export default async function KpisPage({ searchParams }: KpisPageProps) {
     companies.map((company) => company.id),
   );
   const filter = buildFilterState(searchParams, allowedCompanyIds);
+  if (profile?.role === "gestor_unidade") {
+    filter.selectedCompanyIds = allowedCompanyIds;
+  }
   const range = buildDateRange(filter);
-  const selectedKpiId = (searchParams.kpiId as string | undefined) ?? kpis[0].id;
-  const selectedKpi = kpis.find((kpi) => kpi.id === selectedKpiId) ?? kpis[0];
 
+  // Aggregate by company for the period
   const { data: aggregateData, error: aggregateError } = await supabase.rpc(
     "dashboard_dre_aggregate_by_company",
     {
-      p_company_ids: companies.map((company) => company.id),
+      p_company_ids: filter.selectedCompanyIds,
       p_date_from: range.dateFrom,
       p_date_to: range.dateTo,
     },
@@ -79,49 +96,27 @@ export default async function KpisPage({ searchParams }: KpisPageProps) {
     accountCodeById,
   );
 
-  const monthlyRanges = buildLastSixMonthRanges(range.dateTo);
-  const monthlyAggregates = await Promise.all(
-    monthlyRanges.map(async (monthRange) => {
-      const { data, error } = await supabase.rpc("dashboard_dre_aggregate_by_company", {
-        p_company_ids: companies.map((company) => company.id),
-        p_date_from: monthRange.dateFrom,
-        p_date_to: monthRange.dateTo,
-      });
-      if (error) throw new Error(error.message);
-      return buildAccountValuesByCompany(
-        (data ?? []) as Array<{ company_id: string; dre_account_id: string; amount: number }>,
-        accountCodeById,
-      );
-    }),
-  );
+  // Compute consolidated account values (sum across all selected companies)
+  const consolidatedValues = new Map<string, number>();
+  for (const [, companyMap] of valuesByCompany) {
+    for (const [code, value] of companyMap) {
+      consolidatedValues.set(code, (consolidatedValues.get(code) ?? 0) + value);
+    }
+  }
 
-  const rows = companies.map((company) => {
-    const companyValues = valuesByCompany.get(company.id) ?? new Map<string, number>();
-    const value = evaluateKpiValue(selectedKpi, companyValues);
-    const sparkline = monthlyAggregates.map((monthMap) =>
-      evaluateKpiValue(selectedKpi, monthMap.get(company.id) ?? new Map<string, number>()),
-    );
-    return {
-      companyId: company.id,
-      companyName: company.name,
-      value,
-      sparkline,
-      isCurrentUserCompany: profile?.company_id === company.id,
-    };
-  });
-
-  const statsValues = rows.map((row) => row.value);
-  const average = statsValues.length > 0 ? statsValues.reduce((sum, value) => sum + value, 0) / statsValues.length : 0;
-  const med = median(statsValues);
+  // Compute each KPI value
+  const kpiCards = kpis.map((kpi) => ({
+    id: kpi.id,
+    name: kpi.name,
+    description: kpi.description,
+    formula_type: kpi.formula_type,
+    value: evaluateKpiValue(kpi, consolidatedValues),
+  }));
 
   return (
-    <KpiRankingView
+    <KpiAllView
       filter={filter}
-      kpis={kpis}
-      selectedKpiId={selectedKpi.id}
-      rows={rows}
-      average={average}
-      median={med}
+      kpiCards={kpiCards}
       role={profile?.role ?? "gestor_hero"}
     />
   );

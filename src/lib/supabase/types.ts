@@ -11,3 +11,17 @@ export interface UserProfile {
 }
 
 export type SyncStatus = "success" | "error" | "running";
+
+export interface Segment {
+  id: string;
+  name: string;
+  slug: string;
+  display_order: number;
+  active: boolean;
+}
+
+export interface UserSegmentAccess {
+  id: string;
+  user_id: string;
+  segment_id: string;
+}

@@ -11,7 +11,7 @@ interface Params {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
-  const { supabase, user, profile } = await getCurrentSessionContext();
+  const { user, profile } = await getCurrentSessionContext();
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
@@ -42,7 +42,8 @@ export async function PATCH(request: Request, { params }: Params) {
     patch.company_id = null;
   }
 
-  const { error } = await supabase.from("users").update(patch).eq("id", params.userId);
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.from("users").update(patch).eq("id", params.userId);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }

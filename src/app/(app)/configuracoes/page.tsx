@@ -4,7 +4,11 @@ import { SettingsTabs } from "@/components/app/settings-tabs";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import type { KpiDefinition } from "@/lib/kpi/calc";
 
-export default async function ConfiguracoesPage() {
+interface ConfiguracoesPageProps {
+  params?: { segmentSlug?: string };
+}
+
+export default async function ConfiguracoesPage({ params }: ConfiguracoesPageProps) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     redirect("/login");
@@ -13,11 +17,26 @@ export default async function ConfiguracoesPage() {
     redirect("/dashboard");
   }
 
+  let segmentId: string | null = null;
+  if (params?.segmentSlug) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("id")
+      .eq("slug", params.segmentSlug)
+      .eq("active", true)
+      .maybeSingle<{ id: string }>();
+    segmentId = seg?.id ?? null;
+  }
+
+  let companiesQuery = supabase
+    .from("companies")
+    .select("id,name,active,created_at,omie_app_key,omie_app_secret");
+  if (segmentId) {
+    companiesQuery = companiesQuery.eq("segment_id", segmentId);
+  }
+
   const [companiesResult, dreResult, mappingsResult, kpisResult] = await Promise.all([
-    supabase
-      .from("companies")
-      .select("id,name,active,created_at,omie_app_key,omie_app_secret")
-      .order("name"),
+    companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")

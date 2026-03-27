@@ -32,6 +32,7 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute =
     request.nextUrl.pathname === "/login" ||
     request.nextUrl.pathname === "/signup" ||
+    request.nextUrl.pathname === "/pendente" ||
     request.nextUrl.pathname.startsWith("/auth/callback");
   const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
   const isPublicRoot = request.nextUrl.pathname === "/";
@@ -59,8 +60,7 @@ export async function updateSession(request: NextRequest) {
 
     if (!isActive) {
       const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("reason", "inactive");
+      url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
     } else if (!canAccessPath(request.nextUrl.pathname, role)) {
       const url = request.nextUrl.clone();

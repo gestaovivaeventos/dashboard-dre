@@ -5,29 +5,31 @@ import { useState } from "react";
 
 import { NavLinks } from "@/components/app/nav-links";
 import { SignOutButton } from "@/components/app/sign-out-button";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import type { UserRole } from "@/lib/supabase/types";
+import type { Segment, UserRole } from "@/lib/supabase/types";
 
 interface AppShellProps {
   children: React.ReactNode;
   userName: string;
   userEmail: string;
   userRole: UserRole;
+  segments: Segment[];
 }
 
-export function AppShell({ children, userName, userEmail, userRole }: AppShellProps) {
+export function AppShell({ children, userName, userEmail, userRole, segments }: AppShellProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-background">
       <aside className="fixed inset-y-0 left-0 hidden w-72 border-r bg-background p-4 md:block">
         <div className="mb-6">
           <p className="text-sm text-muted-foreground">Hero DRE</p>
           <h1 className="text-xl font-semibold">Dashboard</h1>
         </div>
-        <NavLinks role={userRole} />
+        <NavLinks role={userRole} segments={segments} />
       </aside>
 
       <div className="md:pl-72">
@@ -56,6 +58,7 @@ export function AppShell({ children, userName, userEmail, userRole }: AppShellPr
               <p className="text-sm font-medium leading-none">{userName}</p>
               <p className="text-xs text-muted-foreground">{userEmail}</p>
             </div>
+            <ThemeToggle />
             <Separator className="hidden h-8 w-px sm:block" />
             <SignOutButton />
           </div>

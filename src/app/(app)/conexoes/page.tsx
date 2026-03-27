@@ -3,7 +3,11 @@ import { redirect } from "next/navigation";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
-export default async function ConexoesPage() {
+interface ConexoesPageProps {
+  params?: { segmentSlug?: string };
+}
+
+export default async function ConexoesPage({ params }: ConexoesPageProps) {
   const { user, profile } = await getCurrentSessionContext();
   if (!user) {
     redirect("/login");
@@ -12,5 +16,5 @@ export default async function ConexoesPage() {
     redirect("/dashboard");
   }
 
-  return <ConnectionsGrid />;
+  return <ConnectionsGrid segmentSlug={params?.segmentSlug} />;
 }

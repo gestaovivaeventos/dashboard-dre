@@ -62,7 +62,11 @@ function formatDateTime(value: string | null) {
   return new Date(value).toLocaleString("pt-BR");
 }
 
-export function ConnectionsGrid() {
+interface ConnectionsGridProps {
+  segmentSlug?: string;
+}
+
+export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
   const { showToast } = useToast();
   const [companies, setCompanies] = useState<ConnectionCompany[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +78,10 @@ export function ConnectionsGrid() {
   const loadCompanies = useCallback(async () => {
     setLoading(true);
     setStatusMessage(null);
-    const query = historyStatusFilter === "all" ? "" : `?status=${historyStatusFilter}`;
+    const queryParams = new URLSearchParams();
+    if (historyStatusFilter !== "all") queryParams.set("status", historyStatusFilter);
+    if (segmentSlug) queryParams.set("segment", segmentSlug);
+    const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
     const response = await fetch(`/api/connections${query}`, { cache: "no-store" });
     const payload = (await response.json()) as {
       companies?: ConnectionCompany[];
@@ -94,7 +101,7 @@ export function ConnectionsGrid() {
 
     setCompanies(payload.companies);
     setLoading(false);
-  }, [historyStatusFilter, showToast]);
+  }, [historyStatusFilter, segmentSlug, showToast]);
 
   useEffect(() => {
     void loadCompanies();

@@ -16,6 +16,7 @@ import {
 
 interface DashboardPageProps {
   searchParams: Record<string, string | string[] | undefined>;
+  params?: { segmentSlug?: string };
 }
 
 interface DashboardDisplayRow extends DreAccountBase {
@@ -26,14 +27,31 @@ interface DashboardDisplayRow extends DreAccountBase {
   variationPercentage: number;
 }
 
-export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+export default async function DashboardPage({ searchParams, params }: DashboardPageProps) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     redirect("/login");
   }
 
+  // Resolve segment filter if inside a segment route
+  let segmentId: string | null = null;
+  if (params?.segmentSlug) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("id")
+      .eq("slug", params.segmentSlug)
+      .eq("active", true)
+      .maybeSingle<{ id: string }>();
+    segmentId = seg?.id ?? null;
+  }
+
+  let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
+  if (segmentId) {
+    companiesQuery = companiesQuery.eq("segment_id", segmentId);
+  }
+
   const [{ data: companiesData }, { data: accountsData }] = await Promise.all([
-    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")

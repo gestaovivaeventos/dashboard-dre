@@ -1,26 +1,105 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
-import { NAV_ITEMS } from "@/components/app/navigation";
-import type { UserRole } from "@/lib/supabase/types";
+import { GLOBAL_NAV_ITEMS, SEGMENT_SUB_ITEMS } from "@/components/app/navigation";
+import type { Segment, UserRole } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
   role: UserRole;
+  segments: Segment[];
   onNavigate?: () => void;
 }
 
-export function NavLinks({ role, onNavigate }: NavLinksProps) {
+export function NavLinks({ role, segments, onNavigate }: NavLinksProps) {
   const pathname = usePathname();
-  const items = NAV_ITEMS.filter((item) => item.roles.includes(role));
+
+  // Auto-expand the segment whose route is currently active
+  const activeSegmentSlug = segments.find((s) =>
+    pathname.startsWith(`/s/${s.slug}`),
+  )?.slug ?? null;
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(
+    activeSegmentSlug ? { [activeSegmentSlug]: true } : {},
+  );
+
+  const toggleSegment = (slug: string) => {
+    setExpanded((prev) => ({ ...prev, [slug]: !prev[slug] }));
+  };
+
+  const subItems = SEGMENT_SUB_ITEMS.filter((item) => item.roles.includes(role));
+  const globalItems = GLOBAL_NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   return (
     <nav className="space-y-1">
-      {items.map((item) => {
+      {/* Segment groups */}
+      {segments.map((segment) => {
+        const isOpen = expanded[segment.slug] ?? false;
+
+        return (
+          <div key={segment.id}>
+            <button
+              type="button"
+              onClick={() => toggleSegment(segment.slug)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                pathname.startsWith(`/s/${segment.slug}`)
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              )}
+            >
+              <span className="truncate">{segment.name}</span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 shrink-0 transition-transform",
+                  isOpen && "rotate-180",
+                )}
+              />
+            </button>
+
+            {isOpen ? (
+              <div className="ml-3 mt-0.5 space-y-0.5 border-l pl-3">
+                {subItems.map((item) => {
+                  const href = `/s/${segment.slug}${item.suffix}`;
+                  const Icon = item.icon;
+                  const isActive = pathname === href;
+
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={onNavigate}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span>{item.title}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {/* Separator */}
+      {globalItems.length > 0 ? (
+        <div className="my-3 border-t" />
+      ) : null}
+
+      {/* Global items */}
+      {globalItems.map((item) => {
         const Icon = item.icon;
-        const isActive = pathname === item.href;
+        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
         return (
           <Link

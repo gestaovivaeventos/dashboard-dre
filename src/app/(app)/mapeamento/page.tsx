@@ -3,7 +3,11 @@ import { redirect } from "next/navigation";
 import { MappingManager } from "@/components/app/mapping-manager";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
-export default async function MapeamentoPage() {
+interface MapeamentoPageProps {
+  params?: { segmentSlug?: string };
+}
+
+export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     redirect("/login");
@@ -12,8 +16,24 @@ export default async function MapeamentoPage() {
     redirect("/dashboard");
   }
 
+  let segmentId: string | null = null;
+  if (params?.segmentSlug) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("id")
+      .eq("slug", params.segmentSlug)
+      .eq("active", true)
+      .maybeSingle<{ id: string }>();
+    segmentId = seg?.id ?? null;
+  }
+
+  let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
+  if (segmentId) {
+    companiesQuery = companiesQuery.eq("segment_id", segmentId);
+  }
+
   const [{ data: companiesData }, { data: dreAccountsData }] = await Promise.all([
-    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,active")

@@ -29,7 +29,7 @@ export async function getCurrentSessionContext() {
         name: fallbackName,
         role: "gestor_unidade",
         company_id: null,
-        active: true,
+        active: false,
       },
       { onConflict: "id" },
     );
