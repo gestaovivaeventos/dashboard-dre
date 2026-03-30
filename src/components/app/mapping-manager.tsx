@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2, RefreshCcw, Search, Unlink2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2, RefreshCcw, Save, Search, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -49,11 +49,14 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
   const [rows, setRows] = useState<MappingRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
 
-  const loadRows = async () => {
+  // Estado atual dos selects (draft) e estado original (salvo no banco)
+  const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
+  const [originalByCode, setOriginalByCode] = useState<Record<string, string>>({});
+
+  const loadRows = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
     const params = new URLSearchParams({ companyId });
@@ -73,18 +76,31 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
     }
 
     setRows(payload.rows);
-    const nextDraft: Record<string, string> = {};
+    const snapshot: Record<string, string> = {};
     payload.rows.forEach((row) => {
-      nextDraft[row.code] = row.dreAccountId ?? "";
+      snapshot[row.code] = row.dreAccountId ?? "";
     });
-    setDraftByCode(nextDraft);
+    setDraftByCode({ ...snapshot });
+    setOriginalByCode(snapshot);
     setLoading(false);
-  };
+  }, [companyId, showToast]);
 
   useEffect(() => {
     void loadRows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [loadRows]);
+
+  // Calcular quais linhas foram modificadas
+  const changedCodes = useMemo(() => {
+    const codes: string[] = [];
+    for (const code of Object.keys(draftByCode)) {
+      if (draftByCode[code] !== originalByCode[code]) {
+        codes.push(code);
+      }
+    }
+    return codes;
+  }, [draftByCode, originalByCode]);
+
+  const hasChanges = changedCodes.length > 0;
 
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -97,37 +113,57 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
     );
   }, [rows, search]);
 
-  const mappedCount = rows.filter((row) => row.dreAccountId).length;
+  const mappedCount = useMemo(() => {
+    return rows.filter((row) => {
+      const draft = draftByCode[row.code];
+      return draft !== undefined && draft !== "";
+    }).length;
+  }, [rows, draftByCode]);
 
-  const saveMapping = async (row: MappingRow, clear = false) => {
-    const selectedAccountId = clear ? null : draftByCode[row.code] || null;
-    setSavingCode(row.code);
-    const response = await fetch("/api/category-mapping", {
+  // Descarta todas as alterações pendentes
+  const discardChanges = () => {
+    setDraftByCode({ ...originalByCode });
+  };
+
+  // Salvar todas as alterações em lote
+  const saveAllChanges = async () => {
+    if (!hasChanges) return;
+
+    const rowsByCode = new Map(rows.map((r) => [r.code, r]));
+    const mappings = changedCodes.map((code) => ({
+      omieCategoryCode: code,
+      omieCategoryName: rowsByCode.get(code)?.description ?? code,
+      dreAccountId: draftByCode[code] || null,
+    }));
+
+    setSaving(true);
+    const response = await fetch("/api/category-mapping/batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        companyId,
-        omieCategoryCode: row.code,
-        omieCategoryName: row.description,
-        dreAccountId: selectedAccountId,
-      }),
+      body: JSON.stringify({ companyId, mappings }),
     });
-    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+    const payload = await safeJson<{
+      ok?: boolean;
+      saved?: number;
+      cleared?: number;
+      error?: string;
+    }>(response);
+
     if (!response.ok || !payload?.ok) {
       showToast({
-        title: "Falha ao salvar mapeamento",
-        description: payload?.error ?? "Nao foi possivel salvar o vinculo.",
+        title: "Falha ao salvar mapeamentos",
+        description: payload?.error ?? "Nao foi possivel salvar os vinculos.",
         variant: "destructive",
       });
-      setSavingCode(null);
+      setSaving(false);
       return;
     }
 
     await loadRows();
-    setSavingCode(null);
+    setSaving(false);
     showToast({
-      title: clear ? "Mapeamento removido" : "Mapeamento salvo",
-      description: `${row.code} atualizado com sucesso.`,
+      title: "Mapeamentos salvos",
+      description: `${payload.saved ?? 0} vinculado(s), ${payload.cleared ?? 0} removido(s).`,
       variant: "success",
     });
   };
@@ -137,7 +173,7 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
       <div>
         <h2 className="text-2xl font-semibold">Mapeamento OMIE x DRE</h2>
         <p className="text-sm text-muted-foreground">
-          Vincule cada categoria Omie a uma conta do DRE.
+          Vincule cada categoria Omie a uma conta do DRE. Altere quantas quiser e clique em &quot;Salvar Modificacoes&quot;.
         </p>
       </div>
 
@@ -149,6 +185,7 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 value={companyId}
                 onChange={(event) => setCompanyId(event.target.value)}
+                disabled={saving}
               >
                 {companies.map((company) => (
                   <option key={company.id} value={company.id}>
@@ -156,7 +193,7 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                   </option>
                 ))}
               </select>
-              <Button type="button" variant="outline" size="sm" onClick={() => void loadRows()} disabled={loading}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadRows()} disabled={loading || saving}>
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                 Atualizar
               </Button>
@@ -189,7 +226,7 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                   <th className="whitespace-nowrap px-4 py-3 text-left">Codigo</th>
                   <th className="px-4 py-3 text-left">Descricao</th>
                   <th className="px-4 py-3 text-left">Conta DRE</th>
-                  <th className="px-4 py-3 text-right">Acoes</th>
+                  <th className="px-4 py-3 text-center w-20">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,11 +245,21 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                   </tr>
                 ) : (
                   visibleRows.map((row) => {
-                    const isMapped = !!row.dreAccountId;
+                    const draftValue = draftByCode[row.code] ?? "";
+                    const originalValue = originalByCode[row.code] ?? "";
+                    const isModified = draftValue !== originalValue;
+                    const isMapped = draftValue !== "";
+
                     return (
                       <tr
                         key={row.code}
-                        className={`border-b transition-colors hover:bg-muted/30 ${isMapped ? "" : "bg-amber-50/40"}`}
+                        className={`border-b transition-colors hover:bg-muted/30 ${
+                          isModified
+                            ? "bg-blue-50/60"
+                            : isMapped
+                              ? ""
+                              : "bg-amber-50/40"
+                        }`}
                       >
                         <td className="whitespace-nowrap px-4 py-2.5 font-mono font-medium">
                           {row.code}
@@ -222,8 +269,13 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                         </td>
                         <td className="px-4 py-2.5">
                           <select
-                            className="h-9 w-full min-w-[220px] rounded-md border border-input bg-background px-2 text-sm"
-                            value={draftByCode[row.code] ?? ""}
+                            className={`h-9 w-full min-w-[220px] rounded-md border px-2 text-sm ${
+                              isModified
+                                ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
+                                : "border-input bg-background"
+                            }`}
+                            value={draftValue}
+                            disabled={saving}
                             onChange={(event) =>
                               setDraftByCode((previous) => ({
                                 ...previous,
@@ -239,32 +291,12 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                             ))}
                           </select>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                          <div className="inline-flex items-center gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => void saveMapping(row)}
-                              disabled={savingCode === row.code || !draftByCode[row.code]}
-                            >
-                              {savingCode === row.code ? (
-                                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Check className="mr-1.5 h-3.5 w-3.5" />
-                              )}
-                              Salvar
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void saveMapping(row, true)}
-                              disabled={savingCode === row.code || !row.dreAccountId}
-                            >
-                              <Unlink2 className="mr-1.5 h-3.5 w-3.5" />
-                              Limpar
-                            </Button>
-                          </div>
+                        <td className="px-4 py-2.5 text-center">
+                          {isModified && (
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                              Alterado
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -275,6 +307,42 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
           </div>
         </CardContent>
       </Card>
+
+      {/* Barra fixa de ações quando há alterações pendentes */}
+      {hasChanges && (
+        <div className="sticky bottom-4 z-10">
+          <div className="mx-auto flex items-center justify-between gap-4 rounded-lg border bg-background p-4 shadow-lg">
+            <span className="text-sm font-medium">
+              {changedCodes.length} {changedCodes.length === 1 ? "alteracao pendente" : "alteracoes pendentes"}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={discardChanges}
+                disabled={saving}
+              >
+                <Undo2 className="mr-1.5 h-4 w-4" />
+                Descartar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void saveAllChanges()}
+                disabled={saving}
+              >
+                {saving ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-1.5 h-4 w-4" />
+                )}
+                Salvar Modificacoes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
