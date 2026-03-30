@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { KeyRound, Loader2, Plus, RefreshCcw, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,15 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
   const [editingCredentials, setEditingCredentials] = useState<string | null>(null);
   const [credForm, setCredForm] = useState({ appKey: "", appSecret: "" });
   const [savingCred, setSavingCred] = useState(false);
+
+  // Rename state
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [nameForm, setNameForm] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  // Delete state
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const sortedCompanies = useMemo(
     () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
@@ -169,6 +178,78 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     });
   };
 
+  const startEditingName = (company: CompanyItem) => {
+    if (editingName === company.id) {
+      setEditingName(null);
+      return;
+    }
+    setEditingName(company.id);
+    setNameForm(company.name);
+    setEditingCredentials(null);
+    setConfirmingDelete(null);
+  };
+
+  const saveName = async (companyId: string) => {
+    const trimmed = nameForm.trim();
+    if (!trimmed) return;
+
+    setSavingName(true);
+    const response = await fetch(`/api/companies/${companyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmed }),
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao renomear",
+        description: payload?.error ?? "Nao foi possivel atualizar o nome.",
+        variant: "destructive",
+      });
+      setSavingName(false);
+      return;
+    }
+
+    setCompanies((prev) =>
+      prev.map((c) => (c.id === companyId ? { ...c, name: trimmed } : c)),
+    );
+    setEditingName(null);
+    setSavingName(false);
+    showToast({
+      title: "Empresa renomeada",
+      description: `Nome atualizado para "${trimmed}".`,
+      variant: "success",
+    });
+  };
+
+  const deleteCompany = async (companyId: string) => {
+    setDeleting(true);
+    const response = await fetch(`/api/companies/${companyId}`, {
+      method: "DELETE",
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao excluir",
+        description: payload?.error ?? "Nao foi possivel excluir a empresa.",
+        variant: "destructive",
+      });
+      setDeleting(false);
+      return;
+    }
+
+    setCompanies((prev) => prev.filter((c) => c.id !== companyId));
+    setConfirmingDelete(null);
+    setDeleting(false);
+    showToast({
+      title: "Empresa excluida",
+      description: "A empresa e todos os dados associados foram removidos.",
+      variant: "success",
+    });
+  };
+
   const runAction = async (companyId: string, type: "test" | "sync") => {
     setActionLoading((previous) => ({
       ...previous,
@@ -248,6 +329,8 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
           {sortedCompanies.map((company) => {
             const loadingAction = actionLoading[company.id];
             const isEditingCred = editingCredentials === company.id;
+            const isEditingThisName = editingName === company.id;
+            const isConfirmingDel = confirmingDelete === company.id;
 
             return (
               <div key={company.id} className="rounded-lg border p-4">
@@ -264,9 +347,22 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => startEditingName(company)}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Editar
+                    </Button>
+                    <Button
+                      type="button"
                       variant={isEditingCred ? "default" : "outline"}
                       size="sm"
-                      onClick={() => openCredentials(company.id)}
+                      onClick={() => {
+                        openCredentials(company.id);
+                        setEditingName(null);
+                        setConfirmingDelete(null);
+                      }}
                     >
                       <KeyRound className="mr-2 h-4 w-4" />
                       Credenciais
@@ -298,10 +394,56 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       )}
                       Sincronizar
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                      onClick={() => {
+                        setConfirmingDelete(isConfirmingDel ? null : company.id);
+                        setEditingName(null);
+                        setEditingCredentials(null);
+                      }}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Excluir
+                    </Button>
                   </div>
                 </div>
 
-                {/* Credentials form (expandable) */}
+                {/* Rename form */}
+                {isEditingThisName && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Editar nome da empresa</p>
+                    <div className="flex gap-2">
+                      <Input
+                        value={nameForm}
+                        onChange={(e) => setNameForm(e.target.value)}
+                        placeholder="Nome da empresa"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveName(company.id)}
+                        disabled={savingName || !nameForm.trim() || nameForm.trim() === company.name}
+                      >
+                        {savingName ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                        Salvar
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingName(null)}
+                        disabled={savingName}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Credentials form */}
                 {isEditingCred && (
                   <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
                     <p className="text-xs font-medium text-muted-foreground">
@@ -343,6 +485,39 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       >
                         {savingCred ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                         Salvar Credenciais
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delete confirmation */}
+                {isConfirmingDel && (
+                  <div className="mt-3 space-y-3 rounded-md border border-red-200 bg-red-50/50 p-3">
+                    <p className="text-sm font-medium text-red-800">
+                      Tem certeza que deseja excluir &quot;{company.name}&quot;?
+                    </p>
+                    <p className="text-xs text-red-600">
+                      Todos os lancamentos financeiros, mapeamentos e logs de sincronizacao desta empresa serao removidos permanentemente.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setConfirmingDelete(null)}
+                        disabled={deleting}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void deleteCompany(company.id)}
+                        disabled={deleting}
+                      >
+                        {deleting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+                        Confirmar Exclusao
                       </Button>
                     </div>
                   </div>
