@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { KpiAllView } from "@/components/app/kpi-all-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
 import {
   buildDateRange,
   buildFilterState,

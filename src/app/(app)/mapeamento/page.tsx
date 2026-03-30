@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { MappingManager } from "@/components/app/mapping-manager";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
+export const dynamic = "force-dynamic";
+
 interface MapeamentoPageProps {
   params?: { segmentSlug?: string };
 }

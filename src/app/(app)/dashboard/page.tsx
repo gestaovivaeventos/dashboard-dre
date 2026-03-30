@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
 import {
   buildAccumulatedBucket,
   buildDashboardRows,

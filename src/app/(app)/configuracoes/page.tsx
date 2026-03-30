@@ -4,6 +4,8 @@ import { SettingsTabs } from "@/components/app/settings-tabs";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import type { KpiDefinition } from "@/lib/kpi/calc";
 
+export const dynamic = "force-dynamic";
+
 interface ConfiguracoesPageProps {
   params?: { segmentSlug?: string };
 }

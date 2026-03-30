@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
+export const dynamic = "force-dynamic";
+
 interface ConexoesPageProps {
   params?: { segmentSlug?: string };
 }

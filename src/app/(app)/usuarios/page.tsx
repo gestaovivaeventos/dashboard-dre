@@ -4,6 +4,8 @@ import { UsersAdminManager } from "@/components/app/users-admin-manager";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+export const dynamic = "force-dynamic";
+
 export default async function UsuariosPage() {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
