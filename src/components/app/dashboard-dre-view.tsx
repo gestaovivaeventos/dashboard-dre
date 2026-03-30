@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Loader2,
@@ -12,6 +12,7 @@ import {
   FileText,
   Inbox,
   ArrowLeft,
+  Check,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -36,7 +37,7 @@ import type {
   DashboardFilterState,
   DashboardRange,
   DashboardPeriodBucket,
-  ViewMode,
+  PeriodMode,
 } from "@/lib/dashboard/dre";
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -58,7 +59,6 @@ interface DashboardDisplayRow {
   percentageOverNetRevenue: number;
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
-  variationPercentage: number;
 }
 
 interface DashboardDreViewProps {
@@ -98,18 +98,111 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
-const percentageFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "percent",
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
 
 function formatCurrency(value: number) {
   return currencyFormatter.format(value);
 }
 
-function formatPercentage(value: number) {
-  return percentageFormatter.format(value / 100);
+const MONTHS = [
+  { value: 1, label: "Janeiro" },
+  { value: 2, label: "Fevereiro" },
+  { value: 3, label: "Marco" },
+  { value: 4, label: "Abril" },
+  { value: 5, label: "Maio" },
+  { value: 6, label: "Junho" },
+  { value: 7, label: "Julho" },
+  { value: 8, label: "Agosto" },
+  { value: 9, label: "Setembro" },
+  { value: 10, label: "Outubro" },
+  { value: 11, label: "Novembro" },
+  { value: 12, label: "Dezembro" },
+];
+
+function CompanyMultiSelect({
+  companies,
+  selected,
+  onChange,
+  disabled,
+}: {
+  companies: CompanyOption[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const allSelected = selected.length === companies.length;
+
+  const label =
+    selected.length === 0
+      ? "Nenhuma empresa"
+      : allSelected
+        ? "Todas as empresas"
+        : selected.length === 1
+          ? companies.find((c) => c.id === selected[0])?.name ?? "1 empresa"
+          : `${selected.length} empresas`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        className="flex h-10 w-full min-w-[200px] items-center justify-between rounded-md border border-input bg-background px-3 text-sm hover:bg-accent disabled:opacity-50"
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 max-h-60 w-full min-w-[240px] overflow-y-auto rounded-md border bg-background shadow-lg">
+          <label className="flex cursor-pointer items-center gap-2 border-b px-3 py-2 text-sm font-medium hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={(e) =>
+                onChange(e.target.checked ? companies.map((c) => c.id) : [])
+              }
+            />
+            Todas (Consolidado)
+          </label>
+          {companies.map((company) => (
+            <label
+              key={company.id}
+              className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(company.id)}
+                onChange={(e) =>
+                  onChange(
+                    e.target.checked
+                      ? [...selected, company.id]
+                      : selected.filter((id) => id !== company.id),
+                  )
+                }
+              />
+              {company.name}
+              {selected.includes(company.id) && (
+                <Check className="ml-auto h-3.5 w-3.5 text-primary" />
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function DashboardDreView({
@@ -125,14 +218,12 @@ export function DashboardDreView({
   const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
-  const [viewMode, setViewMode] = useState<ViewMode>(filter.viewMode);
-  const [periodType, setPeriodType] = useState(filter.periodType);
-  const [year, setYear] = useState(String(filter.year));
-  const [month, setMonth] = useState(String(filter.month));
-  const [quarter, setQuarter] = useState(String(filter.quarter));
-  const [semester, setSemester] = useState(String(filter.semester));
-  const [startDate, setStartDate] = useState(filter.startDate);
-  const [endDate, setEndDate] = useState(filter.endDate);
+
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
+  const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
+  const [yearFrom, setYearFrom] = useState(filter.yearFrom);
+  const [monthTo, setMonthTo] = useState(filter.monthTo);
+  const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
@@ -244,36 +335,19 @@ export function DashboardDreView({
 
   const handleApply = () => {
     const params = new URLSearchParams();
-    params.set("viewMode", viewMode);
-    params.set("periodType", periodType);
-    params.set("year", year);
-    if (periodType === "mensal") params.set("month", month);
-    if (periodType === "trimestral") params.set("quarter", quarter);
-    if (periodType === "semestral") params.set("semester", semester);
-    if (periodType === "acumulado") {
-      params.set("startDate", startDate);
-      params.set("endDate", endDate);
+    params.set("periodMode", periodMode);
+    if (periodMode === "especifico") {
+      params.set("monthFrom", String(monthFrom));
+      params.set("yearFrom", String(yearFrom));
+      params.set("monthTo", String(monthTo));
+      params.set("yearTo", String(yearTo));
     }
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  const toggleCompany = (companyId: string, checked: boolean) => {
-    if (role === "gestor_unidade") return;
-    setCompanySelection((previous) =>
-      checked
-        ? Array.from(new Set([...previous, companyId]))
-        : previous.filter((id) => id !== companyId),
-    );
-  };
-
-  const selectAllCompanies = (checked: boolean) => {
-    if (role === "gestor_unidade") return;
-    setCompanySelection(checked ? companies.map((company) => company.id) : []);
-  };
-
-  const columns = viewMode === "comparativa" ? visibleBuckets : [visibleBuckets[0] ?? accumulatedBucket];
+  const columns = visibleBuckets;
   const chartColors = ["#0f766e", "#2563eb", "#a21caf", "#d97706", "#dc2626", "#059669"];
 
   const unitsLabel =
@@ -296,7 +370,6 @@ export function DashboardDreView({
           record[column.label] = Number(row.valuesByBucket[column.key] ?? 0);
         });
         record[accumulatedBucket.label] = Number(row.accumulatedValue ?? 0);
-        record["Var %"] = Number(row.variationPercentage ?? 0) / 100;
         return record;
       });
 
@@ -307,11 +380,7 @@ export function DashboardDreView({
           const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
           const cell = worksheet[cellAddress];
           if (!cell) continue;
-          if (colIndex === rangeRef.e.c) {
-            cell.z = "0.00%";
-          } else {
-            cell.z = "R$ #,##0.00";
-          }
+          cell.z = "R$ #,##0.00";
         }
       }
 
@@ -370,11 +439,18 @@ export function DashboardDreView({
     }
   };
 
+  // Number of data columns (months + total)
+  const totalCols = columns.length + 1;
+
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="rounded-xl border bg-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-2xl font-semibold">DRE Gerencial</h2>
+          <div>
+            <h2 className="text-2xl font-semibold">DRE Gerencial</h2>
+            <p className="text-sm text-muted-foreground">{range.label}</p>
+          </div>
           <details className="relative">
             <summary className="list-none">
               <span className={buttonVariants({ variant: "outline" })}>Exportar</span>
@@ -411,116 +487,115 @@ export function DashboardDreView({
             </div>
           </details>
         </div>
-        <p className="text-sm text-muted-foreground">{range.label}</p>
       </div>
 
+      {/* Filters */}
       <div className="space-y-4 rounded-xl border bg-background p-4">
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant={viewMode === "simples" ? "default" : "outline"} onClick={() => setViewMode("simples")}>
-            Visao Simples
-          </Button>
-          <Button type="button" variant={viewMode === "comparativa" ? "default" : "outline"} onClick={() => setViewMode("comparativa")}>
-            Visao Comparativa
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {(["mensal", "trimestral", "semestral", "anual", "acumulado"] as const).map((mode) => (
-            <Button
-              key={mode}
-              type="button"
-              variant={periodType === mode ? "default" : "outline"}
-              onClick={() => setPeriodType(mode)}
-            >
-              {mode === "mensal" && "Mensal"}
-              {mode === "trimestral" && "Trimestral"}
-              {mode === "semestral" && "Semestral"}
-              {mode === "anual" && "Anual"}
-              {mode === "acumulado" && "Acumulado"}
-            </Button>
-          ))}
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="flex flex-wrap items-end gap-4">
+          {/* Company multi-select */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Ano</label>
-            <Input value={year} onChange={(event) => setYear(event.target.value)} />
+            <label className="text-xs font-medium text-muted-foreground">Empresas</label>
+            <CompanyMultiSelect
+              companies={companies}
+              selected={companySelection}
+              onChange={(ids) => {
+                if (role !== "gestor_unidade") setCompanySelection(ids);
+              }}
+              disabled={role === "gestor_unidade"}
+            />
           </div>
-          {periodType === "mensal" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Mes</label>
-              <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                {Array.from({ length: 12 }).map((_, index) => (
-                  <option key={index + 1} value={String(index + 1)}>
-                    {String(index + 1).padStart(2, "0")}
-                  </option>
-                ))}
-              </select>
+
+          {/* Period mode */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Periodo</label>
+            <div className="flex gap-1">
+              {(
+                [
+                  { value: "mes_atual", label: "Mes atual" },
+                  { value: "ano_atual", label: "Ano atual" },
+                  { value: "especifico", label: "Periodo especifico" },
+                ] as const
+              ).map((opt) => (
+                <Button
+                  key={opt.value}
+                  type="button"
+                  size="sm"
+                  variant={periodMode === opt.value ? "default" : "outline"}
+                  onClick={() => setPeriodMode(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
             </div>
-          ) : null}
-          {periodType === "trimestral" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Trimestre</label>
-              <select value={quarter} onChange={(event) => setQuarter(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-              </select>
-            </div>
-          ) : null}
-          {periodType === "semestral" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Semestre</label>
-              <select value={semester} onChange={(event) => setSemester(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                <option value="1">1 semestre</option><option value="2">2 semestre</option>
-              </select>
-            </div>
-          ) : null}
-          {periodType === "acumulado" ? (
+          </div>
+
+          {/* Date range selectors for "especifico" */}
+          {periodMode === "especifico" && (
             <>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">De</label>
-                <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <div className="flex gap-1">
+                  <select
+                    value={monthFrom}
+                    onChange={(e) => setMonthFrom(Number(e.target.value))}
+                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Input
+                    className="w-20"
+                    type="number"
+                    value={yearFrom}
+                    onChange={(e) => setYearFrom(Number(e.target.value))}
+                  />
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Ate</label>
-                <Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <div className="flex gap-1">
+                  <select
+                    value={monthTo}
+                    onChange={(e) => setMonthTo(Number(e.target.value))}
+                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Input
+                    className="w-20"
+                    type="number"
+                    value={yearTo}
+                    onChange={(e) => setYearTo(Number(e.target.value))}
+                  />
+                </div>
               </div>
             </>
-          ) : null}
+          )}
+
+          <Button type="button" onClick={handleApply}>Aplicar</Button>
         </div>
-
-        <details className="rounded-md border p-3">
-          <summary className="cursor-pointer text-sm font-medium">
-            Unidade ({companySelection.length}/{companies.length})
-          </summary>
-          <div className="mt-3 space-y-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={companySelection.length === companies.length} onChange={(event) => selectAllCompanies(event.target.checked)} disabled={role === "gestor_unidade"} />
-              Todas (Consolidado)
-            </label>
-            {companies.map((company) => (
-              <label key={company.id} className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={companySelection.includes(company.id)} onChange={(event) => toggleCompany(company.id, event.target.checked)} disabled={role === "gestor_unidade"} />
-                {company.name}
-              </label>
-            ))}
-          </div>
-        </details>
-
-        <Button type="button" onClick={handleApply}>Aplicar Filtros</Button>
       </div>
 
+      {/* DRE Table */}
       <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
-        <div className="min-w-[980px]">
+        <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
+          {/* Header */}
           <div
             className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600"
-            style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${columns.length}, minmax(120px, 1fr)) minmax(130px,1fr) minmax(110px,1fr)` }}
+            style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
           >
             <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
             {columns.map((column) => (
               <span key={column.key} className="text-right">{column.label}</span>
             ))}
-            <span className="text-right">{accumulatedBucket.label}</span>
-            <span className="text-right">Var %</span>
+            <span className="text-right font-bold">{accumulatedBucket.label}</span>
           </div>
 
           {visibleRows.length === 0 ? (
@@ -529,6 +604,8 @@ export function DashboardDreView({
               <p className="text-sm">Nenhum dado encontrado para os filtros selecionados.</p>
             </div>
           ) : null}
+
+          {/* Rows */}
           {visibleRows.map((row) => {
             const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
             const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
@@ -538,8 +615,9 @@ export function DashboardDreView({
               <div
                 key={row.id}
                 className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`}
-                style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${columns.length}, minmax(120px, 1fr)) minmax(130px,1fr) minmax(110px,1fr)` }}
+                style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
               >
+                {/* Account name */}
                 <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                   {row.hasChildren ? (
                     <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
@@ -557,6 +635,7 @@ export function DashboardDreView({
                   </button>
                 </div>
 
+                {/* Monthly values */}
                 {columns.map((column) => (
                   <div key={`${row.id}-${column.key}`} className="text-right">
                     <button
@@ -575,9 +654,9 @@ export function DashboardDreView({
                   </div>
                 ))}
 
-                <div className="text-right">{formatCurrency(row.accumulatedValue)}</div>
-                <div className={`text-right ${row.variationPercentage >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                  {formatPercentage(row.variationPercentage)}
+                {/* Total column */}
+                <div className="text-right font-semibold">
+                  {formatCurrency(row.accumulatedValue)}
                 </div>
               </div>
             );
@@ -585,6 +664,7 @@ export function DashboardDreView({
         </div>
       </div>
 
+      {/* Evolution chart */}
       <div className="rounded-xl border bg-background p-4">
         <h3 className="text-lg font-semibold">Evolucao da Conta</h3>
         <p className="mb-3 text-sm text-muted-foreground">
@@ -620,6 +700,7 @@ export function DashboardDreView({
         </div>
       </div>
 
+      {/* Drilldown Sheet */}
       <Sheet open={drilldown.open} onOpenChange={(open) => setDrilldown((previous) => ({ ...previous, open }))}>
         <SheetContent className="left-auto right-0 max-w-5xl border-l border-r-0 p-5">
           <div className="space-y-4">

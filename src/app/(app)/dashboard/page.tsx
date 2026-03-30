@@ -24,7 +24,6 @@ interface DashboardDisplayRow extends DreAccountBase {
   percentageOverNetRevenue: number;
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
-  variationPercentage: number;
 }
 
 export default async function DashboardPage({ searchParams, params }: DashboardPageProps) {
@@ -119,31 +118,16 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     accumulatedMap[row.id] = row.value;
   });
 
-  const simplePercentMap: Record<string, number> = {};
-  (bucketRows[0] ?? []).forEach((row) => {
-    simplePercentMap[row.id] = row.percentageOverNetRevenue;
-  });
-
   const displayRows = zeroRows.map((row) => {
     const valuesByBucket: Record<string, number> = {};
     visibleBuckets.forEach((bucket) => {
       valuesByBucket[bucket.key] = valuesPerBucket.get(bucket.key)?.[row.id] ?? 0;
     });
-    const lastBucket = visibleBuckets[visibleBuckets.length - 1];
-    const previousBucket = visibleBuckets.length > 1 ? visibleBuckets[visibleBuckets.length - 2] : null;
-    const lastValue = valuesByBucket[lastBucket.key] ?? 0;
-    const previousValue = previousBucket ? valuesByBucket[previousBucket.key] ?? 0 : 0;
-    const variation =
-      previousBucket && previousValue !== 0
-        ? ((lastValue - previousValue) / Math.abs(previousValue)) * 100
-        : 0;
 
     return {
       ...row,
       valuesByBucket,
       accumulatedValue: accumulatedMap[row.id] ?? 0,
-      variationPercentage: variation,
-      percentageOverNetRevenue: simplePercentMap[row.id] ?? 0,
     } satisfies DashboardDisplayRow;
   });
 

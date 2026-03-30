@@ -1,7 +1,9 @@
 import type { UserProfile } from "@/lib/supabase/types";
 
-type PeriodType = "mensal" | "trimestral" | "semestral" | "anual" | "acumulado";
+export type PeriodMode = "especifico" | "mes_atual" | "ano_atual";
 type DreType = "receita" | "despesa" | "calculado" | "misto";
+
+// Keep legacy ViewMode export for type compatibility
 export type ViewMode = "simples" | "comparativa";
 
 export interface DreAccountBase {
@@ -18,15 +20,21 @@ export interface DreAccountBase {
 }
 
 export interface DashboardFilterState {
+  periodMode: PeriodMode;
+  monthFrom: number;
+  yearFrom: number;
+  monthTo: number;
+  yearTo: number;
+  selectedCompanyIds: string[];
+  // Legacy fields kept for backward compat with URL params
   viewMode: ViewMode;
-  periodType: PeriodType;
+  periodType: string;
   year: number;
   month: number;
   quarter: number;
   semester: 1 | 2;
   startDate: string;
   endDate: string;
-  selectedCompanyIds: string[];
 }
 
 export interface DashboardRange {
@@ -76,24 +84,43 @@ function parseInteger(value: string | undefined, fallback: number) {
   return parsed;
 }
 
+const MONTH_NAMES = [
+  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+  "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+];
+
 export function buildFilterState(
   searchParams: Record<string, string | string[] | undefined>,
   companyIds: string[],
 ) {
   const now = new Date();
-  const fallbackYear = now.getUTCFullYear();
-  const fallbackMonth = now.getUTCMonth() + 1;
-  const viewMode = (searchParams.viewMode as ViewMode) || "simples";
-  const periodType = (searchParams.periodType as PeriodType) || "mensal";
-  const year = parseInteger(searchParams.year as string | undefined, fallbackYear);
-  const month = Math.min(12, Math.max(1, parseInteger(searchParams.month as string | undefined, fallbackMonth)));
-  const quarter = Math.min(4, Math.max(1, parseInteger(searchParams.quarter as string | undefined, 1)));
-  const semester = (Math.min(2, Math.max(1, parseInteger(searchParams.semester as string | undefined, 1))) as 1 | 2);
+  const currentYear = now.getUTCFullYear();
+  const currentMonth = now.getUTCMonth() + 1;
 
-  const defaultStart = toIsoDate(startOfMonth(year, month));
-  const defaultEnd = toIsoDate(endOfMonth(year, month));
-  const startDate = (searchParams.startDate as string | undefined) || defaultStart;
-  const endDate = (searchParams.endDate as string | undefined) || defaultEnd;
+  const periodMode = (searchParams.periodMode as PeriodMode) || "ano_atual";
+
+  let yearFrom: number;
+  let monthFrom: number;
+  let yearTo: number;
+  let monthTo: number;
+
+  if (periodMode === "mes_atual") {
+    yearFrom = currentYear;
+    monthFrom = currentMonth;
+    yearTo = currentYear;
+    monthTo = currentMonth;
+  } else if (periodMode === "ano_atual") {
+    yearFrom = currentYear;
+    monthFrom = 1;
+    yearTo = currentYear;
+    monthTo = 12;
+  } else {
+    // especifico
+    yearFrom = parseInteger(searchParams.yearFrom as string | undefined, currentYear);
+    monthFrom = Math.min(12, Math.max(1, parseInteger(searchParams.monthFrom as string | undefined, 1)));
+    yearTo = parseInteger(searchParams.yearTo as string | undefined, currentYear);
+    monthTo = Math.min(12, Math.max(1, parseInteger(searchParams.monthTo as string | undefined, currentMonth)));
+  }
 
   const rawCompanies = (searchParams.companyIds as string | undefined)?.split(",").filter(Boolean) ?? [];
   const allSelected = rawCompanies.length === 0 || rawCompanies.includes("all");
@@ -102,142 +129,77 @@ export function buildFilterState(
     : rawCompanies.filter((companyId) => companyIds.includes(companyId));
 
   return {
-    viewMode,
-    periodType,
-    year,
-    month,
-    quarter,
-    semester,
-    startDate,
-    endDate,
+    periodMode,
+    yearFrom,
+    monthFrom,
+    yearTo,
+    monthTo,
     selectedCompanyIds: selectedCompanyIds.length > 0 ? selectedCompanyIds : companyIds,
+    // Legacy defaults
+    viewMode: "comparativa" as ViewMode,
+    periodType: "mensal",
+    year: yearFrom,
+    month: monthFrom,
+    quarter: 1,
+    semester: 1 as 1 | 2,
+    startDate: toIsoDate(startOfMonth(yearFrom, monthFrom)),
+    endDate: toIsoDate(endOfMonth(yearTo, monthTo)),
   } satisfies DashboardFilterState;
 }
 
 export function buildDateRange(filter: DashboardFilterState): DashboardRange {
-  const { periodType, year, month, quarter, semester, startDate, endDate } = filter;
+  const { yearFrom, monthFrom, yearTo, monthTo, periodMode } = filter;
+  const dateFrom = toIsoDate(startOfMonth(yearFrom, monthFrom));
+  const dateTo = toIsoDate(endOfMonth(yearTo, monthTo));
 
-  if (periodType === "mensal") {
-    const from = startOfMonth(year, month);
-    const to = endOfMonth(year, month);
-    return {
-      dateFrom: toIsoDate(from),
-      dateTo: toIsoDate(to),
-      label: `Mensal ${String(month).padStart(2, "0")}/${year}`,
-    };
+  let label: string;
+  if (periodMode === "mes_atual") {
+    label = `${MONTH_NAMES[monthFrom - 1]}/${yearFrom}`;
+  } else if (periodMode === "ano_atual") {
+    label = `Jan a Dez/${yearFrom}`;
+  } else {
+    if (yearFrom === yearTo && monthFrom === monthTo) {
+      label = `${MONTH_NAMES[monthFrom - 1]}/${yearFrom}`;
+    } else {
+      label = `${MONTH_NAMES[monthFrom - 1]}/${yearFrom} a ${MONTH_NAMES[monthTo - 1]}/${yearTo}`;
+    }
   }
 
-  if (periodType === "trimestral") {
-    const firstMonth = (quarter - 1) * 3 + 1;
-    return {
-      dateFrom: toIsoDate(startOfMonth(year, firstMonth)),
-      dateTo: toIsoDate(endOfMonth(year, firstMonth + 2)),
-      label: `${quarter}o trimestre/${year}`,
-    };
-  }
-
-  if (periodType === "semestral") {
-    const firstMonth = semester === 1 ? 1 : 7;
-    return {
-      dateFrom: toIsoDate(startOfMonth(year, firstMonth)),
-      dateTo: toIsoDate(endOfMonth(year, firstMonth + 5)),
-      label: `${semester}o semestre/${year}`,
-    };
-  }
-
-  if (periodType === "anual") {
-    return {
-      dateFrom: `${year}-01-01`,
-      dateTo: `${year}-12-31`,
-      label: `Anual ${year}`,
-    };
-  }
-
-  return {
-    dateFrom: startDate,
-    dateTo: endDate,
-    label: `Acumulado ${startDate} ate ${endDate}`,
-  };
+  return { dateFrom, dateTo, label };
 }
 
 export function buildVisibleBuckets(filter: DashboardFilterState) {
-  const single = buildDateRange(filter);
-  if (filter.viewMode === "simples") {
-    return [
-      {
-        key: "single",
-        label: "Periodo",
-        dateFrom: single.dateFrom,
-        dateTo: single.dateTo,
-      },
-    ] satisfies DashboardPeriodBucket[];
+  const { yearFrom, monthFrom, yearTo, monthTo } = filter;
+
+  const buckets: DashboardPeriodBucket[] = [];
+  let year = yearFrom;
+  let month = monthFrom;
+
+  while (year < yearTo || (year === yearTo && month <= monthTo)) {
+    const from = startOfMonth(year, month);
+    const to = endOfMonth(year, month);
+    buckets.push({
+      key: `m-${year}-${month}`,
+      label: `${MONTH_NAMES[month - 1]}/${String(year).slice(2)}`,
+      dateFrom: toIsoDate(from),
+      dateTo: toIsoDate(to),
+    });
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
   }
 
-  if (filter.periodType === "mensal") {
-    return Array.from({ length: 12 }).map((_, index) => {
-      const month = index + 1;
-      const from = startOfMonth(filter.year, month);
-      const to = endOfMonth(filter.year, month);
-      return {
-        key: `m-${month}`,
-        label: `${String(month).padStart(2, "0")}/${filter.year}`,
-        dateFrom: toIsoDate(from),
-        dateTo: toIsoDate(to),
-      };
-    }) satisfies DashboardPeriodBucket[];
-  }
-
-  if (filter.periodType === "trimestral") {
-    return [1, 2, 3, 4].map((quarter) => {
-      const firstMonth = (quarter - 1) * 3 + 1;
-      return {
-        key: `q-${quarter}`,
-        label: `Q${quarter}/${filter.year}`,
-        dateFrom: toIsoDate(startOfMonth(filter.year, firstMonth)),
-        dateTo: toIsoDate(endOfMonth(filter.year, firstMonth + 2)),
-      };
-    }) satisfies DashboardPeriodBucket[];
-  }
-
-  if (filter.periodType === "semestral") {
-    return [1, 2].map((semester) => {
-      const firstMonth = semester === 1 ? 1 : 7;
-      return {
-        key: `s-${semester}`,
-        label: `S${semester}/${filter.year}`,
-        dateFrom: toIsoDate(startOfMonth(filter.year, firstMonth)),
-        dateTo: toIsoDate(endOfMonth(filter.year, firstMonth + 5)),
-      };
-    }) satisfies DashboardPeriodBucket[];
-  }
-
-  if (filter.periodType === "anual") {
-    return [
-      {
-        key: `y-${filter.year}`,
-        label: String(filter.year),
-        dateFrom: `${filter.year}-01-01`,
-        dateTo: `${filter.year}-12-31`,
-      },
-    ] satisfies DashboardPeriodBucket[];
-  }
-
-  return [
-    {
-      key: "acc",
-      label: "Acumulado",
-      dateFrom: filter.startDate,
-      dateTo: filter.endDate,
-    },
-  ] satisfies DashboardPeriodBucket[];
+  return buckets;
 }
 
 export function buildAccumulatedBucket(buckets: DashboardPeriodBucket[]) {
   const first = buckets[0];
   const last = buckets[buckets.length - 1];
   return {
-    key: "acc-total",
-    label: "Acumulado",
+    key: "total",
+    label: "Total",
     dateFrom: first.dateFrom,
     dateTo: last.dateTo,
   } satisfies DashboardPeriodBucket;
