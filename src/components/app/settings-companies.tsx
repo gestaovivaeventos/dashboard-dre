@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCcw, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, Plus, RefreshCcw, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +45,11 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     appKey: "",
     appSecret: "",
   });
+
+  // Credentials editing state
+  const [editingCredentials, setEditingCredentials] = useState<string | null>(null);
+  const [credForm, setCredForm] = useState({ appKey: "", appSecret: "" });
+  const [savingCred, setSavingCred] = useState(false);
 
   const sortedCompanies = useMemo(
     () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
@@ -101,10 +106,65 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setForm({ name: "", appKey: "", appSecret: "" });
     setIsModalOpen(false);
     setIsSaving(false);
-    setStatusMessage("Empresa criada com sucesso.");
     showToast({
       title: "Empresa criada",
       description: `${company.name} foi adicionada.`,
+      variant: "success",
+    });
+  };
+
+  const openCredentials = (companyId: string) => {
+    if (editingCredentials === companyId) {
+      setEditingCredentials(null);
+      return;
+    }
+    setEditingCredentials(companyId);
+    setCredForm({ appKey: "", appSecret: "" });
+  };
+
+  const saveCredentials = async (companyId: string) => {
+    if (!credForm.appKey.trim() || !credForm.appSecret.trim()) {
+      showToast({
+        title: "Campos obrigatorios",
+        description: "Preencha App Key e App Secret.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingCred(true);
+    const response = await fetch(`/api/companies/${companyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appKey: credForm.appKey.trim(),
+        appSecret: credForm.appSecret.trim(),
+      }),
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao salvar credenciais",
+        description: payload?.error ?? "Nao foi possivel atualizar.",
+        variant: "destructive",
+      });
+      setSavingCred(false);
+      return;
+    }
+
+    // Update local state
+    setCompanies((prev) =>
+      prev.map((c) =>
+        c.id === companyId ? { ...c, has_credentials: true } : c,
+      ),
+    );
+    setEditingCredentials(null);
+    setCredForm({ appKey: "", appSecret: "" });
+    setSavingCred(false);
+    showToast({
+      title: "Credenciais salvas",
+      description: "App Key e App Secret atualizados com sucesso.",
       variant: "success",
     });
   };
@@ -131,16 +191,12 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
         variant: "destructive",
       });
     } else if (type === "sync") {
-      setStatusMessage(
-        `Sincronizacao finalizada. ${payload?.recordsImported ?? 0} lancamentos importados.`,
-      );
       showToast({
         title: "Sincronizacao concluida",
         description: `${payload?.recordsImported ?? 0} lancamentos importados.`,
         variant: "success",
       });
     } else {
-      setStatusMessage("Conexao validada com sucesso.");
       showToast({
         title: "Conexao validada",
         description: "Credenciais Omie estao corretas.",
@@ -191,22 +247,36 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
 
           {sortedCompanies.map((company) => {
             const loadingAction = actionLoading[company.id];
+            const isEditingCred = editingCredentials === company.id;
+
             return (
               <div key={company.id} className="rounded-lg border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="font-medium">{company.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Credenciais: {company.has_credentials ? "configuradas" : "pendentes"}
+                      Credenciais:{" "}
+                      <span className={company.has_credentials ? "text-emerald-600" : "text-amber-600"}>
+                        {company.has_credentials ? "configuradas" : "pendentes"}
+                      </span>
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
+                      variant={isEditingCred ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => openCredentials(company.id)}
+                    >
+                      <KeyRound className="mr-2 h-4 w-4" />
+                      Credenciais
+                    </Button>
+                    <Button
+                      type="button"
                       variant="outline"
                       size="sm"
                       onClick={() => runAction(company.id, "test")}
-                      disabled={Boolean(loadingAction)}
+                      disabled={Boolean(loadingAction) || !company.has_credentials}
                     >
                       {loadingAction === "test" ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -219,7 +289,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       type="button"
                       size="sm"
                       onClick={() => runAction(company.id, "sync")}
-                      disabled={Boolean(loadingAction)}
+                      disabled={Boolean(loadingAction) || !company.has_credentials}
                     >
                       {loadingAction === "sync" ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -230,6 +300,53 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                     </Button>
                   </div>
                 </div>
+
+                {/* Credentials form (expandable) */}
+                {isEditingCred && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {company.has_credentials
+                        ? "Atualizar credenciais Omie (os valores atuais nao sao exibidos por seguranca)"
+                        : "Configurar credenciais Omie"}
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        placeholder="Omie App Key"
+                        value={credForm.appKey}
+                        onChange={(e) =>
+                          setCredForm((prev) => ({ ...prev, appKey: e.target.value }))
+                        }
+                      />
+                      <Input
+                        placeholder="Omie App Secret"
+                        value={credForm.appSecret}
+                        onChange={(e) =>
+                          setCredForm((prev) => ({ ...prev, appSecret: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingCredentials(null)}
+                        disabled={savingCred}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveCredentials(company.id)}
+                        disabled={savingCred || !credForm.appKey.trim() || !credForm.appSecret.trim()}
+                      >
+                        {savingCred ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                        Salvar Credenciais
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -257,20 +374,18 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                   required
                 />
                 <Input
-                  placeholder="Omie App Key"
+                  placeholder="Omie App Key (opcional)"
                   value={form.appKey}
                   onChange={(event) =>
                     setForm((previous) => ({ ...previous, appKey: event.target.value }))
                   }
-                  required
                 />
                 <Input
-                  placeholder="Omie App Secret"
+                  placeholder="Omie App Secret (opcional)"
                   value={form.appSecret}
                   onChange={(event) =>
                     setForm((previous) => ({ ...previous, appSecret: event.target.value }))
                   }
-                  required
                 />
                 <Separator />
                 <div className="flex justify-end gap-2">

@@ -61,9 +61,9 @@ export async function POST(request: Request) {
     const appSecret = body.appSecret?.trim();
     const segmentId = body.segmentId?.trim() ?? null;
 
-    if (!name || !appKey || !appSecret) {
+    if (!name) {
       return NextResponse.json(
-        { error: "Informe nome, app key e app secret." },
+        { error: "Informe o nome da empresa." },
         { status: 400 },
       );
     }
@@ -71,10 +71,12 @@ export async function POST(request: Request) {
     const db = createAdminClientIfAvailable() ?? supabase;
     const insertData: Record<string, unknown> = {
       name,
-      omie_app_key: encryptSecret(appKey),
-      omie_app_secret: encryptSecret(appSecret),
       active: true,
     };
+    if (appKey && appSecret) {
+      insertData.omie_app_key = encryptSecret(appKey);
+      insertData.omie_app_secret = encryptSecret(appSecret);
+    }
     if (segmentId) {
       insertData.segment_id = segmentId;
     }
@@ -107,7 +109,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       company: {
         ...data,
-        has_credentials: true,
+        has_credentials: Boolean(appKey && appSecret),
       },
     });
   } catch (error) {
