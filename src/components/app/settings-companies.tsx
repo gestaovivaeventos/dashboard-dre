@@ -19,6 +19,7 @@ interface CompanyItem {
 
 interface SettingsCompaniesProps {
   initialCompanies: CompanyItem[];
+  segmentId: string | null;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -31,7 +32,7 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function SettingsCompanies({ initialCompanies }: SettingsCompaniesProps) {
+export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompaniesProps) {
   const { showToast } = useToast();
   const [companies, setCompanies] = useState(initialCompanies);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -53,7 +54,8 @@ export function SettingsCompanies({ initialCompanies }: SettingsCompaniesProps) 
   const refreshCompanies = async () => {
     setIsRefreshing(true);
     setStatusMessage(null);
-    const response = await fetch("/api/companies", { cache: "no-store" });
+    const params = segmentId ? `?segmentId=${segmentId}` : "";
+    const response = await fetch(`/api/companies${params}`, { cache: "no-store" });
     const payload = await safeJson<{ companies?: CompanyItem[]; error?: string }>(response);
     if (!response.ok || !payload?.companies) {
       setStatusMessage(payload?.error ?? "Nao foi possivel atualizar lista de empresas.");
@@ -79,7 +81,7 @@ export function SettingsCompanies({ initialCompanies }: SettingsCompaniesProps) 
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, segmentId }),
     });
 
     const payload = await safeJson<{ company?: CompanyItem; error?: string }>(response);

@@ -98,6 +98,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
       companies={companies}
       dreAccounts={dreAccounts}
       kpis={(kpisResult.data ?? []) as KpiDefinition[]}
+      segmentId={segmentId}
     />
   );
 }

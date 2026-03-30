@@ -4,7 +4,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/security/encryption";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
@@ -13,11 +13,17 @@ export async function GET() {
     return NextResponse.json({ error: "Apenas admin pode acessar." }, { status: 403 });
   }
 
+  const url = new URL(request.url);
+  const segmentId = url.searchParams.get("segmentId");
+
   const db = createAdminClientIfAvailable() ?? supabase;
-  const { data, error } = await db
+  let query = db
     .from("companies")
-    .select("id,name,active,created_at,omie_app_key,omie_app_secret")
-    .order("name");
+    .select("id,name,active,created_at,omie_app_key,omie_app_secret");
+  if (segmentId) {
+    query = query.eq("segment_id", segmentId);
+  }
+  const { data, error } = await query.order("name");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -48,10 +54,12 @@ export async function POST(request: Request) {
       name?: string;
       appKey?: string;
       appSecret?: string;
+      segmentId?: string | null;
     };
     const name = body.name?.trim();
     const appKey = body.appKey?.trim();
     const appSecret = body.appSecret?.trim();
+    const segmentId = body.segmentId?.trim() ?? null;
 
     if (!name || !appKey || !appSecret) {
       return NextResponse.json(
@@ -61,14 +69,19 @@ export async function POST(request: Request) {
     }
 
     const db = createAdminClientIfAvailable() ?? supabase;
+    const insertData: Record<string, unknown> = {
+      name,
+      omie_app_key: encryptSecret(appKey),
+      omie_app_secret: encryptSecret(appSecret),
+      active: true,
+    };
+    if (segmentId) {
+      insertData.segment_id = segmentId;
+    }
+
     const { data, error } = await db
       .from("companies")
-      .insert({
-        name,
-        omie_app_key: encryptSecret(appKey),
-        omie_app_secret: encryptSecret(appSecret),
-        active: true,
-      })
+      .insert(insertData)
       .select("id,name,active,created_at")
       .single();
 

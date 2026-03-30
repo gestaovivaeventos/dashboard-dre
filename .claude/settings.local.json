@@ -3,7 +3,19 @@
     "allow": [
       "Read(//c/Users/lucasm/Documents/**)",
       "Bash(npx tsc:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(where python:*)",
+      "Bash(where python3:*)",
+      "Read(//c/Users/lucasm/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/6ea2cca4-19dd-470e-98b2-42228d02e2f6/e883ce62-18d7-45e9-a669-4c185232683f/skills/xlsx/**)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pip install openpyxl pandas --quiet)",
+      "Bash(SKILL_DIR=\"C:\\\\Users\\\\lucasm\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\6ea2cca4-19dd-470e-98b2-42228d02e2f6\\\\e883ce62-18d7-45e9-a669-4c185232683f\\\\skills\\\\xlsx\")",
+      "Read(//c/Users/lucasm/Documents/New project/**)",
+      "Bash(grep -n \"omie_app_key\\\\|omie_app_secret\\\\|CREATE TABLE.*companies\" \"C:\\\\Users\\\\lucasm\\\\Documents\\\\New project/supabase/migrations\"/*.sql)",
+      "Bash(curl -s -X POST \"https://app.omie.com.br/api/v1/financas/mf/\" -H \"Content-Type: application/json\" -d \"{\"\"call\"\":\"\"ListarMovimentos\"\",\"\"app_key\"\":\"\"6477667522326\"\",\"\"app_secret\"\":\"\"a4578fbddd93ec5533f47b23adc9d8da\"\",\"\"param\"\":[{\"\"nPagina\"\":1,\"\"dDtPagtoDe\"\":\"\"01-03-2026\"\",\"\"dDtPagtoAte\"\":\"\"31-03-2026\"\",\"\"nRegPorPagina\"\":500}]}\")",
+      "Bash(curl -s -X POST \"https://app.omie.com.br/api/v1/financas/mf/\" -H \"Content-Type: application/json\" -d \"{\"\"call\"\":\"\"ListarMovimentos\"\",\"\"app_key\"\":\"\"6477667522326\"\",\"\"app_secret\"\":\"\"a4578fbddd93ec5533f47b23adc9d8da\"\",\"\"param\"\":[{\"\"nPagina\"\":1,\"\"dDtPagtoDe\"\":\"\"01-03-2026\"\",\"\"dDtPagtoAte\"\":\"\"31-03-2026\"\",\"\"nRegPorPagina\"\":10}]}\")",
+      "Bash(curl -s -X POST \"https://app.omie.com.br/api/v1/financas/mf/\" -H \"Content-Type: application/json\" -d \"{\"\"call\"\":\"\"ListarMovimentos\"\",\"\"app_key\"\":\"\"6477667522326\"\",\"\"app_secret\"\":\"\"a4578fbddd93ec5533f47b23adc9d8da\"\",\"\"param\"\":[{\"\"nPagina\"\":1,\"\"dDtPagtoDe\"\":\"\"01-03-2026\"\",\"\"dDtPagtoAte\"\":\"\"31-03-2026\"\",\"\"nRegPorPagina\"\":500,\"\"cExibirDepartamentos\"\":\"\"S\"\"}]}\")",
+      "Bash(find \"C:/Users/lucasm/Documents/New project/src/app/\\(app\\)/s\" -name \"page.tsx\" -type f)"
     ]
   }
 }

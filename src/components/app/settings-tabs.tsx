@@ -35,11 +35,12 @@ interface SettingsTabsProps {
     }>;
   }>;
   kpis: KpiDefinition[];
+  segmentId?: string | null;
 }
 
 type TabValue = "empresas" | "estrutura_dre" | "kpis";
 
-export function SettingsTabs({ companies, dreAccounts, kpis }: SettingsTabsProps) {
+export function SettingsTabs({ companies, dreAccounts, kpis, segmentId }: SettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("empresas");
 
   return (
@@ -69,7 +70,7 @@ export function SettingsTabs({ companies, dreAccounts, kpis }: SettingsTabsProps
       </div>
 
       {tab === "empresas" ? (
-        <SettingsCompanies initialCompanies={companies} />
+        <SettingsCompanies initialCompanies={companies} segmentId={segmentId ?? null} />
       ) : tab === "estrutura_dre" ? (
         <DreStructureManager initialAccounts={dreAccounts} />
       ) : (
