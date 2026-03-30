@@ -98,8 +98,8 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
 
   // Compute consolidated account values (sum across all selected companies)
   const consolidatedValues = new Map<string, number>();
-  for (const [, companyMap] of valuesByCompany) {
-    for (const [code, value] of companyMap) {
+  for (const [, companyMap] of Array.from(valuesByCompany)) {
+    for (const [code, value] of Array.from(companyMap)) {
       consolidatedValues.set(code, (consolidatedValues.get(code) ?? 0) + value);
     }
   }
