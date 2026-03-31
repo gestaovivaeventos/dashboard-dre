@@ -129,19 +129,57 @@ export async function POST(request: Request, { params }: Params) {
     }, { status: 400 });
   }
 
-  // Load DRE accounts for name matching
+  // Load DRE accounts for matching (by code, exact name, or normalized name)
   const { data: dreAccounts } = await db
     .from("dre_accounts")
     .select("id,code,name")
     .eq("active", true);
 
-  const accountByName = new Map<string, string>();
+  function normalize(s: string): string {
+    return s.toLowerCase().trim()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+      .replace(/[^a-z0-9\s]/g, " ") // non-alphanumeric → space
+      .replace(/\s+/g, " ").trim();
+  }
+
   const accountByCode = new Map<string, string>();
-  (dreAccounts ?? []).forEach((a) => {
-    const name = (a.name as string).toLowerCase().trim();
-    accountByName.set(name, a.id as string);
-    accountByCode.set(a.code as string, a.id as string);
+  const accountByExactName = new Map<string, string>();
+  const accountByNormName = new Map<string, string>();
+  const allAccounts = (dreAccounts ?? []).map((a) => ({
+    id: a.id as string,
+    code: a.code as string,
+    name: a.name as string,
+    norm: normalize(a.name as string),
+  }));
+
+  allAccounts.forEach((a) => {
+    accountByCode.set(a.code, a.id);
+    accountByExactName.set(a.name.toLowerCase().trim(), a.id);
+    accountByNormName.set(a.norm, a.id);
   });
+
+  // Match an input string to a DRE account ID
+  function matchAccount(input: string): string | null {
+    const trimmed = input.trim();
+    // 1. Try as code (e.g. "7.2.1")
+    if (accountByCode.has(trimmed)) return accountByCode.get(trimmed)!;
+    // 2. Try "code - name" format (e.g. "7.2.1 - Salarios")
+    const codePart = trimmed.split(/\s*-\s*/)[0];
+    if (accountByCode.has(codePart)) return accountByCode.get(codePart)!;
+    // 3. Exact name (case-insensitive)
+    const lower = trimmed.toLowerCase();
+    if (accountByExactName.has(lower)) return accountByExactName.get(lower)!;
+    // 4. Normalized name (no accents, no special chars)
+    const norm = normalize(trimmed);
+    if (accountByNormName.has(norm)) return accountByNormName.get(norm)!;
+    // 5. Partial match: find account whose normalized name contains the input
+    for (const a of allAccounts) {
+      if (a.norm.includes(norm) || norm.includes(a.norm)) {
+        return a.id;
+      }
+    }
+    return null;
+  }
 
   // Parse data rows
   const parsed: ParsedRow[] = [];
@@ -195,11 +233,7 @@ export async function POST(request: Request, { params }: Params) {
   const unmatchedAccounts = new Set<string>();
 
   for (const row of parsed) {
-    const nameLower = row.accountName.toLowerCase().trim();
-    let accountId = accountByName.get(nameLower);
-    if (!accountId) {
-      accountId = accountByCode.get(row.accountName.trim());
-    }
+    const accountId = matchAccount(row.accountName);
     if (!accountId) {
       unmatchedAccounts.add(row.accountName);
       continue;

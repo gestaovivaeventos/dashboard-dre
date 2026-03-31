@@ -657,8 +657,20 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                 {/* Budget upload panel */}
                 {budgetOpen === company.id && (
                   <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Upload de orcamento — CSV com colunas: Empresa, Ano, Mes, Conta do DRE, Valor orcado
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Upload de orcamento — CSV com colunas: Empresa, Ano, Mes, Conta do DRE, Valor orcado
+                      </p>
+                      <a
+                        href={`/api/budget-template?companyName=${encodeURIComponent(company.name)}`}
+                        className="whitespace-nowrap rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
+                        download
+                      >
+                        Baixar template
+                      </a>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Na coluna &quot;Conta do DRE&quot;, use o codigo (ex: 7.2.1) ou o formato &quot;7.2.1 - Salarios&quot;. O template ja vem preenchido.
                     </p>
                     <div className="flex items-center gap-3">
                       <input
