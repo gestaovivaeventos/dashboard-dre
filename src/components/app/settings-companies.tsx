@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { History, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { FormEvent, useRef, useMemo, useState } from "react";
+import { FileUp, History, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,6 +59,18 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
   // Delete state
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Budget upload state
+  const [budgetOpen, setBudgetOpen] = useState<string | null>(null);
+  const [uploadingBudget, setUploadingBudget] = useState(false);
+  const [budgetResult, setBudgetResult] = useState<{
+    imported?: number;
+    skipped?: number;
+    unmatchedAccounts?: string[];
+    parseErrors?: string[];
+    error?: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sortedCompanies = useMemo(
     () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
@@ -250,6 +262,88 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     });
   };
 
+  const openBudget = (companyId: string) => {
+    if (budgetOpen === companyId) {
+      setBudgetOpen(null);
+      setBudgetResult(null);
+      return;
+    }
+    setBudgetOpen(companyId);
+    setBudgetResult(null);
+    setEditingName(null);
+    setEditingCredentials(null);
+    setConfirmingDelete(null);
+  };
+
+  const handleBudgetUpload = async (companyId: string, file: File) => {
+    setUploadingBudget(true);
+    setBudgetResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`/api/companies/${companyId}/budget`, {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await safeJson<{
+      ok?: boolean;
+      imported?: number;
+      skipped?: number;
+      unmatchedAccounts?: string[];
+      parseErrors?: string[];
+      error?: string;
+    }>(response);
+
+    if (!response.ok || !payload?.ok) {
+      setBudgetResult({ error: payload?.error ?? "Falha ao importar orcamento." });
+      showToast({
+        title: "Falha no upload",
+        description: payload?.error ?? "Verifique o formato do CSV.",
+        variant: "destructive",
+      });
+    } else {
+      setBudgetResult({
+        imported: payload.imported,
+        skipped: payload.skipped,
+        unmatchedAccounts: payload.unmatchedAccounts,
+        parseErrors: payload.parseErrors,
+      });
+      showToast({
+        title: "Orcamento importado",
+        description: `${payload.imported ?? 0} registros importados.`,
+        variant: "success",
+      });
+    }
+
+    setUploadingBudget(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const clearBudget = async (companyId: string) => {
+    if (!window.confirm("Excluir todos os dados de orcamento desta empresa?")) return;
+    setUploadingBudget(true);
+    const response = await fetch(`/api/companies/${companyId}/budget`, {
+      method: "DELETE",
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao excluir orcamento",
+        description: payload?.error ?? "Erro inesperado.",
+        variant: "destructive",
+      });
+    } else {
+      showToast({
+        title: "Orcamento excluido",
+        description: "Todos os dados de orcamento desta empresa foram removidos.",
+        variant: "success",
+      });
+      setBudgetResult(null);
+    }
+    setUploadingBudget(false);
+  };
+
   const runAction = async (companyId: string, type: "test" | "sync" | "sync-full") => {
     if (type === "sync-full") {
       if (!window.confirm("Isso vai buscar todo o historico desde 2022. Pode levar varios minutos. Continuar?")) return;
@@ -423,6 +517,15 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                     </Button>
                     <Button
                       type="button"
+                      variant={budgetOpen === company.id ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => openBudget(company.id)}
+                    >
+                      <FileUp className="mr-2 h-4 w-4" />
+                      Orcamento
+                    </Button>
+                    <Button
+                      type="button"
                       variant="outline"
                       size="sm"
                       className="text-red-600 hover:bg-red-50 hover:text-red-700"
@@ -430,6 +533,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                         setConfirmingDelete(isConfirmingDel ? null : company.id);
                         setEditingName(null);
                         setEditingCredentials(null);
+                        setBudgetOpen(null);
                       }}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
@@ -545,6 +649,85 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       >
                         {deleting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
                         Confirmar Exclusao
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Budget upload panel */}
+                {budgetOpen === company.id && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Upload de orcamento — CSV com colunas: Empresa, Ano, Mes, Conta do DRE, Valor orcado
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv"
+                        className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-accent"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void handleBudgetUpload(company.id, f);
+                        }}
+                        disabled={uploadingBudget}
+                      />
+                      {uploadingBudget && <Loader2 className="h-4 w-4 animate-spin" />}
+                    </div>
+
+                    {budgetResult && (
+                      <div className={`rounded-md border p-3 text-sm ${budgetResult.error ? "border-red-200 bg-red-50/50" : "border-emerald-200 bg-emerald-50/50"}`}>
+                        {budgetResult.error ? (
+                          <p className="text-red-700">{budgetResult.error}</p>
+                        ) : (
+                          <>
+                            <p className="text-emerald-700">
+                              {budgetResult.imported} registros importados com sucesso.
+                            </p>
+                            {(budgetResult.skipped ?? 0) > 0 && (
+                              <p className="mt-1 text-amber-700">
+                                {budgetResult.skipped} registros ignorados — contas nao encontradas:{" "}
+                                <span className="font-mono text-xs">
+                                  {budgetResult.unmatchedAccounts?.join(", ")}
+                                </span>
+                              </p>
+                            )}
+                            {(budgetResult.parseErrors?.length ?? 0) > 0 && (
+                              <details className="mt-1">
+                                <summary className="cursor-pointer text-xs text-amber-600">
+                                  {budgetResult.parseErrors?.length} erros de parse
+                                </summary>
+                                <ul className="mt-1 list-inside list-disc text-xs text-amber-700">
+                                  {budgetResult.parseErrors?.map((err, idx) => (
+                                    <li key={idx}>{err}</li>
+                                  ))}
+                                </ul>
+                              </details>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-between">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-red-600 hover:bg-red-50"
+                        onClick={() => void clearBudget(company.id)}
+                        disabled={uploadingBudget}
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        Limpar orcamento
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setBudgetOpen(null); setBudgetResult(null); }}
+                      >
+                        Fechar
                       </Button>
                     </div>
                   </div>
