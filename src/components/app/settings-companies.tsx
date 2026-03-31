@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { History, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -250,24 +250,31 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     });
   };
 
-  const runAction = async (companyId: string, type: "test" | "sync") => {
+  const runAction = async (companyId: string, type: "test" | "sync" | "sync-full") => {
+    if (type === "sync-full") {
+      if (!window.confirm("Isso vai buscar todo o historico desde 2022. Pode levar varios minutos. Continuar?")) return;
+    }
+
     setActionLoading((previous) => ({
       ...previous,
       [companyId]: type,
     }));
     setStatusMessage(null);
 
-    const endpoint =
-      type === "test" ? `/api/companies/${companyId}/test` : `/api/sync/${companyId}`;
-    const response = await fetch(endpoint, {
+    const endpoints: Record<string, string> = {
+      test: `/api/companies/${companyId}/test`,
+      sync: `/api/sync/${companyId}`,
+      "sync-full": `/api/sync/${companyId}/full`,
+    };
+    const response = await fetch(endpoints[type], {
       method: "POST",
     });
-    const payload = await safeJson<{ error?: string; recordsImported?: number }>(response);
+    const payload = await safeJson<{ error?: string; recordsImported?: number; recordsDeleted?: number }>(response);
 
     if (!response.ok) {
       setStatusMessage(payload?.error ?? "A operacao falhou.");
       showToast({
-        title: type === "sync" ? "Falha na sincronizacao" : "Falha no teste de conexao",
+        title: type === "test" ? "Falha no teste de conexao" : "Falha na sincronizacao",
         description: payload?.error ?? "Nao foi possivel concluir a operacao.",
         variant: "destructive",
       });
@@ -275,6 +282,12 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
       showToast({
         title: "Sincronizacao concluida",
         description: `${payload?.recordsImported ?? 0} lancamentos importados.`,
+        variant: "success",
+      });
+    } else if (type === "sync-full") {
+      showToast({
+        title: "Sincronizacao completa concluida",
+        description: `${payload?.recordsImported ?? 0} importados, ${payload?.recordsDeleted ?? 0} obsoletos removidos.`,
         variant: "success",
       });
     } else {
@@ -393,6 +406,20 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                         <RefreshCcw className="mr-2 h-4 w-4" />
                       )}
                       Sincronizar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => runAction(company.id, "sync-full")}
+                      disabled={Boolean(loadingAction) || !company.has_credentials}
+                    >
+                      {loadingAction === "sync-full" ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <History className="mr-2 h-4 w-4" />
+                      )}
+                      Sincronizar Historico
                     </Button>
                     <Button
                       type="button"
