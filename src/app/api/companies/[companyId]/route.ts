@@ -23,6 +23,7 @@ export async function PATCH(request: Request, { params }: Params) {
     name?: string;
     appKey?: string;
     appSecret?: string;
+    segmentId?: string | null;
   };
 
   const db = createAdminClientIfAvailable() ?? supabase;
@@ -32,6 +33,11 @@ export async function PATCH(request: Request, { params }: Params) {
   const name = body.name?.trim();
   if (name) {
     updates.name = name;
+  }
+
+  // Segment
+  if ("segmentId" in body) {
+    updates.segment_id = body.segmentId || null;
   }
 
   // Credentials

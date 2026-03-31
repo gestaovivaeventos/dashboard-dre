@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { AdminPanelView } from "@/components/app/admin-panel-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
