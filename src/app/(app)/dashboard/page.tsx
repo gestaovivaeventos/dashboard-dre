@@ -159,12 +159,23 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
   }
 
   // Fetch budget data for "Previsto x Realizado" mode
+  // When "Ano atual", cap budget at current month (not full year)
   let budgetMap: Record<string, number> = {};
   if (filter.budgetMode) {
+    const now = new Date();
+    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getUTCFullYear();
+
+    let budgetDateTo = accumulatedBucket.dateTo;
+    if (filter.periodMode === "ano_atual") {
+      const lastDay = new Date(Date.UTC(currentYear, currentMonth, 0));
+      budgetDateTo = lastDay.toISOString().slice(0, 10);
+    }
+
     const { data: budgetData } = await supabase.rpc("budget_aggregate", {
       p_company_ids: filter.selectedCompanyIds,
       p_date_from: accumulatedBucket.dateFrom,
-      p_date_to: accumulatedBucket.dateTo,
+      p_date_to: budgetDateTo,
     });
 
     const budgetAmounts = new Map<string, number>();
