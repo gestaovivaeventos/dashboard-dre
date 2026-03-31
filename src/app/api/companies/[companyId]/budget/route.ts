@@ -183,19 +183,19 @@ export async function POST(request: Request, { params }: Params) {
     });
   }
 
-  // Match account names to IDs
-  const toInsert: Array<{
+  // Match account names to IDs and aggregate duplicates
+  // (e.g. "Outras" appears under multiple parents but maps to the same dre_account_id)
+  const aggregated = new Map<string, {
     company_id: string;
     dre_account_id: string;
     year: number;
     month: number;
     amount: number;
-  }> = [];
+  }>();
   const unmatchedAccounts = new Set<string>();
 
   for (const row of parsed) {
     const nameLower = row.accountName.toLowerCase().trim();
-    // Try exact name match, then code match
     let accountId = accountByName.get(nameLower);
     if (!accountId) {
       accountId = accountByCode.get(row.accountName.trim());
@@ -205,14 +205,22 @@ export async function POST(request: Request, { params }: Params) {
       continue;
     }
 
-    toInsert.push({
-      company_id: companyId,
-      dre_account_id: accountId,
-      year: row.year,
-      month: row.month,
-      amount: row.amount,
-    });
+    const key = `${accountId}:${row.year}:${row.month}`;
+    const existing = aggregated.get(key);
+    if (existing) {
+      existing.amount += row.amount;
+    } else {
+      aggregated.set(key, {
+        company_id: companyId,
+        dre_account_id: accountId,
+        year: row.year,
+        month: row.month,
+        amount: row.amount,
+      });
+    }
   }
+
+  const toInsert = Array.from(aggregated.values());
 
   if (toInsert.length === 0) {
     return NextResponse.json({
