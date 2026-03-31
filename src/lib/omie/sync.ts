@@ -482,14 +482,31 @@ async function syncEntries({
     }
   }
 
-  // 5. Limpar lancamentos obsoletos (somente no modo full).
+  // 5. Limpar lancamentos obsoletos dentro do periodo buscado.
+  //    - Full: busca todos da empresa (periodo completo).
+  //    - Incremental: busca apenas no range de datas sincronizado,
+  //      para nao deletar dados fora da janela incremental.
   let recordsDeleted = 0;
-  if (mode === "full") {
+  {
     const validOmieIds = new Set(uniqueEntries.map((e) => e.omie_id));
-    const { data: existingEntries } = await supabase
+
+    // Converter dateFrom/dateTo de DD-MM-YYYY para YYYY-MM-DD (formato do banco).
+    const [dd1, mm1, yyyy1] = dateFrom.split("-");
+    const [dd2, mm2, yyyy2] = dateTo.split("-");
+    const dbDateFrom = `${yyyy1}-${mm1}-${dd1}`;
+    const dbDateTo = `${yyyy2}-${mm2}-${dd2}`;
+
+    let query = supabase
       .from("financial_entries")
       .select("id, omie_id")
       .eq("company_id", companyId);
+
+    if (mode === "incremental") {
+      // Escopo: apenas entries dentro do periodo buscado.
+      query = query.gte("payment_date", dbDateFrom).lte("payment_date", dbDateTo);
+    }
+
+    const { data: existingEntries } = await query;
 
     const idsToDelete = (existingEntries ?? [])
       .filter((e) => !validOmieIds.has(e.omie_id as string))
