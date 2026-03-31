@@ -118,8 +118,11 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
   return (
     <KpiAllView
       filter={filter}
+      range={range}
       kpiCards={kpiCards}
+      companies={companies.filter((c) => allowedCompanyIds.includes(c.id))}
       role={profile?.role ?? "gestor_hero"}
+      selectedCompanyIds={filter.selectedCompanyIds}
     />
   );
 }

@@ -1,14 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { Check, ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { DashboardFilterState } from "@/lib/dashboard/dre";
+import type { DashboardFilterState, DashboardRange, PeriodMode } from "@/lib/dashboard/dre";
 import type { KpiFormulaType } from "@/lib/kpi/calc";
 import type { UserRole } from "@/lib/supabase/types";
+
+interface CompanyOption {
+  id: string;
+  name: string;
+}
 
 interface KpiCard {
   id: string;
@@ -20,9 +26,27 @@ interface KpiCard {
 
 interface KpiAllViewProps {
   filter: DashboardFilterState;
+  range: DashboardRange;
   kpiCards: KpiCard[];
+  companies: CompanyOption[];
   role: UserRole;
+  selectedCompanyIds: string[];
 }
+
+const MONTHS = [
+  { value: 1, label: "Janeiro" },
+  { value: 2, label: "Fevereiro" },
+  { value: 3, label: "Marco" },
+  { value: 4, label: "Abril" },
+  { value: 5, label: "Maio" },
+  { value: 6, label: "Junho" },
+  { value: 7, label: "Julho" },
+  { value: 8, label: "Agosto" },
+  { value: 9, label: "Setembro" },
+  { value: 10, label: "Outubro" },
+  { value: 11, label: "Novembro" },
+  { value: 12, label: "Dezembro" },
+];
 
 function formatKpiValue(value: number, formulaType: KpiFormulaType) {
   if (formulaType === "value") {
@@ -39,28 +63,106 @@ function formatKpiValue(value: number, formulaType: KpiFormulaType) {
   );
 }
 
-export function KpiAllView({ filter, kpiCards }: KpiAllViewProps) {
+function CompanyMultiSelect({
+  companies,
+  selected,
+  onChange,
+  disabled,
+}: {
+  companies: CompanyOption[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const allSelected = selected.length === companies.length;
+  const label =
+    selected.length === 0
+      ? "Nenhuma empresa"
+      : allSelected
+        ? "Todas as empresas"
+        : selected.length === 1
+          ? companies.find((c) => c.id === selected[0])?.name ?? "1 empresa"
+          : `${selected.length} empresas`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        className="flex h-10 w-full min-w-[200px] items-center justify-between rounded-md border border-input bg-background px-3 text-sm hover:bg-accent disabled:opacity-50"
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 max-h-60 w-full min-w-[240px] overflow-y-auto rounded-md border bg-background shadow-lg">
+          <label className="flex cursor-pointer items-center gap-2 border-b px-3 py-2 text-sm font-medium hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={(e) => onChange(e.target.checked ? companies.map((c) => c.id) : [])}
+            />
+            Todas (Consolidado)
+          </label>
+          {companies.map((company) => (
+            <label key={company.id} className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-accent">
+              <input
+                type="checkbox"
+                checked={selected.includes(company.id)}
+                onChange={(e) =>
+                  onChange(
+                    e.target.checked
+                      ? [...selected, company.id]
+                      : selected.filter((id) => id !== company.id),
+                  )
+                }
+              />
+              {company.name}
+              {selected.includes(company.id) && <Check className="ml-auto h-3.5 w-3.5 text-primary" />}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function KpiAllView({ filter, range, kpiCards, companies, role }: KpiAllViewProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const [periodType, setPeriodType] = useState(filter.periodType);
-  const [year, setYear] = useState(String(filter.year));
-  const [month, setMonth] = useState(String(filter.month));
-  const [quarter, setQuarter] = useState(String(filter.quarter));
-  const [semester, setSemester] = useState(String(filter.semester));
-  const [startDate, setStartDate] = useState(filter.startDate);
-  const [endDate, setEndDate] = useState(filter.endDate);
+
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
+  const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
+  const [yearFrom, setYearFrom] = useState(filter.yearFrom);
+  const [monthTo, setMonthTo] = useState(filter.monthTo);
+  const [yearTo, setYearTo] = useState(filter.yearTo);
+  const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
 
   const handleApply = () => {
     const params = new URLSearchParams();
-    params.set("periodType", periodType);
-    params.set("year", year);
-    if (periodType === "mensal") params.set("month", month);
-    if (periodType === "trimestral") params.set("quarter", quarter);
-    if (periodType === "semestral") params.set("semester", semester);
-    if (periodType === "acumulado") {
-      params.set("startDate", startDate);
-      params.set("endDate", endDate);
+    params.set("periodMode", periodMode);
+    if (periodMode === "especifico") {
+      params.set("monthFrom", String(monthFrom));
+      params.set("yearFrom", String(yearFrom));
+      params.set("monthTo", String(monthTo));
+      params.set("yearTo", String(yearTo));
     }
+    const allSelected = companySelection.length === companies.length;
+    if (!allSelected) params.set("companyIds", companySelection.join(","));
     router.push(`${pathname}?${params.toString()}`);
   };
 
@@ -69,76 +171,88 @@ export function KpiAllView({ filter, kpiCards }: KpiAllViewProps) {
       <div className="rounded-xl border bg-background p-4">
         <h2 className="text-2xl font-semibold">KPIs</h2>
         <p className="text-sm text-muted-foreground">
-          Indicadores consolidados do periodo.
+          Indicadores consolidados — {range.label}
         </p>
       </div>
 
-      {/* Period filter */}
+      {/* Filters */}
       <div className="space-y-4 rounded-xl border bg-background p-4">
-        <div className="flex flex-wrap gap-2">
-          {(["mensal", "trimestral", "semestral", "anual", "acumulado"] as const).map((mode) => (
-            <Button key={mode} type="button" variant={periodType === mode ? "default" : "outline"} onClick={() => setPeriodType(mode)}>
-              {mode === "mensal" && "Mensal"}
-              {mode === "trimestral" && "Trimestral"}
-              {mode === "semestral" && "Semestral"}
-              {mode === "anual" && "Anual"}
-              {mode === "acumulado" && "Acumulado"}
-            </Button>
-          ))}
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="flex flex-wrap items-end gap-4">
+          {/* Company multi-select */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Ano</label>
-            <Input value={year} onChange={(event) => setYear(event.target.value)} />
+            <label className="text-xs font-medium text-muted-foreground">Empresas</label>
+            <CompanyMultiSelect
+              companies={companies}
+              selected={companySelection}
+              onChange={(ids) => {
+                if (role !== "gestor_unidade") setCompanySelection(ids);
+              }}
+              disabled={role === "gestor_unidade"}
+            />
           </div>
 
-          {periodType === "mensal" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Mes</label>
-              <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                {Array.from({ length: 12 }).map((_, index) => (
-                  <option key={index + 1} value={String(index + 1)}>
-                    {String(index + 1).padStart(2, "0")}
-                  </option>
-                ))}
-              </select>
+          {/* Period mode */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Periodo</label>
+            <div className="flex gap-1">
+              {(
+                [
+                  { value: "mes_atual", label: "Mes atual" },
+                  { value: "ano_atual", label: "Ano atual" },
+                  { value: "especifico", label: "Periodo especifico" },
+                ] as const
+              ).map((opt) => (
+                <Button
+                  key={opt.value}
+                  type="button"
+                  size="sm"
+                  variant={periodMode === opt.value ? "default" : "outline"}
+                  onClick={() => setPeriodMode(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
             </div>
-          ) : null}
+          </div>
 
-          {periodType === "trimestral" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Trimestre</label>
-              <select value={quarter} onChange={(event) => setQuarter(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-              </select>
-            </div>
-          ) : null}
-
-          {periodType === "semestral" ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Semestre</label>
-              <select value={semester} onChange={(event) => setSemester(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                <option value="1">1 semestre</option><option value="2">2 semestre</option>
-              </select>
-            </div>
-          ) : null}
-
-          {periodType === "acumulado" ? (
+          {/* Date range for "especifico" */}
+          {periodMode === "especifico" && (
             <>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">De</label>
-                <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <div className="flex gap-1">
+                  <select
+                    value={monthFrom}
+                    onChange={(e) => setMonthFrom(Number(e.target.value))}
+                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                  <Input className="w-20" type="number" value={yearFrom} onChange={(e) => setYearFrom(Number(e.target.value))} />
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Ate</label>
-                <Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <div className="flex gap-1">
+                  <select
+                    value={monthTo}
+                    onChange={(e) => setMonthTo(Number(e.target.value))}
+                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                  <Input className="w-20" type="number" value={yearTo} onChange={(e) => setYearTo(Number(e.target.value))} />
+                </div>
               </div>
             </>
-          ) : null}
-        </div>
+          )}
 
-        <Button type="button" onClick={handleApply}>Aplicar Filtros</Button>
+          <Button type="button" onClick={handleApply}>Aplicar</Button>
+        </div>
       </div>
 
       {/* KPI cards grid */}
