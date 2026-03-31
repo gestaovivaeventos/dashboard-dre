@@ -336,7 +336,7 @@ export function processMovimento(
       return { entries: [], auditLog };
     }
 
-    const [year, month, day] = paymentDate.split("-").map(Number);
+    const [year, month] = paymentDate.split("-").map(Number);
     const ano_pgto = year;
     const mes_pagamento = month;
 

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { runCompanySync } from "@/lib/omie/sync";
 
@@ -19,7 +18,7 @@ export async function POST(_: Request, { params }: Params) {
   }
 
   try {
-    const result = await runCompanySync(params.companyId, profile, "incremental");
+    const result = await runCompanySync(params.companyId, profile, "full");
     return NextResponse.json({
       ok: true,
       recordsImported: result.recordsImported,
@@ -29,7 +28,9 @@ export async function POST(_: Request, { params }: Params) {
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Falha inesperada ao sincronizar empresa.";
+      error instanceof Error
+        ? error.message
+        : "Falha inesperada ao sincronizar empresa.";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });
   }
 }

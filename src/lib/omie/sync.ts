@@ -103,29 +103,6 @@ function getString(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
-function parseDate(input: unknown): string | null {
-  if (typeof input !== "string" || !input.trim()) return null;
-  const trimmed = input.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
-    const [day, month, year] = trimmed.split("/");
-    return `${year}-${month}-${day}`;
-  }
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().slice(0, 10);
-}
-
-function parseNumber(input: unknown): number {
-  if (typeof input === "number" && Number.isFinite(input)) return input;
-  if (typeof input === "string") {
-    const normalized = input.replace(/\./g, "").replace(",", ".");
-    const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-}
-
 function extractArray(response: Record<string, unknown>) {
   const candidates = Object.values(response).filter(Array.isArray);
   return (candidates[0] as Record<string, unknown>[] | undefined) ?? [];
