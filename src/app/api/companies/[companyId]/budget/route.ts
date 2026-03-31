@@ -17,7 +17,28 @@ interface ParsedRow {
   lineNumber: number;
 }
 
-function parseCsvLine(line: string): string[] {
+function unwrapOuterQuotes(line: string): string {
+  // Excel/Sheets brasileiro exporta linhas inteiras envolvidas em aspas:
+  // "Viva Petropolis,2026,1,Conta,""66.719,88"""
+  // Precisamos remover as aspas externas e desescapar as internas.
+  const trimmed = line.trim();
+  if (
+    trimmed.length >= 2 &&
+    trimmed[0] === '"' &&
+    trimmed[trimmed.length - 1] === '"'
+  ) {
+    const inner = trimmed.slice(1, -1);
+    // Only unwrap if the inner content has commas (it's a wrapped row, not a single quoted field)
+    if (inner.includes(",")) {
+      // Desescapar aspas duplas internas: "" → "
+      return inner.replace(/""/g, '"');
+    }
+  }
+  return trimmed;
+}
+
+function parseCsvLine(rawLine: string): string[] {
+  const line = unwrapOuterQuotes(rawLine);
   const fields: string[] = [];
   let current = "";
   let inQuotes = false;
