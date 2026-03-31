@@ -26,6 +26,7 @@ interface DashboardDisplayRow extends DreAccountBase {
   percentageOverNetRevenue: number;
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
+  valuesByCompany?: Record<string, number>;
 }
 
 export default async function DashboardPage({ searchParams, params }: DashboardPageProps) {
@@ -120,16 +121,60 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     accumulatedMap[row.id] = row.value;
   });
 
+  // Fetch per-company data for comparative mode
+  let companyValuesMap: Record<string, Record<string, number>> = {};
+  if (filter.compareCompanies && filter.selectedCompanyIds.length > 1) {
+    const { data: byCompanyData } = await supabase.rpc("dashboard_dre_aggregate_by_company", {
+      p_company_ids: filter.selectedCompanyIds,
+      p_date_from: accumulatedBucket.dateFrom,
+      p_date_to: accumulatedBucket.dateTo,
+    });
+
+    const rawByCompany = (byCompanyData as Array<{
+      company_id: string;
+      dre_account_id: string;
+      amount: number | string | null;
+    }> | null) ?? [];
+
+    // Group raw amounts by company
+    const amountsByCompanyId = new Map<string, Map<string, number>>();
+    rawByCompany.forEach((item) => {
+      let map = amountsByCompanyId.get(item.company_id);
+      if (!map) {
+        map = new Map();
+        amountsByCompanyId.set(item.company_id, map);
+      }
+      map.set(item.dre_account_id, Number(item.amount ?? 0));
+    });
+
+    // Build full DRE rows per company (so formulas/summaries are computed)
+    for (const companyId of filter.selectedCompanyIds) {
+      const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
+      const companyRows = buildDashboardRows(accounts, companyAmounts).rows;
+      const byId: Record<string, number> = {};
+      companyRows.forEach((r) => { byId[r.id] = r.value; });
+      companyValuesMap[companyId] = byId;
+    }
+  }
+
   const displayRows = zeroRows.map((row) => {
     const valuesByBucket: Record<string, number> = {};
     visibleBuckets.forEach((bucket) => {
       valuesByBucket[bucket.key] = valuesPerBucket.get(bucket.key)?.[row.id] ?? 0;
     });
 
+    const valuesByCompany: Record<string, number> = {};
+    if (filter.compareCompanies) {
+      for (const companyId of filter.selectedCompanyIds) {
+        valuesByCompany[companyId] = companyValuesMap[companyId]?.[row.id] ?? 0;
+      }
+    }
+
     return {
       ...row,
       valuesByBucket,
       accumulatedValue: accumulatedMap[row.id] ?? 0,
+      valuesByCompany: filter.compareCompanies ? valuesByCompany : undefined,
     } satisfies DashboardDisplayRow;
   });
 

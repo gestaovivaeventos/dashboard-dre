@@ -59,6 +59,7 @@ interface DashboardDisplayRow {
   percentageOverNetRevenue: number;
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
+  valuesByCompany?: Record<string, number>;
 }
 
 interface DashboardDreViewProps {
@@ -101,6 +102,21 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
 
 function formatCurrency(value: number) {
   return currencyFormatter.format(value);
+}
+
+function formatVar(a: number, b: number): string {
+  if (a === 0 && b === 0) return "-";
+  if (a === 0) return "-";
+  const pct = ((b - a) / Math.abs(a)) * 100;
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function varColor(a: number, b: number): string {
+  if (a === 0 && b === 0) return "text-slate-400";
+  if (a === 0) return "text-slate-400";
+  const pct = ((b - a) / Math.abs(a)) * 100;
+  return pct >= 0 ? "text-emerald-700" : "text-red-700";
 }
 
 const MONTHS = [
@@ -225,6 +241,7 @@ export function DashboardDreView({
   const [monthTo, setMonthTo] = useState(filter.monthTo);
   const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
+  const [compareMode, setCompareMode] = useState(filter.compareCompanies);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     () =>
@@ -344,6 +361,7 @@ export function DashboardDreView({
     }
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
+    if (compareMode) params.set("compareCompanies", "true");
     router.push(`${pathname}?${params.toString()}`);
   };
 
@@ -579,90 +597,199 @@ export function DashboardDreView({
             </>
           )}
 
+          {/* Compare companies toggle */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">&nbsp;</label>
+            <Button
+              type="button"
+              size="sm"
+              variant={compareMode ? "default" : "outline"}
+              onClick={() => setCompareMode(!compareMode)}
+              disabled={companySelection.length < 2}
+            >
+              Comparativo entre empresas
+            </Button>
+          </div>
+
           <Button type="button" onClick={handleApply}>Aplicar</Button>
         </div>
       </div>
 
       {/* DRE Table */}
-      <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
-        <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
-          {/* Header */}
-          <div
-            className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600"
-            style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
-          >
-            <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
-            {columns.map((column) => (
-              <span key={column.key} className="text-right">{column.label}</span>
-            ))}
-            <span className="text-right font-bold">{accumulatedBucket.label}</span>
-          </div>
+      {filter.compareCompanies && rows[0]?.valuesByCompany ? (() => {
+        // Comparative mode: one column per company + Var% between each pair
+        const selectedCompanies = companies.filter((c) => selectedCompanyIds.includes(c.id));
+        // Build column layout: Company1 | Company2 | Var% | Company3 | Var% | ...
+        const compCols: Array<{ type: "company"; companyId: string; name: string } | { type: "var"; leftId: string; rightId: string }> = [];
+        selectedCompanies.forEach((company, idx) => {
+          compCols.push({ type: "company", companyId: company.id, name: company.name });
+          if (idx > 0 && idx % 1 === 0) {
+            // After every company (from the 2nd onward), add var% vs previous
+            compCols.splice(compCols.length - 0, 0, {
+              type: "var",
+              leftId: selectedCompanies[idx - 1].id,
+              rightId: company.id,
+            });
+          }
+        });
+        // Reorganize: Company1 | Company2 | Var%(1vs2) | Company3 | Var%(2vs3) ...
+        const orderedCols: typeof compCols = [];
+        for (let i = 0; i < selectedCompanies.length; i++) {
+          orderedCols.push({ type: "company", companyId: selectedCompanies[i].id, name: selectedCompanies[i].name });
+          if (i > 0) {
+            orderedCols.push({ type: "var", leftId: selectedCompanies[i - 1].id, rightId: selectedCompanies[i].id });
+          }
+        }
+        const gridCols = orderedCols.length;
+        const gridTemplate = `minmax(320px, 2.6fr) repeat(${gridCols}, minmax(100px, 1fr))`;
 
-          {visibleRows.length === 0 ? (
-            <div className="flex min-h-44 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <Inbox className="h-6 w-6" />
-              <p className="text-sm">Nenhum dado encontrado para os filtros selecionados.</p>
-            </div>
-          ) : null}
-
-          {/* Rows */}
-          {visibleRows.map((row) => {
-            const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-            const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
-            const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
-
-            return (
-              <div
-                key={row.id}
-                className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`}
-                style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
-              >
-                {/* Account name */}
-                <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
-                  {row.hasChildren ? (
-                    <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
-                      {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </button>
+        return (
+          <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+            <div style={{ minWidth: `${320 + gridCols * 110}px` }}>
+              {/* Header */}
+              <div className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600" style={{ gridTemplateColumns: gridTemplate }}>
+                <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+                {orderedCols.map((col, idx) =>
+                  col.type === "company" ? (
+                    <span key={`h-${idx}`} className="text-right">{col.name}</span>
                   ) : (
-                    <span className="w-4" />
-                  )}
-                  <button
-                    type="button"
-                    className="truncate text-left hover:underline"
-                    onClick={() => setSelectedAccountId(row.id)}
-                  >
-                    {row.name}
-                  </button>
-                </div>
+                    <span key={`h-${idx}`} className="text-center text-[10px] text-slate-400">Var %</span>
+                  ),
+                )}
+              </div>
 
-                {/* Monthly values */}
-                {columns.map((column) => (
-                  <div key={`${row.id}-${column.key}`} className="text-right">
+              {visibleRows.length === 0 ? (
+                <div className="flex min-h-44 flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <Inbox className="h-6 w-6" />
+                  <p className="text-sm">Nenhum dado encontrado.</p>
+                </div>
+              ) : null}
+
+              {visibleRows.map((row) => {
+                const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
+                const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
+                const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+                const cv = row.valuesByCompany ?? {};
+
+                return (
+                  <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`} style={{ gridTemplateColumns: gridTemplate }}>
+                    <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+                      {row.hasChildren ? (
+                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                          {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </button>
+                      ) : (
+                        <span className="w-4" />
+                      )}
+                      <button type="button" className="truncate text-left hover:underline" onClick={() => setSelectedAccountId(row.id)}>
+                        {row.name}
+                      </button>
+                    </div>
+
+                    {orderedCols.map((col, idx) => {
+                      if (col.type === "company") {
+                        return (
+                          <div key={`${row.id}-c-${idx}`} className="text-right">
+                            {formatCurrency(cv[col.companyId] ?? 0)}
+                          </div>
+                        );
+                      }
+                      const leftVal = cv[col.leftId] ?? 0;
+                      const rightVal = cv[col.rightId] ?? 0;
+                      return (
+                        <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal)}`}>
+                          {formatVar(leftVal, rightVal)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })() : (
+        // Standard mode: monthly columns + total
+        <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+          <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
+            {/* Header */}
+            <div
+              className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600"
+              style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+            >
+              <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+              {columns.map((column) => (
+                <span key={column.key} className="text-right">{column.label}</span>
+              ))}
+              <span className="text-right font-bold">{accumulatedBucket.label}</span>
+            </div>
+
+            {visibleRows.length === 0 ? (
+              <div className="flex min-h-44 flex-col items-center justify-center gap-2 text-muted-foreground">
+                <Inbox className="h-6 w-6" />
+                <p className="text-sm">Nenhum dado encontrado para os filtros selecionados.</p>
+              </div>
+            ) : null}
+
+            {/* Rows */}
+            {visibleRows.map((row) => {
+              const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
+              const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
+              const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+
+              return (
+                <div
+                  key={row.id}
+                  className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`}
+                  style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                >
+                  {/* Account name */}
+                  <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+                    {row.hasChildren ? (
+                      <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                        {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </button>
+                    ) : (
+                      <span className="w-4" />
+                    )}
                     <button
                       type="button"
-                      className={`w-full text-right ${!row.is_summary ? "hover:underline" : ""}`}
-                      onClick={() => {
-                        if (row.is_summary) {
-                          setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }));
-                        } else {
-                          void openDrilldown(row, column, 1, drillSearch);
-                        }
-                      }}
+                      className="truncate text-left hover:underline"
+                      onClick={() => setSelectedAccountId(row.id)}
                     >
-                      {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
+                      {row.name}
                     </button>
                   </div>
-                ))}
 
-                {/* Total column */}
-                <div className="text-right font-semibold">
-                  {formatCurrency(row.accumulatedValue)}
+                  {/* Monthly values */}
+                  {columns.map((column) => (
+                    <div key={`${row.id}-${column.key}`} className="text-right">
+                      <button
+                        type="button"
+                        className={`w-full text-right ${!row.is_summary ? "hover:underline" : ""}`}
+                        onClick={() => {
+                          if (row.is_summary) {
+                            setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }));
+                          } else {
+                            void openDrilldown(row, column, 1, drillSearch);
+                          }
+                        }}
+                      >
+                        {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Total column */}
+                  <div className="text-right font-semibold">
+                    {formatCurrency(row.accumulatedValue)}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Evolution chart */}
       <div className="rounded-xl border bg-background p-4">
