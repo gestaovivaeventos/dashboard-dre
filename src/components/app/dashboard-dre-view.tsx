@@ -60,6 +60,7 @@ interface DashboardDisplayRow {
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
   valuesByCompany?: Record<string, number>;
+  budgetValue?: number;
 }
 
 interface DashboardDreViewProps {
@@ -242,6 +243,7 @@ export function DashboardDreView({
   const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
   const [compareMode, setCompareMode] = useState(filter.compareCompanies);
+  const [budgetMode, setBudgetMode] = useState(filter.budgetMode);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     () =>
@@ -362,6 +364,7 @@ export function DashboardDreView({
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
     if (compareMode) params.set("compareCompanies", "true");
+    if (budgetMode) params.set("budgetMode", "true");
     router.push(`${pathname}?${params.toString()}`);
   };
 
@@ -597,18 +600,34 @@ export function DashboardDreView({
             </>
           )}
 
-          {/* Compare companies toggle */}
+          {/* View mode toggles */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">&nbsp;</label>
-            <Button
-              type="button"
-              size="sm"
-              variant={compareMode ? "default" : "outline"}
-              onClick={() => setCompareMode(!compareMode)}
-              disabled={companySelection.length < 2}
-            >
-              Comparativo entre empresas
-            </Button>
+            <label className="text-xs font-medium text-muted-foreground">Visao</label>
+            <div className="flex gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={compareMode ? "default" : "outline"}
+                onClick={() => {
+                  setCompareMode(!compareMode);
+                  if (!compareMode) setBudgetMode(false);
+                }}
+                disabled={companySelection.length < 2}
+              >
+                Comparativo entre empresas
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={budgetMode ? "default" : "outline"}
+                onClick={() => {
+                  setBudgetMode(!budgetMode);
+                  if (!budgetMode) setCompareMode(false);
+                }}
+              >
+                Previsto x Realizado
+              </Button>
+            </div>
           </div>
 
           <Button type="button" onClick={handleApply}>Aplicar</Button>
@@ -616,7 +635,61 @@ export function DashboardDreView({
       </div>
 
       {/* DRE Table */}
-      {filter.compareCompanies && rows[0]?.valuesByCompany ? (() => {
+      {filter.budgetMode ? (() => {
+        // Budget mode: Previsto | Realizado | Var%
+        const gridTemplate = "minmax(320px, 2.6fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(100px, 1fr)";
+
+        return (
+          <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+            <div style={{ minWidth: "700px" }}>
+              {/* Header */}
+              <div className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600" style={{ gridTemplateColumns: gridTemplate }}>
+                <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+                <span className="text-right">Previsto</span>
+                <span className="text-right">Realizado</span>
+                <span className="text-center">Var %</span>
+              </div>
+
+              {visibleRows.length === 0 ? (
+                <div className="flex min-h-44 flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <Inbox className="h-6 w-6" />
+                  <p className="text-sm">Nenhum dado encontrado.</p>
+                </div>
+              ) : null}
+
+              {visibleRows.map((row) => {
+                const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
+                const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
+                const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+                const budgetVal = row.budgetValue ?? 0;
+                const actualVal = row.accumulatedValue;
+
+                return (
+                  <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`} style={{ gridTemplateColumns: gridTemplate }}>
+                    <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+                      {row.hasChildren ? (
+                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                          {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </button>
+                      ) : (
+                        <span className="w-4" />
+                      )}
+                      <button type="button" className="truncate text-left hover:underline" onClick={() => setSelectedAccountId(row.id)}>
+                        {row.name}
+                      </button>
+                    </div>
+                    <div className="text-right">{formatCurrency(budgetVal)}</div>
+                    <div className="text-right">{formatCurrency(actualVal)}</div>
+                    <div className={`text-center ${varColor(budgetVal, actualVal)}`}>
+                      {formatVar(budgetVal, actualVal)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })() : filter.compareCompanies && rows[0]?.valuesByCompany ? (() => {
         // Comparative mode: one column per company + Var% between each pair
         const selectedCompanies = companies.filter((c) => selectedCompanyIds.includes(c.id));
         // Build column layout: Company1 | Company2 | Var% | Company3 | Var% | ...

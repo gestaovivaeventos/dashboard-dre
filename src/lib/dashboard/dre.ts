@@ -27,6 +27,7 @@ export interface DashboardFilterState {
   yearTo: number;
   selectedCompanyIds: string[];
   compareCompanies: boolean;
+  budgetMode: boolean;
   // Legacy fields kept for backward compat with URL params
   viewMode: ViewMode;
   periodType: string;
@@ -130,6 +131,7 @@ export function buildFilterState(
     : rawCompanies.filter((companyId) => companyIds.includes(companyId));
 
   const compareCompanies = searchParams.compareCompanies === "true";
+  const budgetMode = searchParams.budgetMode === "true";
 
   return {
     periodMode,
@@ -139,6 +141,7 @@ export function buildFilterState(
     monthTo,
     selectedCompanyIds: selectedCompanyIds.length > 0 ? selectedCompanyIds : companyIds,
     compareCompanies,
+    budgetMode,
     // Legacy defaults
     viewMode: "comparativa" as ViewMode,
     periodType: "mensal",
