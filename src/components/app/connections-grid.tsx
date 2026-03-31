@@ -11,6 +11,7 @@ interface ConnectionCompany {
   id: string;
   name: string;
   last_sync_at: string | null;
+  last_full_sync_at: string | null;
   last_sync_status: "success" | "error" | "running" | null;
   last_sync_error: string | null;
   entries_count: number;
@@ -71,6 +72,7 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
   const [companies, setCompanies] = useState<ConnectionCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncingByCompany, setSyncingByCompany] = useState<Record<string, boolean>>({});
+  const [fullSyncingByCompany, setFullSyncingByCompany] = useState<Record<string, boolean>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [expandedCompanyId, setExpandedCompanyId] = useState<string | null>(null);
   const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | "success" | "error">("all");
@@ -140,6 +142,46 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
     setSyncingByCompany((previous) => ({ ...previous, [companyId]: false }));
   };
 
+  const handleFullSync = async (companyId: string, isFirstTime: boolean) => {
+    const message = isFirstTime
+      ? "Primeira sincronizacao — sera buscado historico desde 2022. Isso pode levar varios minutos. Continuar?"
+      : "Isso vai buscar 24 meses de historico. Pode levar alguns minutos. Continuar?";
+
+    if (!window.confirm(message)) return;
+
+    setFullSyncingByCompany((previous) => ({ ...previous, [companyId]: true }));
+    setStatusMessage(null);
+
+    const response = await fetch(`/api/sync/${companyId}/full`, {
+      method: "POST",
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      recordsImported?: number;
+      recordsDeleted?: number;
+    };
+    if (!response.ok) {
+      setStatusMessage(payload.error ?? "Falha na sincronizacao completa.");
+      showToast({
+        title: "Falha na sincronizacao completa",
+        description: payload.error ?? "A empresa nao foi sincronizada.",
+        variant: "destructive",
+      });
+    } else {
+      showToast({
+        title: "Sincronizacao completa concluida",
+        description: `${payload.recordsImported ?? 0} registros importados, ${payload.recordsDeleted ?? 0} obsoletos removidos.`,
+        variant: "success",
+      });
+      await loadCompanies();
+    }
+
+    setFullSyncingByCompany((previous) => ({
+      ...previous,
+      [companyId]: false,
+    }));
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -201,6 +243,32 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
                   )}
                   Sincronizar Agora
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() =>
+                    void handleFullSync(
+                      company.id,
+                      !company.last_full_sync_at,
+                    )
+                  }
+                  disabled={
+                    (fullSyncingByCompany[company.id] ?? false) || syncing
+                  }
+                >
+                  {fullSyncingByCompany[company.id] ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                  )}
+                  Sincronizar Tudo
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  {company.last_full_sync_at
+                    ? `Ultima sync completa: ${formatDateTime(company.last_full_sync_at)}`
+                    : "Sync completa: Pendente"}
+                </p>
                 <Button
                   type="button"
                   variant="outline"
