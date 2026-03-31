@@ -38,8 +38,11 @@ interface NormalizedEntry {
   processing_metadata: Record<string, unknown>;
 }
 
+export type SyncMode = "incremental" | "full";
+
 interface SyncResult {
   recordsImported: number;
+  recordsDeleted: number;
   categories: Array<{ company_id: string; code: string; description: string }>;
   newUnmappedCategories: Array<{
     company_id: string;
@@ -51,6 +54,38 @@ interface SyncResult {
 // ===========================================================================
 // Helpers
 // ===========================================================================
+function formatDateForOmie(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function calculateDateRange(
+  mode: SyncMode,
+  lastFullSyncAt: string | null,
+): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const dateTo = formatDateForOmie(now);
+
+  if (mode === "full") {
+    if (!lastFullSyncAt) {
+      return { dateFrom: "01-01-2022", dateTo };
+    }
+    const from = new Date(now);
+    from.setMonth(from.getMonth() - 24);
+    return { dateFrom: formatDateForOmie(from), dateTo };
+  }
+
+  // Incremental: from watermark - 3 days
+  if (!lastFullSyncAt) {
+    return { dateFrom: "01-01-2022", dateTo };
+  }
+  const from = new Date(lastFullSyncAt);
+  from.setDate(from.getDate() - 3);
+  return { dateFrom: formatDateForOmie(from), dateTo };
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -284,23 +319,36 @@ export async function canSyncCompany(
 // ===========================================================================
 // Public sync entry points
 // ===========================================================================
-export async function runCompanySync(companyId: string, profile: UserProfile) {
+export async function runCompanySync(
+  companyId: string,
+  profile: UserProfile,
+  mode: SyncMode = "incremental",
+) {
   return runCompanySyncInternal(companyId, {
     profile,
     skipPermission: false,
+    mode,
   });
 }
 
-export async function runCompanySyncAsSystem(companyId: string) {
+export async function runCompanySyncAsSystem(
+  companyId: string,
+  mode: SyncMode = "incremental",
+) {
   return runCompanySyncInternal(companyId, {
     profile: null,
     skipPermission: true,
+    mode,
   });
 }
 
 async function runCompanySyncInternal(
   companyId: string,
-  options: { profile: UserProfile | null; skipPermission: boolean },
+  options: {
+    profile: UserProfile | null;
+    skipPermission: boolean;
+    mode: SyncMode;
+  },
 ) {
   const supabase = await createSupabaseClient();
   if (!options.skipPermission) {
@@ -312,17 +360,28 @@ async function runCompanySyncInternal(
 
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .select("id, omie_app_key, omie_app_secret")
+    .select("id, omie_app_key, omie_app_secret, last_full_sync_at")
     .eq("id", companyId)
     .single<{
       id: string;
       omie_app_key: string | null;
       omie_app_secret: string | null;
+      last_full_sync_at: string | null;
     }>();
 
   if (companyError || !company) {
     throw new Error("Empresa nao encontrada.");
   }
+
+  const effectiveMode =
+    options.mode === "incremental" && !company.last_full_sync_at
+      ? "full"
+      : options.mode;
+
+  const { dateFrom, dateTo } = calculateDateRange(
+    effectiveMode,
+    company.last_full_sync_at,
+  );
 
   const { data: syncLog, error: syncLogError } = await supabase
     .from("sync_log")
@@ -331,6 +390,7 @@ async function runCompanySyncInternal(
       started_at: new Date().toISOString(),
       status: "running",
       records_imported: 0,
+      sync_type: effectiveMode,
     })
     .select("id")
     .single<{ id: string }>();
@@ -355,7 +415,17 @@ async function runCompanySyncInternal(
       appKey,
       appSecret,
       lastRequestRef,
+      mode: effectiveMode,
+      dateFrom,
+      dateTo,
     });
+
+    if (effectiveMode === "full") {
+      await supabase
+        .from("companies")
+        .update({ last_full_sync_at: new Date().toISOString() })
+        .eq("id", companyId);
+    }
 
     await supabase
       .from("sync_log")
@@ -393,18 +463,19 @@ async function syncEntries({
   appKey,
   appSecret,
   lastRequestRef,
+  mode,
+  dateFrom,
+  dateTo,
 }: {
   companyId: string;
   appKey: string;
   appSecret: string;
   lastRequestRef: { value: number };
+  mode: SyncMode;
+  dateFrom: string;
+  dateTo: string;
 }): Promise<SyncResult> {
   const supabase = await createSupabaseClient();
-
-  // Periodo de sincronizacao: ano 2026 completo.
-  // TODO: tornar configuravel via parametro.
-  const dateFrom = "01-01-2026";
-  const dateTo = "31-12-2026";
 
   // 1. Buscar movimentos financeiros filtrados por data de pagamento
   //    + catalogo de categorias em paralelo.
@@ -434,27 +505,31 @@ async function syncEntries({
     }
   }
 
-  // 5. Limpar lancamentos obsoletos.
-  const validOmieIds = new Set(uniqueEntries.map((e) => e.omie_id));
-  const { data: existingEntries } = await supabase
-    .from("financial_entries")
-    .select("id, omie_id")
-    .eq("company_id", companyId);
-
-  const idsToDelete = (existingEntries ?? [])
-    .filter((e) => !validOmieIds.has(e.omie_id as string))
-    .map((e) => e.id as string);
-
-  for (const batch of chunk(idsToDelete, 50)) {
-    const { error } = await supabase
+  // 5. Limpar lancamentos obsoletos (somente no modo full).
+  let recordsDeleted = 0;
+  if (mode === "full") {
+    const validOmieIds = new Set(uniqueEntries.map((e) => e.omie_id));
+    const { data: existingEntries } = await supabase
       .from("financial_entries")
-      .delete()
-      .in("id", batch);
-    if (error) {
-      throw new Error(
-        `Falha ao limpar lancamentos obsoletos: ${error.message}`,
-      );
+      .select("id, omie_id")
+      .eq("company_id", companyId);
+
+    const idsToDelete = (existingEntries ?? [])
+      .filter((e) => !validOmieIds.has(e.omie_id as string))
+      .map((e) => e.id as string);
+
+    for (const batch of chunk(idsToDelete, 50)) {
+      const { error } = await supabase
+        .from("financial_entries")
+        .delete()
+        .in("id", batch);
+      if (error) {
+        throw new Error(
+          `Falha ao limpar lancamentos obsoletos: ${error.message}`,
+        );
+      }
     }
+    recordsDeleted = idsToDelete.length;
   }
 
   // 6. Consolidar categorias e upsert omie_categories.
@@ -507,6 +582,7 @@ async function syncEntries({
 
   return {
     recordsImported: uniqueEntries.length,
+    recordsDeleted,
     categories,
     newUnmappedCategories,
   };
