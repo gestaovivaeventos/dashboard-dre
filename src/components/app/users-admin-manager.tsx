@@ -233,22 +233,35 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
         return;
       }
 
-      // Save segment + company access (best-effort, don't block close)
-      await Promise.allSettled([
+      // Save segment + company access
+      console.log("[saveEdit] saving permissions - segments:", selectedSegments, "companies:", selectedCompanies);
+
+      const [segResult, compResult] = await Promise.allSettled([
         fetch("/api/segments/access", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: selectedEditUser.id, segmentIds: selectedSegments }),
-        }),
+        }).then(async (r) => ({ status: r.status, body: await r.json() })),
         fetch("/api/segments/companies", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: selectedEditUser.id, companyIds: selectedCompanies }),
-        }),
+        }).then(async (r) => ({ status: r.status, body: await r.json() })),
       ]);
 
+      console.log("[saveEdit] segments result:", JSON.stringify(segResult));
+      console.log("[saveEdit] companies result:", JSON.stringify(compResult));
+
+      const segFailed = segResult.status === "rejected" || (segResult.status === "fulfilled" && segResult.value.status !== 200);
+      const compFailed = compResult.status === "rejected" || (compResult.status === "fulfilled" && compResult.value.status !== 200);
+
       setEditUserId(null);
-      showMessage("Usuario atualizado.");
+
+      if (segFailed || compFailed) {
+        showMessage("Perfil salvo, mas houve erro ao salvar permissoes. Verifique o console.", "error");
+      } else {
+        showMessage("Usuario atualizado.");
+      }
       await refresh();
     } catch {
       showMessage("Erro de conexao ao salvar usuario.", "error");
