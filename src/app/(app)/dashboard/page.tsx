@@ -134,7 +134,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
   });
 
   // Fetch per-company data for comparative mode
-  let companyValuesMap: Record<string, Record<string, number>> = {};
+  const companyValuesMap: Record<string, Record<string, number>> = {};
   if (filter.compareCompanies && filter.selectedCompanyIds.length > 1) {
     const { data: byCompanyData } = await supabase.rpc("dashboard_dre_aggregate_by_company", {
       p_company_ids: filter.selectedCompanyIds,
@@ -171,7 +171,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
 
   // Fetch budget data for "Previsto x Realizado" mode
   // When "Ano atual", cap budget at current month (not full year)
-  let budgetMap: Record<string, number> = {};
+  const budgetMap: Record<string, number> = {};
   if (filter.budgetMode) {
     const now = new Date();
     const currentMonth = now.getUTCMonth() + 1;
