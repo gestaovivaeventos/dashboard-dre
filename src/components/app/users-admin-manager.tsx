@@ -214,16 +214,20 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
           ? form.company_id || selectedCompanies[0] || null
           : null;
 
+      const patchBody = {
+        name: form.name,
+        role: form.role,
+        company_id: effectiveCompanyId,
+      };
+      console.log("[saveEdit] sending PATCH:", JSON.stringify(patchBody), "userId:", selectedEditUser.id);
+
       const response = await fetch(`/api/users/${selectedEditUser.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          role: form.role,
-          company_id: effectiveCompanyId,
-        }),
+        body: JSON.stringify(patchBody),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as { error?: string; updated?: Record<string, unknown> };
+      console.log("[saveEdit] response:", response.status, JSON.stringify(payload));
       if (!response.ok) {
         showMessage(payload.error ?? "Falha ao salvar usuario.", "error");
         return;

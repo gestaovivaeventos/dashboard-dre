@@ -38,13 +38,26 @@ export async function PATCH(request: Request, { params }: Params) {
     patch.company_id = null;
   }
 
+  console.log("[PATCH /api/users] userId:", params.userId, "body:", JSON.stringify(body), "patch:", JSON.stringify(patch));
+
   const adminClient = createAdminClient();
-  const { error } = await adminClient.from("users").update(patch).eq("id", params.userId);
+  const { data, error } = await adminClient
+    .from("users")
+    .update(patch)
+    .eq("id", params.userId)
+    .select("id, role, name, company_id");
+
+  console.log("[PATCH /api/users] result:", JSON.stringify({ data, error }));
+
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true });
+  if (!data || data.length === 0) {
+    return NextResponse.json({ error: "Usuario nao encontrado." }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true, updated: data[0] });
 }
 
 export async function DELETE(_: Request, { params }: Params) {
