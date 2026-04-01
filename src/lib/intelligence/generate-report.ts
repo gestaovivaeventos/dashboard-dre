@@ -165,39 +165,43 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
   };
 
   // 10. Build KPI cards
+  // Find rows by code — common DRE structure: 1=Receita Bruta, 4=Receita Líquida,
+  // 7=Lucro Operacional Bruto, 11=Resultado do Exercício, 10=EBITDA
   const findRow = (code: string) => currentRows.find((r) => r.code === code);
   const findPrevRow = (code: string) => prevRows.find((r) => r.code === code);
 
-  const receitaRow = findRow("4");
-  const ebitdaRow = findRow("10");
-  const receitaPrev = findPrevRow("4");
-  const ebitdaPrev = findPrevRow("10");
+  const receitaBrutaRow = findRow("1");
+  const lucroOpRow = findRow("7");
+  const resultadoRow = findRow("11");
+  const receitaLiqRow = findRow("4");
+  const receitaBrutaPrev = findPrevRow("1");
+  const lucroOpPrev = findPrevRow("7");
+  const resultadoPrev = findPrevRow("11");
 
-  const margemEbitda = receitaRow && receitaRow.value !== 0 && ebitdaRow
-    ? (ebitdaRow.value / receitaRow.value) * 100
-    : 0;
-  const margemEbitdaPrev = receitaPrev && receitaPrev.value !== 0 && ebitdaPrev
-    ? (ebitdaPrev.value / receitaPrev.value) * 100
-    : 0;
+  const pctOf = (value: number, base: number) =>
+    base !== 0 ? (value / Math.abs(base)) * 100 : 0;
+
+  const lucroOpPct = pctOf(lucroOpRow?.value ?? 0, receitaLiqRow?.value ?? 0);
+  const resultadoPct = pctOf(resultadoRow?.value ?? 0, receitaLiqRow?.value ?? 0);
 
   const kpis: ReportData["kpis"] = [
     {
-      label: "Receita Liquida",
-      value: formatBRL(receitaRow?.value ?? 0),
-      change: changePct(receitaRow?.value ?? 0, receitaPrev?.value ?? 0),
-      changeType: changeType(receitaRow?.value ?? 0, receitaPrev?.value ?? 0),
+      label: "Receita Bruta",
+      value: formatBRL(receitaBrutaRow?.value ?? 0),
+      change: changePct(receitaBrutaRow?.value ?? 0, receitaBrutaPrev?.value ?? 0),
+      changeType: changeType(receitaBrutaRow?.value ?? 0, receitaBrutaPrev?.value ?? 0),
     },
     {
-      label: "EBITDA",
-      value: formatBRL(ebitdaRow?.value ?? 0),
-      change: changePct(ebitdaRow?.value ?? 0, ebitdaPrev?.value ?? 0),
-      changeType: changeType(ebitdaRow?.value ?? 0, ebitdaPrev?.value ?? 0),
+      label: "Lucro Operacional Bruto",
+      value: `${formatBRL(lucroOpRow?.value ?? 0)} (${formatPct(lucroOpPct)})`,
+      change: changePct(lucroOpRow?.value ?? 0, lucroOpPrev?.value ?? 0),
+      changeType: changeType(lucroOpRow?.value ?? 0, lucroOpPrev?.value ?? 0),
     },
     {
-      label: "Margem EBITDA",
-      value: formatPct(margemEbitda),
-      change: formatPct(margemEbitda - margemEbitdaPrev),
-      changeType: changeType(margemEbitda, margemEbitdaPrev),
+      label: "Resultado do Exercicio",
+      value: `${formatBRL(resultadoRow?.value ?? 0)} (${formatPct(resultadoPct)})`,
+      change: changePct(resultadoRow?.value ?? 0, resultadoPrev?.value ?? 0),
+      changeType: changeType(resultadoRow?.value ?? 0, resultadoPrev?.value ?? 0),
     },
   ];
 
