@@ -951,8 +951,8 @@ export function DashboardDreView({
                   drillRows.map((row) => (
                     <div key={row.id} className="grid grid-cols-[100px_2fr_1.5fr_140px_1fr] gap-2 border-t px-3 py-2 text-sm">
                       <span>{new Date(row.payment_date).toLocaleDateString("pt-BR")}</span>
-                      <span className="truncate">{row.description}</span>
-                      <span className="truncate">{row.supplier_customer || "-"}</span>
+                      <span className="truncate cursor-default" title={row.description}>{row.description}</span>
+                      <span className="truncate cursor-default" title={row.supplier_customer || "-"}>{row.supplier_customer || "-"}</span>
                       <span className="text-right">{formatCurrency(row.value)}</span>
                       <span>{row.company_name}</span>
                     </div>
