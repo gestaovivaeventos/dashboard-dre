@@ -204,6 +204,7 @@ async function fetchAllMovimentos(
         dDtPagtoDe: dateFrom,
         dDtPagtoAte: dateTo,
         cExibirDepartamentos: "S",
+        lDadosCad: "S",
       },
       lastRequestRef,
     );
@@ -527,8 +528,13 @@ async function syncEntries({
       if (cpf) det.cNomeCliente = cpf;
     }
 
-    // Injetar descricao a partir dos campos disponiveis
-    if (!det.cDescricao && !det.cObs) {
+    // Descricao: com lDadosCad=S, a API retorna o campo "observacao".
+    // Se observacao existir, copiar para cDescricao (que o processador prioriza).
+    // Se nao, usar cNumOS + cTipo como fallback.
+    const obs = getString(det, ["observacao"]);
+    if (obs) {
+      det.cDescricao = obs;
+    } else if (!det.cDescricao && !det.cObs) {
       const numOS = getString(det, ["cNumOS"]);
       const tipo = getString(det, ["cTipo"]);
       const numDocFiscal = getString(det, ["cNumDocFiscal"]);
