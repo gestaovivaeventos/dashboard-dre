@@ -10,6 +10,8 @@ const OMIE_MOV_FINANCEIRAS_URL =
   "https://app.omie.com.br/api/v1/financas/mf/";
 const OMIE_CATEGORIAS_URL =
   "https://app.omie.com.br/api/v1/geral/categorias/";
+const OMIE_CLIENTES_URL =
+  "https://app.omie.com.br/api/v1/geral/clientes/";
 const REQUEST_INTERVAL_MS = 350;
 
 // ===========================================================================
@@ -282,6 +284,52 @@ async function fetchCategoryCatalog(
 }
 
 // ===========================================================================
+// Fetch client/supplier names (ListarClientesResumido)
+// ===========================================================================
+async function fetchClientNames(
+  appKey: string,
+  appSecret: string,
+  lastRequestRef: { value: number },
+) {
+  const clientsByCode = new Map<number, string>();
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    try {
+      const response = await omieRequest(
+        OMIE_CLIENTES_URL,
+        "ListarClientesResumido",
+        appKey,
+        appSecret,
+        { pagina: page, registros_por_pagina: 500 },
+        lastRequestRef,
+      );
+      const records = extractArray(response);
+      for (const record of records) {
+        const code = record.codigo_cliente ?? record.nCodCliente;
+        const nomeFantasia = getString(record, ["nome_fantasia", "fantasia"]);
+        const razaoSocial = getString(record, ["razao_social", "nome"]);
+        const name = nomeFantasia || razaoSocial;
+        if (code && name) {
+          clientsByCode.set(Number(code), name);
+        }
+      }
+      totalPages = Number(
+        getString(response, ["total_de_paginas", "nTotPaginas"]) ?? "1",
+      );
+      if (!Number.isFinite(totalPages) || totalPages < 1) totalPages = page;
+      page += 1;
+    } catch {
+      // If API fails (e.g. no permission), return what we have
+      break;
+    }
+  }
+
+  return clientsByCode;
+}
+
+// ===========================================================================
 // Permissions
 // ===========================================================================
 export async function canSyncCompany(
@@ -455,15 +503,42 @@ async function syncEntries({
   const supabase = await createSupabaseClient();
 
   // 1. Buscar movimentos financeiros filtrados por data de pagamento
-  //    + catalogo de categorias em paralelo.
-  const [rawMovimentos, categoryCatalog] = await Promise.all([
+  //    + catalogo de categorias + nomes de clientes/fornecedores.
+  const [rawMovimentos, categoryCatalog, clientNames] = await Promise.all([
     fetchAllMovimentos(appKey, appSecret, dateFrom, dateTo, lastRequestRef),
     fetchCategoryCatalog(appKey, appSecret, lastRequestRef),
+    fetchClientNames(appKey, appSecret, lastRequestRef),
   ]);
 
   // 2. Usar o novo processador financeiro que implementa as 11 regras
   //    de negócio completas para DRE em regime de caixa.
   const { entries } = processMovimentos(rawMovimentos, companyId);
+
+  // 2.1 Enriquecer entries com nome do cliente/fornecedor
+  //     A API ListarMovimentos retorna apenas nCodCliente (ID numerico).
+  //     Buscamos o nome fantasia via ListarClientesResumido.
+  for (const entry of entries) {
+    const raw = entry.raw_json;
+    const det = (raw?.detalhes ?? raw) as Record<string, unknown>;
+    const codCliente = Number(det?.nCodCliente ?? 0);
+    if (codCliente && clientNames.has(codCliente)) {
+      entry.supplier_customer = clientNames.get(codCliente) ?? null;
+    }
+    // Melhorar description: usar cObs ou cNumOS + cTipo como fallback
+    if (!entry.description || entry.description === "Receita Omie" || entry.description === "Despesa Omie") {
+      const obs = getString(det, ["cObs", "observacao"]);
+      const numOS = getString(det, ["cNumOS"]);
+      const tipo = getString(det, ["cTipo"]);
+      const numTitulo = getString(det, ["cNumTitulo"]);
+      if (obs) {
+        entry.description = obs;
+      } else if (numOS) {
+        entry.description = tipo ? `${tipo} - ${numOS}` : numOS;
+      } else if (numTitulo) {
+        entry.description = tipo ? `${tipo} - ${numTitulo}` : numTitulo;
+      }
+    }
+  }
 
   // 3. Deduplicar por omie_id (ultima ocorrencia vence).
   const deduped = new Map<string, NormalizedEntry>();
