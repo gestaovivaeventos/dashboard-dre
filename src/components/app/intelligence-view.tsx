@@ -39,11 +39,13 @@ import { ReportPreview } from "@/components/app/report-preview";
 interface Company {
   id: string;
   name: string;
+  segmentSlug: string | null;
 }
 
 interface Segment {
   id: string;
   name: string;
+  slug: string;
 }
 
 interface IntelligenceViewProps {
@@ -248,6 +250,7 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
           dateFrom,
           dateTo,
           periodLabel,
+          segmentSlug: selectedCompany?.segmentSlug ?? null,
         }),
       });
       const payload = (await response.json()) as { reportId?: string; html?: string; error?: string };

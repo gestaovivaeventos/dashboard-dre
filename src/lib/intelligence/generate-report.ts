@@ -5,8 +5,8 @@ import { createOpenAI } from "@ai-sdk/openai";
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
-import { REPORT_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
-import { renderReportEmail } from "@/lib/intelligence/render-email";
+import { REPORT_SYSTEM_PROMPT, getSegmentReportPrompt } from "@/lib/intelligence/prompts";
+import { renderReportEmail, renderNarrativeEmail } from "@/lib/intelligence/render-email";
 import type { ReportData } from "@/lib/intelligence/render-email";
 
 export interface GenerateReportInput {
@@ -15,6 +15,7 @@ export interface GenerateReportInput {
   dateFrom: string;
   dateTo: string;
   periodLabel: string;
+  segmentSlug?: string | null;
 }
 
 export interface GenerateReportResult {
@@ -59,7 +60,7 @@ function changePct(current: number, prev: number): string {
 }
 
 export async function generateReport(input: GenerateReportInput): Promise<GenerateReportResult> {
-  const { supabase, companyIds, dateFrom, dateTo, periodLabel } = input;
+  const { supabase, companyIds, dateFrom, dateTo, periodLabel, segmentSlug } = input;
 
   // 1. Fetch company names
   const { data: companies } = await supabase
@@ -152,21 +153,48 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
       pctRevenue: r.percentageOverNetRevenue,
     }));
 
-  // 8. Call AI
+  // 8. Check for segment-specific prompt
+  const segmentPrompt = getSegmentReportPrompt(segmentSlug ?? null);
+
+  // Include ALL rows (not just level <= 2) for segment prompts — they need full detail
+  const fullContextRows = currentRows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    level: r.level,
+    value: r.value,
+    prevValue: prevRowById.get(r.id)?.value ?? 0,
+    budget: budgetMap.get(r.id) ?? null,
+    pctRevenue: r.percentageOverNetRevenue,
+  }));
+
+  if (segmentPrompt) {
+    // --- SEGMENT-SPECIFIC FLOW: narrative HTML output ---
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      system: segmentPrompt,
+      prompt: `Dados financeiros de "${companyName}" — ${periodLabel}:\n\n${JSON.stringify(fullContextRows, null, 2)}`,
+      maxOutputTokens: 4000,
+    });
+
+    const html = renderNarrativeEmail(companyName, periodLabel, text);
+    return {
+      html,
+      json: { companyName, periodLabel, contextRows: fullContextRows, narrativeOutput: true },
+    };
+  }
+
+  // --- GENERIC FLOW: JSON structured output ---
   const { text } = await generateText({
     model: openai("gpt-4o-mini"),
     system: REPORT_SYSTEM_PROMPT,
     prompt: JSON.stringify({ periodo: periodLabel, empresa: companyName, dre: contextRows }),
   });
 
-  // 9. Parse AI JSON
   const aiAnalysis = JSON.parse(text) as ReportData["aiAnalysis"] & {
     kpi_comentarios?: Record<string, string>;
   };
 
-  // 10. Build KPI cards
-  // Find rows by code — common DRE structure: 1=Receita Bruta, 4=Receita Líquida,
-  // 7=Lucro Operacional Bruto, 11=Resultado do Exercício, 10=EBITDA
+  // Build KPI cards
   const findRow = (code: string) => currentRows.find((r) => r.code === code);
   const findPrevRow = (code: string) => prevRows.find((r) => r.code === code);
 
@@ -205,7 +233,7 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
     },
   ];
 
-  // 11. Build budget comparison table (top 8 accounts with budget)
+  // Build budget comparison table
   const budgetComparison: ReportData["budgetComparison"] = currentRows
     .filter((r) => {
       const b = budgetMap.get(r.id);
@@ -226,7 +254,6 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
       };
     });
 
-  // 12. Render email
   const reportData: ReportData = {
     companyName,
     periodLabel,
@@ -242,14 +269,8 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
 
   const html = renderReportEmail(reportData);
 
-  const json: Record<string, unknown> = {
-    companyName,
-    periodLabel,
-    kpis,
-    aiAnalysis,
-    budgetComparison,
-    contextRows,
+  return {
+    html,
+    json: { companyName, periodLabel, kpis, aiAnalysis, budgetComparison, contextRows },
   };
-
-  return { html, json };
 }

@@ -12,6 +12,7 @@ interface GenerateBody {
   dateTo?: string;
   periodLabel?: string;
   segmentName?: string;
+  segmentSlug?: string;
   horizonMonths?: number;
 }
 
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as GenerateBody;
-  const { type, companyIds, dateFrom, dateTo, periodLabel, segmentName, horizonMonths } = body;
+  const { type, companyIds, dateFrom, dateTo, periodLabel, segmentName, segmentSlug, horizonMonths } = body;
 
   if (!type || !companyIds || companyIds.length === 0) {
     return NextResponse.json(
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
         dateFrom: dateFrom!,
         dateTo: dateTo!,
         periodLabel: periodLabel ?? dateFrom!,
+        segmentSlug: segmentSlug ?? null,
       });
       html = result.html;
       json = result.json;
