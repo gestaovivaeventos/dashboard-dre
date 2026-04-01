@@ -32,12 +32,8 @@ export async function PATCH(request: Request, { params }: Params) {
   if (body.company_id !== undefined) patch.company_id = body.company_id;
   if (body.active !== undefined) patch.active = body.active;
 
-  if (body.role === "gestor_unidade" && !body.company_id) {
-    return NextResponse.json(
-      { error: "Gestor_unidade exige unidade vinculada." },
-      { status: 400 },
-    );
-  }
+  // company_id is optional for gestor_unidade — access is now managed via
+  // segment/company permission tables (user_segment_access, user_company_access)
   if (body.role && body.role !== "gestor_unidade") {
     patch.company_id = null;
   }

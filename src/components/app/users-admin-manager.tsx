@@ -208,13 +208,19 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
     if (!selectedEditUser) return;
     setSaving(true);
     try {
+      // For gestor_unidade, use the first selected company as the primary company_id
+      const effectiveCompanyId =
+        form.role === "gestor_unidade"
+          ? form.company_id || selectedCompanies[0] || null
+          : null;
+
       const response = await fetch(`/api/users/${selectedEditUser.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
           role: form.role,
-          company_id: form.role === "gestor_unidade" ? form.company_id || null : null,
+          company_id: effectiveCompanyId,
         }),
       });
       const payload = (await response.json()) as { error?: string };
