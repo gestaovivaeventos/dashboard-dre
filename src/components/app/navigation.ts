@@ -1,4 +1,4 @@
-import { BarChart3, Cog, MapPinned, PieChart, Settings, Users } from "lucide-react";
+import { BarChart3, Brain, Cog, MapPinned, PieChart, Settings, Users } from "lucide-react";
 
 import type { UserRole } from "@/lib/supabase/types";
 
@@ -42,6 +42,12 @@ export const GLOBAL_NAV_ITEMS = [
     title: "Usuarios",
     href: "/usuarios",
     icon: Users,
+    roles: ["admin"] as UserRole[],
+  },
+  {
+    title: "Inteligencia",
+    href: "/admin/inteligencia",
+    icon: Brain,
     roles: ["admin"] as UserRole[],
   },
 ] as const;
