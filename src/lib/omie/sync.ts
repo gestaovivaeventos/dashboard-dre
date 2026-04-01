@@ -10,6 +10,8 @@ const OMIE_MOV_FINANCEIRAS_URL =
   "https://app.omie.com.br/api/v1/financas/mf/";
 const OMIE_CATEGORIAS_URL =
   "https://app.omie.com.br/api/v1/geral/categorias/";
+const OMIE_CLIENTES_URL =
+  "https://app.omie.com.br/api/v1/geral/clientes/";
 const REQUEST_INTERVAL_MS = 350;
 
 // ===========================================================================
@@ -202,6 +204,7 @@ async function fetchAllMovimentos(
         dDtPagtoDe: dateFrom,
         dDtPagtoAte: dateTo,
         cExibirDepartamentos: "S",
+        lDadosCad: "S",
       },
       lastRequestRef,
     );
@@ -279,6 +282,52 @@ async function fetchCategoryCatalog(
   }
 
   return categoriesByCode;
+}
+
+// ===========================================================================
+// Fetch client/supplier names (ListarClientesResumido)
+// ===========================================================================
+async function fetchClientNames(
+  appKey: string,
+  appSecret: string,
+  lastRequestRef: { value: number },
+) {
+  const clientsByCode = new Map<number, string>();
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    try {
+      const response = await omieRequest(
+        OMIE_CLIENTES_URL,
+        "ListarClientesResumido",
+        appKey,
+        appSecret,
+        { pagina: page, registros_por_pagina: 500 },
+        lastRequestRef,
+      );
+      const records = extractArray(response);
+      for (const record of records) {
+        const code = record.codigo_cliente ?? record.nCodCliente;
+        const nomeFantasia = getString(record, ["nome_fantasia", "fantasia"]);
+        const razaoSocial = getString(record, ["razao_social", "nome"]);
+        const name = nomeFantasia || razaoSocial;
+        if (code && name) {
+          clientsByCode.set(Number(code), name);
+        }
+      }
+      totalPages = Number(
+        getString(response, ["total_de_paginas", "nTotPaginas"]) ?? "1",
+      );
+      if (!Number.isFinite(totalPages) || totalPages < 1) totalPages = page;
+      page += 1;
+    } catch {
+      // If API fails (e.g. no permission), return what we have
+      break;
+    }
+  }
+
+  return clientsByCode;
 }
 
 // ===========================================================================
@@ -455,24 +504,63 @@ async function syncEntries({
   const supabase = await createSupabaseClient();
 
   // 1. Buscar movimentos financeiros filtrados por data de pagamento
-  //    + catalogo de categorias em paralelo.
-  const [rawMovimentos, categoryCatalog] = await Promise.all([
+  //    + catalogo de categorias + nomes de clientes/fornecedores.
+  const [rawMovimentos, categoryCatalog, clientNames] = await Promise.all([
     fetchAllMovimentos(appKey, appSecret, dateFrom, dateTo, lastRequestRef),
     fetchCategoryCatalog(appKey, appSecret, lastRequestRef),
+    fetchClientNames(appKey, appSecret, lastRequestRef),
   ]);
 
-  // 2. Usar o novo processador financeiro que implementa as 11 regras
+  // 2. Enriquecer os dados brutos ANTES de processar.
+  //    A API ListarMovimentos NAO retorna nome do cliente nem observacao.
+  //    Injetamos esses campos nos raw records para que o processador os use.
+  for (const raw of rawMovimentos) {
+    const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
+      ? (raw.detalhes as Record<string, unknown>)
+      : raw;
+
+    // Injetar nome fantasia do cliente/fornecedor
+    const codCliente = Number(det.nCodCliente ?? 0);
+    if (codCliente > 0 && clientNames.has(codCliente)) {
+      det.cNomeCliente = clientNames.get(codCliente)!;
+    } else {
+      const cpf = getString(det, ["cCPFCNPJCliente"]);
+      if (cpf) det.cNomeCliente = cpf;
+    }
+
+    // Descricao: com lDadosCad=S, a API retorna o campo "observacao".
+    // Se observacao existir, copiar para cDescricao (que o processador prioriza).
+    // Se nao, usar cNumOS + cTipo como fallback.
+    const obs = getString(det, ["observacao"]);
+    if (obs) {
+      det.cDescricao = obs;
+    } else if (!det.cDescricao && !det.cObs) {
+      const numOS = getString(det, ["cNumOS"]);
+      const tipo = getString(det, ["cTipo"]);
+      const numDocFiscal = getString(det, ["cNumDocFiscal"]);
+      const numTitulo = getString(det, ["cNumTitulo"]);
+      if (numOS && numOS !== "0") {
+        det.cDescricao = tipo ? `${tipo} - ${numOS}` : numOS;
+      } else if (numDocFiscal) {
+        det.cDescricao = tipo ? `${tipo} - NF ${numDocFiscal}` : `NF ${numDocFiscal}`;
+      } else if (numTitulo) {
+        det.cDescricao = tipo ? `${tipo} - ${numTitulo}` : numTitulo;
+      }
+    }
+  }
+
+  // 3. Usar o processador financeiro que implementa as 11 regras
   //    de negócio completas para DRE em regime de caixa.
   const { entries } = processMovimentos(rawMovimentos, companyId);
 
-  // 3. Deduplicar por omie_id (ultima ocorrencia vence).
+  // 4. Deduplicar por omie_id (ultima ocorrencia vence).
   const deduped = new Map<string, NormalizedEntry>();
   for (const entry of entries) {
     deduped.set(entry.omie_id, entry);
   }
   const uniqueEntries = Array.from(deduped.values());
 
-  // 4. Upsert lancamentos normalizados.
+  // 5. Upsert lancamentos normalizados.
   for (const batch of chunk(uniqueEntries, 500)) {
     const { error } = await supabase.from("financial_entries").upsert(batch, {
       onConflict: "company_id,omie_id",
