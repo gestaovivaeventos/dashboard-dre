@@ -27,32 +27,16 @@ interface Alert {
   detail: string;
 }
 
+interface NewsItem {
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+}
+
 interface HomeViewProps {
   userName: string;
 }
-
-const NEWS_ITEMS = [
-  {
-    title: "Mercados e análises do dia",
-    source: "InfoMoney",
-    url: "https://www.infomoney.com.br",
-  },
-  {
-    title: "Economia, negócios e finanças",
-    source: "Valor Econômico",
-    url: "https://valor.globo.com",
-  },
-  {
-    title: "Notícias de economia do Brasil",
-    source: "G1 Economia",
-    url: "https://g1.globo.com/economia/",
-  },
-  {
-    title: "América Latina e mercados globais",
-    source: "Bloomberg Línea",
-    url: "https://bloomberglinea.com.br",
-  },
-];
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -86,8 +70,10 @@ export function HomeView({ userName }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [news, setNews] = useState<NewsItem[]>([]);
   const [loadingIndicators, setLoadingIndicators] = useState(true);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [loadingNews, setLoadingNews] = useState(true);
 
   useEffect(() => {
     void fetch("/api/home/indicators")
@@ -104,6 +90,13 @@ export function HomeView({ userName }: HomeViewProps) {
         setAlerts(data.alerts ?? []);
       })
       .finally(() => setLoadingStats(false));
+
+    void fetch("/api/home/news")
+      .then((r) => r.json())
+      .then((data: { news: NewsItem[] }) => {
+        setNews(data.news ?? []);
+      })
+      .finally(() => setLoadingNews(false));
   }, []);
 
   const greeting = getGreeting();
@@ -262,37 +255,50 @@ export function HomeView({ userName }: HomeViewProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
-            {NEWS_ITEMS.map((item) => (
-              <a
-                key={item.url}
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between rounded-md px-3 py-2.5 transition-colors hover:bg-muted/60 group"
-              >
-                <div>
-                  <p className="text-sm font-medium group-hover:text-primary transition-colors">
-                    {item.title}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {item.source}
-                  </p>
+            {loadingNews ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="px-3 py-2.5 space-y-1">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-3 w-32" />
                 </div>
-                <svg
-                  className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-3 group-hover:text-primary transition-colors"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
+              ))
+            ) : news.length === 0 ? (
+              <p className="text-sm text-muted-foreground px-3 py-2">
+                Nenhuma noticia disponivel no momento.
+              </p>
+            ) : (
+              news.map((item, i) => (
+                <a
+                  key={i}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between rounded-md px-3 py-2.5 transition-colors hover:bg-muted/60 group"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                  />
-                </svg>
-              </a>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium group-hover:text-primary transition-colors line-clamp-2">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {item.source}{item.publishedAt ? ` · ${item.publishedAt}` : ""}
+                    </p>
+                  </div>
+                  <svg
+                    className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-3 group-hover:text-primary transition-colors"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                    />
+                  </svg>
+                </a>
+              ))
+            )}
           </CardContent>
         </Card>
       </section>
