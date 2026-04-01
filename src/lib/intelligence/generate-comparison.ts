@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
+
+const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { COMPARISON_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
 import { renderComparisonEmail } from "@/lib/intelligence/render-email";
@@ -87,7 +90,7 @@ export async function generateComparison(
 
   // 5. Call AI
   const { text } = await generateText({
-    model: "openai/gpt-5.4",
+    model: openai("gpt-4o-mini"),
     system: COMPARISON_SYSTEM_PROMPT,
     prompt: JSON.stringify({
       periodo: periodLabel,

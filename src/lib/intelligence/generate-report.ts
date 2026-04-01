@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
+
+const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { REPORT_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
@@ -151,7 +154,7 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
 
   // 8. Call AI
   const { text } = await generateText({
-    model: "openai/gpt-5.4",
+    model: openai("gpt-4o-mini"),
     system: REPORT_SYSTEM_PROMPT,
     prompt: JSON.stringify({ periodo: periodLabel, empresa: companyName, dre: contextRows }),
   });
