@@ -28,15 +28,18 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
   const recipients = Array.isArray(to) ? to.join(", ") : to;
 
   try {
-    await transporter.sendMail({
+    console.log("[email] Sending to:", recipients, "from:", config.user);
+    const info = await transporter.sendMail({
       from: `"Controll Hub" <${config.user}>`,
       to: recipients,
       subject,
       html,
     });
+    console.log("[email] Sent successfully:", info.messageId);
     return true;
   } catch (error) {
-    console.error("[email] Failed to send:", error);
+    console.error("[email] Failed to send:", (error as Error).message);
+    console.error("[email] Full error:", error);
     return false;
   }
 }
