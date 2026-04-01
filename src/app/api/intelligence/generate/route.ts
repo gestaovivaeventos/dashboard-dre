@@ -3,6 +3,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateReport } from "@/lib/intelligence/generate-report";
 import { generateComparison } from "@/lib/intelligence/generate-comparison";
+import { generateProjection } from "@/lib/intelligence/generate-projection";
 
 interface GenerateBody {
   type: "relatorio" | "comparativo" | "projecao";
@@ -67,6 +68,14 @@ export async function POST(request: Request) {
       });
       html = result.html;
       json = result.json;
+    } else if (type === "projecao") {
+      const result = await generateProjection({
+        supabase,
+        companyId: companyIds[0],
+        horizonMonths: horizonMonths ?? 6,
+      });
+      html = result.html;
+      json = result.json;
     } else {
       return NextResponse.json(
         { error: "Tipo de relatorio nao suportado: " + type },
@@ -80,12 +89,12 @@ export async function POST(request: Request) {
         {
           type,
           company_ids: companyIds,
-          period_from: dateFrom ?? null,
-          period_to: dateTo ?? null,
+          period_from: dateFrom ?? new Date().toISOString().slice(0, 10),
+          period_to: dateTo ?? new Date().toISOString().slice(0, 10),
           content_html: html,
           content_json: json,
           status: "draft",
-          horizon_months: horizonMonths ?? null,
+          created_by: user.id,
         },
       ])
       .select("id")
