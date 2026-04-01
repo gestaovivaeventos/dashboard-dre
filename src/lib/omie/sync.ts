@@ -510,44 +510,51 @@ async function syncEntries({
     fetchClientNames(appKey, appSecret, lastRequestRef),
   ]);
 
-  // 2. Usar o novo processador financeiro que implementa as 11 regras
-  //    de negócio completas para DRE em regime de caixa.
-  const { entries } = processMovimentos(rawMovimentos, companyId);
+  // 2. Enriquecer os dados brutos ANTES de processar.
+  //    A API ListarMovimentos NAO retorna nome do cliente nem observacao.
+  //    Injetamos esses campos nos raw records para que o processador os use.
+  for (const raw of rawMovimentos) {
+    const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
+      ? (raw.detalhes as Record<string, unknown>)
+      : raw;
 
-  // 2.1 Enriquecer entries com nome do cliente/fornecedor
-  //     A API ListarMovimentos retorna apenas nCodCliente (ID numerico).
-  //     Buscamos o nome fantasia via ListarClientesResumido.
-  for (const entry of entries) {
-    const raw = entry.raw_json;
-    const det = (raw?.detalhes ?? raw) as Record<string, unknown>;
-    const codCliente = Number(det?.nCodCliente ?? 0);
-    if (codCliente && clientNames.has(codCliente)) {
-      entry.supplier_customer = clientNames.get(codCliente) ?? null;
+    // Injetar nome fantasia do cliente/fornecedor
+    const codCliente = Number(det.nCodCliente ?? 0);
+    if (codCliente > 0 && clientNames.has(codCliente)) {
+      det.cNomeCliente = clientNames.get(codCliente)!;
+    } else {
+      const cpf = getString(det, ["cCPFCNPJCliente"]);
+      if (cpf) det.cNomeCliente = cpf;
     }
-    // Melhorar description: usar cObs ou cNumOS + cTipo como fallback
-    if (!entry.description || entry.description === "Receita Omie" || entry.description === "Despesa Omie") {
-      const obs = getString(det, ["cObs", "observacao"]);
+
+    // Injetar descricao a partir dos campos disponiveis
+    if (!det.cDescricao && !det.cObs) {
       const numOS = getString(det, ["cNumOS"]);
       const tipo = getString(det, ["cTipo"]);
+      const numDocFiscal = getString(det, ["cNumDocFiscal"]);
       const numTitulo = getString(det, ["cNumTitulo"]);
-      if (obs) {
-        entry.description = obs;
-      } else if (numOS) {
-        entry.description = tipo ? `${tipo} - ${numOS}` : numOS;
+      if (numOS && numOS !== "0") {
+        det.cDescricao = tipo ? `${tipo} - ${numOS}` : numOS;
+      } else if (numDocFiscal) {
+        det.cDescricao = tipo ? `${tipo} - NF ${numDocFiscal}` : `NF ${numDocFiscal}`;
       } else if (numTitulo) {
-        entry.description = tipo ? `${tipo} - ${numTitulo}` : numTitulo;
+        det.cDescricao = tipo ? `${tipo} - ${numTitulo}` : numTitulo;
       }
     }
   }
 
-  // 3. Deduplicar por omie_id (ultima ocorrencia vence).
+  // 3. Usar o processador financeiro que implementa as 11 regras
+  //    de negócio completas para DRE em regime de caixa.
+  const { entries } = processMovimentos(rawMovimentos, companyId);
+
+  // 4. Deduplicar por omie_id (ultima ocorrencia vence).
   const deduped = new Map<string, NormalizedEntry>();
   for (const entry of entries) {
     deduped.set(entry.omie_id, entry);
   }
   const uniqueEntries = Array.from(deduped.values());
 
-  // 4. Upsert lancamentos normalizados.
+  // 5. Upsert lancamentos normalizados.
   for (const batch of chunk(uniqueEntries, 500)) {
     const { error } = await supabase.from("financial_entries").upsert(batch, {
       onConflict: "company_id,omie_id",
