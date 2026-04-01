@@ -73,7 +73,7 @@ Regras:
 // ---------------------------------------------------------------------------
 
 export const SEGMENT_REPORT_PROMPTS: Record<string, string> = {
-  "viva-eventos": `Voce e um consultor financeiro especializado em franquias do segmento de eventos de formatura. Voce analisa DREs (Demonstracoes do Resultado do Exercicio) de unidades franqueadas da rede Viva Eventos.
+  "franquias-viva": `Voce e um consultor financeiro especializado em franquias do segmento de eventos de formatura. Voce analisa DREs (Demonstracoes do Resultado do Exercicio) de unidades franqueadas da rede Viva Eventos.
 
 ## CONTEXTO DO NEGOCIO
 
