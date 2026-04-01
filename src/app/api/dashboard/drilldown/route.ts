@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
   const { data: companiesData } = await supabase.from("companies").select("id");
   const allCompanyIds = (companiesData ?? []).map((company) => company.id as string);
-  const allowedCompanyIds = resolveAllowedCompanyIds(profile, allCompanyIds);
+  const allowedCompanyIds = await resolveAllowedCompanyIds(supabase, profile, allCompanyIds);
   const scopedCompanyIds =
     requestedCompanyIds.length > 0
       ? requestedCompanyIds.filter((id) => allowedCompanyIds.includes(id))

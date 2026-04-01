@@ -66,14 +66,25 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     id: company.id as string,
     name: company.name as string,
   }));
-  const allowedCompanyIds = resolveAllowedCompanyIds(
+  const allowedCompanyIds = await resolveAllowedCompanyIds(
+    supabase,
     profile,
     companies.map((company) => company.id),
   );
 
+  // Filter the companies list to only show allowed ones
+  const visibleCompanies = profile?.role === "admin"
+    ? companies
+    : companies.filter((c) => allowedCompanyIds.includes(c.id));
+
   const filter = buildFilterState(searchParams, allowedCompanyIds);
-  if (profile?.role === "gestor_unidade") {
-    filter.selectedCompanyIds = allowedCompanyIds;
+  if (profile?.role !== "admin") {
+    filter.selectedCompanyIds = allowedCompanyIds.length > 0
+      ? filter.selectedCompanyIds.filter((id) => allowedCompanyIds.includes(id))
+      : allowedCompanyIds;
+    if (filter.selectedCompanyIds.length === 0) {
+      filter.selectedCompanyIds = allowedCompanyIds;
+    }
   }
 
   const range = buildDateRange(filter);
@@ -215,7 +226,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       filter={filter}
       range={range}
       rows={displayRows}
-      companies={companies.filter((company) => allowedCompanyIds.includes(company.id))}
+      companies={visibleCompanies}
       role={profile?.role ?? "gestor_hero"}
       visibleBuckets={visibleBuckets}
       accumulatedBucket={accumulatedBucket}

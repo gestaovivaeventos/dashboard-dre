@@ -70,13 +70,24 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
     return <div className="rounded-xl border bg-background p-4">Nenhum KPI ativo cadastrado.</div>;
   }
 
-  const allowedCompanyIds = resolveAllowedCompanyIds(
+  const allowedCompanyIds = await resolveAllowedCompanyIds(
+    supabase,
     profile,
     companies.map((company) => company.id),
   );
+
+  const visibleCompanies = profile?.role === "admin"
+    ? companies
+    : companies.filter((c) => allowedCompanyIds.includes(c.id));
+
   const filter = buildFilterState(searchParams, allowedCompanyIds);
-  if (profile?.role === "gestor_unidade") {
-    filter.selectedCompanyIds = allowedCompanyIds;
+  if (profile?.role !== "admin") {
+    filter.selectedCompanyIds = allowedCompanyIds.length > 0
+      ? filter.selectedCompanyIds.filter((id) => allowedCompanyIds.includes(id))
+      : allowedCompanyIds;
+    if (filter.selectedCompanyIds.length === 0) {
+      filter.selectedCompanyIds = allowedCompanyIds;
+    }
   }
   const range = buildDateRange(filter);
 
@@ -120,7 +131,7 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
       filter={filter}
       range={range}
       kpiCards={kpiCards}
-      companies={companies.filter((c) => allowedCompanyIds.includes(c.id))}
+      companies={visibleCompanies}
       role={profile?.role ?? "gestor_hero"}
       selectedCompanyIds={filter.selectedCompanyIds}
     />

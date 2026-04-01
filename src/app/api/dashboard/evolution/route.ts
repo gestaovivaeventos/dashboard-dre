@@ -44,7 +44,8 @@ export async function GET(request: Request) {
     id: company.id as string,
     name: company.name as string,
   }));
-  const allowedCompanyIds = resolveAllowedCompanyIds(
+  const allowedCompanyIds = await resolveAllowedCompanyIds(
+    supabase,
     profile,
     companies.map((company) => company.id),
   );

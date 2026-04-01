@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { UserProfile } from "@/lib/supabase/types";
 
 export type PeriodMode = "especifico" | "mes_atual" | "ano_atual";
@@ -295,13 +296,38 @@ export function buildDashboardRows(
   };
 }
 
-export function resolveAllowedCompanyIds(
+/**
+ * Resolve which companies the user is allowed to see.
+ * - admin: all companies
+ * - gestor_hero / gestor_unidade: only companies in user_company_access
+ *   (falls back to profile.company_id for gestor_unidade if no access rows exist)
+ */
+export async function resolveAllowedCompanyIds(
+  supabase: SupabaseClient,
   profile: UserProfile | null,
   allCompanyIds: string[],
-) {
+): Promise<string[]> {
   if (!profile) return allCompanyIds;
-  if (profile.role === "gestor_unidade") {
-    return profile.company_id ? [profile.company_id] : [];
+  if (profile.role === "admin") return allCompanyIds;
+
+  // Query the user_company_access table for explicit permissions
+  const { data } = await supabase
+    .from("user_company_access")
+    .select("company_id")
+    .eq("user_id", profile.id);
+
+  const accessIds = (data ?? []).map((row) => row.company_id as string);
+
+  if (accessIds.length > 0) {
+    // Only keep companies that exist in the loaded list
+    return allCompanyIds.filter((id) => accessIds.includes(id));
   }
-  return allCompanyIds;
+
+  // Fallback for gestor_unidade with legacy company_id field
+  if (profile.role === "gestor_unidade" && profile.company_id) {
+    return allCompanyIds.filter((id) => id === profile.company_id);
+  }
+
+  // No explicit access configured — show nothing for non-admins
+  return [];
 }
