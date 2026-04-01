@@ -214,46 +214,37 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
           ? form.company_id || selectedCompanies[0] || null
           : null;
 
-      const patchBody = {
-        name: form.name,
-        role: form.role,
-        company_id: effectiveCompanyId,
-      };
-      console.log("[saveEdit] sending PATCH:", JSON.stringify(patchBody), "userId:", selectedEditUser.id);
-
       const response = await fetch(`/api/users/${selectedEditUser.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody),
+        body: JSON.stringify({
+          name: form.name,
+          role: form.role,
+          company_id: effectiveCompanyId,
+        }),
       });
-      const payload = (await response.json()) as { error?: string; updated?: Record<string, unknown> };
-      console.log("[saveEdit] response:", response.status, JSON.stringify(payload));
+      const payload = (await response.json()) as { error?: string };
       if (!response.ok) {
         showMessage(payload.error ?? "Falha ao salvar usuario.", "error");
         return;
       }
 
       // Save segment + company access
-      console.log("[saveEdit] saving permissions - segments:", selectedSegments, "companies:", selectedCompanies);
-
       const [segResult, compResult] = await Promise.allSettled([
         fetch("/api/segments/access", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: selectedEditUser.id, segmentIds: selectedSegments }),
-        }).then(async (r) => ({ status: r.status, body: await r.json() })),
+        }),
         fetch("/api/segments/companies", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId: selectedEditUser.id, companyIds: selectedCompanies }),
-        }).then(async (r) => ({ status: r.status, body: await r.json() })),
+        }),
       ]);
 
-      console.log("[saveEdit] segments result:", JSON.stringify(segResult));
-      console.log("[saveEdit] companies result:", JSON.stringify(compResult));
-
-      const segFailed = segResult.status === "rejected" || (segResult.status === "fulfilled" && segResult.value.status !== 200);
-      const compFailed = compResult.status === "rejected" || (compResult.status === "fulfilled" && compResult.value.status !== 200);
+      const segFailed = segResult.status === "rejected" || (segResult.status === "fulfilled" && !segResult.value.ok);
+      const compFailed = compResult.status === "rejected" || (compResult.status === "fulfilled" && !compResult.value.ok);
 
       setEditUserId(null);
 

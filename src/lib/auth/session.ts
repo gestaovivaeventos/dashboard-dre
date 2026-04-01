@@ -42,35 +42,45 @@ export async function getCurrentSessionContext() {
     profile = refreshedProfile ?? null;
   }
 
-  const shouldForceAdminInDev = isDevMode;
-  if (user && shouldForceAdminInDev && (!profile || profile.role !== "admin")) {
+  // In dev mode, promote the current user to admin ONLY if there are no admins
+  // in the system yet (first-time setup). This avoids overwriting role changes
+  // made via the Users admin panel.
+  if (isDevMode && user && (!profile || profile.role !== "admin")) {
     try {
       const adminClient = createAdminClientIfAvailable();
       if (adminClient) {
-        await adminClient.from("users").upsert(
-          {
-            id: user.id,
-            email: user.email ?? `${user.id}@placeholder.local`,
-            name:
-              profile?.name ??
-              (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null),
-            role: "admin",
-            company_id: null,
-            active: true,
-          },
-          { onConflict: "id" },
-        );
+        const { count } = await adminClient
+          .from("users")
+          .select("id", { count: "exact", head: true })
+          .eq("role", "admin")
+          .eq("active", true);
+
+        if (count === 0) {
+          await adminClient.from("users").upsert(
+            {
+              id: user.id,
+              email: user.email ?? `${user.id}@placeholder.local`,
+              name:
+                profile?.name ??
+                (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null),
+              role: "admin",
+              company_id: null,
+              active: true,
+            },
+            { onConflict: "id" },
+          );
+
+          const { data: promotedProfile } = await supabase
+            .from("users")
+            .select("id,email,name,role,company_id,active,created_at")
+            .eq("id", user.id)
+            .maybeSingle<UserProfile>();
+
+          profile = promotedProfile ?? profile;
+        }
       } else {
         await supabase.rpc("promote_first_admin_if_none");
       }
-
-      const { data: promotedProfile } = await supabase
-        .from("users")
-        .select("id,email,name,role,company_id,active,created_at")
-        .eq("id", user.id)
-        .maybeSingle<UserProfile>();
-
-      profile = promotedProfile ?? profile;
     } catch {
       // In dev, if service role is missing, continue with current profile.
     }
