@@ -16,7 +16,7 @@ export default async function SegmentLayout({ children, params }: SegmentLayoutP
 
   const segment = await resolveSegment(params.segmentSlug, profile);
   if (!segment) {
-    redirect("/admin");
+    redirect("/dashboard");
   }
 
   return <>{children}</>;

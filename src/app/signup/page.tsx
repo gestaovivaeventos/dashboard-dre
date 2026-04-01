@@ -41,7 +41,7 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/admin`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
         data: { name },
       },
     });
@@ -61,7 +61,7 @@ export default function SignupPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        router.replace("/admin");
+        router.replace("/dashboard");
       }
     };
 

@@ -11,7 +11,7 @@ export default async function AdminPage() {
     redirect("/login");
   }
   if (!profile || profile.role !== "admin") {
-    redirect("/login");
+    redirect("/dashboard");
   }
 
   const [{ data: companiesData }, { data: segmentsData }, { data: syncData }] =
