@@ -150,9 +150,9 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
     });
 
     setEditUserId(null);
+    setMessage("Usuario atualizado.");
     await refresh();
     setLoading(false);
-    setMessage("Usuario atualizado.");
   };
 
   const deactivate = async (userId: string) => {

@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
   const router = useRouter();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -41,6 +42,7 @@ export default function SignupPage() {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback?next=/admin`,
+        data: { name },
       },
     });
 
@@ -113,6 +115,11 @@ export default function SignupPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="name" className="text-sm font-medium">Nome completo</label>
+                <Input id="name" type="text" placeholder="Seu nome" value={name} onChange={(event) => setName(event.target.value)} required className="h-11" />
+              </div>
+
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">E-mail</label>
                 <Input id="email" type="email" placeholder="seu-email@empresa.com" value={email} onChange={(event) => setEmail(event.target.value)} required className="h-11" />
