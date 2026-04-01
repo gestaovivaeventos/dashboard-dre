@@ -653,9 +653,16 @@ async function syncEntries({
           }
         }
         if (fundosMappings.length > 0) {
+          // Delete existing fundos mappings for this company, then insert fresh
+          const fundosCodes = fundosMappings.map((m) => m.omie_category_code);
           await supabase
             .from("category_mapping")
-            .upsert(fundosMappings, { onConflict: "omie_category_code,company_id" });
+            .delete()
+            .eq("company_id", companyId)
+            .in("omie_category_code", fundosCodes);
+          await supabase
+            .from("category_mapping")
+            .insert(fundosMappings);
         }
       }
     }
