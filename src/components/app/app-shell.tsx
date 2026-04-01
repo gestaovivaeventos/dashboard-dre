@@ -34,9 +34,9 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
             collapsed ? "w-16" : "w-72"
           }`}
         >
-          <div className={`flex items-center p-4 ${collapsed ? "justify-center" : ""}`}>
+          <a href="/home" className={`flex items-center p-4 ${collapsed ? "justify-center" : ""}`}>
             {collapsed ? <Logo size={32} /> : <LogoFull />}
-          </div>
+          </a>
 
           <div className="flex-1 overflow-y-auto px-2">
             <NavLinks role={userRole} segments={segments} collapsed={collapsed} />
@@ -77,9 +77,9 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
                   </Button>
                 </SheetTrigger>
                 <SheetContent>
-                  <div className="mb-6">
+                  <a href="/home" className="mb-6 block">
                     <LogoFull />
-                  </div>
+                  </a>
                   <NavLinks role={userRole} segments={segments} onNavigate={() => setOpen(false)} />
                 </SheetContent>
               </Sheet>
