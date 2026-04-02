@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 interface SendEmailOptions {
   to: string | string[];
@@ -6,41 +6,36 @@ interface SendEmailOptions {
   html: string;
 }
 
-function getGmailConfig() {
-  const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
-  if (!user || !pass) {
-    console.warn("[email] GMAIL_USER or GMAIL_APP_PASSWORD not set — emails disabled.");
-    return null;
-  }
-  return { user, pass };
-}
-
 export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<{ ok: boolean; error?: string }> {
-  const config = getGmailConfig();
-  if (!config) return { ok: false, error: "GMAIL_USER ou GMAIL_APP_PASSWORD nao configurados." };
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn("[email] RESEND_API_KEY not set — emails disabled.");
+    return { ok: false, error: "RESEND_API_KEY nao configurada." };
+  }
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: config.user, pass: config.pass },
-  });
-
-  const recipients = Array.isArray(to) ? to.join(", ") : to;
+  const from = process.env.RESEND_FROM || "Controll Hub <noreply@controllhub.com.br>";
+  const recipients = Array.isArray(to) ? to : [to];
+  const resend = new Resend(apiKey);
 
   try {
-    console.log("[email] Sending to:", recipients, "from:", config.user);
-    const info = await transporter.sendMail({
-      from: `"Controll Hub" <${config.user}>`,
+    console.log("[email] Sending to:", recipients.join(", "));
+    const { data, error } = await resend.emails.send({
+      from,
       to: recipients,
       subject,
       html,
     });
-    console.log("[email] Sent successfully:", info.messageId);
+
+    if (error) {
+      console.error("[email] Resend error:", error.message);
+      return { ok: false, error: error.message };
+    }
+
+    console.log("[email] Sent successfully:", data?.id);
     return { ok: true };
   } catch (error) {
     const msg = (error as Error).message;
     console.error("[email] Failed to send:", msg);
-    console.error("[email] Full error:", error);
     return { ok: false, error: msg };
   }
 }
