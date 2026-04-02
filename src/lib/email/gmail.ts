@@ -16,9 +16,9 @@ function getGmailConfig() {
   return { user, pass };
 }
 
-export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<boolean> {
+export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<{ ok: boolean; error?: string }> {
   const config = getGmailConfig();
-  if (!config) return false;
+  if (!config) return { ok: false, error: "GMAIL_USER ou GMAIL_APP_PASSWORD nao configurados." };
 
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -36,10 +36,11 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
       html,
     });
     console.log("[email] Sent successfully:", info.messageId);
-    return true;
+    return { ok: true };
   } catch (error) {
-    console.error("[email] Failed to send:", (error as Error).message);
+    const msg = (error as Error).message;
+    console.error("[email] Failed to send:", msg);
     console.error("[email] Full error:", error);
-    return false;
+    return { ok: false, error: msg };
   }
 }

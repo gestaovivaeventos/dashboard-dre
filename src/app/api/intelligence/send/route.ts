@@ -47,13 +47,13 @@ export async function POST(request: Request) {
   }
 
   const subject = buildSubject(report.type as string);
-  const ok = await sendEmail({
+  const result = await sendEmail({
     to: emails,
     subject,
     html: report.content_html as string,
   });
 
-  if (ok) {
+  if (result.ok) {
     await adminClient
       .from("ai_reports")
       .update({
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       .update({ status: "error" })
       .eq("id", reportId);
 
-    return NextResponse.json({ error: "Falha ao enviar email." }, { status: 500 });
+    return NextResponse.json({ error: `Falha ao enviar email: ${result.error}` }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
