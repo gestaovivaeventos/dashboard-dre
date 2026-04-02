@@ -594,36 +594,28 @@ async function syncEntries({
 
       if (recRessarcId && despRessarcId && fundosRecId && fundosDespId) {
         // Buscar TODOS os category_codes mapeados para 2.4 ou 7.5.5
-        // (company-specific + global)
+        // Inclui mapeamentos de qualquer empresa e globais, para cobrir
+        // categorias que podem estar mapeadas em outra empresa do segmento.
         const { data: mappingsData } = await supabase
           .from("category_mapping")
           .select("omie_category_code,dre_account_id,company_id")
           .in("dre_account_id", [recRessarcId, despRessarcId]);
 
-        // Para cada category_code, determinar o mapeamento efetivo
-        // (company-specific tem prioridade sobre global)
+        // Qualquer category_code que esteja mapeado para 2.4 ou 7.5.5
+        // em qualquer contexto é candidato para redirecionamento.
         const effectiveMapping = new Map<string, string>(); // category_code → dre_account_id
-        const globalMappings = new Map<string, string>();
-        const companyMappings = new Map<string, string>();
 
         (mappingsData ?? []).forEach((m) => {
           const cc = m.omie_category_code as string;
           const dreId = m.dre_account_id as string;
           const cid = m.company_id as string | null;
+          // Prioridade: company-specific desta empresa > qualquer outro
           if (cid === companyId) {
-            companyMappings.set(cc, dreId);
-          } else if (cid === null) {
-            globalMappings.set(cc, dreId);
+            effectiveMapping.set(cc, dreId);
+          } else if (!effectiveMapping.has(cc)) {
+            effectiveMapping.set(cc, dreId);
           }
         });
-
-        // Merge: company-specific tem prioridade
-        for (const [cc, dreId] of Array.from(globalMappings)) {
-          effectiveMapping.set(cc, dreId);
-        }
-        for (const [cc, dreId] of Array.from(companyMappings)) {
-          effectiveMapping.set(cc, dreId);
-        }
 
         // Redirecionar entries com cCodProjeto preenchido
         const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
