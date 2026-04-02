@@ -17,8 +17,11 @@ let cachedData: { indicators: Indicator[]; fetchedAt: number } | null = null;
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 async function fetchJSON(url: string): Promise<unknown> {
-  const res = await fetch(url, { next: { revalidate: 3600 } });
-  if (!res.ok) return null;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    console.warn(`[indicators] fetch failed: ${url} → ${res.status}`);
+    return null;
+  }
   return res.json();
 }
 
