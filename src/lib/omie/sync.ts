@@ -629,15 +629,20 @@ async function syncEntries({
         }
 
         // Redirecionar entries com cCodProjeto preenchido.
-        // Usar Map de overrides (nao mutar o entry diretamente).
-        const categoryOverrides = new Map<number, string>(); // index → new category_code
+        // Reconstroi o array entries com category_code alterado onde necessario.
         const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
+        const newEntries: typeof entries = [];
 
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          if (!entry.category_code) continue;
+        for (const entry of entries) {
+          if (!entry.category_code) {
+            newEntries.push(entry);
+            continue;
+          }
           const mappedDreId = effectiveMapping.get(entry.category_code);
-          if (!mappedDreId) continue; // nao e ressarcivel → ignorar
+          if (!mappedDreId) {
+            newEntries.push(entry);
+            continue;
+          }
 
           const raw = entry.raw_json ?? {};
           const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
@@ -645,7 +650,11 @@ async function syncEntries({
             : raw;
           const projeto = getString(det, ["cCodProjeto"]);
 
-          if (!projeto) continue; // sem projeto → manter mapeamento normal
+          if (!projeto) {
+            // sem projeto → manter mapeamento normal
+            newEntries.push(entry);
+            continue;
+          }
 
           // Com projeto → redirecionar para Fundos
           let fundosId: string;
@@ -662,18 +671,18 @@ async function syncEntries({
           }
 
           const newCode = `${prefix}${entry.category_code}`;
-          categoryOverrides.set(i, newCode);
+          // Criar novo entry com category_code atualizado
+          const redirected = Object.assign({}, entry, { category_code: newCode });
+          newEntries.push(redirected);
 
           if (!fundosMappingsNeeded.has(newCode)) {
             fundosMappingsNeeded.set(newCode, { code: newCode, dreId: fundosId, name: label });
           }
         }
 
-        // Aplicar overrides: recriar entries com category_code alterado
-        for (const [idx, newCode] of Array.from(categoryOverrides)) {
-          const original = entries[idx];
-          entries[idx] = { ...original, category_code: newCode } as typeof original;
-        }
+        // Substituir entries pelo array com redirects aplicados
+        entries.length = 0;
+        entries.push(...newEntries);
 
         // Criar mapeamentos para os códigos especiais via delete+insert
         if (fundosMappingsNeeded.size > 0) {
