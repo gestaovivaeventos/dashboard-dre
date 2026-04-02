@@ -114,8 +114,8 @@ function formatVar(a: number, b: number): string {
 }
 
 function varColor(a: number, b: number): string {
-  if (a === 0 && b === 0) return "text-slate-400";
-  if (a === 0) return "text-slate-400";
+  if (a === 0 && b === 0) return "text-muted-foreground/60";
+  if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
   return pct >= 0 ? "text-emerald-700" : "text-red-700";
 }
@@ -640,11 +640,11 @@ export function DashboardDreView({
         const gridTemplate = "minmax(320px, 2.6fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(100px, 1fr)";
 
         return (
-          <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+          <div className="overflow-x-auto rounded-xl border bg-muted/50">
             <div style={{ minWidth: "700px" }}>
               {/* Header */}
-              <div className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600" style={{ gridTemplateColumns: gridTemplate }}>
-                <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+              <div className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
+                <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
                 <span className="text-right">Previsto</span>
                 <span className="text-right">Realizado</span>
                 <span className="text-center">Var %</span>
@@ -659,8 +659,8 @@ export function DashboardDreView({
 
               {visibleRows.map((row) => {
                 const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-                const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
-                const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+                const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+                const borderClass = isKeyResult ? "border-t-2 border-border" : "border-t border-border";
                 const budgetVal = row.budgetValue ?? 0;
                 const actualVal = row.accumulatedValue;
 
@@ -668,7 +668,7 @@ export function DashboardDreView({
                   <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`} style={{ gridTemplateColumns: gridTemplate }}>
                     <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                       {row.hasChildren ? (
-                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
                           {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </button>
                       ) : (
@@ -717,16 +717,16 @@ export function DashboardDreView({
         const gridTemplate = `minmax(320px, 2.6fr) repeat(${gridCols}, minmax(100px, 1fr))`;
 
         return (
-          <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+          <div className="overflow-x-auto rounded-xl border bg-muted/50">
             <div style={{ minWidth: `${320 + gridCols * 110}px` }}>
               {/* Header */}
-              <div className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600" style={{ gridTemplateColumns: gridTemplate }}>
-                <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+              <div className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
+                <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
                 {orderedCols.map((col, idx) =>
                   col.type === "company" ? (
                     <span key={`h-${idx}`} className="text-right">{col.name}</span>
                   ) : (
-                    <span key={`h-${idx}`} className="text-center text-[10px] text-slate-400">Var %</span>
+                    <span key={`h-${idx}`} className="text-center text-[10px] text-muted-foreground/60">Var %</span>
                   ),
                 )}
               </div>
@@ -740,15 +740,15 @@ export function DashboardDreView({
 
               {visibleRows.map((row) => {
                 const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-                const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
-                const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+                const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+                const borderClass = isKeyResult ? "border-t-2 border-border" : "border-t border-border";
                 const cv = row.valuesByCompany ?? {};
 
                 return (
                   <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`} style={{ gridTemplateColumns: gridTemplate }}>
                     <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                       {row.hasChildren ? (
-                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                        <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
                           {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </button>
                       ) : (
@@ -783,14 +783,14 @@ export function DashboardDreView({
         );
       })() : (
         // Standard mode: monthly columns + total
-        <div className="overflow-x-auto rounded-xl border bg-[#f3f3f3]">
+        <div className="overflow-x-auto rounded-xl border bg-muted/50">
           <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
             {/* Header */}
             <div
-              className="grid border-b bg-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-600"
+              className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground"
               style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
             >
-              <span className="sticky left-0 z-10 bg-slate-100">Plano de Contas</span>
+              <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
               {columns.map((column) => (
                 <span key={column.key} className="text-right">{column.label}</span>
               ))}
@@ -807,7 +807,7 @@ export function DashboardDreView({
             {/* Rows */}
             {visibleRows.map((row) => {
               const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-              const rowClass = isKeyResult ? "bg-white font-bold uppercase" : row.is_summary ? "bg-[#f7f7f7] font-semibold" : "bg-[#f3f3f3]";
+              const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
               const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
 
               return (
@@ -819,7 +819,7 @@ export function DashboardDreView({
                   {/* Account name */}
                   <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                     {row.hasChildren ? (
-                      <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-slate-500 hover:bg-slate-200">
+                      <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
                         {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </button>
                     ) : (
@@ -939,7 +939,7 @@ export function DashboardDreView({
             </div>
 
             <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[100px_2fr_1.5fr_140px_1fr] gap-2 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-600">
+              <div className="grid grid-cols-[100px_2fr_1.5fr_140px_1fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
                 <span>Data Pgto</span><span>Descricao</span><span>Fornecedor/Cliente</span><span className="text-right">Valor</span><span>Unidade</span>
               </div>
               <div className="max-h-[420px] overflow-y-auto">
@@ -959,7 +959,7 @@ export function DashboardDreView({
                   ))
                 )}
               </div>
-              <div className="flex items-center justify-between border-t bg-slate-50 px-3 py-2 text-sm">
+              <div className="flex items-center justify-between border-t bg-muted px-3 py-2 text-sm">
                 <div>Registros: {drillTotal} | Total da pagina: <strong>{formatCurrency(drillTotalValue)}</strong></div>
                 <div className="flex items-center gap-2">
                   <select value={String(drillPageSize)} onChange={(event) => setDrillPageSize(Number(event.target.value))} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
