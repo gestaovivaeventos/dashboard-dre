@@ -392,7 +392,9 @@ export function processMovimento(
       if (nCodTitulo !== "0" && nCodTitulo !== "") {
         base = `${nCodTitulo}:${cNumParcela}:${cOrigem}`;
       } else if (cNumTitulo) {
-        base = `0:${cNumTitulo}:${cOrigem}`;
+        // Include batchIndex to avoid collision when multiple entries
+        // share the same cNumTitulo (e.g. EXTP extrato entries)
+        base = `0:${cNumTitulo}:${cOrigem}:${batchIndex}`;
       } else {
         base = `0:${paymentDate}:${cOrigem}:${batchIndex}`;
       }
