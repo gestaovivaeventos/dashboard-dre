@@ -75,14 +75,18 @@ async function fetchIndicators(): Promise<Indicator[]> {
   } catch { /* skip */ }
 
   try {
-    // IBOVESPA via AwesomeAPI
-    const ibovData = await fetchJSON("https://economia.awesomeapi.com.br/json/last/IBOV") as { IBOV?: { bid: string; pctChange: string } } | null;
-    if (ibovData?.IBOV) {
-      const bid = Number(ibovData.IBOV.bid);
-      const pct = Number(ibovData.IBOV.pctChange);
+    // IBOVESPA via Yahoo Finance
+    const ibovData = await fetchJSON("https://query1.finance.yahoo.com/v8/finance/chart/%5EBVSP?interval=1d&range=1d") as {
+      chart?: { result?: Array<{ meta?: { regularMarketPrice: number; chartPreviousClose: number } }> }
+    } | null;
+    const meta = ibovData?.chart?.result?.[0]?.meta;
+    if (meta) {
+      const price = meta.regularMarketPrice;
+      const prevClose = meta.chartPreviousClose;
+      const pct = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
       indicators.push({
         name: "ibovespa",
-        value: bid.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
+        value: price.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
         change: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% hoje`,
         changeType: pct > 0 ? "up" : pct < 0 ? "down" : "neutral",
         color: "#8b5cf6",
