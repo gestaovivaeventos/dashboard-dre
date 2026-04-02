@@ -27,7 +27,7 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="min-h-screen bg-slate-50 dark:bg-background">
+      <div className="min-h-screen bg-background">
         {/* Desktop sidebar */}
         <aside
           className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r bg-background transition-all duration-300 md:flex ${

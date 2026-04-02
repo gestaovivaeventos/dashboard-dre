@@ -9,7 +9,7 @@ export function ReportPreview({ html }: ReportPreviewProps) {
     <iframe
       srcDoc={html}
       sandbox="allow-same-origin"
-      className="w-full rounded border bg-white"
+      className="w-full rounded border bg-background"
       style={{ height: 600 }}
       title="Previa do relatorio"
     />

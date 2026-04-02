@@ -286,7 +286,7 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        <div className="grid grid-cols-[80px_1.8fr_130px_70px_1fr_80px_90px_170px_220px] gap-2 rounded-md border bg-slate-50 p-2 text-xs font-semibold uppercase text-slate-600">
+        <div className="grid grid-cols-[80px_1.8fr_130px_70px_1fr_80px_90px_170px_220px] gap-2 rounded-md border bg-muted p-2 text-xs font-semibold uppercase text-muted-foreground">
           <span>Codigo</span>
           <span>Nome</span>
           <span>Tipo</span>
@@ -304,8 +304,8 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
             const isEditing = editingId === account.id && draft !== null;
             const calculatedClass =
               account.type === "calculado"
-                ? "border-blue-200 bg-blue-50/70"
-                : "border-slate-200 bg-white";
+                ? "border-blue-500/30 bg-blue-500/10"
+                : "border-border bg-background";
 
             return (
               <div
@@ -321,7 +321,7 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
                     <button
                       type="button"
                       onClick={() => toggleExpanded(account.id)}
-                      className="rounded p-0.5 hover:bg-slate-200"
+                      className="rounded p-0.5 hover:bg-muted"
                     >
                       {expandedIds[account.id] ? (
                         <ChevronDown className="h-4 w-4" />
@@ -387,7 +387,7 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
                       placeholder={draft.type === "calculado" ? "Ex: 8+9-10" : ""}
                     />
                   ) : (
-                    <span className="text-xs text-slate-600">{account.formula ?? "-"}</span>
+                    <span className="text-xs text-muted-foreground">{account.formula ?? "-"}</span>
                   )}
                 </div>
                 <div>
@@ -404,7 +404,7 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
                       {draft.active ? (
                         <ToggleRight className="h-6 w-6 text-emerald-600" />
                       ) : (
-                        <ToggleLeft className="h-6 w-6 text-slate-400" />
+                        <ToggleLeft className="h-6 w-6 text-muted-foreground" />
                       )}
                     </button>
                   ) : account.active ? (
@@ -433,18 +433,18 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
                     account.sort_order
                   )}
                 </div>
-                <div className="space-y-1 text-xs text-slate-600">
+                <div className="space-y-1 text-xs text-muted-foreground">
                   {account.mappings.length === 0
                     ? "-"
                     : account.mappings.map((mapping) => {
                         const mappingLabel = `${mapping.code} - ${mapping.name}`;
                         const isMappingRemoving = savingId === mapping.id;
                         return (
-                          <div key={mapping.id} className="flex items-center justify-between gap-2 rounded border bg-white px-1 py-0.5">
+                          <div key={mapping.id} className="flex items-center justify-between gap-2 rounded border bg-background px-1 py-0.5">
                             <span className="truncate">{mappingLabel}</span>
                             <button
                               type="button"
-                              className="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-red-600 disabled:opacity-50"
                               onClick={() => void removeMapping(mapping.id, mappingLabel)}
                               disabled={isMappingRemoving}
                               title="Remover mapeamento"

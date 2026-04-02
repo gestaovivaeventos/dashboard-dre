@@ -250,7 +250,7 @@ export function KpiRankingView({
       </div>
 
       <div className="hidden overflow-hidden rounded-xl border bg-background md:block">
-        <div className="grid grid-cols-[100px_2fr_1.2fr_180px] gap-3 border-b bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-600">
+        <div className="grid grid-cols-[100px_2fr_1.2fr_180px] gap-3 border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground">
           <span># Ranking</span>
           <span>Unidade</span>
           <button type="button" className="flex items-center justify-end gap-2 text-right" onClick={() => setSortDirection((prev) => (prev === "desc" ? "asc" : "desc"))}>
@@ -270,7 +270,7 @@ export function KpiRankingView({
             const rank = index + 1;
             const isTop3 = rank <= 3;
             const isBottom3 = rank > sortedRows.length - 3;
-            const rankClass = isTop3 ? "bg-emerald-50" : isBottom3 ? "bg-red-50" : "bg-white";
+            const rankClass = isTop3 ? "bg-emerald-500/10" : isBottom3 ? "bg-red-500/10" : "bg-background";
             const currentCompanyClass =
               role === "gestor_unidade" && row.isCurrentUserCompany ? "ring-2 ring-blue-400" : "";
             return (
