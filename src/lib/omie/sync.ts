@@ -593,23 +593,20 @@ async function syncEntries({
       const fundosDespId = dreIdByCode.get("5.9");     // Despesas Ressarciveis - Fundos
 
       if (recRessarcId && despRessarcId && fundosRecId && fundosDespId) {
-        // Buscar TODOS os category_codes mapeados para 2.4 ou 7.5.5
-        // Inclui mapeamentos de qualquer empresa e globais, para cobrir
-        // categorias que podem estar mapeadas em outra empresa do segmento.
+        // DUPLA DETECCAO de categorias ressarciveis:
+        //
+        // Fonte 1: category_mapping — category_codes mapeados para 2.4 ou 7.5.5
+        //          em qualquer empresa (cobre categorias ja mapeadas)
         const { data: mappingsData } = await supabase
           .from("category_mapping")
           .select("omie_category_code,dre_account_id,company_id")
           .in("dre_account_id", [recRessarcId, despRessarcId]);
 
-        // Qualquer category_code que esteja mapeado para 2.4 ou 7.5.5
-        // em qualquer contexto é candidato para redirecionamento.
         const effectiveMapping = new Map<string, string>(); // category_code → dre_account_id
-
         (mappingsData ?? []).forEach((m) => {
           const cc = m.omie_category_code as string;
           const dreId = m.dre_account_id as string;
           const cid = m.company_id as string | null;
-          // Prioridade: company-specific desta empresa > qualquer outro
           if (cid === companyId) {
             effectiveMapping.set(cc, dreId);
           } else if (!effectiveMapping.has(cc)) {
@@ -617,13 +614,27 @@ async function syncEntries({
           }
         });
 
+        // Fonte 2: catalogo Omie — categorias cujo nome contem "ressarc"
+        //          (cobre categorias nao mapeadas ainda, como em empresas novas)
+        for (const [code, description] of Array.from(categoryCatalog.entries())) {
+          if (effectiveMapping.has(code)) continue; // ja detectado pelo mapeamento
+          const norm = description.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (norm.includes("ressarc")) {
+            // Determinar se é receita ou despesa pelo prefixo do código Omie
+            // Códigos 1.xx = receita, 2.xx = despesa (convenção Omie)
+            const isReceita = code.startsWith("1.");
+            effectiveMapping.set(code, isReceita ? recRessarcId : despRessarcId);
+          }
+        }
+
         // Redirecionar entries com cCodProjeto preenchido
         const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
 
         for (const entry of entries) {
           if (!entry.category_code) continue;
           const mappedDreId = effectiveMapping.get(entry.category_code);
-          if (!mappedDreId) continue; // nao mapeia para ressarcivel → ignorar
+          if (!mappedDreId) continue; // nao e ressarcivel → ignorar
 
           const raw = entry.raw_json ?? {};
           const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
