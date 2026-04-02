@@ -628,10 +628,13 @@ async function syncEntries({
           }
         }
 
-        // Redirecionar entries com cCodProjeto preenchido
+        // Redirecionar entries com cCodProjeto preenchido.
+        // Usar Map de overrides (nao mutar o entry diretamente).
+        const categoryOverrides = new Map<number, string>(); // index → new category_code
         const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
 
-        for (const entry of entries) {
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i];
           if (!entry.category_code) continue;
           const mappedDreId = effectiveMapping.get(entry.category_code);
           if (!mappedDreId) continue; // nao e ressarcivel → ignorar
@@ -659,11 +662,17 @@ async function syncEntries({
           }
 
           const newCode = `${prefix}${entry.category_code}`;
-          (entry as unknown as Record<string, unknown>).category_code = newCode;
+          categoryOverrides.set(i, newCode);
 
           if (!fundosMappingsNeeded.has(newCode)) {
             fundosMappingsNeeded.set(newCode, { code: newCode, dreId: fundosId, name: label });
           }
+        }
+
+        // Aplicar overrides: recriar entries com category_code alterado
+        for (const [idx, newCode] of Array.from(categoryOverrides)) {
+          const original = entries[idx];
+          entries[idx] = { ...original, category_code: newCode } as typeof original;
         }
 
         // Criar mapeamentos para os códigos especiais via delete+insert
