@@ -236,11 +236,20 @@ function selectValueByCorretor(
       source_field_value: "nValPago",
     };
   } else {
-    const value = parseNumber(record.nValLiquido);
+    const valLiquido = parseNumber(record.nValLiquido);
+    if (valLiquido !== 0) {
+      return {
+        value: valLiquido,
+        corretor_duplicidade: 1,
+        source_field_value: "nValLiquido",
+      };
+    }
+    // Fallback: se nValLiquido vazio/zero, usa nValPago
+    const valPago = parseNumber(record.nValPago);
     return {
-      value,
+      value: valPago,
       corretor_duplicidade: 1,
-      source_field_value: "nValLiquido",
+      source_field_value: valPago !== 0 ? "nValPago" : "nValLiquido",
     };
   }
 }
@@ -392,7 +401,9 @@ export function processMovimento(
       if (nCodTitulo !== "0" && nCodTitulo !== "") {
         base = `${nCodTitulo}:${cNumParcela}:${cOrigem}`;
       } else if (cNumTitulo) {
-        base = `0:${cNumTitulo}:${cOrigem}`;
+        // Include batchIndex to avoid collision when multiple entries
+        // share the same cNumTitulo (e.g. EXTP extrato entries)
+        base = `0:${cNumTitulo}:${cOrigem}:${batchIndex}`;
       } else {
         base = `0:${paymentDate}:${cOrigem}:${batchIndex}`;
       }

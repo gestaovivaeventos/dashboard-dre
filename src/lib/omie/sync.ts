@@ -386,13 +386,14 @@ async function runCompanySyncInternal(
 
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .select("id, omie_app_key, omie_app_secret, last_full_sync_at")
+    .select("id, omie_app_key, omie_app_secret, last_full_sync_at, segment_id")
     .eq("id", companyId)
     .single<{
       id: string;
       omie_app_key: string | null;
       omie_app_secret: string | null;
       last_full_sync_at: string | null;
+      segment_id: string | null;
     }>();
 
   if (companyError || !company) {
@@ -444,6 +445,7 @@ async function runCompanySyncInternal(
       mode: effectiveMode,
       dateFrom,
       dateTo,
+      segmentId: company.segment_id,
     });
 
     if (effectiveMode === "full") {
@@ -492,6 +494,7 @@ async function syncEntries({
   mode,
   dateFrom,
   dateTo,
+  segmentId,
 }: {
   companyId: string;
   appKey: string;
@@ -500,6 +503,7 @@ async function syncEntries({
   mode: SyncMode;
   dateFrom: string;
   dateTo: string;
+  segmentId: string | null;
 }): Promise<SyncResult> {
   const supabase = await createSupabaseClient();
 
@@ -552,6 +556,154 @@ async function syncEntries({
   // 3. Usar o processador financeiro que implementa as 11 regras
   //    de negócio completas para DRE em regime de caixa.
   const { entries } = processMovimentos(rawMovimentos, companyId);
+
+  // 3.1 Regra Franquias Viva: Ressarciveis com projeto → Fundos
+  //     Baseada no MAPEAMENTO existente (contas DRE 2.4 e 7.5.5).
+  //
+  //     - category_code mapeado para 2.4 (Receitas Ressarciveis):
+  //       Se cCodProjeto preenchido → redireciona para 5.8 (Receitas Ressarciveis - Fundos)
+  //       Se cCodProjeto vazio → mantém em 2.4
+  //
+  //     - category_code mapeado para 7.5.5 (Despesas Ressarciveis):
+  //       Se cCodProjeto preenchido → redireciona para 5.9 (Despesas Ressarciveis - Fundos)
+  //       Se cCodProjeto vazio → mantém em 7.5.5
+  if (segmentId) {
+    const { data: segData } = await supabase
+      .from("segments")
+      .select("slug")
+      .eq("id", segmentId)
+      .single<{ slug: string }>();
+
+    if (segData?.slug === "franquias-viva") {
+      // Buscar IDs das 4 contas DRE envolvidas
+      const { data: dreAccounts } = await supabase
+        .from("dre_accounts")
+        .select("id,code")
+        .in("code", ["2.4", "7.5.5", "5.8", "5.9"])
+        .eq("active", true);
+
+      const dreIdByCode = new Map<string, string>();
+      (dreAccounts ?? []).forEach((a) => {
+        dreIdByCode.set(a.code as string, a.id as string);
+      });
+
+      const recRessarcId = dreIdByCode.get("2.4");    // Receitas Ressarciveis
+      const despRessarcId = dreIdByCode.get("7.5.5");  // Despesas Ressarciveis
+      const fundosRecId = dreIdByCode.get("5.8");      // Receitas Ressarciveis - Fundos
+      const fundosDespId = dreIdByCode.get("5.9");     // Despesas Ressarciveis - Fundos
+
+      if (recRessarcId && despRessarcId && fundosRecId && fundosDespId) {
+        // DUPLA DETECCAO de categorias ressarciveis:
+        //
+        // Fonte 1: category_mapping — category_codes mapeados para 2.4 ou 7.5.5
+        //          em qualquer empresa (cobre categorias ja mapeadas)
+        const { data: mappingsData } = await supabase
+          .from("category_mapping")
+          .select("omie_category_code,dre_account_id,company_id")
+          .in("dre_account_id", [recRessarcId, despRessarcId]);
+
+        const effectiveMapping = new Map<string, string>(); // category_code → dre_account_id
+        (mappingsData ?? []).forEach((m) => {
+          const cc = m.omie_category_code as string;
+          const dreId = m.dre_account_id as string;
+          const cid = m.company_id as string | null;
+          if (cid === companyId) {
+            effectiveMapping.set(cc, dreId);
+          } else if (!effectiveMapping.has(cc)) {
+            effectiveMapping.set(cc, dreId);
+          }
+        });
+
+        // Fonte 2: catalogo Omie — categorias cujo nome contem "ressarc"
+        //          (cobre categorias nao mapeadas ainda, como em empresas novas)
+        for (const [code, description] of Array.from(categoryCatalog.entries())) {
+          if (effectiveMapping.has(code)) continue; // ja detectado pelo mapeamento
+          const norm = description.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          if (norm.includes("ressarc")) {
+            // Determinar se é receita ou despesa pelo prefixo do código Omie
+            // Códigos 1.xx = receita, 2.xx = despesa (convenção Omie)
+            const isReceita = code.startsWith("1.");
+            effectiveMapping.set(code, isReceita ? recRessarcId : despRessarcId);
+          }
+        }
+
+        // Redirecionar entries com cCodProjeto preenchido.
+        // Reconstroi o array entries com category_code alterado onde necessario.
+        const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
+        const newEntries: typeof entries = [];
+
+        for (const entry of entries) {
+          if (!entry.category_code) {
+            newEntries.push(entry);
+            continue;
+          }
+          const mappedDreId = effectiveMapping.get(entry.category_code);
+          if (!mappedDreId) {
+            newEntries.push(entry);
+            continue;
+          }
+
+          const raw = entry.raw_json ?? {};
+          const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
+            ? (raw.detalhes as Record<string, unknown>)
+            : raw;
+          const projeto = getString(det, ["cCodProjeto"]);
+
+          if (!projeto) {
+            // sem projeto → manter mapeamento normal
+            newEntries.push(entry);
+            continue;
+          }
+
+          // Com projeto → redirecionar para Fundos
+          let fundosId: string;
+          let prefix: string;
+          let label: string;
+          if (mappedDreId === recRessarcId) {
+            fundosId = fundosRecId;
+            prefix = "__fundos_rec_";
+            label = "Receitas Ressarciveis - Fundos (projeto)";
+          } else {
+            fundosId = fundosDespId;
+            prefix = "__fundos_desp_";
+            label = "Despesas Ressarciveis - Fundos (projeto)";
+          }
+
+          const newCode = `${prefix}${entry.category_code}`;
+          // Criar novo entry com category_code atualizado
+          const redirected = Object.assign({}, entry, { category_code: newCode });
+          newEntries.push(redirected);
+
+          if (!fundosMappingsNeeded.has(newCode)) {
+            fundosMappingsNeeded.set(newCode, { code: newCode, dreId: fundosId, name: label });
+          }
+        }
+
+        // Substituir entries pelo array com redirects aplicados
+        entries.length = 0;
+        entries.push(...newEntries);
+
+        // Criar mapeamentos para os códigos especiais via delete+insert
+        if (fundosMappingsNeeded.size > 0) {
+          const codes = Array.from(fundosMappingsNeeded.keys());
+          await supabase
+            .from("category_mapping")
+            .delete()
+            .eq("company_id", companyId)
+            .in("omie_category_code", codes);
+
+          const rows = Array.from(fundosMappingsNeeded.values()).map((m) => ({
+            omie_category_code: m.code,
+            omie_category_name: m.name,
+            dre_account_id: m.dreId,
+            company_id: companyId,
+          }));
+          await supabase.from("category_mapping").insert(rows);
+        }
+      }
+    }
+  }
 
   // 4. Deduplicar por omie_id (ultima ocorrencia vence).
   const deduped = new Map<string, NormalizedEntry>();

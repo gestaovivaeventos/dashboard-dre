@@ -81,7 +81,12 @@ export async function GET(request: Request) {
       .map((mapping) => [mapping.omie_category_code as string, mapping]),
   );
 
-  const rows: CategoryMappingRow[] = (categories ?? []).map((category) => {
+  // Filtrar categorias internas geradas automaticamente pelo sync (fundos ressarciveis)
+  const visibleCategories = (categories ?? []).filter(
+    (c) => !(c.code as string).startsWith("__fundos_"),
+  );
+
+  const rows: CategoryMappingRow[] = visibleCategories.map((category) => {
     const code = category.code as string;
     const companyMapping = companyMappingByCode.get(code);
     const globalMapping = globalMappingByCode.get(code);
