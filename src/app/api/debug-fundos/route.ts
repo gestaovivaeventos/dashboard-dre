@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     .lte("payment_date", "2026-03-31");
 
   // ALL entries with EXTP-like omie_ids for March
-  const { data: _extpEntries } = await supabase
+  await supabase
     .from("financial_entries")
     .select("omie_id,category_code,value,payment_date,description")
     .eq("company_id", companyId)
