@@ -452,6 +452,7 @@ async function runCompanySyncInternal(
       appSecret,
       lastRequestRef,
       mode: effectiveMode,
+      supabase,
       dateFrom,
       dateTo,
       segmentId: company.segment_id,
@@ -504,6 +505,7 @@ async function syncEntries({
   dateFrom,
   dateTo,
   segmentId,
+  supabase,
 }: {
   companyId: string;
   appKey: string;
@@ -513,8 +515,8 @@ async function syncEntries({
   dateFrom: string;
   dateTo: string;
   segmentId: string | null;
+  supabase: Awaited<ReturnType<typeof createSupabaseClient>>;
 }): Promise<SyncResult> {
-  const supabase = await createSupabaseClient();
 
   // 1. Buscar movimentos financeiros filtrados por data de pagamento
   //    + catalogo de categorias + nomes de clientes/fornecedores.
