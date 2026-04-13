@@ -40,7 +40,7 @@ interface NormalizedEntry {
   processing_metadata: Record<string, unknown>;
 }
 
-export type SyncMode = "incremental" | "full";
+export type SyncMode = "incremental" | "full" | "rolling";
 
 interface SyncResult {
   recordsImported: number;
@@ -69,6 +69,12 @@ function calculateDateRange(
 ): { dateFrom: string; dateTo: string } {
   const now = new Date();
   const dateTo = formatDateForOmie(now);
+
+  if (mode === "rolling") {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 3);
+    return { dateFrom: formatDateForOmie(from), dateTo };
+  }
 
   if (mode === "full") {
     if (!lastFullSyncAt) {

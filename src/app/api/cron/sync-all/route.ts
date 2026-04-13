@@ -5,6 +5,7 @@ import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function isAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
     const companyName = company.name as string;
 
     try {
-      const result = await runCompanySyncAsSystem(companyId);
+      const result = await runCompanySyncAsSystem(companyId, "rolling");
       result.newUnmappedCategories.forEach((category) => {
         unmappedCategories.push({
           companyId,
