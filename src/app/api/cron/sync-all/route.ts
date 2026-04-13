@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { sendSyncFailureEmail, sendUnmappedCategoriesEmail } from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: companies, error: companiesError } = await supabase
     .from("companies")
     .select("id,name,active")
