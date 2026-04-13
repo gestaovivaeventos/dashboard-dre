@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/encryption";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
@@ -382,7 +383,9 @@ async function runCompanySyncInternal(
     mode: SyncMode;
   },
 ) {
-  const supabase = await createSupabaseClient();
+  const supabase = options.skipPermission
+    ? createAdminClient()
+    : await createSupabaseClient();
   if (!options.skipPermission) {
     const isAllowed = await canSyncCompany(options.profile, companyId);
     if (!isAllowed) {
