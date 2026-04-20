@@ -1,26 +1,24 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
-import { getCurrentSessionContext } from "@/lib/auth/session";
+import { getSessionContext } from "@/lib/auth/session";
 import type { Segment } from "@/lib/supabase/types";
 
-export default async function ProtectedLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  const { supabase, user, profile, modules } = await getCurrentSessionContext();
+export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
+  const ctx = await getSessionContext();
 
-  if (!user) {
-    redirect("/login");
-  }
+  if (!ctx.user) redirect("/login");
+  if (!ctx.modules?.ctrl) redirect("/dashboard");
 
-  const userName = profile?.name || user.email || "Usuario";
-  const userEmail = profile?.email || user.email || "";
-  const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
-  const ctrlRole = modules?.ctrl?.role ?? null;
+  const { profile, supabase, modules } = ctx;
+  const userName  = profile?.name || ctx.user.email || "Usuario";
+  const userEmail = profile?.email || ctx.user.email || "";
+  const dreRole   = modules!.dre!.role;
+  const ctrlRole  = modules!.ctrl!.role;
 
-  // Fetch segments the user has access to
+  // Segmentos para o shell DRE (mesmo do (app) layout)
   let segments: Segment[] = [];
-  if (userRole === "admin") {
+  if (dreRole === "admin") {
     const { data } = await supabase
       .from("segments")
       .select("id,name,slug,display_order,active")
@@ -39,7 +37,13 @@ export default async function ProtectedLayout({
   }
 
   return (
-    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} ctrlRole={ctrlRole} segments={segments}>
+    <AppShell
+      userName={userName}
+      userEmail={userEmail}
+      userRole={dreRole}
+      ctrlRole={ctrlRole}
+      segments={segments}
+    >
       {children}
     </AppShell>
   );

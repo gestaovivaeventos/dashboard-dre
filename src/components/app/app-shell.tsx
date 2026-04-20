@@ -11,17 +11,18 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { Segment, UserRole } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 
 interface AppShellProps {
   children: React.ReactNode;
   userName: string;
   userEmail: string;
-  userRole: UserRole;
+  userRole: DreRole;
+  ctrlRole?: CtrlRole | null;
   segments: Segment[];
 }
 
-export function AppShell({ children, userName, userEmail, userRole, segments }: AppShellProps) {
+export function AppShell({ children, userName, userEmail, userRole, ctrlRole, segments }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -39,7 +40,7 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
           </a>
 
           <div className="flex-1 overflow-y-auto px-2">
-            <NavLinks role={userRole} segments={segments} collapsed={collapsed} />
+            <NavLinks role={userRole} ctrlRole={ctrlRole} segments={segments} collapsed={collapsed} />
           </div>
 
           <div className="border-t p-2">
@@ -80,7 +81,7 @@ export function AppShell({ children, userName, userEmail, userRole, segments }: 
                   <a href="/home" className="mb-6 block">
                     <LogoFull />
                   </a>
-                  <NavLinks role={userRole} segments={segments} onNavigate={() => setOpen(false)} />
+                  <NavLinks role={userRole} ctrlRole={ctrlRole} segments={segments} onNavigate={() => setOpen(false)} />
                 </SheetContent>
               </Sheet>
               <span className="text-sm font-bold">Controll Hub</span>

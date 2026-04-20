@@ -1,9 +1,12 @@
 "use client";
 
+import { CheckSquare } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { CtrlRole } from "@/lib/supabase/types";
 
 interface Indicator {
   name: string;
@@ -36,6 +39,8 @@ interface NewsItem {
 
 interface HomeViewProps {
   userName: string;
+  ctrlRole?: CtrlRole | null;
+  pendingApprovalsCount?: number;
 }
 
 function getGreeting(): string {
@@ -66,7 +71,7 @@ function alertDotColor(type: string): string {
   return "bg-blue-400";
 }
 
-export function HomeView({ userName }: HomeViewProps) {
+export function HomeView({ userName, ctrlRole, pendingApprovalsCount = 0 }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -114,6 +119,35 @@ export function HomeView({ userName }: HomeViewProps) {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">{formattedDate}</p>
       </div>
+
+      {/* ── 1b. Ctrl Approvals Banner ─────────────────────────────── */}
+      {ctrlRole && ctrlRole !== "solicitante" && (
+        <Link
+          href="/ctrl/aprovacoes"
+          className="block rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 transition-colors hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/30 dark:hover:bg-violet-950/50"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckSquare className="h-5 w-5 text-violet-600" />
+              <div>
+                <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">
+                  Aprovações Pendentes — Controladoria
+                </p>
+                <p className="text-xs text-violet-600 dark:text-violet-400">
+                  {pendingApprovalsCount > 0
+                    ? `${pendingApprovalsCount} requisição(ões) aguardando sua aprovação`
+                    : "Nenhuma requisição pendente"}
+                </p>
+              </div>
+            </div>
+            {pendingApprovalsCount > 0 && (
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-600 text-xs font-bold text-white">
+                {pendingApprovalsCount}
+              </span>
+            )}
+          </div>
+        </Link>
+      )}
 
       {/* ── 2. Indicadores Econômicos ─────────────────────────────── */}
       <section>

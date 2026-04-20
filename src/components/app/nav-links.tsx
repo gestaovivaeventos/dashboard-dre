@@ -5,26 +5,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-import { GLOBAL_NAV_ITEMS, SEGMENT_SUB_ITEMS } from "@/components/app/navigation";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type { Segment, UserRole } from "@/lib/supabase/types";
+import { CTRL_NAV_ITEMS, GLOBAL_NAV_ITEMS, SEGMENT_SUB_ITEMS } from "@/components/app/navigation";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
-  role: UserRole;
+  role: DreRole;
+  ctrlRole?: CtrlRole | null;
   segments: Segment[];
   collapsed?: boolean;
   onNavigate?: () => void;
 }
 
-export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProps) {
+export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: NavLinksProps) {
   const pathname = usePathname();
 
-  // Auto-expand the segment whose route is currently active
   const activeSegmentSlug = segments.find((s) =>
     pathname.startsWith(`/s/${s.slug}`),
   )?.slug ?? null;
@@ -37,20 +33,22 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
     setExpanded((prev) => ({ ...prev, [slug]: !prev[slug] }));
   };
 
-  const subItems = SEGMENT_SUB_ITEMS.filter((item) => item.roles.includes(role));
+  const subItems    = SEGMENT_SUB_ITEMS.filter((item) => item.roles.includes(role));
   const globalItems = GLOBAL_NAV_ITEMS.filter((item) => item.roles.includes(role));
+  const ctrlItems   = ctrlRole
+    ? CTRL_NAV_ITEMS.filter((item) => item.roles.includes(ctrlRole))
+    : [];
 
-  // Collapsed: show first sub-item icon per segment as entry point
+  // ─── Collapsed mode ───────────────────────────────────────────────────────
+
   if (collapsed) {
     return (
       <nav className="space-y-1">
         {segments.map((segment) => {
           const isSegmentActive = pathname.startsWith(`/s/${segment.slug}`);
-          // Link to the first available sub-item for this segment
           const firstItem = subItems[0];
           if (!firstItem) return null;
           const href = `/s/${segment.slug}${firstItem.suffix}`;
-
           return (
             <Tooltip key={segment.id}>
               <TooltipTrigger asChild>
@@ -69,19 +67,42 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
                   </span>
                 </Link>
               </TooltipTrigger>
-              <TooltipContent side="right">
-                {segment.name}
-              </TooltipContent>
+              <TooltipContent side="right">{segment.name}</TooltipContent>
             </Tooltip>
           );
         })}
 
-        {globalItems.length > 0 && <div className="my-3 border-t" />}
+        {ctrlItems.length > 0 && <div className="my-2 border-t" />}
+
+        {ctrlItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = pathname.startsWith(item.href);
+          return (
+            <Tooltip key={item.href}>
+              <TooltipTrigger asChild>
+                <Link
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex h-10 w-full items-center justify-center rounded-lg transition-colors",
+                    isActive
+                      ? "bg-violet-600 text-white"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">{item.title}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+
+        {globalItems.length > 0 && <div className="my-2 border-t" />}
 
         {globalItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-
           return (
             <Tooltip key={item.href}>
               <TooltipTrigger asChild>
@@ -98,9 +119,7 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
                   <Icon className="h-4 w-4" />
                 </Link>
               </TooltipTrigger>
-              <TooltipContent side="right">
-                {item.title}
-              </TooltipContent>
+              <TooltipContent side="right">{item.title}</TooltipContent>
             </Tooltip>
           );
         })}
@@ -108,13 +127,19 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
     );
   }
 
-  // Expanded (default)
+  // ─── Expanded mode ────────────────────────────────────────────────────────
+
   return (
     <nav className="space-y-1">
-      {/* Segment groups */}
+      {/* Segmentos DRE */}
+      {segments.length > 0 && (
+        <div className="mb-1 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+          DRE Financeiro
+        </div>
+      )}
+
       {segments.map((segment) => {
         const isOpen = expanded[segment.slug] ?? false;
-
         return (
           <div key={segment.id}>
             <button
@@ -136,13 +161,12 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
               />
             </button>
 
-            {isOpen ? (
+            {isOpen && (
               <div className="ml-3 mt-0.5 space-y-0.5 border-l pl-3">
                 {subItems.map((item) => {
                   const href = `/s/${segment.slug}${item.suffix}`;
                   const Icon = item.icon;
                   const isActive = pathname === href;
-
                   return (
                     <Link
                       key={href}
@@ -161,21 +185,47 @@ export function NavLinks({ role, segments, collapsed, onNavigate }: NavLinksProp
                   );
                 })}
               </div>
-            ) : null}
+            )}
           </div>
         );
       })}
 
-      {/* Separator */}
-      {globalItems.length > 0 ? (
-        <div className="my-3 border-t" />
-      ) : null}
+      {/* Seção Controladoria */}
+      {ctrlItems.length > 0 && (
+        <>
+          <div className="my-3 border-t" />
+          <div className="mb-1 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500">
+            Controladoria
+          </div>
+          {ctrlItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                  isActive
+                    ? "bg-violet-600 text-white"
+                    : "text-muted-foreground hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/40",
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.title}</span>
+              </Link>
+            );
+          })}
+        </>
+      )}
 
-      {/* Global items */}
+      {/* Items globais DRE */}
+      {globalItems.length > 0 && <div className="my-3 border-t" />}
+
       {globalItems.map((item) => {
         const Icon = item.icon;
         const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-
         return (
           <Link
             key={item.href}
