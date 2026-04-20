@@ -752,8 +752,8 @@ async function syncEntries({
       .select("id, omie_id")
       .eq("company_id", companyId);
 
-    if (mode === "incremental") {
-      // Escopo: apenas entries dentro do periodo buscado.
+    if (mode !== "full") {
+      // Escopo: apenas entries dentro do periodo buscado (rolling ou incremental).
       query = query.gte("payment_date", dbDateFrom).lte("payment_date", dbDateTo);
     }
 
