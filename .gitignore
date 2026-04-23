@@ -34,3 +34,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code / tooling working dirs
+.stitch/
+.superpowers/
+.playwright-mcp/
+
+# Reference material (theme pack + design screenshots)
+tema-viva/
+home-unificado*.png
+
+# Supabase CLI temp files
+supabase/.temp/
