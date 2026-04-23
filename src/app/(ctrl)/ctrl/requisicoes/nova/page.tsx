@@ -5,15 +5,27 @@ import { getCtrlUser } from "@/lib/ctrl/auth";
 import { getExpenseTypes } from "@/lib/ctrl/actions/expense-types";
 import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { getSuppliers } from "@/lib/ctrl/actions/suppliers";
+import { createClient } from "@/lib/supabase/server";
+
+async function getActiveEvents() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("ctrl_events")
+    .select("id, name, description, is_active, created_by, created_at, updated_at")
+    .eq("is_active", true)
+    .order("name");
+  return data ?? [];
+}
 
 export default async function NovaRequisicaoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  const [sectorsResult, expenseTypesResult, suppliersResult] = await Promise.all([
+  const [sectorsResult, expenseTypesResult, suppliersResult, events] = await Promise.all([
     getSectors(),
     getExpenseTypes(),
     getSuppliers("aprovado"),
+    getActiveEvents(),
   ]);
 
   const sectors = sectorsResult.sectors ?? [];
@@ -34,6 +46,7 @@ export default async function NovaRequisicaoPage() {
           sectors={sectors}
           expenseTypes={expenseTypes}
           suppliers={suppliers}
+          events={events}
         />
       </div>
     </div>
