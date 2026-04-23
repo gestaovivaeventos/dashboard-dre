@@ -55,14 +55,14 @@ export async function POST(request: Request) {
   }
 
   const subject = buildSubject(report.type as string);
-  const ok = await sendEmail({
+  const result = await sendEmail({
     to: emails,
     subject,
     html: report.content_html as string,
   });
 
-  if (!ok) {
-    return NextResponse.json({ error: "Falha ao reenviar email." }, { status: 500 });
+  if (!result.ok) {
+    return NextResponse.json({ error: `Falha ao reenviar email: ${result.error}` }, { status: 500 });
   }
 
   await adminClient

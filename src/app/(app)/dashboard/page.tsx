@@ -87,6 +87,22 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     }
   }
 
+  // If no companies selected, render empty state
+  if (filter.selectedCompanyIds.length === 0) {
+    return (
+      <DashboardDreView
+        filter={filter}
+        range={{ dateFrom: "", dateTo: "", label: "" }}
+        rows={[]}
+        companies={visibleCompanies}
+        role={profile?.role ?? "gestor_hero"}
+        visibleBuckets={[]}
+        accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "" }}
+        selectedCompanyIds={[]}
+      />
+    );
+  }
+
   const range = buildDateRange(filter);
   const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
   const visibleBuckets = buildVisibleBuckets(filter);

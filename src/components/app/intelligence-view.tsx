@@ -39,11 +39,13 @@ import { ReportPreview } from "@/components/app/report-preview";
 interface Company {
   id: string;
   name: string;
+  segmentSlug: string | null;
 }
 
 interface Segment {
   id: string;
   name: string;
+  slug: string;
 }
 
 interface IntelligenceViewProps {
@@ -198,8 +200,10 @@ export function IntelligenceView({ companies, segments }: IntelligenceViewProps)
 
 function RelatorioTab({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>("");
-  const [month, setMonth] = useState<string>(String(CURRENT_MONTH));
-  const [year, setYear] = useState<string>(String(CURRENT_YEAR));
+  const [monthFrom, setMonthFrom] = useState<string>(String(CURRENT_MONTH));
+  const [yearFrom, setYearFrom] = useState<string>(String(CURRENT_YEAR));
+  const [monthTo, setMonthTo] = useState<string>(String(CURRENT_MONTH));
+  const [yearTo, setYearTo] = useState<string>(String(CURRENT_YEAR));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
@@ -215,9 +219,10 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
       setError("Selecione uma empresa.");
       return;
     }
-    const yearNum = parseInt(year, 10);
-    if (!yearNum || yearNum < 2000 || yearNum > 2100) {
-      setError("Informe um ano valido.");
+    const yFrom = parseInt(yearFrom, 10);
+    const yTo = parseInt(yearTo, 10);
+    if (!yFrom || !yTo || yFrom < 2000 || yTo > 2100) {
+      setError("Informe anos validos.");
       return;
     }
     setLoading(true);
@@ -226,11 +231,15 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
     setHtml(null);
     setSendMessage(null);
     try {
-      const dateFrom = `${yearNum}-${String(parseInt(month, 10)).padStart(2, "0")}-01`;
-      // Last day of month
-      const lastDay = new Date(yearNum, parseInt(month, 10), 0).getDate();
-      const dateTo = `${yearNum}-${String(parseInt(month, 10)).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-      const periodLabel = `${MONTHS.find((m) => m.value === month)?.label ?? month}/${yearNum}`;
+      const mFrom = parseInt(monthFrom, 10);
+      const mTo = parseInt(monthTo, 10);
+      const dateFrom = `${yFrom}-${String(mFrom).padStart(2, "0")}-01`;
+      const lastDay = new Date(yTo, mTo, 0).getDate();
+      const dateTo = `${yTo}-${String(mTo).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+      const labelFrom = `${MONTHS.find((m) => m.value === monthFrom)?.label ?? monthFrom}/${yFrom}`;
+      const labelTo = `${MONTHS.find((m) => m.value === monthTo)?.label ?? monthTo}/${yTo}`;
+      const periodLabel = labelFrom === labelTo ? labelFrom : `${labelFrom} a ${labelTo}`;
 
       const response = await fetch("/api/intelligence/generate", {
         method: "POST",
@@ -241,6 +250,7 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
           dateFrom,
           dateTo,
           periodLabel,
+          segmentSlug: selectedCompany?.segmentSlug ?? null,
         }),
       });
       const payload = (await response.json()) as { reportId?: string; html?: string; error?: string };
@@ -295,8 +305,8 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
       <div className="rounded-lg border bg-background p-4 space-y-4">
         <h3 className="font-medium">Gerar Relatorio Mensal</h3>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
+        <div className="grid gap-4 sm:grid-cols-5">
+          <div className="space-y-2 sm:col-span-5">
             <Label>Empresa</Label>
             <Select value={companyId} onValueChange={setCompanyId}>
               <SelectTrigger>
@@ -313,8 +323,8 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Mes</Label>
-            <Select value={month} onValueChange={setMonth}>
+            <Label>Mes inicio</Label>
+            <Select value={monthFrom} onValueChange={setMonthFrom}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -329,14 +339,40 @@ function RelatorioTab({ companies }: { companies: Company[] }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="relatorio-ano">Ano</Label>
+            <Label>Ano inicio</Label>
             <Input
-              id="relatorio-ano"
               type="number"
               min={2000}
               max={2100}
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
+              value={yearFrom}
+              onChange={(e) => setYearFrom(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Mes fim</Label>
+            <Select value={monthTo} onValueChange={setMonthTo}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTHS.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Ano fim</Label>
+            <Input
+              type="number"
+              min={2000}
+              max={2100}
+              value={yearTo}
+              onChange={(e) => setYearTo(e.target.value)}
             />
           </div>
         </div>

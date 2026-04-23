@@ -1,64 +1,88 @@
+/* =========================================================
+   Ordem de import importa: viva-tokens DEVE vir antes dos
+   @tailwind para que as variaveis estejam disponiveis nos layers.
+   ========================================================= */
+@import "../styles/viva-tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* =========================================================
+   Mapeamento shadcn/ui -> paleta Viva
+   Cada variavel HSL abaixo e o equivalente em HSL dos tokens
+   Viva em HEX. Assim, todos os componentes shadcn (<Card>,
+   <Button>, <Badge>, <Table>...) herdam automaticamente o
+   tema dark + laranja sem precisar reescrever nada.
+   ========================================================= */
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
+  /* shadcn agora SEMPRE usa os valores dark Viva (o projeto e
+     dark-first; a classe .dark mantem-se ativa no <html>). */
+  --background:            217 23% 8%;    /* surface-0 */
+  --foreground:            216 29% 96%;   /* ink-primary */
+
+  --card:                  218 25% 12%;   /* surface-1 */
+  --card-foreground:       216 29% 96%;
+
+  --popover:               218 27% 15%;   /* surface-2 */
+  --popover-foreground:    216 29% 96%;
+
+  --primary:               20 100% 55%;   /* viva-500 */
+  --primary-foreground:    0 0% 100%;
+
+  --secondary:             219 25% 18%;   /* surface-3 */
+  --secondary-foreground:  216 29% 96%;
+
+  --muted:                 218 27% 15%;   /* surface-2 */
+  --muted-foreground:      220 15% 71%;   /* ink-secondary */
+
+  --accent:                219 25% 18%;   /* surface-3 (hover) */
+  --accent-foreground:     216 29% 96%;
+
+  --destructive:           4 86% 58%;     /* status-critical */
+  --destructive-foreground: 0 0% 100%;
+
+  --border:                219 26% 19%;   /* proximo do surface-3 - cor solida visivel */
+  --input:                 218 27% 15%;   /* surface-2 */
+  --ring:                  20 100% 55%;   /* viva-500 */
+
   --radius: 0.75rem;
 }
 
+/* Mantemos .dark como alias do :root para compatibilidade
+   com eventuais next-themes toggles (se um dia virar). */
 .dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 224.3 76.3% 48%;
-}
-
-body {
-  color: hsl(var(--foreground));
-  background: hsl(var(--background));
-  font-family: var(--font-geist-sans), sans-serif;
+  --background:            217 23% 8%;
+  --foreground:            216 29% 96%;
+  --card:                  218 25% 12%;
+  --card-foreground:       216 29% 96%;
+  --popover:               218 27% 15%;
+  --popover-foreground:    216 29% 96%;
+  --primary:               20 100% 55%;
+  --primary-foreground:    0 0% 100%;
+  --secondary:             219 25% 18%;
+  --secondary-foreground:  216 29% 96%;
+  --muted:                 218 27% 15%;
+  --muted-foreground:      220 15% 71%;
+  --accent:                219 25% 18%;
+  --accent-foreground:     216 29% 96%;
+  --destructive:           4 86% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --border:                219 26% 19%;
+  --input:                 218 27% 15%;
+  --ring:                  20 100% 55%;
 }
 
 @layer base {
   * {
     @apply border-border;
   }
-
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body), "Inter", system-ui, -apple-system, sans-serif;
   }
 }

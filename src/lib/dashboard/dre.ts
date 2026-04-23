@@ -126,10 +126,12 @@ export function buildFilterState(
   }
 
   const rawCompanies = (searchParams.companyIds as string | undefined)?.split(",").filter(Boolean) ?? [];
-  const allSelected = rawCompanies.length === 0 || rawCompanies.includes("all");
-  const selectedCompanyIds = allSelected
+  const hasCompanyParam = Boolean(searchParams.companyIds);
+  const selectedCompanyIds = rawCompanies.includes("all")
     ? companyIds
-    : rawCompanies.filter((companyId) => companyIds.includes(companyId));
+    : hasCompanyParam
+      ? rawCompanies.filter((companyId) => companyIds.includes(companyId))
+      : []; // No companies selected by default — user must choose
 
   const compareCompanies = searchParams.compareCompanies === "true";
   const budgetMode = searchParams.budgetMode === "true";
@@ -140,7 +142,7 @@ export function buildFilterState(
     monthFrom,
     yearTo,
     monthTo,
-    selectedCompanyIds: selectedCompanyIds.length > 0 ? selectedCompanyIds : companyIds,
+    selectedCompanyIds,
     compareCompanies,
     budgetMode,
     // Legacy defaults

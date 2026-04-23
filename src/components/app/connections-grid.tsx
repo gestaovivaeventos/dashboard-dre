@@ -301,7 +301,7 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
                     </select>
                   </div>
                   <div className="max-h-64 overflow-y-auto rounded-md border">
-                    <div className="grid grid-cols-[150px_90px_90px_120px_1fr] gap-2 border-b bg-slate-50 px-2 py-2 text-[11px] font-semibold uppercase text-slate-600">
+                    <div className="grid grid-cols-[150px_90px_90px_120px_1fr] gap-2 border-b bg-muted px-2 py-2 text-[11px] font-semibold uppercase text-muted-foreground">
                       <span>Data/Hora</span>
                       <span>Duracao</span>
                       <span>Status</span>

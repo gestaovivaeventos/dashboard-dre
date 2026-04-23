@@ -446,3 +446,31 @@ export function renderProjectionEmail(data: ProjectionData): string {
 
   return baseWrapper(content);
 }
+
+/**
+ * Renders a narrative AI analysis (rich HTML from segment-specific prompts)
+ * inside the standard email wrapper with a branded header.
+ */
+export function renderNarrativeEmail(companyName: string, periodLabel: string, narrativeHtml: string): string {
+  const content = `
+    <tr>
+      <td style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:28px 32px;border-radius:12px 12px 0 0;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.7);">Controll Hub — Relatorio Inteligente</div>
+        <div style="font-size:22px;font-weight:700;color:#ffffff;margin-top:4px;">${companyName}</div>
+        <div style="font-size:14px;color:rgba(255,255,255,0.85);margin-top:2px;">${periodLabel}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="background-color:#ffffff;padding:28px 32px;border-radius:0 0 12px 12px;">
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.7;color:#1a1a1a;">
+          ${narrativeHtml}
+        </div>
+        <div style="height:1px;background-color:#e2e8f0;margin:24px 0 16px;"></div>
+        <div style="font-size:11px;color:#94a3b8;text-align:center;">
+          Gerado por IA — Controll Hub · Dados sincronizados do Omie ERP
+        </div>
+      </td>
+    </tr>`;
+
+  return baseWrapper(content);
+}

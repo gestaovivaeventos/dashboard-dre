@@ -1,25 +1,53 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import type { UserProfile } from "@/lib/supabase/types";
+import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
 
-export async function getCurrentSessionContext() {
+export type { ModuleAccess, UnifiedProfile };
+
+export interface SessionContext {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  user: import("@supabase/supabase-js").User | null;
+  profile: UnifiedProfile | null;
+  modules: ModuleAccess | null;
+}
+
+// ─── Helpers de autorização (use em Server Components e API Routes) ────────────
+
+export function hasDreAccess(ctx: SessionContext, minRole?: DreRole): boolean {
+  if (!ctx.modules?.dre) return false;
+  if (!minRole) return true;
+  const hierarchy: DreRole[] = ["gestor_unidade", "gestor_hero", "admin"];
+  return hierarchy.indexOf(ctx.modules.dre.role) >= hierarchy.indexOf(minRole);
+}
+
+export function hasCtrlAccess(ctx: SessionContext, roles?: CtrlRole[]): boolean {
+  if (!ctx.modules?.ctrl || ctx.modules.ctrl.roles.length === 0) return false;
+  if (!roles || roles.length === 0) return true;
+  return ctx.modules.ctrl.roles.some((r) => roles.includes(r));
+}
+
+// ─── Função principal ─────────────────────────────────────────────────────────
+
+export async function getSessionContext(): Promise<SessionContext> {
   const isDevMode = process.env.NODE_ENV !== "production";
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    return { supabase, user: null, profile: null };
-  }
+  const empty: SessionContext = { supabase, user: null, profile: null, modules: null };
+  if (!user) return empty;
 
-  let { data: profile } = await supabase
+  // Busca perfil + ctrl role em uma query
+  const { data: profileRow } = await supabase
     .from("users")
-    .select("id,email,name,role,company_id,active,created_at")
+    .select(`
+      id, email, name, role, company_id, active, created_at,
+      user_module_roles!user_module_roles_user_id_fkey(role, module)
+    `)
     .eq("id", user.id)
-    .maybeSingle<UserProfile>();
+    .maybeSingle();
 
-  if (!profile) {
+  // Novo usuário — cria perfil mínimo
+  if (!profileRow) {
     const fallbackName =
       typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null;
     await supabase.from("users").upsert(
@@ -33,19 +61,11 @@ export async function getCurrentSessionContext() {
       },
       { onConflict: "id" },
     );
-
-    const { data: refreshedProfile } = await supabase
-      .from("users")
-      .select("id,email,name,role,company_id,active,created_at")
-      .eq("id", user.id)
-      .maybeSingle<UserProfile>();
-    profile = refreshedProfile ?? null;
+    return empty;
   }
 
-  // In dev mode, promote the current user to admin ONLY if there are no admins
-  // in the system yet (first-time setup). This avoids overwriting role changes
-  // made via the Users admin panel.
-  if (isDevMode && user && (!profile || profile.role !== "admin")) {
+  // Promoção automática do primeiro admin em dev
+  if (isDevMode && profileRow.role !== "admin") {
     try {
       const adminClient = createAdminClientIfAvailable();
       if (adminClient) {
@@ -60,48 +80,56 @@ export async function getCurrentSessionContext() {
             {
               id: user.id,
               email: user.email ?? `${user.id}@placeholder.local`,
-              name:
-                profile?.name ??
-                (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null),
+              name: profileRow.name ?? null,
               role: "admin",
               company_id: null,
               active: true,
             },
             { onConflict: "id" },
           );
-
-          const { data: promotedProfile } = await supabase
-            .from("users")
-            .select("id,email,name,role,company_id,active,created_at")
-            .eq("id", user.id)
-            .maybeSingle<UserProfile>();
-
-          profile = promotedProfile ?? profile;
+          // Re-fetch after promotion
+          return getSessionContext();
         }
       } else {
         await supabase.rpc("promote_first_admin_if_none");
       }
     } catch {
-      // In dev, if service role is missing, continue with current profile.
+      // Continue with current profile in dev if service role unavailable
     }
   }
 
-  if (isDevMode && user && !profile) {
-    profile = {
-      id: user.id,
-      email: user.email ?? `${user.id}@placeholder.local`,
-      name:
-        typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null,
-      role: "admin",
-      company_id: null,
-      active: true,
-      created_at: new Date().toISOString(),
-    };
+  if (!profileRow.active && !isDevMode) {
+    return empty;
   }
 
-  if (profile && profile.active === false) {
-    return { supabase, user: null, profile: null };
-  }
+  const dreRole = profileRow.role as DreRole;
 
-  return { supabase, user, profile: profile ?? null };
+  // Coleta TODAS as linhas de user_module_roles para module='ctrl'.
+  // Admin DRE recebe ['admin'] implicitamente (nao persistido).
+  const rawCtrlRoles = (
+    profileRow.user_module_roles as Array<{ role: string; module: string }> | null
+  )?.filter((r) => r.module === "ctrl").map((r) => r.role as CtrlRole) ?? [];
+
+  const ctrlRoles: CtrlRole[] = dreRole === "admin" ? ["admin"] : rawCtrlRoles;
+
+  const profile: UnifiedProfile = {
+    id: profileRow.id,
+    email: profileRow.email,
+    name: profileRow.name,
+    role: dreRole,
+    ctrl_roles: ctrlRoles,
+    company_id: profileRow.company_id,
+    active: profileRow.active,
+    created_at: profileRow.created_at,
+  };
+
+  const modules: ModuleAccess = {
+    dre: { role: dreRole, companyId: profileRow.company_id },
+    ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
+  };
+
+  return { supabase, user, profile, modules };
 }
+
+/** Alias retrocompatível — código existente continua funcionando sem alteração */
+export const getCurrentSessionContext = getSessionContext;

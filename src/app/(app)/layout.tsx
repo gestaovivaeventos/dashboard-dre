@@ -7,7 +7,7 @@ import type { Segment } from "@/lib/supabase/types";
 export default async function ProtectedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { supabase, user, profile } = await getCurrentSessionContext();
+  const { supabase, user, profile, modules } = await getCurrentSessionContext();
 
   if (!user) {
     redirect("/login");
@@ -15,7 +15,8 @@ export default async function ProtectedLayout({
 
   const userName = profile?.name || user.email || "Usuario";
   const userEmail = profile?.email || user.email || "";
-  const userRole = profile?.role ?? "gestor_unidade";
+  const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
+  const ctrlRoles = modules?.ctrl?.roles ?? [];
 
   // Fetch segments the user has access to
   let segments: Segment[] = [];
@@ -38,7 +39,7 @@ export default async function ProtectedLayout({
   }
 
   return (
-    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} segments={segments}>
+    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} ctrlRoles={ctrlRoles} segments={segments}>
       {children}
     </AppShell>
   );

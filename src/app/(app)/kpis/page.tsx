@@ -89,6 +89,20 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
       filter.selectedCompanyIds = allowedCompanyIds;
     }
   }
+  // If no companies selected, render empty state
+  if (filter.selectedCompanyIds.length === 0) {
+    return (
+      <KpiAllView
+        filter={filter}
+        range={{ dateFrom: "", dateTo: "", label: "" }}
+        kpiCards={[]}
+        companies={visibleCompanies}
+        role={profile?.role ?? "gestor_hero"}
+        selectedCompanyIds={[]}
+      />
+    );
+  }
+
   const range = buildDateRange(filter);
 
   // Aggregate by company for the period

@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/sync-all",
       "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/monthly-report",
-      "schedule": "0 12 5 * *"
     }
   ]
 }

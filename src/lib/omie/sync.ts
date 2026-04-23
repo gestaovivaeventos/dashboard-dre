@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/encryption";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
@@ -40,7 +41,7 @@ interface NormalizedEntry {
   processing_metadata: Record<string, unknown>;
 }
 
-export type SyncMode = "incremental" | "full";
+export type SyncMode = "incremental" | "full" | "rolling";
 
 interface SyncResult {
   recordsImported: number;
@@ -69,6 +70,12 @@ function calculateDateRange(
 ): { dateFrom: string; dateTo: string } {
   const now = new Date();
   const dateTo = formatDateForOmie(now);
+
+  if (mode === "rolling") {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 3);
+    return { dateFrom: formatDateForOmie(from), dateTo };
+  }
 
   if (mode === "full") {
     if (!lastFullSyncAt) {
@@ -376,7 +383,9 @@ async function runCompanySyncInternal(
     mode: SyncMode;
   },
 ) {
-  const supabase = await createSupabaseClient();
+  const supabase = options.skipPermission
+    ? createAdminClient()
+    : await createSupabaseClient();
   if (!options.skipPermission) {
     const isAllowed = await canSyncCompany(options.profile, companyId);
     if (!isAllowed) {
@@ -443,6 +452,7 @@ async function runCompanySyncInternal(
       appSecret,
       lastRequestRef,
       mode: effectiveMode,
+      supabase,
       dateFrom,
       dateTo,
       segmentId: company.segment_id,
@@ -495,6 +505,7 @@ async function syncEntries({
   dateFrom,
   dateTo,
   segmentId,
+  supabase,
 }: {
   companyId: string;
   appKey: string;
@@ -504,8 +515,8 @@ async function syncEntries({
   dateFrom: string;
   dateTo: string;
   segmentId: string | null;
+  supabase: Awaited<ReturnType<typeof createSupabaseClient>>;
 }): Promise<SyncResult> {
-  const supabase = await createSupabaseClient();
 
   // 1. Buscar movimentos financeiros filtrados por data de pagamento
   //    + catalogo de categorias + nomes de clientes/fornecedores.
@@ -741,8 +752,8 @@ async function syncEntries({
       .select("id, omie_id")
       .eq("company_id", companyId);
 
-    if (mode === "incremental") {
-      // Escopo: apenas entries dentro do periodo buscado.
+    if (mode !== "full") {
+      // Escopo: apenas entries dentro do periodo buscado (rolling ou incremental).
       query = query.gte("payment_date", dbDateFrom).lte("payment_date", dbDateTo);
     }
 

@@ -3,13 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { canAccessPath } from "@/lib/auth/access";
 import { getSupabaseEnv } from "@/lib/supabase/env";
+import type { DreRole, CtrlRole } from "@/lib/supabase/types";
 
 export async function updateSession(request: NextRequest) {
   const isDevMode = process.env.NODE_ENV !== "production";
-  const response = NextResponse.next({
-    request,
-  });
+  const response = NextResponse.next({ request });
   const { supabaseAnonKey, supabaseUrl } = getSupabaseEnv();
+  const pathname = request.nextUrl.pathname;
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -25,52 +25,61 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const isAuthRoute =
-    request.nextUrl.pathname === "/login" ||
-    request.nextUrl.pathname === "/signup" ||
-    request.nextUrl.pathname === "/pendente" ||
-    request.nextUrl.pathname.startsWith("/auth/callback");
-  const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
-  const isPublicRoot = request.nextUrl.pathname === "/";
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname === "/pendente" ||
+    pathname.startsWith("/auth/callback");
+  const isApiRoute  = pathname.startsWith("/api/");
+  const isPublicRoot = pathname === "/";
 
   let supabaseResponse = response;
 
   if (!user && !isAuthRoute && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("redirectedFrom", request.nextUrl.pathname);
+    url.searchParams.set("redirectedFrom", pathname);
     supabaseResponse = NextResponse.redirect(url);
-  } else if (user && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/signup")) {
+  } else if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
-    const { data: profile } = await supabase
+    const { data: profileData } = await supabase
       .from("users")
-      .select("role,active")
+      .select(`
+        role, active,
+        user_module_roles!user_module_roles_user_id_fkey(role, module)
+      `)
       .eq("id", user.id)
-      .maybeSingle<{ role: "admin" | "gestor_hero" | "gestor_unidade"; active: boolean }>();
+      .maybeSingle<{
+        role: DreRole;
+        active: boolean;
+        user_module_roles: Array<{ role: string; module: string }> | null;
+      }>();
 
-    const role = profile?.role ?? "gestor_unidade";
-    const isActive = profile?.active ?? true;
+    const dreRole: DreRole = profileData?.role ?? "gestor_unidade";
+    const isActive = profileData?.active ?? true;
 
     if (!isActive) {
       const url = request.nextUrl.clone();
       url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
-    } else if (!canAccessPath(request.nextUrl.pathname, role)) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
-      supabaseResponse = NextResponse.redirect(url);
+    } else {
+      const ctrlModuleRow = profileData?.user_module_roles?.find((r) => r.module === "ctrl");
+      const ctrlRole: CtrlRole | null =
+        dreRole === "admin" ? "admin" : ctrlModuleRow ? (ctrlModuleRow.role as CtrlRole) : null;
+
+      if (!canAccessPath(pathname, dreRole, ctrlRole)) {
+        const url = request.nextUrl.clone();
+        url.pathname = pathname.startsWith("/ctrl") ? "/ctrl/requisicoes" : "/dashboard";
+        supabaseResponse = NextResponse.redirect(url);
+      }
     }
   }
 
-  // Copy over the cookies from the original response (which may have been updated by Supabase)
-  // to our final response, whether it's a redirect or the original request.
   if (supabaseResponse !== response) {
     const cookiesToSet = response.cookies.getAll();
     cookiesToSet.forEach(({ name, value, ...options }) => {

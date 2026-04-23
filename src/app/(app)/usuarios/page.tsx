@@ -17,7 +17,14 @@ export default async function UsuariosPage() {
 
   const adminClient = createAdminClient();
 
-  const [{ data: users }, { data: companies }, { data: segments }, { data: segAccessData }, { data: compAccessData }] = await Promise.all([
+  const [
+    { data: users },
+    { data: companies },
+    { data: segments },
+    { data: segAccessData },
+    { data: compAccessData },
+    { data: ctrlRolesData },
+  ] = await Promise.all([
     supabase
       .from("users")
       .select("id,email,name,role,company_id,active,companies(name)")
@@ -26,7 +33,17 @@ export default async function UsuariosPage() {
     supabase.from("segments").select("id,name,slug").eq("active", true).order("display_order"),
     adminClient.from("user_segment_access").select("user_id,segment_id"),
     adminClient.from("user_company_access").select("user_id,company_id"),
+    adminClient.from("user_module_roles").select("user_id,role").eq("module", "ctrl"),
   ]);
+
+  // Agora um usuario pode ter multiplas linhas em user_module_roles (multi-permissao)
+  const ctrlRolesByUser = new Map<string, string[]>();
+  (ctrlRolesData ?? []).forEach((row) => {
+    const uid = row.user_id as string;
+    const list = ctrlRolesByUser.get(uid) ?? [];
+    list.push(row.role as string);
+    ctrlRolesByUser.set(uid, list);
+  });
 
   const segmentNames = new Map((segments ?? []).map((s) => [s.id as string, s.name as string]));
   const companyNames = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
@@ -53,17 +70,35 @@ export default async function UsuariosPage() {
     }
   });
 
-  const usersData = (users ?? []).map((item) => ({
-    id: item.id as string,
-    email: item.email as string,
-    name: ((item.name as string | null) ?? "") as string,
-    role: item.role as "admin" | "gestor_hero" | "gestor_unidade",
-    company_id: (item.company_id as string | null) ?? null,
-    company_name: ((item.companies as { name?: string } | null)?.name ?? null) as string | null,
-    active: Boolean(item.active),
-    segment_names: userSegments.get(item.id as string) ?? [],
-    company_names: userCompanies.get(item.id as string) ?? [],
-  }));
+  type CtrlRoleKey =
+    | "admin"
+    | "solicitante"
+    | "gerente"
+    | "diretor"
+    | "csc"
+    | "contas_a_pagar"
+    | "aprovacao_fornecedor";
+
+  const usersData = (users ?? []).map((item) => {
+    const dreRole = item.role as "admin" | "gestor_hero" | "gestor_unidade";
+    // Admin DRE tem acesso total ao ctrl implicitamente (nao persistido em user_module_roles)
+    const ctrlRoles: CtrlRoleKey[] =
+      dreRole === "admin"
+        ? ["admin"]
+        : (ctrlRolesByUser.get(item.id as string) ?? []) as CtrlRoleKey[];
+    return {
+      id: item.id as string,
+      email: item.email as string,
+      name: ((item.name as string | null) ?? "") as string,
+      role: dreRole,
+      ctrl_roles: ctrlRoles,
+      company_id: (item.company_id as string | null) ?? null,
+      company_name: ((item.companies as { name?: string } | null)?.name ?? null) as string | null,
+      active: Boolean(item.active),
+      segment_names: userSegments.get(item.id as string) ?? [],
+      company_names: userCompanies.get(item.id as string) ?? [],
+    };
+  });
 
   const companyOptions = (companies ?? []).map((company) => ({
     id: company.id as string,

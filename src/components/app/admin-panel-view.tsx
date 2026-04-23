@@ -33,7 +33,7 @@ function SyncStatusIcon({ status }: { status: string | null }) {
   if (status === "success") return <CheckCircle2 className="h-4 w-4 text-green-600" />;
   if (status === "error") return <XCircle className="h-4 w-4 text-red-600" />;
   if (status === "running") return <Clock3 className="h-4 w-4 text-blue-600 animate-pulse" />;
-  return <AlertTriangle className="h-4 w-4 text-slate-400" />;
+  return <AlertTriangle className="h-4 w-4 text-muted-foreground" />;
 }
 
 function formatDate(dateStr: string | null) {
@@ -153,7 +153,7 @@ export function AdminPanelView({ companies: initialCompanies, segments }: AdminP
           <CardTitle>Todas as Empresas</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-[1.5fr_1.2fr_100px_80px_1fr_120px] gap-2 rounded-md border bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-600">
+          <div className="grid grid-cols-[1.5fr_1.2fr_100px_80px_1fr_120px] gap-2 rounded-md border bg-muted px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
             <span>Empresa</span>
             <span>Segmento</span>
             <span>Status</span>

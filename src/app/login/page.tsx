@@ -33,7 +33,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    router.replace("/home");
   };
 
   useEffect(() => {
@@ -41,7 +41,7 @@ export default function LoginPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        router.replace("/dashboard");
+        router.replace("/home");
       }
     };
 
