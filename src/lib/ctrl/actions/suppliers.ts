@@ -8,7 +8,7 @@ import { requireCtrlRole } from "@/lib/ctrl/auth";
 import type { CtrlSupplier } from "@/lib/supabase/types";
 
 export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado") {
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
+  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
   const supabase = await createClient();
 
   let query = supabase
@@ -24,7 +24,7 @@ export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado
 }
 
 export async function approveSupplier(supplierId: string) {
-  const ctx = await requireCtrlRole("csc", "admin");
+  const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
@@ -44,7 +44,7 @@ export async function approveSupplier(supplierId: string) {
 }
 
 export async function rejectSupplier(supplierId: string, reason: string) {
-  await requireCtrlRole("csc", "admin");
+  await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 

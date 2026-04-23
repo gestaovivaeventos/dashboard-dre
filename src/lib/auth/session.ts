@@ -21,9 +21,9 @@ export function hasDreAccess(ctx: SessionContext, minRole?: DreRole): boolean {
 }
 
 export function hasCtrlAccess(ctx: SessionContext, roles?: CtrlRole[]): boolean {
-  if (!ctx.modules?.ctrl) return false;
+  if (!ctx.modules?.ctrl || ctx.modules.ctrl.roles.length === 0) return false;
   if (!roles || roles.length === 0) return true;
-  return roles.includes(ctx.modules.ctrl.role);
+  return ctx.modules.ctrl.roles.some((r) => roles.includes(r));
 }
 
 // ─── Função principal ─────────────────────────────────────────────────────────
@@ -104,19 +104,20 @@ export async function getSessionContext(): Promise<SessionContext> {
 
   const dreRole = profileRow.role as DreRole;
 
-  const ctrlModuleRow = (
+  // Coleta TODAS as linhas de user_module_roles para module='ctrl'.
+  // Admin DRE recebe ['admin'] implicitamente (nao persistido).
+  const rawCtrlRoles = (
     profileRow.user_module_roles as Array<{ role: string; module: string }> | null
-  )?.find((r) => r.module === "ctrl");
+  )?.filter((r) => r.module === "ctrl").map((r) => r.role as CtrlRole) ?? [];
 
-  const ctrlRole: CtrlRole | null =
-    dreRole === "admin" ? "admin" : ctrlModuleRow ? (ctrlModuleRow.role as CtrlRole) : null;
+  const ctrlRoles: CtrlRole[] = dreRole === "admin" ? ["admin"] : rawCtrlRoles;
 
   const profile: UnifiedProfile = {
     id: profileRow.id,
     email: profileRow.email,
     name: profileRow.name,
     role: dreRole,
-    ctrl_role: ctrlRole,
+    ctrl_roles: ctrlRoles,
     company_id: profileRow.company_id,
     active: profileRow.active,
     created_at: profileRow.created_at,
@@ -124,7 +125,7 @@ export async function getSessionContext(): Promise<SessionContext> {
 
   const modules: ModuleAccess = {
     dre: { role: dreRole, companyId: profileRow.company_id },
-    ctrl: ctrlRole ? { role: ctrlRole } : null,
+    ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
   };
 
   return { supabase, user, profile, modules };

@@ -1,6 +1,6 @@
 import { Building2 } from "lucide-react";
 
-import { getCtrlUser } from "@/lib/ctrl/auth";
+import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { redirect } from "next/navigation";
 
@@ -8,8 +8,7 @@ export default async function SetoresPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  const allowedRoles = ["csc", "admin"] as const;
-  if (!allowedRoles.includes(ctx.ctrlRole as typeof allowedRoles[number])) {
+  if (!hasCtrlRole(ctx, "csc", "admin")) {
     redirect("/ctrl/requisicoes");
   }
 

@@ -30,7 +30,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { UserRole } from "@/lib/supabase/types";
+import type { CtrlRole, UserRole } from "@/lib/supabase/types";
+
+// Roles do modulo ctrl que podem ser atribuidos manualmente (admin e derivado do DRE role).
+type AssignableCtrlRole = Exclude<CtrlRole, "admin">;
+
+const CTRL_ROLE_OPTIONS: { value: AssignableCtrlRole; label: string; hint?: string }[] = [
+  { value: "solicitante", label: "Solicitante", hint: "Pode criar requisicoes de pagamento" },
+  { value: "gerente", label: "Gerente", hint: "Aprova requisicoes de nivel 2" },
+  { value: "diretor", label: "Diretor", hint: "Aprova requisicoes de nivel 3 e reverte" },
+  { value: "csc", label: "CSC", hint: "Acesso financeiro completo" },
+  { value: "contas_a_pagar", label: "Contas a Pagar", hint: "Envia requisicoes aprovadas para pagamento" },
+  { value: "aprovacao_fornecedor", label: "Aprovacao de Fornecedor", hint: "Aprova/rejeita fornecedores" },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,6 +59,7 @@ interface UserItem {
   name: string;
   email: string;
   role: UserRole;
+  ctrl_roles: CtrlRole[];
   company_id: string | null;
   company_name: string | null;
   active: boolean;
@@ -94,6 +107,8 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
   // Permissions
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
+  // Controladoria: conjunto de permissoes. [] = sem acesso ao modulo ctrl.
+  const [selectedCtrlRoles, setSelectedCtrlRoles] = useState<AssignableCtrlRole[]>([]);
 
   // Form
   const [form, setForm] = useState({
@@ -188,6 +203,10 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
       role: user.role,
       company_id: user.company_id ?? "",
     });
+    // 'admin' derivado do DRE role nao e editavel aqui - filtramos fora
+    setSelectedCtrlRoles(
+      user.ctrl_roles.filter((r): r is AssignableCtrlRole => r !== "admin"),
+    );
     try {
       const [segRes, compRes] = await Promise.all([
         fetch(`/api/segments/access?userId=${user.id}`),
@@ -221,6 +240,8 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
           name: form.name,
           role: form.role,
           company_id: effectiveCompanyId,
+          // admin DRE sempre derivado, nao persistir; senao envia o array de roles escolhidas ([] = remover tudo)
+          ctrl_roles: form.role === "admin" ? [] : selectedCtrlRoles,
         }),
       });
       const payload = (await response.json()) as { error?: string };
@@ -549,6 +570,58 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Controladoria (ctrl) roles — multi-select */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Acesso Controladoria</Label>
+              {form.role === "admin" ? (
+                <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  Admin DRE tem acesso total a Controladoria automaticamente.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Marque quantos acessos forem necessarios. Cada acesso e independente -
+                    e possivel combinar (ex.: Gerente + Aprovacao de Fornecedor).
+                  </p>
+                  <div className="rounded-lg border p-3 space-y-1.5">
+                    {CTRL_ROLE_OPTIONS.map((opt) => {
+                      const isChecked = selectedCtrlRoles.includes(opt.value);
+                      return (
+                        <label
+                          key={opt.value}
+                          className="flex items-start gap-2.5 rounded-md px-2 py-1.5 cursor-pointer hover:bg-accent transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() =>
+                              setSelectedCtrlRoles((prev) =>
+                                prev.includes(opt.value)
+                                  ? prev.filter((r) => r !== opt.value)
+                                  : [...prev, opt.value],
+                              )
+                            }
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium leading-tight">{opt.label}</p>
+                            {opt.hint ? (
+                              <p className="text-xs text-muted-foreground mt-0.5">{opt.hint}</p>
+                            ) : null}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {selectedCtrlRoles.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">
+                      Nenhum acesso marcado = usuario nao entra no modulo Controladoria.
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {/* Segment + Company permissions */}
