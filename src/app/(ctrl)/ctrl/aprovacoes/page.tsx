@@ -1,12 +1,16 @@
 import { redirect } from "next/navigation";
 
 import { AprovacoesClient } from "@/components/ctrl/aprovacoes-client";
-import { getCtrlUser } from "@/lib/ctrl/auth";
+import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests } from "@/lib/ctrl/actions/requests";
 
 export default async function AprovacoesPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
+
+  if (!hasCtrlRole(ctx, "gerente", "diretor", "csc", "contas_a_pagar", "admin")) {
+    redirect("/ctrl");
+  }
 
   const { requests = [], error } = await getRequests({
     statuses: ["pendente", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],

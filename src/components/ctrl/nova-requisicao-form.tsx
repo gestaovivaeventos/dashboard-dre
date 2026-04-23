@@ -349,7 +349,19 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className={INPUT_CLS}
+            onClick={(e) => {
+              // Abre o calendario nativo ao clicar em qualquer parte do campo
+              // (Chrome/Edge so abrem via icone por padrao).
+              const el = e.currentTarget as HTMLInputElement & {
+                showPicker?: () => void;
+              };
+              try {
+                el.showPicker?.();
+              } catch {
+                // showPicker pode lancar se chamado sem gesto do usuario ou em browser incompativel.
+              }
+            }}
+            className={`${INPUT_CLS} cursor-pointer`}
           />
         </div>
       </div>

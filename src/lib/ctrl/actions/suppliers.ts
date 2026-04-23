@@ -23,12 +23,20 @@ export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado
   return { suppliers: data as CtrlSupplier[] };
 }
 
-export async function approveSupplier(supplierId: string) {
+export async function approveSupplier(
+  supplierId: string,
+  expenseTypeIds: string[],
+) {
   const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+
+  if (!Array.isArray(expenseTypeIds) || expenseTypeIds.length === 0) {
+    return { error: "Selecione ao menos um tipo de despesa." };
+  }
+
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
-  const { error } = await supabase
+  const { error: updateError } = await supabase
     .from("ctrl_suppliers")
     .update({
       status: "aprovado",
@@ -38,7 +46,27 @@ export async function approveSupplier(supplierId: string) {
     })
     .eq("id", supplierId);
 
-  if (error) return { error: error.message };
+  if (updateError) return { error: updateError.message };
+
+  // Substitui os vinculos existentes pelos selecionados (idempotente em re-aprovacoes).
+  const { error: deleteError } = await supabase
+    .from("ctrl_supplier_expense_types")
+    .delete()
+    .eq("supplier_id", supplierId);
+
+  if (deleteError) return { error: deleteError.message };
+
+  const rows = expenseTypeIds.map((expenseTypeId) => ({
+    supplier_id: supplierId,
+    expense_type_id: expenseTypeId,
+  }));
+
+  const { error: insertError } = await supabase
+    .from("ctrl_supplier_expense_types")
+    .insert(rows);
+
+  if (insertError) return { error: insertError.message };
+
   revalidatePath("/ctrl/admin/fornecedores");
   return { ok: true };
 }

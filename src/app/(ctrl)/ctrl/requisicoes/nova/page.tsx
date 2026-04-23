@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { NovaRequisicaoForm } from "@/components/ctrl/nova-requisicao-form";
-import { getCtrlUser } from "@/lib/ctrl/auth";
+import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getExpenseTypes } from "@/lib/ctrl/actions/expense-types";
 import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { getSuppliers } from "@/lib/ctrl/actions/suppliers";
@@ -21,16 +21,31 @@ export default async function NovaRequisicaoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  const [sectorsResult, expenseTypesResult, suppliersResult, events] = await Promise.all([
-    getSectors(),
-    getExpenseTypes(),
-    getSuppliers("aprovado"),
-    getActiveEvents(),
-  ]);
+  if (!hasCtrlRole(ctx, "solicitante", "gerente", "diretor", "csc", "admin")) {
+    redirect("/ctrl/requisicoes");
+  }
 
-  const sectors = sectorsResult.sectors ?? [];
-  const expenseTypes = expenseTypesResult.expenseTypes ?? [];
-  const suppliers = suppliersResult.suppliers ?? [];
+  const [sectorsSettled, expenseTypesSettled, suppliersSettled, eventsSettled] =
+    await Promise.allSettled([
+      getSectors(),
+      getExpenseTypes(),
+      getSuppliers("aprovado"),
+      getActiveEvents(),
+    ]);
+
+  const sectors =
+    sectorsSettled.status === "fulfilled"
+      ? sectorsSettled.value.sectors ?? []
+      : [];
+  const expenseTypes =
+    expenseTypesSettled.status === "fulfilled"
+      ? expenseTypesSettled.value.expenseTypes ?? []
+      : [];
+  const suppliers =
+    suppliersSettled.status === "fulfilled"
+      ? suppliersSettled.value.suppliers ?? []
+      : [];
+  const events = eventsSettled.status === "fulfilled" ? eventsSettled.value : [];
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

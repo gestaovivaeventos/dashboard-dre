@@ -1,8 +1,62 @@
 import { Truck } from "lucide-react";
+import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
-import { getSuppliers } from "@/lib/ctrl/actions/suppliers";
-import { redirect } from "next/navigation";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
+
+async function getData() {
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const [suppliersResult, expenseTypesResult] = await Promise.all([
+    supabase
+      .from("ctrl_suppliers")
+      .select(
+        `id, name, cnpj_cpf, email, phone, omie_id, from_omie,
+         chave_pix, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao,
+         status, rejection_reason, created_at, approved_at,
+         approver:users!ctrl_suppliers_approved_by_fkey(name, email),
+         ctrl_supplier_expense_types(expense_type_id)`,
+      )
+      .order("name"),
+    supabase.from("ctrl_expense_types").select("id, name").order("name"),
+  ]);
+
+  return {
+    suppliersError: suppliersResult.error?.message ?? null,
+    suppliers: (suppliersResult.data ?? []) as Array<{
+      id: string;
+      name: string;
+      cnpj_cpf: string | null;
+      email: string | null;
+      phone: string | null;
+      omie_id: number | null;
+      from_omie: boolean | null;
+      chave_pix: string | null;
+      banco: string | null;
+      agencia: string | null;
+      conta_corrente: string | null;
+      titular_banco: string | null;
+      doc_titular: string | null;
+      transf_padrao: boolean | null;
+      status: string;
+      rejection_reason: string | null;
+      created_at: string;
+      approved_at: string | null;
+      approver:
+        | { name: string | null; email: string | null }
+        | Array<{ name: string | null; email: string | null }>
+        | null;
+      ctrl_supplier_expense_types: Array<{ expense_type_id: string }> | null;
+    }>,
+    expenseTypes: (expenseTypesResult.data ?? []) as Array<{
+      id: string;
+      name: string;
+    }>,
+  };
+}
 
 export default async function FornecedoresPage() {
   const ctx = await getCtrlUser();
@@ -12,7 +66,9 @@ export default async function FornecedoresPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const { suppliers, error } = await getSuppliers();
+  const canApprove = hasCtrlRole(ctx, "csc", "admin", "aprovacao_fornecedor");
+
+  const { suppliers, expenseTypes, suppliersError } = await getData();
 
   return (
     <div className="space-y-6">
@@ -23,9 +79,9 @@ export default async function FornecedoresPage() {
         </p>
       </div>
 
-      {error ? (
-        <p className="text-sm text-destructive">{error}</p>
-      ) : !suppliers?.length ? (
+      {suppliersError ? (
+        <p className="text-sm text-destructive">{suppliersError}</p>
+      ) : !suppliers.length ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
           <Truck className="mb-4 h-12 w-12 text-muted-foreground/40" />
           <h3 className="font-semibold">Nenhum fornecedor cadastrado</h3>
@@ -34,47 +90,37 @@ export default async function FornecedoresPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-3">Nome</th>
-                <th className="px-4 py-3">CNPJ/CPF</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Criado em</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((s) => (
-                <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-medium">{s.name}</td>
-                  <td className="px-4 py-3 font-mono text-muted-foreground">{s.cnpj_cpf ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={s.status} />
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(s.created_at).toLocaleDateString("pt-BR")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FornecedoresTable
+          suppliers={suppliers.map((s) => {
+            const approver = Array.isArray(s.approver) ? s.approver[0] ?? null : s.approver;
+            return {
+              id: s.id,
+              name: s.name,
+              cnpj_cpf: s.cnpj_cpf,
+              email: s.email,
+              phone: s.phone,
+              omie_id: s.omie_id,
+              from_omie: s.from_omie ?? false,
+              chave_pix: s.chave_pix,
+              banco: s.banco,
+              agencia: s.agencia,
+              conta_corrente: s.conta_corrente,
+              titular_banco: s.titular_banco,
+              doc_titular: s.doc_titular,
+              transf_padrao: s.transf_padrao ?? false,
+              status: s.status,
+              rejection_reason: s.rejection_reason,
+              created_at: s.created_at,
+              approved_at: s.approved_at,
+              approver_name: approver?.name ?? approver?.email ?? null,
+              expense_type_ids:
+                s.ctrl_supplier_expense_types?.map((l) => l.expense_type_id) ?? [],
+            };
+          })}
+          expenseTypes={expenseTypes}
+          canApprove={canApprove}
+        />
       )}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; className: string }> = {
-    aprovado: { label: "Aprovado", className: "bg-green-100 text-green-800" },
-    rejeitado: { label: "Rejeitado", className: "bg-red-100 text-red-800" },
-    pendente: { label: "Pendente", className: "bg-yellow-100 text-yellow-800" },
-  };
-  const config = map[status] ?? { label: status, className: "bg-gray-100 text-gray-800" };
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${config.className}`}>
-      {config.label}
-    </span>
   );
 }

@@ -215,8 +215,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                       </td>
                     )}
                     <td className="px-4 py-3">
-                      <p className="font-medium">#{req.request_number}</p>
-                      <p className="text-xs text-muted-foreground line-clamp-1">{req.title}</p>
+                      <p className="font-medium line-clamp-1">{req.title}</p>
+                      <p className="text-xs text-muted-foreground">#{req.request_number}</p>
                     </td>
                     <td className="px-4 py-3">
                       {sup ? (

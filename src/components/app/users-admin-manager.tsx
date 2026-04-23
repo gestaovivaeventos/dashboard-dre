@@ -267,14 +267,20 @@ export function UsersAdminManager({ initialUsers, companies, segments = [] }: Us
       const segFailed = segResult.status === "rejected" || (segResult.status === "fulfilled" && !segResult.value.ok);
       const compFailed = compResult.status === "rejected" || (compResult.status === "fulfilled" && !compResult.value.ok);
 
+      // Fecha o modal e libera o botao antes de recarregar a lista,
+      // para o usuario nao ficar preso olhando "Salvando..." + modal aberto
+      // enquanto o refresh da lista acontece em segundo plano.
       setEditUserId(null);
+      setSaving(false);
 
       if (segFailed || compFailed) {
         showMessage("Perfil salvo, mas houve erro ao salvar permissoes. Verifique o console.", "error");
       } else {
         showMessage("Usuario atualizado.");
       }
-      await refresh();
+
+      void refresh();
+      return;
     } catch {
       showMessage("Erro de conexao ao salvar usuario.", "error");
     } finally {

@@ -29,11 +29,25 @@ interface AdminPanelViewProps {
   segments: SegmentItem[];
 }
 
-function SyncStatusIcon({ status }: { status: string | null }) {
-  if (status === "success") return <CheckCircle2 className="h-4 w-4 text-green-600" />;
-  if (status === "error") return <XCircle className="h-4 w-4 text-red-600" />;
-  if (status === "running") return <Clock3 className="h-4 w-4 text-blue-600 animate-pulse" />;
-  return <AlertTriangle className="h-4 w-4 text-muted-foreground" />;
+function SyncStatusIcon({
+  status,
+  error,
+}: {
+  status: string | null;
+  error?: string | null;
+}) {
+  const title =
+    status === "error"
+      ? error ?? "Erro na sincronizacao"
+      : status === "success"
+        ? "Sincronizacao concluida"
+        : status === "running"
+          ? "Sincronizando..."
+          : "Nunca sincronizada";
+  if (status === "success") return <CheckCircle2 className="h-4 w-4 text-green-600" aria-label={title} />;
+  if (status === "error") return <XCircle className="h-4 w-4 text-red-600" aria-label={title} />;
+  if (status === "running") return <Clock3 className="h-4 w-4 text-blue-600 animate-pulse" aria-label={title} />;
+  return <AlertTriangle className="h-4 w-4 text-muted-foreground" aria-label={title} />;
 }
 
 function formatDate(dateStr: string | null) {
@@ -140,9 +154,18 @@ export function AdminPanelView({ companies: initialCompanies, segments }: AdminP
         <Card className="border-red-300 bg-red-50">
           <CardContent className="pt-4">
             <p className="text-sm font-medium text-red-800">
-              {lastErrors.length} empresa(s) com erro na ultima sync:{" "}
-              {lastErrors.map((c) => c.name).join(", ")}
+              {lastErrors.length} empresa(s) com erro na ultima sync:
             </p>
+            <ul className="mt-2 space-y-1 text-xs text-red-800">
+              {lastErrors.map((c) => (
+                <li key={c.id}>
+                  <span className="font-semibold">{c.name}:</span>{" "}
+                  <span className="font-mono">
+                    {c.last_sync_error ?? "Erro nao informado"}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ) : null}
@@ -191,15 +214,36 @@ export function AdminPanelView({ companies: initialCompanies, segments }: AdminP
               <span className={company.active ? "text-green-700" : "text-red-700"}>
                 {company.active ? "Ativa" : "Inativa"}
               </span>
-              <span className="flex items-center gap-1">
-                <SyncStatusIcon status={company.last_sync_status} />
+              <span
+                className="flex items-center gap-1"
+                title={
+                  company.last_sync_status === "error"
+                    ? company.last_sync_error ?? "Erro na sincronizacao"
+                    : undefined
+                }
+              >
+                <SyncStatusIcon
+                  status={company.last_sync_status}
+                  error={company.last_sync_error}
+                />
               </span>
               <span className="text-muted-foreground text-xs">
                 {formatDate(company.last_sync_at)}
               </span>
-              <span className="text-muted-foreground">
-                {company.last_sync_records > 0 ? company.last_sync_records.toLocaleString("pt-BR") : "—"}
-              </span>
+              {company.last_sync_status === "error" ? (
+                <span
+                  className="truncate text-xs text-red-700"
+                  title={company.last_sync_error ?? "Erro na sincronizacao"}
+                >
+                  {company.last_sync_error ?? "Erro na sincronizacao"}
+                </span>
+              ) : !company.last_sync_at ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
+                <span className="text-muted-foreground">
+                  {company.last_sync_records.toLocaleString("pt-BR")}
+                </span>
+              )}
             </div>
           ))}
         </CardContent>

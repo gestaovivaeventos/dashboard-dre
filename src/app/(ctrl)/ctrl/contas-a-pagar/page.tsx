@@ -2,15 +2,21 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { ContasAPagarTable, type ContasRequest } from "@/components/ctrl/contas-a-pagar-table";
 
 async function getCompanies() {
-  const supabase = await createClient();
-  const { data } = await supabase
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+  const { data, error } = await supabase
     .from("companies")
     .select("id, name")
     .eq("active", true)
     .order("name");
+  if (error) {
+    console.error("[contas-a-pagar] Falha ao carregar empresas:", error);
+    return [];
+  }
   return (data ?? []) as { id: string; name: string }[];
 }
 

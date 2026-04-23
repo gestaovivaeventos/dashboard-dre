@@ -1,12 +1,35 @@
 import { FileText, Plus } from "lucide-react";
 
-import { getCtrlUser } from "@/lib/ctrl/auth";
+import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests } from "@/lib/ctrl/actions/requests";
 import { redirect } from "next/navigation";
 
 export default async function RequisicoesPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
+
+  if (
+    !hasCtrlRole(
+      ctx,
+      "solicitante",
+      "gerente",
+      "diretor",
+      "csc",
+      "contas_a_pagar",
+      "admin",
+    )
+  ) {
+    redirect("/ctrl");
+  }
+
+  const canCreateRequest = hasCtrlRole(
+    ctx,
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "admin",
+  );
 
   const { requests, error } = await getRequests();
 
@@ -21,13 +44,15 @@ export default async function RequisicoesPage() {
               : "Todas as requisições"}
           </p>
         </div>
-        <a
-          href="/ctrl/requisicoes/nova"
-          className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Nova Requisição
-        </a>
+        {canCreateRequest ? (
+          <a
+            href="/ctrl/requisicoes/nova"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Nova Requisição
+          </a>
+        ) : null}
       </div>
 
       {error ? (
