@@ -1,0 +1,272 @@
+/* =========================================================
+   VIVA EVENTOS — Design Tokens + Utilitarios
+   Importado em src/app/globals.css.
+   Fontes sao carregadas via next/font em src/app/layout.tsx
+   (variaveis --font-display e --font-body).
+   ========================================================= */
+
+:root {
+  /* ---------- Brand ---------- */
+  --viva-orange-50:  #FFF2E8;
+  --viva-orange-100: #FFE0C9;
+  --viva-orange-200: #FFC091;
+  --viva-orange-300: #FFA05A;
+  --viva-orange-400: #FF8636;
+  --viva-orange-500: #FF6B1A;   /* laranja principal do logo */
+  --viva-orange-600: #E85A0F;
+  --viva-orange-700: #B8450B;
+  --viva-orange-800: #8A3208;
+  --viva-orange-900: #5C2105;
+
+  /* ---------- Surfaces (dark tech) ---------- */
+  --surface-0:  #0F1319;
+  --surface-1:  #161B24;
+  --surface-2:  #1C2330;
+  --surface-3:  #232C3B;
+  --surface-4:  #2E3849;
+
+  /* ---------- Text ---------- */
+  --text-primary:   #F1F4F9;
+  --text-secondary: #A8B1C1;
+  --text-muted:     #6B7689;
+  --text-disabled:  #454E60;
+
+  /* ---------- Borders ---------- */
+  --border-subtle:  rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+
+  /* ---------- Status (saude / semaforo) ---------- */
+  --status-critical: #F04438;
+  --status-warning:  #F79009;
+  --status-progress: #3B82F6;
+  --status-success:  #12B76A;
+  --status-info:     #06AED4;
+
+  --status-critical-bg: rgba(240, 68, 56, 0.12);
+  --status-warning-bg:  rgba(247, 144,  9, 0.12);
+  --status-progress-bg: rgba(59, 130, 246, 0.12);
+  --status-success-bg:  rgba(18, 183, 106, 0.12);
+
+  /* ---------- Gradient cards (status) ---------- */
+  --grad-critical: linear-gradient(135deg, rgba(240,68,56,0.25) 0%, rgba(240,68,56,0.05) 100%);
+  --grad-warning:  linear-gradient(135deg, rgba(247,144, 9,0.25) 0%, rgba(247,144, 9,0.05) 100%);
+  --grad-progress: linear-gradient(135deg, rgba(59,130,246,0.25) 0%, rgba(59,130,246,0.05) 100%);
+  --grad-success:  linear-gradient(135deg, rgba(18,183,106,0.25) 0%, rgba(18,183,106,0.05) 100%);
+
+  /* ---------- Radii / sombras ---------- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.5);
+}
+
+/* =========================================================
+   Typography utilities
+   ========================================================= */
+.t-display {
+  font-family: var(--font-display), "Chakra Petch", "Rajdhani", system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.t-label {
+  font-family: var(--font-body), "Inter", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.t-kpi {
+  font-family: var(--font-display), "Chakra Petch", "Rajdhani", system-ui, sans-serif;
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.t-muted { color: var(--text-muted); }
+
+/* =========================================================
+   Assinatura visual: borda laranja sob headers
+   ========================================================= */
+.viva-underline {
+  position: relative;
+}
+.viva-underline::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg,
+    var(--viva-orange-500) 0%,
+    var(--viva-orange-500) 40%,
+    transparent 100%);
+}
+
+/* =========================================================
+   Cards
+   ========================================================= */
+.viva-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+.viva-card--elevated {
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+}
+
+/* Status (saude) cards com gradiente */
+.viva-status-card {
+  position: relative;
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+.viva-status-card--critical { background: var(--grad-critical); }
+.viva-status-card--warning  { background: var(--grad-warning); }
+.viva-status-card--progress { background: var(--grad-progress); }
+.viva-status-card--success  { background: var(--grad-success); }
+
+/* =========================================================
+   Buttons
+   ========================================================= */
+.viva-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body), "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 120ms ease;
+  white-space: nowrap;
+}
+.viva-btn--primary {
+  background: var(--viva-orange-500);
+  color: #fff;
+}
+.viva-btn--primary:hover { background: var(--viva-orange-600); }
+
+.viva-btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+.viva-btn--ghost:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.viva-btn--tab {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+  padding: 10px 14px;
+  width: 100%;
+  justify-content: flex-start;
+}
+.viva-btn--tab.is-active {
+  background: var(--surface-3);
+  color: var(--viva-orange-500);
+  border-color: var(--viva-orange-500);
+}
+
+/* =========================================================
+   Inputs / selects
+   ========================================================= */
+.viva-input,
+.viva-select {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: var(--font-body), "Inter", system-ui, sans-serif;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+.viva-input:focus,
+.viva-select:focus {
+  border-color: var(--viva-orange-500);
+}
+
+/* =========================================================
+   Tables
+   ========================================================= */
+.viva-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.viva-table thead th {
+  text-align: left;
+  font-family: var(--font-body), "Inter", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-1);
+}
+.viva-table tbody td {
+  padding: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+.viva-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.viva-table tbody tr:hover td { background: var(--surface-2); }
+
+/* =========================================================
+   Badges
+   ========================================================= */
+.viva-badge {
+  display: inline-flex; align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+}
+.viva-badge--critical { background: var(--status-critical-bg); color: var(--status-critical); }
+.viva-badge--warning  { background: var(--status-warning-bg);  color: var(--status-warning);  }
+.viva-badge--progress { background: var(--status-progress-bg); color: var(--status-progress); }
+.viva-badge--success  { background: var(--status-success-bg);  color: var(--status-success);  }
+
+/* =========================================================
+   Progress bar
+   ========================================================= */
+.viva-progress {
+  width: 100%; height: 8px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.viva-progress__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--viva-orange-400), var(--viva-orange-500));
+  border-radius: 999px;
+}
+
+/* Scrollbars discretos */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--surface-4); }

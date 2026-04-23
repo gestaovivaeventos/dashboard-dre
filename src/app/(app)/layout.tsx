@@ -16,7 +16,7 @@ export default async function ProtectedLayout({
   const userName = profile?.name || user.email || "Usuario";
   const userEmail = profile?.email || user.email || "";
   const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
-  const ctrlRole = modules?.ctrl?.role ?? null;
+  const ctrlRoles = modules?.ctrl?.roles ?? [];
 
   // Fetch segments the user has access to
   let segments: Segment[] = [];
@@ -39,7 +39,7 @@ export default async function ProtectedLayout({
   }
 
   return (
-    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} ctrlRole={ctrlRole} segments={segments}>
+    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} ctrlRoles={ctrlRoles} segments={segments}>
       {children}
     </AppShell>
   );

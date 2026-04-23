@@ -39,7 +39,7 @@ interface NewsItem {
 
 interface HomeViewProps {
   userName: string;
-  ctrlRole?: CtrlRole | null;
+  ctrlRoles?: CtrlRole[];
   pendingApprovalsCount?: number;
 }
 
@@ -71,7 +71,10 @@ function alertDotColor(type: string): string {
   return "bg-blue-400";
 }
 
-export function HomeView({ userName, ctrlRole, pendingApprovalsCount = 0 }: HomeViewProps) {
+export function HomeView({ userName, ctrlRoles = [], pendingApprovalsCount = 0 }: HomeViewProps) {
+  const canSeeApprovals = ctrlRoles.some((r) =>
+    (["gerente", "diretor", "csc", "admin", "contas_a_pagar", "aprovacao_fornecedor"] as CtrlRole[]).includes(r),
+  );
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -121,7 +124,7 @@ export function HomeView({ userName, ctrlRole, pendingApprovalsCount = 0 }: Home
       </div>
 
       {/* ── 1b. Ctrl Approvals Banner ─────────────────────────────── */}
-      {ctrlRole && ctrlRole !== "solicitante" && (
+      {canSeeApprovals && (
         <Link
           href="/ctrl/aprovacoes"
           className="block rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 transition-colors hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/30 dark:hover:bg-violet-950/50"

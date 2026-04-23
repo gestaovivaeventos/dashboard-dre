@@ -12,13 +12,13 @@ import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
   role: DreRole;
-  ctrlRole?: CtrlRole | null;
+  ctrlRoles?: CtrlRole[];
   segments: Segment[];
   collapsed?: boolean;
   onNavigate?: () => void;
 }
 
-export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: NavLinksProps) {
+export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: NavLinksProps) {
   const pathname = usePathname();
 
   const activeSegmentSlug = segments.find((s) =>
@@ -35,8 +35,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
 
   const subItems    = SEGMENT_SUB_ITEMS.filter((item) => item.roles.includes(role));
   const globalItems = GLOBAL_NAV_ITEMS.filter((item) => item.roles.includes(role));
-  const ctrlItems   = ctrlRole
-    ? CTRL_NAV_ITEMS.filter((item) => item.roles.includes(ctrlRole))
+  const ctrlItems   = ctrlRoles && ctrlRoles.length > 0
+    ? CTRL_NAV_ITEMS.filter((item) => ctrlRoles.some((r) => item.roles.includes(r)))
     : [];
 
   // ─── Collapsed mode ───────────────────────────────────────────────────────
@@ -58,8 +58,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
                   className={cn(
                     "flex h-10 w-full items-center justify-center rounded-lg text-sm transition-colors",
                     isSegmentActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      ? "bg-viva-500 text-white"
+                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
                   )}
                 >
                   <span className="text-xs font-bold uppercase">
@@ -72,7 +72,7 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
           );
         })}
 
-        {ctrlItems.length > 0 && <div className="my-2 border-t" />}
+        {ctrlItems.length > 0 && <div className="my-2 border-t border-white/5" />}
 
         {ctrlItems.map((item) => {
           const Icon = item.icon;
@@ -86,8 +86,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
                   className={cn(
                     "flex h-10 w-full items-center justify-center rounded-lg transition-colors",
                     isActive
-                      ? "bg-violet-600 text-white"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      ? "bg-viva-500 text-white"
+                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -98,7 +98,7 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
           );
         })}
 
-        {globalItems.length > 0 && <div className="my-2 border-t" />}
+        {globalItems.length > 0 && <div className="my-2 border-t border-white/5" />}
 
         {globalItems.map((item) => {
           const Icon = item.icon;
@@ -112,8 +112,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
                   className={cn(
                     "flex h-10 w-full items-center justify-center rounded-lg transition-colors",
                     isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      ? "bg-viva-500 text-white"
+                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -133,7 +133,7 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
     <nav className="space-y-1">
       {/* Segmentos DRE */}
       {segments.length > 0 && (
-        <div className="mb-1 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        <div className="t-label mb-1 px-3 py-1 text-ink-muted/80">
           DRE Financeiro
         </div>
       )}
@@ -148,8 +148,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
               className={cn(
                 "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 pathname.startsWith(`/s/${segment.slug}`)
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                  ? "bg-surface-3 text-viva-500"
+                  : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
               )}
             >
               <span className="truncate">{segment.name}</span>
@@ -175,8 +175,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
                       className={cn(
                         "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
                         isActive
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          ? "bg-viva-500 text-white"
+                          : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
                       )}
                     >
                       <Icon className="h-3.5 w-3.5" />
@@ -193,8 +193,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
       {/* Seção Controladoria */}
       {ctrlItems.length > 0 && (
         <>
-          <div className="my-3 border-t" />
-          <div className="mb-1 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-violet-500">
+          <div className="my-3 border-t border-white/5" />
+          <div className="t-label mb-1 px-3 py-1 text-viva-500">
             Controladoria
           </div>
           {ctrlItems.map((item) => {
@@ -208,8 +208,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                   isActive
-                    ? "bg-violet-600 text-white"
-                    : "text-muted-foreground hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/40",
+                    ? "bg-viva-500 text-white"
+                    : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -221,7 +221,7 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
       )}
 
       {/* Items globais DRE */}
-      {globalItems.length > 0 && <div className="my-3 border-t" />}
+      {globalItems.length > 0 && <div className="my-3 border-t border-white/5" />}
 
       {globalItems.map((item) => {
         const Icon = item.icon;
@@ -234,8 +234,8 @@ export function NavLinks({ role, ctrlRole, segments, collapsed, onNavigate }: Na
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
               isActive
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                ? "bg-viva-500 text-white"
+                : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
             )}
           >
             <Icon className="h-4 w-4" />

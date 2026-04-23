@@ -18,20 +18,20 @@ interface AppShellProps {
   userName: string;
   userEmail: string;
   userRole: DreRole;
-  ctrlRole?: CtrlRole | null;
+  ctrlRoles?: CtrlRole[];
   segments: Segment[];
 }
 
-export function AppShell({ children, userName, userEmail, userRole, ctrlRole, segments }: AppShellProps) {
+export function AppShell({ children, userName, userEmail, userRole, ctrlRoles, segments }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-surface-0">
         {/* Desktop sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r bg-background transition-all duration-300 md:flex ${
+          className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-white/5 bg-surface-1 transition-all duration-300 md:flex ${
             collapsed ? "w-16" : "w-72"
           }`}
         >
@@ -40,23 +40,23 @@ export function AppShell({ children, userName, userEmail, userRole, ctrlRole, se
           </a>
 
           <div className="flex-1 overflow-y-auto px-2">
-            <NavLinks role={userRole} ctrlRole={ctrlRole} segments={segments} collapsed={collapsed} />
+            <NavLinks role={userRole} ctrlRoles={ctrlRoles} segments={segments} collapsed={collapsed} />
           </div>
 
-          <div className="border-t p-2">
+          <div className="border-t border-white/5 p-2">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={() => setCollapsed(!collapsed)}
-              className={`w-full ${collapsed ? "justify-center px-0" : "justify-start gap-2"}`}
+              className={`w-full text-ink-secondary hover:text-ink-primary ${collapsed ? "justify-center px-0" : "justify-start gap-2"}`}
             >
               {collapsed ? (
                 <PanelLeftOpen className="h-4 w-4" />
               ) : (
                 <>
                   <PanelLeftClose className="h-4 w-4" />
-                  <span className="text-xs text-muted-foreground">Recolher menu</span>
+                  <span className="text-xs">Recolher menu</span>
                 </>
               )}
             </Button>
@@ -68,8 +68,9 @@ export function AppShell({ children, userName, userEmail, userRole, ctrlRole, se
             collapsed ? "md:pl-16" : "md:pl-72"
           }`}
         >
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background px-4 md:px-6">
-            <div className="flex items-center gap-2 md:hidden">
+          {/* Topbar Viva: 68px, surface-1, borda inferior laranja 2px (assinatura visual) */}
+          <header className="sticky top-0 z-30 flex h-[68px] items-center justify-between border-b-2 border-viva-500 bg-surface-1 px-4 md:px-6">
+            <div className="flex items-center gap-3 md:hidden">
               <Sheet open={open} onOpenChange={setOpen}>
                 <SheetTrigger asChild>
                   <Button type="button" variant="outline" size="icon">
@@ -77,23 +78,27 @@ export function AppShell({ children, userName, userEmail, userRole, ctrlRole, se
                     <span className="sr-only">Abrir menu</span>
                   </Button>
                 </SheetTrigger>
-                <SheetContent>
+                <SheetContent className="bg-surface-1">
                   <a href="/home" className="mb-6 block">
                     <LogoFull />
                   </a>
-                  <NavLinks role={userRole} ctrlRole={ctrlRole} segments={segments} onNavigate={() => setOpen(false)} />
+                  <NavLinks role={userRole} ctrlRoles={ctrlRoles} segments={segments} onNavigate={() => setOpen(false)} />
                 </SheetContent>
               </Sheet>
-              <span className="text-sm font-bold">Controll Hub</span>
+              <span className="t-display text-sm text-ink-primary">Controll Hub</span>
+            </div>
+
+            <div className="hidden md:block">
+              <span className="t-display text-sm text-ink-primary">Controll Hub</span>
             </div>
 
             <div className="ml-auto flex items-center gap-4">
               <div className="text-right">
-                <p className="text-sm font-medium leading-none">{userName}</p>
-                <p className="text-xs text-muted-foreground">{userEmail}</p>
+                <p className="text-sm font-medium leading-none text-ink-primary">{userName}</p>
+                <p className="text-xs text-ink-muted">{userEmail}</p>
               </div>
               <ThemeToggle />
-              <Separator className="hidden h-8 w-px sm:block" />
+              <Separator className="hidden h-8 w-px bg-white/10 sm:block" />
               <SignOutButton />
             </div>
           </header>

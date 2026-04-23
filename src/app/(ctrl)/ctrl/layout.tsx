@@ -14,7 +14,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const userName  = profile?.name || ctx.user.email || "Usuario";
   const userEmail = profile?.email || ctx.user.email || "";
   const dreRole   = modules!.dre!.role;
-  const ctrlRole  = modules!.ctrl!.role;
+  const ctrlRoles = modules!.ctrl!.roles;
 
   // Segmentos para o shell DRE (mesmo do (app) layout)
   let segments: Segment[] = [];
@@ -41,7 +41,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       userName={userName}
       userEmail={userEmail}
       userRole={dreRole}
-      ctrlRole={ctrlRole}
+      ctrlRoles={ctrlRoles}
       segments={segments}
     >
       {children}

@@ -11,10 +11,15 @@ export default async function HomePage() {
   if (!user) redirect("/login");
 
   const userName = profile?.name || user.email || "Usuario";
-  const ctrlRole = modules?.ctrl?.role ?? null;
+  const ctrlRoles = modules?.ctrl?.roles ?? [];
+
+  // Mostra contagem de aprovacoes pendentes para quem tem algum role com poder de aprovacao
+  const canSeeApprovals = ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar", "aprovacao_fornecedor"].includes(r),
+  );
 
   let pendingApprovalsCount = 0;
-  if (ctrlRole && ctrlRole !== "solicitante") {
+  if (canSeeApprovals) {
     try {
       const adminClient = createAdminClient();
       const { count } = await adminClient
@@ -30,7 +35,7 @@ export default async function HomePage() {
   return (
     <HomeView
       userName={userName}
-      ctrlRole={ctrlRole}
+      ctrlRoles={ctrlRoles}
       pendingApprovalsCount={pendingApprovalsCount}
     />
   );
