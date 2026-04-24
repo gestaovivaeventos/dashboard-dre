@@ -357,11 +357,11 @@ export async function runCompanySync(
   profile: UserProfile,
   mode: SyncMode = "incremental",
 ) {
-  return runCompanySyncInternal(companyId, {
-    profile,
-    skipPermission: false,
-    mode,
-  });
+  const isAllowed = await canSyncCompany(profile, companyId);
+  if (!isAllowed) {
+    throw new Error("Sem permissao para sincronizar esta empresa.");
+  }
+  return runCompanySyncAsSystem(companyId, mode);
 }
 
 export async function runCompanySyncAsSystem(
