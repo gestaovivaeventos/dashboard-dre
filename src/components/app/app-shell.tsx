@@ -31,7 +31,7 @@ export function AppShell({ children, userName, userEmail, userRole, ctrlRoles, s
       <div className="min-h-screen bg-surface-0">
         {/* Desktop sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-white/5 bg-surface-1 transition-all duration-300 md:flex ${
+          className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-border bg-surface-1 transition-all duration-300 md:flex ${
             collapsed ? "w-16" : "w-72"
           }`}
         >
@@ -43,7 +43,7 @@ export function AppShell({ children, userName, userEmail, userRole, ctrlRoles, s
             <NavLinks role={userRole} ctrlRoles={ctrlRoles} segments={segments} collapsed={collapsed} />
           </div>
 
-          <div className="border-t border-white/5 p-2">
+          <div className="border-t border-border p-2">
             <Button
               type="button"
               variant="ghost"

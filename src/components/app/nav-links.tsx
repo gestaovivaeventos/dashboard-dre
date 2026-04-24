@@ -72,7 +72,7 @@ export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: N
           );
         })}
 
-        {ctrlItems.length > 0 && <div className="my-2 border-t border-white/5" />}
+        {ctrlItems.length > 0 && <div className="my-2 border-t border-border" />}
 
         {ctrlItems.map((item) => {
           const Icon = item.icon;
@@ -98,7 +98,7 @@ export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: N
           );
         })}
 
-        {globalItems.length > 0 && <div className="my-2 border-t border-white/5" />}
+        {globalItems.length > 0 && <div className="my-2 border-t border-border" />}
 
         {globalItems.map((item) => {
           const Icon = item.icon;
@@ -193,7 +193,7 @@ export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: N
       {/* Seção Controladoria */}
       {ctrlItems.length > 0 && (
         <>
-          <div className="my-3 border-t border-white/5" />
+          <div className="my-3 border-t border-border" />
           <div className="t-label mb-1 px-3 py-1 text-viva-500">
             Controladoria
           </div>
@@ -221,7 +221,7 @@ export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: N
       )}
 
       {/* Items globais DRE */}
-      {globalItems.length > 0 && <div className="my-3 border-t border-white/5" />}
+      {globalItems.length > 0 && <div className="my-3 border-t border-border" />}
 
       {globalItems.map((item) => {
         const Icon = item.icon;

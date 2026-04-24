@@ -58,18 +58,20 @@ const config: Config = {
           800: "#8A3208",
           900: "#5C2105",
         },
+        // Surfaces e textos seguem as CSS vars — alternam entre tema
+        // claro (:root) e escuro (.dark) definidos em viva-tokens.css.
         surface: {
-          0: "#0F1319",
-          1: "#161B24",
-          2: "#1C2330",
-          3: "#232C3B",
-          4: "#2E3849",
+          0: "var(--surface-0)",
+          1: "var(--surface-1)",
+          2: "var(--surface-2)",
+          3: "var(--surface-3)",
+          4: "var(--surface-4)",
         },
         ink: {
-          primary:   "#F1F4F9",
-          secondary: "#A8B1C1",
-          muted:     "#6B7689",
-          disabled:  "#454E60",
+          primary:   "var(--text-primary)",
+          secondary: "var(--text-secondary)",
+          muted:     "var(--text-muted)",
+          disabled:  "var(--text-disabled)",
         },
         status: {
           critical: "#F04438",
