@@ -23,13 +23,27 @@ export const metadata: Metadata = {
   description: "Painel DRE com autenticação Supabase",
 };
 
+// Aplica o tema salvo antes da hidratacao para nao "piscar" ao carregar.
+// Se nao houver preferencia salva, usa a do sistema operacional.
+const THEME_INIT_SCRIPT = `
+(function(){try{
+  var stored = localStorage.getItem('theme');
+  var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var isDark = stored === 'dark' || (!stored && prefersDark);
+  if (isDark) document.documentElement.classList.add('dark');
+}catch(e){}})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`dark ${display.variable} ${body.variable}`}>
+    <html lang="pt-BR" className={`${display.variable} ${body.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
         <ToasterProvider>{children}</ToasterProvider>
       </body>

@@ -16,35 +16,34 @@
    tema dark + laranja sem precisar reescrever nada.
    ========================================================= */
 :root {
-  /* shadcn agora SEMPRE usa os valores dark Viva (o projeto e
-     dark-first; a classe .dark mantem-se ativa no <html>). */
-  --background:            217 23% 8%;    /* surface-0 */
-  --foreground:            216 29% 96%;   /* ink-primary */
+  /* Modo CLARO (default). O toggle adiciona .dark para trocar. */
+  --background:            220 20% 98%;   /* off-white */
+  --foreground:            217 23% 12%;   /* quase preto */
 
-  --card:                  218 25% 12%;   /* surface-1 */
-  --card-foreground:       216 29% 96%;
+  --card:                  0 0% 100%;     /* branco puro */
+  --card-foreground:       217 23% 12%;
 
-  --popover:               218 27% 15%;   /* surface-2 */
-  --popover-foreground:    216 29% 96%;
+  --popover:               0 0% 100%;
+  --popover-foreground:    217 23% 12%;
 
-  --primary:               20 100% 55%;   /* viva-500 */
+  --primary:               20 100% 55%;   /* viva-500 (identidade, nao muda) */
   --primary-foreground:    0 0% 100%;
 
-  --secondary:             219 25% 18%;   /* surface-3 */
-  --secondary-foreground:  216 29% 96%;
+  --secondary:             220 14% 94%;   /* cinza bem claro */
+  --secondary-foreground:  217 23% 12%;
 
-  --muted:                 218 27% 15%;   /* surface-2 */
-  --muted-foreground:      220 15% 71%;   /* ink-secondary */
+  --muted:                 220 14% 94%;
+  --muted-foreground:      220 10% 45%;   /* cinza medio para textos secundarios */
 
-  --accent:                219 25% 18%;   /* surface-3 (hover) */
-  --accent-foreground:     216 29% 96%;
+  --accent:                220 14% 94%;
+  --accent-foreground:     217 23% 12%;
 
-  --destructive:           4 86% 58%;     /* status-critical */
+  --destructive:           4 86% 58%;
   --destructive-foreground: 0 0% 100%;
 
-  --border:                219 26% 19%;   /* proximo do surface-3 - cor solida visivel */
-  --input:                 218 27% 15%;   /* surface-2 */
-  --ring:                  20 100% 55%;   /* viva-500 */
+  --border:                220 13% 88%;   /* cinza visivel em fundo claro */
+  --input:                 220 13% 88%;
+  --ring:                  20 100% 55%;
 
   --radius: 0.75rem;
 }
