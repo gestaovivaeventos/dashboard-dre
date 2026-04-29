@@ -604,38 +604,35 @@ async function syncEntries({
       const fundosDespId = dreIdByCode.get("5.9");     // Despesas Ressarciveis - Fundos
 
       if (recRessarcId && despRessarcId && fundosRecId && fundosDespId) {
-        // DUPLA DETECCAO de categorias ressarciveis:
+        // FONTE UNICA DE VERDADE: catalogo Omie da PROPRIA empresa.
         //
-        // Fonte 1: category_mapping — category_codes mapeados para 2.4 ou 7.5.5
-        //          em qualquer empresa (cobre categorias ja mapeadas)
-        const { data: mappingsData } = await supabase
-          .from("category_mapping")
-          .select("omie_category_code,dre_account_id,company_id")
-          .in("dre_account_id", [recRessarcId, despRessarcId]);
-
-        const effectiveMapping = new Map<string, string>(); // category_code → dre_account_id
-        (mappingsData ?? []).forEach((m) => {
-          const cc = m.omie_category_code as string;
-          const dreId = m.dre_account_id as string;
-          const cid = m.company_id as string | null;
-          if (cid === companyId) {
-            effectiveMapping.set(cc, dreId);
-          } else if (!effectiveMapping.has(cc)) {
-            effectiveMapping.set(cc, dreId);
-          }
-        });
-
-        // Fonte 2: catalogo Omie — categorias cujo nome contem "ressarc"
-        //          (cobre categorias nao mapeadas ainda, como em empresas novas)
+        // A regra de Fundos (cCodProjeto) so vale para categorias cujo NOME
+        // no catalogo Omie da empresa seja exatamente um dos 4 canonicos:
+        //   "Receitas Ressarciveis", "Receitas Ressarciveis (*)",
+        //   "Despesas Ressarciveis", "Despesas Ressarciveis (*)".
+        //
+        // Comparacao case/acentos-insensivel, por IGUALDADE (nao substring).
+        // Mapeamentos manuais em category_mapping NAO sao consultados aqui
+        // de proposito: o mesmo codigo Omie (ex.: "1.04.98") pode ser
+        // "Estorno de Pagamento" no catalogo de uma empresa e ter sido
+        // mapeado erroneamente para 2.4/7.5.5 em outra — confiar no nome
+        // canonico do catalogo da propria empresa evita contaminar a regra
+        // de Fundos com categorias nao-ressarciveis.
+        const effectiveMapping = new Map<string, string>(); // category_code → dre_account_id (2.4 ou 7.5.5)
         for (const [code, description] of Array.from(categoryCatalog.entries())) {
-          if (effectiveMapping.has(code)) continue; // ja detectado pelo mapeamento
-          const norm = description.toLowerCase()
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          if (norm.includes("ressarc")) {
-            // Determinar se é receita ou despesa pelo prefixo do código Omie
-            // Códigos 1.xx = receita, 2.xx = despesa (convenção Omie)
-            const isReceita = code.startsWith("1.");
-            effectiveMapping.set(code, isReceita ? recRessarcId : despRessarcId);
+          const trimmed = description.toLowerCase()
+            .normalize("NFD").replace(/[̀-ͯ]/g, "")
+            .trim();
+          if (
+            trimmed === "receitas ressarciveis" ||
+            trimmed === "receitas ressarciveis (*)"
+          ) {
+            effectiveMapping.set(code, recRessarcId);
+          } else if (
+            trimmed === "despesas ressarciveis" ||
+            trimmed === "despesas ressarciveis (*)"
+          ) {
+            effectiveMapping.set(code, despRessarcId);
           }
         }
 
