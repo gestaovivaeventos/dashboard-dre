@@ -1,0 +1,50 @@
+{
+  "remover": [
+    {
+      "id": "b8a87ff2-0678-48df-bc61-7cd2361610da",
+      "company": "Belo Horizonte",
+      "code": "__fundos_rec_1.04.99",
+      "company_id": "fa5bcff4-2000-4e9d-8bc8-478599d43d71"
+    },
+    {
+      "id": "d9be7e68-b632-4fc3-91e6-6f483663b05d",
+      "company": "Belo Horizonte",
+      "code": "__fundos_desp_2.08.98",
+      "company_id": "fa5bcff4-2000-4e9d-8bc8-478599d43d71"
+    },
+    {
+      "id": "d4946dca-7722-40d1-b136-bb17b93195f3",
+      "company": "Belo Horizonte",
+      "code": "__fundos_desp_2.08.96",
+      "company_id": "fa5bcff4-2000-4e9d-8bc8-478599d43d71"
+    },
+    {
+      "id": "6ee03021-c316-41dd-8f08-5571317f5d9a",
+      "company": "Viva Volta Redonda",
+      "code": "__fundos_desp_2.08.96",
+      "company_id": "77001237-d53c-4f1f-b910-25852b53d373"
+    }
+  ],
+  "manter": [
+    {
+      "id": "268fd3ec-4e26-4931-9f39-4d4492861e98",
+      "company": "Viva Petropolis",
+      "code": "__fundos_desp_2.08.96"
+    },
+    {
+      "id": "112d558e-4d5c-4882-98b7-030b46168ca8",
+      "company": "Viva Volta Redonda",
+      "code": "__fundos_desp_2.08.98"
+    },
+    {
+      "id": "95cfbcce-5d60-401b-b811-759bb53c7195",
+      "company": "Viva Volta Redonda",
+      "code": "__fundos_desp_2.08.94"
+    },
+    {
+      "id": "1e57735e-7b57-4e83-afa3-1289a50b3991",
+      "company": "Viva Volta Redonda",
+      "code": "__fundos_rec_1.04.99"
+    }
+  ]
+}
