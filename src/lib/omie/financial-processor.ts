@@ -1,22 +1,34 @@
 /**
  * PROCESSADOR FINANCEIRO - Camada de Tratamento DRE em Regime de Caixa
- * 
+ *
  * ============================================================================
- * REGRAS DE NEGOCIO IMPLEMENTADAS (11 regras):
+ * REGRAS DE NEGOCIO IMPLEMENTADAS:
  * ============================================================================
- * 
+ *
  * 1. FONTE DE DADOS: API ListarMovimentos da Omie
- * 2. REGRA DO PERIODO: Usa dDtPagamento para derivar ano_pgto e mes_pagamento
- * 3. REGRA DO VERIFICADOR_RATEIO: Detecta quantas categorias (1-5) estão preenchidas
- * 4. REGRA DO CORRETOR_DUPLICIDADE: Define qual valor usar (nValPago vs nValLiquido)
- * 5. REGRA DO VERIFICADOR_BAXP: Exclui cOrigem = BAXP ou BAXR
- * 6. REGRA DE CONSOLIDAÇÃO: Agrupa por período e categoria da DRE
- * 7. REGRA DE RATEIO: Quebra lançamento em até 5 parcelas com nDistrValor
- * 8. DE/PARA: Mapeia categorias Omie para contas DRE
- * 9. FILTRO DE PERÍODO: Aplica tratativas antes de consolidar
- * 10. AUDITORIA: Registra decisões de processamento
- * 11. INTEGRIDADE: Valida inconsistências entre categoria e valor rateado
- * 
+ * 2. REGRA DO PERIODO: Usa dDtPagamento da baixa real para derivar
+ *    ano_pgto e mes_pagamento (regime de caixa).
+ * 3. REGRA DO VERIFICADOR_RATEIO: Detecta quantas categorias (1-5) estão
+ *    preenchidas no array `categorias` do título-pai.
+ * 4. REGRA DO CORRETOR_DUPLICIDADE: Define qual valor usar
+ *    (nValPago vs nValLiquido) quando NÃO há baixas separadas.
+ * 5. REGRA DAS BAIXAS PARCIAIS (substitui antiga regra de exclusão BAXP):
+ *    Movimentos com cOrigem = BAXP/BAXR representam cada baixa individual
+ *    de um título (data + valor reais). Quando o título possui registros
+ *    BAXP/BAXR no mesmo lote, esses passam a ser a FONTE DE VERDADE para
+ *    período e valor — o registro-pai (MANP/RPTP/MANR/RPTR/...) é suprimido
+ *    para evitar duplicidade. Isso garante que pagamentos parciais em meses
+ *    diferentes apareçam exatamente no mês de cada baixa, em vez de
+ *    consolidados na data do último pagamento do título.
+ * 6. REGRA DE CONSOLIDAÇÃO: Agrupa por período e categoria da DRE.
+ * 7. REGRA DE RATEIO: Quando o pai tem rateio (até 5 categorias), cada
+ *    baixa é distribuída proporcionalmente entre as categorias usando
+ *    os percentuais do título.
+ * 8. DE/PARA: Mapeia categorias Omie para contas DRE.
+ * 9. FILTRO DE PERÍODO: Aplica tratativas antes de consolidar.
+ * 10. AUDITORIA: Registra decisões de processamento.
+ * 11. INTEGRIDADE: Valida inconsistências entre categoria e valor rateado.
+ *
  * ============================================================================
  */
 
@@ -35,6 +47,8 @@ export interface RawOmieMovimento {
   // Valores
   nValPago?: string | number;
   nValLiquido?: string | number;
+  nValorMovCC?: string | number; // valor da baixa em conta corrente (BAXP/BAXR)
+  nCodBaixa?: string | number; // id único da baixa (BAXP/BAXR)
 
   // Categoria simples (sem rateio)
   cCodCateg?: string;
@@ -394,23 +408,36 @@ export function processMovimento(
     const temRateio = verificadorRateio > 0;
 
     // ====================================================================
-    // Helper: Gera omie_id único e DETERMINÍSTICO (estável entre syncs).
+    // Helper: Gera omie_id unico e DETERMINISTICO (estavel entre syncs).
     //
-    // Branch 1 (com nCodTitulo): chave estável por design — Omie garante
-    // unicidade de (nCodTitulo, cNumParcela, cOrigem).
+    // Estrategia: usar `nCodMovCC` como chave PRIMARIA quando ele existe.
+    // O nCodMovCC e o ID da movimentacao bancaria (conta corrente) e e o
+    // identificador mais granular e estavel que a Omie expoe — UMA
+    // movimentacao real == UM nCodMovCC. Diferentes "views" do mesmo
+    // lancamento (parent EXTP, baixa BAXP, conciliacao COMP, etc.) que
+    // a API as vezes devolve em registros separados compartilham o
+    // mesmo nCodMovCC, e portanto colapsam em um unico omie_id no
+    // upsert — eliminando duplicatas estruturais.
     //
-    // Branches 2/3 (sem nCodTitulo, ex.: TRAP/TRAR/MANP/EXTP): a chave
-    // antiga incluía `batchIndex` (posição do registro no array da resposta
-    // da API), o que tornava o omie_id INSTÁVEL entre syncs — o mesmo
-    // lançamento Omie ganhava omie_ids diferentes em syncs distintos,
-    // criando linhas duplicadas em financial_entries (uma por sync).
-    // Agora a chave inclui dDtPagamento + value normalizado para ficar
-    // determinística sem depender da ordem da resposta.
+    // IMPORTANTE: cOrigem foi REMOVIDO da chave quando ha nCodMovCC.
+    // Versoes anteriores incluiam cOrigem para diferenciar parent vs.
+    // baixa, mas como nCodMovCC ja identifica unicamente o movimento,
+    // manter cOrigem so reintroduzia o bug de duplicacao.
+    //
+    // Fallbacks (sem nCodMovCC):
+    //   - nCodTitulo presente: chave por (nCodTitulo, cNumParcela, cOrigem)
+    //     — funciona para titulos abertos (sem baixa ainda).
+    //   - cNumTitulo: chave por (cNumTitulo, cOrigem, paymentDate, value).
+    //   - Ultimo recurso: (paymentDate, cOrigem, value) — pode colidir
+    //     em casos raros mas e o melhor possivel sem ID estavel.
     // ====================================================================
+    const nCodMovCC = getString(record as Record<string, unknown>, ["nCodMovCC"]);
     const valueKey = (val: number) => val.toFixed(2);
     const makeOmieId = (suffix: string, valueForKey: number): string => {
       let base: string;
-      if (nCodTitulo !== "0" && nCodTitulo !== "") {
+      if (nCodMovCC) {
+        base = `cc:${nCodMovCC}`;
+      } else if (nCodTitulo !== "0" && nCodTitulo !== "") {
         base = `${nCodTitulo}:${cNumParcela}:${cOrigem}`;
       } else if (cNumTitulo) {
         base = `0:${cNumTitulo}:${cOrigem}:${paymentDate}:${valueKey(valueForKey)}`;
@@ -502,6 +529,225 @@ export function processMovimento(
   }
 }
 
+// ============================================================================
+// REGRA 5 (NOVA): BAIXAS PARCIAIS COMO FONTE DE VERDADE
+// ============================================================================
+// Quando um título possui registros BAXP/BAXR (uma baixa por linha),
+// usamos esses registros como autoridade para período e valor — cada baixa
+// vira uma financial_entry com a data REAL daquela baixa.
+//
+// Isso resolve o caso de pagamentos parciais em meses diferentes:
+// um título de R$ 2.948,96 quitado com R$ 428,57 em 17/04/2025 e
+// R$ 2.520,39 em 06/01/2026 antes era consolidado em Jan/2026; agora
+// gera duas entries — uma em Abr/2025 e outra em Jan/2026.
+//
+// Quando o pai possui rateio, a baixa é distribuída proporcionalmente
+// entre as categorias do título usando os percentuais originais.
+//
+// Quando o lote NÃO contém BAXP/BAXR para um nCodTitulo (ex.: sync
+// incremental que pegou só o pai), caímos no fluxo legado (processMovimento).
+// ============================================================================
+function isBaixaRecord(record: RawOmieMovimento): boolean {
+  const cOrigem = getString(record as Record<string, unknown>, ["cOrigem"])?.toUpperCase() ?? "";
+  return cOrigem === "BAXP" || cOrigem === "BAXR";
+}
+
+interface RateioPercentual {
+  categoria: string;
+  percentual: number; // 0..1
+  posicao: number; // 1-based
+}
+
+function calcularRateioPercentuais(parent: RawOmieMovimento | null): RateioPercentual[] {
+  if (!parent) return [];
+  const parcelas = extrairRateioParcelas(parent);
+  if (parcelas.length === 0) return [];
+  const total = parcelas.reduce((sum, p) => sum + p.valor, 0);
+  if (total <= 0) return [];
+  return parcelas.map((p) => ({
+    categoria: p.categoria,
+    percentual: p.valor / total,
+    posicao: p.posicao,
+  }));
+}
+
+function processBaixasDoTitulo(
+  parents: Record<string, unknown>[],
+  baixas: Record<string, unknown>[],
+  options: FinancialProcessorOptions
+): ProcessingResult[] {
+  const results: ProcessingResult[] = [];
+  // Pai "principal" para herdar metadados (rateio, fornecedor, descrição).
+  // Preferimos o registro com mais informação (categorias rateadas, depois
+  // qualquer não-baixa). Se não houver pai no lote, usamos o próprio BAXP.
+  const flattenedParents = parents.map((p) => flattenMovimento(p as RawOmieMovimento));
+  const parentWithRateio =
+    flattenedParents.find((p) => Array.isArray(p.categorias) && p.categorias.length > 0) ?? null;
+  const parent: RawOmieMovimento | null =
+    parentWithRateio ?? flattenedParents[0] ?? null;
+  const rateio = calcularRateioPercentuais(parent);
+
+  for (let i = 0; i < baixas.length; i++) {
+    const rawBaixa = baixas[i];
+    const baixa = flattenMovimento(rawBaixa as RawOmieMovimento);
+
+    const auditLog: ProcessingAuditLog = {
+      movimento_index: options.batchIndex + i,
+      omie_id_source: "",
+      status: "aceito",
+      razao: "",
+      entries_gerados: 0,
+    };
+
+    try {
+      const paymentDate = parseDate(
+        getString(baixa as Record<string, unknown>, ["dDtPagamento"])
+      );
+      if (!paymentDate) {
+        auditLog.status = "rejeitado_sem_data";
+        auditLog.razao = "Baixa sem dDtPagamento (regime caixa exige data).";
+        results.push({ entries: [], auditLog });
+        continue;
+      }
+
+      const [year, month] = paymentDate.split("-").map(Number);
+      const cNatureza = getString(baixa as Record<string, unknown>, ["cNatureza"])?.toUpperCase() ?? "";
+      const cGrupo = getString(baixa as Record<string, unknown>, ["cGrupo"])?.toUpperCase() ?? "";
+      const type: "receita" | "despesa" =
+        cNatureza === "R" || cGrupo.includes("RECEBER") || cGrupo.includes("_REC")
+          ? "receita"
+          : "despesa";
+
+      // Valor real da baixa: nValorMovCC (movimento de conta corrente).
+      // Fallback para nValPago do resumo da própria baixa.
+      const baixaValue =
+        parseNumber(baixa.nValorMovCC) ||
+        parseNumber((baixa.resumo as Record<string, unknown> | undefined)?.nValPago);
+      if (baixaValue === 0) {
+        auditLog.status = "rejeitado_sem_data";
+        auditLog.razao = "Baixa sem valor (nValorMovCC e nValPago zerados).";
+        results.push({ entries: [], auditLog });
+        continue;
+      }
+
+      const nCodTitulo = getString(baixa as Record<string, unknown>, ["nCodTitulo"]) ?? "0";
+      const nCodBaixa = getString(baixa as Record<string, unknown>, ["nCodBaixa"]) ?? "";
+      const cOrigemBaixa = getString(baixa as Record<string, unknown>, ["cOrigem"])?.toUpperCase() ?? "";
+
+      // Metadados herdados do pai quando disponível
+      const metaSource = parent ?? baixa;
+      const description =
+        getString(metaSource as Record<string, unknown>, [
+          "cDescricao",
+          "descricao",
+          "cObs",
+          "observacao",
+        ]) ??
+        getString(baixa as Record<string, unknown>, ["cDescricao", "observacao"]) ??
+        (type === "receita" ? "Receita Omie" : "Despesa Omie");
+
+      const supplier_customer = getString(metaSource as Record<string, unknown>, [
+        "cNomeCliente",
+        "nome_cliente",
+        "nome_fornecedor",
+        "cNomeFornecedor",
+      ]);
+
+      const document_number = getString(metaSource as Record<string, unknown>, [
+        "cNumDocFiscal",
+        "cNumDocumento",
+        "cNumParcela",
+        "numero_documento",
+      ]);
+
+      // Prioridade: nCodMovCC (id do movimento bancario) — mesma chave
+      // que processMovimento usa, garantindo que parent e baixa colapsem
+      // em UM unico omie_id quando representam a mesma transacao real.
+      // Fallback para nCodBaixa preserva o comportamento legado quando
+      // a Omie nao expoe nCodMovCC na resposta da baixa.
+      const nCodMovCC = getString(baixa as Record<string, unknown>, ["nCodMovCC"]);
+      const baseKey = nCodMovCC
+        ? `mov:cc:${nCodMovCC}`
+        : nCodBaixa
+          ? `bx:${nCodTitulo}:${nCodBaixa}`
+          : `bx:${nCodTitulo}:${paymentDate}:${baixaValue.toFixed(2)}`;
+      auditLog.omie_id_source = baseKey;
+
+      const entries: ProcessedFinancialEntry[] = [];
+
+      if (rateio.length > 0) {
+        // Distribui a baixa proporcionalmente entre as categorias do rateio.
+        // Acumula resíduo de arredondamento para garantir soma exata.
+        let consumido = 0;
+        for (let j = 0; j < rateio.length; j++) {
+          const r = rateio[j];
+          const isLast = j === rateio.length - 1;
+          const portion = isLast
+            ? Number((baixaValue - consumido).toFixed(2))
+            : Number((baixaValue * r.percentual).toFixed(2));
+          consumido += portion;
+          if (portion === 0) continue;
+          entries.push({
+            omie_id: `${baseKey}:r${r.posicao}`,
+            company_id: options.companyId,
+            type,
+            description,
+            supplier_customer,
+            document_number,
+            value: portion,
+            payment_date: paymentDate,
+            ano_pgto: year,
+            mes_pagamento: month,
+            category_code: r.categoria,
+            raw_json: rawBaixa as Record<string, unknown>,
+            processing_metadata: {
+              regra_baxp_aplicada: true,
+              regra_periodo_aplicada: true,
+              verificador_rateio: rateio.length,
+              corretor_duplicidade: 0,
+              source_field_value: "nValPago",
+            },
+          });
+        }
+      } else {
+        const categoryCode = getString(baixa as Record<string, unknown>, ["cCodCateg"]);
+        entries.push({
+          omie_id: baseKey,
+          company_id: options.companyId,
+          type,
+          description,
+          supplier_customer,
+          document_number,
+          value: baixaValue,
+          payment_date: paymentDate,
+          ano_pgto: year,
+          mes_pagamento: month,
+          category_code: categoryCode,
+          raw_json: rawBaixa as Record<string, unknown>,
+          processing_metadata: {
+            regra_baxp_aplicada: true,
+            regra_periodo_aplicada: true,
+            verificador_rateio: 0,
+            corretor_duplicidade: 1,
+            source_field_value: cOrigemBaixa === "BAXR" ? "nValPago" : "nValPago",
+          },
+        });
+      }
+
+      auditLog.entries_gerados = entries.length;
+      auditLog.razao = `Baixa parcial processada (${cOrigemBaixa}, nCodBaixa=${nCodBaixa || "-"}).`;
+      results.push({ entries, auditLog });
+    } catch (error) {
+      auditLog.status = "erro";
+      auditLog.razao =
+        error instanceof Error ? error.message : "Erro desconhecido ao processar baixa.";
+      results.push({ entries: [], auditLog });
+    }
+  }
+
+  return results;
+}
+
 export function processMovimentos(
   rawMovimentos: Record<string, unknown>[],
   companyId: string
@@ -512,13 +758,76 @@ export function processMovimentos(
   const entries: ProcessedFinancialEntry[] = [];
   const auditLogs: ProcessingAuditLog[] = [];
 
+  // Agrupa por nCodTitulo para identificar pares pai + baixas.
+  // Movimentos sem nCodTitulo viram seu próprio grupo (chave única).
+  type Grupo = {
+    parents: { raw: Record<string, unknown>; index: number }[];
+    baixas: { raw: Record<string, unknown>; index: number }[];
+  };
+  const grupos = new Map<string, Grupo>();
+  const ordemGrupos: string[] = [];
+
   for (let i = 0; i < rawMovimentos.length; i++) {
-    const result = processMovimento(rawMovimentos[i], {
-      companyId,
-      batchIndex: i,
-    });
-    entries.push(...result.entries);
-    auditLogs.push(result.auditLog);
+    const raw = rawMovimentos[i];
+    const flat = flattenMovimento(raw as RawOmieMovimento);
+    const nCodTitulo = getString(flat as Record<string, unknown>, ["nCodTitulo"]);
+    const groupKey = nCodTitulo ? `t:${nCodTitulo}` : `i:${i}`;
+
+    let grupo = grupos.get(groupKey);
+    if (!grupo) {
+      grupo = { parents: [], baixas: [] };
+      grupos.set(groupKey, grupo);
+      ordemGrupos.push(groupKey);
+    }
+
+    if (isBaixaRecord(flat)) {
+      grupo.baixas.push({ raw, index: i });
+    } else {
+      grupo.parents.push({ raw, index: i });
+    }
+  }
+
+  for (const groupKey of ordemGrupos) {
+    const grupo = grupos.get(groupKey)!;
+
+    if (grupo.baixas.length > 0) {
+      // Há baixas: elas são a fonte de verdade para período/valor.
+      // O pai é usado apenas para herdar rateio e metadados.
+      const baixaResults = processBaixasDoTitulo(
+        grupo.parents.map((p) => p.raw),
+        grupo.baixas.map((b) => b.raw),
+        {
+          companyId,
+          batchIndex: grupo.baixas[0].index,
+        }
+      );
+      for (const r of baixaResults) {
+        entries.push(...r.entries);
+        auditLogs.push(r.auditLog);
+      }
+
+      // Auditoria: registra que cada pai foi suprimido em favor das baixas.
+      for (const p of grupo.parents) {
+        auditLogs.push({
+          movimento_index: p.index,
+          omie_id_source: groupKey,
+          status: "aceito",
+          razao:
+            "Pai suprimido — título possui baixas (BAXP/BAXR) que viram a fonte de verdade.",
+          entries_gerados: 0,
+        });
+      }
+    } else {
+      // Sem baixas no lote: processa cada pai pelo fluxo legado.
+      for (const p of grupo.parents) {
+        const result = processMovimento(p.raw, {
+          companyId,
+          batchIndex: p.index,
+        });
+        entries.push(...result.entries);
+        auditLogs.push(result.auditLog);
+      }
+    }
   }
 
   return { entries, auditLogs };

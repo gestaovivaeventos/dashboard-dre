@@ -730,48 +730,67 @@ async function syncEntries({
     }
   }
 
-  // 5. Limpar lancamentos obsoletos dentro do periodo buscado.
-  //    - Full: busca todos da empresa (periodo completo).
-  //    - Incremental: busca apenas no range de datas sincronizado,
-  //      para nao deletar dados fora da janela incremental.
+  // 5. Limpar lancamentos obsoletos dentro do periodo buscado via RPC SQL.
+  //
+  //    Versao anterior fazia SELECT id, omie_id em JS — sujeito ao limite
+  //    default de ~1000 linhas do PostgREST. Para empresas com volume
+  //    > 1000 linhas no escopo, o cleanup deixava entries antigos para
+  //    tras (ex.: omie_ids no formato legado nao sobrescritos por upsert),
+  //    causando duplicatas persistentes apos Full Sync.
+  //
+  //    A RPC SQL abaixo executa o DELETE atomicamente sem paginacao.
+  //    - Full: omite p_date_from/p_date_to → escopo total da empresa.
+  //    - Rolling/Incremental: passa as datas → escopo restrito.
   let recordsDeleted = 0;
   {
-    const validOmieIds = new Set(uniqueEntries.map((e) => e.omie_id));
+    const validOmieIds = uniqueEntries.map((e) => e.omie_id);
 
-    // Converter dateFrom/dateTo de DD-MM-YYYY para YYYY-MM-DD (formato do banco).
     const [dd1, mm1, yyyy1] = dateFrom.split("-");
     const [dd2, mm2, yyyy2] = dateTo.split("-");
     const dbDateFrom = `${yyyy1}-${mm1}-${dd1}`;
     const dbDateTo = `${yyyy2}-${mm2}-${dd2}`;
 
-    let query = supabase
-      .from("financial_entries")
-      .select("id, omie_id")
-      .eq("company_id", companyId);
-
-    if (mode !== "full") {
-      // Escopo: apenas entries dentro do periodo buscado (rolling ou incremental).
-      query = query.gte("payment_date", dbDateFrom).lte("payment_date", dbDateTo);
+    const { data: obsoleteDeleted, error: obsoleteError } = await supabase.rpc(
+      "cleanup_obsolete_entries",
+      {
+        p_company_id: companyId,
+        p_valid_omie_ids: validOmieIds,
+        p_date_from: mode === "full" ? null : dbDateFrom,
+        p_date_to: mode === "full" ? null : dbDateTo,
+      },
+    );
+    if (obsoleteError) {
+      throw new Error(
+        `Falha ao limpar lancamentos obsoletos: ${obsoleteError.message}`,
+      );
     }
+    recordsDeleted = Number(obsoleteDeleted ?? 0);
 
-    const { data: existingEntries } = await query;
-
-    const idsToDelete = (existingEntries ?? [])
-      .filter((e) => !validOmieIds.has(e.omie_id as string))
-      .map((e) => e.id as string);
-
-    for (const batch of chunk(idsToDelete, 50)) {
-      const { error } = await supabase
-        .from("financial_entries")
-        .delete()
-        .in("id", batch);
-      if (error) {
-        throw new Error(
-          `Falha ao limpar lancamentos obsoletos: ${error.message}`,
-        );
-      }
+    // 5b. Limpeza global de duplicatas pai-vs-baixa por nCodTitulo.
+    const { data: pvbDeleted, error: pvbError } = await supabase.rpc(
+      "cleanup_parent_vs_baixa_duplicates",
+      { p_company_id: companyId },
+    );
+    if (pvbError) {
+      throw new Error(
+        `Falha ao limpar entries legados de titulos com baixas: ${pvbError.message}`,
+      );
     }
-    recordsDeleted = idsToDelete.length;
+    recordsDeleted += Number(pvbDeleted ?? 0);
+
+    // 5c. Dedup por nCodMovCC — consolida duplicatas estruturais (parent,
+    //     baixa, conciliacao) que apontam para o mesmo movimento bancario.
+    //     Mantem a linha mais recente por (company_id, nCodMovCC, rateio).
+    const { data: nccDeleted, error: nccError } = await supabase.rpc(
+      "dedupe_financial_entries_by_ncodmovcc",
+      { p_company_id: companyId },
+    );
+    if (nccError) {
+      throw new Error(
+        `Falha ao deduplicar por nCodMovCC: ${nccError.message}`,
+      );
+    }
+    recordsDeleted += Number(nccDeleted ?? 0);
   }
 
   // 6. Consolidar categorias e upsert omie_categories.

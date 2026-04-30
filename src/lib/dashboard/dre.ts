@@ -261,7 +261,16 @@ export function buildDashboardRows(
         return ref ? calculateValueById(ref.id) : 0;
       });
     } else if (account.is_summary) {
-      value = children.reduce((sum, child) => sum + calculateValueById(child.id), 0);
+      // Soma filhos + qualquer valor mapeado diretamente nesta conta.
+      // Sem o "+ direto", contas summary sem filhos (ex.: 9 Receitas Não
+      // Operacionais, 10 Despesas Não Operacionais) sempre rendem 0 mesmo
+      // quando há entries com category_mapping apontando direto para elas.
+      const childrenSum = children.reduce(
+        (sum, child) => sum + calculateValueById(child.id),
+        0,
+      );
+      const directAmount = amountsByAccountId.get(account.id) ?? 0;
+      value = childrenSum + directAmount;
     } else {
       value = amountsByAccountId.get(account.id) ?? 0;
     }
