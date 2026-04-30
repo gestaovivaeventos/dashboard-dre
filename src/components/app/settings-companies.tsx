@@ -63,11 +63,14 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
   // Budget upload state
   const [budgetOpen, setBudgetOpen] = useState<string | null>(null);
   const [uploadingBudget, setUploadingBudget] = useState(false);
+  const [budgetYear, setBudgetYear] = useState<string>(String(new Date().getFullYear()));
   const [budgetResult, setBudgetResult] = useState<{
+    year?: number;
+    rowsParsed?: number;
+    rawCells?: number;
     imported?: number;
-    skipped?: number;
-    unmatchedAccounts?: string[];
-    parseErrors?: string[];
+    distinctLabels?: number;
+    unmappedLabels?: string[];
     error?: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -276,22 +279,36 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
   };
 
   const handleBudgetUpload = async (companyId: string, file: File) => {
+    const yearNum = Number(budgetYear);
+    if (!Number.isFinite(yearNum) || yearNum < 2000 || yearNum > 2100) {
+      showToast({
+        title: "Ano invalido",
+        description: "Informe o ano da planilha (ex: 2026).",
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     setUploadingBudget(true);
     setBudgetResult(null);
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("year", String(yearNum));
 
-    const response = await fetch(`/api/companies/${companyId}/budget`, {
+    const response = await fetch(`/api/companies/${companyId}/budget/xlsx`, {
       method: "POST",
       body: formData,
     });
     const payload = await safeJson<{
       ok?: boolean;
+      year?: number;
+      rowsParsed?: number;
+      rawCells?: number;
       imported?: number;
-      skipped?: number;
-      unmatchedAccounts?: string[];
-      parseErrors?: string[];
+      distinctLabels?: number;
+      unmappedLabels?: string[];
       error?: string;
     }>(response);
 
@@ -299,19 +316,21 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
       setBudgetResult({ error: payload?.error ?? "Falha ao importar orcamento." });
       showToast({
         title: "Falha no upload",
-        description: payload?.error ?? "Verifique o formato do CSV.",
+        description: payload?.error ?? "Verifique a planilha.",
         variant: "destructive",
       });
     } else {
       setBudgetResult({
+        year: payload.year,
+        rowsParsed: payload.rowsParsed,
+        rawCells: payload.rawCells,
         imported: payload.imported,
-        skipped: payload.skipped,
-        unmatchedAccounts: payload.unmatchedAccounts,
-        parseErrors: payload.parseErrors,
+        distinctLabels: payload.distinctLabels,
+        unmappedLabels: payload.unmappedLabels,
       });
       showToast({
         title: "Orcamento importado",
-        description: `${payload.imported ?? 0} registros importados.`,
+        description: `${payload.imported ?? 0} celulas gravadas. ${(payload.unmappedLabels ?? []).length} linhas sem mapeamento.`,
         variant: "success",
       });
     }
@@ -657,33 +676,38 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                 {/* Budget upload panel */}
                 {budgetOpen === company.id && (
                   <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Upload de orcamento — CSV com colunas: Empresa, Ano, Mes, Conta do DRE, Valor orcado
-                      </p>
-                      <a
-                        href={`/api/budget-template?companyName=${encodeURIComponent(company.name)}`}
-                        className="whitespace-nowrap rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
-                        download
-                      >
-                        Baixar template
-                      </a>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Na coluna &quot;Conta do DRE&quot;, use o codigo (ex: 7.2.1) ou o formato &quot;7.2.1 - Salarios&quot;. O template ja vem preenchido.
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Upload de orcamento — envie a planilha .xlsx original (formato matricial: contas em linhas e meses em colunas).
                     </p>
-                    <div className="flex items-center gap-3">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".csv"
-                        className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-accent"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void handleBudgetUpload(company.id, f);
-                        }}
-                        disabled={uploadingBudget}
-                      />
+                    <p className="text-[11px] text-muted-foreground">
+                      O sistema detecta o cabecalho de meses (JANEIRO..DEZEMBRO) automaticamente e ignora linhas-totalizador (Receita Liquida, LUCRO OPERACIONAL BRUTO, etc.). Linhas novas que ainda nao tem vinculo aparecerao em Mapeamento &gt; Linhas do Orcamento.
+                    </p>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Ano da planilha</label>
+                        <Input
+                          type="number"
+                          className="w-28"
+                          value={budgetYear}
+                          onChange={(e) => setBudgetYear(e.target.value)}
+                          placeholder="2026"
+                          disabled={uploadingBudget}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Arquivo .xlsx</label>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          className="block text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-accent"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleBudgetUpload(company.id, f);
+                          }}
+                          disabled={uploadingBudget}
+                        />
+                      </div>
                       {uploadingBudget && <Loader2 className="h-4 w-4 animate-spin" />}
                     </div>
 
@@ -694,24 +718,16 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                         ) : (
                           <>
                             <p className="text-emerald-700">
-                              {budgetResult.imported} registros importados com sucesso.
+                              Ano {budgetResult.year}: {budgetResult.rowsParsed} linha(s) lida(s), {budgetResult.rawCells} celula(s) armazenada(s), {budgetResult.imported} celula(s) gravada(s) em budget_entries.
                             </p>
-                            {(budgetResult.skipped ?? 0) > 0 && (
-                              <p className="mt-1 text-amber-700">
-                                {budgetResult.skipped} registros ignorados — contas nao encontradas:{" "}
-                                <span className="font-mono text-xs">
-                                  {budgetResult.unmatchedAccounts?.join(", ")}
-                                </span>
-                              </p>
-                            )}
-                            {(budgetResult.parseErrors?.length ?? 0) > 0 && (
+                            {(budgetResult.unmappedLabels?.length ?? 0) > 0 && (
                               <details className="mt-1">
-                                <summary className="cursor-pointer text-xs text-amber-600">
-                                  {budgetResult.parseErrors?.length} erros de parse
+                                <summary className="cursor-pointer text-amber-700">
+                                  {budgetResult.unmappedLabels?.length} linha(s) sem vinculo a conta DRE — abra Mapeamento &gt; Linhas do Orcamento para configurar.
                                 </summary>
                                 <ul className="mt-1 list-inside list-disc text-xs text-amber-700">
-                                  {budgetResult.parseErrors?.map((err, idx) => (
-                                    <li key={idx}>{err}</li>
+                                  {budgetResult.unmappedLabels?.map((label, idx) => (
+                                    <li key={idx}>{label}</li>
                                   ))}
                                 </ul>
                               </details>

@@ -36,8 +36,9 @@ import type {
 } from "@/lib/dashboard/dre";
 import type { UserRole } from "@/lib/supabase/types";
 
-type ViewTab = "orcamento" | "realizado" | "projecao";
+type ViewTab = "orcamento" | "realizado" | "projecao" | "comparativo";
 type RealizadoSubView = "consolidado" | "mensal";
+type CompareSubView = "orcamento" | "realizado";
 
 interface CompanyOption {
   id: string;
@@ -61,11 +62,13 @@ interface BudgetForecastDisplayRow {
   realizedValue?: number;
   budgetByBucket?: Record<string, number>;
   accumulatedBudget?: number;
+  valuesByCompany?: Record<string, number>;
+  budgetByCompany?: Record<string, number>;
 }
 
 interface BudgetForecastViewProps {
   view: ViewTab;
-  subView: RealizadoSubView;
+  subView: RealizadoSubView | CompareSubView | string;
   filter: DashboardFilterState;
   range: DashboardRange;
   rows: BudgetForecastDisplayRow[];
@@ -145,6 +148,7 @@ const TAB_OPTIONS: Array<{ value: ViewTab; label: string }> = [
   { value: "orcamento", label: "Orcamento Anual" },
   { value: "realizado", label: "Previsto x Realizado" },
   { value: "projecao", label: "Projecao" },
+  { value: "comparativo", label: "Comparativo entre Empresas" },
 ];
 
 function CompanyMultiSelect({
@@ -335,6 +339,7 @@ export function BudgetForecastView({
     bucket: DashboardPeriodBucket,
     page = 1,
     search = "",
+    companyIdsOverride?: string[],
   ) => {
     setDrilldown({
       open: true,
@@ -347,7 +352,7 @@ export function BudgetForecastView({
       accountId: account.id,
       dateFrom: bucket.dateFrom,
       dateTo: bucket.dateTo,
-      companyIds: selectedCompanyIds.join(","),
+      companyIds: (companyIdsOverride ?? selectedCompanyIds).join(","),
       page: String(page),
       pageSize: String(drillPageSize),
       search,
@@ -365,16 +370,25 @@ export function BudgetForecastView({
     setDrillLoading(false);
   };
 
+  const openDrilldownForCompany = async (
+    account: BudgetForecastDisplayRow,
+    bucket: DashboardPeriodBucket,
+    companyId: string,
+  ) => {
+    return openDrilldown(account, bucket, 1, "", [companyId]);
+  };
+
   const buildQuery = (overrides: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
     const v = overrides.view ?? view;
     if (v && v !== "orcamento") params.set("view", v);
-    if (overrides.subView !== undefined) {
-      if (overrides.subView && overrides.subView !== "consolidado") {
-        params.set("subView", overrides.subView);
-      }
-    } else if (subView !== "consolidado") {
-      params.set("subView", subView);
+    // Per-tab default subView: realizado -> consolidado, comparativo -> orcamento.
+    // We skip the param when it matches the default to keep URLs clean.
+    const defaultSubViewFor = (tab: string) =>
+      tab === "comparativo" ? "orcamento" : "consolidado";
+    const effectiveSub = overrides.subView !== undefined ? overrides.subView : subView;
+    if (effectiveSub && effectiveSub !== defaultSubViewFor(v)) {
+      params.set("subView", effectiveSub);
     }
     const pm = overrides.periodMode ?? periodMode;
     params.set("periodMode", pm);
@@ -394,13 +408,15 @@ export function BudgetForecastView({
   };
 
   const switchTab = (next: ViewTab) => {
-    // Reset subView when switching away from realizado
+    // Reset subView when switching to a tab that doesn't use the same value
     const overrides: Record<string, string | undefined> = { view: next };
-    if (next !== "realizado") overrides.subView = "consolidado";
+    if (next === "realizado") overrides.subView = "consolidado";
+    else if (next === "comparativo") overrides.subView = "orcamento";
+    else overrides.subView = "consolidado";
     router.push(`${pathname}?${buildQuery(overrides)}`);
   };
 
-  const switchSubView = (next: RealizadoSubView) => {
+  const switchSubView = (next: string) => {
     router.push(`${pathname}?${buildQuery({ subView: next })}`);
   };
 
@@ -411,6 +427,7 @@ export function BudgetForecastView({
     orcamento: "Orcamento Anual",
     realizado: "Previsto x Realizado",
     projecao: "Projecao (Realizado + Orcamento)",
+    comparativo: "Comparativo entre Empresas",
   };
 
   return (
@@ -554,12 +571,49 @@ export function BudgetForecastView({
             </div>
           )}
 
+          {/* Sub-view toggle (only on Comparativo entre Empresas) */}
+          {view === "comparativo" && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Visao</label>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={subView !== "realizado" ? "default" : "outline"}
+                  onClick={() => switchSubView("orcamento")}
+                >
+                  Orcamento Anual
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={subView === "realizado" ? "default" : "outline"}
+                  onClick={() => switchSubView("realizado")}
+                >
+                  Previsto x Realizado
+                </Button>
+              </div>
+            </div>
+          )}
+
           <Button type="button" onClick={handleApply}>Aplicar</Button>
         </div>
       </div>
 
       {/* Tables per view */}
-      {view === "realizado" && subView === "consolidado" ? (
+      {view === "comparativo" ? (
+        <ComparativoTable
+          rows={visibleRows}
+          expanded={expanded}
+          setExpanded={setExpanded}
+          companies={companies.filter((c) => selectedCompanyIds.includes(c.id))}
+          mode={subView === "realizado" ? "realizado" : "orcamento"}
+          onSelectAccount={setSelectedAccountId}
+          onDrilldownRealized={(row, companyId) =>
+            void openDrilldownForCompany(row, accumulatedBucket, companyId)
+          }
+        />
+      ) : view === "realizado" && subView === "consolidado" ? (
         <RealizadoTable
           rows={visibleRows}
           expanded={expanded}
@@ -1056,6 +1110,168 @@ function RealizadoMensalTable({
               <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
               <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
               <span className={`text-center font-semibold ${varColor(totalBudget, totalReal)}`}>{formatVar(totalBudget, totalReal)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ComparativoTable({
+  rows,
+  expanded,
+  setExpanded,
+  companies,
+  mode,
+  onSelectAccount,
+  onDrilldownRealized,
+}: {
+  rows: BudgetForecastDisplayRow[];
+  expanded: Record<string, boolean>;
+  setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  companies: CompanyOption[];
+  mode: "orcamento" | "realizado";
+  onSelectAccount: (id: string) => void;
+  onDrilldownRealized: (row: BudgetForecastDisplayRow, companyId: string) => void;
+}) {
+  // Orcamento mode: 1 column per company + Total
+  // Realizado mode: 3 columns per company (Prev | Real | Var%) + Total trio
+  const isCompare = mode === "realizado";
+  const colsPerCompany = isCompare ? 3 : 1;
+  const totalDataCols = companies.length * colsPerCompany + colsPerCompany;
+  const minCellWidth = isCompare ? 90 : 130;
+  const minWidth = 320 + totalDataCols * (minCellWidth + 10);
+  const gridTemplate = `minmax(280px, 2.4fr) ${`minmax(${minCellWidth}px, 1fr) `.repeat(totalDataCols).trim()}`;
+
+  return (
+    <div className="overflow-x-auto rounded-xl border bg-muted/50">
+      <div style={{ minWidth: `${minWidth}px` }}>
+        {/* Top header row: company names span their columns */}
+        <div
+          className="grid border-b bg-muted px-4 pt-3 text-xs font-semibold uppercase text-muted-foreground"
+          style={{ gridTemplateColumns: gridTemplate }}
+        >
+          <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
+          {companies.map((company) => (
+            <span
+              key={`hdr-${company.id}`}
+              className="text-center"
+              style={{ gridColumn: `span ${colsPerCompany}` }}
+            >
+              {company.name}
+            </span>
+          ))}
+          <span
+            className="text-center font-bold"
+            style={{ gridColumn: `span ${colsPerCompany}` }}
+          >
+            Total
+          </span>
+        </div>
+
+        {/* Sub-header row only when in realizado (Prev/Real/Var%) */}
+        {isCompare ? (
+          <div
+            className="grid border-b bg-muted px-4 pb-2 text-[10px] font-semibold uppercase text-muted-foreground/80"
+            style={{ gridTemplateColumns: gridTemplate }}
+          >
+            <span className="sticky left-0 z-10 bg-muted" />
+            {companies.map((company) => (
+              <span key={`sub-${company.id}`} className="contents">
+                <span className="text-right">Prev</span>
+                <span className="text-right">Real</span>
+                <span className="text-center">Var %</span>
+              </span>
+            ))}
+            <span className="text-right">Prev</span>
+            <span className="text-right">Real</span>
+            <span className="text-center">Var %</span>
+          </div>
+        ) : (
+          <div className="border-b bg-muted px-4 pb-2" />
+        )}
+
+        {rows.length === 0 ? (
+          <div className="flex min-h-44 flex-col items-center justify-center gap-2 text-muted-foreground">
+            <Inbox className="h-6 w-6" />
+            <p className="text-sm">Nenhum dado encontrado.</p>
+          </div>
+        ) : null}
+
+        {rows.map((row) => {
+          const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
+          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+          const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+          const canDrill = !row.is_summary;
+
+          // Per-company values
+          const budgetByCompany = row.budgetByCompany ?? {};
+          const realizedByCompany = row.valuesByCompany ?? {};
+
+          // Totals across selected companies
+          let totalBudget = 0;
+          let totalReal = 0;
+          companies.forEach((c) => {
+            totalBudget += budgetByCompany[c.id] ?? 0;
+            totalReal += realizedByCompany[c.id] ?? 0;
+          });
+
+          return (
+            <div
+              key={row.id}
+              className={`grid px-4 py-2 text-sm ${rowClass} ${borderClass}`}
+              style={{ gridTemplateColumns: gridTemplate }}
+            >
+              <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+                {row.hasChildren ? (
+                  <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
+                    {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                ) : (
+                  <span className="w-4" />
+                )}
+                <button type="button" className="truncate text-left hover:underline" onClick={() => onSelectAccount(row.id)}>
+                  {row.name}
+                </button>
+              </div>
+
+              {companies.map((company) => {
+                const bud = budgetByCompany[company.id] ?? 0;
+                const real = realizedByCompany[company.id] ?? 0;
+                if (!isCompare) {
+                  return (
+                    <span key={`${row.id}-${company.id}`} className="text-right">
+                      {formatCurrency(bud)}
+                    </span>
+                  );
+                }
+                return (
+                  <span key={`${row.id}-${company.id}-grp`} className="contents">
+                    <span className="text-right">{formatCurrency(bud)}</span>
+                    <span className="text-right">
+                      {canDrill ? (
+                        <button type="button" className="w-full text-right hover:underline" onClick={() => onDrilldownRealized(row, company.id)}>
+                          {formatCurrency(real)}
+                        </button>
+                      ) : (
+                        formatCurrency(real)
+                      )}
+                    </span>
+                    <span className={`text-center ${varColor(bud, real)}`}>{formatVar(bud, real)}</span>
+                  </span>
+                );
+              })}
+
+              {isCompare ? (
+                <span className="contents">
+                  <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
+                  <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
+                  <span className={`text-center font-semibold ${varColor(totalBudget, totalReal)}`}>{formatVar(totalBudget, totalReal)}</span>
+                </span>
+              ) : (
+                <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
+              )}
             </div>
           );
         })}

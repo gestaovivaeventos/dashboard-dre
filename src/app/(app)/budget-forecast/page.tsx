@@ -16,8 +16,7 @@ import {
   type DashboardPeriodBucket,
 } from "@/lib/dashboard/dre";
 
-type ViewTab = "orcamento" | "realizado" | "projecao";
-type RealizadoSubView = "consolidado" | "mensal";
+type ViewTab = "orcamento" | "realizado" | "projecao" | "comparativo";
 
 interface BudgetForecastPageProps {
   searchParams: Record<string, string | string[] | undefined>;
@@ -33,17 +32,19 @@ interface BudgetForecastDisplayRow extends DreAccountBase {
   realizedValue?: number;
   budgetByBucket?: Record<string, number>;
   accumulatedBudget?: number;
+  valuesByCompany?: Record<string, number>;
+  budgetByCompany?: Record<string, number>;
 }
 
 function parseView(value: string | string[] | undefined): ViewTab {
   const v = Array.isArray(value) ? value[0] : value;
-  if (v === "realizado" || v === "projecao") return v;
+  if (v === "realizado" || v === "projecao" || v === "comparativo") return v;
   return "orcamento";
 }
 
-function parseSubView(value: string | string[] | undefined): RealizadoSubView {
+function parseSubView(value: string | string[] | undefined): string {
   const v = Array.isArray(value) ? value[0] : value;
-  return v === "mensal" ? "mensal" : "consolidado";
+  return v ?? "";
 }
 
 export default async function BudgetForecastPage({ searchParams, params }: BudgetForecastPageProps) {
@@ -312,6 +313,97 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       realizedValue: realizedMap[row.id] ?? 0,
       budgetValue: budgetMap[row.id] ?? 0,
     } satisfies BudgetForecastDisplayRow));
+  } else if (view === "comparativo") {
+    // Comparativo: always consolidated (no monthly drill); columns per company.
+    // sub-view: "realizado" -> Previsto x Realizado per company; default -> Orcamento Anual per company
+    const compareSub = subView === "realizado" ? "realizado" : "orcamento";
+
+    // Cap budget at current month for ano_atual to mirror the per-company realizado window
+    let cmpBudgetDateTo = accumulatedBucket.dateTo;
+    if (filter.periodMode === "ano_atual" && compareSub === "realizado") {
+      const lastDay = new Date(Date.UTC(currentYear, currentMonth, 0));
+      cmpBudgetDateTo = lastDay.toISOString().slice(0, 10);
+    }
+
+    // Per-company budget aggregation: loop one RPC call per company.
+    const budgetByCompanyAggregates = await Promise.all(
+      filter.selectedCompanyIds.map(async (companyId) => {
+        const { data, error } = await supabase.rpc("budget_aggregate", {
+          p_company_ids: [companyId],
+          p_date_from: accumulatedBucket.dateFrom,
+          p_date_to: cmpBudgetDateTo,
+        });
+        if (error) throw new Error(`Falha ao carregar orcamento por empresa: ${error.message}`);
+        const amounts = new Map<string, number>();
+        ((data as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((item) => {
+          amounts.set(item.dre_account_id, Number(item.amount ?? 0));
+        });
+        return { companyId, rows: buildDashboardRows(accounts, amounts).rows };
+      }),
+    );
+
+    const budgetByCompany: Record<string, Record<string, number>> = {};
+    budgetByCompanyAggregates.forEach(({ companyId, rows }) => {
+      const byId: Record<string, number> = {};
+      rows.forEach((r) => { byId[r.id] = r.value; });
+      budgetByCompany[companyId] = byId;
+    });
+
+    // For "realizado" sub-view, also fetch per-company realized totals.
+    const realizedByCompany: Record<string, Record<string, number>> = {};
+    if (compareSub === "realizado") {
+      const { data: byCompanyData, error: byCompanyErr } = await supabase.rpc(
+        "dashboard_dre_aggregate_by_company",
+        {
+          p_company_ids: filter.selectedCompanyIds,
+          p_date_from: accumulatedBucket.dateFrom,
+          p_date_to: accumulatedBucket.dateTo,
+        },
+      );
+      if (byCompanyErr) {
+        throw new Error(`Falha ao carregar realizado por empresa: ${byCompanyErr.message}`);
+      }
+
+      const amountsByCompanyId = new Map<string, Map<string, number>>();
+      ((byCompanyData as Array<{
+        company_id: string;
+        dre_account_id: string;
+        amount: number | string | null;
+      }> | null) ?? []).forEach((item) => {
+        let map = amountsByCompanyId.get(item.company_id);
+        if (!map) {
+          map = new Map();
+          amountsByCompanyId.set(item.company_id, map);
+        }
+        map.set(item.dre_account_id, Number(item.amount ?? 0));
+      });
+
+      for (const companyId of filter.selectedCompanyIds) {
+        const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
+        const companyRows = buildDashboardRows(accounts, companyAmounts).rows;
+        const byId: Record<string, number> = {};
+        companyRows.forEach((r) => { byId[r.id] = r.value; });
+        realizedByCompany[companyId] = byId;
+      }
+    }
+
+    displayRows = zeroRows.map((row) => {
+      const valuesByCompany: Record<string, number> = {};
+      const budgetMap: Record<string, number> = {};
+      filter.selectedCompanyIds.forEach((companyId) => {
+        budgetMap[companyId] = budgetByCompany[companyId]?.[row.id] ?? 0;
+        if (compareSub === "realizado") {
+          valuesByCompany[companyId] = realizedByCompany[companyId]?.[row.id] ?? 0;
+        }
+      });
+      return {
+        ...row,
+        valuesByBucket: {},
+        accumulatedValue: 0,
+        valuesByCompany: compareSub === "realizado" ? valuesByCompany : undefined,
+        budgetByCompany: budgetMap,
+      } satisfies BudgetForecastDisplayRow;
+    });
   } else {
     // Projecao: months <= current = realized, months > current = budget
     const realizedBuckets = visibleBuckets.filter((b) => {
