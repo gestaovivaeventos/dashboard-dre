@@ -394,23 +394,33 @@ export function processMovimento(
     const temRateio = verificadorRateio > 0;
 
     // ====================================================================
-    // Helper: Gera omie_id único
+    // Helper: Gera omie_id único e DETERMINÍSTICO (estável entre syncs).
+    //
+    // Branch 1 (com nCodTitulo): chave estável por design — Omie garante
+    // unicidade de (nCodTitulo, cNumParcela, cOrigem).
+    //
+    // Branches 2/3 (sem nCodTitulo, ex.: TRAP/TRAR/MANP/EXTP): a chave
+    // antiga incluía `batchIndex` (posição do registro no array da resposta
+    // da API), o que tornava o omie_id INSTÁVEL entre syncs — o mesmo
+    // lançamento Omie ganhava omie_ids diferentes em syncs distintos,
+    // criando linhas duplicadas em financial_entries (uma por sync).
+    // Agora a chave inclui dDtPagamento + value normalizado para ficar
+    // determinística sem depender da ordem da resposta.
     // ====================================================================
-    const makeOmieId = (suffix: string): string => {
+    const valueKey = (val: number) => val.toFixed(2);
+    const makeOmieId = (suffix: string, valueForKey: number): string => {
       let base: string;
       if (nCodTitulo !== "0" && nCodTitulo !== "") {
         base = `${nCodTitulo}:${cNumParcela}:${cOrigem}`;
       } else if (cNumTitulo) {
-        // Include batchIndex to avoid collision when multiple entries
-        // share the same cNumTitulo (e.g. EXTP extrato entries)
-        base = `0:${cNumTitulo}:${cOrigem}:${batchIndex}`;
+        base = `0:${cNumTitulo}:${cOrigem}:${paymentDate}:${valueKey(valueForKey)}`;
       } else {
-        base = `0:${paymentDate}:${cOrigem}:${batchIndex}`;
+        base = `0:${paymentDate}:${cOrigem}:${valueKey(valueForKey)}`;
       }
       return `mov:${base}${suffix}`;
     };
 
-    auditLog.omie_id_source = makeOmieId("");
+    auditLog.omie_id_source = makeOmieId("", 0);
 
     const entries: ProcessedFinancialEntry[] = [];
 
@@ -422,7 +432,7 @@ export function processMovimento(
 
       for (const parcela of parcelas) {
         const entry: ProcessedFinancialEntry = {
-          omie_id: makeOmieId(`:r${parcela.posicao}`),
+          omie_id: makeOmieId(`:r${parcela.posicao}`, parcela.valor),
           company_id: companyId,
           type,
           description,
@@ -460,7 +470,7 @@ export function processMovimento(
     const categoryCode = getString(record as Record<string, unknown>, ["cCodCateg"]);
 
     const entry: ProcessedFinancialEntry = {
-      omie_id: makeOmieId(""),
+      omie_id: makeOmieId("", value),
       company_id: companyId,
       type,
       description,
