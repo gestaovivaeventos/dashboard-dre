@@ -6,20 +6,22 @@ export type { DreRole as UserRole };
 // ─── Regras do módulo DRE ─────────────────────────────────────────────────────
 
 const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
-  { suffix: "/dashboard",     roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { suffix: "/kpis",          roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { suffix: "/mapeamento",    roles: ["admin"] },
-  { suffix: "/configuracoes", roles: ["admin"] },
+  { suffix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/mapeamento",       roles: ["admin"] },
+  { suffix: "/configuracoes",    roles: ["admin"] },
 ];
 
 const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
-  { prefix: "/admin",         roles: ["admin"] },
-  { prefix: "/usuarios",      roles: ["admin"] },
-  { prefix: "/dashboard",     roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { prefix: "/kpis",          roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { prefix: "/conexoes",      roles: ["admin", "gestor_hero"] },
-  { prefix: "/mapeamento",    roles: ["admin"] },
-  { prefix: "/configuracoes", roles: ["admin"] },
+  { prefix: "/admin",            roles: ["admin"] },
+  { prefix: "/usuarios",         roles: ["admin"] },
+  { prefix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },
+  { prefix: "/mapeamento",       roles: ["admin"] },
+  { prefix: "/configuracoes",    roles: ["admin"] },
 ];
 
 // ─── Regras do módulo Ctrl ────────────────────────────────────────────────────
