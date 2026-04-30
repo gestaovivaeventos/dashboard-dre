@@ -11,6 +11,7 @@ import {
   PieChart,
   Receipt,
   Settings,
+  Target,
   Truck,
   Users,
 } from "lucide-react";
@@ -23,6 +24,12 @@ export const SEGMENT_SUB_ITEMS = [
     title: "Dashboard (DRE)",
     suffix: "/dashboard",
     icon: PieChart,
+    roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
+  },
+  {
+    title: "Budget e Forecast",
+    suffix: "/budget-forecast",
+    icon: Target,
     roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
   },
   {

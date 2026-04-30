@@ -27,7 +27,6 @@ interface DashboardDisplayRow extends DreAccountBase {
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
   valuesByCompany?: Record<string, number>;
-  budgetValue?: number;
 }
 
 export default async function DashboardPage({ searchParams, params }: DashboardPageProps) {
@@ -185,36 +184,6 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     }
   }
 
-  // Fetch budget data for "Previsto x Realizado" mode
-  // When "Ano atual", cap budget at current month (not full year)
-  const budgetMap: Record<string, number> = {};
-  if (filter.budgetMode) {
-    const now = new Date();
-    const currentMonth = now.getUTCMonth() + 1;
-    const currentYear = now.getUTCFullYear();
-
-    let budgetDateTo = accumulatedBucket.dateTo;
-    if (filter.periodMode === "ano_atual") {
-      const lastDay = new Date(Date.UTC(currentYear, currentMonth, 0));
-      budgetDateTo = lastDay.toISOString().slice(0, 10);
-    }
-
-    const { data: budgetData } = await supabase.rpc("budget_aggregate", {
-      p_company_ids: filter.selectedCompanyIds,
-      p_date_from: accumulatedBucket.dateFrom,
-      p_date_to: budgetDateTo,
-    });
-
-    const budgetAmounts = new Map<string, number>();
-    ((budgetData as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((item) => {
-      budgetAmounts.set(item.dre_account_id, Number(item.amount ?? 0));
-    });
-
-    // Build full DRE rows from budget amounts (so formulas/summaries compute)
-    const budgetRows = buildDashboardRows(accounts, budgetAmounts).rows;
-    budgetRows.forEach((r) => { budgetMap[r.id] = r.value; });
-  }
-
   const displayRows = zeroRows.map((row) => {
     const valuesByBucket: Record<string, number> = {};
     visibleBuckets.forEach((bucket) => {
@@ -233,7 +202,6 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       valuesByBucket,
       accumulatedValue: accumulatedMap[row.id] ?? 0,
       valuesByCompany: filter.compareCompanies ? valuesByCompany : undefined,
-      budgetValue: filter.budgetMode ? (budgetMap[row.id] ?? 0) : undefined,
     } satisfies DashboardDisplayRow;
   });
 
