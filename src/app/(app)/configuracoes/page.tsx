@@ -39,7 +39,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [companiesResult, dreResult, mappingsResult, kpisResult] = await Promise.all([
+  const [companiesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
     companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
@@ -55,6 +55,14 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
         "id,name,description,formula_type,numerator_account_codes,denominator_account_codes,multiply_by,sort_order,active",
       )
       .order("sort_order", { ascending: true }),
+    supabase
+      .from("cash_flow_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active")
+      .order("sort_order"),
+    supabase
+      .from("cash_flow_category_mappings")
+      .select("id,omie_category_code,omie_category_name,cash_flow_account_id,company_id")
+      .order("omie_category_code"),
   ]);
 
   const companies = (companiesResult.data ?? []).map((company) => ({
@@ -135,11 +143,44 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     mappings: mappingByAccount.get(account.id as string) ?? [],
   }));
 
+  const cashFlowMappingByAccount = new Map<
+    string,
+    Array<{ id: string; code: string; name: string; company_id: string | null }>
+  >();
+  (cashFlowMappingsResult.data ?? []).forEach((mapping) => {
+    const accountId = mapping.cash_flow_account_id as string;
+    const entries = cashFlowMappingByAccount.get(accountId) ?? [];
+    entries.push({
+      id: mapping.id as string,
+      code: mapping.omie_category_code as string,
+      name: mapping.omie_category_name as string,
+      company_id: (mapping.company_id as string | null) ?? null,
+    });
+    cashFlowMappingByAccount.set(accountId, entries);
+  });
+
+  const cashFlowAccounts = (cashFlowResult.data ?? []).map((account) => ({
+    id: account.id as string,
+    code: account.code as string,
+    name: account.name as string,
+    parent_id: (account.parent_id as string | null) ?? null,
+    level: account.level as number,
+    type: account.type as "receita" | "despesa" | "calculado" | "misto",
+    is_summary: account.is_summary as boolean,
+    formula: (account.formula as string | null) ?? null,
+    source: (account.source as string | null) ?? null,
+    is_highlight_block: account.is_highlight_block as boolean,
+    sort_order: account.sort_order as number,
+    active: account.active as boolean,
+    mappings: cashFlowMappingByAccount.get(account.id as string) ?? [],
+  }));
+
   return (
     <SettingsTabs
       companies={companies}
       companiesWithDepartments={companiesWithDepartments}
       dreAccounts={dreAccounts}
+      cashFlowAccounts={cashFlowAccounts}
       kpis={(kpisResult.data ?? []) as KpiDefinition[]}
       segmentId={segmentId}
     />

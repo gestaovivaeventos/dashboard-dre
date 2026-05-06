@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { CashFlowStructureManager, type CashFlowAccountItem } from "@/components/app/cash-flow-structure-manager";
 import { DreStructureManager } from "@/components/app/dre-structure-manager";
 import { KpiAdminManager } from "@/components/app/kpi-admin-manager";
 import { SettingsCompanies } from "@/components/app/settings-companies";
@@ -50,16 +51,18 @@ interface SettingsTabsProps {
       company_id: string | null;
     }>;
   }>;
+  cashFlowAccounts: CashFlowAccountItem[];
   kpis: KpiDefinition[];
   segmentId?: string | null;
 }
 
-type TabValue = "empresas" | "estrutura_dre" | "kpis" | "departamentos";
+type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos";
 
 export function SettingsTabs({
   companies,
   companiesWithDepartments,
   dreAccounts,
+  cashFlowAccounts,
   kpis,
   segmentId,
 }: SettingsTabsProps) {
@@ -67,33 +70,20 @@ export function SettingsTabs({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2 border-b pb-3">
-        <Button
-          type="button"
-          variant={tab === "empresas" ? "default" : "outline"}
-          onClick={() => setTab("empresas")}
-        >
+      <div className="flex flex-wrap gap-2 border-b pb-3">
+        <Button type="button" variant={tab === "empresas" ? "default" : "outline"} onClick={() => setTab("empresas")}>
           Empresas
         </Button>
-        <Button
-          type="button"
-          variant={tab === "estrutura_dre" ? "default" : "outline"}
-          onClick={() => setTab("estrutura_dre")}
-        >
+        <Button type="button" variant={tab === "estrutura_dre" ? "default" : "outline"} onClick={() => setTab("estrutura_dre")}>
           Estrutura DRE
         </Button>
-        <Button
-          type="button"
-          variant={tab === "kpis" ? "default" : "outline"}
-          onClick={() => setTab("kpis")}
-        >
+        <Button type="button" variant={tab === "estrutura_fluxo_caixa" ? "default" : "outline"} onClick={() => setTab("estrutura_fluxo_caixa")}>
+          Estrutura Fluxo de Caixa
+        </Button>
+        <Button type="button" variant={tab === "kpis" ? "default" : "outline"} onClick={() => setTab("kpis")}>
           KPIs
         </Button>
-        <Button
-          type="button"
-          variant={tab === "departamentos" ? "default" : "outline"}
-          onClick={() => setTab("departamentos")}
-        >
+        <Button type="button" variant={tab === "departamentos" ? "default" : "outline"} onClick={() => setTab("departamentos")}>
           Departamentos
         </Button>
       </div>
@@ -102,13 +92,12 @@ export function SettingsTabs({
         <SettingsCompanies initialCompanies={companies} segmentId={segmentId ?? null} />
       ) : tab === "estrutura_dre" ? (
         <DreStructureManager initialAccounts={dreAccounts} />
+      ) : tab === "estrutura_fluxo_caixa" ? (
+        <CashFlowStructureManager initialAccounts={cashFlowAccounts} />
       ) : tab === "kpis" ? (
         <KpiAdminManager
           initialKpis={kpis}
-          dreAccounts={dreAccounts.map((account) => ({
-            code: account.code,
-            name: account.name,
-          }))}
+          dreAccounts={dreAccounts.map((account) => ({ code: account.code, name: account.name }))}
         />
       ) : (
         <SettingsDepartments companies={companiesWithDepartments} />

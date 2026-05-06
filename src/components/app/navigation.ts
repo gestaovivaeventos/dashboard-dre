@@ -14,6 +14,7 @@ import {
   Target,
   Truck,
   Users,
+  Wallet,
 } from "lucide-react";
 
 import type { DreRole, CtrlRole } from "@/lib/supabase/types";
@@ -24,6 +25,12 @@ export const SEGMENT_SUB_ITEMS = [
     title: "Dashboard (DRE)",
     suffix: "/dashboard",
     icon: PieChart,
+    roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
+  },
+  {
+    title: "Fluxo de Caixa",
+    suffix: "/fluxo-de-caixa",
+    icon: Wallet,
     roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
   },
   {

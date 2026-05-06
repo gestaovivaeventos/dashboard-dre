@@ -34,13 +34,22 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: dreAccountsData }] = await Promise.all([
+  const [
+    { data: companiesData },
+    { data: dreAccountsData },
+    { data: cashFlowAccountsData },
+  ] = await Promise.all([
     companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,active")
       .eq("active", true)
       .order("code"),
+    supabase
+      .from("cash_flow_accounts")
+      .select("id,code,name,active,source")
+      .eq("active", true)
+      .order("sort_order"),
   ]);
 
   const companies = (companiesData ?? []).map((company) => ({
@@ -56,5 +65,21 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
     }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-  return <MappingManager companies={companies} dreAccounts={dreAccounts} />;
+  // Apenas analiticas (sem source) podem ser mapeadas.
+  const cashFlowAccounts = (cashFlowAccountsData ?? [])
+    .filter((a) => !(a.source as string | null))
+    .map((account) => ({
+      id: account.id as string,
+      code: account.code as string,
+      name: account.name as string,
+    }))
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+  return (
+    <MappingManager
+      companies={companies}
+      dreAccounts={dreAccounts}
+      cashFlowAccounts={cashFlowAccounts}
+    />
+  );
 }

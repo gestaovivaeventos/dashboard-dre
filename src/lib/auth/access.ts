@@ -7,6 +7,7 @@ export type { DreRole as UserRole };
 
 const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
   { suffix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/mapeamento",       roles: ["admin"] },
@@ -17,6 +18,7 @@ const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
   { prefix: "/admin",            roles: ["admin"] },
   { prefix: "/usuarios",         roles: ["admin"] },
   { prefix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },

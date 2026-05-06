@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
+import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
 
-type Tab = "omie" | "budget";
+type Tab = "omie" | "cashflow" | "budget";
 
 interface CompanyOption {
   id: string;
@@ -43,6 +44,7 @@ interface BudgetMappingRow {
 interface MappingManagerProps {
   companies: CompanyOption[];
   dreAccounts: DreAccountOption[];
+  cashFlowAccounts: DreAccountOption[];
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -55,7 +57,7 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function MappingManager({ companies, dreAccounts }: MappingManagerProps) {
+export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: MappingManagerProps) {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>("omie");
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
@@ -303,7 +305,15 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
           variant={tab === "omie" ? "default" : "outline"}
           onClick={() => setTab("omie")}
         >
-          Categorias Omie
+          Categorias Omie (DRE)
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={tab === "cashflow" ? "default" : "outline"}
+          onClick={() => setTab("cashflow")}
+        >
+          Categorias Omie (Fluxo de Caixa)
         </Button>
         <Button
           type="button"
@@ -352,7 +362,13 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   className="pl-9 w-64"
-                  placeholder={tab === "omie" ? "Buscar categoria ou conta DRE" : "Buscar linha ou conta DRE"}
+                  placeholder={
+                    tab === "omie"
+                      ? "Buscar categoria ou conta DRE"
+                      : tab === "cashflow"
+                        ? "Buscar categoria ou conta de Fluxo"
+                        : "Buscar linha ou conta DRE"
+                  }
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                 />
@@ -360,14 +376,22 @@ export function MappingManager({ companies, dreAccounts }: MappingManagerProps) 
               <span className="whitespace-nowrap text-xs text-muted-foreground">
                 {tab === "omie"
                   ? `${mappedCount}/${rows.length} mapeadas`
-                  : `${budgetMappedCount}/${budgetRows.length} mapeadas`}
+                  : tab === "budget"
+                    ? `${budgetMappedCount}/${budgetRows.length} mapeadas`
+                    : ""}
               </span>
             </div>
           </div>
         </CardHeader>
       </Card>
 
-      {tab === "omie" ? (
+      {tab === "cashflow" ? (
+        <CashFlowMappingTab
+          companyId={companyId}
+          search={search}
+          cashFlowAccounts={cashFlowAccounts}
+        />
+      ) : tab === "omie" ? (
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
