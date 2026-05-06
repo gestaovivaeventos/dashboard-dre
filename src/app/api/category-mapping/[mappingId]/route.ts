@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
@@ -22,5 +23,6 @@ export async function DELETE(_: Request, { params }: Params) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true });
 }

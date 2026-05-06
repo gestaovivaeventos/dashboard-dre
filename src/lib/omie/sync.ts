@@ -1,3 +1,5 @@
+import { revalidatePath } from "next/cache";
+
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -13,6 +15,8 @@ const OMIE_CATEGORIAS_URL =
   "https://app.omie.com.br/api/v1/geral/categorias/";
 const OMIE_CLIENTES_URL =
   "https://app.omie.com.br/api/v1/geral/clientes/";
+const OMIE_DEPARTAMENTOS_URL =
+  "https://app.omie.com.br/api/v1/geral/departamentos/";
 const REQUEST_INTERVAL_MS = 350;
 
 // ===========================================================================
@@ -35,6 +39,7 @@ interface NormalizedEntry {
   mes_pagamento: number;
   category_code: string | null;
   category_name?: string | null;
+  department_code: string | null;
   supplier_customer: string | null;
   document_number: string | null;
   raw_json: Record<string, unknown>;
@@ -123,6 +128,49 @@ function chunk<T>(items: T[], size: number) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+// Erros transientes do undici/supabase-js em que vale tentar de novo:
+// "TypeError: fetch failed", "ECONNRESET", "socket hang up", etc.
+// Tipicamente causados por payload grande ou conexao interrompida no
+// caminho ate o PostgREST.
+function isTransientNetworkError(message: string | null | undefined) {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("fetch failed") ||
+    m.includes("econnreset") ||
+    m.includes("etimedout") ||
+    m.includes("socket hang up") ||
+    m.includes("network") ||
+    m.includes("timeout")
+  );
+}
+
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<{ data: T | null; error: { message: string } | null }>,
+  maxAttempts = 4,
+): Promise<{ data: T | null; error: { message: string } | null }> {
+  let lastErrorMessage: string | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await fn();
+      if (!result.error) return result;
+      lastErrorMessage = result.error.message;
+      if (!isTransientNetworkError(result.error.message) || attempt === maxAttempts) {
+        return result;
+      }
+    } catch (err) {
+      lastErrorMessage = err instanceof Error ? err.message : String(err);
+      if (!isTransientNetworkError(lastErrorMessage) || attempt === maxAttempts) {
+        throw err;
+      }
+    }
+    // backoff exponencial: 500ms, 1s, 2s
+    await sleep(500 * 2 ** (attempt - 1));
+  }
+  return { data: null, error: { message: `${label}: ${lastErrorMessage ?? "falha apos retries"}` } };
 }
 
 // ===========================================================================
@@ -338,6 +386,217 @@ async function fetchClientNames(
 }
 
 // ===========================================================================
+// Fetch department catalog (ListarDepartamentos)
+// ===========================================================================
+// A Omie expoe os departamentos cadastrados em cada empresa via a API
+// `geral/departamentos/`. Retornamos um Map<codigo, descricao> para a
+// camada de UI/persistencia popular o catalogo `company_departments`.
+// ===========================================================================
+export interface OmieDepartment {
+  code: string;
+  name: string;
+}
+
+async function fetchDepartmentCatalog(
+  appKey: string,
+  appSecret: string,
+  lastRequestRef: { value: number },
+): Promise<OmieDepartment[]> {
+  // Coletamos TODOS os departamentos do catalogo, incluindo agregadores.
+  // Depois filtramos para deixar apenas FOLHAS — agregadores (ex.: "Sua Empresa"
+  // que e raiz da arvore VIVA GO/HERO) nao recebem lancamentos diretamente
+  // e por isso nao fazem sentido como opcao de filtro na DRE.
+  //
+  // A Omie expoe a hierarquia de varias formas dependendo do plano. Detectamos
+  // agregadores por DOIS criterios (qualquer um marca como agregador):
+  //   1. `estrutura` aparece como prefixo de outra estrutura (ex.: "01" e
+  //      prefixo de "01.001"). Esse e o criterio principal porque a Omie
+  //      sempre retorna `estrutura` para hierarquias.
+  //   2. `codigo`/`cCodDepartamento` aparece como pai (`codDep`, `codigo_pai`,
+  //      `cCodDepPai`) de outro registro.
+  interface RawDept {
+    code: string;
+    name: string;
+    structure: string | null;
+    parentCode: string | null;
+  }
+  const all: RawDept[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    let response: Record<string, unknown>;
+    try {
+      response = await omieRequest(
+        OMIE_DEPARTAMENTOS_URL,
+        "ListarDepartamentos",
+        appKey,
+        appSecret,
+        { pagina: page, registros_por_pagina: 500, apenas_importado_api: "N" },
+        lastRequestRef,
+      );
+    } catch {
+      // ListarDepartamentos retorna erro de "nenhum cadastro" como exception:
+      // tratamos como lista vazia em vez de propagar.
+      break;
+    }
+    const records = extractArray(response);
+    for (const record of records) {
+      const code = getString(record, ["codigo", "cCodDepartamento", "codDep"]);
+      const description = getString(record, ["descricao", "cDescricao"]);
+      const structure = getString(record, ["estrutura", "cEstrutura"]);
+      const name = description ?? structure ?? code;
+      const parentCode = getString(record, [
+        "codigo_pai",
+        "cCodDepPai",
+        "codigoPai",
+        "cCodPai",
+        "codDepPai",
+      ]);
+      if (code) {
+        all.push({
+          code,
+          name: name ?? code,
+          structure,
+          parentCode: parentCode ?? null,
+        });
+      }
+    }
+    totalPages = Number(
+      getString(response, [
+        "total_de_paginas",
+        "total_paginas",
+        "nTotPaginas",
+      ]) ?? "1",
+    );
+    if (!Number.isFinite(totalPages) || totalPages < 1) totalPages = page;
+    page += 1;
+  }
+
+  // 1. Marca codigos que aparecem como parent.
+  const hasChildren = new Set<string>();
+  for (const d of all) {
+    if (d.parentCode) hasChildren.add(d.parentCode);
+  }
+
+  // 2. Marca codigos cuja `estrutura` e prefixo da estrutura de outro.
+  //    Ex.: estrutura "01" e prefixo de "01.001" -> "01" e agregador.
+  //    Comparacao via prefixo + delimitador "." para evitar falso positivo
+  //    (estrutura "1" nao e prefixo de "10").
+  const structures = all
+    .map((d) => ({ code: d.code, structure: d.structure }))
+    .filter((d): d is { code: string; structure: string } => Boolean(d.structure));
+  for (const a of structures) {
+    for (const b of structures) {
+      if (a.code === b.code) continue;
+      if (b.structure.startsWith(a.structure + ".")) {
+        hasChildren.add(a.code);
+        break;
+      }
+    }
+  }
+
+  // Dedup por code e mantem apenas folhas.
+  const byCode = new Map<string, OmieDepartment>();
+  for (const d of all) {
+    if (hasChildren.has(d.code)) continue;
+    if (!byCode.has(d.code)) byCode.set(d.code, { code: d.code, name: d.name });
+  }
+  return Array.from(byCode.values());
+}
+
+/**
+ * Busca os departamentos cadastrados na Omie para a empresa e sincroniza com
+ * a tabela `company_departments` (upsert por (company_id, omie_code)).
+ *
+ * Mantem `included` quando ja existe — assim re-syncs nao apagam selecao
+ * feita pelo usuario. Lancamentos sem departamento sao representados pela
+ * linha sentinela `__none__`, criada se ainda nao existir.
+ */
+export async function syncCompanyDepartments(companyId: string) {
+  const supabase = createAdminClient();
+
+  const { data: company, error: companyError } = await supabase
+    .from("companies")
+    .select("id, omie_app_key, omie_app_secret")
+    .eq("id", companyId)
+    .single<{
+      id: string;
+      omie_app_key: string | null;
+      omie_app_secret: string | null;
+    }>();
+
+  if (companyError || !company) {
+    throw new Error("Empresa nao encontrada.");
+  }
+  if (!company.omie_app_key || !company.omie_app_secret) {
+    throw new Error("Credenciais Omie nao configuradas para esta empresa.");
+  }
+
+  const appKey = decryptSecret(company.omie_app_key);
+  const appSecret = decryptSecret(company.omie_app_secret);
+  const lastRequestRef = { value: 0 };
+  const departments = await fetchDepartmentCatalog(appKey, appSecret, lastRequestRef);
+
+  const now = new Date().toISOString();
+
+  // Upsert do catalogo Omie. Sentinela `__none__` e tratada na linha seguinte.
+  if (departments.length > 0) {
+    const rows = departments.map((d) => ({
+      company_id: companyId,
+      omie_code: d.code,
+      name: d.name,
+      synced_at: now,
+      updated_at: now,
+    }));
+    const { error } = await supabase
+      .from("company_departments")
+      .upsert(rows, {
+        onConflict: "company_id,omie_code",
+        ignoreDuplicates: false,
+      });
+    if (error) {
+      throw new Error(`Falha ao salvar departamentos: ${error.message}`);
+    }
+  }
+
+  // Limpa departamentos obsoletos: agregadores que ficaram em syncs antigos
+  // (antes do filtro por folha) ou departamentos removidos na Omie. Preserva
+  // `__none__` e os codigos que vieram no catalogo atual.
+  {
+    const validCodes = ["__none__", ...departments.map((d) => d.code)];
+    const { error } = await supabase
+      .from("company_departments")
+      .delete()
+      .eq("company_id", companyId)
+      .not("omie_code", "in", `(${validCodes.map((c) => `"${c}"`).join(",")})`);
+    if (error) {
+      // Nao propagamos: limpeza e best-effort. Usuario ainda consegue salvar.
+      console.warn("[syncCompanyDepartments] cleanup warning:", error.message);
+    }
+  }
+
+  // Sentinela "sem departamento" — so insere se ainda nao existir.
+  const { data: existingNone } = await supabase
+    .from("company_departments")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("omie_code", "__none__")
+    .maybeSingle();
+  if (!existingNone) {
+    await supabase.from("company_departments").insert({
+      company_id: companyId,
+      omie_code: "__none__",
+      name: "Sem departamento vinculado",
+      included: false,
+      synced_at: now,
+    });
+  }
+
+  return { count: departments.length };
+}
+
+// ===========================================================================
 // Permissions
 // ===========================================================================
 export async function canSyncCompany(
@@ -474,6 +733,18 @@ async function runCompanySyncInternal(
         error_message: null,
       })
       .eq("id", syncLog.id);
+
+    // Invalida o cache do Next para que a proxima navegacao ao Dashboard
+    // (ou rotas relacionadas) renderize com o snapshot pos-sync. Sem isso,
+    // abas abertas antes do sync continuam mostrando o snapshot antigo
+    // ate o usuario forcar refresh manual — causa raiz da discrepancia
+    // recorrente entre celula da DRE e total do Drilldown.
+    try {
+      revalidatePath("/(app)", "layout");
+    } catch {
+      // revalidatePath nao esta disponivel fora de contexto Next (ex: testes
+      // standalone). Sync ainda foi gravado com sucesso, falha aqui e benigna.
+    }
 
     return result;
   } catch (error) {
@@ -721,12 +992,29 @@ async function syncEntries({
   const uniqueEntries = Array.from(deduped.values());
 
   // 5. Upsert lancamentos normalizados.
-  for (const batch of chunk(uniqueEntries, 500)) {
-    const { error } = await supabase.from("financial_entries").upsert(batch, {
-      onConflict: "company_id,omie_id",
-    });
+  //
+  //    Batch de 200 (nao 500): cada entry inclui raw_json (registro Omie
+  //    cru) + processing_metadata. Em empresas com volume + payload rico
+  //    (ex.: Viva Go), batches grandes geram POSTs de varios MB e batem
+  //    em limites/timeouts no caminho ate o PostgREST — visiveis como
+  //    "TypeError: fetch failed" do undici, antes mesmo do Postgres ver
+  //    o request. withRetry cobre falhas transientes de rede.
+  const batches = chunk(uniqueEntries, 200);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const { error } = await withRetry(
+      `upsert financial_entries batch ${i + 1}/${batches.length}`,
+      async () => {
+        const r = await supabase
+          .from("financial_entries")
+          .upsert(batch, { onConflict: "company_id,omie_id" });
+        return { data: r.data, error: r.error };
+      },
+    );
     if (error) {
-      throw new Error(`Falha ao salvar lancamentos: ${error.message}`);
+      throw new Error(
+        `Falha ao salvar lancamentos (batch ${i + 1}/${batches.length}, ${batch.length} registros): ${error.message}`,
+      );
     }
   }
 

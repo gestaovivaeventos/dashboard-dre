@@ -5,6 +5,7 @@ import { useState } from "react";
 import { DreStructureManager } from "@/components/app/dre-structure-manager";
 import { KpiAdminManager } from "@/components/app/kpi-admin-manager";
 import { SettingsCompanies } from "@/components/app/settings-companies";
+import { SettingsDepartments } from "@/components/app/settings-departments";
 import { Button } from "@/components/ui/button";
 import type { KpiDefinition } from "@/lib/kpi/calc";
 
@@ -15,6 +16,21 @@ interface SettingsTabsProps {
     active: boolean;
     created_at: string;
     has_credentials: boolean;
+    has_department_apportionment?: boolean;
+  }>;
+  companiesWithDepartments: Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    has_credentials: boolean;
+    has_department_apportionment: boolean;
+    departments: Array<{
+      id: string;
+      omie_code: string;
+      name: string;
+      included: boolean;
+      synced_at: string | null;
+    }>;
   }>;
   dreAccounts: Array<{
     id: string;
@@ -38,9 +54,15 @@ interface SettingsTabsProps {
   segmentId?: string | null;
 }
 
-type TabValue = "empresas" | "estrutura_dre" | "kpis";
+type TabValue = "empresas" | "estrutura_dre" | "kpis" | "departamentos";
 
-export function SettingsTabs({ companies, dreAccounts, kpis, segmentId }: SettingsTabsProps) {
+export function SettingsTabs({
+  companies,
+  companiesWithDepartments,
+  dreAccounts,
+  kpis,
+  segmentId,
+}: SettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("empresas");
 
   return (
@@ -67,13 +89,20 @@ export function SettingsTabs({ companies, dreAccounts, kpis, segmentId }: Settin
         >
           KPIs
         </Button>
+        <Button
+          type="button"
+          variant={tab === "departamentos" ? "default" : "outline"}
+          onClick={() => setTab("departamentos")}
+        >
+          Departamentos
+        </Button>
       </div>
 
       {tab === "empresas" ? (
         <SettingsCompanies initialCompanies={companies} segmentId={segmentId ?? null} />
       ) : tab === "estrutura_dre" ? (
         <DreStructureManager initialAccounts={dreAccounts} />
-      ) : (
+      ) : tab === "kpis" ? (
         <KpiAdminManager
           initialKpis={kpis}
           dreAccounts={dreAccounts.map((account) => ({
@@ -81,6 +110,8 @@ export function SettingsTabs({ companies, dreAccounts, kpis, segmentId }: Settin
             name: account.name,
           }))}
         />
+      ) : (
+        <SettingsDepartments companies={companiesWithDepartments} />
       )}
     </div>
   );

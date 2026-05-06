@@ -32,7 +32,9 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
 
   let companiesQuery = supabase
     .from("companies")
-    .select("id,name,active,created_at,omie_app_key,omie_app_secret");
+    .select(
+      "id,name,active,created_at,omie_app_key,omie_app_secret,has_department_apportionment",
+    );
   if (segmentId) {
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
@@ -61,6 +63,46 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     active: company.active as boolean,
     created_at: company.created_at as string,
     has_credentials: Boolean(company.omie_app_key && company.omie_app_secret),
+    has_department_apportionment: Boolean(company.has_department_apportionment),
+  }));
+
+  // Catalogo de departamentos ja sincronizados (alimenta a aba "Departamentos"
+  // sem precisar bater na Omie a cada render).
+  const companyIds = companies.map((c) => c.id);
+  const departmentsResult = companyIds.length > 0
+    ? await supabase
+        .from("company_departments")
+        .select("id,company_id,omie_code,name,included,synced_at")
+        .in("company_id", companyIds)
+        .order("omie_code")
+    : { data: [] as Array<Record<string, unknown>> };
+
+  const departmentsByCompany = new Map<
+    string,
+    Array<{
+      id: string;
+      omie_code: string;
+      name: string;
+      included: boolean;
+      synced_at: string | null;
+    }>
+  >();
+  (departmentsResult.data ?? []).forEach((row) => {
+    const companyId = row.company_id as string;
+    const list = departmentsByCompany.get(companyId) ?? [];
+    list.push({
+      id: row.id as string,
+      omie_code: row.omie_code as string,
+      name: row.name as string,
+      included: row.included as boolean,
+      synced_at: (row.synced_at as string | null) ?? null,
+    });
+    departmentsByCompany.set(companyId, list);
+  });
+
+  const companiesWithDepartments = companies.map((c) => ({
+    ...c,
+    departments: departmentsByCompany.get(c.id) ?? [],
   }));
 
   const mappingByAccount = new Map<
@@ -96,6 +138,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
   return (
     <SettingsTabs
       companies={companies}
+      companiesWithDepartments={companiesWithDepartments}
       dreAccounts={dreAccounts}
       kpis={(kpisResult.data ?? []) as KpiDefinition[]}
       segmentId={segmentId}

@@ -97,6 +97,11 @@ export interface ProcessedFinancialEntry {
   category_code: string | null;
   category_name?: string | null;
 
+  // Departamento Omie (rateio por unidade de negocio). Null quando o
+  // lancamento nao esta vinculado a nenhum departamento. O filtro da DRE
+  // por departamento (configurado por empresa) usa esse campo.
+  department_code: string | null;
+
   // Rastreabilidade e auditoria
   raw_json: Record<string, unknown>;
 
@@ -105,8 +110,19 @@ export interface ProcessedFinancialEntry {
     regra_baxp_aplicada: boolean;
     regra_periodo_aplicada: boolean;
     verificador_rateio: number; // 1-5 = numero de categorias rateadas, 0 = sem rateio
+    // Quantidade de departamentos no rateio (>= 2 quando o titulo distribui
+    // o valor entre departamentos diferentes). 0/undefined = sem rateio dept.
+    // Cada combinacao categoria x departamento gera uma entry independente.
+    verificador_rateio_dept?: number;
     corretor_duplicidade: number; // 0 = rateio, 1 = valor unico
-    source_field_value?: "nValPago" | "nValLiquido"; // qual valor foi usado
+    source_field_value?: "nValPago" | "nValLiquido" | "nValorMovCC"; // qual valor foi usado
+    // Ajuste de cash (desconto/juros/multa). Quando diferente de zero,
+    // o valor da entry foi recalculado a partir do bruto da Omie.
+    adjusted_for_cash?: boolean;
+    gross_value?: number; // valor bruto antes de desconto/juros/multa
+    discount_value?: number;
+    juros_value?: number;
+    multa_value?: number;
   };
 }
 
@@ -213,6 +229,135 @@ function detectVerificadorRateio(record: RawOmieMovimento): number {
 }
 
 // ============================================================================
+// EXTRAcaO DE DEPARTAMENTO (com suporte a rateio)
+// ============================================================================
+// Quando o sync chama ListarMovimentos com cExibirDepartamentos=S, a Omie
+// retorna o vinculo de departamento de duas formas (depende do tipo do
+// movimento e do plano da empresa):
+//
+//   1. Array `departamentos` na raiz (analogo a `categorias`), com itens no
+//      formato { cCodDepartamento, nDistrPercentual, nDistrValor }. Quando
+//      o titulo possui rateio entre 2+ departamentos (caso comum em empresas
+//      com unidades de negocio compartilhadas), cada item carrega o
+//      percentual e o valor distribuido para aquele departamento.
+//   2. Campo escalar `cCodDepartamento` em `detalhes` — usado quando ha
+//      apenas 1 departamento e a Omie nao expoe o array.
+//
+// Empresas como Hero/Viva Go (mesmo aplicativo Omie) usam rateio entre 2+
+// departamentos para dividir despesas administrativas — ex.: aluguel total
+// 2.304 distribuido como HERO 1.000 (43.40%) + VIVA GO 1.304 (56.60%).
+// Para a DRE refletir corretamente essa partilha, precisamos gerar uma
+// `financial_entries` por (categoria x departamento), cada uma com o seu
+// valor proporcional. O filtro `company_departments.included` aplicado
+// nas RPCs separa o que entra na DRE de cada empresa.
+// ============================================================================
+
+// Retorna a lista completa de departamentos com o percentual de cada um
+// (somando 1.0). Lista vazia quando o registro nao traz array `departamentos`
+// (nesse caso o caller deve cair no `extractDepartmentScalar`).
+function extractDepartmentRateio(
+  record: RawOmieMovimento
+): Array<{ code: string; percentual: number; posicao: number }> {
+  const r = record as Record<string, unknown>;
+  const arrayKeys = ["departamentos", "distribuicao", "dist_dep", "dep", "departments"];
+
+  for (const key of arrayKeys) {
+    const arr = r[key];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+
+    const items: Array<{ code: string; weight: number; posicao: number }> = [];
+    for (let i = 0; i < arr.length; i++) {
+      const item = arr[i];
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const code = getString(obj, [
+        "cCodDepartamento",
+        "codigo_departamento",
+        "codigo",
+        "codDep",
+        "cCodDep",
+        "id_departamento",
+      ]);
+      if (!code) continue;
+      // Pesos: priorizamos `nDistrValor` (mais preciso que percentual, que
+      // vem com arredondamento). Fallback para `nDistrPercentual` quando o
+      // valor nao vier (alguns endpoints so expoem percentual).
+      const valor = parseNumber(obj.nDistrValor);
+      const percentual = parseNumber(obj.nDistrPercentual);
+      const weight = valor > 0 ? valor : percentual;
+      items.push({ code, weight, posicao: i + 1 });
+    }
+    if (items.length === 0) continue;
+
+    const totalWeight = items.reduce((s, p) => s + p.weight, 0);
+    if (totalWeight <= 0) {
+      // Caso extremo: array com codigos mas sem valores/percentuais. Distribui
+      // igualmente para nao perder o vinculo.
+      const eqp = 1 / items.length;
+      return items.map((p) => ({ code: p.code, percentual: eqp, posicao: p.posicao }));
+    }
+    return items.map((p) => ({
+      code: p.code,
+      percentual: p.weight / totalWeight,
+      posicao: p.posicao,
+    }));
+  }
+
+  return [];
+}
+
+// Fallback escalar: usado quando o registro nao tem array `departamentos`.
+function extractDepartmentScalar(record: RawOmieMovimento): string | null {
+  const r = record as Record<string, unknown>;
+  return getString(r, [
+    "cCodDepartamento",
+    "cDepartamento",
+    "codigo_departamento",
+    "codDep",
+    "cCodDep",
+    "id_departamento",
+    "departamento",
+  ]);
+}
+
+// Resolve a forma de vinculo: rateio (>=2), single (1) ou none.
+type DepartmentResolution =
+  | { mode: "none" }
+  | { mode: "single"; code: string }
+  | { mode: "rateio"; items: Array<{ code: string; percentual: number; posicao: number }> };
+
+function resolveDepartments(record: RawOmieMovimento): DepartmentResolution {
+  const items = extractDepartmentRateio(record);
+  if (items.length >= 2) return { mode: "rateio", items };
+  if (items.length === 1) return { mode: "single", code: items[0].code };
+  const scalar = extractDepartmentScalar(record);
+  if (scalar) return { mode: "single", code: scalar };
+  return { mode: "none" };
+}
+
+// Distribui `valorAlvo` entre N departamentos preservando a soma exata.
+// Residuo de centavos vai para a ultima parcela (mesmo padrao usado no
+// rateio por categoria — ver `extrairRateioParcelas`).
+function distribuirPorDepartamentos(
+  pcts: Array<{ code: string; percentual: number; posicao: number }>,
+  valorAlvo: number
+): Array<{ code: string; valor: number; posicao: number }> {
+  if (pcts.length === 0) return [];
+  const out: Array<{ code: string; valor: number; posicao: number }> = [];
+  let consumido = 0;
+  for (let i = 0; i < pcts.length; i++) {
+    const p = pcts[i];
+    const isLast = i === pcts.length - 1;
+    const portion = isLast
+      ? Number((valorAlvo - consumido).toFixed(2))
+      : Number((valorAlvo * p.percentual).toFixed(2));
+    consumido += portion;
+    out.push({ code: p.code, valor: portion, posicao: p.posicao });
+  }
+  return out;
+}
+
+// ============================================================================
 // REGRA 4: CORRETOR_DUPLICIDADE + Seleção de Valor
 // ============================================================================
 // Define qual valor usar:
@@ -269,6 +414,59 @@ function selectValueByCorretor(
 }
 
 // ============================================================================
+// AJUSTE DE CAIXA: DESCONTO / JUROS / MULTA
+// ============================================================================
+// A API da Omie expoe os campos `nDesconto`, `nJuros` e `nMulta` em
+// `detalhes` e/ou `resumo`. O valor bruto do titulo (nValorTitulo) e a
+// soma dos `nDistrValor` do rateio nao refletem o cash real que entrou
+// ou saiu da conta corrente — esses precisam ser ajustados.
+//
+// Para registros-pai (MANP/RPTP/EXTP/BARP/MANR/RPTR/EXTR/BARR), o cash
+// efetivo pode ser lido em `resumo.nValLiquido` (quando disponivel) ou
+// recalculado como `nValPago - nDesconto + nJuros + nMulta`.
+//
+// Para baixas (BAXP/BAXR), `nValorMovCC` ja reflete o movimento real
+// na conta corrente; mas como salvaguarda, tambem aplicamos a mesma
+// formula caso `nValorMovCC` nao venha.
+// ============================================================================
+interface CashAdjustment {
+  desconto: number;
+  juros: number;
+  multa: number;
+  hasAdjustment: boolean;
+}
+
+function extractCashAdjustment(record: RawOmieMovimento): CashAdjustment {
+  const r = record as Record<string, unknown>;
+  const desconto = parseNumber(r.nDesconto);
+  const juros = parseNumber(r.nJuros);
+  const multa = parseNumber(r.nMulta);
+  return {
+    desconto,
+    juros,
+    multa,
+    hasAdjustment: desconto > 0 || juros > 0 || multa > 0,
+  };
+}
+
+// Calcula o valor de cash efetivo de um registro-pai a partir de
+// nValLiquido (preferencial) ou nValPago - desconto + juros + multa.
+// Retorna null quando nao da para inferir (campos zerados).
+function computeParentCashValue(
+  record: RawOmieMovimento,
+  adj: CashAdjustment
+): number | null {
+  const r = record as Record<string, unknown>;
+  const valLiquido = parseNumber(r.nValLiquido);
+  if (valLiquido > 0) return valLiquido;
+  const valPago = parseNumber(r.nValPago);
+  if (valPago > 0) {
+    return Number((valPago - adj.desconto + adj.juros + adj.multa).toFixed(2));
+  }
+  return null;
+}
+
+// ============================================================================
 // REGRA 7: QUEBRA DE RATEIO
 // ============================================================================
 // Para lançamentos com rateio, quebra em parcelas usando o array "categorias"
@@ -277,6 +475,13 @@ function selectValueByCorretor(
 //   - nDistrValor (valor distribuído para esta categoria)
 //   - nDistrPercentual (percentual)
 //   - nValorFixo ("S"/"N")
+//
+// Quando `valorAlvo` é informado e difere do somatório de `nDistrValor`
+// (caso típico: pai com desconto/juros/multa), as parcelas são reescaladas
+// proporcionalmente — usando os próprios `nDistrValor` como pesos
+// (mais preciso que `nDistrPercentual`, que vem com arredondamento).
+// O resíduo de centavos é absorvido pela última parcela para garantir
+// que o somatório bata exatamente com `valorAlvo`.
 // ============================================================================
 interface RateioParcela {
   categoria: string;
@@ -284,24 +489,43 @@ interface RateioParcela {
   posicao: number; // 1-based
 }
 
-function extrairRateioParcelas(record: RawOmieMovimento): RateioParcela[] {
-  const parcelas: RateioParcela[] = [];
+function extrairRateioParcelas(
+  record: RawOmieMovimento,
+  valorAlvo?: number
+): RateioParcela[] {
+  const raw: RateioParcela[] = [];
   const categorias = record.categorias;
-  if (!Array.isArray(categorias)) return parcelas;
+  if (!Array.isArray(categorias)) return raw;
 
   for (let i = 0; i < categorias.length; i++) {
     const item = categorias[i];
     const categoria = item.cCodCateg;
     if (!categoria || (typeof categoria === "string" && !categoria.trim())) continue;
-
     const valor = parseNumber(item.nDistrValor);
-    parcelas.push({
+    raw.push({
       categoria: typeof categoria === "string" ? categoria.trim() : String(categoria),
       valor,
       posicao: i + 1,
     });
   }
 
+  if (valorAlvo === undefined || raw.length === 0) return raw;
+
+  const brutoTotal = raw.reduce((sum, p) => sum + p.valor, 0);
+  // Sem rescale necessário: valorAlvo casa com o bruto (tolerância 1 centavo).
+  if (brutoTotal <= 0 || Math.abs(brutoTotal - valorAlvo) < 0.01) return raw;
+
+  const parcelas: RateioParcela[] = [];
+  let consumido = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const p = raw[i];
+    const isLast = i === raw.length - 1;
+    const portion = isLast
+      ? Number((valorAlvo - consumido).toFixed(2))
+      : Number(((p.valor * valorAlvo) / brutoTotal).toFixed(2));
+    consumido += portion;
+    parcelas.push({ categoria: p.categoria, valor: portion, posicao: p.posicao });
+  }
   return parcelas;
 }
 
@@ -452,42 +676,109 @@ export function processMovimento(
     const entries: ProcessedFinancialEntry[] = [];
 
     // ====================================================================
-    // REGRA 7: RATEIO - Quebra em até 5 parcelas
+    // REGRA 7: RATEIO - Quebra em ate 5 parcelas (categoria) x N depts
+    // Quando ha desconto/juros/multa no titulo, o cash real difere da
+    // soma dos `nDistrValor`. Recalculamos o `valorAlvo` (cash efetivo)
+    // e reescalamos o rateio proporcionalmente.
+    //
+    // Quando ha tambem rateio por departamento (>=2 depts), cada parcela
+    // de categoria e distribuida entre os depts proporcionalmente —
+    // gerando entries por (categoria x departamento). Cada entry mantem
+    // apenas UM department_code (escolhido pelo rateio) para que o filtro
+    // `company_departments.included` nas RPCs continue funcionando como
+    // selecao por linha.
     // ====================================================================
+    const deptResolution = resolveDepartments(record);
+    const singleDeptCode =
+      deptResolution.mode === "single"
+        ? deptResolution.code
+        : deptResolution.mode === "rateio"
+          ? null
+          : null;
+    const verificadorRateioDept =
+      deptResolution.mode === "rateio" ? deptResolution.items.length : undefined;
+
     if (temRateio) {
-      const parcelas = extrairRateioParcelas(record);
+      const adj = extractCashAdjustment(record);
+      const valorAlvo = adj.hasAdjustment
+        ? computeParentCashValue(record, adj) ?? undefined
+        : undefined;
+      const parcelas = extrairRateioParcelas(record, valorAlvo);
+      const grossSum = parcelas.reduce((sum, p) => sum + p.valor, 0);
+
+      const baseMetadata = {
+        regra_baxp_aplicada: false,
+        regra_periodo_aplicada: true,
+        verificador_rateio: verificadorRateio,
+        verificador_rateio_dept: verificadorRateioDept,
+        corretor_duplicidade: 0, // Com rateio, sempre 0
+        source_field_value: (valorAlvo !== undefined ? "nValLiquido" : "nValPago") as
+          | "nValLiquido"
+          | "nValPago",
+        adjusted_for_cash: valorAlvo !== undefined,
+        gross_value: valorAlvo !== undefined ? grossSum : undefined,
+        discount_value: adj.desconto || undefined,
+        juros_value: adj.juros || undefined,
+        multa_value: adj.multa || undefined,
+      };
 
       for (const parcela of parcelas) {
-        const entry: ProcessedFinancialEntry = {
-          omie_id: makeOmieId(`:r${parcela.posicao}`, parcela.valor),
-          company_id: companyId,
-          type,
-          description,
-          supplier_customer,
-          document_number,
-          value: parcela.valor,
-          payment_date: paymentDate,
-          ano_pgto,
-          mes_pagamento,
-          category_code: parcela.categoria,
-          raw_json: rawRecord,
-          processing_metadata: {
-            regra_baxp_aplicada: false,
-            regra_periodo_aplicada: true,
-            verificador_rateio: verificadorRateio,
-            corretor_duplicidade: 0, // Com rateio, sempre 0
-            source_field_value: "nValPago", // placeholder para rateio
-          },
-        };
-        entries.push(entry);
+        if (deptResolution.mode === "rateio") {
+          const deptParts = distribuirPorDepartamentos(
+            deptResolution.items,
+            parcela.valor
+          );
+          for (const dp of deptParts) {
+            if (dp.valor === 0) continue;
+            entries.push({
+              omie_id: makeOmieId(`:r${parcela.posicao}:d${dp.posicao}`, dp.valor),
+              company_id: companyId,
+              type,
+              description,
+              supplier_customer,
+              document_number,
+              value: dp.valor,
+              payment_date: paymentDate,
+              ano_pgto,
+              mes_pagamento,
+              category_code: parcela.categoria,
+              department_code: dp.code,
+              raw_json: rawRecord,
+              processing_metadata: { ...baseMetadata },
+            });
+          }
+        } else {
+          entries.push({
+            omie_id: makeOmieId(`:r${parcela.posicao}`, parcela.valor),
+            company_id: companyId,
+            type,
+            description,
+            supplier_customer,
+            document_number,
+            value: parcela.valor,
+            payment_date: paymentDate,
+            ano_pgto,
+            mes_pagamento,
+            category_code: parcela.categoria,
+            department_code: singleDeptCode,
+            raw_json: rawRecord,
+            processing_metadata: { ...baseMetadata },
+          });
+        }
       }
 
+      if (valorAlvo !== undefined) {
+        auditLog.razao = `Rateio reescalado de bruto p/ cash (desc=${adj.desconto}, juros=${adj.juros}, multa=${adj.multa}, alvo=${valorAlvo}).`;
+      }
+      if (deptResolution.mode === "rateio") {
+        auditLog.razao = `${auditLog.razao ? auditLog.razao + " " : ""}Rateio por departamento aplicado (${deptResolution.items.length} depts).`;
+      }
       auditLog.entries_gerados = entries.length;
       return { entries, auditLog };
     }
 
     // ====================================================================
-    // REGRA 4: CORRETOR_DUPLICIDADE (sem rateio)
+    // REGRA 4: CORRETOR_DUPLICIDADE (sem rateio de categoria)
     // ====================================================================
     const { value, corretor_duplicidade, source_field_value } = selectValueByCorretor(
       record,
@@ -495,8 +786,50 @@ export function processMovimento(
     );
 
     const categoryCode = getString(record as Record<string, unknown>, ["cCodCateg"]);
+    const adjNoRateio = extractCashAdjustment(record);
 
-    const entry: ProcessedFinancialEntry = {
+    const baseMetadataNoRateio = {
+      regra_baxp_aplicada: false,
+      regra_periodo_aplicada: true,
+      verificador_rateio: verificadorRateio,
+      verificador_rateio_dept: verificadorRateioDept,
+      corretor_duplicidade,
+      source_field_value,
+      adjusted_for_cash: adjNoRateio.hasAdjustment && source_field_value === "nValLiquido",
+      discount_value: adjNoRateio.desconto || undefined,
+      juros_value: adjNoRateio.juros || undefined,
+      multa_value: adjNoRateio.multa || undefined,
+    };
+
+    if (deptResolution.mode === "rateio") {
+      // Sem rateio de categoria, mas com rateio de departamento: explode o
+      // valor da entry entre os depts (uma entry por departamento).
+      const deptParts = distribuirPorDepartamentos(deptResolution.items, value);
+      for (const dp of deptParts) {
+        if (dp.valor === 0) continue;
+        entries.push({
+          omie_id: makeOmieId(`:d${dp.posicao}`, dp.valor),
+          company_id: companyId,
+          type,
+          description,
+          supplier_customer,
+          document_number,
+          value: dp.valor,
+          payment_date: paymentDate,
+          ano_pgto,
+          mes_pagamento,
+          category_code: categoryCode,
+          department_code: dp.code,
+          raw_json: rawRecord,
+          processing_metadata: { ...baseMetadataNoRateio },
+        });
+      }
+      auditLog.razao = `Rateio por departamento aplicado (${deptResolution.items.length} depts).`;
+      auditLog.entries_gerados = entries.length;
+      return { entries, auditLog };
+    }
+
+    entries.push({
       omie_id: makeOmieId("", value),
       company_id: companyId,
       type,
@@ -508,17 +841,10 @@ export function processMovimento(
       ano_pgto,
       mes_pagamento,
       category_code: categoryCode,
+      department_code: singleDeptCode,
       raw_json: rawRecord,
-      processing_metadata: {
-        regra_baxp_aplicada: false,
-        regra_periodo_aplicada: true,
-        verificador_rateio: verificadorRateio,
-        corretor_duplicidade,
-        source_field_value,
-      },
-    };
-
-    entries.push(entry);
+      processing_metadata: { ...baseMetadataNoRateio },
+    });
     auditLog.entries_gerados = 1;
     return { entries, auditLog };
   } catch (error) {
@@ -585,11 +911,20 @@ function processBaixasDoTitulo(
     flattenedParents.find((p) => Array.isArray(p.categorias) && p.categorias.length > 0) ?? null;
   const parent: RawOmieMovimento | null =
     parentWithRateio ?? flattenedParents[0] ?? null;
-  const rateio = calcularRateioPercentuais(parent);
+  // Rateio herdado do pai — usado apenas quando a baixa NAO traz seu proprio
+  // array `categorias`. Em pagamentos parciais o pai pode nao vir no mesmo
+  // lote da Omie (filtro por dDtPagamento exclui titulos com saldo aberto),
+  // por isso o array da propria baixa tem prioridade.
+  const parentRateio = calcularRateioPercentuais(parent);
 
   for (let i = 0; i < baixas.length; i++) {
     const rawBaixa = baixas[i];
     const baixa = flattenMovimento(rawBaixa as RawOmieMovimento);
+    // A propria baixa pode (e geralmente traz, em titulos rateados) o array
+    // `categorias` com o rateio do titulo — preferimos ele ao do pai para
+    // sobreviver a sync incremental que so trouxe o BAXP.
+    const baixaRateio = calcularRateioPercentuais(baixa);
+    const rateio = baixaRateio.length > 0 ? baixaRateio : parentRateio;
 
     const auditLog: ProcessingAuditLog = {
       movimento_index: options.batchIndex + i,
@@ -618,11 +953,41 @@ function processBaixasDoTitulo(
           ? "receita"
           : "despesa";
 
-      // Valor real da baixa: nValorMovCC (movimento de conta corrente).
-      // Fallback para nValPago do resumo da própria baixa.
-      const baixaValue =
-        parseNumber(baixa.nValorMovCC) ||
-        parseNumber((baixa.resumo as Record<string, unknown> | undefined)?.nValPago);
+      // Valor real da baixa: nValorMovCC (movimento de conta corrente)
+      // ja vem net de desconto/juros/multa. Fallback para nValPago da baixa
+      // ajustado manualmente quando nValorMovCC nao esta presente.
+      //
+      // Edge case: alguns lotes (ex.: pai BARP que ja contem o resumo da
+      // baixa embutido) trazem nDesconto > 0 com nValPago em valor BRUTO.
+      // Quando ocorrer, tratamos `nValPago` como bruto e aplicamos o
+      // ajuste; para `nValorMovCC` confiamos no valor entregue pela API.
+      const baixaAdj = extractCashAdjustment(baixa);
+      let baixaValue = parseNumber(baixa.nValorMovCC);
+      let baixaSource: "nValorMovCC" | "nValLiquido" | "nValPago" = "nValorMovCC";
+      if (baixaValue === 0) {
+        const valLiquidoBaixa = parseNumber(
+          (baixa.resumo as Record<string, unknown> | undefined)?.nValLiquido
+        );
+        const valPagoBaixa = parseNumber(
+          (baixa.resumo as Record<string, unknown> | undefined)?.nValPago
+        );
+        if (valLiquidoBaixa > 0) {
+          baixaValue = valLiquidoBaixa;
+          baixaSource = "nValLiquido";
+        } else if (valPagoBaixa > 0) {
+          baixaValue = baixaAdj.hasAdjustment
+            ? Number(
+                (
+                  valPagoBaixa -
+                  baixaAdj.desconto +
+                  baixaAdj.juros +
+                  baixaAdj.multa
+                ).toFixed(2)
+              )
+            : valPagoBaixa;
+          baixaSource = "nValPago";
+        }
+      }
       if (baixaValue === 0) {
         auditLog.status = "rejeitado_sem_data";
         auditLog.razao = "Baixa sem valor (nValorMovCC e nValPago zerados).";
@@ -673,11 +1038,75 @@ function processBaixasDoTitulo(
           : `bx:${nCodTitulo}:${paymentDate}:${baixaValue.toFixed(2)}`;
       auditLog.omie_id_source = baseKey;
 
+      // Departamento: prioriza RATEIO em qualquer fonte (baixa > parent),
+      // antes de cair para SINGLE. E comum a Omie expor o array `departamentos`
+      // apenas no titulo-pai e a baixa trazer somente o `cCodDepartamento`
+      // escalar do "departamento principal". Sem essa prioridade ignoravamos
+      // o rateio do pai e a baixa inteira ia para 1 unico dept — Hero perdia
+      // a sua parte de despesas rateadas com Viva Go.
+      //
+      // Ordem:
+      //   1. Rateio (>=2 depts) na propria baixa — fonte mais especifica
+      //   2. Rateio (>=2 depts) no pai
+      //   3. Single da baixa (array com 1 item ou cCodDepartamento escalar)
+      //   4. Single do pai
+      const baixaItems = extractDepartmentRateio(baixa);
+      const parentItems = parent ? extractDepartmentRateio(parent) : [];
+      let deptResolution: DepartmentResolution;
+      if (baixaItems.length >= 2) {
+        deptResolution = { mode: "rateio", items: baixaItems };
+      } else if (parentItems.length >= 2) {
+        deptResolution = { mode: "rateio", items: parentItems };
+      } else if (baixaItems.length === 1) {
+        deptResolution = { mode: "single", code: baixaItems[0].code };
+      } else {
+        const baixaScalar = extractDepartmentScalar(baixa);
+        if (baixaScalar) {
+          deptResolution = { mode: "single", code: baixaScalar };
+        } else if (parentItems.length === 1) {
+          deptResolution = { mode: "single", code: parentItems[0].code };
+        } else {
+          const parentScalar = parent ? extractDepartmentScalar(parent) : null;
+          deptResolution = parentScalar
+            ? { mode: "single", code: parentScalar }
+            : { mode: "none" };
+        }
+      }
+      const singleDeptCode =
+        deptResolution.mode === "single" ? deptResolution.code : null;
+      const verificadorRateioDept =
+        deptResolution.mode === "rateio" ? deptResolution.items.length : undefined;
+
       const entries: ProcessedFinancialEntry[] = [];
+
+      const baseMetaRateio = {
+        regra_baxp_aplicada: true,
+        regra_periodo_aplicada: true,
+        verificador_rateio: rateio.length,
+        verificador_rateio_dept: verificadorRateioDept,
+        corretor_duplicidade: 0,
+        source_field_value: baixaSource,
+        adjusted_for_cash: baixaAdj.hasAdjustment,
+        discount_value: baixaAdj.desconto || undefined,
+        juros_value: baixaAdj.juros || undefined,
+        multa_value: baixaAdj.multa || undefined,
+      };
+      const baseMetaSemRateio = {
+        regra_baxp_aplicada: true,
+        regra_periodo_aplicada: true,
+        verificador_rateio: 0,
+        verificador_rateio_dept: verificadorRateioDept,
+        corretor_duplicidade: 1,
+        source_field_value: baixaSource,
+        adjusted_for_cash: baixaAdj.hasAdjustment,
+        discount_value: baixaAdj.desconto || undefined,
+        juros_value: baixaAdj.juros || undefined,
+        multa_value: baixaAdj.multa || undefined,
+      };
 
       if (rateio.length > 0) {
         // Distribui a baixa proporcionalmente entre as categorias do rateio.
-        // Acumula resíduo de arredondamento para garantir soma exata.
+        // Acumula residuo de arredondamento para garantir soma exata.
         let consumido = 0;
         for (let j = 0; j < rateio.length; j++) {
           const r = rateio[j];
@@ -687,55 +1116,104 @@ function processBaixasDoTitulo(
             : Number((baixaValue * r.percentual).toFixed(2));
           consumido += portion;
           if (portion === 0) continue;
+
+          if (deptResolution.mode === "rateio") {
+            // Cada parcela de categoria e ainda subdividida entre os depts.
+            const deptParts = distribuirPorDepartamentos(
+              deptResolution.items,
+              portion
+            );
+            for (const dp of deptParts) {
+              if (dp.valor === 0) continue;
+              entries.push({
+                omie_id: `${baseKey}:r${r.posicao}:d${dp.posicao}`,
+                company_id: options.companyId,
+                type,
+                description,
+                supplier_customer,
+                document_number,
+                value: dp.valor,
+                payment_date: paymentDate,
+                ano_pgto: year,
+                mes_pagamento: month,
+                category_code: r.categoria,
+                department_code: dp.code,
+                raw_json: rawBaixa as Record<string, unknown>,
+                processing_metadata: { ...baseMetaRateio },
+              });
+            }
+          } else {
+            entries.push({
+              omie_id: `${baseKey}:r${r.posicao}`,
+              company_id: options.companyId,
+              type,
+              description,
+              supplier_customer,
+              document_number,
+              value: portion,
+              payment_date: paymentDate,
+              ano_pgto: year,
+              mes_pagamento: month,
+              category_code: r.categoria,
+              department_code: singleDeptCode,
+              raw_json: rawBaixa as Record<string, unknown>,
+              processing_metadata: { ...baseMetaRateio },
+            });
+          }
+        }
+      } else {
+        const categoryCode = getString(baixa as Record<string, unknown>, ["cCodCateg"]);
+
+        if (deptResolution.mode === "rateio") {
+          const deptParts = distribuirPorDepartamentos(
+            deptResolution.items,
+            baixaValue
+          );
+          for (const dp of deptParts) {
+            if (dp.valor === 0) continue;
+            entries.push({
+              omie_id: `${baseKey}:d${dp.posicao}`,
+              company_id: options.companyId,
+              type,
+              description,
+              supplier_customer,
+              document_number,
+              value: dp.valor,
+              payment_date: paymentDate,
+              ano_pgto: year,
+              mes_pagamento: month,
+              category_code: categoryCode,
+              department_code: dp.code,
+              raw_json: rawBaixa as Record<string, unknown>,
+              processing_metadata: { ...baseMetaSemRateio },
+            });
+          }
+        } else {
           entries.push({
-            omie_id: `${baseKey}:r${r.posicao}`,
+            omie_id: baseKey,
             company_id: options.companyId,
             type,
             description,
             supplier_customer,
             document_number,
-            value: portion,
+            value: baixaValue,
             payment_date: paymentDate,
             ano_pgto: year,
             mes_pagamento: month,
-            category_code: r.categoria,
+            category_code: categoryCode,
+            department_code: singleDeptCode,
             raw_json: rawBaixa as Record<string, unknown>,
-            processing_metadata: {
-              regra_baxp_aplicada: true,
-              regra_periodo_aplicada: true,
-              verificador_rateio: rateio.length,
-              corretor_duplicidade: 0,
-              source_field_value: "nValPago",
-            },
+            processing_metadata: { ...baseMetaSemRateio },
           });
         }
-      } else {
-        const categoryCode = getString(baixa as Record<string, unknown>, ["cCodCateg"]);
-        entries.push({
-          omie_id: baseKey,
-          company_id: options.companyId,
-          type,
-          description,
-          supplier_customer,
-          document_number,
-          value: baixaValue,
-          payment_date: paymentDate,
-          ano_pgto: year,
-          mes_pagamento: month,
-          category_code: categoryCode,
-          raw_json: rawBaixa as Record<string, unknown>,
-          processing_metadata: {
-            regra_baxp_aplicada: true,
-            regra_periodo_aplicada: true,
-            verificador_rateio: 0,
-            corretor_duplicidade: 1,
-            source_field_value: cOrigemBaixa === "BAXR" ? "nValPago" : "nValPago",
-          },
-        });
       }
 
       auditLog.entries_gerados = entries.length;
-      auditLog.razao = `Baixa parcial processada (${cOrigemBaixa}, nCodBaixa=${nCodBaixa || "-"}).`;
+      const deptInfo =
+        deptResolution.mode === "rateio"
+          ? ` rateio dept (${deptResolution.items.length})`
+          : "";
+      auditLog.razao = `Baixa parcial processada (${cOrigemBaixa}, nCodBaixa=${nCodBaixa || "-"})${deptInfo}.`;
       results.push({ entries, auditLog });
     } catch (error) {
       auditLog.status = "erro";

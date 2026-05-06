@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { sendSyncFailureEmail, sendUnmappedCategoriesEmail } from "@/lib/notifications/resend";
+import {
+  sendSyncFailureEmail,
+  sendUnmappedCategoriesEmail,
+  sendUnmappedEntriesAlertEmail,
+} from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -82,9 +86,53 @@ export async function GET(request: Request) {
     }
   }
 
+  // Auditoria de lancamentos invisiveis no dashboard apos os syncs:
+  // varre os ultimos 90 dias de TODAS as empresas ativas. Se aparecer
+  // qualquer entry com categoria sem mapeamento DRE, alerta o admin.
+  // Esta e a defesa principal contra o sintoma "drilldown != dashboard"
+  // — entries sem mapping ficam fora da agregacao da DRE silenciosamente.
+  const allCompanyIds = (companies ?? []).map((c) => c.id as string);
+  const today = new Date();
+  const since = new Date(today);
+  since.setDate(since.getDate() - 90);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  let unmappedEntries: Array<{
+    companyName: string;
+    categoryCode: string;
+    categoryName: string;
+    entryCount: number;
+    totalValue: number;
+    oldestPayment: string;
+    newestPayment: string;
+  }> = [];
+
+  if (allCompanyIds.length > 0) {
+    const { data: auditData, error: auditError } = await supabase.rpc(
+      "dashboard_dre_unmapped_entries_audit",
+      {
+        p_company_ids: allCompanyIds,
+        p_date_from: fmt(since),
+        p_date_to: fmt(today),
+      },
+    );
+    if (!auditError && Array.isArray(auditData)) {
+      unmappedEntries = auditData.map((row) => ({
+        companyName: String(row.company_name ?? ""),
+        categoryCode: String(row.category_code ?? ""),
+        categoryName: String(row.category_name ?? ""),
+        entryCount: Number(row.entry_count ?? 0),
+        totalValue: Number(row.total_value ?? 0),
+        oldestPayment: String(row.oldest_payment ?? ""),
+        newestPayment: String(row.newest_payment ?? ""),
+      }));
+    }
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
+    sendUnmappedEntriesAlertEmail(unmappedEntries),
   ]);
 
   return NextResponse.json({
@@ -92,6 +140,7 @@ export async function GET(request: Request) {
     processed: results.length,
     failed: failures.length,
     unmappedCategories: unmappedCategories.length,
+    unmappedEntries: unmappedEntries.length,
     results,
   });
 }

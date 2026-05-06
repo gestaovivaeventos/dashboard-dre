@@ -1,0 +1,364 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { Loader2, RefreshCcw, Save } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useToast } from "@/components/ui/toaster";
+
+interface DepartmentItem {
+  id: string;
+  omie_code: string;
+  name: string;
+  included: boolean;
+  synced_at: string | null;
+}
+
+interface CompanyWithDepartments {
+  id: string;
+  name: string;
+  active: boolean;
+  has_credentials: boolean;
+  has_department_apportionment: boolean;
+  departments: DepartmentItem[];
+}
+
+interface SettingsDepartmentsProps {
+  companies: CompanyWithDepartments[];
+}
+
+const NONE_CODE = "__none__";
+
+async function safeJson<T>(response: Response): Promise<T | null> {
+  const bodyText = await response.text();
+  if (!bodyText) return null;
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch {
+    return null;
+  }
+}
+
+interface CompanyEditState {
+  hasFlag: boolean;
+  // codigos selecionados (incluindo possivelmente "__none__")
+  selected: Set<string>;
+  departments: DepartmentItem[];
+  syncedOnce: boolean;
+}
+
+function buildInitialState(company: CompanyWithDepartments): CompanyEditState {
+  const selected = new Set<string>();
+  for (const d of company.departments) {
+    if (d.included) selected.add(d.omie_code);
+  }
+  return {
+    hasFlag: company.has_department_apportionment,
+    selected,
+    departments: company.departments,
+    syncedOnce: company.departments.length > 0,
+  };
+}
+
+export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
+  const { showToast } = useToast();
+
+  const [stateByCompany, setStateByCompany] = useState<Record<string, CompanyEditState>>(
+    () =>
+      Object.fromEntries(companies.map((c) => [c.id, buildInitialState(c)])),
+  );
+  const [loadingByCompany, setLoadingByCompany] = useState<Record<string, "fetch" | "save" | null>>({});
+
+  const sortedCompanies = useMemo(
+    () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
+    [companies],
+  );
+
+  const setLoading = (companyId: string, kind: "fetch" | "save" | null) => {
+    setLoadingByCompany((prev) => ({ ...prev, [companyId]: kind }));
+  };
+
+  const updateState = (companyId: string, patch: Partial<CompanyEditState>) => {
+    setStateByCompany((prev) => ({
+      ...prev,
+      [companyId]: { ...prev[companyId], ...patch },
+    }));
+  };
+
+  const refreshDepartments = async (companyId: string) => {
+    setLoading(companyId, "fetch");
+    const response = await fetch(
+      `/api/companies/${companyId}/departments?refresh=1`,
+      { cache: "no-store" },
+    );
+    const payload = await safeJson<{
+      has_department_apportionment?: boolean;
+      departments?: DepartmentItem[];
+      error?: string;
+    }>(response);
+    if (!response.ok || !payload?.departments) {
+      showToast({
+        title: "Falha ao buscar departamentos",
+        description: payload?.error ?? "Verifique as credenciais Omie da empresa.",
+        variant: "destructive",
+      });
+      setLoading(companyId, null);
+      return;
+    }
+
+    const selected = new Set<string>();
+    for (const d of payload.departments) {
+      if (d.included) selected.add(d.omie_code);
+    }
+    updateState(companyId, {
+      hasFlag: Boolean(payload.has_department_apportionment),
+      selected,
+      departments: payload.departments,
+      syncedOnce: true,
+    });
+    setLoading(companyId, null);
+    showToast({
+      title: "Departamentos atualizados",
+      description: `${payload.departments.length} departamento(s) sincronizados.`,
+      variant: "success",
+    });
+  };
+
+  const handleFlagChange = async (companyId: string, value: "sim" | "nao") => {
+    const desiredFlag = value === "sim";
+    const current = stateByCompany[companyId];
+    if (!current) return;
+
+    // Se o usuario marcar Sim e ainda nao temos departamentos sincronizados,
+    // dispara automaticamente o refresh para popular a lista.
+    if (desiredFlag && !current.syncedOnce) {
+      updateState(companyId, { hasFlag: desiredFlag });
+      await refreshDepartments(companyId);
+      return;
+    }
+
+    updateState(companyId, { hasFlag: desiredFlag });
+  };
+
+  const handleToggleCode = (companyId: string, code: string) => {
+    setStateByCompany((prev) => {
+      const current = prev[companyId];
+      if (!current) return prev;
+      const next = new Set(current.selected);
+      if (next.has(code)) {
+        next.delete(code);
+      } else {
+        next.add(code);
+      }
+      return { ...prev, [companyId]: { ...current, selected: next } };
+    });
+  };
+
+  const saveCompany = async (companyId: string) => {
+    const current = stateByCompany[companyId];
+    if (!current) return;
+
+    setLoading(companyId, "save");
+    const includedCodes = current.hasFlag ? Array.from(current.selected) : [];
+    const response = await fetch(`/api/companies/${companyId}/departments`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        has_department_apportionment: current.hasFlag,
+        included_codes: includedCodes,
+      }),
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao salvar",
+        description: payload?.error ?? "Nao foi possivel atualizar a configuracao.",
+        variant: "destructive",
+      });
+      setLoading(companyId, null);
+      return;
+    }
+
+    // Reflete localmente: atualiza `included` em cada item.
+    const nextDepts = current.departments.map((d) => ({
+      ...d,
+      included: current.hasFlag && current.selected.has(d.omie_code),
+    }));
+    updateState(companyId, { departments: nextDepts });
+    setLoading(companyId, null);
+    showToast({
+      title: "Configuracao salva",
+      description: current.hasFlag
+        ? `${includedCodes.length} departamento(s) selecionado(s) para a DRE.`
+        : "Filtro por departamento desativado.",
+      variant: "success",
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-semibold">Departamentos</h2>
+        <p className="text-sm text-muted-foreground">
+          Configure por empresa se ha rateio por departamento na Omie e
+          selecione quais departamentos devem entrar na DRE.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Empresas</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {sortedCompanies.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhuma empresa cadastrada neste grupo.
+            </p>
+          ) : null}
+
+          {sortedCompanies.map((company) => {
+            const state = stateByCompany[company.id];
+            if (!state) return null;
+            const loading = loadingByCompany[company.id] ?? null;
+
+            // Garante que a sentinela "__none__" sempre apareca quando ja
+            // sincronizamos pelo menos uma vez. Quando ainda nao houve sync,
+            // a lista vem vazia e exibimos um aviso para o usuario.
+            const hasNoneRow = state.departments.some(
+              (d) => d.omie_code === NONE_CODE,
+            );
+            const departmentsDisplay = hasNoneRow
+              ? state.departments
+              : state.syncedOnce
+                ? [
+                    ...state.departments,
+                    {
+                      id: `${company.id}-none-virtual`,
+                      omie_code: NONE_CODE,
+                      name: "Sem departamento vinculado",
+                      included: state.selected.has(NONE_CODE),
+                      synced_at: null,
+                    },
+                  ]
+                : [];
+
+            return (
+              <div key={company.id} className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex-1 min-w-[16rem]">
+                    <p className="font-medium">{company.name}</p>
+                    {!company.has_credentials ? (
+                      <p className="text-xs text-amber-600">
+                        Configure as credenciais Omie antes de buscar departamentos.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">
+                        Possui rateio por departamento?
+                      </span>
+                      <select
+                        value={state.hasFlag ? "sim" : "nao"}
+                        onChange={(e) =>
+                          handleFlagChange(
+                            company.id,
+                            e.target.value as "sim" | "nao",
+                          )
+                        }
+                        className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                        disabled={loading !== null || !company.has_credentials}
+                      >
+                        <option value="nao">Nao</option>
+                        <option value="sim">Sim</option>
+                      </select>
+                    </label>
+
+                    {state.hasFlag ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void refreshDepartments(company.id)}
+                        disabled={loading !== null || !company.has_credentials}
+                      >
+                        {loading === "fetch" ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCcw className="mr-2 h-4 w-4" />
+                        )}
+                        Atualizar lista Omie
+                      </Button>
+                    ) : null}
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void saveCompany(company.id)}
+                      disabled={loading !== null}
+                    >
+                      {loading === "save" ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+
+                {state.hasFlag ? (
+                  <div className="mt-3 rounded-md border bg-muted/30 p-3">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Departamentos a incluir na DRE — apenas lancamentos
+                      vinculados a um dos departamentos selecionados (ou ao
+                      pseudo &quot;Sem departamento vinculado&quot;, se marcado) entrarao
+                      no Dashboard.
+                    </p>
+                    {departmentsDisplay.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhum departamento sincronizado ainda. Clique em
+                        &quot;Atualizar lista Omie&quot; para buscar.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {departmentsDisplay.map((d) => (
+                          <label
+                            key={d.id}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={state.selected.has(d.omie_code)}
+                              onChange={() =>
+                                handleToggleCode(company.id, d.omie_code)
+                              }
+                              disabled={loading !== null}
+                              className="h-4 w-4 rounded border-input"
+                            />
+                            <span>
+                              {d.omie_code === NONE_CODE
+                                ? "Sem departamento vinculado"
+                                : d.name}
+                              {d.omie_code !== NONE_CODE ? (
+                                <span className="ml-1 text-xs text-muted-foreground">
+                                  ({d.omie_code})
+                                </span>
+                              ) : null}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

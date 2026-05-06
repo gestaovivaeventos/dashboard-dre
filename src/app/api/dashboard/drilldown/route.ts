@@ -43,25 +43,40 @@ export async function GET(request: Request) {
       total: 0,
       totalPages: 0,
       totalValue: 0,
+      aggregateTotal: 0,
     });
   }
 
-  const { data, error } = await supabase.rpc("dashboard_dre_drilldown", {
-    p_dre_account_id: accountId,
-    p_company_ids: scopedCompanyIds,
-    p_date_from: dateFrom,
-    p_date_to: dateTo,
-    p_search: search,
-    p_limit: pageSize,
-    p_offset: offset,
-  });
+  // Roda em paralelo:
+  // 1) Pagina pedida do drilldown (pra exibir).
+  // 2) Total agregado da MESMA conta no MESMO periodo, mesma snapshot.
+  //    Esse aggregateTotal e a "verdade canonica" do que a celula da DRE
+  //    DEVE estar mostrando agora. O cliente compara com o valor renderizado
+  //    e, se diferirem, mostra alerta + botao para atualizar — garantindo
+  //    que dashboard e drilldown nunca exibam totais conflitantes ao usuario.
+  const [drillResult, aggregateResult] = await Promise.all([
+    supabase.rpc("dashboard_dre_drilldown", {
+      p_dre_account_id: accountId,
+      p_company_ids: scopedCompanyIds,
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+      p_search: search,
+      p_limit: pageSize,
+      p_offset: offset,
+    }),
+    supabase.rpc("dashboard_dre_aggregate", {
+      p_company_ids: scopedCompanyIds,
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    }),
+  ]);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+  if (drillResult.error) {
+    return NextResponse.json({ error: drillResult.error.message }, { status: 400 });
   }
 
   const rows = (
-    data as
+    drillResult.data as
       | Array<{
           financial_entry_id: string;
           payment_date: string;
@@ -90,6 +105,15 @@ export async function GET(request: Request) {
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
 
+  const aggregateRows =
+    (aggregateResult.data as Array<{
+      dre_account_id: string;
+      amount: number | string | null;
+    }> | null) ?? [];
+  const aggregateTotal = Number(
+    aggregateRows.find((r) => r.dre_account_id === accountId)?.amount ?? 0,
+  );
+
   return NextResponse.json({
     rows,
     page,
@@ -97,5 +121,6 @@ export async function GET(request: Request) {
     total,
     totalPages,
     totalValue,
+    aggregateTotal,
   });
 }

@@ -98,9 +98,17 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
         visibleBuckets={[]}
         accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "" }}
         selectedCompanyIds={[]}
+        lastSyncAt={null}
       />
     );
   }
+
+  const { data: lastSyncAtRaw } = await supabase.rpc(
+    "dashboard_last_successful_sync",
+    { p_company_ids: filter.selectedCompanyIds },
+  );
+  const lastSyncAt =
+    typeof lastSyncAtRaw === "string" ? lastSyncAtRaw : null;
 
   const range = buildDateRange(filter);
   const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
@@ -215,6 +223,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       visibleBuckets={visibleBuckets}
       accumulatedBucket={accumulatedBucket}
       selectedCompanyIds={filter.selectedCompanyIds}
+      lastSyncAt={lastSyncAt}
     />
   );
 }

@@ -13,6 +13,7 @@ import {
   Inbox,
   ArrowLeft,
   Check,
+  RefreshCw,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
@@ -71,6 +72,7 @@ interface DashboardDreViewProps {
   visibleBuckets: DashboardPeriodBucket[];
   accumulatedBucket: DashboardPeriodBucket;
   selectedCompanyIds: string[];
+  lastSyncAt: string | null;
 }
 
 interface DrilldownState {
@@ -133,6 +135,70 @@ const MONTHS = [
   { value: 11, label: "Novembro" },
   { value: 12, label: "Dezembro" },
 ];
+
+function SyncFreshnessIndicator({
+  lastSyncAt,
+  refreshing,
+  onRefresh,
+}: {
+  lastSyncAt: string | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  let label: string;
+  let stale = false;
+  if (!lastSyncAt) {
+    label = "Sem sync registrado";
+    stale = true;
+  } else {
+    const syncedAt = new Date(lastSyncAt).getTime();
+    const diffMin = Math.floor((now - syncedAt) / 60_000);
+    if (diffMin < 1) label = "Sincronizado agora";
+    else if (diffMin < 60) label = `Sincronizado ha ${diffMin} min`;
+    else if (diffMin < 60 * 24) {
+      const h = Math.floor(diffMin / 60);
+      label = `Sincronizado ha ${h}h`;
+    } else {
+      label = `Sincronizado em ${new Date(lastSyncAt).toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`;
+    }
+    // Se o ultimo sync foi ha mais de 6 horas, sinaliza como possivelmente
+    // desatualizado para o usuario considerar atualizar antes de tomar decisao.
+    stale = diffMin > 60 * 6;
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-xs">
+      <span
+        className={`inline-block h-2 w-2 rounded-full ${
+          stale ? "bg-amber-500" : "bg-emerald-500"
+        }`}
+      />
+      <span className="text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={refreshing}
+        className="inline-flex items-center gap-1 text-foreground hover:underline disabled:opacity-50"
+        title="Buscar dados atualizados"
+      >
+        <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
+        Atualizar
+      </button>
+    </div>
+  );
+}
 
 function CompanyMultiSelect({
   companies,
@@ -230,10 +296,12 @@ export function DashboardDreView({
   visibleBuckets,
   accumulatedBucket,
   selectedCompanyIds,
+  lastSyncAt,
 }: DashboardDreViewProps) {
   const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
+  const [refreshing, setRefreshing] = useState(false);
 
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
   const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
@@ -261,6 +329,11 @@ export function DashboardDreView({
   const [drillPageSize, setDrillPageSize] = useState(20);
   const [drillTotal, setDrillTotal] = useState(0);
   const [drillTotalValue, setDrillTotalValue] = useState(0);
+  // Valor que estava na celula da DRE clicada e total agregado canonico
+  // devolvido pela API. Se diferirem, exibimos um banner alertando que o
+  // dashboard esta desatualizado e oferecemos botao para recarregar.
+  const [drillCellValue, setDrillCellValue] = useState(0);
+  const [drillAggregateTotal, setDrillAggregateTotal] = useState(0);
 
   const [selectedAccountId, setSelectedAccountId] = useState(rows[0]?.id ?? "");
   const [evolutionData, setEvolutionData] = useState<EvolutionPoint[]>([]);
@@ -320,6 +393,7 @@ export function DashboardDreView({
     bucket: DashboardPeriodBucket,
     page = 1,
     search = "",
+    cellValueOverride?: number,
   ) => {
     setDrilldown({
       open: true,
@@ -327,6 +401,9 @@ export function DashboardDreView({
       accountName: `${account.code} - ${account.name}`,
       bucket,
     });
+    if (typeof cellValueOverride === "number") {
+      setDrillCellValue(cellValueOverride);
+    }
     setDrillLoading(true);
     const params = new URLSearchParams({
       accountId: account.id,
@@ -342,10 +419,12 @@ export function DashboardDreView({
       rows?: DrilldownRow[];
       total?: number;
       totalValue?: number;
+      aggregateTotal?: number;
     };
     setDrillRows(payload.rows ?? []);
     setDrillTotal(payload.total ?? 0);
     setDrillTotalValue(payload.totalValue ?? 0);
+    setDrillAggregateTotal(payload.aggregateTotal ?? 0);
     setDrillPage(page);
     setDrillLoading(false);
   };
@@ -469,6 +548,18 @@ export function DashboardDreView({
             <h2 className="text-2xl font-semibold">DRE Gerencial</h2>
             <p className="text-sm text-muted-foreground">{range.label}</p>
           </div>
+          <div className="flex items-center gap-2">
+            <SyncFreshnessIndicator
+              lastSyncAt={lastSyncAt}
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                router.refresh();
+                // router.refresh() nao retorna Promise observavel; usamos
+                // timeout curto para o spinner sair quando o SSR terminar.
+                window.setTimeout(() => setRefreshing(false), 1500);
+              }}
+            />
           <details className="relative">
             <summary className="list-none">
               <span className={buttonVariants({ variant: "outline" })}>Exportar</span>
@@ -504,6 +595,7 @@ export function DashboardDreView({
               </Button>
             </div>
           </details>
+          </div>
         </div>
       </div>
 
@@ -773,7 +865,13 @@ export function DashboardDreView({
                           if (row.is_summary) {
                             setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }));
                           } else {
-                            void openDrilldown(row, column, 1, drillSearch);
+                            void openDrilldown(
+                              row,
+                              column,
+                              1,
+                              drillSearch,
+                              row.valuesByBucket[column.key] ?? 0,
+                            );
                           }
                         }}
                       >
@@ -852,6 +950,29 @@ export function DashboardDreView({
               <p className="text-sm text-muted-foreground">{drilldown.accountName} | {drilldown.bucket.label}</p>
             </div>
 
+            {!drillLoading && Math.abs(drillAggregateTotal - drillCellValue) > 0.01 && (
+              <div className="flex items-start justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <div>
+                  <strong className="block">Dados do dashboard desatualizados.</strong>
+                  <span>
+                    Celula da DRE mostra <strong>{formatCurrency(drillCellValue)}</strong>,
+                    mas o total real desta conta agora e{" "}
+                    <strong>{formatCurrency(drillAggregateTotal)}</strong>.
+                    Atualize para sincronizar.
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => router.refresh()}
+                  className="shrink-0"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Atualizar dashboard
+                </Button>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Input placeholder="Buscar descricao, fornecedor ou documento" value={drillSearch} onChange={(event) => setDrillSearch(event.target.value)} />
               <Button
@@ -889,7 +1010,12 @@ export function DashboardDreView({
                 )}
               </div>
               <div className="flex items-center justify-between border-t bg-muted px-3 py-2 text-sm">
-                <div>Registros: {drillTotal} | Total da pagina: <strong>{formatCurrency(drillTotalValue)}</strong></div>
+                <div>
+                  Registros: {drillTotal} | Total da pagina: <strong>{formatCurrency(drillTotalValue)}</strong>
+                  {drillTotal > drillRows.length && (
+                    <> | Total da conta: <strong>{formatCurrency(drillAggregateTotal)}</strong></>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <select value={String(drillPageSize)} onChange={(event) => setDrillPageSize(Number(event.target.value))} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
                     <option value="20">20</option><option value="50">50</option><option value="100">100</option>
