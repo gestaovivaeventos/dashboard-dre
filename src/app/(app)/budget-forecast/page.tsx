@@ -54,7 +54,15 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   }
 
   const view = parseView(searchParams.view);
-  const subView = parseSubView(searchParams.subView);
+  const subViewRaw = parseSubView(searchParams.subView);
+  // Apply per-view defaults: realizado defaults to "consolidado", comparativo
+  // defaults to "orcamento", others ignore the field.
+  const subView = subViewRaw
+    || (view === "realizado"
+      ? "consolidado"
+      : view === "comparativo"
+        ? "orcamento"
+        : "");
 
   // Resolve segment filter if inside a segment route
   let segmentId: string | null = null;
