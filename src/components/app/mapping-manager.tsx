@@ -76,6 +76,10 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
   const [budgetSaving, setBudgetSaving] = useState(false);
   const [budgetDraftByLabel, setBudgetDraftByLabel] = useState<Record<string, string>>({});
   const [budgetOriginalByLabel, setBudgetOriginalByLabel] = useState<Record<string, string>>({});
+  const [companyAccountIds, setCompanyAccountIds] = useState<string[]>([]);
+  const [budgetSuggestions, setBudgetSuggestions] = useState<
+    Record<string, { dreAccountId: string; dreAccountCode: string; dreAccountName: string }>
+  >({});
 
   const loadRows = useCallback(async () => {
     if (!companyId) return;
@@ -115,7 +119,12 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
     setBudgetLoading(true);
     const params = new URLSearchParams({ companyId });
     const response = await fetch(`/api/budget-mapping?${params.toString()}`, { cache: "no-store" });
-    const payload = await safeJson<{ rows?: BudgetMappingRow[]; error?: string }>(response);
+    const payload = await safeJson<{
+      rows?: BudgetMappingRow[];
+      companyAccountIds?: string[];
+      suggestions?: Record<string, { dreAccountId: string; dreAccountCode: string; dreAccountName: string }>;
+      error?: string;
+    }>(response);
     if (!response.ok || !payload?.rows) {
       showToast({
         title: "Falha ao carregar mapeamentos de orcamento",
@@ -123,10 +132,14 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
         variant: "destructive",
       });
       setBudgetRows([]);
+      setCompanyAccountIds([]);
+      setBudgetSuggestions({});
       setBudgetLoading(false);
       return;
     }
     setBudgetRows(payload.rows);
+    setCompanyAccountIds(payload.companyAccountIds ?? []);
+    setBudgetSuggestions(payload.suggestions ?? {});
     const snapshot: Record<string, string> = {};
     payload.rows.forEach((row) => {
       snapshot[row.label] = row.dreAccountId ?? "";
@@ -135,6 +148,25 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
     setBudgetOriginalByLabel(snapshot);
     setBudgetLoading(false);
   }, [companyId, showToast]);
+
+  const applyBudgetSuggestions = () => {
+    setBudgetDraftByLabel((previous) => {
+      const next = { ...previous };
+      Object.entries(budgetSuggestions).forEach(([label, suggestion]) => {
+        // Only fill in when the current draft is empty (don't overwrite user choices)
+        if (!next[label]) {
+          next[label] = suggestion.dreAccountId;
+        }
+      });
+      return next;
+    });
+  };
+
+  const applySuggestionFor = (label: string) => {
+    const suggestion = budgetSuggestions[label];
+    if (!suggestion) return;
+    setBudgetDraftByLabel((previous) => ({ ...previous, [label]: suggestion.dreAccountId }));
+  };
 
   useEffect(() => {
     if (tab === "budget") void loadBudgetRows();
@@ -484,91 +516,150 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
       </Card>
 
       ) : (
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50 text-xs font-semibold uppercase text-muted-foreground">
-                  <th className="px-4 py-3 text-left">Linha do Orcamento</th>
-                  <th className="px-4 py-3 text-center w-24">Linhas</th>
-                  <th className="px-4 py-3 text-left">Conta DRE</th>
-                  <th className="px-4 py-3 text-center w-20">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {budgetLoading ? (
-                  <tr>
-                    <td colSpan={4} className="py-10 text-center text-muted-foreground">
-                      <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
-                      Carregando linhas do orcamento...
-                    </td>
+      <>
+        {/* Suggestions header */}
+        {Object.keys(budgetSuggestions).length > 0 && (
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="text-sm">
+                <p className="font-medium">
+                  {Object.keys(budgetSuggestions).length} sugestao(oes) automatica(s) disponivel(is)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Linhas sem mapeamento que combinam com contas DRE ja usadas por esta empresa.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={applyBudgetSuggestions}
+                disabled={budgetSaving}
+              >
+                Aplicar todas as sugestoes
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-xs font-semibold uppercase text-muted-foreground">
+                    <th className="px-4 py-3 text-left">Linha do Orcamento</th>
+                    <th className="px-4 py-3 text-center w-24">Linhas</th>
+                    <th className="px-4 py-3 text-left">Conta DRE</th>
+                    <th className="px-4 py-3 text-left w-72">Sugestao</th>
+                    <th className="px-4 py-3 text-center w-20">Status</th>
                   </tr>
-                ) : visibleBudgetRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-10 text-center text-muted-foreground">
-                      Nenhuma linha encontrada. Faca upload de uma planilha de orcamento em Configuracoes.
-                    </td>
-                  </tr>
-                ) : (
-                  visibleBudgetRows.map((row) => {
-                    const draftValue = budgetDraftByLabel[row.label] ?? "";
-                    const originalValue = budgetOriginalByLabel[row.label] ?? "";
-                    const isModified = draftValue !== originalValue;
-                    const isMapped = draftValue !== "";
-                    return (
-                      <tr
-                        key={row.label}
-                        className={`border-b transition-colors hover:bg-muted/30 ${
-                          isModified ? "bg-blue-50/60" : isMapped ? "" : "bg-amber-50/40"
-                        }`}
-                      >
-                        <td className="px-4 py-2.5">
-                          <span className="line-clamp-1">{row.label}</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-center text-xs text-muted-foreground">
-                          {row.rowsCount}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <select
-                            className={`h-9 w-full min-w-[220px] rounded-md border px-2 text-sm ${
-                              isModified
-                                ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
-                                : "border-input bg-background"
-                            }`}
-                            value={draftValue}
-                            disabled={budgetSaving}
-                            onChange={(event) =>
-                              setBudgetDraftByLabel((previous) => ({
-                                ...previous,
-                                [row.label]: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Selecione uma conta DRE</option>
-                            {dreAccounts.map((account) => (
-                              <option key={account.id} value={account.id}>
-                                {account.code} - {account.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          {isModified && (
-                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                              Alterado
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {budgetLoading ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-muted-foreground">
+                        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+                        Carregando linhas do orcamento...
+                      </td>
+                    </tr>
+                  ) : visibleBudgetRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-muted-foreground">
+                        Nenhuma linha encontrada. Faca upload de uma planilha de orcamento em Configuracoes.
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleBudgetRows.map((row) => {
+                      const draftValue = budgetDraftByLabel[row.label] ?? "";
+                      const originalValue = budgetOriginalByLabel[row.label] ?? "";
+                      const isModified = draftValue !== originalValue;
+                      const isMapped = draftValue !== "";
+                      const suggestion = budgetSuggestions[row.label];
+
+                      const companyAccounts = dreAccounts.filter((a) => companyAccountIds.includes(a.id));
+                      const otherAccounts = dreAccounts.filter((a) => !companyAccountIds.includes(a.id));
+
+                      return (
+                        <tr
+                          key={row.label}
+                          className={`border-b transition-colors hover:bg-muted/30 ${
+                            isModified ? "bg-blue-50/60" : isMapped ? "" : "bg-amber-50/40"
+                          }`}
+                        >
+                          <td className="px-4 py-2.5">
+                            <span className="line-clamp-1">{row.label}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-center text-xs text-muted-foreground">
+                            {row.rowsCount}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <select
+                              className={`h-9 w-full min-w-[260px] rounded-md border px-2 text-sm ${
+                                isModified
+                                  ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
+                                  : "border-input bg-background"
+                              }`}
+                              value={draftValue}
+                              disabled={budgetSaving}
+                              onChange={(event) =>
+                                setBudgetDraftByLabel((previous) => ({
+                                  ...previous,
+                                  [row.label]: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">Selecione uma conta DRE</option>
+                              {companyAccounts.length > 0 && (
+                                <optgroup label="Contas DRE desta empresa">
+                                  {companyAccounts.map((account) => (
+                                    <option key={account.id} value={account.id}>
+                                      {account.code} - {account.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <optgroup label="Outras contas DRE">
+                                {otherAccounts.map((account) => (
+                                  <option key={account.id} value={account.id}>
+                                    {account.code} - {account.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            </select>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {suggestion && draftValue !== suggestion.dreAccountId ? (
+                              <button
+                                type="button"
+                                onClick={() => applySuggestionFor(row.label)}
+                                disabled={budgetSaving}
+                                className="rounded-md border border-emerald-300 bg-emerald-50/60 px-2 py-1 text-left text-xs text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                                title="Aplicar sugestao"
+                              >
+                                {suggestion.dreAccountCode} - {suggestion.dreAccountName}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/60">-</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            {isModified && (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                                Alterado
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </>
       )}
 
       {/* Barra fixa de ações quando há alterações pendentes (Omie) */}
