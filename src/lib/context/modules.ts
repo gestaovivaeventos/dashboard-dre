@@ -1,5 +1,6 @@
-import type { CtrlRole, DreRole } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 import type { ActiveModule } from "@/lib/context/active-context";
+import { readActiveModule, readActiveSegmentSlug } from "@/lib/context/active-context";
 
 export interface ModuleDefinition {
   id: ActiveModule;
@@ -56,4 +57,38 @@ export function resolveActiveModule(
     if (found) return found;
   }
   return available[0];
+}
+
+export interface ResolvedLayoutContext {
+  availableModules: ModuleDefinition[];
+  activeModule: ActiveModule;
+  activeSegmentSlug: string | null;
+}
+
+/**
+ * Resolves the navigation context shared by all (app) layouts.
+ * Reads cookies, validates against the user's available modules and segments,
+ * and applies safe fallbacks.
+ *
+ * @param fallbackModule Used when the cookie is missing/invalid AND no modules
+ *   are available (degenerate). Different layouts default differently.
+ */
+export async function resolveLayoutContext(
+  dreRole: DreRole | null | undefined,
+  ctrlRoles: CtrlRole[] | null | undefined,
+  segments: Segment[],
+  fallbackModule: ActiveModule,
+): Promise<ResolvedLayoutContext> {
+  const availableModules = resolveAvailableModules(dreRole, ctrlRoles);
+  const moduleCookie = await readActiveModule();
+  const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
+  const activeModule: ActiveModule = activeModuleDef?.id ?? fallbackModule;
+
+  const segmentCookie = await readActiveSegmentSlug();
+  const activeSegmentSlug =
+    segmentCookie && segments.some((s) => s.slug === segmentCookie)
+      ? segmentCookie
+      : segments[0]?.slug ?? null;
+
+  return { availableModules, activeModule, activeSegmentSlug };
 }

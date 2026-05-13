@@ -2,7 +2,7 @@
 
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,7 @@ export function SegmentSelector({ segments, activeSlug }: SegmentSelectorProps) 
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,13 +62,15 @@ export function SegmentSelector({ segments, activeSlug }: SegmentSelectorProps) 
       ? segments.filter((s) => s.name.toLowerCase().includes(query.trim().toLowerCase()))
       : segments;
 
-  const onPick = (slug: string) => {
+  const onPick = async (slug: string) => {
     if (slug === activeSegment.slug) {
       setOpen(false);
       return;
     }
+    if (pending) return;
 
-    startTransition(async () => {
+    setPending(true);
+    try {
       await fetch("/api/context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,7 +86,9 @@ export function SegmentSelector({ segments, activeSlug }: SegmentSelectorProps) 
       }
       setOpen(false);
       setQuery("");
-    });
+    } finally {
+      setPending(false);
+    }
   };
 
   return (

@@ -2,8 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
-import { readActiveModule, readActiveSegmentSlug } from "@/lib/context/active-context";
-import { resolveActiveModule, resolveAvailableModules } from "@/lib/context/modules";
+import { resolveLayoutContext } from "@/lib/context/modules";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -39,16 +38,12 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   }
 
   // Resolve module/segment context — ctrl layout always lands in ctrl module.
-  const availableModules = resolveAvailableModules(dreRole, ctrlRoles);
-  const moduleCookie = await readActiveModule();
-  const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
-  const activeModule = activeModuleDef?.id ?? "ctrl";
-
-  const segmentCookie = await readActiveSegmentSlug();
-  const activeSegmentSlug =
-    segmentCookie && segments.some((s) => s.slug === segmentCookie)
-      ? segmentCookie
-      : segments[0]?.slug ?? null;
+  const { availableModules, activeModule, activeSegmentSlug } = await resolveLayoutContext(
+    dreRole,
+    ctrlRoles,
+    segments,
+    "ctrl",
+  );
 
   return (
     <AppShell

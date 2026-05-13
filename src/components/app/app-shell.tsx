@@ -45,8 +45,9 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
 
   const hasCtrl = (ctrlRoles?.length ?? 0) > 0;
-  const showSegmentSelector =
-    activeModule === "dre" && availableModules.some((m) => m.id === "dre");
+  const showSegmentSelector = availableModules.some(
+    (m) => m.id === activeModule && m.usesSegments,
+  );
 
   const sidebarNav = (mobile: boolean) => (
     <NavLinks

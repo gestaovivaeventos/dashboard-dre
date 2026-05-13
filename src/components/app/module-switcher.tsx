@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState } from "react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ActiveModule } from "@/lib/context/active-context";
@@ -14,7 +14,7 @@ interface ModuleSwitcherProps {
 
 export function ModuleSwitcher({ active, available }: ModuleSwitcherProps) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
 
   // Single-module users see a static label, no dropdown.
   if (available.length <= 1) {
@@ -25,12 +25,13 @@ export function ModuleSwitcher({ active, available }: ModuleSwitcherProps) {
     );
   }
 
-  const onChange = (next: string) => {
-    if (next === active) return;
+  const onChange = async (next: string) => {
+    if (next === active || pending) return;
     const target = available.find((m) => m.id === next);
     if (!target) return;
 
-    startTransition(async () => {
+    setPending(true);
+    try {
       await fetch("/api/context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -38,7 +39,9 @@ export function ModuleSwitcher({ active, available }: ModuleSwitcherProps) {
       });
       router.push(target.defaultPath);
       router.refresh();
-    });
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
