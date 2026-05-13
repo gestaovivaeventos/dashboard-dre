@@ -17,12 +17,15 @@ import {
   Wallet,
 } from "lucide-react";
 
-import type { DreRole, CtrlRole } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
-/** Sub-menu items dentro de cada segmento DRE */
-export const SEGMENT_SUB_ITEMS = [
+/**
+ * DRE module items rendered per active segment.
+ * The href is built at render time as `/s/<active-slug><suffix>`.
+ */
+export const DRE_SEGMENT_DAILY_ITEMS = [
   {
-    title: "Dashboard (DRE)",
+    title: "Dashboard",
     suffix: "/dashboard",
     icon: PieChart,
     roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
@@ -45,6 +48,9 @@ export const SEGMENT_SUB_ITEMS = [
     icon: BarChart3,
     roles: ["admin", "gestor_hero", "gestor_unidade"] as DreRole[],
   },
+] as const;
+
+export const DRE_SEGMENT_ADMIN_ITEMS = [
   {
     title: "Mapeamento",
     suffix: "/mapeamento",
@@ -59,13 +65,12 @@ export const SEGMENT_SUB_ITEMS = [
   },
 ] as const;
 
-/** Items globais do módulo DRE */
-export const GLOBAL_NAV_ITEMS = [
+export const DRE_GLOBAL_ADMIN_ITEMS = [
   {
-    title: "Painel Administrador",
-    href: "/admin",
+    title: "Conexoes",
+    href: "/conexoes",
     icon: Settings,
-    roles: ["admin"] as DreRole[],
+    roles: ["admin", "gestor_hero"] as DreRole[],
   },
   {
     title: "Usuarios",
@@ -79,18 +84,23 @@ export const GLOBAL_NAV_ITEMS = [
     icon: Brain,
     roles: ["admin"] as DreRole[],
   },
+  {
+    title: "Painel Administrador",
+    href: "/admin",
+    icon: Settings,
+    roles: ["admin"] as DreRole[],
+  },
 ] as const;
 
-/** Items do módulo Controladoria — visíveis quando ctrlRole != null */
-export const CTRL_NAV_ITEMS = [
+export const CTRL_DAILY_ITEMS = [
   {
-    title: "Requisições",
+    title: "Requisicoes",
     href: "/ctrl/requisicoes",
     icon: FileText,
     roles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin"] as CtrlRole[],
   },
   {
-    title: "Aprovações",
+    title: "Aprovacoes",
     href: "/ctrl/aprovacoes",
     icon: CheckSquare,
     roles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] as CtrlRole[],
@@ -102,23 +112,26 @@ export const CTRL_NAV_ITEMS = [
     roles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] as CtrlRole[],
   },
   {
-    title: "Orçamento",
+    title: "Orcamento",
     href: "/ctrl/orcamento",
     icon: DollarSign,
     roles: ["gerente", "diretor", "csc", "admin"] as CtrlRole[],
   },
   {
-    title: "Relatórios",
+    title: "Relatorios",
     href: "/ctrl/relatorios",
     icon: BarChart3,
     roles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] as CtrlRole[],
   },
   {
-    title: "Notificações",
+    title: "Notificacoes",
     href: "/ctrl/notificacoes",
     icon: Bell,
     roles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin"] as CtrlRole[],
   },
+] as const;
+
+export const CTRL_ADMIN_ITEMS = [
   {
     title: "Fornecedores",
     href: "/ctrl/admin/fornecedores",

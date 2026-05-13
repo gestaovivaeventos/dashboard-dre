@@ -1,248 +1,175 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
-import { CTRL_NAV_ITEMS, GLOBAL_NAV_ITEMS, SEGMENT_SUB_ITEMS } from "@/components/app/navigation";
+import {
+  CTRL_ADMIN_ITEMS,
+  CTRL_DAILY_ITEMS,
+  DRE_GLOBAL_ADMIN_ITEMS,
+  DRE_SEGMENT_ADMIN_ITEMS,
+  DRE_SEGMENT_DAILY_ITEMS,
+} from "@/components/app/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ActiveModule } from "@/lib/context/active-context";
 import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
+  activeModule: ActiveModule;
   role: DreRole;
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
+  activeSegmentSlug: string | null;
   collapsed?: boolean;
   onNavigate?: () => void;
 }
 
-export function NavLinks({ role, ctrlRoles, segments, collapsed, onNavigate }: NavLinksProps) {
+interface RenderItem {
+  key: string;
+  title: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+export function NavLinks({
+  activeModule,
+  role,
+  ctrlRoles,
+  segments,
+  activeSegmentSlug,
+  collapsed,
+  onNavigate,
+}: NavLinksProps) {
   const pathname = usePathname();
 
-  const activeSegmentSlug = segments.find((s) =>
-    pathname.startsWith(`/s/${s.slug}`),
-  )?.slug ?? null;
+  const { daily, admin } = buildItems({
+    activeModule,
+    role,
+    ctrlRoles,
+    segments,
+    activeSegmentSlug,
+  });
 
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(
-    activeSegmentSlug ? { [activeSegmentSlug]: true } : {},
-  );
+  const renderItem = (item: RenderItem) => {
+    const Icon = item.icon;
+    const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
-  const toggleSegment = (slug: string) => {
-    setExpanded((prev) => ({ ...prev, [slug]: !prev[slug] }));
-  };
-
-  const subItems    = SEGMENT_SUB_ITEMS.filter((item) => item.roles.includes(role));
-  const globalItems = GLOBAL_NAV_ITEMS.filter((item) => item.roles.includes(role));
-  const ctrlItems   = ctrlRoles && ctrlRoles.length > 0
-    ? CTRL_NAV_ITEMS.filter((item) => ctrlRoles.some((r) => item.roles.includes(r)))
-    : [];
-
-  // ─── Collapsed mode ───────────────────────────────────────────────────────
-
-  if (collapsed) {
-    return (
-      <nav className="space-y-1">
-        {segments.map((segment) => {
-          const isSegmentActive = pathname.startsWith(`/s/${segment.slug}`);
-          const firstItem = subItems[0];
-          if (!firstItem) return null;
-          const href = `/s/${segment.slug}${firstItem.suffix}`;
-          return (
-            <Tooltip key={segment.id}>
-              <TooltipTrigger asChild>
-                <Link
-                  href={href}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex h-10 w-full items-center justify-center rounded-lg text-sm transition-colors",
-                    isSegmentActive
-                      ? "bg-viva-500 text-white"
-                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-                  )}
-                >
-                  <span className="text-xs font-bold uppercase">
-                    {segment.name.slice(0, 2)}
-                  </span>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">{segment.name}</TooltipContent>
-            </Tooltip>
-          );
-        })}
-
-        {ctrlItems.length > 0 && <div className="my-2 border-t border-border" />}
-
-        {ctrlItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname.startsWith(item.href);
-          return (
-            <Tooltip key={item.href}>
-              <TooltipTrigger asChild>
-                <Link
-                  href={item.href}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex h-10 w-full items-center justify-center rounded-lg transition-colors",
-                    isActive
-                      ? "bg-viva-500 text-white"
-                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">{item.title}</TooltipContent>
-            </Tooltip>
-          );
-        })}
-
-        {globalItems.length > 0 && <div className="my-2 border-t border-border" />}
-
-        {globalItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Tooltip key={item.href}>
-              <TooltipTrigger asChild>
-                <Link
-                  href={item.href}
-                  onClick={onNavigate}
-                  className={cn(
-                    "flex h-10 w-full items-center justify-center rounded-lg transition-colors",
-                    isActive
-                      ? "bg-viva-500 text-white"
-                      : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right">{item.title}</TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </nav>
+    const baseLink = (
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        aria-current={isActive ? "page" : undefined}
+        className={cn(
+          collapsed
+            ? "flex h-10 w-full items-center justify-center rounded-lg transition-colors"
+            : "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+          isActive
+            ? "bg-viva-500 text-white"
+            : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
+        )}
+      >
+        <Icon className="h-4 w-4" />
+        {!collapsed && <span>{item.title}</span>}
+      </Link>
     );
-  }
 
-  // ─── Expanded mode ────────────────────────────────────────────────────────
+    if (!collapsed) return <div key={item.key}>{baseLink}</div>;
+
+    return (
+      <Tooltip key={item.key}>
+        <TooltipTrigger asChild>{baseLink}</TooltipTrigger>
+        <TooltipContent side="right">{item.title}</TooltipContent>
+      </Tooltip>
+    );
+  };
 
   return (
     <nav className="space-y-1">
-      {/* Segmentos DRE */}
-      {segments.length > 0 && (
-        <div className="t-label mb-1 px-3 py-1 text-ink-muted/80">
-          DRE Financeiro
-        </div>
-      )}
+      {daily.map(renderItem)}
 
-      {segments.map((segment) => {
-        const isOpen = expanded[segment.slug] ?? false;
-        return (
-          <div key={segment.id}>
-            <button
-              type="button"
-              onClick={() => toggleSegment(segment.slug)}
-              className={cn(
-                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                pathname.startsWith(`/s/${segment.slug}`)
-                  ? "bg-surface-3 text-viva-500"
-                  : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-              )}
-            >
-              <span className="truncate">{segment.name}</span>
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 shrink-0 transition-transform",
-                  isOpen && "rotate-180",
-                )}
-              />
-            </button>
-
-            {isOpen && (
-              <div className="ml-3 mt-0.5 space-y-0.5 border-l pl-3">
-                {subItems.map((item) => {
-                  const href = `/s/${segment.slug}${item.suffix}`;
-                  const Icon = item.icon;
-                  const isActive = pathname === href;
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={onNavigate}
-                      className={cn(
-                        "flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors",
-                        isActive
-                          ? "bg-viva-500 text-white"
-                          : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      <span>{item.title}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {/* Seção Controladoria */}
-      {ctrlItems.length > 0 && (
+      {admin.length > 0 && (
         <>
           <div className="my-3 border-t border-border" />
-          <div className="t-label mb-1 px-3 py-1 text-viva-500">
-            Controladoria
-          </div>
-          {ctrlItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onNavigate}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  isActive
-                    ? "bg-viva-500 text-white"
-                    : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                <span>{item.title}</span>
-              </Link>
-            );
-          })}
+          {!collapsed && (
+            <div className="t-label mb-1 px-3 py-1 text-ink-muted/80">ADMINISTRAÇÃO</div>
+          )}
+          {admin.map(renderItem)}
         </>
       )}
-
-      {/* Items globais DRE */}
-      {globalItems.length > 0 && <div className="my-3 border-t border-border" />}
-
-      {globalItems.map((item) => {
-        const Icon = item.icon;
-        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-              isActive
-                ? "bg-viva-500 text-white"
-                : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            <span>{item.title}</span>
-          </Link>
-        );
-      })}
     </nav>
   );
+}
+
+interface BuildItemsInput {
+  activeModule: ActiveModule;
+  role: DreRole;
+  ctrlRoles?: CtrlRole[];
+  segments: Segment[];
+  activeSegmentSlug: string | null;
+}
+
+function buildItems({
+  activeModule,
+  role,
+  ctrlRoles,
+  segments,
+  activeSegmentSlug,
+}: BuildItemsInput): { daily: RenderItem[]; admin: RenderItem[] } {
+  if (activeModule === "dre") {
+    const slug =
+      activeSegmentSlug && segments.some((s) => s.slug === activeSegmentSlug)
+        ? activeSegmentSlug
+        : segments[0]?.slug ?? null;
+
+    const daily: RenderItem[] = slug
+      ? DRE_SEGMENT_DAILY_ITEMS.filter((i) => i.roles.includes(role)).map((i) => ({
+          key: `dre-seg-daily-${i.suffix}`,
+          title: i.title,
+          href: `/s/${slug}${i.suffix}`,
+          icon: i.icon,
+        }))
+      : [];
+
+    const segmentAdmin: RenderItem[] = slug
+      ? DRE_SEGMENT_ADMIN_ITEMS.filter((i) => i.roles.includes(role)).map((i) => ({
+          key: `dre-seg-admin-${i.suffix}`,
+          title: i.title,
+          href: `/s/${slug}${i.suffix}`,
+          icon: i.icon,
+        }))
+      : [];
+
+    const globalAdmin: RenderItem[] = DRE_GLOBAL_ADMIN_ITEMS.filter((i) => i.roles.includes(role)).map(
+      (i) => ({
+        key: `dre-global-${i.href}`,
+        title: i.title,
+        href: i.href,
+        icon: i.icon,
+      }),
+    );
+
+    return { daily, admin: [...segmentAdmin, ...globalAdmin] };
+  }
+
+  // Controladoria
+  const ctrlSet = new Set(ctrlRoles ?? []);
+  const matches = <T extends { roles: readonly CtrlRole[] }>(item: T) =>
+    item.roles.some((r) => ctrlSet.has(r));
+
+  const daily: RenderItem[] = CTRL_DAILY_ITEMS.filter(matches).map((i) => ({
+    key: `ctrl-daily-${i.href}`,
+    title: i.title,
+    href: i.href,
+    icon: i.icon,
+  }));
+
+  const admin: RenderItem[] = CTRL_ADMIN_ITEMS.filter(matches).map((i) => ({
+    key: `ctrl-admin-${i.href}`,
+    title: i.title,
+    href: i.href,
+    icon: i.icon,
+  }));
+
+  return { daily, admin };
 }

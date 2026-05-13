@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { readActiveModule, readActiveSegmentSlug } from "@/lib/context/active-context";
+import { resolveActiveModule, resolveAvailableModules } from "@/lib/context/modules";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function ProtectedLayout({
@@ -18,7 +20,7 @@ export default async function ProtectedLayout({
   const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
   const ctrlRoles = modules?.ctrl?.roles ?? [];
 
-  // Fetch segments the user has access to
+  // Fetch segments the user has access to.
   let segments: Segment[] = [];
   if (userRole === "admin") {
     const { data } = await supabase
@@ -38,8 +40,29 @@ export default async function ProtectedLayout({
       .sort((a, b) => a.display_order - b.display_order);
   }
 
+  // Resolve module/segment context.
+  const availableModules = resolveAvailableModules(userRole, ctrlRoles);
+  const moduleCookie = await readActiveModule();
+  const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
+  const activeModule = activeModuleDef?.id ?? "dre";
+
+  const segmentCookie = await readActiveSegmentSlug();
+  const activeSegmentSlug =
+    segmentCookie && segments.some((s) => s.slug === segmentCookie)
+      ? segmentCookie
+      : segments[0]?.slug ?? null;
+
   return (
-    <AppShell userName={userName} userEmail={userEmail} userRole={userRole} ctrlRoles={ctrlRoles} segments={segments}>
+    <AppShell
+      userName={userName}
+      userEmail={userEmail}
+      userRole={userRole}
+      ctrlRoles={ctrlRoles}
+      segments={segments}
+      activeModule={activeModule}
+      availableModules={availableModules}
+      activeSegmentSlug={activeSegmentSlug}
+    >
       {children}
     </AppShell>
   );
