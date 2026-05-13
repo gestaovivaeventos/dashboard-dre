@@ -7,10 +7,11 @@ import {
   Cog,
   DollarSign,
   FileText,
+  LayoutDashboard,
   MapPinned,
   PieChart,
+  Plug,
   Receipt,
-  Settings,
   Target,
   Truck,
   Users,
@@ -69,7 +70,7 @@ export const DRE_GLOBAL_ADMIN_ITEMS = [
   {
     title: "Conexoes",
     href: "/conexoes",
-    icon: Settings,
+    icon: Plug,
     roles: ["admin", "gestor_hero"] as DreRole[],
   },
   {
@@ -87,7 +88,7 @@ export const DRE_GLOBAL_ADMIN_ITEMS = [
   {
     title: "Painel Administrador",
     href: "/admin",
-    icon: Settings,
+    icon: LayoutDashboard,
     roles: ["admin"] as DreRole[],
   },
 ] as const;

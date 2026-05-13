@@ -51,9 +51,17 @@ export function NavLinks({
     activeSegmentSlug,
   });
 
+  // Compute the single best-matching href (longest prefix that the path is at or under)
+  const allItems = [...daily, ...admin];
+  const activeHref =
+    allItems
+      .map((i) => i.href)
+      .filter((h) => pathname === h || pathname.startsWith(`${h}/`))
+      .sort((a, b) => b.length - a.length)[0] ?? null;
+
   const renderItem = (item: RenderItem) => {
     const Icon = item.icon;
-    const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    const isActive = item.href === activeHref;
 
     const baseLink = (
       <Link
