@@ -5,7 +5,7 @@ export const ACTIVE_SEGMENT_COOKIE = "active_segment_slug";
 
 export type ActiveModule = "dre" | "ctrl";
 
-const VALID_MODULES: readonly ActiveModule[] = ["dre", "ctrl"] as const;
+export const VALID_MODULES: readonly ActiveModule[] = ["dre", "ctrl"] as const;
 
 /**
  * Read the active module from cookies. Returns null if not set or invalid.
