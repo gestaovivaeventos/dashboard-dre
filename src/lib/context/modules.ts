@@ -1,0 +1,59 @@
+import type { CtrlRole, DreRole } from "@/lib/supabase/types";
+import type { ActiveModule } from "@/lib/context/active-context";
+
+export interface ModuleDefinition {
+  id: ActiveModule;
+  label: string;
+  /** True if this module operates per-segment (controls header SegmentSelector visibility). */
+  usesSegments: boolean;
+  /** Default landing page when the user switches to this module. */
+  defaultPath: string;
+}
+
+export const MODULES: Record<ActiveModule, ModuleDefinition> = {
+  dre: {
+    id: "dre",
+    label: "DRE Financeiro",
+    usesSegments: true,
+    defaultPath: "/home",
+  },
+  ctrl: {
+    id: "ctrl",
+    label: "Controladoria",
+    usesSegments: false,
+    defaultPath: "/ctrl/requisicoes",
+  },
+};
+
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl"] as const;
+
+/**
+ * Returns the modules the user has any access to.
+ * - DRE access if dreRole is set (always true for an authenticated app user).
+ * - Ctrl access if at least one ctrlRole is non-null/non-empty.
+ */
+export function resolveAvailableModules(
+  dreRole: DreRole | null | undefined,
+  ctrlRoles: CtrlRole[] | null | undefined,
+): ModuleDefinition[] {
+  const result: ModuleDefinition[] = [];
+  if (dreRole) result.push(MODULES.dre);
+  if (ctrlRoles && ctrlRoles.length > 0) result.push(MODULES.ctrl);
+  return result;
+}
+
+/**
+ * Pick the active module: cookie value if present and the user has access; otherwise the first available.
+ * Returns null only if the user has access to no modules (degenerate case).
+ */
+export function resolveActiveModule(
+  cookieValue: ActiveModule | null,
+  available: ModuleDefinition[],
+): ModuleDefinition | null {
+  if (available.length === 0) return null;
+  if (cookieValue) {
+    const found = available.find((m) => m.id === cookieValue);
+    if (found) return found;
+  }
+  return available[0];
+}
