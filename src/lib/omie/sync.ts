@@ -82,13 +82,13 @@ function calculateDateRange(
     return { dateFrom: formatDateForOmie(from), dateTo };
   }
 
+  // "full" sempre re-busca todo o historico desde 2022. Antes, apos a primeira
+  // execucao bem-sucedida, este ramo caia para uma janela de 24 meses — combinado
+  // com `cleanup_obsolete_entries(p_date_from=null, p_date_to=null)`, isso apagava
+  // todos os entries fora da janela (2022, 2023, inicio de 2024) a cada
+  // "Sincronizar Historico" subsequente.
   if (mode === "full") {
-    if (!lastFullSyncAt) {
-      return { dateFrom: "01-01-2022", dateTo };
-    }
-    const from = new Date(now);
-    from.setMonth(from.getMonth() - 24);
-    return { dateFrom: formatDateForOmie(from), dateTo };
+    return { dateFrom: "01-01-2022", dateTo };
   }
 
   // Incremental: from watermark - 3 days

@@ -7,6 +7,7 @@ import { DreStructureManager } from "@/components/app/dre-structure-manager";
 import { KpiAdminManager } from "@/components/app/kpi-admin-manager";
 import { SettingsCompanies } from "@/components/app/settings-companies";
 import { SettingsDepartments } from "@/components/app/settings-departments";
+import { SettingsPartners } from "@/components/app/settings-partners";
 import { Button } from "@/components/ui/button";
 import type { KpiDefinition } from "@/lib/kpi/calc";
 
@@ -56,7 +57,7 @@ interface SettingsTabsProps {
   segmentId?: string | null;
 }
 
-type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos";
+type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos" | "socios";
 
 export function SettingsTabs({
   companies,
@@ -86,6 +87,9 @@ export function SettingsTabs({
         <Button type="button" variant={tab === "departamentos" ? "default" : "outline"} onClick={() => setTab("departamentos")}>
           Departamentos
         </Button>
+        <Button type="button" variant={tab === "socios" ? "default" : "outline"} onClick={() => setTab("socios")}>
+          Socios
+        </Button>
       </div>
 
       {tab === "empresas" ? (
@@ -99,8 +103,10 @@ export function SettingsTabs({
           initialKpis={kpis}
           dreAccounts={dreAccounts.map((account) => ({ code: account.code, name: account.name }))}
         />
-      ) : (
+      ) : tab === "departamentos" ? (
         <SettingsDepartments companies={companiesWithDepartments} />
+      ) : (
+        <SettingsPartners companies={companies.map((c) => ({ id: c.id, name: c.name }))} />
       )}
     </div>
   );
