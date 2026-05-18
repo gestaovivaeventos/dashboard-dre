@@ -4,20 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import {
-  CTRL_ADMIN_ITEMS,
-  CTRL_DAILY_ITEMS,
-  DRE_GLOBAL_ADMIN_ITEMS,
-  DRE_SEGMENT_ADMIN_ITEMS,
-  DRE_SEGMENT_DAILY_ITEMS,
+  NAV_GROUPS,
+  type NavGroup,
+  type NavGroupId,
+  type NavItem,
 } from "@/components/app/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ActiveModule } from "@/lib/context/active-context";
 import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
-  activeModule: ActiveModule;
-  role: DreRole;
+  dreRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
   activeSegmentSlug: string | null;
@@ -29,12 +26,42 @@ interface RenderItem {
   key: string;
   title: string;
   href: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: NavItem["icon"];
+  badge?: number;
 }
 
+interface RenderGroup {
+  id: NavGroupId;
+  label: string;
+  items: RenderItem[];
+}
+
+const MODULE_COLOR: Record<
+  NavGroupId,
+  { text: string; bg: string; rail: string; dot: string }
+> = {
+  financeiro: {
+    text: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-600/[0.06] dark:bg-blue-400/[0.08]",
+    rail: "bg-blue-600 dark:bg-blue-400",
+    dot: "bg-blue-600 dark:bg-blue-400",
+  },
+  compras: {
+    text: "text-violet-600 dark:text-violet-400",
+    bg: "bg-violet-600/[0.06] dark:bg-violet-400/[0.08]",
+    rail: "bg-violet-600 dark:bg-violet-400",
+    dot: "bg-violet-600 dark:bg-violet-400",
+  },
+  plataforma: {
+    text: "text-slate-600 dark:text-slate-300",
+    bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
+    rail: "bg-slate-600 dark:bg-slate-400",
+    dot: "bg-slate-600 dark:bg-slate-400",
+  },
+};
+
 export function NavLinks({
-  activeModule,
-  role,
+  dreRole,
   ctrlRoles,
   segments,
   activeSegmentSlug,
@@ -43,141 +70,197 @@ export function NavLinks({
 }: NavLinksProps) {
   const pathname = usePathname();
 
-  const { daily, admin } = buildItems({
-    activeModule,
-    role,
-    ctrlRoles,
-    segments,
-    activeSegmentSlug,
-  });
+  const groups = buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
 
-  // Compute the single best-matching href (longest prefix that the path is at or under)
-  const allItems = [...daily, ...admin];
+  const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
-    allItems
-      .map((i) => i.href)
+    allHrefs
       .filter((h) => pathname === h || pathname.startsWith(`${h}/`))
       .sort((a, b) => b.length - a.length)[0] ?? null;
 
-  const renderItem = (item: RenderItem) => {
+  if (groups.length === 0) {
+    return (
+      <p className="px-3 py-4 text-sm text-ink-muted">
+        Sem acesso a nenhuma area — fale com um admin.
+      </p>
+    );
+  }
+
+  const renderItem = (item: RenderItem, groupId: NavGroupId) => {
     const Icon = item.icon;
     const isActive = item.href === activeHref;
+    const color = MODULE_COLOR[groupId];
 
-    const baseLink = (
+    if (collapsed) {
+      const collapsedLink = (
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          aria-current={isActive ? "page" : undefined}
+          className={cn(
+            "relative flex h-9 w-full items-center justify-center rounded-md transition-colors",
+            isActive
+              ? cn(color.bg, color.text)
+              : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
+          )}
+        >
+          {isActive && (
+            <span
+              aria-hidden
+              className={cn(
+                "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
+                color.rail,
+              )}
+            />
+          )}
+          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        </Link>
+      );
+      return (
+        <Tooltip key={item.key}>
+          <TooltipTrigger asChild>{collapsedLink}</TooltipTrigger>
+          <TooltipContent side="right">{item.title}</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return (
       <Link
+        key={item.key}
         href={item.href}
         onClick={onNavigate}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          collapsed
-            ? "flex h-10 w-full items-center justify-center rounded-lg transition-colors"
-            : "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+          "relative flex h-[30px] items-center gap-2.5 rounded-md px-3 text-[12.5px] transition-colors",
           isActive
-            ? "bg-viva-500 text-white"
+            ? cn(color.text, color.bg, "font-semibold")
             : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
         )}
       >
-        <Icon className="h-4 w-4" />
-        {!collapsed && <span>{item.title}</span>}
+        {isActive && (
+          <span
+            aria-hidden
+            className={cn(
+              "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
+              color.rail,
+            )}
+          />
+        )}
+        <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        <span className="flex-1 truncate">{item.title}</span>
+        {item.badge != null && (
+          <span
+            className={cn(
+              "text-[10px] font-semibold tabular-nums",
+              color.text,
+              !isActive && "opacity-80",
+            )}
+          >
+            {item.badge}
+          </span>
+        )}
       </Link>
-    );
-
-    if (!collapsed) return <div key={item.key}>{baseLink}</div>;
-
-    return (
-      <Tooltip key={item.key}>
-        <TooltipTrigger asChild>{baseLink}</TooltipTrigger>
-        <TooltipContent side="right">{item.title}</TooltipContent>
-      </Tooltip>
     );
   };
 
   return (
-    <nav className="space-y-1">
-      {daily.map(renderItem)}
-
-      {admin.length > 0 && (
-        <>
-          <div className="my-3 border-t border-border" />
-          {!collapsed && (
-            <div className="t-label mb-1 px-3 py-1 text-ink-muted/80">ADMINISTRAÇÃO</div>
-          )}
-          {admin.map(renderItem)}
-        </>
-      )}
+    <nav className={collapsed ? "space-y-1" : "space-y-0.5"}>
+      {groups.map((group, idx) => {
+        const color = MODULE_COLOR[group.id];
+        return (
+          <div key={group.id} className={idx === 0 ? undefined : "mt-2"}>
+            {!collapsed && (
+              <div className="flex items-center gap-1.5 px-3 pt-3 pb-1.5">
+                <span
+                  aria-hidden
+                  className={cn("h-[5px] w-[5px] rounded-full", color.dot)}
+                />
+                <span
+                  className={cn(
+                    "text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    color.text,
+                  )}
+                >
+                  {group.label}
+                </span>
+              </div>
+            )}
+            {collapsed && idx > 0 && (
+              <div className="my-2 border-t border-border" />
+            )}
+            <div className={collapsed ? "space-y-1" : "space-y-px"}>
+              {group.items.map((item) => renderItem(item, group.id))}
+            </div>
+          </div>
+        );
+      })}
     </nav>
   );
 }
 
-interface BuildItemsInput {
-  activeModule: ActiveModule;
-  role: DreRole;
+interface BuildInput {
+  dreRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
   activeSegmentSlug: string | null;
 }
 
-function buildItems({
-  activeModule,
-  role,
+function buildGroups({
+  dreRole,
   ctrlRoles,
   segments,
   activeSegmentSlug,
-}: BuildItemsInput): { daily: RenderItem[]; admin: RenderItem[] } {
-  if (activeModule === "dre") {
-    const slug =
-      activeSegmentSlug && segments.some((s) => s.slug === activeSegmentSlug)
-        ? activeSegmentSlug
-        : segments[0]?.slug ?? null;
+}: BuildInput): RenderGroup[] {
+  const ctrlSet = new Set(ctrlRoles ?? []);
+  const slug =
+    activeSegmentSlug && segments.some((s) => s.slug === activeSegmentSlug)
+      ? activeSegmentSlug
+      : segments[0]?.slug ?? null;
 
-    const daily: RenderItem[] = slug
-      ? DRE_SEGMENT_DAILY_ITEMS.filter((i) => i.roles.includes(role)).map((i) => ({
-          key: `dre-seg-daily-${i.suffix}`,
-          title: i.title,
-          href: `/s/${slug}${i.suffix}`,
-          icon: i.icon,
-        }))
-      : [];
+  const result: RenderGroup[] = [];
 
-    const segmentAdmin: RenderItem[] = slug
-      ? DRE_SEGMENT_ADMIN_ITEMS.filter((i) => i.roles.includes(role)).map((i) => ({
-          key: `dre-seg-admin-${i.suffix}`,
-          title: i.title,
-          href: `/s/${slug}${i.suffix}`,
-          icon: i.icon,
-        }))
-      : [];
+  for (const group of NAV_GROUPS) {
+    const items: RenderItem[] = [];
 
-    const globalAdmin: RenderItem[] = DRE_GLOBAL_ADMIN_ITEMS.filter((i) => i.roles.includes(role)).map(
-      (i) => ({
-        key: `dre-global-${i.href}`,
-        title: i.title,
-        href: i.href,
-        icon: i.icon,
-      }),
-    );
+    for (const item of group.items) {
+      if (!isItemVisible(item, dreRole, ctrlSet)) continue;
 
-    return { daily, admin: [...segmentAdmin, ...globalAdmin] };
+      const href = resolveHref(item, slug);
+      if (!href) continue;
+
+      items.push({ key: item.key, title: item.title, href, icon: item.icon });
+    }
+
+    if (items.length > 0) {
+      result.push({ id: group.id, label: group.label, items });
+    }
   }
 
-  // Controladoria
-  const ctrlSet = new Set(ctrlRoles ?? []);
-  const matches = <T extends { roles: readonly CtrlRole[] }>(item: T) =>
-    item.roles.some((r) => ctrlSet.has(r));
-
-  const daily: RenderItem[] = CTRL_DAILY_ITEMS.filter(matches).map((i) => ({
-    key: `ctrl-daily-${i.href}`,
-    title: i.title,
-    href: i.href,
-    icon: i.icon,
-  }));
-
-  const admin: RenderItem[] = CTRL_ADMIN_ITEMS.filter(matches).map((i) => ({
-    key: `ctrl-admin-${i.href}`,
-    title: i.title,
-    href: i.href,
-    icon: i.icon,
-  }));
-
-  return { daily, admin };
+  return result;
 }
+
+function isItemVisible(
+  item: NavItem,
+  dreRole: DreRole | null,
+  ctrlSet: Set<CtrlRole>,
+): boolean {
+  const dreOk =
+    item.dreRoles && dreRole !== null
+      ? item.dreRoles.includes(dreRole)
+      : false;
+  const ctrlOk = item.ctrlRoles
+    ? item.ctrlRoles.some((r) => ctrlSet.has(r))
+    : false;
+
+  if (!item.dreRoles && !item.ctrlRoles) return false;
+  return dreOk || ctrlOk;
+}
+
+function resolveHref(item: NavItem, activeSlug: string | null): string | null {
+  if (item.scope === "global") return item.href ?? null;
+  if (!activeSlug || !item.suffix) return null;
+  return `/s/${activeSlug}${item.suffix}`;
+}
+
+// Re-export for callers that want the type alongside this component.
+export type { NavGroup };

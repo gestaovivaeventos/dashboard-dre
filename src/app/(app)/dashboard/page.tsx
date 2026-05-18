@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 import {
@@ -35,16 +36,32 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     redirect("/login");
   }
 
+  // Load all segments the user can access (for the picker).
+  let segments: Segment[] = [];
+  if (profile?.role === "admin") {
+    const { data } = await supabase
+      .from("segments")
+      .select("id,name,slug,display_order,active")
+      .eq("active", true)
+      .order("display_order");
+    segments = (data as Segment[]) ?? [];
+  } else if (profile) {
+    const { data } = await supabase
+      .from("user_segment_access")
+      .select("segments(id,name,slug,display_order,active)")
+      .eq("user_id", profile.id);
+    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
+      .map((row) => row.segments)
+      .filter((s) => s && s.active)
+      .sort((a, b) => a.display_order - b.display_order);
+  }
+
   // Resolve segment filter if inside a segment route
   let segmentId: string | null = null;
-  if (params?.segmentSlug) {
-    const { data: seg } = await supabase
-      .from("segments")
-      .select("id")
-      .eq("slug", params.segmentSlug)
-      .eq("active", true)
-      .maybeSingle<{ id: string }>();
-    segmentId = seg?.id ?? null;
+  const activeSegmentSlug = params?.segmentSlug ?? null;
+  if (activeSegmentSlug) {
+    const found = segments.find((s) => s.slug === activeSegmentSlug);
+    segmentId = found?.id ?? null;
   }
 
   let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
@@ -99,6 +116,8 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
         accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "" }}
         selectedCompanyIds={[]}
         lastSyncAt={null}
+        segments={segments}
+        activeSegmentSlug={activeSegmentSlug}
       />
     );
   }
@@ -224,6 +243,8 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       accumulatedBucket={accumulatedBucket}
       selectedCompanyIds={filter.selectedCompanyIds}
       lastSyncAt={lastSyncAt}
+      segments={segments}
+      activeSegmentSlug={activeSegmentSlug}
     />
   );
 }

@@ -4,10 +4,9 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useState } from "react";
 
 import { Logo, LogoFull } from "@/components/app/logo";
-import { ModuleSwitcher } from "@/components/app/module-switcher";
 import { NavLinks } from "@/components/app/nav-links";
 import { NotificationsLink } from "@/components/app/notifications-link";
-import { SegmentSelector } from "@/components/app/segment-selector";
+import { SegmentChip } from "@/components/app/segment-chip";
 import { SignOutButton } from "@/components/app/sign-out-button";
 import { ThemeToggle } from "@/components/app/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,9 @@ export function AppShell({
   userRole,
   ctrlRoles,
   segments,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   availableModules,
   activeSegmentSlug,
 }: AppShellProps) {
@@ -45,14 +46,11 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
 
   const hasCtrl = (ctrlRoles?.length ?? 0) > 0;
-  const showSegmentSelector = availableModules.some(
-    (m) => m.id === activeModule && m.usesSegments,
-  );
+  const hasSegments = segments.length > 0;
 
   const sidebarNav = (mobile: boolean) => (
     <NavLinks
-      activeModule={activeModule}
-      role={userRole}
+      dreRole={userRole}
       ctrlRoles={ctrlRoles}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
@@ -110,28 +108,19 @@ export function AppShell({
                   </Button>
                 </SheetTrigger>
                 <SheetContent className="bg-surface-1">
-                  <a href="/home" className="mb-6 block">
+                  <a href="/home" className="mb-4 block">
                     <LogoFull />
                   </a>
 
-                  <div className="mb-4 space-y-2">
-                    <ModuleSwitcher active={activeModule} available={availableModules} />
-                    {showSegmentSelector && (
-                      <SegmentSelector segments={segments} activeSlug={activeSegmentSlug} />
-                    )}
-                  </div>
+                  {hasSegments && (
+                    <div className="mb-4">
+                      <SegmentChip segments={segments} activeSlug={activeSegmentSlug} />
+                    </div>
+                  )}
 
                   {sidebarNav(true)}
                 </SheetContent>
               </Sheet>
-            </div>
-
-            {/* Desktop selectors */}
-            <div className="hidden items-center gap-3 md:flex">
-              <ModuleSwitcher active={activeModule} available={availableModules} />
-              {showSegmentSelector && (
-                <SegmentSelector segments={segments} activeSlug={activeSegmentSlug} />
-              )}
             </div>
 
             <div className="ml-auto flex items-center gap-3">
