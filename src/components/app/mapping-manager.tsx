@@ -22,6 +22,9 @@ interface DreAccountOption {
   id: string;
   code: string;
   name: string;
+  // null = conta do plano global; uuid = conta customizada de uma empresa.
+  // Usado para filtrar quais contas aparecem como opcao para cada empresa.
+  company_id?: string | null;
 }
 
 interface MappingRow {
@@ -79,6 +82,20 @@ export function MappingManager({
   // Estado atual dos selects (draft) e estado original (salvo no banco)
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [originalByCode, setOriginalByCode] = useState<Record<string, string>>({});
+
+  // Contas DRE relevantes para a empresa selecionada:
+  // - Contas globais (company_id === null) sempre aparecem
+  // - Contas customizadas (company_id === companyId) so aparecem para a empresa dona
+  // - Mapeamentos existentes que apontam para contas fora desse escopo continuam
+  //   funcionando (FK preservado), apenas nao aparecem como nova opcao para mapeamento.
+  const availableDreAccounts = useMemo(
+    () =>
+      dreAccounts.filter(
+        (account) =>
+          account.company_id == null || account.company_id === companyId,
+      ),
+    [dreAccounts, companyId],
+  );
 
   // Budget tab state
   const [budgetRows, setBudgetRows] = useState<BudgetMappingRow[]>([]);
@@ -508,7 +525,7 @@ export function MappingManager({
                             }
                           >
                             <option value="">Selecione uma conta DRE</option>
-                            {dreAccounts.map((account) => (
+                            {availableDreAccounts.map((account) => (
                               <option key={account.id} value={account.id}>
                                 {account.code} - {account.name}
                               </option>
@@ -594,8 +611,8 @@ export function MappingManager({
                       const isMapped = draftValue !== "";
                       const suggestion = budgetSuggestions[row.label];
 
-                      const companyAccounts = dreAccounts.filter((a) => companyAccountIds.includes(a.id));
-                      const otherAccounts = dreAccounts.filter((a) => !companyAccountIds.includes(a.id));
+                      const companyAccounts = availableDreAccounts.filter((a) => companyAccountIds.includes(a.id));
+                      const otherAccounts = availableDreAccounts.filter((a) => !companyAccountIds.includes(a.id));
 
                       return (
                         <tr

@@ -40,11 +40,19 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [companiesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
+  const [companiesResult, allCompaniesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
     companiesQuery.order("name"),
+    // Lista de TODAS as empresas do sistema (cross-segment) para alimentar
+    // o seletor "Copiar Plano de Contas" do DreStructureManager.
+    supabase
+      .from("companies")
+      .select("id,name")
+      .eq("active", true)
+      .order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .is("company_id", null)
       .order("code"),
     supabase
       .from("category_mapping")
@@ -176,6 +184,11 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     mappings: cashFlowMappingByAccount.get(account.id as string) ?? [],
   }));
 
+  const allCompanies = (allCompaniesResult.data ?? []).map((c) => ({
+    id: c.id as string,
+    name: c.name as string,
+  }));
+
   return (
     <SettingsTabs
       companies={companies}
@@ -186,6 +199,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
       segmentId={segmentId}
       segments={segments}
       currentSegmentSlug={segmentSlug}
+      allCompanies={allCompanies}
     />
   );
 }

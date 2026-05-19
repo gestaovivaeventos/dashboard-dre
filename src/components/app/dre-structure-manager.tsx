@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -51,11 +52,18 @@ interface CompanyOption {
 interface DreStructureManagerProps {
   initialAccounts: DreAccountItem[];
   companies?: CompanyOption[];
+  // Lista completa de empresas no sistema (cross-segment) usada pelo
+  // "Copiar Plano de Contas" para permitir copiar plano de qualquer empresa.
+  allCompanies?: CompanyOption[];
 }
 
 const GLOBAL_VALUE = "__global__";
 
-export function DreStructureManager({ initialAccounts, companies = [] }: DreStructureManagerProps) {
+export function DreStructureManager({
+  initialAccounts,
+  companies = [],
+  allCompanies = [],
+}: DreStructureManagerProps) {
   const { showToast } = useToast();
   const [accounts, setAccounts] = useState(initialAccounts);
   const [scopeCompanyId, setScopeCompanyId] = useState<string | null>(null);
@@ -96,6 +104,13 @@ export function DreStructureManager({ initialAccounts, companies = [] }: DreStru
     sort_order: 0,
   });
   const [createSaving, setCreateSaving] = useState(false);
+
+  // "Copiar Plano de Contas" modal state.
+  const [copyOpen, setCopyOpen] = useState(false);
+  // sourceCompanyId: "" = plano global; otherwise an empresa id.
+  const [copySourceId, setCopySourceId] = useState<string>("");
+  const [copySaving, setCopySaving] = useState(false);
+  const [copyConfirmOverwrite, setCopyConfirmOverwrite] = useState(false);
 
   const byParent = useMemo(() => {
     const map = new Map<string | null, DreAccountItem[]>();
@@ -394,6 +409,69 @@ export function DreStructureManager({ initialAccounts, companies = [] }: DreStru
     });
   };
 
+  const openCopyModal = () => {
+    setCopySourceId("");
+    setCopyConfirmOverwrite(false);
+    setCopyOpen(true);
+  };
+
+  const cancelCopy = () => {
+    setCopyOpen(false);
+    setCopySourceId("");
+    setCopyConfirmOverwrite(false);
+  };
+
+  const submitCopy = async (force: boolean) => {
+    if (!selectedCompanyId) return;
+    setCopySaving(true);
+
+    const response = await fetch("/api/dre-accounts/copy-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourceCompanyId: copySourceId || null,
+        targetCompanyId: selectedCompanyId,
+        force,
+      }),
+    });
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      copied?: number;
+      error?: string;
+      existingCount?: number;
+    };
+    setCopySaving(false);
+
+    if (response.status === 409) {
+      // Empresa destino ja possui plano customizado. Mostra opcao de
+      // sobrescrever exigindo confirmacao explicita.
+      setCopyConfirmOverwrite(true);
+      showToast({
+        title: "Empresa destino ja possui plano",
+        description: `Encontradas ${payload.existingCount ?? 0} contas customizadas. Confirme a substituicao para prosseguir.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao copiar plano",
+        description: payload.error ?? "Nao foi possivel copiar o plano.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    cancelCopy();
+    await refresh();
+    showToast({
+      title: "Plano copiado",
+      description: `${payload.copied ?? 0} contas copiadas.`,
+      variant: "success",
+    });
+  };
+
   const selectedCompanyName = companies.find((c) => c.id === selectedCompanyId)?.name;
 
   // Banner visibility: explain which plan is currently shown.
@@ -462,9 +540,126 @@ export function DreStructureManager({ initialAccounts, companies = [] }: DreStru
             <Plus className="mr-2 h-4 w-4" />
             Criar nova conta
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={openCopyModal}
+            disabled={loading || !selectedCompanyId}
+            title={
+              !selectedCompanyId
+                ? "Selecione uma empresa para copiar um plano para ela"
+                : undefined
+            }
+          >
+            <Copy className="mr-2 h-4 w-4" />
+            Copiar Plano de Contas
+          </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
+        {copyOpen && selectedCompanyId && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !copySaving) cancelCopy();
+            }}
+          >
+            <div className="w-full max-w-md rounded-lg border bg-background p-5 shadow-lg space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Copiar Plano de Contas</h3>
+                <button
+                  type="button"
+                  onClick={cancelCopy}
+                  disabled={copySaving}
+                  className="rounded p-1 hover:bg-muted disabled:opacity-50"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                Copia toda a estrutura DRE da origem para <strong>{selectedCompanyName}</strong>.
+                Apenas a estrutura e copiada — mapeamentos Omie nao sao copiados.
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Empresa de origem
+                </label>
+                <select
+                  value={copySourceId}
+                  onChange={(e) => {
+                    setCopySourceId(e.target.value);
+                    setCopyConfirmOverwrite(false);
+                  }}
+                  disabled={copySaving}
+                  className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">Plano global (padrao Franquias Viva)</option>
+                  {allCompanies
+                    .filter((c) => c.id !== selectedCompanyId)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {copyConfirmOverwrite && (
+                <div className="rounded-md border border-red-500/40 bg-red-500/5 p-3 text-xs text-red-900 dark:text-red-200 space-y-2">
+                  <p>
+                    <strong>{selectedCompanyName}</strong> ja tem um plano customizado.
+                    Continuar substitui todas as contas atuais e remove os mapeamentos
+                    Omie vinculados a elas. Esta acao nao pode ser desfeita.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={cancelCopy}
+                  disabled={copySaving}
+                >
+                  Cancelar
+                </Button>
+                {copyConfirmOverwrite ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => void submitCopy(true)}
+                    disabled={copySaving}
+                  >
+                    {copySaving ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    Substituir e copiar
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={() => void submitCopy(false)}
+                    disabled={copySaving}
+                  >
+                    {copySaving ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    Copiar
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {creating && (
           <div className="rounded-md border bg-muted/30 p-3 space-y-3">
             <div className="flex items-center justify-between">

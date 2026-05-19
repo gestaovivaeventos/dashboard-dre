@@ -59,6 +59,8 @@ interface SettingsTabsProps {
   segmentId?: string | null;
   segments?: Segment[];
   currentSegmentSlug?: string;
+  // Empresas do sistema inteiro (cross-segment) - usado pelo "Copiar Plano de Contas"
+  allCompanies?: Array<{ id: string; name: string }>;
 }
 
 type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos" | "socios";
@@ -72,6 +74,7 @@ export function SettingsTabs({
   segmentId,
   segments,
   currentSegmentSlug,
+  allCompanies,
 }: SettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("empresas");
 
@@ -110,6 +113,7 @@ export function SettingsTabs({
         <DreStructureManager
           initialAccounts={dreAccounts}
           companies={companies.map((c) => ({ id: c.id, name: c.name }))}
+          allCompanies={allCompanies ?? companies.map((c) => ({ id: c.id, name: c.name }))}
         />
       ) : tab === "estrutura_fluxo_caixa" ? (
         <CashFlowStructureManager initialAccounts={cashFlowAccounts} />
