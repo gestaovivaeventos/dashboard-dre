@@ -1000,41 +1000,36 @@ function processBaixasDoTitulo(
       let baixaValue: number;
       let baixaSource: "nValorMovCC" | "nValLiquido" | "nValPago";
 
-      if (
-        type === "receita" &&
-        baixaAdj.hasAdjustment &&
-        valPagoBaixaResumo > 0
-      ) {
-        baixaValue = Number(
-          (
-            valPagoBaixaResumo -
-            baixaAdj.desconto +
-            baixaAdj.juros +
-            baixaAdj.multa
-          ).toFixed(2),
-        );
-        baixaSource = "nValPago";
-      } else if (nValorMovCCBaixa > 0) {
+      // Prioridade: nValorMovCC (cash real ja calculado pela Omie) >
+      //             nValLiquido (resumo, ja net) >
+      //             nValPago + formula (somente como fallback — cortesia
+      //             integral onde nao houve cash mas Omie ainda traz bruto).
+      //
+      // CRITICO: nao aplicar a formula quando nValorMovCC > 0, porque em
+      // baixas o nValPago do resumo JA reflete o valor liquido pago pelo
+      // cliente (inclui juros/multa, descontado o desconto). Somar de novo
+      // gera dobra de juros e multa.
+      if (nValorMovCCBaixa > 0) {
         baixaValue = nValorMovCCBaixa;
         baixaSource = "nValorMovCC";
       } else if (valLiquidoBaixaResumo > 0) {
         baixaValue = valLiquidoBaixaResumo;
         baixaSource = "nValLiquido";
       } else if (valPagoBaixaResumo > 0) {
-        // Despesa com nValorMovCC zerado: mantem ajuste legado para nao
-        // descartar lancamentos (regra antiga era aplicar formula no
-        // fallback). Em receita, ja foi tratado no branch acima.
-        baixaValue =
-          type === "despesa" && baixaAdj.hasAdjustment
-            ? Number(
-                (
-                  valPagoBaixaResumo -
-                  baixaAdj.desconto +
-                  baixaAdj.juros +
-                  baixaAdj.multa
-                ).toFixed(2),
-              )
-            : valPagoBaixaResumo;
+        // nValorMovCC e nValLiquido zerados: cenario tipico de cortesia
+        // integral (desconto cancelou o pagamento) onde a Omie ainda
+        // mostra o bruto em nValPago. Formula extrai o cash real (pode
+        // ser 0). Aplica para receita e despesa.
+        baixaValue = baixaAdj.hasAdjustment
+          ? Number(
+              (
+                valPagoBaixaResumo -
+                baixaAdj.desconto +
+                baixaAdj.juros +
+                baixaAdj.multa
+              ).toFixed(2),
+            )
+          : valPagoBaixaResumo;
         baixaSource = "nValPago";
       } else {
         baixaValue = 0;
