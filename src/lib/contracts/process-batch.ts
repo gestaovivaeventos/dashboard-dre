@@ -10,7 +10,7 @@
 
 import { extractContract } from './extract'
 import { LandingAIError } from './landingai'
-import { GeminiError } from './gemini'
+import { LlmExtractionError } from './llm'
 import { calcularSomaGrupos, analisarLinha, chaveGrupoSoma } from './validate'
 import type { ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -134,7 +134,7 @@ export async function processBatch(
       result.credits_used += extraction.creditsUsed
     } catch (e) {
       const message =
-        e instanceof LandingAIError || e instanceof GeminiError
+        e instanceof LandingAIError || e instanceof LlmExtractionError
           ? e.message
           : `Extração falhou: ${(e as Error).message}`
 

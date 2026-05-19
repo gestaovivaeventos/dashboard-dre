@@ -1,16 +1,19 @@
-// Gemini "extract" wrapper. Sends the markdown text from LandingAI to Gemini
-// with the same prompt used by the GCP Cloud Function and returns structured JSON.
-// The prompt is intentionally kept verbatim (Portuguese, exact rules) so the model's
-// behaviour matches what is already validated in production.
+// LLM extraction wrapper. Takes the markdown output of LandingAI ADE and
+// returns the structured ContractExtraction JSON.
+//
+// Uses OpenAI Chat Completions with response_format=json_object. The prompt
+// is the same one validated in production by the GCP Cloud Function — kept
+// verbatim (Portuguese, exact rules) so behaviour stays consistent.
 
 import type { ContractExtraction } from './types'
 
-const DEFAULT_MODEL = 'gemini-2.5-flash-lite'
+const DEFAULT_MODEL = 'gpt-4o-mini'
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
-export class GeminiError extends Error {
+export class LlmExtractionError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message)
-    this.name = 'GeminiError'
+    this.name = 'LlmExtractionError'
   }
 }
 
@@ -107,75 +110,71 @@ ${text}
 `
 }
 
-function extractJsonFromResponse(raw: string): string {
-  // Strip ```json fences and surrounding whitespace, matching the Python cleanup.
-  const cleaned = raw
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim()
-  return cleaned
-}
-
-export async function extractContractDataWithGemini(
+export async function extractContractDataWithLlm(
   text: string,
   options: { model?: string; timeoutMs?: number } = {},
 ): Promise<ContractExtraction> {
-  const apiKey = process.env.GEMINI_API_KEY
+  const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
-    throw new GeminiError('GEMINI_API_KEY não configurada no ambiente')
+    throw new LlmExtractionError('OPENAI_API_KEY não configurada no ambiente')
   }
 
   const model = options.model ?? DEFAULT_MODEL
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 120_000)
 
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await fetch(OPENAI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: buildPrompt(text) }] }],
-        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+        model,
+        messages: [{ role: 'user', content: buildPrompt(text) }],
+        temperature: 0,
+        response_format: { type: 'json_object' },
       }),
       signal: controller.signal,
     })
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
-      throw new GeminiError('Gemini: timeout aguardando resposta')
+      throw new LlmExtractionError('OpenAI: timeout aguardando resposta')
     }
-    throw new GeminiError(`Gemini: falha de rede (${(e as Error).message})`)
+    throw new LlmExtractionError(`OpenAI: falha de rede (${(e as Error).message})`)
   } finally {
     clearTimeout(timeout)
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new GeminiError(`Gemini: HTTP ${response.status} ${body.slice(0, 300)}`, response.status)
+    throw new LlmExtractionError(
+      `OpenAI: HTTP ${response.status} ${body.slice(0, 300)}`,
+      response.status,
+    )
   }
 
   const payload = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    choices?: Array<{ message?: { content?: string } }>
   }
 
-  const rawText = payload.candidates?.[0]?.content?.parts?.[0]?.text
+  const rawText = payload.choices?.[0]?.message?.content
   if (!rawText) {
-    throw new GeminiError('Gemini: resposta vazia ou sem candidato')
+    throw new LlmExtractionError('OpenAI: resposta vazia ou sem choice')
   }
 
   let parsed: ContractExtraction
   try {
-    parsed = JSON.parse(extractJsonFromResponse(rawText)) as ContractExtraction
+    parsed = JSON.parse(rawText) as ContractExtraction
   } catch (e) {
-    throw new GeminiError(
-      `Gemini: JSON inválido na resposta (${(e as Error).message}): ${rawText.slice(0, 200)}`,
+    throw new LlmExtractionError(
+      `OpenAI: JSON inválido na resposta (${(e as Error).message}): ${rawText.slice(0, 200)}`,
     )
   }
 
-  // The Python script defensively initializes `favorecido` when missing.
   if (!parsed.favorecido) {
     parsed.favorecido = { nome: '', cpf_cnpj: '', banco: '', agencia: '', conta: '' }
   }

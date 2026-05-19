@@ -3,7 +3,7 @@
 // Returns both the raw extraction (for storage in raw_extraction jsonb) and a
 // normalized ExtractedContract ready for the validation rules.
 
-import { extractContractDataWithGemini } from './gemini'
+import { extractContractDataWithLlm } from './llm'
 import { parseDocumentWithLandingAI } from './landingai'
 import { parseValor } from './parse-value'
 import type { ContractExtraction, ExtractedContract } from './types'
@@ -17,7 +17,7 @@ export interface ContractExtractionResult {
 
 export async function extractContract(documentUrl: string): Promise<ContractExtractionResult> {
   const ocr = await parseDocumentWithLandingAI(documentUrl)
-  const raw = await extractContractDataWithGemini(ocr.markdown)
+  const raw = await extractContractDataWithLlm(ocr.markdown)
 
   return {
     raw,
