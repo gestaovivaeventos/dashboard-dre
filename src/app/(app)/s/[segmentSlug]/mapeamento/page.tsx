@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { MappingManager } from "@/components/app/mapping-manager";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 
@@ -20,13 +21,14 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
 
   const { segmentSlug } = await params;
 
-  const { data: seg } = await supabase
+  const { data: allSegments } = await supabase
     .from("segments")
-    .select("id")
-    .eq("slug", segmentSlug)
+    .select("id,name,slug,display_order,active")
     .eq("active", true)
-    .maybeSingle<{ id: string }>();
-  const segmentId = seg?.id ?? null;
+    .order("display_order");
+  const segments = (allSegments as Segment[] | null) ?? [];
+  const currentSegment = segments.find((s) => s.slug === segmentSlug) ?? null;
+  const segmentId = currentSegment?.id ?? null;
 
   let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
   if (segmentId) {
@@ -79,6 +81,8 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
       companies={companies}
       dreAccounts={dreAccounts}
       cashFlowAccounts={cashFlowAccounts}
+      segments={segments}
+      currentSegmentSlug={segmentSlug}
     />
   );
 }

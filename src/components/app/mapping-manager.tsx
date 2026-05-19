@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
 import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
+import { SegmentSelector } from "@/components/app/segment-selector";
+import type { Segment } from "@/lib/supabase/types";
 
 type Tab = "omie" | "cashflow" | "budget";
 
@@ -45,6 +47,8 @@ interface MappingManagerProps {
   companies: CompanyOption[];
   dreAccounts: DreAccountOption[];
   cashFlowAccounts: DreAccountOption[];
+  segments?: Segment[];
+  currentSegmentSlug?: string;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -57,7 +61,13 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: MappingManagerProps) {
+export function MappingManager({
+  companies,
+  dreAccounts,
+  cashFlowAccounts,
+  segments,
+  currentSegmentSlug,
+}: MappingManagerProps) {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>("omie");
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
@@ -329,6 +339,13 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
           Vincule cada origem (categoria Omie ou linha do orcamento) a uma conta do DRE.
         </p>
       </div>
+
+      {segments && segments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-ink-secondary">Segmento:</span>
+          <SegmentSelector segments={segments} activeSlug={currentSegmentSlug ?? null} />
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button
