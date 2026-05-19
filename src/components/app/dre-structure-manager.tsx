@@ -1,17 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
   Loader2,
   Pencil,
+  Plus,
   Save,
   Trash2,
   ToggleLeft,
   ToggleRight,
   Unlink2,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ interface DreAccountItem {
   formula: string | null;
   sort_order: number;
   active: boolean;
+  company_id?: string | null;
   mappings: Array<{
     id: string;
     code: string;
@@ -40,13 +43,25 @@ interface DreAccountItem {
   }>;
 }
 
-interface DreStructureManagerProps {
-  initialAccounts: DreAccountItem[];
+interface CompanyOption {
+  id: string;
+  name: string;
 }
 
-export function DreStructureManager({ initialAccounts }: DreStructureManagerProps) {
+interface DreStructureManagerProps {
+  initialAccounts: DreAccountItem[];
+  companies?: CompanyOption[];
+}
+
+const GLOBAL_VALUE = "__global__";
+
+export function DreStructureManager({ initialAccounts, companies = [] }: DreStructureManagerProps) {
   const { showToast } = useToast();
   const [accounts, setAccounts] = useState(initialAccounts);
+  const [scopeCompanyId, setScopeCompanyId] = useState<string | null>(null);
+  const [usingCustomPlan, setUsingCustomPlan] = useState(false);
+  // selectedCompanyId === null means "Plano global"; otherwise an empresa is selected.
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -60,6 +75,27 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
     sort_order: number;
     active: boolean;
   } | null>(null);
+
+  // "Criar nova conta" form state.
+  const [creating, setCreating] = useState(false);
+  const [createDraft, setCreateDraft] = useState<{
+    code: string;
+    name: string;
+    type: DreType;
+    parent_id: string;
+    formula: string;
+    is_summary: boolean;
+    sort_order: number;
+  }>({
+    code: "",
+    name: "",
+    type: "despesa",
+    parent_id: "",
+    formula: "",
+    is_summary: false,
+    sort_order: 0,
+  });
+  const [createSaving, setCreateSaving] = useState(false);
 
   const byParent = useMemo(() => {
     const map = new Map<string | null, DreAccountItem[]>();
@@ -89,12 +125,16 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
     return rows;
   }, [byParent, expandedIds]);
 
-  const refresh = async () => {
+  const loadForCompany = async (companyId: string | null) => {
     setLoading(true);
     setMessage(null);
-    const response = await fetch("/api/dre-accounts", { cache: "no-store" });
+    const url = companyId
+      ? `/api/dre-accounts?companyId=${encodeURIComponent(companyId)}`
+      : "/api/dre-accounts";
+    const response = await fetch(url, { cache: "no-store" });
     const payload = (await response.json()) as {
       accounts?: DreAccountItem[];
+      scope?: { companyId: string | null; usingCustomPlan: boolean };
       error?: string;
     };
     if (!response.ok || !payload.accounts) {
@@ -108,8 +148,18 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
       return;
     }
     setAccounts(payload.accounts);
+    setScopeCompanyId(payload.scope?.companyId ?? null);
+    setUsingCustomPlan(Boolean(payload.scope?.usingCustomPlan));
     setLoading(false);
   };
+
+  // Reload accounts whenever the selected company changes.
+  useEffect(() => {
+    void loadForCompany(selectedCompanyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId]);
+
+  const refresh = () => loadForCompany(selectedCompanyId);
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((previous) => ({ ...previous, [id]: !previous[id] }));
@@ -274,18 +324,272 @@ export function DreStructureManager({ initialAccounts }: DreStructureManagerProp
     });
   };
 
+  const cancelCreate = () => {
+    setCreating(false);
+    setCreateDraft({
+      code: "",
+      name: "",
+      type: "despesa",
+      parent_id: "",
+      formula: "",
+      is_summary: false,
+      sort_order: 0,
+    });
+  };
+
+  const submitCreate = async () => {
+    const code = createDraft.code.trim();
+    const name = createDraft.name.trim();
+    if (!code) {
+      showToast({ title: "Codigo obrigatorio", variant: "destructive" });
+      return;
+    }
+    if (!/^\d+(\.\d+)*$/.test(code)) {
+      showToast({
+        title: "Codigo invalido",
+        description: "Use o formato '1', '1.1', '1.1.1' etc.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!name) {
+      showToast({ title: "Nome obrigatorio", variant: "destructive" });
+      return;
+    }
+
+    setCreateSaving(true);
+    const response = await fetch("/api/dre-accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company_id: selectedCompanyId,
+        code,
+        name,
+        type: createDraft.type,
+        parent_id: createDraft.parent_id || null,
+        is_summary: createDraft.type === "calculado" ? true : createDraft.is_summary,
+        formula: createDraft.formula.trim() || null,
+        sort_order: createDraft.sort_order,
+        active: true,
+      }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    setCreateSaving(false);
+
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao criar conta",
+        description: payload.error ?? "Nao foi possivel criar a conta.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    cancelCreate();
+    await refresh();
+    showToast({
+      title: "Conta criada",
+      description: `${code} - ${name} adicionada ao plano.`,
+      variant: "success",
+    });
+  };
+
+  const selectedCompanyName = companies.find((c) => c.id === selectedCompanyId)?.name;
+
+  // Banner visibility: explain which plan is currently shown.
+  const isGlobalView = selectedCompanyId === null;
+  const isCustomView = usingCustomPlan && scopeCompanyId === selectedCompanyId;
+  const isFallbackToGlobal = selectedCompanyId !== null && !usingCustomPlan;
+
   return (
     <Card>
-      <CardHeader className="space-y-2">
+      <CardHeader className="space-y-3">
         <CardTitle>Estrutura DRE</CardTitle>
-        <div className="flex gap-2">
+
+        {companies.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm font-medium text-ink-secondary">Empresa:</label>
+            <select
+              value={selectedCompanyId ?? GLOBAL_VALUE}
+              onChange={(event) =>
+                setSelectedCompanyId(
+                  event.target.value === GLOBAL_VALUE ? null : event.target.value,
+                )
+              }
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              disabled={loading}
+            >
+              <option value={GLOBAL_VALUE}>Plano global (padrao)</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {isGlobalView && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+            Voce esta editando o <strong>plano global</strong>. Alteracoes aqui afetam todas as
+            empresas que ainda nao tem plano customizado (incluindo o segmento Franquias Viva).
+          </div>
+        )}
+        {isFallbackToGlobal && selectedCompanyName && (
+          <div className="rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+            <strong>{selectedCompanyName}</strong> ainda nao tem plano customizado e esta usando o
+            plano global. Crie a primeira conta abaixo para iniciar um plano dedicado a essa empresa
+            (o plano global nao sera afetado).
+          </div>
+        )}
+        {isCustomView && selectedCompanyName && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-900 dark:text-emerald-200">
+            Editando o <strong>plano customizado</strong> de {selectedCompanyName}. Alteracoes ficam
+            isoladas a essa empresa.
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={refresh} disabled={loading}>
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Atualizar estrutura
           </Button>
+          <Button
+            type="button"
+            onClick={() => setCreating(true)}
+            disabled={loading || creating}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Criar nova conta
+          </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
+        {creating && (
+          <div className="rounded-md border bg-muted/30 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold">Nova conta</h4>
+              <button
+                type="button"
+                onClick={cancelCreate}
+                className="rounded p-1 hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Codigo</label>
+                <Input
+                  value={createDraft.code}
+                  onChange={(e) => setCreateDraft({ ...createDraft, code: e.target.value })}
+                  placeholder="Ex: 7.6 ou 7.3.21"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Nivel sera deduzido pelo numero de pontos.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Nome</label>
+                <Input
+                  value={createDraft.name}
+                  onChange={(e) => setCreateDraft({ ...createDraft, name: e.target.value })}
+                  placeholder="Nome descritivo"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Tipo</label>
+                <select
+                  value={createDraft.type}
+                  onChange={(e) =>
+                    setCreateDraft({
+                      ...createDraft,
+                      type: e.target.value as DreType,
+                      is_summary: e.target.value === "calculado" ? true : createDraft.is_summary,
+                    })
+                  }
+                  className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="receita">receita</option>
+                  <option value="despesa">despesa</option>
+                  <option value="calculado">calculado (somatorio)</option>
+                  <option value="misto">misto</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Conta pai (opcional)</label>
+                <select
+                  value={createDraft.parent_id}
+                  onChange={(e) => setCreateDraft({ ...createDraft, parent_id: e.target.value })}
+                  className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="">(nenhuma — conta de topo)</option>
+                  {accounts
+                    .filter((a) => a.is_summary)
+                    .sort((a, b) =>
+                      a.code.localeCompare(b.code, undefined, { numeric: true }),
+                    )
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code} - {a.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              {createDraft.type === "calculado" && (
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Formula (ex.: 4-5 ou 7.1+7.2+7.3)
+                  </label>
+                  <Input
+                    value={createDraft.formula}
+                    onChange={(e) => setCreateDraft({ ...createDraft, formula: e.target.value })}
+                    placeholder="Codigos de outras contas separados por + ou -"
+                  />
+                </div>
+              )}
+              {createDraft.type !== "calculado" && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="create-is-summary"
+                    type="checkbox"
+                    checked={createDraft.is_summary}
+                    onChange={(e) =>
+                      setCreateDraft({ ...createDraft, is_summary: e.target.checked })
+                    }
+                  />
+                  <label htmlFor="create-is-summary" className="text-xs text-muted-foreground">
+                    E uma conta totalizadora (somatorio dos filhos)
+                  </label>
+                </div>
+              )}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Ordem</label>
+                <Input
+                  type="number"
+                  value={createDraft.sort_order}
+                  onChange={(e) =>
+                    setCreateDraft({ ...createDraft, sort_order: Number(e.target.value || 0) })
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" onClick={() => void submitCreate()} disabled={createSaving}>
+                {createSaving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Salvar conta
+              </Button>
+              <Button type="button" variant="outline" onClick={cancelCreate}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-[80px_1.8fr_130px_70px_1fr_80px_90px_170px_220px] gap-2 rounded-md border bg-muted p-2 text-xs font-semibold uppercase text-muted-foreground">
           <span>Codigo</span>
           <span>Nome</span>
