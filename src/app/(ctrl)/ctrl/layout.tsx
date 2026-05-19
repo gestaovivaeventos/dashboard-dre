@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
+import { resolveLayoutContext } from "@/lib/context/modules";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -36,6 +37,14 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       .sort((a, b) => a.display_order - b.display_order);
   }
 
+  // Resolve module/segment context — ctrl layout always lands in ctrl module.
+  const { availableModules, activeModule, activeSegmentSlug } = await resolveLayoutContext(
+    dreRole,
+    ctrlRoles,
+    segments,
+    "ctrl",
+  );
+
   return (
     <AppShell
       userName={userName}
@@ -43,6 +52,9 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       userRole={dreRole}
       ctrlRoles={ctrlRoles}
       segments={segments}
+      activeModule={activeModule}
+      availableModules={availableModules}
+      activeSegmentSlug={activeSegmentSlug}
     >
       {children}
     </AppShell>
