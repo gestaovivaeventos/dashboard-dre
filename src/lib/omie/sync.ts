@@ -96,14 +96,13 @@ function calculateDateRange(
     return { dateFrom: formatDateForOmie(from), dateTo };
   }
 
+  // "full" sempre re-busca todo o historico desde 2022. Antes, apos a primeira
+  // execucao bem-sucedida, este ramo caia para uma janela de 24 meses — combinado
+  // com `cleanup_obsolete_entries(p_date_from=null, p_date_to=null)`, isso apagava
+  // todos os entries fora da janela (2022, 2023, inicio de 2024) a cada
+  // "Sincronizar Historico" subsequente. Em vez de tentar "otimizar" a janela,
+  // confiamos no upsert por omie_id para reaproveitar registros ja gravados.
   if (mode === "full") {
-    // Sempre busca desde 2022. O cleanup_obsolete_entries para mode=full
-    // apaga TODOS os registros fora do conjunto retornado pela Omie
-    // (p_date_from/p_date_to = null) — limitar a busca a uma janela menor
-    // (ex.: 24 meses) excluiria os anos anteriores do conjunto valido e
-    // o cleanup apagaria todo o historico antigo. Em vez de tentar
-    // "otimizar", confiamos no upsert por omie_id para reaproveitar
-    // registros ja gravados.
     return { dateFrom: "01-01-2022", dateTo };
   }
 
