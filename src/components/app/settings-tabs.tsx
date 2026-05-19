@@ -5,11 +5,13 @@ import { useState } from "react";
 import { CashFlowStructureManager, type CashFlowAccountItem } from "@/components/app/cash-flow-structure-manager";
 import { DreStructureManager } from "@/components/app/dre-structure-manager";
 import { KpiAdminManager } from "@/components/app/kpi-admin-manager";
+import { SegmentSelector } from "@/components/app/segment-selector";
 import { SettingsCompanies } from "@/components/app/settings-companies";
 import { SettingsDepartments } from "@/components/app/settings-departments";
 import { SettingsPartners } from "@/components/app/settings-partners";
 import { Button } from "@/components/ui/button";
 import type { KpiDefinition } from "@/lib/kpi/calc";
+import type { Segment } from "@/lib/supabase/types";
 
 interface SettingsTabsProps {
   companies: Array<{
@@ -55,6 +57,8 @@ interface SettingsTabsProps {
   cashFlowAccounts: CashFlowAccountItem[];
   kpis: KpiDefinition[];
   segmentId?: string | null;
+  segments?: Segment[];
+  currentSegmentSlug?: string;
 }
 
 type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos" | "socios";
@@ -66,11 +70,19 @@ export function SettingsTabs({
   cashFlowAccounts,
   kpis,
   segmentId,
+  segments,
+  currentSegmentSlug,
 }: SettingsTabsProps) {
   const [tab, setTab] = useState<TabValue>("empresas");
 
   return (
     <div className="space-y-4">
+      {segments && segments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-ink-secondary">Segmento:</span>
+          <SegmentSelector segments={segments} activeSlug={currentSegmentSlug ?? null} />
+        </div>
+      )}
       <div className="flex flex-wrap gap-2 border-b pb-3">
         <Button type="button" variant={tab === "empresas" ? "default" : "outline"} onClick={() => setTab("empresas")}>
           Empresas
@@ -95,7 +107,10 @@ export function SettingsTabs({
       {tab === "empresas" ? (
         <SettingsCompanies initialCompanies={companies} segmentId={segmentId ?? null} />
       ) : tab === "estrutura_dre" ? (
-        <DreStructureManager initialAccounts={dreAccounts} />
+        <DreStructureManager
+          initialAccounts={dreAccounts}
+          companies={companies.map((c) => ({ id: c.id, name: c.name }))}
+        />
       ) : tab === "estrutura_fluxo_caixa" ? (
         <CashFlowStructureManager initialAccounts={cashFlowAccounts} />
       ) : tab === "kpis" ? (
