@@ -11,6 +11,9 @@ interface CashFlowAccountOption {
   id: string;
   code: string;
   name: string;
+  // null = conta do plano global (compartilhada). uuid = conta customizada de
+  // uma empresa especifica. Usado para isolar opcoes por empresa.
+  company_id?: string | null;
 }
 
 interface CashFlowMappingRow {
@@ -141,12 +144,25 @@ export function CashFlowMappingTab({ companyId, search, cashFlowAccounts }: Cash
     });
   };
 
+  // Se a empresa tem plano customizado (qualquer conta com company_id ===
+  // companyId), o plano global foi clonado e nao se aplica mais a ela —
+  // mostramos somente as contas dela. Caso contrario, usamos o plano global.
+  const hasCustomPlan = useMemo(
+    () => cashFlowAccounts.some((a) => a.company_id === companyId),
+    [cashFlowAccounts, companyId],
+  );
+
   // Apenas contas analiticas (com codigo hierarquico, ex.: 2.1) podem ser
   // mapeadas — totalizadoras e linhas com origem especial sao filtradas no
-  // server.
+  // server. Adicionalmente, filtramos por escopo da empresa selecionada.
   const mappableAccounts = useMemo(
-    () => cashFlowAccounts.filter((a) => a.code && a.code.includes(".")),
-    [cashFlowAccounts],
+    () =>
+      cashFlowAccounts.filter((a) => {
+        if (!a.code || !a.code.includes(".")) return false;
+        const scope = a.company_id ?? null;
+        return hasCustomPlan ? scope === companyId : scope === null;
+      }),
+    [cashFlowAccounts, companyId, hasCustomPlan],
   );
 
   return (

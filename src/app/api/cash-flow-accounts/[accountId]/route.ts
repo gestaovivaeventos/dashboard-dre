@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
 interface Params {
   params: { accountId: string };
 }
+
+type CashFlowType = "receita" | "despesa" | "calculado" | "misto";
 
 export async function PATCH(request: Request, { params }: Params) {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -17,12 +20,29 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const body = (await request.json()) as {
     name?: string;
-    type?: "receita" | "despesa" | "calculado" | "misto";
+    type?: CashFlowType;
     is_summary?: boolean;
     formula?: string | null;
     sort_order?: number;
     active?: boolean;
   };
+
+  // Leaf-only edit rule: an account that has children is considered a
+  // parent/aggregator and must not be edited. The editor enforces this in
+  // the UI; we also enforce here for safety.
+  const { count: childCount, error: childError } = await supabase
+    .from("cash_flow_accounts")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_id", params.accountId);
+  if (childError) {
+    return NextResponse.json({ error: childError.message }, { status: 400 });
+  }
+  if ((childCount ?? 0) > 0) {
+    return NextResponse.json(
+      { error: "Contas que possuem subcontas nao podem ser editadas. Apenas contas finais sao editaveis." },
+      { status: 400 },
+    );
+  }
 
   const patch: Record<string, unknown> = {};
   if (typeof body.name === "string") patch.name = body.name.trim();
@@ -52,6 +72,7 @@ export async function PATCH(request: Request, { params }: Params) {
   if (error || !data) {
     return NextResponse.json({ error: error?.message ?? "Conta nao encontrada." }, { status: 400 });
   }
+  revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true });
 }
 
@@ -80,5 +101,6 @@ export async function DELETE(_: Request, { params }: Params) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
+  revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true });
 }

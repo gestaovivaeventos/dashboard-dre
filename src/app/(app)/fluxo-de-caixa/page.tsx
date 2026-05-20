@@ -60,7 +60,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     companiesQuery.order("name"),
     supabase
       .from("cash_flow_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active,company_id")
       .eq("active", true)
       .order("sort_order"),
     supabase
@@ -94,7 +94,38 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     }
   }
 
-  const cashFlowAccounts = (cashFlowAccountsData ?? []) as CashFlowAccountBase[];
+  // Escopo do plano de Fluxo de Caixa para exibicao:
+  // - Empresa unica selecionada com plano customizado (qualquer linha com
+  //   company_id = empresa): mostramos o plano dela e ignoramos o global,
+  //   senao a tela duplica todas as linhas (global + custom com mesmos codes).
+  // - Caso contrario (consolidado multi-empresa OU empresa sem custom plan):
+  //   usamos o plano global.
+  const allRawCashFlowAccounts = (cashFlowAccountsData ?? []) as Array<
+    CashFlowAccountBase & { company_id: string | null }
+  >;
+  const scopedCompanyId =
+    filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
+  const companyHasCustomPlan = scopedCompanyId
+    ? allRawCashFlowAccounts.some((a) => a.company_id === scopedCompanyId)
+    : false;
+  const cashFlowAccounts: CashFlowAccountBase[] = allRawCashFlowAccounts
+    .filter((a) =>
+      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
+    )
+    .map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      parent_id: a.parent_id,
+      level: a.level,
+      type: a.type,
+      is_summary: a.is_summary,
+      formula: a.formula,
+      source: a.source,
+      is_highlight_block: a.is_highlight_block,
+      sort_order: a.sort_order,
+      active: a.active,
+    }));
   const dreAccounts = filterCoreDreAccounts((dreAccountsData ?? []) as DreAccountBase[]);
 
   if (filter.selectedCompanyIds.length === 0) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
@@ -188,6 +189,7 @@ export async function POST(request: Request) {
     }
   }
 
+  revalidatePath("/(app)", "layout");
   return NextResponse.json({
     ok: true,
     copied: inserted?.length ?? 0,

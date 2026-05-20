@@ -73,7 +73,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
       .eq("active", true)
       .order("code"),
   ]);
@@ -130,7 +130,38 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     typeof lastSyncAtRaw === "string" ? lastSyncAtRaw : null;
 
   const range = buildDateRange(filter);
-  const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
+
+  // Scope resolution for per-company custom DRE plans: when exactly ONE
+  // company is selected AND that company has a custom plan (any row with
+  // company_id === that companyId), display its rows; otherwise fall back
+  // to the global plan (company_id IS NULL). This prevents duplicate rows
+  // (global + custom appearing twice) when a single company is in view.
+  const allRawDreAccounts = (accountsData ?? []) as Array<
+    DreAccountBase & { company_id: string | null }
+  >;
+  const scopedCompanyId =
+    filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
+  const companyHasCustomPlan = scopedCompanyId
+    ? allRawDreAccounts.some((a) => a.company_id === scopedCompanyId)
+    : false;
+  const scopedDreAccounts: DreAccountBase[] = allRawDreAccounts
+    .filter((a) =>
+      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
+    )
+    .map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      parent_id: a.parent_id,
+      level: a.level,
+      type: a.type,
+      is_summary: a.is_summary,
+      formula: a.formula,
+      sort_order: a.sort_order,
+      active: a.active,
+    }));
+
+  const accounts = filterCoreDreAccounts(scopedDreAccounts);
   const visibleBuckets = buildVisibleBuckets(filter);
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 

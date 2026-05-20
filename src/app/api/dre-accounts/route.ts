@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
@@ -152,25 +153,32 @@ export async function POST(request: Request) {
     );
   }
 
-  // Validate parent (if any) is in the same scope.
-  if (parentId) {
-    const { data: parent, error: parentError } = await supabase
-      .from("dre_accounts")
-      .select("id,company_id")
-      .eq("id", parentId)
-      .maybeSingle<{ id: string; company_id: string | null }>();
-    if (parentError) {
-      return NextResponse.json({ error: parentError.message }, { status: 400 });
-    }
-    if (!parent) {
-      return NextResponse.json({ error: "Conta pai nao encontrada." }, { status: 400 });
-    }
-    if ((parent.company_id ?? null) !== companyId) {
-      return NextResponse.json(
-        { error: "Conta pai pertence a outro escopo (global ou empresa diferente)." },
-        { status: 400 },
-      );
-    }
+  // Per the editor rule, new accounts are always created as leaves and must
+  // attach to an existing parent in the same scope. Top-level creation is
+  // disallowed (use the global plan for that).
+  if (!parentId) {
+    return NextResponse.json(
+      { error: "Selecione uma conta pai. Novas contas so podem ser criadas no ultimo nivel da estrutura." },
+      { status: 400 },
+    );
+  }
+
+  const { data: parent, error: parentError } = await supabase
+    .from("dre_accounts")
+    .select("id,company_id")
+    .eq("id", parentId)
+    .maybeSingle<{ id: string; company_id: string | null }>();
+  if (parentError) {
+    return NextResponse.json({ error: parentError.message }, { status: 400 });
+  }
+  if (!parent) {
+    return NextResponse.json({ error: "Conta pai nao encontrada." }, { status: 400 });
+  }
+  if ((parent.company_id ?? null) !== companyId) {
+    return NextResponse.json(
+      { error: "Conta pai pertence a outro escopo (global ou empresa diferente)." },
+      { status: 400 },
+    );
   }
 
   const insertPayload = {
@@ -200,5 +208,8 @@ export async function POST(request: Request) {
     );
   }
 
+  // Garante que a tela de mapeamento (server-render) recarregue a lista
+  // de contas e passe a oferecer a nova conta no select da empresa dona.
+  revalidatePath("/(app)", "layout");
   return NextResponse.json({ account: data });
 }

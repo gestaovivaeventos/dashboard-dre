@@ -116,7 +116,10 @@ export function SettingsTabs({
           allCompanies={allCompanies ?? companies.map((c) => ({ id: c.id, name: c.name }))}
         />
       ) : tab === "estrutura_fluxo_caixa" ? (
-        <CashFlowStructureManager initialAccounts={cashFlowAccounts} />
+        <CashFlowStructureManager
+          initialAccounts={cashFlowAccounts}
+          companies={companies.map((c) => ({ id: c.id, name: c.name }))}
+        />
       ) : tab === "kpis" ? (
         <KpiAdminManager
           initialKpis={kpis}

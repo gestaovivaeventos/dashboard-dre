@@ -62,11 +62,19 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
             .in("company_id", companyIds)
             .order("code")
         : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
-      supabase
-        .from("cash_flow_accounts")
-        .select("id,code,name,active,source")
-        .eq("active", true)
-        .order("sort_order"),
+      companyIds.length > 0
+        ? supabase
+            .from("cash_flow_accounts")
+            .select("id,code,name,active,source,company_id")
+            .eq("active", true)
+            .or(`company_id.is.null,company_id.in.(${companyIds.join(",")})`)
+            .order("sort_order")
+        : supabase
+            .from("cash_flow_accounts")
+            .select("id,code,name,active,source,company_id")
+            .eq("active", true)
+            .is("company_id", null)
+            .order("sort_order"),
     ]);
 
   const dreAccounts = [...(globalDreData ?? []), ...(segmentDreData ?? [])]
@@ -78,13 +86,16 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
     }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
-  // Apenas analiticas (sem source) podem ser mapeadas.
+  // Apenas analiticas (sem source) podem ser mapeadas. `company_id` e
+  // preservado para que o componente filtre por escopo (plano global vs
+  // plano customizado da empresa selecionada).
   const cashFlowAccounts = (cashFlowAccountsData ?? [])
     .filter((a) => !(a.source as string | null))
     .map((account) => ({
       id: account.id as string,
       code: account.code as string,
       name: account.name as string,
+      company_id: (account.company_id as string | null) ?? null,
     }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 

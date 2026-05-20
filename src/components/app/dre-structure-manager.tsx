@@ -7,6 +7,7 @@ import {
   ChevronsUpDown,
   Copy,
   Loader2,
+  Lock,
   Pencil,
   Plus,
   Save,
@@ -140,6 +141,8 @@ export function DreStructureManager({
     return rows;
   }, [byParent, expandedIds]);
 
+  const isLeaf = (accountId: string) => (byParent.get(accountId) ?? []).length === 0;
+
   const loadForCompany = async (companyId: string | null) => {
     setLoading(true);
     setMessage(null);
@@ -176,6 +179,50 @@ export function DreStructureManager({
 
   const refresh = () => loadForCompany(selectedCompanyId);
 
+  // Lazy-forks the global plan into a per-company plan if the admin starts
+  // customizing a company that has no custom plan yet. Returns the up-to-date
+  // accounts list for the active scope so callers can resolve cloned ids
+  // without waiting for React state to settle.
+  const ensureCustomizedIfNeeded = async (): Promise<{
+    ok: boolean;
+    accounts: DreAccountItem[];
+    forked: boolean;
+  }> => {
+    if (selectedCompanyId === null || (usingCustomPlan && scopeCompanyId === selectedCompanyId)) {
+      return { ok: true, accounts, forked: false };
+    }
+
+    const response = await fetch("/api/dre-accounts/ensure-customized", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyId: selectedCompanyId }),
+    });
+    const payload = (await response.json()) as { error?: string; forked?: boolean };
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao iniciar plano da empresa",
+        description: payload.error ?? "Nao foi possivel criar um plano customizado para a empresa.",
+        variant: "destructive",
+      });
+      return { ok: false, accounts, forked: false };
+    }
+
+    // Pull the freshly-forked rows so callers can map by code → new id.
+    const refreshed = await fetch(
+      `/api/dre-accounts?companyId=${encodeURIComponent(selectedCompanyId)}`,
+      { cache: "no-store" },
+    );
+    const refreshedPayload = (await refreshed.json()) as {
+      accounts?: DreAccountItem[];
+      scope?: { companyId: string | null; usingCustomPlan: boolean };
+    };
+    const freshAccounts = refreshedPayload.accounts ?? [];
+    setAccounts(freshAccounts);
+    setScopeCompanyId(refreshedPayload.scope?.companyId ?? selectedCompanyId);
+    setUsingCustomPlan(Boolean(refreshedPayload.scope?.usingCustomPlan));
+    return { ok: true, accounts: freshAccounts, forked: Boolean(payload.forked) };
+  };
+
   const toggleExpanded = (id: string) => {
     setExpandedIds((previous) => ({ ...previous, [id]: !previous[id] }));
   };
@@ -197,12 +244,34 @@ export function DreStructureManager({
     setSavingId(accountId);
     setMessage(null);
 
+    const original = accounts.find((a) => a.id === accountId);
+    const ensured = await ensureCustomizedIfNeeded();
+    if (!ensured.ok) {
+      setSavingId(null);
+      return;
+    }
+
+    // After lazy-fork, the original (global) account id is no longer valid
+    // for this scope. Re-resolve by code against the freshly-forked rows.
+    const targetId = ensured.forked && original
+      ? ensured.accounts.find((a) => a.code === original.code)?.id ?? null
+      : accountId;
+    if (!targetId) {
+      showToast({
+        title: "Conta nao encontrada",
+        description: "Nao foi possivel localizar a conta apos preparar o plano da empresa.",
+        variant: "destructive",
+      });
+      setSavingId(null);
+      return;
+    }
+
     const payload = {
       ...draft,
       formula: draft.formula.trim() || null,
       is_summary: draft.type === "calculado" ? true : draft.is_summary,
     };
-    const response = await fetch(`/api/dre-accounts/${accountId}`, {
+    const response = await fetch(`/api/dre-accounts/${targetId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -233,14 +302,25 @@ export function DreStructureManager({
   };
 
   const moveSibling = async (account: DreAccountItem, direction: "up" | "down") => {
-    const siblings = [...(byParent.get(account.parent_id) ?? [])];
-    const currentIndex = siblings.findIndex((item) => item.id === account.id);
+    const ensured = await ensureCustomizedIfNeeded();
+    if (!ensured.ok) return;
+
+    // Re-resolve the row in the active scope (it may be a freshly-cloned row).
+    const scoped = ensured.forked
+      ? ensured.accounts.find((a) => a.code === account.code)
+      : account;
+    if (!scoped) return;
+
+    const scopedSiblings = ensured.accounts
+      .filter((a) => a.parent_id === scoped.parent_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code));
+    const currentIndex = scopedSiblings.findIndex((item) => item.id === scoped.id);
     if (currentIndex < 0) return;
     const swapIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (swapIndex < 0 || swapIndex >= siblings.length) return;
+    if (swapIndex < 0 || swapIndex >= scopedSiblings.length) return;
 
-    const current = siblings[currentIndex];
-    const target = siblings[swapIndex];
+    const current = scopedSiblings[currentIndex];
+    const target = scopedSiblings[swapIndex];
     const updates = [
       { id: current.id, sort_order: target.sort_order },
       { id: target.id, sort_order: current.sort_order },
@@ -270,6 +350,14 @@ export function DreStructureManager({
   };
 
   const removeAccount = async (account: DreAccountItem) => {
+    if (!isLeaf(account.id)) {
+      showToast({
+        title: "Conta nao excluivel",
+        description: "Contas que possuem subcontas nao podem ser excluidas.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (
       !window.confirm(
         `Excluir a conta ${account.code} - ${account.name}? Essa acao nao pode ser desfeita.`,
@@ -278,9 +366,24 @@ export function DreStructureManager({
       return;
     }
 
+    const ensured = await ensureCustomizedIfNeeded();
+    if (!ensured.ok) return;
+
+    const targetId = ensured.forked
+      ? ensured.accounts.find((a) => a.code === account.code)?.id ?? null
+      : account.id;
+    if (!targetId) {
+      showToast({
+        title: "Conta nao encontrada",
+        description: "Nao foi possivel localizar a conta apos preparar o plano da empresa.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSavingId(account.id);
     setMessage(null);
-    const response = await fetch(`/api/dre-accounts/${account.id}`, {
+    const response = await fetch(`/api/dre-accounts/${targetId}`, {
       method: "DELETE",
     });
     const payload = (await response.json()) as { error?: string };
@@ -371,8 +474,31 @@ export function DreStructureManager({
       showToast({ title: "Nome obrigatorio", variant: "destructive" });
       return;
     }
+    if (!createDraft.parent_id) {
+      showToast({
+        title: "Selecione uma conta pai",
+        description: "Novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setCreateSaving(true);
+    const parentInDraft = accounts.find((a) => a.id === createDraft.parent_id);
+    const ensured = await ensureCustomizedIfNeeded();
+    if (!ensured.ok) {
+      setCreateSaving(false);
+      return;
+    }
+
+    // The parent id from the dropdown may have been cloned by the fork — find
+    // the equivalent row in the active scope by code.
+    let parentId: string = createDraft.parent_id;
+    if (parentInDraft && ensured.forked) {
+      const resolved = ensured.accounts.find((a) => a.code === parentInDraft.code)?.id;
+      if (resolved) parentId = resolved;
+    }
+
     const response = await fetch("/api/dre-accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -381,7 +507,7 @@ export function DreStructureManager({
         code,
         name,
         type: createDraft.type,
-        parent_id: createDraft.parent_id || null,
+        parent_id: parentId,
         is_summary: createDraft.type === "calculado" ? true : createDraft.is_summary,
         formula: createDraft.formula.trim() || null,
         sort_order: createDraft.sort_order,
@@ -471,6 +597,19 @@ export function DreStructureManager({
       variant: "success",
     });
   };
+
+  // Eligible parents = aggregator accounts that already have children. We
+  // exclude leaves (adding under a leaf would silently turn it into a parent
+  // and block editing of the former leaf) and calculated rows (those compute
+  // from formulas and shouldn't have children).
+  const parentOptions = useMemo(
+    () =>
+      accounts
+        .filter((a) => !isLeaf(a.id) && a.type !== "calculado")
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accounts, byParent],
+  );
 
   const selectedCompanyName = companies.find((c) => c.id === selectedCompanyId)?.name;
 
@@ -712,24 +851,22 @@ export function DreStructureManager({
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Conta pai (opcional)</label>
+                <label className="text-xs font-medium text-muted-foreground">Conta pai</label>
                 <select
                   value={createDraft.parent_id}
                   onChange={(e) => setCreateDraft({ ...createDraft, parent_id: e.target.value })}
                   className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">(nenhuma — conta de topo)</option>
-                  {accounts
-                    .filter((a) => a.is_summary)
-                    .sort((a, b) =>
-                      a.code.localeCompare(b.code, undefined, { numeric: true }),
-                    )
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} - {a.name}
-                      </option>
-                    ))}
+                  <option value="">(selecione uma conta agrupadora)</option>
+                  {parentOptions.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} - {a.name}
+                    </option>
+                  ))}
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  A nova conta sera criada como conta final desta conta agrupadora.
+                </p>
               </div>
               {createDraft.type === "calculado" && (
                 <div className="space-y-1 sm:col-span-2">
@@ -973,6 +1110,17 @@ export function DreStructureManager({
                       )}
                       Salvar
                     </Button>
+                  ) : hasChildren ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled
+                      title="Conta agrupadora — possui subcontas. Apenas contas finais sao editaveis."
+                    >
+                      <Lock className="mr-2 h-3 w-3" />
+                      Bloqueada
+                    </Button>
                   ) : (
                     <Button type="button" size="sm" variant="outline" onClick={() => startEdit(account)}>
                       <Pencil className="mr-2 h-3 w-3" />
@@ -1003,7 +1151,8 @@ export function DreStructureManager({
                     size="sm"
                     variant="destructive"
                     onClick={() => void removeAccount(account)}
-                    disabled={savingId === account.id}
+                    disabled={savingId === account.id || hasChildren}
+                    title={hasChildren ? "Conta agrupadora — possui subcontas." : undefined}
                   >
                     {savingId === account.id ? (
                       <Loader2 className="mr-2 h-3 w-3 animate-spin" />
