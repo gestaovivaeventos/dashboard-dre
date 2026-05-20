@@ -41,7 +41,13 @@ export function canAccessPath(
   pathname: string,
   dreRole: DreRole,
   ctrlRole: CtrlRole | null = null,
+  options: { contractsOnly?: boolean } = {},
 ): boolean {
+  // Contracts-only users see *only* /contratos and its sub-paths.
+  if (options.contractsOnly) {
+    return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
   // Módulo Ctrl: /ctrl/*
   if (pathname.startsWith("/ctrl")) {
     if (!ctrlRole) return false;

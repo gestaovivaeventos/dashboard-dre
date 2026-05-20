@@ -41,6 +41,8 @@ export interface UnifiedProfile {
   company_id: string | null;
   active: boolean;
   created_at: string;
+  /** Quando true, o usuário só enxerga /contratos e o sidebar oculta o resto. */
+  contracts_only: boolean;
 }
 
 /** Alias retrocompatível — código legado usa UserProfile */

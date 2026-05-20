@@ -14,7 +14,11 @@ interface Params {
 export async function POST(_request: Request, { params }: Params) {
   const { supabase, user, profile } = await getCurrentSessionContext()
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 })
-  if (profile?.role !== 'admin' && profile?.role !== 'gestor_hero') {
+  const allowed =
+    profile?.contracts_only === true ||
+    profile?.role === 'admin' ||
+    profile?.role === 'gestor_hero'
+  if (!allowed) {
     return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 })
   }
 

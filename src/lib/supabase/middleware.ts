@@ -43,25 +43,34 @@ export async function updateSession(request: NextRequest) {
     url.searchParams.set("redirectedFrom", pathname);
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && (pathname === "/login" || pathname === "/signup")) {
+    // Load contracts_only too so we can send these users straight to /contratos.
+    const { data: postLoginProfile } = await supabase
+      .from("users")
+      .select("contracts_only")
+      .eq("id", user.id)
+      .maybeSingle<{ contracts_only: boolean | null }>();
+
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = postLoginProfile?.contracts_only ? "/contratos" : "/dashboard";
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase
       .from("users")
       .select(`
-        role, active,
+        role, active, contracts_only,
         user_module_roles!user_module_roles_user_id_fkey(role, module)
       `)
       .eq("id", user.id)
       .maybeSingle<{
         role: DreRole;
         active: boolean;
+        contracts_only: boolean | null;
         user_module_roles: Array<{ role: string; module: string }> | null;
       }>();
 
     const dreRole: DreRole = profileData?.role ?? "gestor_unidade";
     const isActive = profileData?.active ?? true;
+    const contractsOnly = Boolean(profileData?.contracts_only);
 
     if (!isActive) {
       const url = request.nextUrl.clone();
@@ -72,9 +81,13 @@ export async function updateSession(request: NextRequest) {
       const ctrlRole: CtrlRole | null =
         dreRole === "admin" ? "admin" : ctrlModuleRow ? (ctrlModuleRow.role as CtrlRole) : null;
 
-      if (!canAccessPath(pathname, dreRole, ctrlRole)) {
+      if (!canAccessPath(pathname, dreRole, ctrlRole, { contractsOnly })) {
         const url = request.nextUrl.clone();
-        url.pathname = pathname.startsWith("/ctrl") ? "/ctrl/requisicoes" : "/dashboard";
+        if (contractsOnly) {
+          url.pathname = "/contratos";
+        } else {
+          url.pathname = pathname.startsWith("/ctrl") ? "/ctrl/requisicoes" : "/dashboard";
+        }
         supabaseResponse = NextResponse.redirect(url);
       }
     }

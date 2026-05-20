@@ -7,14 +7,17 @@ interface Params {
   params: { id: string }
 }
 
-function canUseContracts(role: string | undefined): boolean {
-  return role === 'admin' || role === 'gestor_hero'
+function canUseContracts(
+  role: string | undefined,
+  contractsOnly: boolean | undefined,
+): boolean {
+  return contractsOnly === true || role === 'admin' || role === 'gestor_hero'
 }
 
 export async function GET(_request: Request, { params }: Params) {
   const { supabase, user, profile } = await getCurrentSessionContext()
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 })
-  if (!canUseContracts(profile?.role)) {
+  if (!canUseContracts(profile?.role, profile?.contracts_only)) {
     return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 })
   }
 

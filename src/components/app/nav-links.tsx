@@ -20,6 +20,7 @@ interface NavLinksProps {
   activeSegmentSlug: string | null;
   collapsed?: boolean;
   onNavigate?: () => void;
+  contractsOnly?: boolean;
 }
 
 interface RenderItem {
@@ -67,10 +68,21 @@ export function NavLinks({
   activeSegmentSlug,
   collapsed,
   onNavigate,
+  contractsOnly,
 }: NavLinksProps) {
   const pathname = usePathname();
 
-  const groups = buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
+  const allGroups = buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
+  // contracts_only users see only the Validacao de Contratos entry —
+  // strip every other group/item from the sidebar.
+  const groups: RenderGroup[] = contractsOnly
+    ? allGroups
+        .map((g) => ({
+          ...g,
+          items: g.items.filter((i) => i.href === "/contratos" || i.href.startsWith("/contratos/")),
+        }))
+        .filter((g) => g.items.length > 0)
+    : allGroups;
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
