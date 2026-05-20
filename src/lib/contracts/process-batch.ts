@@ -79,7 +79,7 @@ export async function processNextPendingBatch(
 export async function processBatch(
   db: SupabaseClient,
   batchId: string,
-  options: { timeBudgetMs?: number } = {},
+  options: { timeBudgetMs?: number; maxItems?: number } = {},
 ): Promise<ProcessBatchResult> {
   const result: ProcessBatchResult = {
     batch_id: batchId,
@@ -93,7 +93,10 @@ export async function processBatch(
   // Default to 250s, leaving a 50s safety margin under Vercel's 300s ceiling.
   const startedAt = Date.now()
   const timeBudgetMs = options.timeBudgetMs ?? 250_000
+  const maxItems = options.maxItems
   const timeIsUp = () => Date.now() - startedAt > timeBudgetMs
+
+  console.log(`[contracts] processBatch start batch=${batchId} budget=${timeBudgetMs}ms maxItems=${maxItems ?? 'unlimited'}`)
 
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
@@ -106,12 +109,25 @@ export async function processBatch(
     .neq('status', 'erro')
     .order('created_at', { ascending: true })
 
-  for (const item of (pendingExtraction ?? []) as Array<
+  const pendingList = (pendingExtraction ?? []) as Array<
     Pick<ItemRow, 'id' | 'requisicao_codigo' | 'link_contrato'>
-  >) {
-    if (timeIsUp()) break
+  >
+  console.log(`[contracts] phase1 found ${pendingList.length} items needing extraction`)
+
+  for (const item of pendingList) {
+    if (timeIsUp()) {
+      console.log('[contracts] time budget exhausted, breaking extraction loop')
+      break
+    }
+    if (maxItems !== undefined && result.extracted + result.errors >= maxItems) {
+      console.log(`[contracts] maxItems=${maxItems} reached, breaking extraction loop`)
+      break
+    }
+    const itemStart = Date.now()
+    console.log(`[contracts] extracting req=${item.requisicao_codigo} link=${item.link_contrato.slice(0, 80)}`)
     try {
       const extraction = await extractContract(item.link_contrato)
+      console.log(`[contracts] extraction OK req=${item.requisicao_codigo} took=${Date.now() - itemStart}ms credits=${extraction.creditsUsed}`)
       const normalized = extraction.normalized
       const payments = normalized.valores_pagamentos
 
@@ -144,6 +160,8 @@ export async function processBatch(
         e instanceof LandingAIError || e instanceof LlmExtractionError
           ? e.message
           : `Extração falhou: ${(e as Error).message}`
+
+      console.log(`[contracts] extraction FAIL req=${item.requisicao_codigo} took=${Date.now() - itemStart}ms err=${message}`)
 
       await db
         .from('contract_validation_items')

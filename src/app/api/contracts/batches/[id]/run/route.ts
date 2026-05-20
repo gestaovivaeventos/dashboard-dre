@@ -39,7 +39,12 @@ export async function POST(_request: Request, { params }: Params) {
   }
 
   // Use the service-role client so RLS doesn't fight the batch update loop.
+  // Process only 1 item per manual click so the request returns fast with
+  // diagnostics. The cron drains the rest in the background.
   const adminDb = createAdminClient()
-  const result = await processBatch(adminDb, params.id)
+  const result = await processBatch(adminDb, params.id, {
+    maxItems: 1,
+    timeBudgetMs: 250_000,
+  })
   return NextResponse.json({ ok: true, ...result })
 }

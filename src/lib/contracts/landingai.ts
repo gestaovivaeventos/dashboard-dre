@@ -31,18 +31,26 @@ export async function parseDocumentWithLandingAI(
   form.append('document_url', documentUrl)
   form.append('model', options.model ?? DEFAULT_MODEL)
 
+  const timeoutMs = options.timeoutMs ?? 90_000
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 180_000)
+  const timeout = setTimeout(() => {
+    console.log(`[landingai] aborting fetch after ${timeoutMs}ms`)
+    controller.abort()
+  }, timeoutMs)
+  const fetchStart = Date.now()
 
   let response: Response
   try {
+    console.log(`[landingai] POST parse url=${documentUrl.slice(0, 80)}`)
     response = await fetch(LANDINGAI_PARSE_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
       signal: controller.signal,
     })
+    console.log(`[landingai] parse responded status=${response.status} took=${Date.now() - fetchStart}ms`)
   } catch (e) {
+    console.log(`[landingai] parse fetch threw after ${Date.now() - fetchStart}ms: ${(e as Error).name}: ${(e as Error).message}`)
     if (e instanceof Error && e.name === 'AbortError') {
       throw new LandingAIError('LandingAI parse: timeout aguardando resposta')
     }
