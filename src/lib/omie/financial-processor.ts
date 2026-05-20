@@ -367,7 +367,8 @@ function distribuirPorDepartamentos(
 // ============================================================================
 function selectValueByCorretor(
   record: RawOmieMovimento,
-  verificadorRateio: number
+  verificadorRateio: number,
+  type: "receita" | "despesa",
 ): {
   value: number;
   corretor_duplicidade: number;
@@ -403,8 +404,33 @@ function selectValueByCorretor(
         source_field_value: "nValLiquido",
       };
     }
-    // Fallback: se nValLiquido vazio/zero, usa nValPago
+    // nValLiquido = 0: pode ser (a) titulo sem dado, ou (b) titulo onde
+    // desconto/juros/multa zeram o cash real (caso classico: desconto >=
+    // nValPago).
+    //
+    // RECEITA: aplicamos a formula (nValPago - desconto + juros + multa).
+    // O fallback antigo para nValPago contabilizava o BRUTO como recebimento
+    // mesmo quando o desconto cancelava o pagamento — bug observado em
+    // Volta Redonda Mar/Abr 2023 (Cerimonial/Fee inflado em R$ 65.200).
+    //
+    // DESPESA: mantemos o fallback legado para nValPago. Em despesa, o
+    // desconto recebido nao reduz o valor da despesa em si — a despesa
+    // mantem o valor bruto (modelo contabil onde desconto vira receita
+    // financeira em outra linha).
     const valPago = parseNumber(record.nValPago);
+    if (type === "receita") {
+      const adj = extractCashAdjustment(record);
+      if (adj.hasAdjustment) {
+        const cashReal = Number(
+          (valPago - adj.desconto + adj.juros + adj.multa).toFixed(2),
+        );
+        return {
+          value: cashReal,
+          corretor_duplicidade: 1,
+          source_field_value: "nValLiquido",
+        };
+      }
+    }
     return {
       value: valPago,
       corretor_duplicidade: 1,
@@ -782,7 +808,8 @@ export function processMovimento(
     // ====================================================================
     const { value, corretor_duplicidade, source_field_value } = selectValueByCorretor(
       record,
-      verificadorRateio
+      verificadorRateio,
+      type,
     );
 
     const categoryCode = getString(record as Record<string, unknown>, ["cCodCateg"]);
@@ -953,42 +980,70 @@ function processBaixasDoTitulo(
           ? "receita"
           : "despesa";
 
-      // Valor real da baixa: nValorMovCC (movimento de conta corrente)
-      // ja vem net de desconto/juros/multa. Fallback para nValPago da baixa
-      // ajustado manualmente quando nValorMovCC nao esta presente.
+      // Valor real da baixa: para RECEITA aplicamos a formula de cash
+      // quando ha desconto/juros/multa (forca o regime de caixa); para
+      // DESPESA mantemos o comportamento legado (`nValorMovCC` primeiro,
+      // fallbacks em resumo).
       //
-      // Edge case: alguns lotes (ex.: pai BARP que ja contem o resumo da
-      // baixa embutido) trazem nDesconto > 0 com nValPago em valor BRUTO.
-      // Quando ocorrer, tratamos `nValPago` como bruto e aplicamos o
-      // ajuste; para `nValorMovCC` confiamos no valor entregue pela API.
+      // Motivacao: descontos concedidos em receita reduzem o cash real
+      // (cortesia ao cliente — Cerimonial/Fee em Volta Redonda Mar/Abr
+      // 2023 inflado em R$ 65.200 era exatamente isso). Em despesa, o
+      // desconto recebido nao reduz o valor da despesa em si — o modelo
+      // contabil mantem o bruto e trata o desconto como receita financeira
+      // em linha separada.
       const baixaAdj = extractCashAdjustment(baixa);
-      let baixaValue = parseNumber(baixa.nValorMovCC);
-      let baixaSource: "nValorMovCC" | "nValLiquido" | "nValPago" = "nValorMovCC";
-      if (baixaValue === 0) {
-        const valLiquidoBaixa = parseNumber(
-          (baixa.resumo as Record<string, unknown> | undefined)?.nValLiquido
-        );
-        const valPagoBaixa = parseNumber(
-          (baixa.resumo as Record<string, unknown> | undefined)?.nValPago
-        );
-        if (valLiquidoBaixa > 0) {
-          baixaValue = valLiquidoBaixa;
-          baixaSource = "nValLiquido";
-        } else if (valPagoBaixa > 0) {
-          baixaValue = baixaAdj.hasAdjustment
-            ? Number(
-                (
-                  valPagoBaixa -
-                  baixaAdj.desconto +
-                  baixaAdj.juros +
-                  baixaAdj.multa
-                ).toFixed(2)
-              )
-            : valPagoBaixa;
-          baixaSource = "nValPago";
-        }
+      const baixaResumo = (baixa.resumo as Record<string, unknown> | undefined) ?? {};
+      const valLiquidoBaixaResumo = parseNumber(baixaResumo.nValLiquido);
+      const valPagoBaixaResumo = parseNumber(baixaResumo.nValPago);
+      const nValorMovCCBaixa = parseNumber(baixa.nValorMovCC);
+
+      let baixaValue: number;
+      let baixaSource: "nValorMovCC" | "nValLiquido" | "nValPago";
+
+      // Prioridade: nValorMovCC (cash real ja calculado pela Omie) >
+      //             nValLiquido (resumo, ja net) >
+      //             nValPago + formula (somente como fallback — cortesia
+      //             integral onde nao houve cash mas Omie ainda traz bruto).
+      //
+      // CRITICO: nao aplicar a formula quando nValorMovCC > 0, porque em
+      // baixas o nValPago do resumo JA reflete o valor liquido pago pelo
+      // cliente (inclui juros/multa, descontado o desconto). Somar de novo
+      // gera dobra de juros e multa.
+      if (nValorMovCCBaixa > 0) {
+        baixaValue = nValorMovCCBaixa;
+        baixaSource = "nValorMovCC";
+      } else if (valLiquidoBaixaResumo > 0) {
+        baixaValue = valLiquidoBaixaResumo;
+        baixaSource = "nValLiquido";
+      } else if (valPagoBaixaResumo > 0) {
+        // nValorMovCC e nValLiquido zerados: cenario tipico de cortesia
+        // integral (desconto cancelou o pagamento) onde a Omie ainda
+        // mostra o bruto em nValPago. Formula extrai o cash real (pode
+        // ser 0). Aplica para receita e despesa.
+        baixaValue = baixaAdj.hasAdjustment
+          ? Number(
+              (
+                valPagoBaixaResumo -
+                baixaAdj.desconto +
+                baixaAdj.juros +
+                baixaAdj.multa
+              ).toFixed(2),
+            )
+          : valPagoBaixaResumo;
+        baixaSource = "nValPago";
+      } else {
+        baixaValue = 0;
+        baixaSource = "nValorMovCC";
       }
-      if (baixaValue === 0) {
+
+      // Rejeita baixa vazia. Em RECEITA com ajuste podemos ter cash real = 0
+      // (cortesia integral) e isso e legitimo — nao rejeitamos para que o
+      // upsert sobrescreva o valor antigo (bug). Em despesa, value === 0
+      // sempre indica baixa sem dado util.
+      if (
+        baixaValue === 0 &&
+        !(type === "receita" && baixaAdj.hasAdjustment)
+      ) {
         auditLog.status = "rejeitado_sem_data";
         auditLog.razao = "Baixa sem valor (nValorMovCC e nValPago zerados).";
         results.push({ entries: [], auditLog });

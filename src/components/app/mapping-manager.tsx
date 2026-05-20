@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
 import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
+import { SegmentSelector } from "@/components/app/segment-selector";
+import type { Segment } from "@/lib/supabase/types";
 
 type Tab = "omie" | "cashflow" | "budget";
 
@@ -20,6 +22,9 @@ interface DreAccountOption {
   id: string;
   code: string;
   name: string;
+  // null = conta do plano global; uuid = conta customizada de uma empresa.
+  // Usado para filtrar quais contas aparecem como opcao para cada empresa.
+  company_id?: string | null;
 }
 
 interface MappingRow {
@@ -45,6 +50,8 @@ interface MappingManagerProps {
   companies: CompanyOption[];
   dreAccounts: DreAccountOption[];
   cashFlowAccounts: DreAccountOption[];
+  segments?: Segment[];
+  currentSegmentSlug?: string;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -57,7 +64,13 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: MappingManagerProps) {
+export function MappingManager({
+  companies,
+  dreAccounts,
+  cashFlowAccounts,
+  segments,
+  currentSegmentSlug,
+}: MappingManagerProps) {
   const { showToast } = useToast();
   const [tab, setTab] = useState<Tab>("omie");
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
@@ -69,6 +82,20 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
   // Estado atual dos selects (draft) e estado original (salvo no banco)
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [originalByCode, setOriginalByCode] = useState<Record<string, string>>({});
+
+  // Contas DRE relevantes para a empresa selecionada:
+  // - Contas globais (company_id === null) sempre aparecem
+  // - Contas customizadas (company_id === companyId) so aparecem para a empresa dona
+  // - Mapeamentos existentes que apontam para contas fora desse escopo continuam
+  //   funcionando (FK preservado), apenas nao aparecem como nova opcao para mapeamento.
+  const availableDreAccounts = useMemo(
+    () =>
+      dreAccounts.filter(
+        (account) =>
+          account.company_id == null || account.company_id === companyId,
+      ),
+    [dreAccounts, companyId],
+  );
 
   // Budget tab state
   const [budgetRows, setBudgetRows] = useState<BudgetMappingRow[]>([]);
@@ -330,6 +357,13 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
         </p>
       </div>
 
+      {segments && segments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-ink-secondary">Segmento:</span>
+          <SegmentSelector segments={segments} activeSlug={currentSegmentSlug ?? null} />
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Button
           type="button"
@@ -491,7 +525,7 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
                             }
                           >
                             <option value="">Selecione uma conta DRE</option>
-                            {dreAccounts.map((account) => (
+                            {availableDreAccounts.map((account) => (
                               <option key={account.id} value={account.id}>
                                 {account.code} - {account.name}
                               </option>
@@ -577,8 +611,8 @@ export function MappingManager({ companies, dreAccounts, cashFlowAccounts }: Map
                       const isMapped = draftValue !== "";
                       const suggestion = budgetSuggestions[row.label];
 
-                      const companyAccounts = dreAccounts.filter((a) => companyAccountIds.includes(a.id));
-                      const otherAccounts = dreAccounts.filter((a) => !companyAccountIds.includes(a.id));
+                      const companyAccounts = availableDreAccounts.filter((a) => companyAccountIds.includes(a.id));
+                      const otherAccounts = availableDreAccounts.filter((a) => !companyAccountIds.includes(a.id));
 
                       return (
                         <tr

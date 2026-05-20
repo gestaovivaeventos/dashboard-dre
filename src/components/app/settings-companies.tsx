@@ -1,13 +1,50 @@
 "use client";
 
-import { FormEvent, useRef, useMemo, useState } from "react";
-import { FileUp, History, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, FileUp, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/toaster";
+import { cn } from "@/lib/utils";
+
+interface SyncSelection {
+  rolling: boolean;
+  currentMonth: boolean;
+  full: boolean;
+  years: Set<number>;
+}
+
+function emptySelection(): SyncSelection {
+  return { rolling: false, currentMonth: false, full: false, years: new Set() };
+}
+
+function hasSelection(selection: SyncSelection): boolean {
+  return (
+    selection.full ||
+    selection.rolling ||
+    selection.currentMonth ||
+    selection.years.size > 0
+  );
+}
+
+const MONTH_NAMES_PT = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+];
 
 interface CompanyItem {
   id: string;
@@ -34,6 +71,7 @@ async function safeJson<T>(response: Response): Promise<T | null> {
 
 export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompaniesProps) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [companies, setCompanies] = useState(initialCompanies);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -59,6 +97,22 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
   // Delete state
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Manual sync menu state
+  const [openSyncMenuId, setOpenSyncMenuId] = useState<string | null>(null);
+  const [selectionsByCompany, setSelectionsByCompany] = useState<Record<string, SyncSelection>>({});
+  const [syncingByCompany, setSyncingByCompany] = useState<Record<string, boolean>>({});
+
+  const currentYear = useMemo(() => new Date().getFullYear(), []);
+  const currentMonthLabel = useMemo(() => {
+    const now = new Date();
+    return `${MONTH_NAMES_PT[now.getMonth()]}/${now.getFullYear()}`;
+  }, []);
+  const availableYears = useMemo(() => {
+    const years: number[] = [];
+    for (let y = currentYear; y >= 2022; y--) years.push(y);
+    return years;
+  }, [currentYear]);
 
   // Budget upload state
   const [budgetOpen, setBudgetOpen] = useState<string | null>(null);
@@ -130,6 +184,9 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setForm({ name: "", appKey: "", appSecret: "" });
     setIsModalOpen(false);
     setIsSaving(false);
+    // Reaproveita o RSC para que as outras abas (Departamentos, Socios) recebam
+    // a nova empresa sem exigir reload manual da pagina.
+    router.refresh();
     showToast({
       title: "Empresa criada",
       description: `${company.name} foi adicionada.`,
@@ -186,6 +243,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setEditingCredentials(null);
     setCredForm({ appKey: "", appSecret: "" });
     setSavingCred(false);
+    router.refresh();
     showToast({
       title: "Credenciais salvas",
       description: "App Key e App Secret atualizados com sucesso.",
@@ -231,6 +289,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     );
     setEditingName(null);
     setSavingName(false);
+    router.refresh();
     showToast({
       title: "Empresa renomeada",
       description: `Nome atualizado para "${trimmed}".`,
@@ -258,6 +317,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setCompanies((prev) => prev.filter((c) => c.id !== companyId));
     setConfirmingDelete(null);
     setDeleting(false);
+    router.refresh();
     showToast({
       title: "Empresa excluida",
       description: "A empresa e todos os dados associados foram removidos.",
@@ -363,45 +423,24 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setUploadingBudget(false);
   };
 
-  const runAction = async (companyId: string, type: "test" | "sync" | "sync-full") => {
-    if (type === "sync-full") {
-      if (!window.confirm("Isso vai buscar todo o historico desde 2022. Pode levar varios minutos. Continuar?")) return;
-    }
-
+  const runAction = async (companyId: string, type: "test") => {
     setActionLoading((previous) => ({
       ...previous,
       [companyId]: type,
     }));
     setStatusMessage(null);
 
-    const endpoints: Record<string, string> = {
-      test: `/api/companies/${companyId}/test`,
-      sync: `/api/sync/${companyId}`,
-      "sync-full": `/api/sync/${companyId}/full`,
-    };
-    const response = await fetch(endpoints[type], {
+    const response = await fetch(`/api/companies/${companyId}/test`, {
       method: "POST",
     });
-    const payload = await safeJson<{ error?: string; recordsImported?: number; recordsDeleted?: number }>(response);
+    const payload = await safeJson<{ error?: string }>(response);
 
     if (!response.ok) {
       setStatusMessage(payload?.error ?? "A operacao falhou.");
       showToast({
-        title: type === "test" ? "Falha no teste de conexao" : "Falha na sincronizacao",
+        title: "Falha no teste de conexao",
         description: payload?.error ?? "Nao foi possivel concluir a operacao.",
         variant: "destructive",
-      });
-    } else if (type === "sync") {
-      showToast({
-        title: "Sincronizacao concluida",
-        description: `${payload?.recordsImported ?? 0} lancamentos importados.`,
-        variant: "success",
-      });
-    } else if (type === "sync-full") {
-      showToast({
-        title: "Sincronizacao completa concluida",
-        description: `${payload?.recordsImported ?? 0} importados, ${payload?.recordsDeleted ?? 0} obsoletos removidos.`,
-        variant: "success",
       });
     } else {
       showToast({
@@ -415,6 +454,80 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
       ...previous,
       [companyId]: null,
     }));
+  };
+
+  const getSelection = (companyId: string): SyncSelection =>
+    selectionsByCompany[companyId] ?? emptySelection();
+
+  const updateSelection = (
+    companyId: string,
+    updater: (prev: SyncSelection) => SyncSelection,
+  ) => {
+    setSelectionsByCompany((prev) => {
+      const current = prev[companyId] ?? emptySelection();
+      return { ...prev, [companyId]: updater(current) };
+    });
+  };
+
+  const toggleYear = (companyId: string, year: number) => {
+    updateSelection(companyId, (prev) => {
+      const years = new Set(prev.years);
+      if (years.has(year)) years.delete(year);
+      else years.add(year);
+      return { ...prev, years };
+    });
+  };
+
+  const runManualSync = async (companyId: string) => {
+    const selection = getSelection(companyId);
+    if (!hasSelection(selection)) return;
+
+    if (selection.full) {
+      const confirmed = window.confirm(
+        "Sincronizar todo o historico (Periodo todo) pode levar varios minutos. Continuar?",
+      );
+      if (!confirmed) return;
+    }
+
+    setOpenSyncMenuId(null);
+    setSyncingByCompany((prev) => ({ ...prev, [companyId]: true }));
+    setStatusMessage(null);
+
+    const response = await fetch(`/api/sync/${companyId}/manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        full: selection.full,
+        rolling: selection.rolling,
+        currentMonth: selection.currentMonth,
+        years: Array.from(selection.years),
+      }),
+    });
+    const payload = await safeJson<{
+      error?: string;
+      recordsImported?: number;
+      recordsDeleted?: number;
+      rangesProcessed?: number;
+    }>(response);
+
+    if (!response.ok) {
+      setStatusMessage(payload?.error ?? "Falha na sincronizacao.");
+      showToast({
+        title: "Falha na sincronizacao",
+        description: payload?.error ?? "Nao foi possivel concluir a operacao.",
+        variant: "destructive",
+      });
+    } else {
+      showToast({
+        title: "Sincronizacao concluida",
+        description: `${payload?.recordsImported ?? 0} importados, ${payload?.recordsDeleted ?? 0} obsoletos removidos (${payload?.rangesProcessed ?? 0} periodo(s)).`,
+        variant: "success",
+      });
+      // Limpa selecao apos sucesso para evitar re-execucao acidental.
+      updateSelection(companyId, () => emptySelection());
+    }
+
+    setSyncingByCompany((prev) => ({ ...prev, [companyId]: false }));
   };
 
   return (
@@ -507,33 +620,37 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       )}
                       Testar Conexao
                     </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => runAction(company.id, "sync")}
-                      disabled={Boolean(loadingAction) || !company.has_credentials}
-                    >
-                      {loadingAction === "sync" ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCcw className="mr-2 h-4 w-4" />
-                      )}
-                      Sincronizar
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => runAction(company.id, "sync-full")}
-                      disabled={Boolean(loadingAction) || !company.has_credentials}
-                    >
-                      {loadingAction === "sync-full" ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <History className="mr-2 h-4 w-4" />
-                      )}
-                      Sincronizar Historico
-                    </Button>
+                    <SyncMenu
+                      open={openSyncMenuId === company.id}
+                      onOpenChange={(open) =>
+                        setOpenSyncMenuId(open ? company.id : null)
+                      }
+                      selection={getSelection(company.id)}
+                      onToggleRolling={() =>
+                        updateSelection(company.id, (prev) => ({
+                          ...prev,
+                          rolling: !prev.rolling,
+                        }))
+                      }
+                      onToggleCurrentMonth={() =>
+                        updateSelection(company.id, (prev) => ({
+                          ...prev,
+                          currentMonth: !prev.currentMonth,
+                        }))
+                      }
+                      onToggleFull={() =>
+                        updateSelection(company.id, (prev) => ({
+                          ...prev,
+                          full: !prev.full,
+                        }))
+                      }
+                      onToggleYear={(year) => toggleYear(company.id, year)}
+                      availableYears={availableYears}
+                      currentMonthLabel={currentMonthLabel}
+                      onSubmit={() => void runManualSync(company.id)}
+                      syncing={syncingByCompany[company.id] ?? false}
+                      disabled={!company.has_credentials || Boolean(loadingAction)}
+                    />
                     <Button
                       type="button"
                       variant={budgetOpen === company.id ? "default" : "outline"}
@@ -821,5 +938,165 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
         </div>
       ) : null}
     </div>
+  );
+}
+
+interface SyncMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  selection: SyncSelection;
+  onToggleRolling: () => void;
+  onToggleCurrentMonth: () => void;
+  onToggleFull: () => void;
+  onToggleYear: (year: number) => void;
+  availableYears: number[];
+  currentMonthLabel: string;
+  onSubmit: () => void;
+  syncing: boolean;
+  disabled: boolean;
+}
+
+function SyncMenu({
+  open,
+  onOpenChange,
+  selection,
+  onToggleRolling,
+  onToggleCurrentMonth,
+  onToggleFull,
+  onToggleYear,
+  availableYears,
+  currentMonthLabel,
+  onSubmit,
+  syncing,
+  disabled,
+}: SyncMenuProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Fecha o popover ao clicar fora ou pressionar ESC.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) {
+        onOpenChange(false);
+      }
+    };
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open, onOpenChange]);
+
+  // "Periodo todo" prevalece sobre as outras opcoes — desabilitamos visualmente.
+  const otherDisabled = selection.full;
+  const canSubmit = hasSelection(selection) && !disabled && !syncing;
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => onOpenChange(!open)}
+        disabled={disabled || syncing}
+      >
+        {syncing ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCcw className="mr-2 h-4 w-4" />
+        )}
+        Sincronizar
+        <ChevronDown className="ml-1 h-4 w-4" />
+      </Button>
+
+      {open ? (
+        <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-md border bg-popover p-3 text-popover-foreground shadow-md">
+          <div className="space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                Periodos rapidos
+              </p>
+              <div className="space-y-1">
+                <CheckboxRow
+                  checked={selection.rolling}
+                  disabled={otherDisabled}
+                  onToggle={onToggleRolling}
+                  label="Ultimos 3 dias"
+                />
+                <CheckboxRow
+                  checked={selection.currentMonth}
+                  disabled={otherDisabled}
+                  onToggle={onToggleCurrentMonth}
+                  label={`Mes atual (${currentMonthLabel})`}
+                />
+                <CheckboxRow
+                  checked={selection.full}
+                  onToggle={onToggleFull}
+                  label="Periodo todo (historico)"
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                Anos
+              </p>
+              <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+                {availableYears.map((year) => (
+                  <CheckboxRow
+                    key={year}
+                    checked={selection.years.has(year)}
+                    disabled={otherDisabled}
+                    onToggle={() => onToggleYear(year)}
+                    label={String(year)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full"
+              size="sm"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+            >
+              Sincronizar selecionados
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+interface CheckboxRowProps {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+  label: string;
+}
+
+function CheckboxRow({ checked, disabled, onToggle, label }: CheckboxRowProps) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onToggle}
+        className="h-4 w-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
+      />
+      <span>{label}</span>
+    </label>
   );
 }

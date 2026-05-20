@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { SettingsTabs } from "@/components/app/settings-tabs";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import type { KpiDefinition } from "@/lib/kpi/calc";
+import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,13 +22,14 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
 
   const { segmentSlug } = await params;
 
-  const { data: seg } = await supabase
+  const { data: allSegments } = await supabase
     .from("segments")
-    .select("id")
-    .eq("slug", segmentSlug)
+    .select("id,name,slug,display_order,active")
     .eq("active", true)
-    .maybeSingle<{ id: string }>();
-  const segmentId = seg?.id ?? null;
+    .order("display_order");
+  const segments = (allSegments as Segment[] | null) ?? [];
+  const currentSegment = segments.find((s) => s.slug === segmentSlug) ?? null;
+  const segmentId = currentSegment?.id ?? null;
 
   let companiesQuery = supabase
     .from("companies")
@@ -38,11 +40,19 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [companiesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
+  const [companiesResult, allCompaniesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
     companiesQuery.order("name"),
+    // Lista de TODAS as empresas do sistema (cross-segment) para alimentar
+    // o seletor "Copiar Plano de Contas" do DreStructureManager.
+    supabase
+      .from("companies")
+      .select("id,name")
+      .eq("active", true)
+      .order("name"),
     supabase
       .from("dre_accounts")
       .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .is("company_id", null)
       .order("code"),
     supabase
       .from("category_mapping")
@@ -174,6 +184,11 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     mappings: cashFlowMappingByAccount.get(account.id as string) ?? [],
   }));
 
+  const allCompanies = (allCompaniesResult.data ?? []).map((c) => ({
+    id: c.id as string,
+    name: c.name as string,
+  }));
+
   return (
     <SettingsTabs
       companies={companies}
@@ -182,6 +197,9 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
       cashFlowAccounts={cashFlowAccounts}
       kpis={(kpisResult.data ?? []) as KpiDefinition[]}
       segmentId={segmentId}
+      segments={segments}
+      currentSegmentSlug={segmentSlug}
+      allCompanies={allCompanies}
     />
   );
 }

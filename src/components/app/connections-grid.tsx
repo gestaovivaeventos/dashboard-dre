@@ -145,7 +145,7 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
   const handleFullSync = async (companyId: string, isFirstTime: boolean) => {
     const message = isFirstTime
       ? "Primeira sincronizacao — sera buscado historico desde 2022. Isso pode levar varios minutos. Continuar?"
-      : "Isso vai buscar 24 meses de historico. Pode levar alguns minutos. Continuar?";
+      : "Isso vai re-buscar todo o historico desde 2022. Pode levar varios minutos. Continuar?";
 
     if (!window.confirm(message)) return;
 

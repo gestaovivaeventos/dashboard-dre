@@ -46,7 +46,13 @@ interface NormalizedEntry {
   processing_metadata: Record<string, unknown>;
 }
 
-export type SyncMode = "incremental" | "full" | "rolling";
+export type SyncMode = "incremental" | "full" | "rolling" | "custom";
+
+export interface CustomDateRange {
+  // Datas no formato DD-MM-YYYY (mesmo formato usado pela Omie).
+  dateFrom: string;
+  dateTo: string;
+}
 
 interface SyncResult {
   recordsImported: number;
@@ -72,9 +78,17 @@ function formatDateForOmie(date: Date): string {
 function calculateDateRange(
   mode: SyncMode,
   lastFullSyncAt: string | null,
+  customRange?: CustomDateRange,
 ): { dateFrom: string; dateTo: string } {
   const now = new Date();
   const dateTo = formatDateForOmie(now);
+
+  if (mode === "custom") {
+    if (!customRange) {
+      throw new Error("Range customizado obrigatorio para sync mode=custom.");
+    }
+    return { dateFrom: customRange.dateFrom, dateTo: customRange.dateTo };
+  }
 
   if (mode === "rolling") {
     const from = new Date(now);
@@ -82,13 +96,14 @@ function calculateDateRange(
     return { dateFrom: formatDateForOmie(from), dateTo };
   }
 
+  // "full" sempre re-busca todo o historico desde 2022. Antes, apos a primeira
+  // execucao bem-sucedida, este ramo caia para uma janela de 24 meses — combinado
+  // com `cleanup_obsolete_entries(p_date_from=null, p_date_to=null)`, isso apagava
+  // todos os entries fora da janela (2022, 2023, inicio de 2024) a cada
+  // "Sincronizar Historico" subsequente. Em vez de tentar "otimizar" a janela,
+  // confiamos no upsert por omie_id para reaproveitar registros ja gravados.
   if (mode === "full") {
-    if (!lastFullSyncAt) {
-      return { dateFrom: "01-01-2022", dateTo };
-    }
-    const from = new Date(now);
-    from.setMonth(from.getMonth() - 24);
-    return { dateFrom: formatDateForOmie(from), dateTo };
+    return { dateFrom: "01-01-2022", dateTo };
   }
 
   // Incremental: from watermark - 3 days
@@ -623,6 +638,23 @@ export async function runCompanySync(
   return runCompanySyncAsSystem(companyId, mode);
 }
 
+export async function runCompanyRangeSync(
+  companyId: string,
+  profile: UserProfile,
+  range: CustomDateRange,
+) {
+  const isAllowed = await canSyncCompany(profile, companyId);
+  if (!isAllowed) {
+    throw new Error("Sem permissao para sincronizar esta empresa.");
+  }
+  return runCompanySyncInternal(companyId, {
+    profile: null,
+    skipPermission: true,
+    mode: "custom",
+    customRange: range,
+  });
+}
+
 export async function runCompanySyncAsSystem(
   companyId: string,
   mode: SyncMode = "incremental",
@@ -640,6 +672,7 @@ async function runCompanySyncInternal(
     profile: UserProfile | null;
     skipPermission: boolean;
     mode: SyncMode;
+    customRange?: CustomDateRange;
   },
 ) {
   const supabase = options.skipPermission
@@ -676,6 +709,7 @@ async function runCompanySyncInternal(
   const { dateFrom, dateTo } = calculateDateRange(
     effectiveMode,
     company.last_full_sync_at,
+    options.customRange,
   );
 
   const { data: syncLog, error: syncLogError } = await supabase
