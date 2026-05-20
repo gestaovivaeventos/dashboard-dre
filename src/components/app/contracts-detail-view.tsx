@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState, useTransition } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -82,6 +83,36 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
   erro: 'destructive',
 }
 
+// Custom className overrides so the badge palette matches the user's mental
+// model (green = good, yellow = needs attention) instead of the default
+// shadcn variants.
+const STATUS_CLASS: Record<string, string> = {
+  aprovada: 'bg-emerald-500 hover:bg-emerald-500 text-white border-transparent',
+  analise_especialista:
+    'bg-amber-500 hover:bg-amber-500 text-white border-transparent',
+}
+
+// Numeric weight for sorting by Status — keeps the most actionable items
+// (errors, reprovadas) at the top when sorting ascending.
+const STATUS_RANK: Record<string, number> = {
+  erro: 0,
+  reprovada: 1,
+  analise_especialista: 2,
+  pending: 3,
+  processing: 4,
+  aprovada: 5,
+}
+
+type SortKey =
+  | 'requisicao_codigo'
+  | 'status'
+  | 'tipo_documento'
+  | 'fornecedor_req'
+  | 'fornecedor_doc'
+  | 'valor_req'
+  | 'valor_doc'
+type SortDir = 'asc' | 'desc'
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—'
   try {
@@ -104,11 +135,22 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [running, setRunning] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('status')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [, startTransition] = useTransition()
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return items.filter((it) => {
+    const filteredItems = items.filter((it) => {
       if (filterStatus !== 'all' && it.status !== filterStatus) return false
       if (!term) return true
       return (
@@ -118,7 +160,67 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
         (it.status_resumo ?? '').toLowerCase().includes(term)
       )
     })
-  }, [items, filterStatus, search])
+
+    // Stable sort by the selected key. Empty values land at the end regardless
+    // of direction so the user sees real data first.
+    const direction = sortDir === 'asc' ? 1 : -1
+    const sortValue = (it: Item): string | number => {
+      switch (sortKey) {
+        case 'requisicao_codigo':
+          return it.requisicao_codigo
+        case 'status':
+          return STATUS_RANK[it.status] ?? 99
+        case 'tipo_documento':
+          return (it.tipo_documento ?? '').toLowerCase()
+        case 'fornecedor_req':
+          return (it.fornecedor ?? it.favorecido ?? '').toLowerCase()
+        case 'fornecedor_doc':
+          return (it.extracted_fornecedor ?? '').toLowerCase()
+        case 'valor_req':
+          return Number(it.valor) || 0
+        case 'valor_doc':
+          return Number(it.extracted_valor_contrato) || 0
+      }
+    }
+
+    return [...filteredItems].sort((a, b) => {
+      const va = sortValue(a)
+      const vb = sortValue(b)
+      const aEmpty = va === '' || va === 0
+      const bEmpty = vb === '' || vb === 0
+      if (aEmpty !== bEmpty) return aEmpty ? 1 : -1
+      if (va < vb) return -1 * direction
+      if (va > vb) return 1 * direction
+      return 0
+    })
+  }, [items, filterStatus, search, sortKey, sortDir])
+
+  function SortableHead({
+    column,
+    children,
+    align,
+  }: {
+    column: SortKey
+    children: React.ReactNode
+    align?: 'left' | 'right'
+  }) {
+    const active = sortKey === column
+    const Icon = !active ? ArrowUpDown : sortDir === 'asc' ? ArrowUp : ArrowDown
+    return (
+      <TableHead className={align === 'right' ? 'text-right' : undefined}>
+        <button
+          type="button"
+          onClick={() => toggleSort(column)}
+          className={`inline-flex items-center gap-1 hover:text-foreground ${
+            active ? 'text-foreground' : 'text-muted-foreground'
+          }`}
+        >
+          {children}
+          <Icon className="h-3 w-3" />
+        </button>
+      </TableHead>
+    )
+  }
 
   const isRunning = batch.status === 'processing' || batch.status === 'pending'
 
@@ -261,13 +363,13 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Req</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Fornecedor (req)</TableHead>
-                    <TableHead>Fornecedor (doc)</TableHead>
-                    <TableHead className="text-right">Valor (req)</TableHead>
-                    <TableHead className="text-right">Valor (doc)</TableHead>
+                    <SortableHead column="requisicao_codigo">Req</SortableHead>
+                    <SortableHead column="status">Status</SortableHead>
+                    <SortableHead column="tipo_documento">Tipo</SortableHead>
+                    <SortableHead column="fornecedor_req">Fornecedor (req)</SortableHead>
+                    <SortableHead column="fornecedor_doc">Fornecedor (doc)</SortableHead>
+                    <SortableHead column="valor_req" align="right">Valor (req)</SortableHead>
+                    <SortableHead column="valor_doc" align="right">Valor (doc)</SortableHead>
                     <TableHead>Resumo</TableHead>
                     <TableHead>Contrato</TableHead>
                   </TableRow>
@@ -277,7 +379,10 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
                     <TableRow key={it.id}>
                       <TableCell className="font-mono text-xs">{it.requisicao_codigo}</TableCell>
                       <TableCell>
-                        <Badge variant={STATUS_VARIANT[it.status] ?? 'outline'}>
+                        <Badge
+                          variant={STATUS_VARIANT[it.status] ?? 'outline'}
+                          className={STATUS_CLASS[it.status]}
+                        >
                           {STATUS_LABEL[it.status] ?? it.status}
                         </Badge>
                       </TableCell>
