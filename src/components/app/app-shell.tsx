@@ -27,6 +27,7 @@ interface AppShellProps {
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
   activeSegmentSlug: string | null;
+  contractsOnly?: boolean;
 }
 
 export function AppShell({
@@ -41,6 +42,7 @@ export function AppShell({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   availableModules,
   activeSegmentSlug,
+  contractsOnly,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -56,6 +58,7 @@ export function AppShell({
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}
       onNavigate={mobile ? () => setOpen(false) : undefined}
+      contractsOnly={contractsOnly}
     />
   );
 

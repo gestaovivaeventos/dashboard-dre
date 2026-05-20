@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronDown, FileUp, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ async function safeJson<T>(response: Response): Promise<T | null> {
 
 export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompaniesProps) {
   const { showToast } = useToast();
+  const router = useRouter();
   const [companies, setCompanies] = useState(initialCompanies);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -182,6 +184,9 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setForm({ name: "", appKey: "", appSecret: "" });
     setIsModalOpen(false);
     setIsSaving(false);
+    // Reaproveita o RSC para que as outras abas (Departamentos, Socios) recebam
+    // a nova empresa sem exigir reload manual da pagina.
+    router.refresh();
     showToast({
       title: "Empresa criada",
       description: `${company.name} foi adicionada.`,
@@ -238,6 +243,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setEditingCredentials(null);
     setCredForm({ appKey: "", appSecret: "" });
     setSavingCred(false);
+    router.refresh();
     showToast({
       title: "Credenciais salvas",
       description: "App Key e App Secret atualizados com sucesso.",
@@ -283,6 +289,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     );
     setEditingName(null);
     setSavingName(false);
+    router.refresh();
     showToast({
       title: "Empresa renomeada",
       description: `Nome atualizado para "${trimmed}".`,
@@ -310,6 +317,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     setCompanies((prev) => prev.filter((c) => c.id !== companyId));
     setConfirmingDelete(null);
     setDeleting(false);
+    router.refresh();
     showToast({
       title: "Empresa excluida",
       description: "A empresa e todos os dados associados foram removidos.",
