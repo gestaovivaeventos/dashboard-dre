@@ -31,7 +31,7 @@ export async function parseDocumentWithLandingAI(
   form.append('document_url', documentUrl)
   form.append('model', options.model ?? DEFAULT_MODEL)
 
-  const timeoutMs = options.timeoutMs ?? 90_000
+  const timeoutMs = options.timeoutMs ?? 200_000
   const controller = new AbortController()
   const timeout = setTimeout(() => {
     console.log(`[landingai] aborting fetch after ${timeoutMs}ms`)
