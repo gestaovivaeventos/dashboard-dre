@@ -533,9 +533,16 @@ export function CashFlowView({
               : row.is_summary
                 ? "bg-muted font-semibold border-t border-border"
                 : "bg-muted/50 border-t border-border";
+          const stickyBgClass = isHighlight
+            ? "bg-viva-50"
+            : isMainTotal
+              ? "bg-background"
+              : row.is_summary
+                ? "bg-muted"
+                : "bg-card";
           return (
             <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass}`} style={{ gridTemplateColumns: gridTemplate }}>
-              <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+              <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                 {row.hasChildren && !isHighlight ? (
                   <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
                     {expanded[row.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -620,6 +627,11 @@ export function CashFlowView({
                 : row.is_summary
                   ? "bg-muted font-semibold"
                   : "bg-muted/50";
+              const stickyBgClass = isMainTotal
+                ? "bg-background"
+                : row.is_summary
+                  ? "bg-muted"
+                  : "bg-card";
               const borderClass = isMainTotal
                 ? "border-t-2 border-slate-500"
                 : "border-t border-slate-200";
@@ -629,7 +641,7 @@ export function CashFlowView({
                   className={`grid ${borderClass} px-4 py-2 text-sm ${rowClass}`}
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit" style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
+                  <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                     {row.hasChildren ? (
                       <button
                         type="button"
@@ -674,7 +686,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-viva-500 bg-viva-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-viva-700"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span>Fluxo de Caixa</span>
+                  <span className="sticky left-0 z-[2] bg-card">Fluxo de Caixa</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`hl-h-${i}`} />
                   ))}
@@ -685,7 +697,7 @@ export function CashFlowView({
                     className="grid border-t border-viva-500/40 bg-viva-500/5 px-4 py-2 text-sm font-semibold"
                     style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                   >
-                    <div className="sticky left-0 z-[1] flex items-center gap-2 bg-inherit">
+                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
                       <span className="w-4" />
                       <span className="truncate">{row.name}</span>
                     </div>
