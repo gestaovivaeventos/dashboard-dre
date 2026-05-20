@@ -22,6 +22,7 @@ const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
   { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },
+  { prefix: "/contratos",        roles: ["admin", "gestor_hero"] },
 ];
 
 // ─── Regras do módulo Ctrl ────────────────────────────────────────────────────
@@ -40,7 +41,13 @@ export function canAccessPath(
   pathname: string,
   dreRole: DreRole,
   ctrlRole: CtrlRole | null = null,
+  options: { contractsOnly?: boolean } = {},
 ): boolean {
+  // Contracts-only users see *only* /contratos and its sub-paths.
+  if (options.contractsOnly) {
+    return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
   // Módulo Ctrl: /ctrl/*
   if (pathname.startsWith("/ctrl")) {
     if (!ctrlRole) return false;

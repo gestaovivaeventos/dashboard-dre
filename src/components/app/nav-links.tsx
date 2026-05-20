@@ -20,6 +20,7 @@ interface NavLinksProps {
   activeSegmentSlug: string | null;
   collapsed?: boolean;
   onNavigate?: () => void;
+  contractsOnly?: boolean;
 }
 
 interface RenderItem {
@@ -67,10 +68,16 @@ export function NavLinks({
   activeSegmentSlug,
   collapsed,
   onNavigate,
+  contractsOnly,
 }: NavLinksProps) {
   const pathname = usePathname();
 
-  const groups = buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
+  // contracts_only users see ONLY the Validacao de Contratos entry. We bypass
+  // buildGroups (which filters by dreRoles) so the item still appears even
+  // when the user's underlying role would normally hide it.
+  const groups: RenderGroup[] = contractsOnly
+    ? buildContractsOnlyGroups()
+    : buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -203,6 +210,25 @@ interface BuildInput {
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
   activeSegmentSlug: string | null;
+}
+
+function buildContractsOnlyGroups(): RenderGroup[] {
+  // Pull the canonical Validacao de Contratos item out of NAV_GROUPS so the
+  // title/icon/href stay in sync with the rest of the nav config.
+  for (const group of NAV_GROUPS) {
+    for (const item of group.items) {
+      if (item.scope === "global" && item.href === "/contratos") {
+        return [
+          {
+            id: group.id,
+            label: group.label,
+            items: [{ key: item.key, title: item.title, href: item.href!, icon: item.icon }],
+          },
+        ];
+      }
+    }
+  }
+  return [];
 }
 
 function buildGroups({

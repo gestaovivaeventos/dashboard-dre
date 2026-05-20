@@ -40,7 +40,7 @@ export async function getSessionContext(): Promise<SessionContext> {
   const { data: profileRow } = await supabase
     .from("users")
     .select(`
-      id, email, name, role, company_id, active, created_at,
+      id, email, name, role, company_id, active, created_at, contracts_only,
       user_module_roles!user_module_roles_user_id_fkey(role, module)
     `)
     .eq("id", user.id)
@@ -121,6 +121,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     company_id: profileRow.company_id,
     active: profileRow.active,
     created_at: profileRow.created_at,
+    contracts_only: Boolean(profileRow.contracts_only),
   };
 
   const modules: ModuleAccess = {
