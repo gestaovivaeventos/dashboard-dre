@@ -22,6 +22,7 @@ const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
   { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },
+  { prefix: "/contratos",        roles: ["admin", "gestor_hero"] },
 ];
 
 // ─── Regras do módulo Ctrl ────────────────────────────────────────────────────
