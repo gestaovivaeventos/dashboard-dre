@@ -120,33 +120,47 @@ export async function extractContractDataWithLlm(
   }
 
   const model = options.model ?? DEFAULT_MODEL
+  const timeoutMs = options.timeoutMs ?? 120_000
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 120_000)
+  // Same hard-timeout pattern as landingai.ts — AbortController alone is
+  // unreliable when sockets hang. Promise.race forces rejection after
+  // timeoutMs regardless of fetch state.
+  let abortTimer: NodeJS.Timeout | null = null
+  const hardTimeout = new Promise<never>((_, reject) => {
+    abortTimer = setTimeout(() => {
+      controller.abort()
+      reject(new LlmExtractionError('OpenAI: timeout aguardando resposta'))
+    }, timeoutMs)
+  })
 
   let response: Response
   try {
-    response = await fetch(OPENAI_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: buildPrompt(text) }],
-        temperature: 0,
-        response_format: { type: 'json_object' },
+    response = await Promise.race([
+      fetch(OPENAI_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: buildPrompt(text) }],
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }),
+        signal: controller.signal,
       }),
-      signal: controller.signal,
-    })
+      hardTimeout,
+    ])
   } catch (e) {
+    if (e instanceof LlmExtractionError) throw e
     if (e instanceof Error && e.name === 'AbortError') {
       throw new LlmExtractionError('OpenAI: timeout aguardando resposta')
     }
     throw new LlmExtractionError(`OpenAI: falha de rede (${(e as Error).message})`)
   } finally {
-    clearTimeout(timeout)
+    if (abortTimer) clearTimeout(abortTimer)
   }
 
   if (!response.ok) {

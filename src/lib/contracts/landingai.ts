@@ -33,30 +33,45 @@ export async function parseDocumentWithLandingAI(
 
   const timeoutMs = options.timeoutMs ?? 200_000
   const controller = new AbortController()
-  const timeout = setTimeout(() => {
-    console.log(`[landingai] aborting fetch after ${timeoutMs}ms`)
-    controller.abort()
-  }, timeoutMs)
   const fetchStart = Date.now()
+
+  // We pair AbortController with a Promise.race hard-timeout. AbortController
+  // alone has proved unreliable in Vercel's Node runtime when the LandingAI
+  // socket hangs without bytes — the fetch never settles, the abort signal
+  // doesn't bubble up, the function dies at maxDuration and the item stays
+  // 'pending', blocking the cron forever. The race guarantees we *always*
+  // reject after timeoutMs so the catch can mark the item as 'erro'.
+  let abortTimer: NodeJS.Timeout | null = null
+  const hardTimeout = new Promise<never>((_, reject) => {
+    abortTimer = setTimeout(() => {
+      console.log(`[landingai] hard timeout ${timeoutMs}ms — aborting`)
+      controller.abort()
+      reject(new LandingAIError('LandingAI parse: timeout aguardando resposta'))
+    }, timeoutMs)
+  })
 
   let response: Response
   try {
     console.log(`[landingai] POST parse url=${documentUrl.slice(0, 80)}`)
-    response = await fetch(LANDINGAI_PARSE_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: controller.signal,
-    })
+    response = await Promise.race([
+      fetch(LANDINGAI_PARSE_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      }),
+      hardTimeout,
+    ])
     console.log(`[landingai] parse responded status=${response.status} took=${Date.now() - fetchStart}ms`)
   } catch (e) {
     console.log(`[landingai] parse fetch threw after ${Date.now() - fetchStart}ms: ${(e as Error).name}: ${(e as Error).message}`)
+    if (e instanceof LandingAIError) throw e
     if (e instanceof Error && e.name === 'AbortError') {
       throw new LandingAIError('LandingAI parse: timeout aguardando resposta')
     }
     throw new LandingAIError(`LandingAI parse: falha de rede (${(e as Error).message})`)
   } finally {
-    clearTimeout(timeout)
+    if (abortTimer) clearTimeout(abortTimer)
   }
 
   if (!response.ok) {
