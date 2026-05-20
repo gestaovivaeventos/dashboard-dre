@@ -79,6 +79,7 @@ export async function processNextPendingBatch(
 export async function processBatch(
   db: SupabaseClient,
   batchId: string,
+  options: { timeBudgetMs?: number } = {},
 ): Promise<ProcessBatchResult> {
   const result: ProcessBatchResult = {
     batch_id: batchId,
@@ -88,6 +89,11 @@ export async function processBatch(
     credits_used: 0,
     status: 'processing',
   }
+
+  // Default to 250s, leaving a 50s safety margin under Vercel's 300s ceiling.
+  const startedAt = Date.now()
+  const timeBudgetMs = options.timeBudgetMs ?? 250_000
+  const timeIsUp = () => Date.now() - startedAt > timeBudgetMs
 
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
@@ -103,6 +109,7 @@ export async function processBatch(
   for (const item of (pendingExtraction ?? []) as Array<
     Pick<ItemRow, 'id' | 'requisicao_codigo' | 'link_contrato'>
   >) {
+    if (timeIsUp()) break
     try {
       const extraction = await extractContract(item.link_contrato)
       const normalized = extraction.normalized
@@ -171,6 +178,7 @@ export async function processBatch(
   const somaGrupos = calcularSomaGrupos(itemsForSum)
 
   for (const item of (allItems ?? []) as ItemRow[]) {
+    if (timeIsUp()) break
     // Skip items already finalized in a previous run or that errored out.
     if (
       item.status === 'aprovada' ||

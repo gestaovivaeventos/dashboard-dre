@@ -134,10 +134,15 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
       })
       const payload = await res.json()
       if (!res.ok) throw new Error(payload.error ?? 'Falha ao processar')
+      const remaining = (batch.total_items ?? 0) - (payload.extracted ?? 0)
       showToast({
-        title: 'Processamento disparado',
-        description: 'Atualize em alguns segundos para ver o resultado.',
+        title: 'Fatia processada',
+        description:
+          payload.status === 'completed'
+            ? `Lote concluído: ${payload.extracted} extraídos, ${payload.validated} validados.`
+            : `${payload.extracted} extraídos. O cron continua o restante automaticamente (~2 min).`,
       })
+      void remaining
       await refresh()
     } catch (err) {
       showToast({
