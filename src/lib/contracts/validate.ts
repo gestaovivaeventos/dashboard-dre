@@ -258,3 +258,168 @@ export function chaveGrupoSoma(requisicaoCodigo: string, tipoDocumento: string |
   const tipo = (tipoDocumento || DEFAULT_DOC_TYPE).trim() || DEFAULT_DOC_TYPE
   return `${requisicaoCodigo}|${tipo}`
 }
+
+// ─── Validação por requisição (rules R1, R6, R9, R10, R14, R15, R16, V1) ────
+
+export interface RequisitionDocument extends ExtractedContract {
+  // Whether the extraction step succeeded. Items with extraction_failed=true
+  // make the whole requisition non-validatable (status = 'erro').
+  extraction_failed: boolean
+}
+
+export interface RequisitionGroup {
+  requisicao_codigo: string
+  req: RequisitionInput
+  documentos: RequisitionDocument[]
+}
+
+const TIPO_CONTRATO = 'Contrato / Aditivo Contratual'
+const TIPO_RECIBO = 'Recibo / Declaração de Quitação'
+const TIPO_BOLETO = 'Boleto'
+
+// Threshold for the R10 document-required rule:
+// req.valor ≤ R$ 1.000 → recibo (qualquer)
+// req.valor ≥ R$ 1.001 → contrato OU recibo assinado OU boleto
+const R10_THRESHOLD = 1000
+
+export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
+  // If ANY document had an extraction failure, we can't audit the requisition
+  // safely — flag the whole group as 'erro' so a human/retry pipeline picks it up.
+  const errored = group.documentos.filter((d) => d.extraction_failed)
+  if (errored.length > 0) {
+    return {
+      status: 'erro',
+      motivos: [`${errored.length} documento(s) com falha de extração — não foi possível validar a requisição`],
+      resumo: 'Erro de extração em um ou mais documentos',
+    }
+  }
+
+  // Only consider documents the model could classify. Suporte/Evidências is
+  // informational only (didn't carry data we use here).
+  const docs = group.documentos.filter(
+    (d) => d.tipo_documento && d.tipo_documento !== 'Documentos de Suporte / Evidências',
+  )
+
+  if (docs.length === 0) {
+    return {
+      status: 'analise_especialista',
+      motivos: ['Nenhum documento classificável (apenas suporte/evidências)'],
+      resumo: 'Análise do especialista — apenas documentos de suporte',
+    }
+  }
+
+  const motivos: string[] = []
+  const req = group.req
+
+  // R1 — Soma dos valor_contrato bate com valor da req (±0,01)
+  const reqValor = Number(req.valor) || 0
+  if (reqValor > 0) {
+    const soma = docs.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
+    if (Math.abs(reqValor - soma) > VALUE_TOLERANCE) {
+      motivos.push(
+        `Soma dos valores dos documentos (${soma.toFixed(2)}) não corresponde ao valor da requisição (${reqValor.toFixed(2)})`,
+      )
+    }
+  } else {
+    motivos.push('Valor da requisição em branco ou zero')
+  }
+
+  // R6 — Pelo menos UM doc com fornecedor casando (fuzzy ≥85) com forn ou favorecido da req
+  const reqForn = limparNomeEmpresa(req.fornecedor)
+  const reqFav = limparNomeEmpresa(req.favorecido)
+  if (!reqForn && !reqFav) {
+    motivos.push('Fornecedor/Favorecido da requisição em branco')
+  } else {
+    const algumBate = docs.some((d) => {
+      const docName = limparNomeEmpresa(d.fornecedor)
+      if (!docName) return false
+      return (
+        (reqForn && nomesParecem(docName, reqForn)) ||
+        (reqFav && nomesParecem(docName, reqFav))
+      )
+    })
+    if (!algumBate) {
+      const nomesDocs = docs.map((d) => d.fornecedor || '—').join(' / ')
+      motivos.push(
+        `Nenhum documento com fornecedor correspondente (Req: '${req.fornecedor ?? ''}' / '${req.favorecido ?? ''}' vs Docs: ${nomesDocs})`,
+      )
+    }
+  }
+
+  // R9 — Pelo menos UM doc com CPF/CNPJ batendo com o da req
+  const reqCnpj = digitsOnly(req.cpf_cnpj)
+  if (!reqCnpj) {
+    motivos.push('CPF/CNPJ da requisição em branco')
+  } else {
+    const algumBate = docs.some((d) => digitsOnly(d.cpf_cnpj) === reqCnpj)
+    if (!algumBate) {
+      motivos.push(`Nenhum documento com CPF/CNPJ correspondente (Req: ${req.cpf_cnpj ?? ''})`)
+    }
+  }
+
+  // R10 — Documentos obrigatórios por faixa de valor
+  if (reqValor > 0 && reqValor <= R10_THRESHOLD) {
+    const temRecibo = docs.some((d) => d.tipo_documento === TIPO_RECIBO)
+    if (!temRecibo) {
+      motivos.push(`Requisição até R$ ${R10_THRESHOLD.toFixed(2)} exige pelo menos um Recibo`)
+    }
+  } else if (reqValor >= R10_THRESHOLD + 1) {
+    const temContrato = docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
+    const temReciboAssinado = docs.some(
+      (d) => d.tipo_documento === TIPO_RECIBO && isAssinaturaPresente(d.assinatura_contratado),
+    )
+    const temBoleto = docs.some((d) => d.tipo_documento === TIPO_BOLETO)
+    if (!temContrato && !temReciboAssinado && !temBoleto) {
+      motivos.push(
+        `Requisição acima de R$ ${R10_THRESHOLD.toFixed(2)} exige Contrato OU Recibo assinado OU Boleto`,
+      )
+    }
+  }
+
+  // R14 — Se algum doc tem conta preenchida, pelo menos um deles tem que bater com a da req
+  const reqConta = digitsOnly(req.conta)
+  const docsComConta = docs.filter((d) => digitsOnly(d.conta))
+  if (docsComConta.length > 0) {
+    if (!reqConta) {
+      motivos.push('Documento(s) com conta bancária preenchida, mas a requisição está sem conta')
+    } else {
+      const algumBate = docsComConta.some((d) => digitsOnly(d.conta).includes(reqConta))
+      if (!algumBate) {
+        const contas = docsComConta.map((d) => d.conta || '—').join(' / ')
+        motivos.push(
+          `Conta bancária dos documentos (${contas}) não confere com a requisição (${req.conta ?? ''})`,
+        )
+      }
+    }
+  }
+
+  // R15 — Se tem Contrato, ele DEVE ter assinatura contratante e contratado
+  const contratos = docs.filter((d) => d.tipo_documento === TIPO_CONTRATO)
+  const recibos = docs.filter((d) => d.tipo_documento === TIPO_RECIBO)
+  if (contratos.length > 0) {
+    const semContratante = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratante))
+    const semContratado = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratado))
+    if (semContratante) motivos.push('Contrato sem assinatura do contratante')
+    if (semContratado) motivos.push('Contrato sem assinatura do contratado')
+  } else if (recibos.length > 0) {
+    // R16 — Sem Contrato, mas tem Recibo → recibo deve estar assinado pelo contratado
+    const semAssinatura = recibos.some((r) => !isAssinaturaPresente(r.assinatura_contratado))
+    if (semAssinatura) motivos.push('Recibo sem assinatura do contratado')
+  }
+
+  // V1 — Qualquer regra falhou → Reprovada
+  if (motivos.length > 0) {
+    return {
+      status: 'reprovada',
+      motivos,
+      resumo: `Reprovada — ${motivos.join(' · ')}`,
+    }
+  }
+
+  const tipos = Array.from(new Set(docs.map((d) => d.tipo_documento).filter(Boolean))).join(', ')
+  return {
+    status: 'aprovada',
+    motivos: [],
+    resumo: `Aprovada (${docs.length} doc${docs.length === 1 ? '' : 's'}${tipos ? ': ' + tipos : ''})`,
+  }
+}

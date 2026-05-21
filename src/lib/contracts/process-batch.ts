@@ -11,7 +11,7 @@
 import { extractContract } from './extract'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
-import { calcularSomaGrupos, analisarLinha, chaveGrupoSoma } from './validate'
+import { analisarRequisicao, type RequisitionDocument } from './validate'
 import type { ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -40,6 +40,7 @@ interface ItemRow {
   assinatura_contratante: string | null
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
+  error_log: string | null
 }
 
 export interface ProcessBatchResult {
@@ -178,63 +179,79 @@ export async function processBatch(
     }
   }
 
-  // ── Phase 2: validate every item we have extraction for ────────────────────
+  // ── Phase 2: validate by REQUISIÇÃO (cross-document rules) ─────────────────
+  // Unit of validation = requisicao_codigo. We group all items of a req and
+  // apply R1, R6, R9, R10, R14, R15, R16; the same verdict is then mirrored
+  // onto every item of that group so the existing UI/queries keep working.
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status, error_log',
     )
     .eq('batch_id', batchId)
 
-  const itemsForSum = ((allItems ?? []) as ItemRow[])
-    .filter((i) => i.tipo_documento)
-    .map((i) => ({
-      requisicao_codigo: i.requisicao_codigo,
-      tipo_documento: i.tipo_documento,
-      extracted_valor_contrato: Number(i.extracted_valor_contrato) || 0,
-    }))
-  const somaGrupos = calcularSomaGrupos(itemsForSum)
+  const items = (allItems ?? []) as ItemRow[]
 
-  for (const item of (allItems ?? []) as ItemRow[]) {
-    if (timeIsUp()) break
-    // Skip items already finalized in a previous run or that errored out.
-    if (
-      item.status === 'aprovada' ||
-      item.status === 'reprovada' ||
-      item.status === 'analise_especialista' ||
-      item.status === 'erro'
-    ) {
-      continue
-    }
-    if (!item.tipo_documento) {
-      // Extraction failed silently — already marked as erro above, or skipped.
-      continue
+  // Group by requisicao_codigo, also tracking which items errored on extraction.
+  const groups = new Map<string, ItemRow[]>()
+  for (const item of items) {
+    const arr = groups.get(item.requisicao_codigo) ?? []
+    arr.push(item)
+    groups.set(item.requisicao_codigo, arr)
+  }
+
+  console.log(`[contracts] phase2 evaluating ${groups.size} requisitions (${items.length} items)`)
+
+  // Materialize entries so we don't iterate Map directly (target=es5 limitation).
+  const groupEntries: Array<[string, ItemRow[]]> = []
+  groups.forEach((v, k) => groupEntries.push([k, v]))
+
+  for (const [reqCodigo, groupItems] of groupEntries) {
+    if (timeIsUp()) {
+      console.log('[contracts] time budget exhausted in phase2')
+      break
     }
 
-    const validation = analisarLinha(
-      {
-        fornecedor: item.fornecedor,
-        favorecido: item.favorecido,
-        cpf_cnpj: item.cpf_cnpj,
-        conta: item.conta,
-        valor: Number(item.valor) || null,
-      },
-      {
-        tipo_documento: item.tipo_documento,
-        fornecedor: item.extracted_fornecedor,
-        cpf_cnpj: item.extracted_cpf_cnpj,
-        conta: item.extracted_conta,
-        valor_contrato: Number(item.extracted_valor_contrato) || null,
-        valores_pagamentos: item.extracted_pagamentos ?? [],
-        assinatura_contratante: item.assinatura_contratante,
-        assinatura_contratado: item.assinatura_contratado,
-      },
-      {
-        somaDoGrupo:
-          somaGrupos.get(chaveGrupoSoma(item.requisicao_codigo, item.tipo_documento)) ?? 0,
-      },
+    // Skip a requisition if every item is already finalized AND we don't need
+    // to re-evaluate. We always re-evaluate when there is fresh data (i.e.,
+    // at least one item flipped extraction state since last run).
+    const anyPendingExtraction = groupItems.some(
+      (i) => !i.tipo_documento && i.status !== 'erro',
     )
+    if (anyPendingExtraction) continue
 
+    // Build the documents list. The first row carries the requisition data
+    // (req.fornecedor, valor, cpf_cnpj, conta) — by construction it's the same
+    // across all items of the same req (they all come from the same XLSX row
+    // group), so picking the first is safe.
+    const first = groupItems[0]
+    const documentos: RequisitionDocument[] = groupItems.map((i) => ({
+      tipo_documento: i.tipo_documento,
+      fornecedor: i.extracted_fornecedor,
+      cpf_cnpj: i.extracted_cpf_cnpj,
+      conta: i.extracted_conta,
+      valor_contrato: Number(i.extracted_valor_contrato) || null,
+      valores_pagamentos: i.extracted_pagamentos ?? [],
+      assinatura_contratante: i.assinatura_contratante,
+      assinatura_contratado: i.assinatura_contratado,
+      extraction_failed: i.status === 'erro',
+    }))
+
+    const validation = analisarRequisicao({
+      requisicao_codigo: reqCodigo,
+      req: {
+        fornecedor: first.fornecedor,
+        favorecido: first.favorecido,
+        cpf_cnpj: first.cpf_cnpj,
+        conta: first.conta,
+        valor: Number(first.valor) || null,
+      },
+      documentos,
+    })
+
+    // Mirror the verdict to every item in the group so existing queries
+    // (status filter, counters, exports) keep working unchanged.
+    const ids = groupItems.map((i) => i.id)
     await db
       .from('contract_validation_items')
       .update({
@@ -243,9 +260,9 @@ export async function processBatch(
         status_resumo: validation.resumo,
         processed_at: new Date().toISOString(),
       })
-      .eq('id', item.id)
+      .in('id', ids)
 
-    result.validated += 1
+    result.validated += groupItems.length
   }
 
   // ── Phase 3: roll up batch aggregates and finalize ─────────────────────────
