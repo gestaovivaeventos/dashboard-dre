@@ -23,7 +23,7 @@ export default async function ContratoBatchPage({ params }: Params) {
   const { data: batch } = await supabase
     .from('contract_validation_batches')
     .select(
-      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, ai_credits_used, created_at, started_at, completed_at, error_message',
+      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, items_verificar_saldo, ai_credits_used, created_at, started_at, completed_at, error_message',
     )
     .eq('id', params.id)
     .maybeSingle()

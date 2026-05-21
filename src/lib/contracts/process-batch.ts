@@ -275,6 +275,7 @@ export async function processBatch(
   let reproved = 0
   let failed = 0
   let specialist = 0
+  let verificarSaldo = 0
   let totalCredits = 0
   let stillPending = 0
   for (const c of (counters ?? []) as Array<{ status: string; ai_credits: number | string }>) {
@@ -282,6 +283,7 @@ export async function processBatch(
     else if (c.status === 'reprovada') reproved += 1
     else if (c.status === 'erro') failed += 1
     else if (c.status === 'analise_especialista') specialist += 1
+    else if (c.status === 'verificar_saldo') verificarSaldo += 1
     else stillPending += 1
     totalCredits += Number(c.ai_credits) || 0
   }
@@ -296,6 +298,7 @@ export async function processBatch(
       items_reproved: reproved,
       items_failed: failed,
       items_specialist: specialist,
+      items_verificar_saldo: verificarSaldo,
       ai_credits_used: totalCredits,
     })
     .eq('id', batchId)

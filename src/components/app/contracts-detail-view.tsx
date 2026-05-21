@@ -35,6 +35,7 @@ interface Batch {
   items_reproved: number
   items_failed: number
   items_specialist: number
+  items_verificar_saldo: number
   ai_credits_used: number | string
   created_at: string
   started_at: string | null
@@ -73,6 +74,7 @@ const STATUS_LABEL: Record<string, string> = {
   aprovada: 'Aprovada',
   reprovada: 'Reprovada',
   analise_especialista: 'Análise especialista',
+  verificar_saldo: 'Verificar saldo',
   erro: 'Erro',
 }
 
@@ -82,27 +84,30 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
   aprovada: 'default',
   reprovada: 'destructive',
   analise_especialista: 'secondary',
+  verificar_saldo: 'secondary',
   erro: 'destructive',
 }
 
 // Custom className overrides so the badge palette matches the user's mental
-// model (green = good, yellow = needs attention) instead of the default
-// shadcn variants.
+// model (green = good, orange = check balance manually, amber = specialist).
 const STATUS_CLASS: Record<string, string> = {
   aprovada: 'bg-emerald-500 hover:bg-emerald-500 text-white border-transparent',
   analise_especialista:
     'bg-amber-500 hover:bg-amber-500 text-white border-transparent',
+  verificar_saldo:
+    'bg-orange-500 hover:bg-orange-500 text-white border-transparent',
 }
 
 // Numeric weight for sorting by Status — keeps the most actionable items
-// (errors, reprovadas) at the top when sorting ascending.
+// (errors, reprovadas, verificar_saldo) at the top when sorting ascending.
 const STATUS_RANK: Record<string, number> = {
   erro: 0,
   reprovada: 1,
-  analise_especialista: 2,
-  pending: 3,
-  processing: 4,
-  aprovada: 5,
+  verificar_saldo: 2,
+  analise_especialista: 3,
+  pending: 4,
+  processing: 5,
+  aprovada: 6,
 }
 
 type SortKey =
@@ -366,6 +371,14 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
         </Card>
         <Card>
           <CardHeader className="pb-2">
+            <CardDescription>Verificar saldo</CardDescription>
+            <CardTitle className="text-2xl text-orange-600">
+              {batch.items_verificar_saldo ?? 0}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
             <CardDescription>Erros / Especialista</CardDescription>
             <CardTitle className="text-2xl">
               {batch.items_failed} / {batch.items_specialist}
@@ -406,6 +419,7 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
                 <SelectItem value="processing">Processando</SelectItem>
                 <SelectItem value="aprovada">Aprovadas</SelectItem>
                 <SelectItem value="reprovada">Reprovadas</SelectItem>
+                <SelectItem value="verificar_saldo">Verificar saldo</SelectItem>
                 <SelectItem value="analise_especialista">Especialista</SelectItem>
                 <SelectItem value="erro">Erros</SelectItem>
               </SelectContent>

@@ -80,6 +80,7 @@ export type ValidationStatus =
   | 'aprovada'
   | 'reprovada'
   | 'analise_especialista'
+  | 'verificar_saldo'
   | 'erro'
 
 export interface ValidationResult {

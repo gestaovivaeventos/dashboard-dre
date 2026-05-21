@@ -310,14 +310,43 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
 
   const motivos: string[] = []
   const req = group.req
+  // Tracks the "partial payment" scenario: contract total exceeds the
+  // requisition value, but one of the contract's installments (pagamentoX)
+  // matches. We can't auto-approve (would need contract balance history we
+  // don't have), but we don't want to reprove either — the requisition is
+  // legitimate, just needs a manual balance check.
+  let partialPayment: null | {
+    somaContratos: number
+    parcelaIdentificada: number
+  } = null
 
   // R1 — Soma dos valor_contrato bate com valor da req (±0,01)
+  // Three outcomes: exact match (ok), overage with matching installment
+  // (verificar_saldo), or true mismatch (reprovada).
   const reqValor = Number(req.valor) || 0
   if (reqValor > 0) {
     const soma = docs.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
-    if (Math.abs(reqValor - soma) > VALUE_TOLERANCE) {
+    const diff = soma - reqValor
+
+    if (Math.abs(diff) <= VALUE_TOLERANCE) {
+      // Match — R1 passes.
+    } else if (diff > 0) {
+      // Sum of contract totals exceeds the requisition. Could be partial
+      // payment: scan installments across all docs for a value that matches.
+      const todasParcelas = docs.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
+      const parcela = todasParcelas.find((v) => Math.abs(v - reqValor) <= VALUE_TOLERANCE)
+      if (parcela !== undefined) {
+        partialPayment = { somaContratos: soma, parcelaIdentificada: parcela }
+      } else {
+        motivos.push(
+          `Valor da requisição (${reqValor.toFixed(2)}) não corresponde à soma dos contratos (${soma.toFixed(2)}) nem a nenhuma parcela declarada`,
+        )
+      }
+    } else {
+      // Sum is LESS than requisition — req is paying more than the docs say
+      // the contract is worth. Always a real problem.
       motivos.push(
-        `Soma dos valores dos documentos (${soma.toFixed(2)}) não corresponde ao valor da requisição (${reqValor.toFixed(2)})`,
+        `Soma dos valores dos documentos (${soma.toFixed(2)}) é menor que o valor da requisição (${reqValor.toFixed(2)})`,
       )
     }
   } else {
@@ -417,6 +446,20 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   }
 
   const tipos = Array.from(new Set(docs.map((d) => d.tipo_documento).filter(Boolean))).join(', ')
+
+  // Sem reprovações, mas com pagamento parcial detectado → não é seguro
+  // aprovar sozinho. Sinaliza pra revisão manual do saldo do contrato.
+  if (partialPayment) {
+    const resumo = `Verificar saldo — parcela de R$ ${partialPayment.parcelaIdentificada.toFixed(2)} identificada em contrato de R$ ${partialPayment.somaContratos.toFixed(2)} (${docs.length} doc${docs.length === 1 ? '' : 's'})`
+    return {
+      status: 'verificar_saldo',
+      motivos: [
+        `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
+      ],
+      resumo,
+    }
+  }
+
   return {
     status: 'aprovada',
     motivos: [],
