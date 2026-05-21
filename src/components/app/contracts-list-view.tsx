@@ -43,6 +43,7 @@ interface Batch {
   items_reproved: number
   items_failed: number
   items_specialist: number
+  items_verificar_saldo?: number
   ai_credits_used: number | string
   created_at: string
   completed_at: string | null
@@ -176,6 +177,7 @@ export function ContractsListView({
                   <TableHead className="text-right">Itens</TableHead>
                   <TableHead className="text-right">Aprov.</TableHead>
                   <TableHead className="text-right">Reprov.</TableHead>
+                  <TableHead className="text-right">Verif.</TableHead>
                   <TableHead className="text-right">Erros</TableHead>
                   <TableHead className="text-right">Esp.</TableHead>
                   <TableHead className="text-right">Créditos</TableHead>
@@ -205,6 +207,9 @@ export function ContractsListView({
                       {b.items_approved}
                     </TableCell>
                     <TableCell className="text-right text-red-600">{b.items_reproved}</TableCell>
+                    <TableCell className="text-right text-orange-600">
+                      {b.items_verificar_saldo ?? 0}
+                    </TableCell>
                     <TableCell className="text-right">{b.items_failed}</TableCell>
                     <TableCell className="text-right">{b.items_specialist}</TableCell>
                     <TableCell className="text-right">

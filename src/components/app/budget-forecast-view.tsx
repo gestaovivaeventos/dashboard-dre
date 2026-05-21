@@ -110,8 +110,22 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   currency: "BRL",
 });
 
+// Formatador compacto usado apenas no eixo Y do grafico: o valor cheio
+// ("R$ 80.000,00") nao cabe na largura padrao do YAxis (60px) e fica cortado.
+// O tooltip continua exibindo o valor completo via `formatCurrency`.
+const currencyCompactFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 function formatCurrency(value: number) {
   return currencyFormatter.format(value);
+}
+
+function formatCurrencyCompact(value: number) {
+  return currencyCompactFormatter.format(value);
 }
 
 function formatVar(a: number, b: number): string {
@@ -667,7 +681,7 @@ export function BudgetForecastView({
               <LineChart data={evolutionData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
-                <YAxis tickFormatter={(value) => formatCurrency(Number(value))} />
+                <YAxis tickFormatter={(value) => formatCurrencyCompact(Number(value))} width={72} />
                 <Tooltip
                   formatter={(value, _name, item) => {
                     const tipo = (item as { payload?: EvolutionPoint } | undefined)?.payload?.tipo;

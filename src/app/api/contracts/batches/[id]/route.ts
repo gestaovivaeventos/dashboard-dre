@@ -26,7 +26,7 @@ export async function GET(_request: Request, { params }: Params) {
   const { data: batch, error: batchErr } = await db
     .from('contract_validation_batches')
     .select(
-      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, ai_credits_used, created_at, started_at, completed_at, error_message, company_id',
+      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, items_verificar_saldo, ai_credits_used, created_at, started_at, completed_at, error_message, company_id',
     )
     .eq('id', params.id)
     .maybeSingle()

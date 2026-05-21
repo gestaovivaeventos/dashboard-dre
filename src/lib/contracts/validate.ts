@@ -258,3 +258,211 @@ export function chaveGrupoSoma(requisicaoCodigo: string, tipoDocumento: string |
   const tipo = (tipoDocumento || DEFAULT_DOC_TYPE).trim() || DEFAULT_DOC_TYPE
   return `${requisicaoCodigo}|${tipo}`
 }
+
+// ─── Validação por requisição (rules R1, R6, R9, R10, R14, R15, R16, V1) ────
+
+export interface RequisitionDocument extends ExtractedContract {
+  // Whether the extraction step succeeded. Items with extraction_failed=true
+  // make the whole requisition non-validatable (status = 'erro').
+  extraction_failed: boolean
+}
+
+export interface RequisitionGroup {
+  requisicao_codigo: string
+  req: RequisitionInput
+  documentos: RequisitionDocument[]
+}
+
+const TIPO_CONTRATO = 'Contrato / Aditivo Contratual'
+const TIPO_RECIBO = 'Recibo / Declaração de Quitação'
+const TIPO_BOLETO = 'Boleto'
+
+// Threshold for the R10 document-required rule:
+// req.valor ≤ R$ 1.000 → recibo (qualquer)
+// req.valor ≥ R$ 1.001 → contrato OU recibo assinado OU boleto
+const R10_THRESHOLD = 1000
+
+export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
+  // If ANY document had an extraction failure, we can't audit the requisition
+  // safely — flag the whole group as 'erro' so a human/retry pipeline picks it up.
+  const errored = group.documentos.filter((d) => d.extraction_failed)
+  if (errored.length > 0) {
+    return {
+      status: 'erro',
+      motivos: [`${errored.length} documento(s) com falha de extração — não foi possível validar a requisição`],
+      resumo: 'Erro de extração em um ou mais documentos',
+    }
+  }
+
+  // Only consider documents the model could classify. Suporte/Evidências is
+  // informational only (didn't carry data we use here).
+  const docs = group.documentos.filter(
+    (d) => d.tipo_documento && d.tipo_documento !== 'Documentos de Suporte / Evidências',
+  )
+
+  if (docs.length === 0) {
+    return {
+      status: 'analise_especialista',
+      motivos: ['Nenhum documento classificável (apenas suporte/evidências)'],
+      resumo: 'Análise do especialista — apenas documentos de suporte',
+    }
+  }
+
+  const motivos: string[] = []
+  const req = group.req
+  // Tracks the "partial payment" scenario: contract total exceeds the
+  // requisition value, but one of the contract's installments (pagamentoX)
+  // matches. We can't auto-approve (would need contract balance history we
+  // don't have), but we don't want to reprove either — the requisition is
+  // legitimate, just needs a manual balance check.
+  let partialPayment: null | {
+    somaContratos: number
+    parcelaIdentificada: number
+  } = null
+
+  // R1 — Soma dos valor_contrato bate com valor da req (±0,01)
+  // Three outcomes: exact match (ok), overage with matching installment
+  // (verificar_saldo), or true mismatch (reprovada).
+  const reqValor = Number(req.valor) || 0
+  if (reqValor > 0) {
+    const soma = docs.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
+    const diff = soma - reqValor
+
+    if (Math.abs(diff) <= VALUE_TOLERANCE) {
+      // Match — R1 passes.
+    } else if (diff > 0) {
+      // Sum of contract totals exceeds the requisition. Could be partial
+      // payment: scan installments across all docs for a value that matches.
+      const todasParcelas = docs.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
+      const parcela = todasParcelas.find((v) => Math.abs(v - reqValor) <= VALUE_TOLERANCE)
+      if (parcela !== undefined) {
+        partialPayment = { somaContratos: soma, parcelaIdentificada: parcela }
+      } else {
+        motivos.push(
+          `Valor da requisição (${reqValor.toFixed(2)}) não corresponde à soma dos contratos (${soma.toFixed(2)}) nem a nenhuma parcela declarada`,
+        )
+      }
+    } else {
+      // Sum is LESS than requisition — req is paying more than the docs say
+      // the contract is worth. Always a real problem.
+      motivos.push(
+        `Soma dos valores dos documentos (${soma.toFixed(2)}) é menor que o valor da requisição (${reqValor.toFixed(2)})`,
+      )
+    }
+  } else {
+    motivos.push('Valor da requisição em branco ou zero')
+  }
+
+  // R6 — Pelo menos UM doc com fornecedor casando (fuzzy ≥85) com forn ou favorecido da req
+  const reqForn = limparNomeEmpresa(req.fornecedor)
+  const reqFav = limparNomeEmpresa(req.favorecido)
+  if (!reqForn && !reqFav) {
+    motivos.push('Fornecedor/Favorecido da requisição em branco')
+  } else {
+    const algumBate = docs.some((d) => {
+      const docName = limparNomeEmpresa(d.fornecedor)
+      if (!docName) return false
+      return (
+        (reqForn && nomesParecem(docName, reqForn)) ||
+        (reqFav && nomesParecem(docName, reqFav))
+      )
+    })
+    if (!algumBate) {
+      const nomesDocs = docs.map((d) => d.fornecedor || '—').join(' / ')
+      motivos.push(
+        `Nenhum documento com fornecedor correspondente (Req: '${req.fornecedor ?? ''}' / '${req.favorecido ?? ''}' vs Docs: ${nomesDocs})`,
+      )
+    }
+  }
+
+  // R9 — Pelo menos UM doc com CPF/CNPJ batendo com o da req
+  const reqCnpj = digitsOnly(req.cpf_cnpj)
+  if (!reqCnpj) {
+    motivos.push('CPF/CNPJ da requisição em branco')
+  } else {
+    const algumBate = docs.some((d) => digitsOnly(d.cpf_cnpj) === reqCnpj)
+    if (!algumBate) {
+      motivos.push(`Nenhum documento com CPF/CNPJ correspondente (Req: ${req.cpf_cnpj ?? ''})`)
+    }
+  }
+
+  // R10 — Documentos obrigatórios por faixa de valor
+  if (reqValor > 0 && reqValor <= R10_THRESHOLD) {
+    const temRecibo = docs.some((d) => d.tipo_documento === TIPO_RECIBO)
+    if (!temRecibo) {
+      motivos.push(`Requisição até R$ ${R10_THRESHOLD.toFixed(2)} exige pelo menos um Recibo`)
+    }
+  } else if (reqValor >= R10_THRESHOLD + 1) {
+    const temContrato = docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
+    const temReciboAssinado = docs.some(
+      (d) => d.tipo_documento === TIPO_RECIBO && isAssinaturaPresente(d.assinatura_contratado),
+    )
+    const temBoleto = docs.some((d) => d.tipo_documento === TIPO_BOLETO)
+    if (!temContrato && !temReciboAssinado && !temBoleto) {
+      motivos.push(
+        `Requisição acima de R$ ${R10_THRESHOLD.toFixed(2)} exige Contrato OU Recibo assinado OU Boleto`,
+      )
+    }
+  }
+
+  // R14 — Se algum doc tem conta preenchida, pelo menos um deles tem que bater com a da req
+  const reqConta = digitsOnly(req.conta)
+  const docsComConta = docs.filter((d) => digitsOnly(d.conta))
+  if (docsComConta.length > 0) {
+    if (!reqConta) {
+      motivos.push('Documento(s) com conta bancária preenchida, mas a requisição está sem conta')
+    } else {
+      const algumBate = docsComConta.some((d) => digitsOnly(d.conta).includes(reqConta))
+      if (!algumBate) {
+        const contas = docsComConta.map((d) => d.conta || '—').join(' / ')
+        motivos.push(
+          `Conta bancária dos documentos (${contas}) não confere com a requisição (${req.conta ?? ''})`,
+        )
+      }
+    }
+  }
+
+  // R15 — Se tem Contrato, ele DEVE ter assinatura contratante e contratado
+  const contratos = docs.filter((d) => d.tipo_documento === TIPO_CONTRATO)
+  const recibos = docs.filter((d) => d.tipo_documento === TIPO_RECIBO)
+  if (contratos.length > 0) {
+    const semContratante = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratante))
+    const semContratado = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratado))
+    if (semContratante) motivos.push('Contrato sem assinatura do contratante')
+    if (semContratado) motivos.push('Contrato sem assinatura do contratado')
+  } else if (recibos.length > 0) {
+    // R16 — Sem Contrato, mas tem Recibo → recibo deve estar assinado pelo contratado
+    const semAssinatura = recibos.some((r) => !isAssinaturaPresente(r.assinatura_contratado))
+    if (semAssinatura) motivos.push('Recibo sem assinatura do contratado')
+  }
+
+  // V1 — Qualquer regra falhou → Reprovada
+  if (motivos.length > 0) {
+    return {
+      status: 'reprovada',
+      motivos,
+      resumo: `Reprovada — ${motivos.join(' · ')}`,
+    }
+  }
+
+  const tipos = Array.from(new Set(docs.map((d) => d.tipo_documento).filter(Boolean))).join(', ')
+
+  // Sem reprovações, mas com pagamento parcial detectado → não é seguro
+  // aprovar sozinho. Sinaliza pra revisão manual do saldo do contrato.
+  if (partialPayment) {
+    const resumo = `Verificar saldo — parcela de R$ ${partialPayment.parcelaIdentificada.toFixed(2)} identificada em contrato de R$ ${partialPayment.somaContratos.toFixed(2)} (${docs.length} doc${docs.length === 1 ? '' : 's'})`
+    return {
+      status: 'verificar_saldo',
+      motivos: [
+        `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
+      ],
+      resumo,
+    }
+  }
+
+  return {
+    status: 'aprovada',
+    motivos: [],
+    resumo: `Aprovada (${docs.length} doc${docs.length === 1 ? '' : 's'}${tipos ? ': ' + tipos : ''})`,
+  }
+}

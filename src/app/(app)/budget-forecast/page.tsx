@@ -85,7 +85,7 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
       .eq("active", true)
       .order("code"),
   ]);
@@ -133,7 +133,39 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   }
 
   const range = buildDateRange(filter);
-  const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
+
+  // Scope resolution for per-company custom DRE plans (espelha dashboard/page.tsx):
+  // quando UMA unica empresa esta selecionada E ela possui plano custom
+  // (alguma linha em dre_accounts com company_id === essa empresa), usa o
+  // plano dela; caso contrario, cai no plano global (company_id IS NULL).
+  // Sem isso, contas que existem em ambos os planos aparecem duplicadas
+  // na grade do Budget/Forecast.
+  const allRawDreAccounts = (accountsData ?? []) as Array<
+    DreAccountBase & { company_id: string | null }
+  >;
+  const scopedCompanyId =
+    filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
+  const companyHasCustomPlan = scopedCompanyId
+    ? allRawDreAccounts.some((a) => a.company_id === scopedCompanyId)
+    : false;
+  const scopedDreAccounts: DreAccountBase[] = allRawDreAccounts
+    .filter((a) =>
+      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
+    )
+    .map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      parent_id: a.parent_id,
+      level: a.level,
+      type: a.type,
+      is_summary: a.is_summary,
+      formula: a.formula,
+      sort_order: a.sort_order,
+      active: a.active,
+    }));
+
+  const accounts = filterCoreDreAccounts(scopedDreAccounts);
   const visibleBuckets = buildVisibleBuckets(filter);
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 
@@ -175,12 +207,17 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   const currentMonth = now.getUTCMonth() + 1;
   const currentYear = now.getUTCFullYear();
 
-  // Compute current-month boundary index within visibleBuckets (-1 if no buckets)
+  // Compute the FIRST bucket that should be rendered as "Orcamento" in the
+  // Projecao view. O mes atual ja conta como Realizado (o filtro de
+  // realizedBuckets/budgetBuckets usa `<= currentMonth` / `> currentMonth`),
+  // entao o split visual (e o highlight em laranja com sufixo "(Orc)") deve
+  // comecar a partir de `currentMonth + 1`. -1 quando nenhum bucket cai no
+  // orcamento (ex.: estamos olhando um ano inteiro no passado).
   const currentMonthIndex = visibleBuckets.findIndex((b) => {
     const [yStr, mStr] = b.key.replace("m-", "").split("-");
     const y = Number(yStr);
     const m = Number(mStr);
-    return y > currentYear || (y === currentYear && m >= currentMonth);
+    return y > currentYear || (y === currentYear && m > currentMonth);
   });
 
   let displayRows: BudgetForecastDisplayRow[] = [];

@@ -5,6 +5,7 @@ import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
+import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
 async function getData() {
   const adminClient = createAdminClientIfAvailable();
@@ -15,7 +16,7 @@ async function getData() {
       .from("ctrl_suppliers")
       .select(
         `id, name, cnpj_cpf, email, phone, omie_id, from_omie,
-         chave_pix, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao,
+         chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao,
          status, rejection_reason, created_at, approved_at,
          approver:users!ctrl_suppliers_approved_by_fkey(name, email),
          ctrl_supplier_expense_types(expense_type_id)`,
@@ -35,6 +36,7 @@ async function getData() {
       omie_id: number | null;
       from_omie: boolean | null;
       chave_pix: string | null;
+      pix_key_type: string | null;
       banco: string | null;
       agencia: string | null;
       conta_corrente: string | null;
@@ -72,11 +74,14 @@ export default async function FornecedoresPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Fornecedores</h1>
-        <p className="text-muted-foreground">
-          Gestão de fornecedores aprovados para pagamento
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Fornecedores</h1>
+          <p className="text-muted-foreground">
+            Gestão de fornecedores aprovados para pagamento
+          </p>
+        </div>
+        <CriarFornecedorButton />
       </div>
 
       {suppliersError ? (
@@ -86,7 +91,7 @@ export default async function FornecedoresPage() {
           <Truck className="mb-4 h-12 w-12 text-muted-foreground/40" />
           <h3 className="font-semibold">Nenhum fornecedor cadastrado</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Adicione fornecedores para habilitar requisições de pagamento.
+            Use o botão acima para adicionar o primeiro fornecedor.
           </p>
         </div>
       ) : (
@@ -102,6 +107,7 @@ export default async function FornecedoresPage() {
               omie_id: s.omie_id,
               from_omie: s.from_omie ?? false,
               chave_pix: s.chave_pix,
+              pix_key_type: s.pix_key_type,
               banco: s.banco,
               agencia: s.agencia,
               conta_corrente: s.conta_corrente,

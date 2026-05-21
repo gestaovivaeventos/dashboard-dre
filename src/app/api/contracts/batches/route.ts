@@ -23,7 +23,7 @@ export async function GET() {
   const { data, error } = await db
     .from('contract_validation_batches')
     .select(
-      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, ai_credits_used, created_at, started_at, completed_at, company_id, error_message',
+      'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, items_verificar_saldo, ai_credits_used, created_at, started_at, completed_at, company_id, error_message',
     )
     .order('created_at', { ascending: false })
     .limit(100)

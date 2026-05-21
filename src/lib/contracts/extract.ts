@@ -28,11 +28,19 @@ export async function extractContract(documentUrl: string): Promise<ContractExtr
 }
 
 export function normalizeExtraction(raw: ContractExtraction): ExtractedContract {
+  // The Gemini prompt asks for up to 10 installments. We capture all of them
+  // so the partial-payment detection in analisarRequisicao can match any.
   const valoresPagamentos = [
     raw.pagamento1_valor,
     raw.pagamento2_valor,
     raw.pagamento3_valor,
     raw.pagamento4_valor,
+    raw.pagamento5_valor,
+    raw.pagamento6_valor,
+    raw.pagamento7_valor,
+    raw.pagamento8_valor,
+    raw.pagamento9_valor,
+    raw.pagamento10_valor,
   ]
     .map(parseValor)
     .filter((v) => v > 0)

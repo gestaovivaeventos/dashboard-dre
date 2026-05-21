@@ -1,12 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useMemo, useEffect } from "react";
-import { AlertTriangle, CheckCircle2, Zap } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Paperclip, Search, X, Zap } from "lucide-react";
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
+const ATTACHMENT_BUCKET = "ctrl-attachments";
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -57,6 +61,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // ── Payment method ───────────────────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState("boleto");
   const [installments, setInstallments] = useState(1);
+  // Operational signal: does the requester need the *physical* credit card?
+  // Persisted only when paymentMethod === 'cartao_credito'. Null means not asked.
+  const [needsCreditCard, setNeedsCreditCard] = useState<"" | "sim" | "nao">("");
 
   // ── Due date (controlled for recurrence constraints) ─────────────────────────
   const [dueDate, setDueDate] = useState("");
@@ -65,6 +72,30 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurMonths, setRecurMonths] = useState<number[]>([]);
 
+  // ── Attachment (uploaded just-in-time on submit, before createRequest) ──────
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+
+  function pickAttachment(file: File | null) {
+    setAttachmentError(null);
+    if (!file) {
+      setAttachment(null);
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      setAttachmentError("Arquivo excede o limite de 10 MB.");
+      return;
+    }
+    setAttachment(file);
+  }
+
+  function clearAttachment() {
+    setAttachment(null);
+    setAttachmentError(null);
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+  }
+
   // ── Budget verification ──────────────────────────────────────────────────────
   const [verifying, setVerifying] = useState(false);
   const [verification, setVerification] = useState<BudgetVerification | null>(null);
@@ -72,10 +103,36 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   // ── Derived values ───────────────────────────────────────────────────────────
 
+  // Brazilian currency mask: digits flow in as cents from the right.
+  // "1" → "0,01"   "12345" → "123,45"   "1234567" → "12.345,67"
+  function formatBRL(digitsOnly: string): string {
+    if (!digitsOnly) return "";
+    const padded = digitsOnly.padStart(3, "0");
+    const intRaw = padded.slice(0, -2).replace(/^0+/, "") || "0";
+    const decPart = padded.slice(-2);
+    const intWithSep = intRaw.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${intWithSep},${decPart}`;
+  }
+
   const parsedAmount = useMemo(() => {
-    const n = parseFloat(amountStr.replace(",", "."));
+    // amountStr is in BR format (1.234,56) — strip thousand sep, swap decimal.
+    const cleaned = amountStr.replace(/\./g, "").replace(",", ".");
+    const n = parseFloat(cleaned);
     return isNaN(n) ? 0 : n;
   }, [amountStr]);
+
+  // Minimum allowed due date. If now > 12:00, the earliest acceptable
+  // date is tomorrow (operations team can't process same-day requests
+  // submitted after lunch).
+  const minDueDate = useMemo(() => {
+    const base = new Date(now);
+    if (base.getHours() >= 12) base.setDate(base.getDate() + 1);
+    const yyyy = base.getFullYear();
+    const mm = String(base.getMonth() + 1).padStart(2, "0");
+    const dd = String(base.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) ?? null,
@@ -175,15 +232,69 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canSubmit) return;
+
+    // Combobox writes to React state, not to a form field, so HTML `required`
+    // doesn't catch the empty case. Do it here.
+    if (!selectedSupplierId) {
+      setError("Selecione um fornecedor.");
+      return;
+    }
+
+    // Defensive due-date check: HTML `min` is enforced by most browsers but
+    // some mobile webviews ignore it. Belt + suspenders.
+    if (dueDate && dueDate < minDueDate) {
+      const isAfterNoon = new Date(now).getHours() >= 12;
+      setError(
+        isAfterNoon
+          ? "Como o horário já passou das 12:00, a data de vencimento deve ser a partir de amanhã."
+          : "A data de vencimento não pode ser anterior a hoje.",
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
 
     const form = new FormData(e.currentTarget);
 
+    // The DB still requires a non-null title column, so we reuse the
+    // description as title — the UI now shows only one text field.
+    const descriptionValue = (form.get("description") as string)?.trim() ?? "";
+
+    // If an attachment was selected, upload it first. We do this client-side
+    // (anon-key + RLS scoped to {auth.uid()}/) so failures stop the submission
+    // before any ctrl_requests row is created.
+    let attachmentPath: string | undefined;
+    if (attachment) {
+      try {
+        const supabase = createSupabaseClient();
+        const { data: userData } = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (!userId) throw new Error("Sessão expirada — refaça o login.");
+
+        const safeName = attachment.name.replace(/[^\w.\-]+/g, "_");
+        const objectPath = `${userId}/${Date.now()}-${safeName}`;
+        const { error: uploadErr } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .upload(objectPath, attachment, {
+            contentType: attachment.type || "application/octet-stream",
+            upsert: false,
+          });
+        if (uploadErr) throw uploadErr;
+        attachmentPath = objectPath;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`Falha ao enviar o anexo: ${msg}`);
+        setLoading(false);
+        return;
+      }
+    }
+
     const result = await createRequest({
-      title: form.get("title") as string,
-      description: (form.get("description") as string) || undefined,
+      title: descriptionValue,
+      description: descriptionValue || undefined,
+      attachment_path: attachmentPath,
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -206,6 +317,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       favorecido: favorecido || undefined,
       barcode: (form.get("barcode") as string) || undefined,
       installments: paymentMethod === "cartao_credito" ? installments : undefined,
+      needs_credit_card:
+        paymentMethod === "cartao_credito" && needsCreditCard
+          ? needsCreditCard === "sim"
+          : undefined,
       is_recurring: isRecurring,
       recurrence_months: isRecurring ? recurMonths : undefined,
     });
@@ -240,18 +355,19 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       )}
 
-      {/* Título */}
+      {/* Descrição (identifica a requisição) */}
       <div className="space-y-1.5">
-        <label htmlFor="title" className={LABEL_CLS}>
-          Título <span className="text-destructive">*</span>
+        <label htmlFor="description" className={LABEL_CLS}>
+          Descrição <span className="text-destructive">*</span>
         </label>
-        <input id="title" name="title" type="text" required placeholder="Ex: Pagamento de serviço de limpeza" className={INPUT_CLS} />
-      </div>
-
-      {/* Descrição */}
-      <div className="space-y-1.5">
-        <label htmlFor="description" className={LABEL_CLS}>Descrição</label>
-        <textarea id="description" name="description" rows={2} placeholder="Detalhes adicionais..." className={`${INPUT_CLS} resize-none`} />
+        <textarea
+          id="description"
+          name="description"
+          rows={2}
+          required
+          placeholder="Ex: Pagamento de serviço de limpeza — referente ao mês de maio"
+          className={`${INPUT_CLS} resize-none`}
+        />
       </div>
 
       {/* Setor + Tipo de Despesa */}
@@ -273,15 +389,18 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           </select>
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="expense_type_id" className={LABEL_CLS}>Tipo de Despesa</label>
+          <label htmlFor="expense_type_id" className={LABEL_CLS}>
+            Tipo de Despesa <span className="text-destructive">*</span>
+          </label>
           <select
             id="expense_type_id"
             name="expense_type_id"
+            required
             value={expenseTypeId}
             onChange={(e) => setExpenseTypeId(e.target.value)}
             className={INPUT_CLS}
           >
-            <option value="">Selecione (opcional)</option>
+            <option value="">Selecione o tipo de despesa</option>
             {expenseTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
@@ -289,22 +408,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
       {/* Fornecedor */}
       <div className="space-y-1.5">
-        <label htmlFor="supplier_id" className={LABEL_CLS}>Fornecedor</label>
-        <select
-          id="supplier_id"
-          name="supplier_id"
-          value={selectedSupplierId}
-          onChange={(e) => handleSupplierChange(e.target.value)}
-          className={INPUT_CLS}
-        >
-          <option value="">Sem fornecedor</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}{s.cnpj_cpf ? ` — ${s.cnpj_cpf}` : ""}
-              {s.status === "pendente" ? " (pendente)" : ""}
-            </option>
-          ))}
-        </select>
+        <label className={LABEL_CLS}>
+          Fornecedor <span className="text-destructive">*</span>
+        </label>
+        <SupplierCombobox
+          suppliers={suppliers}
+          selectedId={selectedSupplierId}
+          onSelect={handleSupplierChange}
+        />
         {selectedSupplier?.status === "pendente" && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             Este fornecedor está aguardando aprovação. A requisição ficará bloqueada até a aprovação.
@@ -333,20 +444,27 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             id="amount"
             name="amount"
             type="text"
-            inputMode="decimal"
+            inputMode="numeric"
             required
             placeholder="0,00"
             value={amountStr}
-            onChange={(e) => setAmountStr(e.target.value)}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, "");
+              setAmountStr(formatBRL(digits));
+            }}
             className={INPUT_CLS}
           />
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="due_date" className={LABEL_CLS}>Data de Vencimento</label>
+          <label htmlFor="due_date" className={LABEL_CLS}>
+            Data de Vencimento <span className="text-destructive">*</span>
+          </label>
           <input
             id="due_date"
             name="due_date"
             type="date"
+            required
+            min={minDueDate}
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             onClick={(e) => {
@@ -366,16 +484,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       </div>
 
-      {/* Mês/Ano referência */}
+      {/* Competência */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label className={LABEL_CLS}>Mês de Referência <span className="text-destructive">*</span></label>
+          <label className={LABEL_CLS}>Mês Competência <span className="text-destructive">*</span></label>
           <select value={refMonth} onChange={(e) => setRefMonth(Number(e.target.value))} className={INPUT_CLS}>
             {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
         </div>
         <div className="space-y-1.5">
-          <label className={LABEL_CLS}>Ano de Referência <span className="text-destructive">*</span></label>
+          <label className={LABEL_CLS}>Ano Competência <span className="text-destructive">*</span></label>
           <select value={refYear} onChange={(e) => setRefYear(Number(e.target.value))} className={INPUT_CLS}>
             {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -544,9 +662,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* PIX */}
       {paymentMethod === "pix" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="pix_key_type" className={LABEL_CLS}>Tipo de Chave PIX</label>
-            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} className={INPUT_CLS}>
+            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier} className={INPUT_CLS}>
               <option value="">Selecione</option>
               <option value="cpf">CPF</option>
               <option value="cnpj">CNPJ</option>
@@ -557,11 +680,11 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           </div>
           <div className="space-y-1.5">
             <label htmlFor="pix_key" className={LABEL_CLS}>Chave PIX</label>
-            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} placeholder="Informe a chave" className={INPUT_CLS} />
+            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -569,29 +692,38 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Transferência */}
       {paymentMethod === "transferencia" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
           <div className="space-y-1.5 sm:col-span-2">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} placeholder="000.000.000-00" className={INPUT_CLS} />
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_name" className={LABEL_CLS}>Banco</label>
-            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
+            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={!!selectedSupplier} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_agency" className={LABEL_CLS}>Agência</label>
-            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} placeholder="0000" className={INPUT_CLS} />
+            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} disabled={!!selectedSupplier} placeholder="0000" className={INPUT_CLS} />
           </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
-            <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="00000" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
-            <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} placeholder="0" className={INPUT_CLS} />
+          <div className="space-y-1.5 sm:col-span-2">
+            <div className="grid grid-cols-[1fr_88px] gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
+                <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
+                <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -599,17 +731,24 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Boleto */}
       {paymentMethod === "boleto" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Favorecido e CPF/CNPJ vêm do cadastro do fornecedor. Informe a linha digitável ou código de barras do boleto.
+            </p>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} placeholder="000.000.000-00" className={INPUT_CLS} />
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="barcode" className={LABEL_CLS}>Linha Digitável / Código de Barras</label>
-            <input id="barcode" name="barcode" type="text" placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
+            <label htmlFor="barcode" className={LABEL_CLS}>
+              Linha Digitável / Código de Barras <span className="text-destructive">*</span>
+            </label>
+            <input id="barcode" name="barcode" type="text" required placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -639,18 +778,90 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
               </p>
             )}
           </div>
+
+          {/* Precisa do cartão de crédito físico? */}
+          <div className="space-y-1.5">
+            <label htmlFor="needs_credit_card" className={LABEL_CLS}>
+              Precisa do cartão de crédito? <span className="text-destructive">*</span>
+            </label>
+            <select
+              id="needs_credit_card"
+              name="needs_credit_card"
+              required
+              value={needsCreditCard}
+              onChange={(e) => setNeedsCreditCard(e.target.value as "" | "sim" | "nao")}
+              className={INPUT_CLS}
+            >
+              <option value="">Selecione</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Selecione &quot;Sim&quot; se o solicitante precisar receber fisicamente o cartão para realizar a compra.
+            </p>
+          </div>
         </div>
       )}
 
       {/* Fornecedor emite nota? */}
       <div className="space-y-1.5">
-        <label htmlFor="supplier_issues_invoice" className={LABEL_CLS}>O fornecedor emite nota fiscal?</label>
-        <select id="supplier_issues_invoice" name="supplier_issues_invoice" className={INPUT_CLS}>
-          <option value="">Não informado</option>
+        <label htmlFor="supplier_issues_invoice" className={LABEL_CLS}>
+          O fornecedor emite nota fiscal? <span className="text-destructive">*</span>
+        </label>
+        <select
+          id="supplier_issues_invoice"
+          name="supplier_issues_invoice"
+          required
+          className={INPUT_CLS}
+        >
+          <option value="">Selecione uma resposta</option>
           <option value="sim">Sim</option>
           <option value="nao">Não</option>
           <option value="nao_sei">Não sei</option>
         </select>
+      </div>
+
+      {/* Anexo */}
+      <div className="space-y-1.5">
+        <label htmlFor="attachment" className={LABEL_CLS}>
+          Anexo (opcional, até 10 MB)
+        </label>
+        {!attachment ? (
+          <div className="flex items-center gap-2">
+            <input
+              ref={attachmentInputRef}
+              id="attachment"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+              onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
+              className={INPUT_CLS}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Paperclip className="h-4 w-4 text-muted-foreground" />
+              <span className="truncate">{attachment.name}</span>
+              <span className="text-xs text-muted-foreground">
+                ({(attachment.size / 1024 / 1024).toFixed(2)} MB)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={clearAttachment}
+              className="text-muted-foreground hover:text-destructive"
+              aria-label="Remover anexo"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {attachmentError && (
+          <p className="text-xs text-destructive">{attachmentError}</p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Formatos: PDF, JPG, PNG, DOC, XLS.
+        </p>
       </div>
 
       {/* Observações */}
@@ -759,5 +970,175 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </p>
       )}
     </form>
+  );
+}
+
+// ── Supplier combobox ───────────────────────────────────────────────────────
+// Filters by name OR CNPJ/CPF (digits-only match so user can type with or
+// without punctuation). Caps the rendered list at 50 — when there are more
+// matches, the user is asked to refine. Plain JS, no extra deps.
+
+function SupplierCombobox({
+  suppliers,
+  selectedId,
+  onSelect,
+}: {
+  suppliers: CtrlSupplier[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selected = suppliers.find((s) => s.id === selectedId);
+  const displayValue = useMemo(() => {
+    if (isOpen) return search;
+    if (!selected) return "";
+    return selected.cnpj_cpf
+      ? `${selected.name} — ${selected.cnpj_cpf}`
+      : selected.name;
+  }, [isOpen, search, selected]);
+
+  // Filter — name substring (case-insensitive) OR cnpj digits substring.
+  const filtered = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    if (!term) return suppliers;
+    const termDigits = term.replace(/\D/g, "");
+    return suppliers.filter((s) => {
+      if (s.name.toLowerCase().includes(term)) return true;
+      if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
+      return false;
+    });
+  }, [search, suppliers]);
+
+  // Reset highlight when filter changes
+  useEffect(() => {
+    setHighlight(0);
+  }, [search]);
+
+  // Close when clicking outside
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setIsOpen(false);
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function commit(s: CtrlSupplier) {
+    onSelect(s.id);
+    setIsOpen(false);
+    setSearch("");
+    inputRef.current?.blur();
+  }
+
+  function clear() {
+    onSelect("");
+    setSearch("");
+    setIsOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  const visible = filtered.slice(0, 50);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="text"
+          autoComplete="off"
+          value={displayValue}
+          onFocus={() => {
+            setIsOpen(true);
+            setSearch("");
+          }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setIsOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setIsOpen(true);
+              setHighlight((h) => Math.min(h + 1, visible.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setHighlight((h) => Math.max(h - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              if (visible[highlight]) commit(visible[highlight]);
+            } else if (e.key === "Escape") {
+              setIsOpen(false);
+              setSearch("");
+              inputRef.current?.blur();
+            }
+          }}
+          placeholder="Digite o nome ou CNPJ do fornecedor..."
+          className={`${INPUT_CLS} pl-8 ${selected ? "pr-9" : ""}`}
+        />
+        {selected ? (
+          <button
+            type="button"
+            onClick={clear}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive"
+            aria-label="Limpar fornecedor"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-background shadow-md">
+          {visible.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground">
+              Nenhum fornecedor encontrado.
+            </p>
+          ) : (
+            <ul role="listbox" className="py-1">
+              {visible.map((s, i) => (
+                <li
+                  key={s.id}
+                  role="option"
+                  aria-selected={i === highlight}
+                  onMouseEnter={() => setHighlight(i)}
+                  onMouseDown={(e) => {
+                    // mousedown beats the outside-click close that triggers on mouseup
+                    e.preventDefault();
+                    commit(s);
+                  }}
+                  className={`cursor-pointer px-3 py-2 text-sm ${
+                    i === highlight ? "bg-muted" : ""
+                  }`}
+                >
+                  <div className="font-medium">{s.name}</div>
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    {s.cnpj_cpf && <span>{s.cnpj_cpf}</span>}
+                    {s.status === "pendente" && (
+                      <span className="text-amber-600">pendente</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+              {filtered.length > 50 && (
+                <li className="px-3 py-2 text-xs text-muted-foreground">
+                  Mostrando 50 de {filtered.length}. Refine a busca.
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

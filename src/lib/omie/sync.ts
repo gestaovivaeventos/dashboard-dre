@@ -891,15 +891,35 @@ async function syncEntries({
       .single<{ slug: string }>();
 
     if (segData?.slug === "franquias-viva") {
-      // Buscar IDs das 4 contas DRE envolvidas
-      const { data: dreAccounts } = await supabase
+      // Buscar IDs das 4 contas DRE envolvidas, escopadas por empresa.
+      //
+      // Sem escopo, o `in("code", [...])` traz tanto a conta GLOBAL
+      // (company_id IS NULL) quanto a versao custom de outras empresas do
+      // mesmo segmento (ex.: Hero Holding tem plano custom). O `Map.set`
+      // abaixo sobrescreve por code em ordem nao-deterministica e a
+      // empresa pode acabar com mappings para a conta de OUTRA empresa
+      // — caso observado em Viva Petropolis Ago/2023, onde
+      // `__fundos_desp_2.08.96` ficou apontando para a conta 5.9 custom da
+      // Hero, e os R$ 7.000 daquela despesa nao apareciam na DRE da
+      // Petropolis (que usa o plano global). Mesma logica de scope do
+      // dashboard em src/app/(app)/dashboard/page.tsx.
+      const { data: dreAccountsAll } = await supabase
         .from("dre_accounts")
-        .select("id,code")
+        .select("id,code,company_id")
         .in("code", ["2.4", "7.5.5", "5.8", "5.9"])
         .eq("active", true);
 
+      const companyHasCustomPlan = (dreAccountsAll ?? []).some(
+        (a) => a.company_id === companyId,
+      );
+      const dreAccounts = (dreAccountsAll ?? []).filter((a) =>
+        companyHasCustomPlan
+          ? a.company_id === companyId
+          : a.company_id === null,
+      );
+
       const dreIdByCode = new Map<string, string>();
-      (dreAccounts ?? []).forEach((a) => {
+      dreAccounts.forEach((a) => {
         dreIdByCode.set(a.code as string, a.id as string);
       });
 
