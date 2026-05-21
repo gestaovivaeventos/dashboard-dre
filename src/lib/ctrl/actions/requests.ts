@@ -65,6 +65,10 @@ export interface CreateRequestInput {
   // Attachment (uploaded client-side to storage bucket 'ctrl-attachments'
   // before submit). Stored verbatim in every row of this submission.
   attachment_path?: string;
+  // Operational signal for credit card payments: does the requester need
+  // to receive the physical card to make the purchase? Only meaningful
+  // when payment_method === 'cartao_credito'.
+  needs_credit_card?: boolean;
 }
 
 // ─── Budget Verification ──────────────────────────────────────────────────────
@@ -355,6 +359,7 @@ export async function createRequest(data: CreateRequestInput) {
     favorecido: data.favorecido ?? null,
     barcode: data.barcode ?? null,
     attachment_path: data.attachment_path ?? null,
+    needs_credit_card: data.needs_credit_card ?? null,
     is_budgeted: verification?.isBudgeted ?? false,
     approval_tier: approvalTier,
     is_recurring: data.is_recurring ?? false,

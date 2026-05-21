@@ -61,6 +61,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // ── Payment method ───────────────────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState("boleto");
   const [installments, setInstallments] = useState(1);
+  // Operational signal: does the requester need the *physical* credit card?
+  // Persisted only when paymentMethod === 'cartao_credito'. Null means not asked.
+  const [needsCreditCard, setNeedsCreditCard] = useState<"" | "sim" | "nao">("");
 
   // ── Due date (controlled for recurrence constraints) ─────────────────────────
   const [dueDate, setDueDate] = useState("");
@@ -307,6 +310,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       favorecido: favorecido || undefined,
       barcode: (form.get("barcode") as string) || undefined,
       installments: paymentMethod === "cartao_credito" ? installments : undefined,
+      needs_credit_card:
+        paymentMethod === "cartao_credito" && needsCreditCard
+          ? needsCreditCard === "sim"
+          : undefined,
       is_recurring: isRecurring,
       recurrence_months: isRecurring ? recurMonths : undefined,
     });
@@ -659,9 +666,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* PIX */}
       {paymentMethod === "pix" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="pix_key_type" className={LABEL_CLS}>Tipo de Chave PIX</label>
-            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} className={INPUT_CLS}>
+            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier} className={INPUT_CLS}>
               <option value="">Selecione</option>
               <option value="cpf">CPF</option>
               <option value="cnpj">CNPJ</option>
@@ -672,11 +684,11 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           </div>
           <div className="space-y-1.5">
             <label htmlFor="pix_key" className={LABEL_CLS}>Chave PIX</label>
-            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} placeholder="Informe a chave" className={INPUT_CLS} />
+            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -684,29 +696,34 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Transferência */}
       {paymentMethod === "transferencia" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
           <div className="space-y-1.5 sm:col-span-2">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} placeholder="000.000.000-00" className={INPUT_CLS} />
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_name" className={LABEL_CLS}>Banco</label>
-            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
+            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={!!selectedSupplier} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_agency" className={LABEL_CLS}>Agência</label>
-            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} placeholder="0000" className={INPUT_CLS} />
+            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} disabled={!!selectedSupplier} placeholder="0000" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
-            <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="00000" className={INPUT_CLS} />
+            <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
-            <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} placeholder="0" className={INPUT_CLS} />
+            <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -714,17 +731,24 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Boleto */}
       {paymentMethod === "boleto" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Favorecido e CPF/CNPJ vêm do cadastro do fornecedor. Informe a linha digitável ou código de barras do boleto.
+            </p>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} placeholder="Nome do favorecido" className={INPUT_CLS} />
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5">
             <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} placeholder="000.000.000-00" className={INPUT_CLS} />
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="barcode" className={LABEL_CLS}>Linha Digitável / Código de Barras</label>
-            <input id="barcode" name="barcode" type="text" placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
+            <label htmlFor="barcode" className={LABEL_CLS}>
+              Linha Digitável / Código de Barras <span className="text-destructive">*</span>
+            </label>
+            <input id="barcode" name="barcode" type="text" required placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -753,6 +777,28 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
                 Serão criadas {installments} requisições, vencimentos no dia 5 de cada mês.
               </p>
             )}
+          </div>
+
+          {/* Precisa do cartão de crédito físico? */}
+          <div className="space-y-1.5">
+            <label htmlFor="needs_credit_card" className={LABEL_CLS}>
+              Precisa do cartão de crédito? <span className="text-destructive">*</span>
+            </label>
+            <select
+              id="needs_credit_card"
+              name="needs_credit_card"
+              required
+              value={needsCreditCard}
+              onChange={(e) => setNeedsCreditCard(e.target.value as "" | "sim" | "nao")}
+              className={INPUT_CLS}
+            >
+              <option value="">Selecione</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Selecione &quot;Sim&quot; se o solicitante precisar receber fisicamente o cartão para realizar a compra.
+            </p>
           </div>
         </div>
       )}
