@@ -599,6 +599,41 @@ export async function createRequest(data: CreateRequestInput) {
 
 // ─── Get Requests ─────────────────────────────────────────────────────────────
 
+// Generates a short-lived signed URL for the attachment of a single request.
+// Returns null path when the request has no attachment.
+export async function getRequestAttachmentUrl(requestId: string) {
+  await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const supabase = await createClient();
+
+  const { data: req, error } = await supabase
+    .from("ctrl_requests")
+    .select("attachment_path")
+    .eq("id", requestId)
+    .maybeSingle<{ attachment_path: string | null }>();
+
+  if (error) return { error: error.message };
+  if (!req?.attachment_path) return { error: "Esta requisição não possui anexo." };
+
+  // 5 min window. Long enough to click + download; short enough that leaked
+  // URLs are stale fast. The bucket has RLS too — admin client just shortcuts
+  // the signing path so users with broad CTRL visibility (CSC, contas_a_pagar)
+  // can read attachments uploaded by other users.
+  const admin = createAdminClientIfAvailable() ?? supabase;
+  const { data: signed, error: signErr } = await admin.storage
+    .from("ctrl-attachments")
+    .createSignedUrl(req.attachment_path, 60 * 5);
+
+  if (signErr) return { error: signErr.message };
+  return { url: signed.signedUrl };
+}
+
 export async function getRequests(filters?: {
   status?: CtrlRequestStatus;
   sector_id?: string;

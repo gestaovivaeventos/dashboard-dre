@@ -29,13 +29,36 @@ async function getContasAPagar() {
       id,
       request_number,
       title,
+      description,
       amount,
       due_date,
+      reference_month,
+      reference_year,
       status,
       paying_company,
       sent_to_payment_at,
       inactivation_reason,
       inactivated_at,
+      payment_method,
+      installments,
+      installment_number,
+      installment_total,
+      needs_credit_card,
+      justification,
+      observations,
+      barcode,
+      pix_key,
+      pix_key_type,
+      bank_name,
+      bank_agency,
+      bank_account,
+      bank_account_digit,
+      bank_cpf_cnpj,
+      favorecido,
+      supplier_issues_invoice,
+      attachment_path,
+      created_at,
+      approved_at,
       ctrl_suppliers(
         name,
         cnpj_cpf,
@@ -45,7 +68,10 @@ async function getContasAPagar() {
         conta_corrente,
         titular_banco
       ),
-      ctrl_expense_types(name)
+      ctrl_expense_types(name),
+      ctrl_sectors(name),
+      creator:users!ctrl_requests_created_by_fkey(name, email),
+      approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
     .in("status", ["aprovado", "agendado", "inativado_csc"])
     .order("due_date", { ascending: true, nullsFirst: false });
