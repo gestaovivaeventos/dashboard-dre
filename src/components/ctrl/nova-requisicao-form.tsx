@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useMemo, useEffect, useRef } from "react";
-import { AlertTriangle, CheckCircle2, Paperclip, X, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Paperclip, Search, X, Zap } from "lucide-react";
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
@@ -233,6 +233,13 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     e.preventDefault();
     if (!canSubmit) return;
 
+    // Combobox writes to React state, not to a form field, so HTML `required`
+    // doesn't catch the empty case. Do it here.
+    if (!selectedSupplierId) {
+      setError("Selecione um fornecedor.");
+      return;
+    }
+
     // Defensive due-date check: HTML `min` is enforced by most browsers but
     // some mobile webviews ignore it. Belt + suspenders.
     if (dueDate && dueDate < minDueDate) {
@@ -401,25 +408,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
       {/* Fornecedor */}
       <div className="space-y-1.5">
-        <label htmlFor="supplier_id" className={LABEL_CLS}>
+        <label className={LABEL_CLS}>
           Fornecedor <span className="text-destructive">*</span>
         </label>
-        <select
-          id="supplier_id"
-          name="supplier_id"
-          required
-          value={selectedSupplierId}
-          onChange={(e) => handleSupplierChange(e.target.value)}
-          className={INPUT_CLS}
-        >
-          <option value="">Selecione um fornecedor</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}{s.cnpj_cpf ? ` — ${s.cnpj_cpf}` : ""}
-              {s.status === "pendente" ? " (pendente)" : ""}
-            </option>
-          ))}
-        </select>
+        <SupplierCombobox
+          suppliers={suppliers}
+          selectedId={selectedSupplierId}
+          onSelect={handleSupplierChange}
+        />
         {selectedSupplier?.status === "pendente" && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             Este fornecedor está aguardando aprovação. A requisição ficará bloqueada até a aprovação.
@@ -717,13 +713,17 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             <label htmlFor="bank_agency" className={LABEL_CLS}>Agência</label>
             <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} disabled={!!selectedSupplier} placeholder="0000" className={INPUT_CLS} />
           </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
-            <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
-            <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
+          <div className="space-y-1.5 sm:col-span-2">
+            <div className="grid grid-cols-[1fr_88px] gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
+                <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
+                <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -970,5 +970,175 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </p>
       )}
     </form>
+  );
+}
+
+// ── Supplier combobox ───────────────────────────────────────────────────────
+// Filters by name OR CNPJ/CPF (digits-only match so user can type with or
+// without punctuation). Caps the rendered list at 50 — when there are more
+// matches, the user is asked to refine. Plain JS, no extra deps.
+
+function SupplierCombobox({
+  suppliers,
+  selectedId,
+  onSelect,
+}: {
+  suppliers: CtrlSupplier[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selected = suppliers.find((s) => s.id === selectedId);
+  const displayValue = useMemo(() => {
+    if (isOpen) return search;
+    if (!selected) return "";
+    return selected.cnpj_cpf
+      ? `${selected.name} — ${selected.cnpj_cpf}`
+      : selected.name;
+  }, [isOpen, search, selected]);
+
+  // Filter — name substring (case-insensitive) OR cnpj digits substring.
+  const filtered = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    if (!term) return suppliers;
+    const termDigits = term.replace(/\D/g, "");
+    return suppliers.filter((s) => {
+      if (s.name.toLowerCase().includes(term)) return true;
+      if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
+      return false;
+    });
+  }, [search, suppliers]);
+
+  // Reset highlight when filter changes
+  useEffect(() => {
+    setHighlight(0);
+  }, [search]);
+
+  // Close when clicking outside
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setIsOpen(false);
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function commit(s: CtrlSupplier) {
+    onSelect(s.id);
+    setIsOpen(false);
+    setSearch("");
+    inputRef.current?.blur();
+  }
+
+  function clear() {
+    onSelect("");
+    setSearch("");
+    setIsOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  const visible = filtered.slice(0, 50);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="text"
+          autoComplete="off"
+          value={displayValue}
+          onFocus={() => {
+            setIsOpen(true);
+            setSearch("");
+          }}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setIsOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setIsOpen(true);
+              setHighlight((h) => Math.min(h + 1, visible.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setHighlight((h) => Math.max(h - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              if (visible[highlight]) commit(visible[highlight]);
+            } else if (e.key === "Escape") {
+              setIsOpen(false);
+              setSearch("");
+              inputRef.current?.blur();
+            }
+          }}
+          placeholder="Digite o nome ou CNPJ do fornecedor..."
+          className={`${INPUT_CLS} pl-8 ${selected ? "pr-9" : ""}`}
+        />
+        {selected ? (
+          <button
+            type="button"
+            onClick={clear}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive"
+            aria-label="Limpar fornecedor"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-md border bg-background shadow-md">
+          {visible.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground">
+              Nenhum fornecedor encontrado.
+            </p>
+          ) : (
+            <ul role="listbox" className="py-1">
+              {visible.map((s, i) => (
+                <li
+                  key={s.id}
+                  role="option"
+                  aria-selected={i === highlight}
+                  onMouseEnter={() => setHighlight(i)}
+                  onMouseDown={(e) => {
+                    // mousedown beats the outside-click close that triggers on mouseup
+                    e.preventDefault();
+                    commit(s);
+                  }}
+                  className={`cursor-pointer px-3 py-2 text-sm ${
+                    i === highlight ? "bg-muted" : ""
+                  }`}
+                >
+                  <div className="font-medium">{s.name}</div>
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    {s.cnpj_cpf && <span>{s.cnpj_cpf}</span>}
+                    {s.status === "pendente" && (
+                      <span className="text-amber-600">pendente</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+              {filtered.length > 50 && (
+                <li className="px-3 py-2 text-xs text-muted-foreground">
+                  Mostrando 50 de {filtered.length}. Refine a busca.
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

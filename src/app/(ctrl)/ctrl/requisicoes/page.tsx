@@ -73,6 +73,7 @@ export default async function RequisicoesPage() {
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">Título</th>
                 <th className="px-4 py-3">Valor</th>
+                <th className="px-4 py-3">Vencimento</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Criado em</th>
               </tr>
@@ -89,6 +90,11 @@ export default async function RequisicoesPage() {
                       style: "currency",
                       currency: "BRL",
                     }).format(req.amount)}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {req.due_date
+                      ? new Date(req.due_date + "T00:00:00").toLocaleDateString("pt-BR")
+                      : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={req.status} />

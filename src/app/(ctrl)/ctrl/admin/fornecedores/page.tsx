@@ -5,6 +5,7 @@ import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
+import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
 async function getData() {
   const adminClient = createAdminClientIfAvailable();
@@ -72,11 +73,14 @@ export default async function FornecedoresPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Fornecedores</h1>
-        <p className="text-muted-foreground">
-          Gestão de fornecedores aprovados para pagamento
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Fornecedores</h1>
+          <p className="text-muted-foreground">
+            Gestão de fornecedores aprovados para pagamento
+          </p>
+        </div>
+        <CriarFornecedorButton />
       </div>
 
       {suppliersError ? (
@@ -86,7 +90,7 @@ export default async function FornecedoresPage() {
           <Truck className="mb-4 h-12 w-12 text-muted-foreground/40" />
           <h3 className="font-semibold">Nenhum fornecedor cadastrado</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Adicione fornecedores para habilitar requisições de pagamento.
+            Use o botão acima para adicionar o primeiro fornecedor.
           </p>
         </div>
       ) : (
