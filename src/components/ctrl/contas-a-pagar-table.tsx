@@ -1,8 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Eye, FileText, Loader2, Paperclip, X } from "lucide-react";
 
-import { sendToPayment, inactivateRequests } from "@/lib/ctrl/actions/requests";
+import {
+  sendToPayment,
+  inactivateRequests,
+  getRequestAttachmentUrl,
+} from "@/lib/ctrl/actions/requests";
 
 type Supplier = {
   name: string;
@@ -14,20 +19,76 @@ type Supplier = {
   titular_banco: string | null;
 };
 
+type NamedRef = { name: string } | { name: string }[] | null;
+type UserRef =
+  | { name: string | null; email: string | null }
+  | Array<{ name: string | null; email: string | null }>
+  | null;
+
 export type ContasRequest = {
   id: string;
   request_number: number;
   title: string;
+  description?: string | null;
   amount: number;
   due_date: string | null;
+  reference_month?: number | null;
+  reference_year?: number | null;
   status: string;
   paying_company: string | null;
   sent_to_payment_at: string | null;
   inactivation_reason: string | null;
   inactivated_at: string | null;
+  payment_method?: string | null;
+  installment_number?: number | null;
+  installment_total?: number | null;
+  needs_credit_card?: boolean | null;
+  justification?: string | null;
+  observations?: string | null;
+  barcode?: string | null;
+  pix_key?: string | null;
+  pix_key_type?: string | null;
+  bank_name?: string | null;
+  bank_agency?: string | null;
+  bank_account?: string | null;
+  bank_account_digit?: string | null;
+  bank_cpf_cnpj?: string | null;
+  favorecido?: string | null;
+  supplier_issues_invoice?: string | null;
+  attachment_path?: string | null;
+  created_at?: string | null;
+  approved_at?: string | null;
   ctrl_suppliers: Supplier | Supplier[] | null;
-  ctrl_expense_types: { name: string } | { name: string }[] | null;
+  ctrl_expense_types: NamedRef;
+  ctrl_sectors?: NamedRef;
+  creator?: UserRef;
+  approver?: UserRef;
 };
+
+function resolveNamed(raw: NamedRef): string | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw[0]?.name ?? null;
+  return raw.name ?? null;
+}
+
+function resolveUser(raw: UserRef): { name: string | null; email: string | null } | null {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  return raw;
+}
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  boleto: "Boleto",
+  pix: "PIX",
+  transferencia: "Transferência",
+  cartao_credito: "Cartão de Crédito",
+  dinheiro: "Dinheiro",
+};
+
+const MONTHS = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 type Tab = "aprovado" | "agendado" | "inativado_csc";
 
@@ -84,6 +145,27 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Detail modal — opened by "Detalhes" button in any row.
+  const [detail, setDetail] = useState<ContasRequest | null>(null);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+
+  async function openAttachment(requestId: string) {
+    setAttachmentLoading(true);
+    try {
+      const result = await getRequestAttachmentUrl(requestId);
+      if ("error" in result && result.error) {
+        notify(result.error, false);
+        return;
+      }
+      // Open in new tab — Supabase signed URLs go directly to the file.
+      if ("url" in result && result.url) {
+        window.open(result.url, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setAttachmentLoading(false);
+    }
+  }
 
   const canInactivate = ctrlRoles.some((r) => ["csc", "admin"].includes(r));
 
@@ -195,6 +277,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                   {activeTab === "aprovado" ? "Vencimento" : activeTab === "agendado" ? "Empresa / Enviado em" : "Inativado em"}
                 </th>
+                <th className="w-20 px-4 py-3 text-right font-medium text-muted-foreground"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -244,6 +327,19 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                           {req.inactivation_reason && <p className="text-muted-foreground line-clamp-2">{req.inactivation_reason}</p>}
                         </div>
                       )}
+                    </td>
+                    <td
+                      className="px-4 py-3 text-right"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setDetail(req)}
+                        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Detalhes
+                      </button>
                     </td>
                   </tr>
                 );
@@ -381,6 +477,286 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
           </div>
         </div>
       )}
+
+      {/* Detail modal */}
+      {detail && (
+        <DetailModal
+          req={detail}
+          onClose={() => setDetail(null)}
+          onOpenAttachment={openAttachment}
+          attachmentLoading={attachmentLoading}
+        />
+      )}
     </div>
   );
+}
+
+// ── Detail modal ─────────────────────────────────────────────────────────────
+
+function DetailModal({
+  req,
+  onClose,
+  onOpenAttachment,
+  attachmentLoading,
+}: {
+  req: ContasRequest;
+  onClose: () => void;
+  onOpenAttachment: (id: string) => void;
+  attachmentLoading: boolean;
+}) {
+  const sup = resolveSupplier(req.ctrl_suppliers);
+  const sector = resolveNamed(req.ctrl_sectors ?? null);
+  const expenseType = resolveNamed(req.ctrl_expense_types);
+  const creator = resolveUser(req.creator ?? null);
+  const approver = resolveUser(req.approver ?? null);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="my-10 w-full max-w-3xl rounded-xl border bg-background shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b px-6 py-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-mono text-muted-foreground">#{req.request_number}</p>
+            <h3 className="font-semibold leading-tight">{req.title}</h3>
+            {req.installment_number && req.installment_total && req.installment_total > 1 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Parcela {req.installment_number}/{req.installment_total}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] overflow-y-auto bg-muted/20 px-6 py-5 space-y-4">
+          {/* Anexo em destaque */}
+          {req.attachment_path ? (
+            <button
+              type="button"
+              onClick={() => onOpenAttachment(req.id)}
+              disabled={attachmentLoading}
+              className="flex w-full items-center gap-3 rounded-lg border bg-background px-4 py-3 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-60"
+            >
+              {attachmentLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              ) : (
+                <Paperclip className="h-4 w-4 text-primary" />
+              )}
+              <span>Abrir anexo</span>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {attachmentLoading ? "Gerando link..." : "Nova aba"}
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed bg-background px-4 py-3 text-sm text-muted-foreground">
+              <Paperclip className="h-4 w-4" />
+              Esta requisição não possui anexo.
+            </div>
+          )}
+
+          {/* Resumo */}
+          <Section title="Resumo">
+            <DetailField label="Valor" value={fmt.format(Number(req.amount))} />
+            <DetailField
+              label="Vencimento"
+              value={
+                req.due_date
+                  ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))
+                  : "—"
+              }
+            />
+            <DetailField
+              label="Competência"
+              value={
+                req.reference_month && req.reference_year
+                  ? `${MONTHS[req.reference_month - 1]} / ${req.reference_year}`
+                  : "—"
+              }
+            />
+            <DetailField label="Setor" value={sector ?? "—"} />
+            <DetailField label="Tipo de Despesa" value={expenseType ?? "—"} />
+            <DetailField
+              label="Método de pagamento"
+              value={req.payment_method ? PAYMENT_METHOD_LABEL[req.payment_method] ?? req.payment_method : "—"}
+            />
+          </Section>
+
+          {/* Descrição / observações / justificativa */}
+          {(req.description || req.observations || req.justification) && (
+            <Section title="Descrição e observações" twoCol={false}>
+              {req.description && <DetailField label="Descrição" value={req.description} fullWidth />}
+              {req.justification && <DetailField label="Justificativa" value={req.justification} fullWidth />}
+              {req.observations && <DetailField label="Observações" value={req.observations} fullWidth />}
+            </Section>
+          )}
+
+          {/* Fornecedor + dados de pagamento */}
+          <Section title="Fornecedor / Pagamento">
+            <DetailField label="Fornecedor" value={sup?.name ?? req.favorecido ?? "—"} />
+            <DetailField label="CNPJ/CPF" value={sup?.cnpj_cpf ?? req.bank_cpf_cnpj ?? "—"} mono />
+            <DetailField label="Emite nota fiscal?" value={formatIssuesInvoice(req.supplier_issues_invoice)} />
+            {req.payment_method === "pix" && (
+              <>
+                <DetailField label="Tipo Chave PIX" value={req.pix_key_type ?? "—"} />
+                <DetailField label="Chave PIX" value={sup?.chave_pix ?? req.pix_key ?? "—"} mono fullWidth />
+              </>
+            )}
+            {req.payment_method === "transferencia" && (
+              <>
+                <DetailField label="Banco" value={sup?.banco ?? req.bank_name ?? "—"} />
+                <DetailField label="Agência" value={sup?.agencia ?? req.bank_agency ?? "—"} mono />
+                <DetailField label="Conta" value={sup?.conta_corrente ?? req.bank_account ?? "—"} mono />
+                <DetailField label="Dígito" value={req.bank_account_digit ?? "—"} mono />
+              </>
+            )}
+            {req.payment_method === "boleto" && (
+              <DetailField label="Linha digitável / Código de barras" value={req.barcode ?? "—"} mono fullWidth />
+            )}
+            {req.payment_method === "cartao_credito" && (
+              <>
+                <DetailField label="Parcelas" value={String(req.installment_total ?? 1)} />
+                <DetailField
+                  label="Precisa do cartão físico?"
+                  value={
+                    req.needs_credit_card == null
+                      ? "—"
+                      : req.needs_credit_card
+                      ? "Sim"
+                      : "Não"
+                  }
+                />
+              </>
+            )}
+          </Section>
+
+          {/* Trilha de aprovação / envio */}
+          <Section title="Histórico">
+            <DetailField
+              label="Criado por"
+              value={creator?.name ?? creator?.email ?? "—"}
+            />
+            <DetailField
+              label="Criado em"
+              value={
+                req.created_at
+                  ? new Date(req.created_at).toLocaleString("pt-BR")
+                  : "—"
+              }
+            />
+            {req.approved_at && (
+              <DetailField
+                label="Aprovado por"
+                value={
+                  (approver?.name ?? approver?.email ?? "—") +
+                  " · " +
+                  new Date(req.approved_at).toLocaleString("pt-BR")
+                }
+                fullWidth
+              />
+            )}
+            {req.sent_to_payment_at && (
+              <DetailField
+                label="Enviado para pagamento"
+                value={
+                  new Date(req.sent_to_payment_at).toLocaleString("pt-BR") +
+                  (req.paying_company ? ` · ${req.paying_company}` : "")
+                }
+                fullWidth
+              />
+            )}
+            {req.inactivated_at && (
+              <DetailField
+                label="Inativado"
+                value={
+                  new Date(req.inactivated_at).toLocaleString("pt-BR") +
+                  (req.inactivation_reason ? ` · ${req.inactivation_reason}` : "")
+                }
+                fullWidth
+              />
+            )}
+          </Section>
+        </div>
+
+        <div className="border-t px-6 py-3 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+  twoCol = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  twoCol?: boolean;
+}) {
+  return (
+    <section className="rounded-lg border bg-background shadow-sm">
+      <header className="flex items-center gap-2 border-b px-4 py-2.5">
+        <FileText className="h-4 w-4 text-primary" />
+        <h4 className="text-sm font-semibold">{title}</h4>
+      </header>
+      <dl
+        className={
+          twoCol
+            ? "grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2 text-sm"
+            : "p-4 space-y-3 text-sm"
+        }
+      >
+        {children}
+      </dl>
+    </section>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+  mono,
+  fullWidth,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div className={`space-y-0.5 ${fullWidth ? "sm:col-span-2" : ""}`}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className={mono ? "font-mono text-sm break-all" : "text-sm whitespace-pre-wrap"}>
+        {value || "—"}
+      </dd>
+    </div>
+  );
+}
+
+function formatIssuesInvoice(value: string | null | undefined): string {
+  if (!value) return "—";
+  if (value === "sim") return "Sim";
+  if (value === "nao") return "Não";
+  if (value === "nao_sei") return "Não sei";
+  return value;
 }
