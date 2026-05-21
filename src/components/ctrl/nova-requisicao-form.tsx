@@ -181,9 +181,13 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
     const form = new FormData(e.currentTarget);
 
+    // The DB still requires a non-null title column, so we reuse the
+    // description as title — the UI now shows only one text field.
+    const descriptionValue = (form.get("description") as string)?.trim() ?? "";
+
     const result = await createRequest({
-      title: form.get("title") as string,
-      description: (form.get("description") as string) || undefined,
+      title: descriptionValue,
+      description: descriptionValue || undefined,
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -240,18 +244,19 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       )}
 
-      {/* Título */}
+      {/* Descrição (identifica a requisição) */}
       <div className="space-y-1.5">
-        <label htmlFor="title" className={LABEL_CLS}>
-          Título <span className="text-destructive">*</span>
+        <label htmlFor="description" className={LABEL_CLS}>
+          Descrição <span className="text-destructive">*</span>
         </label>
-        <input id="title" name="title" type="text" required placeholder="Ex: Pagamento de serviço de limpeza" className={INPUT_CLS} />
-      </div>
-
-      {/* Descrição */}
-      <div className="space-y-1.5">
-        <label htmlFor="description" className={LABEL_CLS}>Descrição</label>
-        <textarea id="description" name="description" rows={2} placeholder="Detalhes adicionais..." className={`${INPUT_CLS} resize-none`} />
+        <textarea
+          id="description"
+          name="description"
+          rows={2}
+          required
+          placeholder="Ex: Pagamento de serviço de limpeza — referente ao mês de maio"
+          className={`${INPUT_CLS} resize-none`}
+        />
       </div>
 
       {/* Setor + Tipo de Despesa */}
