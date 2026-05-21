@@ -7,115 +7,71 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 
 export default async function UsuariosPage() {
-  const { supabase, user, profile } = await getCurrentSessionContext();
-  if (!user) {
-    redirect("/login");
-  }
-  if (!profile || profile.role !== "admin") {
-    redirect("/dashboard");
-  }
+  const { user, profile } = await getCurrentSessionContext();
+  if (!user) redirect("/login");
+  if (!profile || profile.profile !== "admin") redirect("/dashboard");
 
   const adminClient = createAdminClient();
 
   const [
     { data: users },
     { data: companies },
-    { data: segments },
-    { data: segAccessData },
+    { data: sectors },
     { data: compAccessData },
-    { data: ctrlRolesData },
+    { data: sectorAccessData },
   ] = await Promise.all([
-    supabase
+    adminClient
       .from("users")
-      .select("id,email,name,role,company_id,active,companies(name)")
+      .select(
+        "id,email,name,profile,can_financeiro,can_compras,active,created_at",
+      )
       .order("created_at", { ascending: false }),
-    supabase.from("companies").select("id,name,segment_id").eq("active", true).order("name"),
-    supabase.from("segments").select("id,name,slug").eq("active", true).order("display_order"),
-    adminClient.from("user_segment_access").select("user_id,segment_id"),
+    adminClient.from("companies").select("id,name").eq("active", true).order("name"),
+    adminClient.from("ctrl_sectors").select("id,name").eq("active", true).order("name"),
     adminClient.from("user_company_access").select("user_id,company_id"),
-    adminClient.from("user_module_roles").select("user_id,role").eq("module", "ctrl"),
+    adminClient.from("user_sectors").select("user_id,sector_id"),
   ]);
 
-  // Agora um usuario pode ter multiplas linhas em user_module_roles (multi-permissao)
-  const ctrlRolesByUser = new Map<string, string[]>();
-  (ctrlRolesData ?? []).forEach((row) => {
-    const uid = row.user_id as string;
-    const list = ctrlRolesByUser.get(uid) ?? [];
-    list.push(row.role as string);
-    ctrlRolesByUser.set(uid, list);
-  });
-
-  const segmentNames = new Map((segments ?? []).map((s) => [s.id as string, s.name as string]));
-  const companyNames = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
-
-  const userSegments = new Map<string, string[]>();
-  (segAccessData ?? []).forEach((row) => {
-    const uid = row.user_id as string;
-    const name = segmentNames.get(row.segment_id as string);
-    if (name) {
-      const list = userSegments.get(uid) ?? [];
-      list.push(name);
-      userSegments.set(uid, list);
-    }
-  });
+  const companyById = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
+  const sectorById = new Map((sectors ?? []).map((s) => [s.id as string, s.name as string]));
 
   const userCompanies = new Map<string, string[]>();
   (compAccessData ?? []).forEach((row) => {
     const uid = row.user_id as string;
-    const name = companyNames.get(row.company_id as string);
-    if (name) {
-      const list = userCompanies.get(uid) ?? [];
-      list.push(name);
-      userCompanies.set(uid, list);
-    }
+    const cid = row.company_id as string;
+    if (!companyById.has(cid)) return;
+    const list = userCompanies.get(uid) ?? [];
+    list.push(cid);
+    userCompanies.set(uid, list);
   });
 
-  type CtrlRoleKey =
-    | "admin"
-    | "solicitante"
-    | "gerente"
-    | "diretor"
-    | "csc"
-    | "contas_a_pagar"
-    | "aprovacao_fornecedor";
-
-  const usersData = (users ?? []).map((item) => {
-    const dreRole = item.role as "admin" | "gestor_hero" | "gestor_unidade";
-    // Admin DRE tem acesso total ao ctrl implicitamente (nao persistido em user_module_roles)
-    const ctrlRoles: CtrlRoleKey[] =
-      dreRole === "admin"
-        ? ["admin"]
-        : (ctrlRolesByUser.get(item.id as string) ?? []) as CtrlRoleKey[];
-    return {
-      id: item.id as string,
-      email: item.email as string,
-      name: ((item.name as string | null) ?? "") as string,
-      role: dreRole,
-      ctrl_roles: ctrlRoles,
-      company_id: (item.company_id as string | null) ?? null,
-      company_name: ((item.companies as { name?: string } | null)?.name ?? null) as string | null,
-      active: Boolean(item.active),
-      segment_names: userSegments.get(item.id as string) ?? [],
-      company_names: userCompanies.get(item.id as string) ?? [],
-    };
+  const userSectors = new Map<string, string[]>();
+  (sectorAccessData ?? []).forEach((row) => {
+    const uid = row.user_id as string;
+    const sid = row.sector_id as string;
+    if (!sectorById.has(sid)) return;
+    const list = userSectors.get(uid) ?? [];
+    list.push(sid);
+    userSectors.set(uid, list);
   });
 
-  const companyOptions = (companies ?? []).map((company) => ({
-    id: company.id as string,
-    name: company.name as string,
-    segment_id: (company.segment_id as string | null) ?? null,
-  }));
-
-  const segmentOptions = (segments ?? []).map((s) => ({
-    id: s.id as string,
-    name: s.name as string,
+  const usersData = (users ?? []).map((item) => ({
+    id: item.id as string,
+    email: item.email as string,
+    name: ((item.name as string | null) ?? "") as string,
+    profile: (item.profile as string | null) ?? "solicitante",
+    can_financeiro: Boolean(item.can_financeiro),
+    can_compras: Boolean(item.can_compras),
+    active: Boolean(item.active),
+    company_ids: userCompanies.get(item.id as string) ?? [],
+    sector_ids: userSectors.get(item.id as string) ?? [],
   }));
 
   return (
     <UsersAdminManager
       initialUsers={usersData}
-      companies={companyOptions}
-      segments={segmentOptions}
+      companies={(companies ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
+      sectors={(sectors ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))}
     />
   );
 }

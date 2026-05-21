@@ -1,9 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { canAccessPath } from "@/lib/auth/access";
+import { canAccessPathByProfile, defaultLandingFor } from "@/lib/auth/access";
 import { getSupabaseEnv } from "@/lib/supabase/env";
-import type { DreRole, CtrlRole } from "@/lib/supabase/types";
+import type { UserProfileType } from "@/lib/supabase/types";
 
 export async function updateSession(request: NextRequest) {
   const isDevMode = process.env.NODE_ENV !== "production";
@@ -43,53 +43,48 @@ export async function updateSession(request: NextRequest) {
     url.searchParams.set("redirectedFrom", pathname);
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && (pathname === "/login" || pathname === "/signup")) {
-    // Load contracts_only too so we can send these users straight to /contratos.
     const { data: postLoginProfile } = await supabase
       .from("users")
-      .select("contracts_only")
+      .select("profile, can_financeiro, can_compras")
       .eq("id", user.id)
-      .maybeSingle<{ contracts_only: boolean | null }>();
+      .maybeSingle<{
+        profile: UserProfileType | null;
+        can_financeiro: boolean | null;
+        can_compras: boolean | null;
+      }>();
 
     const url = request.nextUrl.clone();
-    url.pathname = postLoginProfile?.contracts_only ? "/contratos" : "/dashboard";
+    url.pathname = defaultLandingFor(
+      postLoginProfile?.profile ?? "solicitante",
+      Boolean(postLoginProfile?.can_financeiro),
+      Boolean(postLoginProfile?.can_compras),
+    );
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase
       .from("users")
-      .select(`
-        role, active, contracts_only,
-        user_module_roles!user_module_roles_user_id_fkey(role, module)
-      `)
+      .select("profile, active, can_financeiro, can_compras")
       .eq("id", user.id)
       .maybeSingle<{
-        role: DreRole;
+        profile: UserProfileType | null;
         active: boolean;
-        contracts_only: boolean | null;
-        user_module_roles: Array<{ role: string; module: string }> | null;
+        can_financeiro: boolean | null;
+        can_compras: boolean | null;
       }>();
 
-    const dreRole: DreRole = profileData?.role ?? "gestor_unidade";
+    const userProfile: UserProfileType = profileData?.profile ?? "solicitante";
+    const canFinanceiro = Boolean(profileData?.can_financeiro);
+    const canCompras = Boolean(profileData?.can_compras);
     const isActive = profileData?.active ?? true;
-    const contractsOnly = Boolean(profileData?.contracts_only);
 
     if (!isActive) {
       const url = request.nextUrl.clone();
       url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
-    } else {
-      const ctrlModuleRow = profileData?.user_module_roles?.find((r) => r.module === "ctrl");
-      const ctrlRole: CtrlRole | null =
-        dreRole === "admin" ? "admin" : ctrlModuleRow ? (ctrlModuleRow.role as CtrlRole) : null;
-
-      if (!canAccessPath(pathname, dreRole, ctrlRole, { contractsOnly })) {
-        const url = request.nextUrl.clone();
-        if (contractsOnly) {
-          url.pathname = "/contratos";
-        } else {
-          url.pathname = pathname.startsWith("/ctrl") ? "/ctrl/requisicoes" : "/dashboard";
-        }
-        supabaseResponse = NextResponse.redirect(url);
-      }
+    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras)) {
+      const url = request.nextUrl.clone();
+      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras);
+      supabaseResponse = NextResponse.redirect(url);
     }
   }
 

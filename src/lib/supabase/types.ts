@@ -29,19 +29,47 @@ export interface ModuleAccess {
   } | null;
 }
 
+// ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
+// Six profiles cover all cases. Each user has exactly one. Module visibility
+// is independent (can_financeiro, can_compras). Plataforma is implicit when
+// profile === 'admin'.
+export type UserProfileType =
+  | "admin"
+  | "contas_a_pagar"
+  | "gerente"
+  | "diretor"
+  | "validador_contrato"
+  | "solicitante";
+
 // ─── Perfil unificado ─────────────────────────────────────────────────────────
 export interface UnifiedProfile {
   id: string;
   email: string;
   name: string | null;
-  /** Role no módulo DRE — sempre presente */
-  role: DreRole;
-  /** Permissoes no módulo Controladoria — [] se sem acesso */
-  ctrl_roles: CtrlRole[];
-  company_id: string | null;
+  /** Tipo de perfil (novo modelo unificado). Sempre presente. */
+  profile: UserProfileType;
+  /** Visibilidade do módulo Financeiro (DRE). */
+  can_financeiro: boolean;
+  /** Visibilidade do módulo Compras (CTRL). */
+  can_compras: boolean;
+  /** Setores aos quais este usuário está vinculado (relevante pra Gerente/Solicitante). */
+  sector_ids: string[];
+  /** Empresas (unidades) que o usuário enxerga. Ignorado para admin (vê tudo). */
+  company_ids: string[];
   active: boolean;
   created_at: string;
-  /** Quando true, o usuário só enxerga /contratos e o sidebar oculta o resto. */
+
+  // ── Compat layer (legado) ──────────────────────────────────────────────────
+  // Derivados de `profile` + flags. Mantidos enquanto o código legado for
+  // migrado pra usar `profile` diretamente. Não escreva diretamente — sempre
+  // derive de profile/can_*.
+  /** @deprecated derivado de profile + can_financeiro */
+  role: DreRole;
+  /** @deprecated derivado de profile + can_compras */
+  ctrl_roles: CtrlRole[];
+  /** @deprecated company_id "principal" (primeiro de company_ids); use company_ids */
+  company_id: string | null;
+  /** @deprecated equivalente a profile === 'validador_contrato' */
   contracts_only: boolean;
 }
 

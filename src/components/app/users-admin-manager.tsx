@@ -1,7 +1,15 @@
 "use client";
 
+import {
+  Check,
+  CheckCircle2,
+  Loader2,
+  MailPlus,
+  Pencil,
+  ShieldX,
+  X,
+} from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
-import { Check, KeyRound, Loader2, MailPlus, Pencil, RefreshCw, ShieldX } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,698 +38,716 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { CtrlRole, UserRole } from "@/lib/supabase/types";
 
-// Roles do modulo ctrl que podem ser atribuidos manualmente (admin e derivado do DRE role).
-type AssignableCtrlRole = Exclude<CtrlRole, "admin">;
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-const CTRL_ROLE_OPTIONS: { value: AssignableCtrlRole; label: string; hint?: string }[] = [
-  { value: "solicitante", label: "Solicitante", hint: "Pode criar requisicoes de pagamento" },
-  { value: "gerente", label: "Gerente", hint: "Aprova requisicoes de nivel 2" },
-  { value: "diretor", label: "Diretor", hint: "Aprova requisicoes de nivel 3 e reverte" },
-  { value: "csc", label: "CSC", hint: "Acesso financeiro completo" },
-  { value: "contas_a_pagar", label: "Contas a Pagar", hint: "Envia requisicoes aprovadas para pagamento" },
-  { value: "aprovacao_fornecedor", label: "Aprovacao de Fornecedor", hint: "Aprova/rejeita fornecedores" },
-];
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface CompanyItem {
-  id: string;
-  name: string;
-  segment_id: string | null;
-}
+type Profile =
+  | "admin"
+  | "contas_a_pagar"
+  | "gerente"
+  | "diretor"
+  | "validador_contrato"
+  | "solicitante";
 
 interface UserItem {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
-  ctrl_roles: CtrlRole[];
-  company_id: string | null;
-  company_name: string | null;
+  profile: string;
+  can_financeiro: boolean;
+  can_compras: boolean;
   active: boolean;
-  segment_names?: string[];
-  company_names?: string[];
+  company_ids: string[];
+  sector_ids: string[];
 }
 
-interface SegmentItem {
+interface SimpleOption {
   id: string;
   name: string;
 }
 
-interface UsersAdminManagerProps {
+interface Props {
   initialUsers: UserItem[];
-  companies: CompanyItem[];
-  segments?: SegmentItem[];
+  companies: SimpleOption[];
+  sectors: SimpleOption[];
 }
 
-// ---------------------------------------------------------------------------
-// Role label map
-// ---------------------------------------------------------------------------
+const PROFILES: Array<{
+  value: Profile;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "admin",
+    label: "Admin",
+    description: "Apaga, edita e vê tudo. Vê todas as unidades automaticamente.",
+  },
+  {
+    value: "contas_a_pagar",
+    label: "Contas a Pagar",
+    description: "Aprova requisições em Contas a Pagar e fornecedores.",
+  },
+  {
+    value: "gerente",
+    label: "Gerente",
+    description: "Aprova requisições dos setores vinculados.",
+  },
+  {
+    value: "diretor",
+    label: "Diretor",
+    description: "Aprova qualquer requisição (sem filtro de setor).",
+  },
+  {
+    value: "validador_contrato",
+    label: "Validador de Contrato",
+    description: "Acesso isolado ao módulo de Validação de Contratos.",
+  },
+  {
+    value: "solicitante",
+    label: "Solicitante",
+    description: "Cria requisições nos setores vinculados.",
+  },
+];
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "Admin",
-  gestor_hero: "Gestor Hero",
-  gestor_unidade: "Gestor Unidade",
+const PROFILE_LABEL: Record<string, string> = Object.fromEntries(
+  PROFILES.map((p) => [p.value, p.label]),
+);
+
+const PROFILE_BADGE_CLASS: Record<string, string> = {
+  admin: "bg-violet-100 text-violet-800 border-transparent",
+  contas_a_pagar: "bg-sky-100 text-sky-800 border-transparent",
+  gerente: "bg-blue-100 text-blue-800 border-transparent",
+  diretor: "bg-emerald-100 text-emerald-800 border-transparent",
+  validador_contrato: "bg-orange-100 text-orange-800 border-transparent",
+  solicitante: "bg-slate-100 text-slate-800 border-transparent",
 };
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// Whether the profile needs sector assignments
+function profileNeedsSectors(p: Profile): boolean {
+  return p === "gerente" || p === "solicitante";
+}
 
-export function UsersAdminManager({ initialUsers, companies, segments = [] }: UsersAdminManagerProps) {
+// ─── Form state ─────────────────────────────────────────────────────────────
+
+interface FormState {
+  email: string;
+  name: string;
+  profile: Profile;
+  can_financeiro: boolean;
+  can_compras: boolean;
+  sector_ids: string[];
+  company_ids: string[];
+}
+
+const emptyForm: FormState = {
+  email: "",
+  name: "",
+  profile: "solicitante",
+  can_financeiro: true,
+  can_compras: true,
+  sector_ids: [],
+  company_ids: [],
+};
+
+function userToForm(u: UserItem): FormState {
+  return {
+    email: u.email,
+    name: u.name,
+    profile: (u.profile as Profile) ?? "solicitante",
+    can_financeiro: u.can_financeiro,
+    can_compras: u.can_compras,
+    sector_ids: [...u.sector_ids],
+    company_ids: [...u.company_ids],
+  };
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
+export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   const [users, setUsers] = useState(initialUsers);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
-
-  // Modal states
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [editUserId, setEditUserId] = useState<string | null>(null);
-  const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState("");
+  const [editing, setEditing] = useState<UserItem | null>(null);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Permissions
-  const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
-  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
-  // Controladoria: conjunto de permissoes. [] = sem acesso ao modulo ctrl.
-  const [selectedCtrlRoles, setSelectedCtrlRoles] = useState<AssignableCtrlRole[]>([]);
-
-  // Form
-  const [form, setForm] = useState({
-    email: "",
-    name: "",
-    role: "gestor_unidade" as UserRole,
-    company_id: "",
-  });
-
-  const selectedEditUser = useMemo(
-    () => users.find((user) => user.id === editUserId) ?? null,
-    [editUserId, users],
+  const companyById = useMemo(
+    () => new Map(companies.map((c) => [c.id, c.name])),
+    [companies],
   );
+  const sectorById = useMemo(() => new Map(sectors.map((s) => [s.id, s.name])), [sectors]);
 
-  const companiesBySegment = useMemo(() => {
-    const map = new Map<string, CompanyItem[]>();
-    for (const seg of segments) {
-      map.set(seg.id, companies.filter((c) => c.segment_id === seg.id));
-    }
-    return map;
-  }, [companies, segments]);
+  function openInvite() {
+    setForm(emptyForm);
+    setError(null);
+    setInviteOpen(true);
+  }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
+  function openEdit(u: UserItem) {
+    setForm(userToForm(u));
+    setError(null);
+    setEditing(u);
+  }
 
-  const showMessage = (text: string, type: "success" | "error" = "success") => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 4000);
-  };
+  function closeAll() {
+    if (loading) return;
+    setInviteOpen(false);
+    setEditing(null);
+    setError(null);
+  }
 
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("/api/users", { cache: "no-store" });
-      const payload = (await response.json()) as { users?: UserItem[]; error?: string };
-      if (response.ok && payload.users) {
-        setUsers(payload.users);
-      } else {
-        showMessage(payload.error ?? "Falha ao carregar usuarios.", "error");
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      // Validador de contrato: força sem módulos/setores/unidades
+      if (key === "profile" && value === "validador_contrato") {
+        next.can_financeiro = false;
+        next.can_compras = false;
+        next.sector_ids = [];
+        next.company_ids = [];
       }
-    } catch {
-      showMessage("Erro de conexao ao carregar usuarios.", "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Invite
-  // ---------------------------------------------------------------------------
-
-  const inviteUser = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      const response = await fetch("/api/users/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: form.email,
-          name: form.name,
-          role: form.role,
-          company_id: form.role === "gestor_unidade" ? form.company_id || null : null,
-        }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        showMessage(payload.error ?? "Falha ao convidar usuario.", "error");
-        return;
+      // Admin: força módulos visíveis = true (atalho de UX)
+      if (key === "profile" && value === "admin") {
+        next.can_financeiro = true;
+        next.can_compras = true;
+        next.company_ids = []; // admin vê tudo, não precisa restringir
       }
-      setInviteOpen(false);
-      setForm({ email: "", name: "", role: "gestor_unidade", company_id: "" });
-      showMessage("Convite enviado com sucesso.");
-      await refresh();
-    } catch {
-      showMessage("Erro de conexao ao convidar usuario.", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Edit
-  // ---------------------------------------------------------------------------
-
-  const startEdit = async (user: UserItem) => {
-    setEditUserId(user.id);
-    setForm({
-      email: user.email,
-      name: user.name ?? "",
-      role: user.role,
-      company_id: user.company_id ?? "",
+      // Sem Financeiro → limpa unidades
+      if (key === "can_financeiro" && value === false) {
+        next.company_ids = [];
+      }
+      return next;
     });
-    // 'admin' derivado do DRE role nao e editavel aqui - filtramos fora
-    setSelectedCtrlRoles(
-      user.ctrl_roles.filter((r): r is AssignableCtrlRole => r !== "admin"),
+  }
+
+  function toggleSector(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      sector_ids: prev.sector_ids.includes(id)
+        ? prev.sector_ids.filter((s) => s !== id)
+        : [...prev.sector_ids, id],
+    }));
+  }
+
+  function toggleCompany(id: string) {
+    setForm((prev) => ({
+      ...prev,
+      company_ids: prev.company_ids.includes(id)
+        ? prev.company_ids.filter((c) => c !== id)
+        : [...prev.company_ids, id],
+    }));
+  }
+
+  async function refresh() {
+    const res = await fetch("/api/users");
+    if (!res.ok) return;
+    const payload = (await res.json()) as {
+      users: Array<{
+        id: string;
+        email: string;
+        name: string;
+        profile: string;
+        can_financeiro: boolean;
+        can_compras: boolean;
+        active: boolean;
+        sectors: Array<{ id: string; name: string }>;
+        companies: Array<{ id: string; name: string }>;
+      }>;
+    };
+    setUsers(
+      payload.users.map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        profile: u.profile,
+        can_financeiro: u.can_financeiro,
+        can_compras: u.can_compras,
+        active: u.active,
+        sector_ids: u.sectors.map((s) => s.id),
+        company_ids: u.companies.map((c) => c.id),
+      })),
     );
-    try {
-      const [segRes, compRes] = await Promise.all([
-        fetch(`/api/segments/access?userId=${user.id}`),
-        fetch(`/api/segments/companies?userId=${user.id}`),
-      ]);
-      const segPayload = (await segRes.json()) as { segmentIds?: string[] };
-      const compPayload = (await compRes.json()) as { companyIds?: string[] };
-      setSelectedSegments(segPayload.segmentIds ?? []);
-      setSelectedCompanies(compPayload.companyIds ?? []);
-    } catch {
-      setSelectedSegments([]);
-      setSelectedCompanies([]);
+  }
+
+  function validateForm(includesEmail: boolean): string | null {
+    if (includesEmail && !form.email.trim()) return "Informe o e-mail.";
+    if (!form.name.trim()) return "Informe o nome.";
+    if (form.profile === "validador_contrato") {
+      // Tudo OK — sem módulos/setores/unidades é o esperado
+      return null;
     }
-  };
+    if (!form.can_financeiro && !form.can_compras && form.profile !== "admin") {
+      return "Marque ao menos um módulo (Financeiro ou Compras).";
+    }
+    if (profileNeedsSectors(form.profile) && form.sector_ids.length === 0) {
+      return "Gerente e Solicitante precisam de pelo menos um setor.";
+    }
+    if (form.can_financeiro && form.profile !== "admin" && form.company_ids.length === 0) {
+      return "Selecione pelo menos uma unidade pra acesso ao Financeiro.";
+    }
+    return null;
+  }
 
-  const saveEdit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedEditUser) return;
-    setSaving(true);
-    try {
-      // For gestor_unidade, use the first selected company as the primary company_id
-      const effectiveCompanyId =
-        form.role === "gestor_unidade"
-          ? form.company_id || selectedCompanies[0] || null
-          : null;
-
-      const response = await fetch(`/api/users/${selectedEditUser.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          role: form.role,
-          company_id: effectiveCompanyId,
-          // admin DRE sempre derivado, nao persistir; senao envia o array de roles escolhidas ([] = remover tudo)
-          ctrl_roles: form.role === "admin" ? [] : selectedCtrlRoles,
-        }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        showMessage(payload.error ?? "Falha ao salvar usuario.", "error");
-        return;
-      }
-
-      // Save segment + company access
-      const [segResult, compResult] = await Promise.allSettled([
-        fetch("/api/segments/access", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: selectedEditUser.id, segmentIds: selectedSegments }),
-        }),
-        fetch("/api/segments/companies", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: selectedEditUser.id, companyIds: selectedCompanies }),
-        }),
-      ]);
-
-      const segFailed = segResult.status === "rejected" || (segResult.status === "fulfilled" && !segResult.value.ok);
-      const compFailed = compResult.status === "rejected" || (compResult.status === "fulfilled" && !compResult.value.ok);
-
-      // Fecha o modal e libera o botao antes de recarregar a lista,
-      // para o usuario nao ficar preso olhando "Salvando..." + modal aberto
-      // enquanto o refresh da lista acontece em segundo plano.
-      setEditUserId(null);
-      setSaving(false);
-
-      if (segFailed || compFailed) {
-        showMessage("Perfil salvo, mas houve erro ao salvar permissoes. Verifique o console.", "error");
-      } else {
-        showMessage("Usuario atualizado.");
-      }
-
-      void refresh();
+  async function handleInviteSubmit(e: FormEvent) {
+    e.preventDefault();
+    const v = validateForm(true);
+    if (v) {
+      setError(v);
       return;
-    } catch {
-      showMessage("Erro de conexao ao salvar usuario.", "error");
-    } finally {
-      setSaving(false);
     }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Other actions
-  // ---------------------------------------------------------------------------
-
-  const deactivate = async (userId: string) => {
-    setSaving(true);
-    try {
-      const response = await fetch(`/api/users/${userId}`, { method: "DELETE" });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        showMessage(payload.error ?? "Falha ao desativar usuario.", "error");
-        return;
-      }
-      showMessage("Usuario desativado.");
-      await refresh();
-    } catch {
-      showMessage("Erro de conexao.", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const approve = async (userId: string) => {
-    setSaving(true);
-    try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: true }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        showMessage(payload.error ?? "Falha ao aprovar usuario.", "error");
-        return;
-      }
-      showMessage("Usuario aprovado com sucesso.");
-      await refresh();
-    } catch {
-      showMessage("Erro de conexao.", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const resetPassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!resetPasswordUserId) return;
-    setSaving(true);
-    try {
-      const response = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: resetPasswordUserId, newPassword }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        showMessage(payload.error ?? "Falha ao redefinir senha.", "error");
-        return;
-      }
-      setResetPasswordUserId(null);
-      setNewPassword("");
-      showMessage("Senha redefinida com sucesso.");
-    } catch {
-      showMessage("Erro de conexao.", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Segment / company toggles
-  // ---------------------------------------------------------------------------
-
-  const toggleSegment = (segmentId: string) => {
-    setSelectedSegments((prev) => {
-      if (prev.includes(segmentId)) {
-        const segCompanyIds = (companiesBySegment.get(segmentId) ?? []).map((c) => c.id);
-        setSelectedCompanies((prevComp) => prevComp.filter((id) => !segCompanyIds.includes(id)));
-        return prev.filter((id) => id !== segmentId);
-      }
-      return [...prev, segmentId];
+    setLoading(true);
+    setError(null);
+    const res = await fetch("/api/users/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: form.email.trim(),
+        name: form.name.trim(),
+        profile: form.profile,
+        can_financeiro: form.can_financeiro,
+        can_compras: form.can_compras,
+        sector_ids: form.sector_ids,
+        company_ids: form.company_ids,
+      }),
     });
-  };
+    setLoading(false);
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(payload?.error ?? "Falha ao enviar convite.");
+      return;
+    }
+    setInviteOpen(false);
+    await refresh();
+  }
 
-  const toggleCompany = (companyId: string) => {
-    setSelectedCompanies((prev) =>
-      prev.includes(companyId) ? prev.filter((id) => id !== companyId) : [...prev, companyId],
-    );
-  };
+  async function handleEditSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    const v = validateForm(false);
+    if (v) {
+      setError(v);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const res = await fetch(`/api/users/${editing.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.trim(),
+        profile: form.profile,
+        can_financeiro: form.can_financeiro,
+        can_compras: form.can_compras,
+        sector_ids: form.sector_ids,
+        company_ids: form.company_ids,
+      }),
+    });
+    setLoading(false);
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(payload?.error ?? "Falha ao salvar.");
+      return;
+    }
+    setEditing(null);
+    await refresh();
+  }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  async function toggleActive(u: UserItem) {
+    await fetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !u.active }),
+    });
+    await refresh();
+  }
+
+  async function deactivate(u: UserItem) {
+    if (!confirm(`Desativar ${u.email}?`)) return;
+    await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+    await refresh();
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Usuarios</h2>
-          <p className="text-sm text-muted-foreground">Gerencie acessos e permissoes do sistema.</p>
+          <h2 className="text-2xl font-semibold">Usuários</h2>
+          <p className="text-sm text-muted-foreground">
+            Gerencie perfis, módulos visíveis, setores e unidades.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
-          </Button>
-          <Button type="button" size="sm" onClick={() => setInviteOpen(true)}>
-            <MailPlus className="mr-2 h-3.5 w-3.5" />
-            Convidar
-          </Button>
-        </div>
+        <Button onClick={openInvite}>
+          <MailPlus className="mr-2 h-4 w-4" />
+          Convidar usuário
+        </Button>
       </div>
 
-      {/* Toast message */}
-      {message ? (
-        <div
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            message.type === "error"
-              ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
-              : "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"
-          }`}
-        >
-          {message.text}
-        </div>
-      ) : null}
-
-      {/* User table */}
-      <div className="rounded-lg border bg-background">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Usuario</TableHead>
-              <TableHead className="hidden sm:table-cell">Perfil</TableHead>
-              <TableHead className="hidden md:table-cell">Segmentos</TableHead>
-              <TableHead className="hidden lg:table-cell">Unidades</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Acoes</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>
-                  <div>
-                    <p className="font-medium">{user.name || "—"}</p>
-                    <p className="text-xs text-muted-foreground">{user.email}</p>
-                  </div>
-                </TableCell>
-                <TableCell className="hidden sm:table-cell">
-                  <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                    {ROLE_LABELS[user.role]}
-                  </Badge>
-                </TableCell>
-                <TableCell className="hidden md:table-cell">
-                  <span className="text-xs text-muted-foreground">
-                    {user.role === "admin"
-                      ? "Todos"
-                      : user.segment_names?.length
-                        ? user.segment_names.join(", ")
-                        : "—"}
-                  </span>
-                </TableCell>
-                <TableCell className="hidden lg:table-cell">
-                  <span className="text-xs text-muted-foreground">
-                    {user.role === "admin"
-                      ? "Todas"
-                      : user.company_names?.length
-                        ? user.company_names.join(", ")
-                        : "—"}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  {user.active ? (
-                    <Badge variant="outline" className="border-green-300 text-green-700 dark:border-green-800 dark:text-green-400">
-                      Ativo
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400">
-                      Pendente
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    {!user.active ? (
-                      <Button type="button" size="sm" variant="default" onClick={() => void approve(user.id)} disabled={saving}>
-                        <Check className="mr-1 h-3 w-3" />
-                        Aprovar
-                      </Button>
-                    ) : null}
-                    <Button type="button" size="sm" variant="ghost" onClick={() => void startEdit(user)} title="Editar">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button type="button" size="sm" variant="ghost" onClick={() => { setResetPasswordUserId(user.id); setNewPassword(""); }} title="Redefinir senha">
-                      <KeyRound className="h-3.5 w-3.5" />
-                    </Button>
-                    {user.active ? (
-                      <Button type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void deactivate(user.id)} disabled={saving} title="Desativar">
-                        <ShieldX className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : null}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-
-            {users.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                  Nenhum usuario cadastrado.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Invite dialog                                                       */}
-      {/* ------------------------------------------------------------------ */}
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Convidar Usuario</DialogTitle>
-            <DialogDescription>Um convite sera enviado por e-mail.</DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={inviteUser}>
-            <div className="space-y-2">
-              <Label htmlFor="invite-email">E-mail</Label>
-              <Input id="invite-email" type="email" placeholder="usuario@empresa.com" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-name">Nome</Label>
-              <Input id="invite-name" placeholder="Nome completo" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-            </div>
-            <div className="space-y-2">
-              <Label>Perfil</Label>
-              <Select value={form.role} onValueChange={(v) => setForm((p) => ({ ...p, role: v as UserRole }))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="gestor_hero">Gestor Hero</SelectItem>
-                  <SelectItem value="gestor_unidade">Gestor Unidade</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Enviar convite
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Edit dialog                                                         */}
-      {/* ------------------------------------------------------------------ */}
-      <Dialog open={!!selectedEditUser} onOpenChange={(open) => { if (!open) setEditUserId(null); }}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Editar Usuario</DialogTitle>
-            <DialogDescription>{selectedEditUser?.email}</DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={saveEdit}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">Nome</Label>
-                <Input id="edit-name" placeholder="Nome completo" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Perfil</Label>
-                <Select value={form.role} onValueChange={(v) => setForm((p) => ({ ...p, role: v as UserRole }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="gestor_hero">Gestor Hero</SelectItem>
-                    <SelectItem value="gestor_unidade">Gestor Unidade</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Controladoria (ctrl) roles — multi-select */}
-            <div className="space-y-2">
-              <Label className="text-sm font-semibold">Acesso Controladoria</Label>
-              {form.role === "admin" ? (
-                <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  Admin DRE tem acesso total a Controladoria automaticamente.
-                </p>
-              ) : (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    Marque quantos acessos forem necessarios. Cada acesso e independente -
-                    e possivel combinar (ex.: Gerente + Aprovacao de Fornecedor).
-                  </p>
-                  <div className="rounded-lg border p-3 space-y-1.5">
-                    {CTRL_ROLE_OPTIONS.map((opt) => {
-                      const isChecked = selectedCtrlRoles.includes(opt.value);
-                      return (
-                        <label
-                          key={opt.value}
-                          className="flex items-start gap-2.5 rounded-md px-2 py-1.5 cursor-pointer hover:bg-accent transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() =>
-                              setSelectedCtrlRoles((prev) =>
-                                prev.includes(opt.value)
-                                  ? prev.filter((r) => r !== opt.value)
-                                  : [...prev, opt.value],
-                              )
-                            }
-                            className="mt-0.5 h-4 w-4 rounded border-gray-300"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium leading-tight">{opt.label}</p>
-                            {opt.hint ? (
-                              <p className="text-xs text-muted-foreground mt-0.5">{opt.hint}</p>
-                            ) : null}
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {selectedCtrlRoles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic">
-                      Nenhum acesso marcado = usuario nao entra no modulo Controladoria.
-                    </p>
-                  ) : null}
-                </>
-              )}
-            </div>
-
-            {/* Segment + Company permissions */}
-            {segments.length > 0 && form.role !== "admin" ? (
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold">Permissoes por Segmento e Unidade</Label>
-                <div className="space-y-2">
-                  {segments.map((seg) => {
-                    const segChecked = selectedSegments.includes(seg.id);
-                    const segCompanies = companiesBySegment.get(seg.id) ?? [];
-
-                    return (
-                      <div key={seg.id} className="rounded-lg border p-3 space-y-2">
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={segChecked}
-                            onChange={() => toggleSegment(seg.id)}
-                            className="h-4 w-4 rounded border-gray-300"
-                          />
-                          {seg.name}
-                        </label>
-
-                        {segChecked && segCompanies.length > 0 ? (
-                          <div className="ml-6 grid grid-cols-2 gap-1">
-                            {segCompanies.map((comp) => (
-                              <label key={comp.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer hover:bg-accent transition-colors">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedCompanies.includes(comp.id)}
-                                  onChange={() => toggleCompany(comp.id)}
-                                  className="h-4 w-4 rounded border-gray-300"
-                                />
-                                {comp.name}
-                              </label>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        {segChecked && segCompanies.length === 0 ? (
-                          <p className="ml-6 text-xs text-muted-foreground">Nenhuma empresa neste segmento.</p>
-                        ) : null}
-                      </div>
-                    );
-                  })}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Nome</TableHead>
+            <TableHead>E-mail</TableHead>
+            <TableHead>Perfil</TableHead>
+            <TableHead>Módulos</TableHead>
+            <TableHead>Setores</TableHead>
+            <TableHead>Unidades</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {users.map((u) => (
+            <TableRow key={u.id}>
+              <TableCell className="font-medium">{u.name || "—"}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{u.email}</TableCell>
+              <TableCell>
+                <Badge className={PROFILE_BADGE_CLASS[u.profile] ?? "bg-slate-100 text-slate-800"}>
+                  {PROFILE_LABEL[u.profile] ?? u.profile}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-xs">
+                {u.profile === "validador_contrato"
+                  ? "(isolado)"
+                  : u.profile === "admin"
+                  ? "Todos"
+                  : [u.can_financeiro && "Financeiro", u.can_compras && "Compras"]
+                      .filter(Boolean)
+                      .join(", ") || "—"}
+              </TableCell>
+              <TableCell className="max-w-[180px] text-xs">
+                {u.sector_ids.length === 0
+                  ? "—"
+                  : u.sector_ids
+                      .map((id) => sectorById.get(id))
+                      .filter(Boolean)
+                      .join(", ")}
+              </TableCell>
+              <TableCell className="max-w-[180px] text-xs">
+                {u.profile === "admin"
+                  ? "Todas"
+                  : u.company_ids.length === 0
+                  ? "—"
+                  : u.company_ids
+                      .map((id) => companyById.get(id))
+                      .filter(Boolean)
+                      .join(", ")}
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant={u.active ? "default" : "outline"}
+                  className={u.active ? "bg-emerald-500 text-white border-transparent" : ""}
+                >
+                  {u.active ? "Ativo" : "Inativo"}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="inline-flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(u)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
+                    {u.active ? <ShieldX className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                  </Button>
                 </div>
-              </div>
-            ) : null}
+              </TableCell>
+            </TableRow>
+          ))}
+          {users.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+                Nenhum usuário cadastrado.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditUserId(null)}>Cancelar</Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Reset password dialog                                               */}
-      {/* ------------------------------------------------------------------ */}
-      <Dialog open={!!resetPasswordUserId} onOpenChange={(open) => { if (!open) { setResetPasswordUserId(null); setNewPassword(""); } }}>
-        <DialogContent className="sm:max-w-md">
+      {/* Invite dialog */}
+      <Dialog open={inviteOpen} onOpenChange={(o) => !o && closeAll()}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Redefinir Senha</DialogTitle>
+            <DialogTitle>Convidar usuário</DialogTitle>
             <DialogDescription>
-              {users.find((u) => u.id === resetPasswordUserId)?.email}
+              Um convite por e-mail é enviado. O usuário define a senha no primeiro acesso.
             </DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={resetPassword}>
-            <div className="space-y-2">
-              <Label htmlFor="new-password">Nova senha</Label>
-              <Input
-                id="new-password"
-                type="password"
-                placeholder="Min. 6 caracteres"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setResetPasswordUserId(null)}>Cancelar</Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </form>
+          <UserForm
+            form={form}
+            error={error}
+            includesEmail
+            companies={companies}
+            sectors={sectors}
+            onChange={updateField}
+            onToggleSector={toggleSector}
+            onToggleCompany={toggleCompany}
+            onSubmit={handleInviteSubmit}
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setInviteOpen(false)} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="submit" form="user-form" disabled={loading}>
+              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+              Enviar convite
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={!!editing} onOpenChange={(o) => !o && closeAll()}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar usuário</DialogTitle>
+            <DialogDescription>
+              {editing?.email}
+              {" — "}
+              alterar perfil/módulos não envia novo convite, só atualiza o acesso.
+            </DialogDescription>
+          </DialogHeader>
+          <UserForm
+            form={form}
+            error={error}
+            includesEmail={false}
+            companies={companies}
+            sectors={sectors}
+            onChange={updateField}
+            onToggleSector={toggleSector}
+            onToggleCompany={toggleCompany}
+            onSubmit={handleEditSubmit}
+          />
+          <DialogFooter className="justify-between">
+            {editing && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => editing && deactivate(editing)}
+                disabled={loading}
+              >
+                Desativar
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={loading}>
+                Cancelar
+              </Button>
+              <Button type="submit" form="user-form" disabled={loading}>
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                Salvar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Inner form ─────────────────────────────────────────────────────────────
+
+function UserForm({
+  form,
+  error,
+  includesEmail,
+  companies,
+  sectors,
+  onChange,
+  onToggleSector,
+  onToggleCompany,
+  onSubmit,
+}: {
+  form: FormState;
+  error: string | null;
+  includesEmail: boolean;
+  companies: SimpleOption[];
+  sectors: SimpleOption[];
+  onChange: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  onToggleSector: (id: string) => void;
+  onToggleCompany: (id: string) => void;
+  onSubmit: (e: FormEvent) => void;
+}) {
+  const showSectors = profileNeedsSectors(form.profile);
+  const showCompanies =
+    form.can_financeiro && form.profile !== "admin" && form.profile !== "validador_contrato";
+  const isValidator = form.profile === "validador_contrato";
+
+  const profileDescription = useMemo(
+    () => PROFILES.find((p) => p.value === form.profile)?.description ?? "",
+    [form.profile],
+  );
+
+  return (
+    <form id="user-form" onSubmit={onSubmit} className="space-y-4">
+      {error && (
+        <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {includesEmail && (
+          <div className="space-y-1.5">
+            <Label htmlFor="user-email">
+              E-mail <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="user-email"
+              type="email"
+              required
+              value={form.email}
+              onChange={(e) => onChange("email", e.target.value)}
+              placeholder="usuario@empresa.com"
+            />
+          </div>
+        )}
+        <div className={`space-y-1.5 ${includesEmail ? "" : "sm:col-span-2"}`}>
+          <Label htmlFor="user-name">
+            Nome <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="user-name"
+            type="text"
+            required
+            value={form.name}
+            onChange={(e) => onChange("name", e.target.value)}
+            placeholder="Nome completo"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>
+          Perfil <span className="text-destructive">*</span>
+        </Label>
+        <Select value={form.profile} onValueChange={(v) => onChange("profile", v as Profile)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROFILES.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{profileDescription}</p>
+      </div>
+
+      {!isValidator && form.profile !== "admin" && (
+        <div className="space-y-1.5">
+          <Label>Módulos visíveis</Label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onChange("can_financeiro", !form.can_financeiro)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                form.can_financeiro
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "hover:bg-muted"
+              }`}
+            >
+              {form.can_financeiro ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Financeiro
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange("can_compras", !form.can_compras)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                form.can_compras
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "hover:bg-muted"
+              }`}
+            >
+              {form.can_compras ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Compras
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Plataforma (Conexões, Usuários, Inteligência) é automática pra admin.
+          </p>
+        </div>
+      )}
+
+      {showSectors && (
+        <div className="space-y-1.5">
+          <Label>
+            Setores <span className="text-destructive">*</span>
+          </Label>
+          <PillMultiSelect
+            options={sectors}
+            selected={form.sector_ids}
+            onToggle={onToggleSector}
+            emptyMessage="Nenhum setor cadastrado."
+          />
+        </div>
+      )}
+
+      {showCompanies && (
+        <div className="space-y-1.5">
+          <Label>
+            Unidades (acesso ao Financeiro) <span className="text-destructive">*</span>
+          </Label>
+          <PillMultiSelect
+            options={companies}
+            selected={form.company_ids}
+            onToggle={onToggleCompany}
+            emptyMessage="Nenhuma empresa cadastrada."
+          />
+        </div>
+      )}
+
+      {form.profile === "admin" && (
+        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+          Admin vê <strong>todas as unidades</strong> e tem acesso ao módulo Plataforma
+          (Conexões, Usuários, Inteligência) automaticamente.
+        </p>
+      )}
+      {isValidator && (
+        <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
+          Validador de Contrato é um perfil <strong>isolado</strong>: só enxerga a tela de
+          Validação de Contratos. Sem setores ou unidades.
+        </p>
+      )}
+    </form>
+  );
+}
+
+function PillMultiSelect({
+  options,
+  selected,
+  onToggle,
+  emptyMessage,
+}: {
+  options: SimpleOption[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  emptyMessage: string;
+}) {
+  if (options.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyMessage}</p>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((opt) => {
+        const active = selected.includes(opt.id);
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onToggle(opt.id)}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              active
+                ? "border-primary bg-primary/10 text-primary"
+                : "hover:bg-muted"
+            }`}
+          >
+            {active && <Check className="h-3 w-3" />}
+            {opt.name}
+          </button>
+        );
+      })}
     </div>
   );
 }

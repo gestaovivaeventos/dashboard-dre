@@ -36,12 +36,15 @@ export async function getSessionContext(): Promise<SessionContext> {
   const empty: SessionContext = { supabase, user: null, profile: null, modules: null };
   if (!user) return empty;
 
-  // Busca perfil + ctrl role em uma query
+  // Busca perfil + ctrl role + setores + empresas em uma query
   const { data: profileRow } = await supabase
     .from("users")
     .select(`
       id, email, name, role, company_id, active, created_at, contracts_only,
-      user_module_roles!user_module_roles_user_id_fkey(role, module)
+      profile, can_financeiro, can_compras,
+      user_module_roles!user_module_roles_user_id_fkey(role, module),
+      user_sectors(sector_id),
+      user_company_access(company_id)
     `)
     .eq("id", user.id)
     .maybeSingle();
@@ -102,34 +105,121 @@ export async function getSessionContext(): Promise<SessionContext> {
     return empty;
   }
 
-  const dreRole = profileRow.role as DreRole;
+  // ── New unified model ────────────────────────────────────────────────────
+  const userProfile = (profileRow.profile ?? null) as
+    | "admin"
+    | "contas_a_pagar"
+    | "gerente"
+    | "diretor"
+    | "validador_contrato"
+    | "solicitante"
+    | null;
+  const canFinanceiro = Boolean(profileRow.can_financeiro);
+  const canCompras = Boolean(profileRow.can_compras);
 
-  // Coleta TODAS as linhas de user_module_roles para module='ctrl'.
-  // Admin DRE recebe ['admin'] implicitamente (nao persistido).
-  const rawCtrlRoles = (
-    profileRow.user_module_roles as Array<{ role: string; module: string }> | null
-  )?.filter((r) => r.module === "ctrl").map((r) => r.role as CtrlRole) ?? [];
+  const sectorIds = (
+    (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
+  ).map((s) => s.sector_id);
 
-  const ctrlRoles: CtrlRole[] = dreRole === "admin" ? ["admin"] : rawCtrlRoles;
+  const companyIds = (
+    (profileRow.user_company_access as Array<{ company_id: string }> | null) ?? []
+  ).map((c) => c.company_id);
+
+  // ── Compat layer: derive legacy fields from the new model ────────────────
+  // Legacy code reads profile.role / profile.ctrl_roles / profile.contracts_only
+  // — we keep those filled while the codebase migrates. New code should
+  // consume `profile.profile` directly.
+  const dreRole: DreRole = deriveDreRole(userProfile, profileRow.role as DreRole | null);
+  const ctrlRoles: CtrlRole[] = deriveCtrlRoles(userProfile, canCompras, profileRow.user_module_roles as Array<{ role: string; module: string }> | null);
 
   const profile: UnifiedProfile = {
     id: profileRow.id,
     email: profileRow.email,
     name: profileRow.name,
-    role: dreRole,
-    ctrl_roles: ctrlRoles,
-    company_id: profileRow.company_id,
+    profile: userProfile ?? "solicitante", // fallback never expected post-backfill
+    can_financeiro: canFinanceiro,
+    can_compras: canCompras,
+    sector_ids: sectorIds,
+    company_ids: companyIds,
     active: profileRow.active,
     created_at: profileRow.created_at,
-    contracts_only: Boolean(profileRow.contracts_only),
+    // ── legacy compat ──
+    role: dreRole,
+    ctrl_roles: ctrlRoles,
+    company_id: profileRow.company_id ?? companyIds[0] ?? null,
+    contracts_only: userProfile === "validador_contrato",
   };
 
   const modules: ModuleAccess = {
-    dre: { role: dreRole, companyId: profileRow.company_id },
+    dre: canFinanceiro ? { role: dreRole, companyId: profile.company_id } : null,
     ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
   };
 
   return { supabase, user, profile, modules };
+}
+
+// ─── Compat helpers ──────────────────────────────────────────────────────────
+
+function deriveDreRole(
+  profile: UserProfileEnum | null,
+  fallback: DreRole | null,
+): DreRole {
+  if (!profile) return fallback ?? "gestor_unidade";
+  switch (profile) {
+    case "admin":
+      return "admin";
+    case "diretor":
+      return "gestor_hero";
+    case "contas_a_pagar":
+      return "gestor_hero";
+    case "gerente":
+      return "gestor_unidade";
+    case "solicitante":
+      return "gestor_unidade";
+    case "validador_contrato":
+      // contracts_only users had a 'gestor_unidade' role in the legacy model;
+      // they don't really use DRE but we keep a value so old checks don't fail.
+      return "gestor_unidade";
+  }
+}
+
+type UserProfileEnum =
+  | "admin"
+  | "contas_a_pagar"
+  | "gerente"
+  | "diretor"
+  | "validador_contrato"
+  | "solicitante";
+
+function deriveCtrlRoles(
+  profile: UserProfileEnum | null,
+  canCompras: boolean,
+  existingRows: Array<{ role: string; module: string }> | null,
+): CtrlRole[] {
+  if (!profile) {
+    // Fall back to whatever exists in user_module_roles (pre-migration data)
+    return (existingRows ?? [])
+      .filter((r) => r.module === "ctrl")
+      .map((r) => r.role as CtrlRole);
+  }
+  if (profile === "validador_contrato") return [];
+  if (!canCompras && profile !== "admin") return [];
+
+  switch (profile) {
+    case "admin":
+      return ["admin"];
+    case "contas_a_pagar":
+      // 'contas_a_pagar' now absorbs csc + aprovacao_fornecedor permissions.
+      return ["contas_a_pagar", "csc", "aprovacao_fornecedor"];
+    case "diretor":
+      return ["diretor"];
+    case "gerente":
+      return ["gerente"];
+    case "solicitante":
+      return ["solicitante"];
+    default:
+      return [];
+  }
 }
 
 /** Alias retrocompatível — código existente continua funcionando sem alteração */

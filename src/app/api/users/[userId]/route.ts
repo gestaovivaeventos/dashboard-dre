@@ -2,17 +2,15 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { CtrlRole, UserRole } from "@/lib/supabase/types";
+import type { UserProfileType } from "@/lib/supabase/types";
 
-// Valores aceitos para ctrl_roles no PATCH. 'admin' NAO entra aqui - e derivado
-// do users.role == 'admin' no getSessionContext, nao persistido em user_module_roles.
-const ASSIGNABLE_CTRL_ROLES: ReadonlyArray<Exclude<CtrlRole, "admin">> = [
-  "solicitante",
+const ASSIGNABLE_PROFILES: ReadonlyArray<UserProfileType> = [
+  "admin",
+  "contas_a_pagar",
   "gerente",
   "diretor",
-  "csc",
-  "contas_a_pagar",
-  "aprovacao_fornecedor",
+  "validador_contrato",
+  "solicitante",
 ];
 
 interface Params {
@@ -26,94 +24,100 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
-  if (profile.role !== "admin") {
+  if (profile.profile !== "admin") {
     return NextResponse.json({ error: "Acesso restrito ao admin." }, { status: 403 });
   }
 
   const body = (await request.json()) as {
     name?: string;
-    role?: UserRole;
-    company_id?: string | null;
+    profile?: UserProfileType;
+    can_financeiro?: boolean;
+    can_compras?: boolean;
     active?: boolean;
-    // [] = remover acesso ao modulo ctrl; undefined = nao alterar
-    ctrl_roles?: CtrlRole[];
+    /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
+    sector_ids?: string[];
+    /** Lista de IDs de empresas (unidades). [] = limpa. undefined = não altera. */
+    company_ids?: string[];
   };
 
-  // Validacao do ctrl_roles antes de qualquer update
-  if (body.ctrl_roles !== undefined) {
-    if (!Array.isArray(body.ctrl_roles)) {
-      return NextResponse.json({ error: "ctrl_roles deve ser um array." }, { status: 400 });
-    }
-    const invalid = body.ctrl_roles.find(
-      (r) => !ASSIGNABLE_CTRL_ROLES.includes(r as Exclude<CtrlRole, "admin">),
+  if (body.profile !== undefined && !ASSIGNABLE_PROFILES.includes(body.profile)) {
+    return NextResponse.json(
+      { error: `profile inválido. Use: ${ASSIGNABLE_PROFILES.join(", ")}.` },
+      { status: 400 },
     );
-    if (invalid) {
-      return NextResponse.json(
-        { error: `ctrl_roles contem valor invalido: "${invalid}". Use apenas: ${ASSIGNABLE_CTRL_ROLES.join(", ")}.` },
-        { status: 400 },
-      );
-    }
-  }
-
-  const patch: Record<string, unknown> = {};
-  if (typeof body.name === "string") patch.name = body.name.trim();
-  if (body.role) patch.role = body.role;
-  if (body.company_id !== undefined) patch.company_id = body.company_id;
-  if (body.active !== undefined) patch.active = body.active;
-
-  // company_id is optional for gestor_unidade — access is now managed via
-  // segment/company permission tables (user_segment_access, user_company_access)
-  if (body.role && body.role !== "gestor_unidade") {
-    patch.company_id = null;
   }
 
   const adminClient = createAdminClient();
+
+  // ── Patch users row ──
+  const patch: Record<string, unknown> = {};
+  if (typeof body.name === "string") patch.name = body.name.trim();
+  if (body.profile !== undefined) {
+    patch.profile = body.profile;
+    // Mantém o flag legado contracts_only em sincronia
+    patch.contracts_only = body.profile === "validador_contrato";
+  }
+  if (body.can_financeiro !== undefined) patch.can_financeiro = body.can_financeiro;
+  if (body.can_compras !== undefined) patch.can_compras = body.can_compras;
+  if (body.active !== undefined) patch.active = body.active;
+
+  // Validador de contrato nunca tem módulos marcados (não enxerga nada além)
+  if (body.profile === "validador_contrato") {
+    patch.can_financeiro = false;
+    patch.can_compras = false;
+  }
 
   if (Object.keys(patch).length > 0) {
     const { data, error } = await adminClient
       .from("users")
       .update(patch)
       .eq("id", params.userId)
-      .select("id, role, name, company_id");
+      .select("id");
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     if (!data || data.length === 0) {
-      return NextResponse.json({ error: "Usuario nao encontrado." }, { status: 404 });
+      return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
   }
 
-  // Sincroniza ctrl_roles em user_module_roles (module='ctrl') quando informado.
-  // Estrategia: apaga todas as linhas do usuario no modulo e insere o novo conjunto.
-  if (body.ctrl_roles !== undefined) {
-    const { error: delError } = await adminClient
-      .from("user_module_roles")
+  // ── Sync sectors ──
+  if (body.sector_ids !== undefined) {
+    const { error: delErr } = await adminClient
+      .from("user_sectors")
       .delete()
-      .eq("user_id", params.userId)
-      .eq("module", "ctrl");
-    if (delError) {
-      return NextResponse.json({ error: delError.message }, { status: 400 });
-    }
+      .eq("user_id", params.userId);
+    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 400 });
 
-    // Dedup + filtro 'admin' (derivado, nao deve ser persistido).
-    const toInsert = Array.from(new Set(body.ctrl_roles.filter((r) => r !== "admin")));
-    if (toInsert.length > 0) {
-      const { error: insertError } = await adminClient
-        .from("user_module_roles")
-        .insert(
-          toInsert.map((role) => ({
-            user_id: params.userId,
-            module: "ctrl",
-            role,
-            granted_by: profile.id,
-          })),
-        );
-      if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 400 });
-      }
+    const sectorIds = Array.from(new Set(body.sector_ids));
+    if (sectorIds.length > 0) {
+      const { error: insErr } = await adminClient.from("user_sectors").insert(
+        sectorIds.map((sectorId) => ({ user_id: params.userId, sector_id: sectorId })),
+      );
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
     }
+  }
+
+  // ── Sync companies (unidades) ──
+  if (body.company_ids !== undefined) {
+    const { error: delErr } = await adminClient
+      .from("user_company_access")
+      .delete()
+      .eq("user_id", params.userId);
+    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 400 });
+
+    const companyIds = Array.from(new Set(body.company_ids));
+    if (companyIds.length > 0) {
+      const { error: insErr } = await adminClient.from("user_company_access").insert(
+        companyIds.map((companyId) => ({ user_id: params.userId, company_id: companyId })),
+      );
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
+    }
+  }
+
+  // ── Sync the legacy `role` column so old code keeps working ──
+  if (body.profile !== undefined) {
+    const legacyRole = deriveLegacyDreRole(body.profile);
+    await adminClient.from("users").update({ role: legacyRole }).eq("id", params.userId);
   }
 
   return NextResponse.json({ ok: true });
@@ -124,14 +128,15 @@ export async function DELETE(_: Request, { params }: Params) {
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
-  if (profile.role !== "admin") {
+  if (profile.profile !== "admin") {
     return NextResponse.json({ error: "Acesso restrito ao admin." }, { status: 403 });
   }
 
-  const { error } = await supabase.from("users").update({ active: false }).eq("id", params.userId);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
-  }
+  const { error } = await supabase
+    .from("users")
+    .update({ active: false })
+    .eq("id", params.userId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   try {
     const adminClient = createAdminClient();
@@ -141,4 +146,10 @@ export async function DELETE(_: Request, { params }: Params) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+function deriveLegacyDreRole(p: UserProfileType): "admin" | "gestor_hero" | "gestor_unidade" {
+  if (p === "admin") return "admin";
+  if (p === "diretor" || p === "contas_a_pagar") return "gestor_hero";
+  return "gestor_unidade";
 }

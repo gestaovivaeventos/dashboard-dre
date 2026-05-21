@@ -1,7 +1,123 @@
-import type { DreRole, CtrlRole } from "@/lib/supabase/types";
+import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 /** Alias retrocompatível */
 export type { DreRole as UserRole };
+
+// ─── Novo modelo: acesso por perfil unificado ───────────────────────────────
+
+/**
+ * Para onde mandar o usuário no pós-login (ou quando tenta acessar uma rota
+ * proibida). A regra de prioridade:
+ *   1. Validador de contrato → /contratos (sempre)
+ *   2. Sem nenhum módulo → /pendente (caso degenerado)
+ *   3. Tem Financeiro → /dashboard
+ *   4. Só Compras → /ctrl/requisicoes
+ *   5. Admin sem módulos marcados → /dashboard como fallback
+ */
+export function defaultLandingFor(
+  profile: UserProfileType,
+  canFinanceiro: boolean,
+  canCompras: boolean,
+): string {
+  if (profile === "validador_contrato") return "/contratos";
+  if (profile === "admin") return canFinanceiro || !canCompras ? "/dashboard" : "/ctrl/requisicoes";
+  if (canFinanceiro) return "/dashboard";
+  if (canCompras) return "/ctrl/requisicoes";
+  return "/pendente";
+}
+
+/**
+ * Decide se o usuário pode acessar uma URL com base no novo modelo.
+ *
+ * - Validador de contrato: só /contratos
+ * - Admin: tudo
+ * - Demais: dependem do módulo da rota (financeiro vs compras vs plataforma)
+ *   E do perfil (gerente/diretor/solicitante/contas_a_pagar) pra páginas
+ *   sensíveis dentro de Compras.
+ */
+export function canAccessPathByProfile(
+  pathname: string,
+  profile: UserProfileType,
+  canFinanceiro: boolean,
+  canCompras: boolean,
+): boolean {
+  // Validador de contrato: ilha. Só /contratos.
+  if (profile === "validador_contrato") {
+    return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
+  // Admin: tudo.
+  if (profile === "admin") return true;
+
+  // /contratos é restrito a admin + validador_contrato; demais perfis: 403.
+  if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
+    return false;
+  }
+
+  // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios
+  // exige admin.
+  if (
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/usuarios") ||
+    pathname.startsWith("/menu-lab")
+  ) {
+    return false;
+  }
+
+  // Rotas do módulo Compras (CTRL).
+  if (pathname.startsWith("/ctrl")) {
+    if (!canCompras) return false;
+    // Aprovações: gerente/diretor/contas_a_pagar/admin
+    if (pathname.startsWith("/ctrl/aprovacoes")) {
+      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Contas a pagar
+    if (pathname.startsWith("/ctrl/contas-a-pagar")) {
+      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Fornecedores (admin do CTRL)
+    if (pathname.startsWith("/ctrl/admin/fornecedores")) {
+      return profile === "contas_a_pagar";
+    }
+    // Demais áreas administrativas do CTRL
+    if (pathname.startsWith("/ctrl/admin")) {
+      return profile === "contas_a_pagar";
+    }
+    // Padrão dentro de /ctrl (requisicoes, notificações, etc.)
+    return true;
+  }
+
+  // Rotas do módulo Financeiro (DRE).
+  // Áreas que requerem admin já caíram acima. O que sobra são telas de
+  // visualização que qualquer perfil com can_financeiro pode acessar.
+  if (
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/fluxo-de-caixa") ||
+    pathname.startsWith("/budget-forecast") ||
+    pathname.startsWith("/kpis") ||
+    pathname.startsWith("/home") ||
+    pathname.startsWith("/s/") ||
+    pathname.startsWith("/conexoes") ||
+    pathname.startsWith("/mapeamento") ||
+    pathname.startsWith("/configuracoes")
+  ) {
+    if (!canFinanceiro) return false;
+    // Mapeamento e Configurações continuam admin-only — caíram acima
+    // se não fosse admin. Aqui só vê quem tem financeiro.
+    if (pathname.startsWith("/mapeamento") || pathname.startsWith("/configuracoes")) {
+      return false;
+    }
+    return true;
+  }
+
+  // Default permissivo pra rotas não-mapeadas (ex: /pendente, /loading)
+  return true;
+}
+
+// ─── Legado: SEGMENT_SUB_RULES / DRE_RULES / CTRL_RULES ────────────────────
+// Mantidos para o código antigo que ainda chama canAccessPath(role, ...).
+// A nova lógica vive em canAccessPathByProfile. Quando todos os callers
+// migrarem, isso some.
 
 // ─── Regras do módulo DRE ─────────────────────────────────────────────────────
 
