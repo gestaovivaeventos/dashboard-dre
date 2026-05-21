@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Banknote, CheckCircle2, Contact, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
 
 import { approveSupplier, rejectSupplier, updateSupplier } from "@/lib/ctrl/actions/suppliers";
+import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
 
 interface SupplierRow {
   id: string;
@@ -14,6 +15,7 @@ interface SupplierRow {
   omie_id: number | null;
   from_omie: boolean;
   chave_pix: string | null;
+  pix_key_type: string | null;
   banco: string | null;
   agencia: string | null;
   conta_corrente: string | null;
@@ -105,6 +107,7 @@ export function FornecedoresTable({
       email: editForm.email,
       phone: editForm.phone,
       chave_pix: editForm.chave_pix,
+      pix_key_type: editForm.pix_key_type,
       banco: editForm.banco,
       agencia: editForm.agencia,
       conta_corrente: editForm.conta_corrente,
@@ -519,8 +522,38 @@ export function FornecedoresTable({
                 </header>
                 {editMode ? (
                   <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
-                    <EditField label="Chave PIX" value={editForm.chave_pix} onChange={(v) => setEditForm({ ...editForm, chave_pix: v })} mono />
-                    <EditField label="Banco" value={editForm.banco} onChange={(v) => setEditForm({ ...editForm, banco: v })} />
+                    <EditSelect
+                      label="Tipo da chave PIX"
+                      value={editForm.pix_key_type}
+                      onChange={(v) => setEditForm({ ...editForm, pix_key_type: v })}
+                      options={[
+                        { value: "", label: "Selecione" },
+                        ...PIX_KEY_TYPES.map((p) => ({ value: p.value, label: p.label })),
+                      ]}
+                    />
+                    <EditField
+                      label="Chave PIX"
+                      value={editForm.chave_pix}
+                      onChange={(v) => setEditForm({ ...editForm, chave_pix: v })}
+                      mono
+                    />
+                    <EditSelect
+                      label="Banco"
+                      value={editForm.banco}
+                      onChange={(v) => setEditForm({ ...editForm, banco: v })}
+                      fullWidth
+                      options={[
+                        { value: "", label: "Selecione o banco" },
+                        // Mantém o valor armazenado mesmo se não estiver na lista atual
+                        ...(editForm.banco && !BANCOS_BR.some((b) => formatBanco(b) === editForm.banco)
+                          ? [{ value: editForm.banco, label: editForm.banco }]
+                          : []),
+                        ...BANCOS_BR.map((b) => ({
+                          value: formatBanco(b),
+                          label: formatBanco(b),
+                        })),
+                      ]}
+                    />
                     <EditField label="Agência" value={editForm.agencia} onChange={(v) => setEditForm({ ...editForm, agencia: v })} mono />
                     <EditField label="Conta corrente" value={editForm.conta_corrente} onChange={(v) => setEditForm({ ...editForm, conta_corrente: v })} mono />
                     <EditField label="Titular" value={editForm.titular_banco} onChange={(v) => setEditForm({ ...editForm, titular_banco: v })} />
@@ -547,6 +580,15 @@ export function FornecedoresTable({
                       </p>
                     ) : (
                       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 text-sm">
+                        <DataField
+                          label="Tipo Chave PIX"
+                          value={
+                            detailSupplier.pix_key_type
+                              ? PIX_KEY_TYPES.find((p) => p.value === detailSupplier.pix_key_type)?.label ??
+                                detailSupplier.pix_key_type
+                              : null
+                          }
+                        />
                         <DataField label="Chave PIX" value={detailSupplier.chave_pix} mono />
                         <DataField label="Banco" value={detailSupplier.banco} />
                         <DataField label="Agência" value={detailSupplier.agencia} mono />
@@ -800,6 +842,7 @@ interface EditFormState {
   email: string;
   phone: string;
   chave_pix: string;
+  pix_key_type: string;
   banco: string;
   agencia: string;
   conta_corrente: string;
@@ -815,6 +858,7 @@ function emptyEditForm(): EditFormState {
     email: "",
     phone: "",
     chave_pix: "",
+    pix_key_type: "",
     banco: "",
     agencia: "",
     conta_corrente: "",
@@ -831,6 +875,7 @@ function toEditForm(s: SupplierRow): EditFormState {
     email: s.email ?? "",
     phone: s.phone ?? "",
     chave_pix: s.chave_pix ?? "",
+    pix_key_type: s.pix_key_type ?? "",
     banco: s.banco ?? "",
     agencia: s.agencia ?? "",
     conta_corrente: s.conta_corrente ?? "",
@@ -845,14 +890,16 @@ function EditField({
   value,
   onChange,
   mono,
+  fullWidth,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   mono?: boolean;
+  fullWidth?: boolean;
 }) {
   return (
-    <div className="space-y-1">
+    <div className={`space-y-1 ${fullWidth ? "sm:col-span-2" : ""}`}>
       <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </label>
@@ -864,6 +911,37 @@ function EditField({
           mono ? "font-mono" : ""
         }`}
       />
+    </div>
+  );
+}
+
+function EditSelect({
+  label,
+  value,
+  onChange,
+  options,
+  fullWidth,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ value: string; label: string }>;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div className={`space-y-1 ${fullWidth ? "sm:col-span-2" : ""}`}>
+      <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
     </div>
   );
 }

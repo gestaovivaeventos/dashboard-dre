@@ -98,6 +98,7 @@ export async function updateSupplier(
     email?: string | null;
     phone?: string | null;
     chave_pix?: string | null;
+    pix_key_type?: string | null;
     banco?: string | null;
     agencia?: string | null;
     conta_corrente?: string | null;
@@ -134,6 +135,7 @@ export async function updateSupplier(
   if (data.email !== undefined) payload.email = data.email?.trim() || null;
   if (data.phone !== undefined) payload.phone = data.phone?.trim() || null;
   if (data.chave_pix !== undefined) payload.chave_pix = data.chave_pix?.trim() || null;
+  if (data.pix_key_type !== undefined) payload.pix_key_type = data.pix_key_type?.trim() || null;
   if (data.banco !== undefined) payload.banco = data.banco?.trim() || null;
   if (data.agencia !== undefined) payload.agencia = data.agencia?.trim() || null;
   if (data.conta_corrente !== undefined) payload.conta_corrente = data.conta_corrente?.trim() || null;
@@ -157,6 +159,7 @@ export async function createSupplier(data: {
   email?: string;
   phone?: string;
   chave_pix?: string;
+  pix_key_type?: string;
   banco?: string;
   agencia?: string;
   conta_corrente?: string;
@@ -184,6 +187,7 @@ export async function createSupplier(data: {
       email: data.email?.trim() || null,
       phone: data.phone?.trim() || null,
       chave_pix: data.chave_pix?.trim() || null,
+      pix_key_type: data.pix_key_type?.trim() || null,
       banco: data.banco?.trim() || null,
       agencia: data.agencia?.trim() || null,
       conta_corrente: data.conta_corrente?.trim() || null,

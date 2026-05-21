@@ -16,7 +16,7 @@ async function getData() {
       .from("ctrl_suppliers")
       .select(
         `id, name, cnpj_cpf, email, phone, omie_id, from_omie,
-         chave_pix, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao,
+         chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao,
          status, rejection_reason, created_at, approved_at,
          approver:users!ctrl_suppliers_approved_by_fkey(name, email),
          ctrl_supplier_expense_types(expense_type_id)`,
@@ -36,6 +36,7 @@ async function getData() {
       omie_id: number | null;
       from_omie: boolean | null;
       chave_pix: string | null;
+      pix_key_type: string | null;
       banco: string | null;
       agencia: string | null;
       conta_corrente: string | null;
@@ -106,6 +107,7 @@ export default async function FornecedoresPage() {
               omie_id: s.omie_id,
               from_omie: s.from_omie ?? false,
               chave_pix: s.chave_pix,
+              pix_key_type: s.pix_key_type,
               banco: s.banco,
               agencia: s.agencia,
               conta_corrente: s.conta_corrente,
