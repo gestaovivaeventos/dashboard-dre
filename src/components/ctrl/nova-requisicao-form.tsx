@@ -72,10 +72,36 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   // ── Derived values ───────────────────────────────────────────────────────────
 
+  // Brazilian currency mask: digits flow in as cents from the right.
+  // "1" → "0,01"   "12345" → "123,45"   "1234567" → "12.345,67"
+  function formatBRL(digitsOnly: string): string {
+    if (!digitsOnly) return "";
+    const padded = digitsOnly.padStart(3, "0");
+    const intRaw = padded.slice(0, -2).replace(/^0+/, "") || "0";
+    const decPart = padded.slice(-2);
+    const intWithSep = intRaw.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${intWithSep},${decPart}`;
+  }
+
   const parsedAmount = useMemo(() => {
-    const n = parseFloat(amountStr.replace(",", "."));
+    // amountStr is in BR format (1.234,56) — strip thousand sep, swap decimal.
+    const cleaned = amountStr.replace(/\./g, "").replace(",", ".");
+    const n = parseFloat(cleaned);
     return isNaN(n) ? 0 : n;
   }, [amountStr]);
+
+  // Minimum allowed due date. If now > 12:00, the earliest acceptable
+  // date is tomorrow (operations team can't process same-day requests
+  // submitted after lunch).
+  const minDueDate = useMemo(() => {
+    const base = new Date(now);
+    if (base.getHours() >= 12) base.setDate(base.getDate() + 1);
+    const yyyy = base.getFullYear();
+    const mm = String(base.getMonth() + 1).padStart(2, "0");
+    const dd = String(base.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) ?? null,
@@ -175,6 +201,19 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canSubmit) return;
+
+    // Defensive due-date check: HTML `min` is enforced by most browsers but
+    // some mobile webviews ignore it. Belt + suspenders.
+    if (dueDate && dueDate < minDueDate) {
+      const isAfterNoon = new Date(now).getHours() >= 12;
+      setError(
+        isAfterNoon
+          ? "Como o horário já passou das 12:00, a data de vencimento deve ser a partir de amanhã."
+          : "A data de vencimento não pode ser anterior a hoje.",
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
@@ -278,15 +317,18 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           </select>
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="expense_type_id" className={LABEL_CLS}>Tipo de Despesa</label>
+          <label htmlFor="expense_type_id" className={LABEL_CLS}>
+            Tipo de Despesa <span className="text-destructive">*</span>
+          </label>
           <select
             id="expense_type_id"
             name="expense_type_id"
+            required
             value={expenseTypeId}
             onChange={(e) => setExpenseTypeId(e.target.value)}
             className={INPUT_CLS}
           >
-            <option value="">Selecione (opcional)</option>
+            <option value="">Selecione o tipo de despesa</option>
             {expenseTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
@@ -294,15 +336,18 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
       {/* Fornecedor */}
       <div className="space-y-1.5">
-        <label htmlFor="supplier_id" className={LABEL_CLS}>Fornecedor</label>
+        <label htmlFor="supplier_id" className={LABEL_CLS}>
+          Fornecedor <span className="text-destructive">*</span>
+        </label>
         <select
           id="supplier_id"
           name="supplier_id"
+          required
           value={selectedSupplierId}
           onChange={(e) => handleSupplierChange(e.target.value)}
           className={INPUT_CLS}
         >
-          <option value="">Sem fornecedor</option>
+          <option value="">Selecione um fornecedor</option>
           {suppliers.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}{s.cnpj_cpf ? ` — ${s.cnpj_cpf}` : ""}
@@ -338,20 +383,27 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             id="amount"
             name="amount"
             type="text"
-            inputMode="decimal"
+            inputMode="numeric"
             required
             placeholder="0,00"
             value={amountStr}
-            onChange={(e) => setAmountStr(e.target.value)}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, "");
+              setAmountStr(formatBRL(digits));
+            }}
             className={INPUT_CLS}
           />
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="due_date" className={LABEL_CLS}>Data de Vencimento</label>
+          <label htmlFor="due_date" className={LABEL_CLS}>
+            Data de Vencimento <span className="text-destructive">*</span>
+          </label>
           <input
             id="due_date"
             name="due_date"
             type="date"
+            required
+            min={minDueDate}
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             onClick={(e) => {
