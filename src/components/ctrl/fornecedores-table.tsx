@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Banknote, CheckCircle2, Contact, Loader2, Tags, XCircle } from "lucide-react";
+import { Banknote, CheckCircle2, Contact, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
 
-import { approveSupplier, rejectSupplier } from "@/lib/ctrl/actions/suppliers";
+import { approveSupplier, rejectSupplier, updateSupplier } from "@/lib/ctrl/actions/suppliers";
 
 interface SupplierRow {
   id: string;
@@ -58,6 +58,69 @@ export function FornecedoresTable({
 
   const [approveModal, setApproveModal] = useState<SupplierRow | null>(null);
   const [selectedExpenseTypes, setSelectedExpenseTypes] = useState<Set<string>>(new Set());
+
+  // Detail / edit modal — opened when the user clicks a row.
+  const [detailSupplier, setDetailSupplier] = useState<SupplierRow | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState<EditFormState>(emptyEditForm());
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  function openDetail(supplier: SupplierRow) {
+    setDetailSupplier(supplier);
+    setEditMode(false);
+    setEditError(null);
+    setEditForm(toEditForm(supplier));
+  }
+
+  function closeDetail() {
+    setDetailSupplier(null);
+    setEditMode(false);
+    setEditError(null);
+  }
+
+  function startEdit() {
+    if (!detailSupplier) return;
+    setEditForm(toEditForm(detailSupplier));
+    setEditMode(true);
+    setEditError(null);
+  }
+
+  async function saveEdit() {
+    if (!detailSupplier) return;
+    if (!editForm.name.trim()) {
+      setEditError("O nome do fornecedor é obrigatório.");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    const result = await updateSupplier(detailSupplier.id, {
+      name: editForm.name,
+      cnpj_cpf: editForm.cnpj_cpf,
+      email: editForm.email,
+      phone: editForm.phone,
+      chave_pix: editForm.chave_pix,
+      banco: editForm.banco,
+      agencia: editForm.agencia,
+      conta_corrente: editForm.conta_corrente,
+      titular_banco: editForm.titular_banco,
+      doc_titular: editForm.doc_titular,
+      transf_padrao: editForm.transf_padrao,
+    });
+    setEditSaving(false);
+    if ("error" in result && result.error) {
+      setEditError(result.error);
+      return;
+    }
+    setFeedback({
+      kind: "success",
+      msg: "Fornecedor atualizado e marcado como pendente para nova aprovação.",
+    });
+    closeDetail();
+    startTransition(() => {
+      // page-level revalidatePath in the action takes care of the data refresh
+    });
+  }
 
   const [activeTab, setActiveTab] = useState<TabKey>("pendente");
 
@@ -203,7 +266,11 @@ export function FornecedoresTable({
                 .map((id) => expenseTypeMap.get(id))
                 .filter(Boolean) as string[];
               return (
-                <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <tr
+                  key={s.id}
+                  className="cursor-pointer border-b last:border-0 hover:bg-muted/30 transition-colors"
+                  onClick={() => openDetail(s)}
+                >
                   <td className="px-4 py-3 font-medium">{s.name}</td>
                   <td className="px-4 py-3 font-mono text-muted-foreground">{s.cnpj_cpf ?? "—"}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -237,7 +304,10 @@ export function FornecedoresTable({
                     )}
                   </td>
                   {canApprove ? (
-                    <td className="px-4 py-3">
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {isPendente ? (
                         <div className="flex justify-end gap-2">
                           <button
@@ -275,6 +345,211 @@ export function FornecedoresTable({
         </table>
       </div>
       )}
+
+      {/* Detail / edit modal — opens on row click */}
+      {detailSupplier ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !editSaving && closeDetail()}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl border bg-background shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b px-6 py-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-semibold">{detailSupplier.name}</h3>
+                <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <StatusBadge status={detailSupplier.status} />
+                  {detailSupplier.from_omie ? (
+                    <span>Origem Omie (ID {detailSupplier.omie_id ?? "—"})</span>
+                  ) : (
+                    <span>Cadastro manual</span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDetail}
+                disabled={editSaving}
+                aria-label="Fechar"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="max-h-[65vh] overflow-y-auto bg-muted/20 px-6 py-5 space-y-4">
+              {editError && (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {editError}
+                </p>
+              )}
+
+              {/* Dados cadastrais */}
+              <section className="rounded-lg border bg-background shadow-sm">
+                <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                  <Contact className="h-4 w-4 text-primary" />
+                  <h4 className="text-sm font-semibold">Dados cadastrais</h4>
+                </header>
+                {editMode ? (
+                  <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                    <EditField label="Nome *" value={editForm.name} onChange={(v) => setEditForm({ ...editForm, name: v })} />
+                    <EditField label="CNPJ/CPF" value={editForm.cnpj_cpf} onChange={(v) => setEditForm({ ...editForm, cnpj_cpf: v })} mono />
+                    <EditField label="E-mail" value={editForm.email} onChange={(v) => setEditForm({ ...editForm, email: v })} />
+                    <EditField label="Telefone" value={editForm.phone} onChange={(v) => setEditForm({ ...editForm, phone: v })} />
+                  </div>
+                ) : (
+                  <dl className="grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2 text-sm">
+                    <DataField label="Nome" value={detailSupplier.name} />
+                    <DataField label="CNPJ/CPF" value={detailSupplier.cnpj_cpf} mono />
+                    <DataField label="E-mail" value={detailSupplier.email} />
+                    <DataField label="Telefone" value={detailSupplier.phone} />
+                    <DataField
+                      label="Cadastrado em"
+                      value={new Date(detailSupplier.created_at).toLocaleDateString("pt-BR")}
+                    />
+                    {detailSupplier.status === "aprovado" && detailSupplier.approved_at && (
+                      <DataField
+                        label="Aprovado em"
+                        value={`${new Date(detailSupplier.approved_at).toLocaleDateString("pt-BR")} por ${detailSupplier.approver_name ?? "—"}`}
+                      />
+                    )}
+                    {detailSupplier.status === "rejeitado" && detailSupplier.rejection_reason && (
+                      <DataField label="Motivo da rejeição" value={detailSupplier.rejection_reason} />
+                    )}
+                  </dl>
+                )}
+              </section>
+
+              {/* Dados bancários */}
+              <section className="rounded-lg border bg-background shadow-sm">
+                <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                  <Banknote className="h-4 w-4 text-primary" />
+                  <h4 className="text-sm font-semibold">Dados bancários</h4>
+                </header>
+                {editMode ? (
+                  <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                    <EditField label="Chave PIX" value={editForm.chave_pix} onChange={(v) => setEditForm({ ...editForm, chave_pix: v })} mono />
+                    <EditField label="Banco" value={editForm.banco} onChange={(v) => setEditForm({ ...editForm, banco: v })} />
+                    <EditField label="Agência" value={editForm.agencia} onChange={(v) => setEditForm({ ...editForm, agencia: v })} mono />
+                    <EditField label="Conta corrente" value={editForm.conta_corrente} onChange={(v) => setEditForm({ ...editForm, conta_corrente: v })} mono />
+                    <EditField label="Titular" value={editForm.titular_banco} onChange={(v) => setEditForm({ ...editForm, titular_banco: v })} />
+                    <EditField label="Doc. titular" value={editForm.doc_titular} onChange={(v) => setEditForm({ ...editForm, doc_titular: v })} mono />
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={editForm.transf_padrao}
+                        onChange={(e) => setEditForm({ ...editForm, transf_padrao: e.target.checked })}
+                        className="h-4 w-4"
+                      />
+                      Usar transferência como método padrão
+                    </label>
+                  </div>
+                ) : (
+                  <div className="p-4">
+                    {!detailSupplier.chave_pix &&
+                    !detailSupplier.banco &&
+                    !detailSupplier.agencia &&
+                    !detailSupplier.conta_corrente &&
+                    !detailSupplier.titular_banco ? (
+                      <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                        Nenhum dado bancário informado.
+                      </p>
+                    ) : (
+                      <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 text-sm">
+                        <DataField label="Chave PIX" value={detailSupplier.chave_pix} mono />
+                        <DataField label="Banco" value={detailSupplier.banco} />
+                        <DataField label="Agência" value={detailSupplier.agencia} mono />
+                        <DataField label="Conta corrente" value={detailSupplier.conta_corrente} mono />
+                        <DataField label="Titular" value={detailSupplier.titular_banco} />
+                        <DataField label="Doc. titular" value={detailSupplier.doc_titular} mono />
+                        <DataField
+                          label="Transf. padrão"
+                          value={detailSupplier.transf_padrao ? "Sim" : "Não"}
+                        />
+                      </dl>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Tipos de despesa vinculados (somente leitura) */}
+              <section className="rounded-lg border bg-background shadow-sm">
+                <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                  <Tags className="h-4 w-4 text-primary" />
+                  <h4 className="text-sm font-semibold">Tipos de despesa vinculados</h4>
+                </header>
+                <div className="p-4 text-sm">
+                  {detailSupplier.expense_type_ids.length === 0 ? (
+                    <p className="text-muted-foreground">Nenhum tipo vinculado.</p>
+                  ) : (
+                    <ul className="flex flex-wrap gap-2">
+                      {detailSupplier.expense_type_ids.map((id) => (
+                        <li
+                          key={id}
+                          className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                        >
+                          {expenseTypeMap.get(id) ?? id}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </section>
+
+              {editMode && (
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                  Ao salvar, o fornecedor voltará a <strong>pendente</strong> e precisará
+                  ser aprovado novamente pelo CSC.
+                </p>
+              )}
+            </div>
+
+            <div className="border-t px-6 py-4 flex justify-between gap-3">
+              {editMode ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditMode(false)}
+                    disabled={editSaving}
+                    className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    Cancelar edição
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEdit}
+                    disabled={editSaving}
+                    className="inline-flex items-center gap-1 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Salvar (volta a pendente)
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={closeDetail}
+                    className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startEdit}
+                    className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {approveModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -424,6 +699,82 @@ function DataField({
         {label}
       </dt>
       <dd className={mono ? "font-mono text-sm" : "text-sm"}>{display}</dd>
+    </div>
+  );
+}
+
+// ── Edit form state helpers ────────────────────────────────────────────────
+
+interface EditFormState {
+  name: string;
+  cnpj_cpf: string;
+  email: string;
+  phone: string;
+  chave_pix: string;
+  banco: string;
+  agencia: string;
+  conta_corrente: string;
+  titular_banco: string;
+  doc_titular: string;
+  transf_padrao: boolean;
+}
+
+function emptyEditForm(): EditFormState {
+  return {
+    name: "",
+    cnpj_cpf: "",
+    email: "",
+    phone: "",
+    chave_pix: "",
+    banco: "",
+    agencia: "",
+    conta_corrente: "",
+    titular_banco: "",
+    doc_titular: "",
+    transf_padrao: false,
+  };
+}
+
+function toEditForm(s: SupplierRow): EditFormState {
+  return {
+    name: s.name ?? "",
+    cnpj_cpf: s.cnpj_cpf ?? "",
+    email: s.email ?? "",
+    phone: s.phone ?? "",
+    chave_pix: s.chave_pix ?? "",
+    banco: s.banco ?? "",
+    agencia: s.agencia ?? "",
+    conta_corrente: s.conta_corrente ?? "",
+    titular_banco: s.titular_banco ?? "",
+    doc_titular: s.doc_titular ?? "",
+    transf_padrao: !!s.transf_padrao,
+  };
+}
+
+function EditField({
+  label,
+  value,
+  onChange,
+  mono,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  mono?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${
+          mono ? "font-mono" : ""
+        }`}
+      />
     </div>
   );
 }
