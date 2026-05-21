@@ -40,7 +40,6 @@ export type ContasRequest = {
   inactivation_reason: string | null;
   inactivated_at: string | null;
   payment_method?: string | null;
-  installments?: number | null;
   installment_number?: number | null;
   installment_total?: number | null;
   needs_credit_card?: boolean | null;
@@ -626,7 +625,7 @@ function DetailModal({
             )}
             {req.payment_method === "cartao_credito" && (
               <>
-                <DetailField label="Parcelas" value={String(req.installments ?? 1)} />
+                <DetailField label="Parcelas" value={String(req.installment_total ?? 1)} />
                 <DetailField
                   label="Precisa do cartão físico?"
                   value={

@@ -40,7 +40,6 @@ async function getContasAPagar() {
       inactivation_reason,
       inactivated_at,
       payment_method,
-      installments,
       installment_number,
       installment_total,
       needs_credit_card,

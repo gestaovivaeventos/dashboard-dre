@@ -158,7 +158,13 @@ export async function createSupplier(data: {
   phone?: string;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
-  const supabase = await createClient();
+  // requireCtrlRole already enforces auth + role. We use the admin client
+  // here because RLS on ctrl_suppliers checks has_ctrl_role() against
+  // user_module_roles directly — DRE admins (who get an implicit ctrl admin
+  // in the session context) don't always have a matching row there, so the
+  // insert would fail via the regular client.
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
 
   const { data: inserted, error } = await supabase
     .from("ctrl_suppliers")
