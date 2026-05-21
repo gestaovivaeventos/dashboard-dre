@@ -1,8 +1,9 @@
-import { FileText, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
+import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests } from "@/lib/ctrl/actions/requests";
-import { redirect } from "next/navigation";
+import { RequisicoesTable } from "@/components/ctrl/requisicoes-table";
 
 export default async function RequisicoesPage() {
   const ctx = await getCtrlUser();
@@ -33,6 +34,19 @@ export default async function RequisicoesPage() {
 
   const { requests, error } = await getRequests();
 
+  // Project only the columns the table component needs — keeps the client
+  // payload small and the contract explicit.
+  const rows =
+    requests?.map((r) => ({
+      id: r.id as string,
+      request_number: r.request_number as number,
+      title: r.title as string,
+      amount: Number(r.amount),
+      due_date: (r.due_date as string | null) ?? null,
+      status: r.status as string,
+      created_at: r.created_at as string,
+    })) ?? [];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -57,77 +71,9 @@ export default async function RequisicoesPage() {
 
       {error ? (
         <p className="text-sm text-destructive">{error}</p>
-      ) : !requests?.length ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-          <FileText className="mb-4 h-12 w-12 text-muted-foreground/40" />
-          <h3 className="font-semibold">Nenhuma requisição</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Crie sua primeira requisição de pagamento.
-          </p>
-        </div>
       ) : (
-        <div className="rounded-lg border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">Título</th>
-                <th className="px-4 py-3">Valor</th>
-                <th className="px-4 py-3">Vencimento</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Criado em</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((req) => (
-                <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-mono text-muted-foreground">
-                    #{req.request_number}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{req.title}</td>
-                  <td className="px-4 py-3">
-                    {new Intl.NumberFormat("pt-BR", {
-                      style: "currency",
-                      currency: "BRL",
-                    }).format(req.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {req.due_date
-                      ? new Date(req.due_date + "T00:00:00").toLocaleDateString("pt-BR")
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={req.status} />
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(req.created_at).toLocaleDateString("pt-BR")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <RequisicoesTable requests={rows} />
       )}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; className: string }> = {
-    pendente:                    { label: "Pendente",            className: "bg-yellow-100 text-yellow-800" },
-    aprovado:                    { label: "Aprovado",            className: "bg-green-100 text-green-800" },
-    rejeitado:                   { label: "Rejeitado",           className: "bg-red-100 text-red-800" },
-    aguardando_complementacao:   { label: "Complementação",      className: "bg-blue-100 text-blue-800" },
-    estornado:                   { label: "Estornado",           className: "bg-gray-100 text-gray-800" },
-    agendado:                    { label: "Agendado",            className: "bg-purple-100 text-purple-800" },
-    travado:                     { label: "Travado",             className: "bg-orange-100 text-orange-800" },
-    inativado_csc:               { label: "Inativado",           className: "bg-gray-100 text-gray-500" },
-    aguardando_aprovacao_fornecedor: { label: "Aguard. Fornec.", className: "bg-indigo-100 text-indigo-800" },
-  };
-  const config = map[status] ?? { label: status, className: "bg-gray-100 text-gray-800" };
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${config.className}`}>
-      {config.label}
-    </span>
   );
 }

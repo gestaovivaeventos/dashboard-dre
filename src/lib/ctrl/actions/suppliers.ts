@@ -156,6 +156,13 @@ export async function createSupplier(data: {
   cnpj_cpf?: string;
   email?: string;
   phone?: string;
+  chave_pix?: string;
+  banco?: string;
+  agencia?: string;
+  conta_corrente?: string;
+  titular_banco?: string;
+  doc_titular?: string;
+  transf_padrao?: boolean;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
   // requireCtrlRole already enforces auth + role. We use the admin client
@@ -166,13 +173,23 @@ export async function createSupplier(data: {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
+  const trimmedName = data.name.trim();
+  if (!trimmedName) return { error: "O nome do fornecedor é obrigatório." };
+
   const { data: inserted, error } = await supabase
     .from("ctrl_suppliers")
     .insert({
-      name: data.name,
-      cnpj_cpf: data.cnpj_cpf ?? null,
-      email: data.email ?? null,
-      phone: data.phone ?? null,
+      name: trimmedName,
+      cnpj_cpf: data.cnpj_cpf?.trim() || null,
+      email: data.email?.trim() || null,
+      phone: data.phone?.trim() || null,
+      chave_pix: data.chave_pix?.trim() || null,
+      banco: data.banco?.trim() || null,
+      agencia: data.agencia?.trim() || null,
+      conta_corrente: data.conta_corrente?.trim() || null,
+      titular_banco: data.titular_banco?.trim() || null,
+      doc_titular: data.doc_titular?.trim() || null,
+      transf_padrao: data.transf_padrao ?? false,
       status: "pendente",
       created_by: ctx.id,
     })
