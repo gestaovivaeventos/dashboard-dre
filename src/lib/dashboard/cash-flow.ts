@@ -66,6 +66,39 @@ export interface CashFlowRow extends CashFlowAccountBase {
   hasChildren: boolean;
 }
 
+// === Nova secao "Acumulados" =================================================
+// Estrutura separada das linhas normais do fluxo. Reutiliza os mesmos buckets
+// mas guarda valores ACUMULADOS desde o inicio da historia ate o fim de cada
+// bucket. Renderizada apos o bloco destaque "Fluxo de Caixa" no CashFlowView.
+export interface CashFlowAccumulatedPartnerRow {
+  id: string;
+  name: string;
+  valuesByBucket: Record<string, number>;
+  accumulatedTotal: number;
+}
+
+export interface CashFlowAccumulatedAccount {
+  totalsByBucket: Record<string, number>;
+  accumulatedTotal: number;
+  partners: CashFlowAccumulatedPartnerRow[];
+}
+
+export interface CashFlowAccumulatedSection {
+  showDividends: boolean;
+  showAportes: boolean;
+  showPartners: boolean;
+  dividends: CashFlowAccumulatedAccount;
+  aportes: CashFlowAccumulatedAccount;
+}
+
+export const EMPTY_CASH_FLOW_ACCUMULATED_SECTION: CashFlowAccumulatedSection = {
+  showDividends: false,
+  showAportes: false,
+  showPartners: false,
+  dividends: { totalsByBucket: {}, accumulatedTotal: 0, partners: [] },
+  aportes: { totalsByBucket: {}, accumulatedTotal: 0, partners: [] },
+};
+
 const MONTH_NAMES = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
   "Jul", "Ago", "Set", "Out", "Nov", "Dez",
