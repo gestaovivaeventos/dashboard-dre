@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Banknote, CheckCircle2, Contact, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
 
 import { approveSupplier, rejectSupplier, updateSupplier } from "@/lib/ctrl/actions/suppliers";
@@ -39,13 +39,18 @@ interface FornecedoresTableProps {
   canApprove: boolean;
 }
 
-type TabKey = "pendente" | "aprovado" | "rejeitado";
+type TabKey = "aprovado" | "pendente" | "rejeitado";
 
+// Order matters — `Object.keys(TAB_LABELS)` is iterated in insertion order for
+// rendering the tabs. Aprovados is first because it's the most consulted state
+// in day-to-day operations.
 const TAB_LABELS: Record<TabKey, string> = {
-  pendente: "Pendentes",
   aprovado: "Aprovados",
+  pendente: "Pendentes",
   rejeitado: "Rejeitados",
 };
+
+const SUPPLIERS_PER_PAGE = 30;
 
 export function FornecedoresTable({
   suppliers,
@@ -122,7 +127,9 @@ export function FornecedoresTable({
     });
   }
 
-  const [activeTab, setActiveTab] = useState<TabKey>("pendente");
+  const [activeTab, setActiveTab] = useState<TabKey>("aprovado");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const expenseTypeMap = useMemo(
     () => new Map(expenseTypes.map((e) => [e.id, e.name])),
@@ -139,10 +146,34 @@ export function FornecedoresTable({
     return acc;
   }, [suppliers]);
 
-  const visibleSuppliers = useMemo(
-    () => suppliers.filter((s) => s.status === activeTab),
-    [suppliers, activeTab],
-  );
+  // Suppliers in the active tab, filtered by the free-text search.
+  // Search matches on name (case-insensitive substring) OR CNPJ/CPF digits
+  // (so the user can type "12.345" or "12345" and both work).
+  const filteredSuppliers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const termDigits = term.replace(/\D/g, "");
+    return suppliers.filter((s) => {
+      if (s.status !== activeTab) return false;
+      if (!term) return true;
+      if (s.name.toLowerCase().includes(term)) return true;
+      if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
+      return false;
+    });
+  }, [suppliers, activeTab, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSuppliers.length / SUPPLIERS_PER_PAGE));
+  // Clamp the page if the dataset shrinks (e.g. filter narrows results).
+  const safePage = Math.min(page, totalPages);
+  const visibleSuppliers = useMemo(() => {
+    const start = (safePage - 1) * SUPPLIERS_PER_PAGE;
+    return filteredSuppliers.slice(start, start + SUPPLIERS_PER_PAGE);
+  }, [filteredSuppliers, safePage]);
+
+  // Reset to page 1 whenever the active tab or search changes — otherwise the
+  // user can find themselves on page 3 of a list that now only has 2 pages.
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, search]);
 
   const openApproveModal = (supplier: SupplierRow) => {
     setApproveModal(supplier);
@@ -239,9 +270,37 @@ export function FornecedoresTable({
         })}
       </div>
 
+      {/* Search */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou CNPJ/CPF..."
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Limpar busca"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {filteredSuppliers.length} resultado{filteredSuppliers.length === 1 ? "" : "s"}
+        </p>
+      </div>
+
       {visibleSuppliers.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Nenhum fornecedor {TAB_LABELS[activeTab].toLowerCase()}.
+          {search
+            ? `Nenhum fornecedor ${TAB_LABELS[activeTab].toLowerCase()} encontrado para "${search}".`
+            : `Nenhum fornecedor ${TAB_LABELS[activeTab].toLowerCase()}.`}
         </div>
       ) : (
       <div className="rounded-lg border">
@@ -344,6 +403,36 @@ export function FornecedoresTable({
           </tbody>
         </table>
       </div>
+      )}
+
+      {/* Pagination — shown only when there are multiple pages of results */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <p className="text-muted-foreground">
+            Página {safePage} de {totalPages} ·{" "}
+            {(safePage - 1) * SUPPLIERS_PER_PAGE + 1}–
+            {Math.min(safePage * SUPPLIERS_PER_PAGE, filteredSuppliers.length)} de{" "}
+            {filteredSuppliers.length}
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Próxima
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Detail / edit modal — opens on row click */}
