@@ -13,6 +13,8 @@ interface PartnerRow {
   id: string;
   name: string;
   sort_order: number;
+  historical_dividends_value: number;
+  historical_aportes_value: number;
   links: Array<{ id: string; supplier_customer: string }>;
 }
 
@@ -37,7 +39,7 @@ export async function GET(_request: Request, { params }: Params) {
   const [partnersResult, linksResult] = await Promise.all([
     db
       .from("company_partners")
-      .select("id, name, sort_order")
+      .select("id, name, sort_order, historical_dividends_value, historical_aportes_value")
       .eq("company_id", params.companyId)
       .order("sort_order")
       .order("id"),
@@ -63,11 +65,19 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const partners: PartnerRow[] = (partnersResult.data ?? []).map((p) => {
-    const row = p as { id: string; name: string; sort_order: number };
+    const row = p as {
+      id: string;
+      name: string;
+      sort_order: number;
+      historical_dividends_value: number | string | null;
+      historical_aportes_value: number | string | null;
+    };
     return {
       id: row.id,
       name: row.name,
       sort_order: row.sort_order,
+      historical_dividends_value: Number(row.historical_dividends_value ?? 0),
+      historical_aportes_value: Number(row.historical_aportes_value ?? 0),
       links: (linksByPartner.get(row.id) ?? []).sort((a, b) =>
         a.supplier_customer.localeCompare(b.supplier_customer),
       ),
@@ -132,6 +142,13 @@ export async function POST(request: Request, { params }: Params) {
 
   const row = data as { id: string; name: string; sort_order: number };
   return NextResponse.json({
-    partner: { id: row.id, name: row.name, sort_order: row.sort_order, links: [] },
+    partner: {
+      id: row.id,
+      name: row.name,
+      sort_order: row.sort_order,
+      historical_dividends_value: 0,
+      historical_aportes_value: 0,
+      links: [],
+    },
   });
 }

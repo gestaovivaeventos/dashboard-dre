@@ -207,12 +207,18 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       ? filter.selectedCompanyIds[0]
       : null;
 
-  type PartnerRow = { id: string; name: string; sort_order: number };
+  type PartnerRow = {
+    id: string;
+    name: string;
+    sort_order: number;
+    historical_dividends_value: number;
+    historical_aportes_value: number;
+  };
   let partners: PartnerRow[] = [];
   if (singleCompanyId) {
     const { data: partnersData } = await supabase
       .from("company_partners")
-      .select("id, name, sort_order")
+      .select("id, name, sort_order, historical_dividends_value, historical_aportes_value")
       .eq("company_id", singleCompanyId)
       .order("sort_order")
       .order("id");
@@ -220,6 +226,14 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       id: row.id as string,
       name: row.name as string,
       sort_order: row.sort_order as number,
+      historical_dividends_value: Number(
+        (row as { historical_dividends_value?: number | string | null })
+          .historical_dividends_value ?? 0,
+      ),
+      historical_aportes_value: Number(
+        (row as { historical_aportes_value?: number | string | null })
+          .historical_aportes_value ?? 0,
+      ),
     }));
   }
 
@@ -249,6 +263,75 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       map.set(item.partner_id, inner);
     });
     return map;
+  };
+
+  // === Excecao pontual: VVR Nov/2022 (split de dividendos Renan/Juliana) ====
+  // Em Nov/2022 a Omie registrou dois pagamentos de dividendos da Viva Volta
+  // Redonda (R$ 3.790,18 cada) no fornecedor generico "Lancamento Debito".
+  // A categoria mapeia para a conta 4.2 (Dividendos Pagos), entao o TOTAL
+  // continua correto via cash_flow_aggregate (R$ 7.580,36). Mas a quebra
+  // por socio fica zerada — "Lancamento Debito" nao esta vinculado a nenhum
+  // socio em configuracoes > socios, e NAO deve ser, pois o sistema
+  // atribuiria os R$ 7.580,36 a um unico socio.
+  //
+  // Esta excecao injeta o split correto (Renan R$ 3.790,18 / Juliana
+  // R$ 3.790,18) apenas no partner_breakdown da conta 4.2, somente quando:
+  //   - empresa unica selecionada e a VVR (match por nome "volta redonda")
+  //   - bucket / faixa inclui o mes 2022-11
+  // Nao altera mapeamento, vinculos socio-fornecedor, total da linha 4.2,
+  // saldos, demais empresas, meses ou categorias. Aplica-se tambem ao
+  // baseline (historico anterior ao primeiro bucket) para refletir
+  // corretamente na secao "Dividendos Acumulados" de meses posteriores.
+  const vvrException = (() => {
+    if (!singleCompanyId) return null;
+    const company = companies.find((c) => c.id === singleCompanyId);
+    if (!company || !company.name.toLowerCase().includes("volta redonda")) {
+      return null;
+    }
+    const dividendsAccount = cashFlowAccounts.find((a) => a.code === "4.2");
+    if (!dividendsAccount) return null;
+    const renan = partners.find((p) => p.name.toLowerCase().includes("renan"));
+    const juliana = partners.find((p) => p.name.toLowerCase().includes("juliana"));
+    if (!renan || !juliana) return null;
+    return {
+      year: 2022,
+      month: 11,
+      dividendsAccountId: dividendsAccount.id,
+      partnerAmounts: [
+        { partnerId: renan.id, amount: 3790.18 },
+        { partnerId: juliana.id, amount: 3790.18 },
+      ],
+    };
+  })();
+
+  const applyVvrExceptionToPartnerBreakdown = (
+    breakdown: Map<string, Map<string, number>>,
+  ) => {
+    if (!vvrException) return;
+    vvrException.partnerAmounts.forEach(({ partnerId, amount }) => {
+      const inner = breakdown.get(partnerId) ?? new Map<string, number>();
+      inner.set(
+        vvrException.dividendsAccountId,
+        (inner.get(vvrException.dividendsAccountId) ?? 0) + amount,
+      );
+      breakdown.set(partnerId, inner);
+    });
+  };
+
+  const isVvrExceptionMonth = (year: number, month: number) =>
+    vvrException !== null
+    && year === vvrException.year
+    && month === vvrException.month;
+
+  const rangeIncludesVvrExceptionMonth = (
+    fromYear: number, fromMonth: number,
+    toYear: number, toMonth: number,
+  ) => {
+    if (!vvrException) return false;
+    const target = vvrException.year * 100 + vvrException.month;
+    const fromKey = fromYear * 100 + fromMonth;
+    const toKey = toYear * 100 + toMonth;
+    return fromKey <= target && target <= toKey;
   };
 
   // Para "Saldo Inicial" precisamos saber o "Caixa Final" do mes anterior.
@@ -414,6 +497,10 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       computePartnerBreakdown(bucket),
     ]);
 
+    if (isVvrExceptionMonth(bucket.year, bucket.month)) {
+      applyVvrExceptionToPartnerBreakdown(partnerBreakdown);
+    }
+
     const { rows } = buildCashFlowRows(cashFlowAccounts, amounts, {
       dreResultadoExercicio: dreResultado,
       saldoInicial,
@@ -438,6 +525,18 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     computeCashFlowAmounts(accumulatedBucket),
     computePartnerBreakdown(accumulatedBucket),
   ]);
+
+  if (
+    buckets.length > 0
+    && rangeIncludesVvrExceptionMonth(
+      buckets[0].year,
+      buckets[0].month,
+      buckets[buckets.length - 1].year,
+      buckets[buckets.length - 1].month,
+    )
+  ) {
+    applyVvrExceptionToPartnerBreakdown(accPartnerBreakdown);
+  }
 
   const { rows: accRows } = buildCashFlowRows(cashFlowAccounts, accAmounts, {
     dreResultadoExercicio: accDreResultado,
@@ -657,13 +756,146 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         computeCashFlowAmounts(baselineBucket),
         computePartnerBreakdown(baselineBucket),
       ]);
+
+      // Se o primeiro bucket exibido e POSTERIOR a Nov/2022, o baseline
+      // (historico anterior) inclui esse mes — entao o split Renan/Juliana
+      // precisa entrar nos running accumulators iniciais para refletir no
+      // acumulado dos meses seguintes.
+      if (
+        vvrException
+        && (firstBucket.year > vvrException.year
+            || (firstBucket.year === vvrException.year
+                && firstBucket.month > vvrException.month))
+      ) {
+        applyVvrExceptionToPartnerBreakdown(baselinePartnerBreakdown);
+      }
     }
   }
 
   const dividendsAccountId = dividendsPaidAccount?.id ?? null;
   const aportesAccountId = capitalIncreaseAccount?.id ?? null;
 
+  // === Saldos historicos pre-Omie por socio ===================================
+  // Cada socio pode ter saldo historico (dividendos / aportes) pago ANTES da
+  // migracao para a Omie. Esses valores entram APENAS na secao "Acumulados"
+  // — nunca nas linhas 4.2 / 5.1 normais, nem no calculo de saldo de caixa.
+  //
+  // Regra de competencia (do produto): o valor historico aparece no mes
+  // ANTERIOR ao primeiro mes Omie com lancamento partner-linked daquela
+  // empresa para a respectiva conta. A partir desse mes o running
+  // accumulator carrega o saldo, somando normalmente com os meses
+  // subsequentes da Omie. Quando o mes de injecao cai antes do primeiro
+  // bucket exibido, o historico entra na inicializacao do running (sai do
+  // "baseline" do usuario, ja partindo do valor maior).
+  //
+  // Se NAO ha primeiro mes Omie (empresa sem dado nessa conta ainda), o
+  // historico vai para o primeiro bucket exibido — assim o admin consegue
+  // verificar visualmente que o valor digitado foi persistido.
+  const firstOmieMonthByAccount = new Map<string, { year: number; month: number }>();
+  if (
+    singleCompanyId
+    && partners.length > 0
+    && (dividendsAccountId || aportesAccountId)
+    && partners.some(
+      (p) =>
+        p.historical_dividends_value > 0 || p.historical_aportes_value > 0,
+    )
+  ) {
+    const { data: firstMonthData } = await supabase.rpc(
+      "cash_flow_partner_first_omie_month",
+      { p_company_id: singleCompanyId },
+    );
+    ((firstMonthData as Array<{
+      cash_flow_account_id: string;
+      first_year: number;
+      first_month: number;
+    }> | null) ?? []).forEach((row) => {
+      firstOmieMonthByAccount.set(row.cash_flow_account_id, {
+        year: row.first_year,
+        month: row.first_month,
+      });
+    });
+
+    // VVR Nov/2022: a excecao injeta partner breakdown em Nov/2022 mesmo
+    // sem entrada partner-linked real. O primeiro mes com valor visivel
+    // passa a ser Nov/2022 — historico deve cair em Out/2022, nao no mes
+    // anterior ao primeiro lancamento partner-linked "real" (que pode ser
+    // posterior).
+    if (vvrException) {
+      const accId = vvrException.dividendsAccountId;
+      const existing = firstOmieMonthByAccount.get(accId);
+      const exceptionKey = vvrException.year * 100 + vvrException.month;
+      if (!existing || existing.year * 100 + existing.month > exceptionKey) {
+        firstOmieMonthByAccount.set(accId, {
+          year: vvrException.year,
+          month: vvrException.month,
+        });
+      }
+    }
+  }
+
+  const computeHistoricalMonth = (
+    accountId: string | null,
+  ): { year: number; month: number } | null => {
+    if (!accountId) return null;
+    const firstOmie = firstOmieMonthByAccount.get(accountId);
+    if (firstOmie) {
+      return previousMonth(firstOmie.year, firstOmie.month);
+    }
+    // Sem dado Omie: ancora no primeiro bucket exibido (fallback amigavel).
+    return firstBucket ? { year: firstBucket.year, month: firstBucket.month } : null;
+  };
+
+  // Distribui injecoes em duas categorias: as que ocorrem ANTES do primeiro
+  // bucket exibido (entram no init do running) e as que caem dentro do
+  // range visivel (injetadas no momento do bucket correspondente).
+  type HistoricalInjection = {
+    partnerId: string;
+    accountId: string;
+    amount: number;
+  };
+  const historicalBeforeFirstVisible: HistoricalInjection[] = [];
+  const historicalWithinVisibleByBucket = new Map<string, HistoricalInjection[]>();
+
+  if (firstBucket) {
+    const firstKey = firstBucket.year * 100 + firstBucket.month;
+    const todayKey = todayYear * 100 + todayMonth;
+
+    const enqueue = (
+      partnerId: string,
+      accountId: string | null,
+      amount: number,
+    ) => {
+      if (!accountId || amount <= 0) return;
+      const month = computeHistoricalMonth(accountId);
+      if (!month) return;
+      const injKey = month.year * 100 + month.month;
+      // Nao projeta no futuro — regra do produto. Cai em silencio.
+      if (injKey > todayKey) return;
+      if (injKey < firstKey) {
+        historicalBeforeFirstVisible.push({ partnerId, accountId, amount });
+        return;
+      }
+      const targetBucket = visibleBuckets.find(
+        (b) => b.year === month.year && b.month === month.month,
+      );
+      if (!targetBucket) return;
+      const list = historicalWithinVisibleByBucket.get(targetBucket.key) ?? [];
+      list.push({ partnerId, accountId, amount });
+      historicalWithinVisibleByBucket.set(targetBucket.key, list);
+    };
+
+    partners.forEach((p) => {
+      enqueue(p.id, dividendsAccountId, p.historical_dividends_value);
+      enqueue(p.id, aportesAccountId, p.historical_aportes_value);
+    });
+  }
+
   // Running accumulators — guardam o acumulado ate o fim do bucket corrente.
+  // Saldos historicos pre-Omie agendados para meses ANTERIORES ao primeiro
+  // bucket exibido somam-se aqui no init (acumulado ja "carrega" desde o
+  // historico). Quando NAO ha socios (showPartners=false), nenhum historico
+  // se aplica (partners.length=0).
   let runningDividendsAccount = dividendsAccountId
     ? baselineAmounts.get(dividendsAccountId) ?? 0
     : 0;
@@ -687,6 +919,28 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     }
   });
 
+  // Aplica historicos cujo mes de competencia e anterior ao primeiro bucket.
+  historicalBeforeFirstVisible.forEach((inj) => {
+    if (inj.accountId === dividendsAccountId) {
+      runningDividendsByPartner.set(
+        inj.partnerId,
+        (runningDividendsByPartner.get(inj.partnerId) ?? 0) + inj.amount,
+      );
+      // Tambem soma ao running account-level para manter consistencia, mas
+      // a totalizadora visivel quando showPartners=true vem da soma dos
+      // partners, entao isso so importa para o fallback showPartners=false
+      // (que so ocorre quando partners.length=0 — caso em que nenhum
+      // historico foi enfileirado).
+      runningDividendsAccount += inj.amount;
+    } else if (inj.accountId === aportesAccountId) {
+      runningAportesByPartner.set(
+        inj.partnerId,
+        (runningAportesByPartner.get(inj.partnerId) ?? 0) + inj.amount,
+      );
+      runningAportesAccount += inj.amount;
+    }
+  });
+
   const accDividendsByBucket: Record<string, number> = {};
   const accAportesByBucket: Record<string, number> = {};
   const accDividendsByPartnerByBucket = new Map<string, Record<string, number>>();
@@ -707,26 +961,57 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       return;
     }
 
+    // Saldos historicos pre-Omie agendados PARA ESTE bucket. Sao injetados
+    // por socio (nao alteram valuesPerBucket — regra do produto: nao tocar
+    // as linhas normais 4.2 / 5.1 do grid, somente acumulados).
+    const bucketHistorical = historicalWithinVisibleByBucket.get(bucket.key) ?? [];
+    const histDividendsByPartner = new Map<string, number>();
+    const histAportesByPartner = new Map<string, number>();
+    bucketHistorical.forEach((inj) => {
+      if (inj.accountId === dividendsAccountId) {
+        histDividendsByPartner.set(
+          inj.partnerId,
+          (histDividendsByPartner.get(inj.partnerId) ?? 0) + inj.amount,
+        );
+      } else if (inj.accountId === aportesAccountId) {
+        histAportesByPartner.set(
+          inj.partnerId,
+          (histAportesByPartner.get(inj.partnerId) ?? 0) + inj.amount,
+        );
+      }
+    });
+
     if (dividendsAccountId) {
       runningDividendsAccount +=
         valuesPerBucket.get(bucket.key)?.[dividendsAccountId] ?? 0;
+      // Acumula o historico tambem no fallback account-level (so usado
+      // quando showPartners=false, situacao em que nenhum historico
+      // foi enfileirado, mas mantemos a soma consistente).
+      histDividendsByPartner.forEach((v) => {
+        runningDividendsAccount += v;
+      });
     }
     if (aportesAccountId) {
       runningAportesAccount +=
         valuesPerBucket.get(bucket.key)?.[aportesAccountId] ?? 0;
+      histAportesByPartner.forEach((v) => {
+        runningAportesAccount += v;
+      });
     }
 
     partners.forEach((p) => {
       if (dividendsAccountId) {
         const monthVal =
-          partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(dividendsAccountId) ?? 0;
+          (partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(dividendsAccountId) ?? 0)
+          + (histDividendsByPartner.get(p.id) ?? 0);
         const newRunning = (runningDividendsByPartner.get(p.id) ?? 0) + monthVal;
         runningDividendsByPartner.set(p.id, newRunning);
         accDividendsByPartnerByBucket.get(p.id)![bucket.key] = newRunning;
       }
       if (aportesAccountId) {
         const monthVal =
-          partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(aportesAccountId) ?? 0;
+          (partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(aportesAccountId) ?? 0)
+          + (histAportesByPartner.get(p.id) ?? 0);
         const newRunning = (runningAportesByPartner.get(p.id) ?? 0) + monthVal;
         runningAportesByPartner.set(p.id, newRunning);
         accAportesByPartnerByBucket.get(p.id)![bucket.key] = newRunning;

@@ -4,8 +4,10 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Search,
   Loader2,
+  ChevronsDownUp,
   ChevronsLeft,
   ChevronsRight,
+  ChevronsUpDown,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
@@ -233,6 +235,21 @@ export function DashboardDreView({
     () =>
       rows.filter((row) => row.hasChildren).reduce((acc, row) => ({ ...acc, [row.id]: true }), {}),
   );
+
+  const expandAllRows = () => {
+    setExpanded(
+      rows
+        .filter((row) => row.hasChildren)
+        .reduce((acc, row) => ({ ...acc, [row.id]: true }), {} as Record<string, boolean>),
+    );
+  };
+  const collapseAllRows = () => {
+    setExpanded(
+      rows
+        .filter((row) => row.hasChildren)
+        .reduce((acc, row) => ({ ...acc, [row.id]: false }), {} as Record<string, boolean>),
+    );
+  };
 
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false,
@@ -519,7 +536,7 @@ export function DashboardDreView({
 
       {/* Filters */}
       <div className="space-y-4 rounded-xl border bg-background p-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-wrap items-start gap-4">
           {/* Segmento + Empresas */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">
@@ -535,6 +552,32 @@ export function DashboardDreView({
               }}
               disabled={role === "gestor_unidade"}
             />
+            {/* Expandir / recolher todas — abaixo do seletor de empresa para
+                melhor visibilidade. Acao puramente client-side. */}
+            <div className="flex gap-1 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={expandAllRows}
+                title="Expandir todas as linhas"
+                aria-label="Expandir todas as linhas"
+              >
+                <ChevronsUpDown className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={collapseAllRows}
+                title="Recolher todas as linhas"
+                aria-label="Recolher todas as linhas"
+              >
+                <ChevronsDownUp className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {/* Period mode */}
@@ -627,7 +670,12 @@ export function DashboardDreView({
             </div>
           </div>
 
-          <Button type="button" onClick={handleApply}>Aplicar</Button>
+          {/* Spacer simula altura do label para alinhar o Aplicar com a
+              linha dos outros botoes apos mudanca para items-start. */}
+          <div className="space-y-1">
+            <span aria-hidden className="block text-xs font-medium opacity-0">.</span>
+            <Button type="button" onClick={handleApply}>Aplicar</Button>
+          </div>
         </div>
       </div>
 

@@ -22,6 +22,8 @@ interface PartnerItem {
   id: string;
   name: string;
   sort_order: number;
+  historical_dividends_value: number;
+  historical_aportes_value: number;
   links: PartnerLink[];
 }
 
@@ -40,6 +42,25 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+
+// Mantem o input numerico no formato "1234.56" (ponto decimal) para
+// preservar edicao parcial sem reformatar enquanto o usuario digita.
+// Valor 0 vira string vazia — campo "em branco" e o estado neutro do
+// produto (nao desenha nada nos acumulados).
+function formatHistoricalForInput(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "";
+  return String(value);
+}
+
+// Aceita "", "1234", "1234.56", "1234,56". Retorna NaN se invalido.
+function parseHistoricalInput(value: string): number {
+  const trimmed = value.trim();
+  if (trimmed === "") return 0;
+  const normalized = trimmed.replace(",", ".");
+  const num = Number(normalized);
+  if (!Number.isFinite(num)) return NaN;
+  return num;
+}
 
 async function safeJson<T>(response: Response): Promise<T | null> {
   const bodyText = await response.text();
@@ -68,9 +89,21 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
   const [newPartnerName, setNewPartnerName] = useState("");
 
   // Estado local de edicao por socio: nome digitado + set de supplier_customers
-  // selecionados. Espelha o que esta no servidor e e descarregado a cada save.
+  // selecionados + historicos pre-Omie (digitados como string para preservar
+  // edicao parcial — convertidos a number so no save). Espelha o que esta no
+  // servidor e e descarregado a cada save.
   const [editByPartner, setEditByPartner] = useState<
-    Record<string, { name: string; selected: Set<string>; dirty: boolean; savingKind: "name" | "links" | null }>
+    Record<
+      string,
+      {
+        name: string;
+        selected: Set<string>;
+        historicalDividends: string;
+        historicalAportes: string;
+        dirty: boolean;
+        savingKind: "name" | "links" | "historical" | null;
+      }
+    >
   >({});
 
   useEffect(() => {
@@ -98,6 +131,8 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
         nextEdit[p.id] = {
           name: p.name,
           selected: new Set(p.links.map((l) => l.supplier_customer)),
+          historicalDividends: formatHistoricalForInput(p.historical_dividends_value),
+          historicalAportes: formatHistoricalForInput(p.historical_aportes_value),
           dirty: false,
           savingKind: null,
         };
@@ -159,7 +194,14 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
     setPartners((prev) => [...prev, partner]);
     setEditByPartner((prev) => ({
       ...prev,
-      [partner.id]: { name: partner.name, selected: new Set(), dirty: false, savingKind: null },
+      [partner.id]: {
+        name: partner.name,
+        selected: new Set(),
+        historicalDividends: "",
+        historicalAportes: "",
+        dirty: false,
+        savingKind: null,
+      },
     }));
     setNewPartnerName("");
     showToast({ title: "Socio adicionado", description: name, variant: "success" });
@@ -199,7 +241,10 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
     }));
   };
 
-  const setSavingKind = (partnerId: string, kind: "name" | "links" | null) => {
+  const setSavingKind = (
+    partnerId: string,
+    kind: "name" | "links" | "historical" | null,
+  ) => {
     setEditByPartner((prev) => ({
       ...prev,
       [partnerId]: { ...prev[partnerId], savingKind: kind },
@@ -236,6 +281,84 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
       [partnerId]: { ...prev[partnerId], name, dirty: false, savingKind: null },
     }));
     showToast({ title: "Nome atualizado", description: name, variant: "success" });
+  };
+
+  const handleSaveHistorical = async (partnerId: string) => {
+    const state = editByPartner[partnerId];
+    if (!state) return;
+    const dividends = parseHistoricalInput(state.historicalDividends);
+    const aportes = parseHistoricalInput(state.historicalAportes);
+    if (Number.isNaN(dividends)) {
+      showToast({
+        title: "Dividendos historicos invalidos",
+        description: "Digite apenas numeros. Ex.: 10000 ou 10000,50.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (Number.isNaN(aportes)) {
+      showToast({
+        title: "Aportes historicos invalidos",
+        description: "Digite apenas numeros. Ex.: 50000 ou 50000,00.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (dividends < 0 || aportes < 0) {
+      showToast({
+        title: "Valores historicos nao podem ser negativos.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSavingKind(partnerId, "historical");
+    const response = await fetch(
+      `/api/companies/${selectedCompanyId}/partners/${partnerId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          historical_dividends_value: dividends,
+          historical_aportes_value: aportes,
+        }),
+      },
+    );
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+    setSavingKind(partnerId, null);
+    if (!response.ok || !payload?.ok) {
+      showToast({
+        title: "Falha ao salvar saldos historicos",
+        description: payload?.error ?? "Tente novamente.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPartners((prev) =>
+      prev.map((p) =>
+        p.id === partnerId
+          ? {
+              ...p,
+              historical_dividends_value: dividends,
+              historical_aportes_value: aportes,
+            }
+          : p,
+      ),
+    );
+    setEditByPartner((prev) => ({
+      ...prev,
+      [partnerId]: {
+        ...prev[partnerId],
+        historicalDividends: formatHistoricalForInput(dividends),
+        historicalAportes: formatHistoricalForInput(aportes),
+        dirty: false,
+        savingKind: null,
+      },
+    }));
+    showToast({
+      title: "Saldos historicos salvos",
+      description: `Dividendos: ${currencyFormatter.format(dividends)} • Aportes: ${currencyFormatter.format(aportes)}`,
+      variant: "success",
+    });
   };
 
   const handleSaveLinks = async (partnerId: string) => {
@@ -360,11 +483,27 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
                   const state = editByPartner[partner.id] ?? {
                     name: partner.name,
                     selected: new Set<string>(),
+                    historicalDividends: formatHistoricalForInput(partner.historical_dividends_value),
+                    historicalAportes: formatHistoricalForInput(partner.historical_aportes_value),
                     dirty: false,
                     savingKind: null,
                   };
                   const isSavingName = state.savingKind === "name";
                   const isSavingLinks = state.savingKind === "links";
+                  const isSavingHistorical = state.savingKind === "historical";
+
+                  // Botao "Salvar saldos historicos" so habilita se o valor
+                  // digitado difere do que veio do servidor. Comparacao por
+                  // valor numerico (nao string) para tolerar formatacao.
+                  const parsedDividendsForCompare = parseHistoricalInput(state.historicalDividends);
+                  const parsedAportesForCompare = parseHistoricalInput(state.historicalAportes);
+                  const historicalIsDirty =
+                    !Number.isNaN(parsedDividendsForCompare)
+                    && !Number.isNaN(parsedAportesForCompare)
+                    && (
+                      parsedDividendsForCompare !== partner.historical_dividends_value
+                      || parsedAportesForCompare !== partner.historical_aportes_value
+                    );
 
                   return (
                     <div key={partner.id} className="rounded-lg border p-4 space-y-3">
@@ -406,6 +545,80 @@ export function SettingsPartners({ companies }: SettingsPartnersProps) {
                           <Trash2 className="mr-2 h-4 w-4" />
                           Remover
                         </Button>
+                      </div>
+
+                      {/*
+                        Saldos historicos pre-Omie por socio. Entram apenas
+                        na secao "Acumulados" da tela Fluxo de Caixa, no mes
+                        anterior ao primeiro lancamento Omie da empresa para
+                        a respectiva conta (4.2 / 5.1). Campos opcionais —
+                        deixe em branco para o socio cujo historico ja esta
+                        100% contemplado pelos lancamentos da Omie.
+                      */}
+                      <div className="rounded-md border bg-muted/30 p-3">
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground">
+                              Saldos historicos pre-Omie
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Valores pagos a este socio ANTES da migracao para a Omie.
+                              Somam-se apenas a secao &quot;Acumulados&quot; do Fluxo de
+                              Caixa, no mes anterior ao primeiro lancamento Omie da empresa.
+                              Deixe em branco se nao aplicavel.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleSaveHistorical(partner.id)}
+                            disabled={isSavingHistorical || !historicalIsDirty}
+                          >
+                            {isSavingHistorical ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="mr-2 h-4 w-4" />
+                            )}
+                            Salvar historicos
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="flex flex-col gap-1 text-xs">
+                            <span className="font-medium text-muted-foreground">
+                              Dividendos historicos pre-Omie (R$)
+                            </span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={state.historicalDividends}
+                              onChange={(e) =>
+                                updateEdit(partner.id, {
+                                  historicalDividends: e.target.value,
+                                })
+                              }
+                              placeholder="0,00"
+                              disabled={isSavingHistorical}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-xs">
+                            <span className="font-medium text-muted-foreground">
+                              Aportes historicos pre-Omie (R$)
+                            </span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={state.historicalAportes}
+                              onChange={(e) =>
+                                updateEdit(partner.id, {
+                                  historicalAportes: e.target.value,
+                                })
+                              }
+                              placeholder="0,00"
+                              disabled={isSavingHistorical}
+                            />
+                          </label>
+                        </div>
                       </div>
 
                       <div className="rounded-md border bg-muted/30 p-3">
