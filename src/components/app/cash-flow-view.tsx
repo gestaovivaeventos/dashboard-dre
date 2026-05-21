@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  FileSpreadsheet,
   Inbox,
   Loader2,
   RefreshCw,
@@ -14,12 +15,15 @@ import {
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { useToast } from "@/components/ui/toaster";
 import type {
   CashFlowAccountBase,
+  CashFlowAccumulatedSection,
   CashFlowFilterState,
   CashFlowPeriodBucket,
   CashFlowRange,
@@ -50,6 +54,7 @@ interface CashFlowViewProps {
   accumulatedBucket: CashFlowPeriodBucket;
   selectedCompanyIds: string[];
   lastSyncAt: string | null;
+  accumulatedSection: CashFlowAccumulatedSection;
 }
 
 interface DrilldownState {
@@ -265,10 +270,13 @@ export function CashFlowView({
   accumulatedBucket,
   selectedCompanyIds,
   lastSyncAt,
+  accumulatedSection,
 }: CashFlowViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState<null | "excel">(null);
 
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
   const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
@@ -281,6 +289,11 @@ export function CashFlowView({
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     () => rows.filter((r) => r.hasChildren).reduce((acc, r) => ({ ...acc, [r.id]: true }), {}),
   );
+
+  // Subniveis dos acumulados iniciam COLAPSADOS para reduzir poluicao visual
+  // — usuario que quiser ver detalhamento por socio expande manualmente.
+  const [accAportesOpen, setAccAportesOpen] = useState(false);
+  const [accDividendsOpen, setAccDividendsOpen] = useState(false);
 
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false,
@@ -379,6 +392,141 @@ export function CashFlowView({
   const columns = visibleBuckets;
   const totalCols = columns.length + 1;
 
+  // Export Excel — mesma estrutura visual da tela (analiticas com indent,
+  // bloco "Fluxo de Caixa" e secao "Acumulados" no final). Inclui sempre
+  // TODOS os niveis e sub-niveis de socio, independentemente do estado de
+  // expand/collapse na UI: o usuario que exporta quer a foto completa.
+  const exportCashFlowExcel = () => {
+    try {
+      setExporting("excel");
+      const totalLabel = accumulatedBucket.label || "Total";
+      const sheetRows: Array<Record<string, string | number>> = [];
+
+      const pushRow = (
+        name: string,
+        valuesByBucket: Record<string, number>,
+        accumulated: number,
+      ) => {
+        const record: Record<string, string | number> = { Conta: name };
+        columns.forEach((column) => {
+          record[column.label] = Number(valuesByBucket[column.key] ?? 0);
+        });
+        record[totalLabel] = Number(accumulated ?? 0);
+        sheetRows.push(record);
+      };
+
+      const pushSeparator = (label: string) => {
+        const record: Record<string, string | number> = { Conta: label };
+        columns.forEach((column) => {
+          record[column.label] = "";
+        });
+        record[totalLabel] = "";
+        sheetRows.push(record);
+      };
+
+      // Walk hierarquico completo das linhas principais (sem respeitar o
+      // estado de expanded — sempre exporta tudo).
+      const byParent = new Map<string | null, CashFlowDisplayRow[]>();
+      rows.forEach((row) => {
+        if (row.is_highlight_block) return;
+        const siblings = byParent.get(row.parent_id) ?? [];
+        siblings.push(row);
+        byParent.set(row.parent_id, siblings);
+      });
+      byParent.forEach((siblings) => {
+        siblings.sort(
+          (a, b) =>
+            a.sort_order - b.sort_order ||
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+        );
+      });
+      const walk = (parentId: string | null) => {
+        (byParent.get(parentId) ?? []).forEach((child) => {
+          const indent = "  ".repeat(Math.max(0, child.level - 1));
+          pushRow(`${indent}${child.name}`, child.valuesByBucket, child.accumulatedValue);
+          walk(child.id);
+        });
+      };
+      walk(null);
+
+      // Bloco destaque "Fluxo de Caixa".
+      if (highlightRows.length > 0) {
+        pushSeparator("FLUXO DE CAIXA");
+        highlightRows.forEach((row) => {
+          pushRow(row.name, row.valuesByBucket, row.accumulatedValue);
+        });
+      }
+
+      // Bloco "Acumulados" (Aportes + Dividendos), com socios sempre incluidos.
+      if (accumulatedSection.showAportes || accumulatedSection.showDividends) {
+        pushSeparator("ACUMULADOS");
+        if (accumulatedSection.showAportes) {
+          pushRow(
+            "APORTES ACUMULADOS",
+            accumulatedSection.aportes.totalsByBucket,
+            accumulatedSection.aportes.accumulatedTotal,
+          );
+          accumulatedSection.aportes.partners.forEach((p) => {
+            pushRow(`  ${p.name}`, p.valuesByBucket, p.accumulatedTotal);
+          });
+        }
+        if (accumulatedSection.showDividends) {
+          pushRow(
+            "DIVIDENDOS ACUMULADOS",
+            accumulatedSection.dividends.totalsByBucket,
+            accumulatedSection.dividends.accumulatedTotal,
+          );
+          accumulatedSection.dividends.partners.forEach((p) => {
+            pushRow(`  ${p.name}`, p.valuesByBucket, p.accumulatedTotal);
+          });
+        }
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+      // Formata todas as colunas numericas como moeda BRL — mesmo padrao do
+      // export do DRE.
+      const rangeRef = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
+      for (let rowIndex = 1; rowIndex <= rangeRef.e.r; rowIndex += 1) {
+        for (let colIndex = 1; colIndex <= rangeRef.e.c; colIndex += 1) {
+          const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+          const cell = worksheet[cellAddress];
+          if (!cell || cell.v === "" || typeof cell.v !== "number") continue;
+          cell.z = "R$ #,##0.00";
+        }
+      }
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Fluxo de Caixa");
+
+      const allCompaniesSelected = companies.length === selectedCompanyIds.length;
+      const unitsLabel = allCompaniesSelected
+        ? "Consolidado"
+        : companies
+            .filter((company) => selectedCompanyIds.includes(company.id))
+            .map((company) => company.name)
+            .join("_");
+      const periodLabel = range.label.replace(/\s+/g, "_");
+
+      XLSX.writeFile(
+        workbook,
+        `FluxoDeCaixa_ControllHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
+      );
+      showToast({
+        title: "Exportacao concluida",
+        description: "Excel do Fluxo de Caixa gerado.",
+        variant: "success",
+      });
+    } catch (error) {
+      showToast({
+        title: "Falha ao exportar",
+        description: error instanceof Error ? error.message : "Erro ao gerar Excel.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(null);
+    }
+  };
+
   // Linhas que aceitam drilldown (analiticas com mapeamento) — exclui linhas
   // calculadas, summary e linhas com source especial.
   const isDrillable = (row: CashFlowDisplayRow) =>
@@ -393,15 +541,38 @@ export function CashFlowView({
             <h2 className="text-2xl font-semibold">Fluxo de Caixa</h2>
             <p className="text-sm text-muted-foreground">{range.label}</p>
           </div>
-          <SyncFreshnessIndicator
-            lastSyncAt={lastSyncAt}
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              router.refresh();
-              window.setTimeout(() => setRefreshing(false), 1500);
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <SyncFreshnessIndicator
+              lastSyncAt={lastSyncAt}
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                router.refresh();
+                window.setTimeout(() => setRefreshing(false), 1500);
+              }}
+            />
+            <details className="relative">
+              <summary className="list-none">
+                <span className={buttonVariants({ variant: "outline" })}>Exportar</span>
+              </summary>
+              <div className="absolute right-0 z-20 mt-2 w-52 rounded-md border bg-background p-2 shadow-sm">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={exportCashFlowExcel}
+                  disabled={exporting !== null || rows.length === 0}
+                >
+                  {exporting === "excel" ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                  )}
+                  Excel
+                </Button>
+              </div>
+            </details>
+          </div>
         </div>
       </div>
 
@@ -711,6 +882,131 @@ export function CashFlowView({
                     </div>
                   </div>
                 ))}
+              </>
+            )}
+
+            {/* Bloco destaque — Aportes / Dividendos Acumulados.
+                Renderizado APOS o bloco "Fluxo de Caixa". Apenas o header
+                "Acumulados" e destacado em indigo; totalizadoras usam cor de
+                texto padrao (foreground) para melhor leitura no tema escuro.
+                Subniveis por socio iniciam COLAPSADOS — chevron expande. */}
+            {(accumulatedSection.showAportes || accumulatedSection.showDividends) && (
+              <>
+                <div
+                  className="grid border-t-4 border-indigo-500 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-indigo-700"
+                  style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                >
+                  <span className="sticky left-0 z-[2] bg-card">Acumulados</span>
+                  {Array.from({ length: totalCols }).map((_, i) => (
+                    <span key={`acc-h-${i}`} />
+                  ))}
+                </div>
+
+                {accumulatedSection.showAportes && (
+                  <>
+                    <div
+                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
+                      style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                    >
+                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                        {accumulatedSection.aportes.partners.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setAccAportesOpen((prev) => !prev)}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+                            aria-label={accAportesOpen ? "Recolher socios" : "Expandir socios"}
+                          >
+                            {accAportesOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        ) : (
+                          <span className="w-4" />
+                        )}
+                        <span className="truncate">Aportes Acumulados</span>
+                      </div>
+                      {columns.map((column) => (
+                        <div key={`acc-ap-tot-${column.key}`} className="text-right">
+                          {formatCurrency(accumulatedSection.aportes.totalsByBucket[column.key] ?? 0)}
+                        </div>
+                      ))}
+                      <div className="text-right font-bold">
+                        {formatCurrency(accumulatedSection.aportes.accumulatedTotal)}
+                      </div>
+                    </div>
+                    {accAportesOpen && accumulatedSection.aportes.partners.map((p) => (
+                      <div
+                        key={p.id}
+                        className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
+                        style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                      >
+                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card pl-4">
+                          <span className="w-4" />
+                          <span className="truncate text-muted-foreground">{p.name}</span>
+                        </div>
+                        {columns.map((column) => (
+                          <div key={`${p.id}-${column.key}`} className="text-right">
+                            {formatCurrency(p.valuesByBucket[column.key] ?? 0)}
+                          </div>
+                        ))}
+                        <div className="text-right font-semibold">
+                          {formatCurrency(p.accumulatedTotal)}
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+
+                {accumulatedSection.showDividends && (
+                  <>
+                    <div
+                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
+                      style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                    >
+                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                        {accumulatedSection.dividends.partners.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setAccDividendsOpen((prev) => !prev)}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+                            aria-label={accDividendsOpen ? "Recolher socios" : "Expandir socios"}
+                          >
+                            {accDividendsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        ) : (
+                          <span className="w-4" />
+                        )}
+                        <span className="truncate">Dividendos Acumulados</span>
+                      </div>
+                      {columns.map((column) => (
+                        <div key={`acc-dv-tot-${column.key}`} className="text-right">
+                          {formatCurrency(accumulatedSection.dividends.totalsByBucket[column.key] ?? 0)}
+                        </div>
+                      ))}
+                      <div className="text-right font-bold">
+                        {formatCurrency(accumulatedSection.dividends.accumulatedTotal)}
+                      </div>
+                    </div>
+                    {accDividendsOpen && accumulatedSection.dividends.partners.map((p) => (
+                      <div
+                        key={p.id}
+                        className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
+                        style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                      >
+                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card pl-4">
+                          <span className="w-4" />
+                          <span className="truncate text-muted-foreground">{p.name}</span>
+                        </div>
+                        {columns.map((column) => (
+                          <div key={`${p.id}-${column.key}`} className="text-right">
+                            {formatCurrency(p.valuesByBucket[column.key] ?? 0)}
+                          </div>
+                        ))}
+                        <div className="text-right font-semibold">
+                          {formatCurrency(p.accumulatedTotal)}
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </div>

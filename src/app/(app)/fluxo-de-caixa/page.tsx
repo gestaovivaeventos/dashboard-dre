@@ -13,9 +13,12 @@ import {
   buildCashFlowDateRange,
   buildCashFlowFilterState,
   buildCashFlowRows,
+  EMPTY_CASH_FLOW_ACCUMULATED_SECTION,
   previousMonth,
   resolveAllowedCompanyIds,
   type CashFlowAccountBase,
+  type CashFlowAccumulatedAccount,
+  type CashFlowAccumulatedSection,
   type CashFlowPeriodBucket,
 } from "@/lib/dashboard/cash-flow";
 
@@ -141,6 +144,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "", year: 0, month: 0 }}
         selectedCompanyIds={[]}
         lastSyncAt={null}
+        accumulatedSection={EMPTY_CASH_FLOW_ACCUMULATED_SECTION}
       />
     );
   }
@@ -617,6 +621,181 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
 
   const displayRows: CashFlowDisplayRow[] = [...baseRows, ...partnerRows];
 
+  // === Nova secao: Aportes / Dividendos Acumulados ============================
+  // Para cada bucket exibido, calcula o total acumulado de Dividendos Pagos
+  // (4.2) e Aumento de Capital (5.1) DESDE O INICIO DA HISTORIA ate o final
+  // daquele bucket — inclui periodos anteriores ao range exibido. Quando
+  // existem socios cadastrados (single-company), tambem detalha por socio.
+  //
+  // Regras:
+  // - Buckets futuros (alem do mes corrente) ficam zerados — nao projetam
+  //   acumulado para frente (regra explicita do produto).
+  // - Total da totalizadora: se ha socios exibidos, soma dos acumulados por
+  //   socio (regra explicita); senao, acumulado da propria conta agregada.
+  // - Subniveis por socio so aparecem em single-company (mesmo padrao das
+  //   linhas 4.2 / 5.1 ja existentes).
+  // - Acumulado segue por sobre virada de ano: jan acumula em cima de dez do
+  //   ano anterior porque o baseline e gerado por consulta sem corte de ano.
+  const BASELINE_FAR_PAST = "1900-01-01";
+
+  let baselineAmounts = new Map<string, number>();
+  let baselinePartnerBreakdown = new Map<string, Map<string, number>>();
+  const firstBucket = buckets[0] ?? null;
+  if (firstBucket) {
+    const baselineEnd = new Date(Date.UTC(firstBucket.year, firstBucket.month - 1, 0));
+    const baselineDateTo = baselineEnd.toISOString().slice(0, 10);
+    if (baselineDateTo >= BASELINE_FAR_PAST) {
+      const baselineBucket: CashFlowPeriodBucket = {
+        key: "acc-baseline",
+        label: "",
+        dateFrom: BASELINE_FAR_PAST,
+        dateTo: baselineDateTo,
+        year: firstBucket.year,
+        month: firstBucket.month,
+      };
+      [baselineAmounts, baselinePartnerBreakdown] = await Promise.all([
+        computeCashFlowAmounts(baselineBucket),
+        computePartnerBreakdown(baselineBucket),
+      ]);
+    }
+  }
+
+  const dividendsAccountId = dividendsPaidAccount?.id ?? null;
+  const aportesAccountId = capitalIncreaseAccount?.id ?? null;
+
+  // Running accumulators — guardam o acumulado ate o fim do bucket corrente.
+  let runningDividendsAccount = dividendsAccountId
+    ? baselineAmounts.get(dividendsAccountId) ?? 0
+    : 0;
+  let runningAportesAccount = aportesAccountId
+    ? baselineAmounts.get(aportesAccountId) ?? 0
+    : 0;
+  const runningDividendsByPartner = new Map<string, number>();
+  const runningAportesByPartner = new Map<string, number>();
+  partners.forEach((p) => {
+    if (dividendsAccountId) {
+      runningDividendsByPartner.set(
+        p.id,
+        baselinePartnerBreakdown.get(p.id)?.get(dividendsAccountId) ?? 0,
+      );
+    }
+    if (aportesAccountId) {
+      runningAportesByPartner.set(
+        p.id,
+        baselinePartnerBreakdown.get(p.id)?.get(aportesAccountId) ?? 0,
+      );
+    }
+  });
+
+  const accDividendsByBucket: Record<string, number> = {};
+  const accAportesByBucket: Record<string, number> = {};
+  const accDividendsByPartnerByBucket = new Map<string, Record<string, number>>();
+  const accAportesByPartnerByBucket = new Map<string, Record<string, number>>();
+  partners.forEach((p) => {
+    accDividendsByPartnerByBucket.set(p.id, {});
+    accAportesByPartnerByBucket.set(p.id, {});
+  });
+
+  visibleBuckets.forEach((bucket) => {
+    if (isFutureBucket(bucket)) {
+      accDividendsByBucket[bucket.key] = 0;
+      accAportesByBucket[bucket.key] = 0;
+      partners.forEach((p) => {
+        accDividendsByPartnerByBucket.get(p.id)![bucket.key] = 0;
+        accAportesByPartnerByBucket.get(p.id)![bucket.key] = 0;
+      });
+      return;
+    }
+
+    if (dividendsAccountId) {
+      runningDividendsAccount +=
+        valuesPerBucket.get(bucket.key)?.[dividendsAccountId] ?? 0;
+    }
+    if (aportesAccountId) {
+      runningAportesAccount +=
+        valuesPerBucket.get(bucket.key)?.[aportesAccountId] ?? 0;
+    }
+
+    partners.forEach((p) => {
+      if (dividendsAccountId) {
+        const monthVal =
+          partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(dividendsAccountId) ?? 0;
+        const newRunning = (runningDividendsByPartner.get(p.id) ?? 0) + monthVal;
+        runningDividendsByPartner.set(p.id, newRunning);
+        accDividendsByPartnerByBucket.get(p.id)![bucket.key] = newRunning;
+      }
+      if (aportesAccountId) {
+        const monthVal =
+          partnerValuesPerBucket.get(bucket.key)?.get(p.id)?.get(aportesAccountId) ?? 0;
+        const newRunning = (runningAportesByPartner.get(p.id) ?? 0) + monthVal;
+        runningAportesByPartner.set(p.id, newRunning);
+        accAportesByPartnerByBucket.get(p.id)![bucket.key] = newRunning;
+      }
+    });
+
+    // Regra explicita: quando socios sao exibidos, a totalizadora e a soma
+    // dos acumulados dos socios. Caso contrario, e o acumulado agregado.
+    if (showPartners) {
+      accDividendsByBucket[bucket.key] = Array.from(
+        runningDividendsByPartner.values(),
+      ).reduce((a, b) => a + b, 0);
+      accAportesByBucket[bucket.key] = Array.from(
+        runningAportesByPartner.values(),
+      ).reduce((a, b) => a + b, 0);
+    } else {
+      accDividendsByBucket[bucket.key] = runningDividendsAccount;
+      accAportesByBucket[bucket.key] = runningAportesAccount;
+    }
+  });
+
+  const finalDividendsTotal = showPartners
+    ? Array.from(runningDividendsByPartner.values()).reduce((a, b) => a + b, 0)
+    : runningDividendsAccount;
+  const finalAportesTotal = showPartners
+    ? Array.from(runningAportesByPartner.values()).reduce((a, b) => a + b, 0)
+    : runningAportesAccount;
+
+  const buildAccountSection = (
+    valuesByPartnerBucket: Map<string, Record<string, number>>,
+    runningByPartner: Map<string, number>,
+    totalsByBucket: Record<string, number>,
+    accumulatedTotal: number,
+  ): CashFlowAccumulatedAccount => ({
+    totalsByBucket,
+    accumulatedTotal,
+    partners: showPartners
+      ? partners.map((p, idx) => ({
+          id: `acc-partner:${p.id}:${idx}`,
+          name: p.name,
+          valuesByBucket: valuesByPartnerBucket.get(p.id) ?? {},
+          accumulatedTotal: runningByPartner.get(p.id) ?? 0,
+        }))
+      : [],
+  });
+
+  // Em modo comparativo entre empresas a tabela renderiza colunas por empresa
+  // ao inves de colunas mensais — a leitura "acumulado por mes" perde sentido
+  // nessa visao, entao escondemos a nova secao ali.
+  const accumulatedSection: CashFlowAccumulatedSection = filter.compareCompanies
+    ? EMPTY_CASH_FLOW_ACCUMULATED_SECTION
+    : {
+        showDividends: dividendsAccountId !== null,
+        showAportes: aportesAccountId !== null,
+        showPartners,
+        dividends: buildAccountSection(
+          accDividendsByPartnerByBucket,
+          runningDividendsByPartner,
+          accDividendsByBucket,
+          finalDividendsTotal,
+        ),
+        aportes: buildAccountSection(
+          accAportesByPartnerByBucket,
+          runningAportesByPartner,
+          accAportesByBucket,
+          finalAportesTotal,
+        ),
+      };
+
   return (
     <CashFlowView
       filter={filter}
@@ -629,6 +808,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       accumulatedBucket={accumulatedBucket}
       selectedCompanyIds={filter.selectedCompanyIds}
       lastSyncAt={lastSyncAt}
+      accumulatedSection={accumulatedSection}
     />
   );
 }
