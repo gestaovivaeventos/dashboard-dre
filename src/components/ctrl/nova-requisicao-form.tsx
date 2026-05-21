@@ -1,12 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useMemo, useEffect } from "react";
-import { AlertTriangle, CheckCircle2, Zap } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { AlertTriangle, CheckCircle2, Paperclip, X, Zap } from "lucide-react";
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
+const ATTACHMENT_BUCKET = "ctrl-attachments";
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -64,6 +68,30 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // ── Recurrence ───────────────────────────────────────────────────────────────
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurMonths, setRecurMonths] = useState<number[]>([]);
+
+  // ── Attachment (uploaded just-in-time on submit, before createRequest) ──────
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+
+  function pickAttachment(file: File | null) {
+    setAttachmentError(null);
+    if (!file) {
+      setAttachment(null);
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      setAttachmentError("Arquivo excede o limite de 10 MB.");
+      return;
+    }
+    setAttachment(file);
+  }
+
+  function clearAttachment() {
+    setAttachment(null);
+    setAttachmentError(null);
+    if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+  }
 
   // ── Budget verification ──────────────────────────────────────────────────────
   const [verifying, setVerifying] = useState(false);
@@ -224,9 +252,39 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     // description as title — the UI now shows only one text field.
     const descriptionValue = (form.get("description") as string)?.trim() ?? "";
 
+    // If an attachment was selected, upload it first. We do this client-side
+    // (anon-key + RLS scoped to {auth.uid()}/) so failures stop the submission
+    // before any ctrl_requests row is created.
+    let attachmentPath: string | undefined;
+    if (attachment) {
+      try {
+        const supabase = createSupabaseClient();
+        const { data: userData } = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (!userId) throw new Error("Sessão expirada — refaça o login.");
+
+        const safeName = attachment.name.replace(/[^\w.\-]+/g, "_");
+        const objectPath = `${userId}/${Date.now()}-${safeName}`;
+        const { error: uploadErr } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .upload(objectPath, attachment, {
+            contentType: attachment.type || "application/octet-stream",
+            upsert: false,
+          });
+        if (uploadErr) throw uploadErr;
+        attachmentPath = objectPath;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(`Falha ao enviar o anexo: ${msg}`);
+        setLoading(false);
+        return;
+      }
+    }
+
     const result = await createRequest({
       title: descriptionValue,
       description: descriptionValue || undefined,
+      attachment_path: attachmentPath,
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -423,16 +481,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       </div>
 
-      {/* Mês/Ano referência */}
+      {/* Competência */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label className={LABEL_CLS}>Mês de Referência <span className="text-destructive">*</span></label>
+          <label className={LABEL_CLS}>Mês Competência <span className="text-destructive">*</span></label>
           <select value={refMonth} onChange={(e) => setRefMonth(Number(e.target.value))} className={INPUT_CLS}>
             {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
         </div>
         <div className="space-y-1.5">
-          <label className={LABEL_CLS}>Ano de Referência <span className="text-destructive">*</span></label>
+          <label className={LABEL_CLS}>Ano Competência <span className="text-destructive">*</span></label>
           <select value={refYear} onChange={(e) => setRefYear(Number(e.target.value))} className={INPUT_CLS}>
             {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -701,13 +759,63 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
       {/* Fornecedor emite nota? */}
       <div className="space-y-1.5">
-        <label htmlFor="supplier_issues_invoice" className={LABEL_CLS}>O fornecedor emite nota fiscal?</label>
-        <select id="supplier_issues_invoice" name="supplier_issues_invoice" className={INPUT_CLS}>
-          <option value="">Não informado</option>
+        <label htmlFor="supplier_issues_invoice" className={LABEL_CLS}>
+          O fornecedor emite nota fiscal? <span className="text-destructive">*</span>
+        </label>
+        <select
+          id="supplier_issues_invoice"
+          name="supplier_issues_invoice"
+          required
+          className={INPUT_CLS}
+        >
+          <option value="">Selecione uma resposta</option>
           <option value="sim">Sim</option>
           <option value="nao">Não</option>
           <option value="nao_sei">Não sei</option>
         </select>
+      </div>
+
+      {/* Anexo */}
+      <div className="space-y-1.5">
+        <label htmlFor="attachment" className={LABEL_CLS}>
+          Anexo (opcional, até 10 MB)
+        </label>
+        {!attachment ? (
+          <div className="flex items-center gap-2">
+            <input
+              ref={attachmentInputRef}
+              id="attachment"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+              onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
+              className={INPUT_CLS}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Paperclip className="h-4 w-4 text-muted-foreground" />
+              <span className="truncate">{attachment.name}</span>
+              <span className="text-xs text-muted-foreground">
+                ({(attachment.size / 1024 / 1024).toFixed(2)} MB)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={clearAttachment}
+              className="text-muted-foreground hover:text-destructive"
+              aria-label="Remover anexo"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {attachmentError && (
+          <p className="text-xs text-destructive">{attachmentError}</p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Formatos: PDF, JPG, PNG, DOC, XLS.
+        </p>
       </div>
 
       {/* Observações */}

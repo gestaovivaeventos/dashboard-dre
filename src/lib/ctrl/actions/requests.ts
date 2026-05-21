@@ -62,6 +62,9 @@ export interface CreateRequestInput {
   // Recurrence
   is_recurring?: boolean;
   recurrence_months?: number[];
+  // Attachment (uploaded client-side to storage bucket 'ctrl-attachments'
+  // before submit). Stored verbatim in every row of this submission.
+  attachment_path?: string;
 }
 
 // ─── Budget Verification ──────────────────────────────────────────────────────
@@ -351,6 +354,7 @@ export async function createRequest(data: CreateRequestInput) {
     pix_key_type: data.pix_key_type ?? null,
     favorecido: data.favorecido ?? null,
     barcode: data.barcode ?? null,
+    attachment_path: data.attachment_path ?? null,
     is_budgeted: verification?.isBudgeted ?? false,
     approval_tier: approvalTier,
     is_recurring: data.is_recurring ?? false,
