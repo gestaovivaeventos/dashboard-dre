@@ -104,8 +104,22 @@ const currencyFormatter = new Intl.NumberFormat("pt-BR", {
   currency: "BRL",
 });
 
+// Formatador compacto usado apenas no eixo Y do grafico: o valor cheio
+// ("R$ 80.000,00") nao cabe na largura padrao do YAxis (60px) e fica cortado.
+// O tooltip continua exibindo o valor completo via `formatCurrency`.
+const currencyCompactFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 function formatCurrency(value: number) {
   return currencyFormatter.format(value);
+}
+
+function formatCurrencyCompact(value: number) {
+  return currencyCompactFormatter.format(value);
 }
 
 function formatVar(a: number, b: number): string {
@@ -778,29 +792,40 @@ export function DashboardDreView({
                   </div>
 
                   {/* Monthly values */}
-                  {columns.map((column) => (
-                    <div key={`${row.id}-${column.key}`} className="text-right">
-                      <button
-                        type="button"
-                        className={`w-full text-right ${!row.is_summary ? "hover:underline" : ""}`}
-                        onClick={() => {
-                          if (row.is_summary) {
-                            setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }));
-                          } else {
-                            void openDrilldown(
-                              row,
-                              column,
-                              1,
-                              drillSearch,
-                              row.valuesByBucket[column.key] ?? 0,
-                            );
-                          }
-                        }}
-                      >
-                        {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
-                      </button>
-                    </div>
-                  ))}
+                  {columns.map((column) => {
+                    // Drilldown abre quando a conta NAO tem filhos visiveis E nao
+                    // e calculada por formula. Contas como "Receitas/Despesas Nao
+                    // Operacionais" (codes 9 e 10) tem is_summary=true por
+                    // convencao do plano, mas sem filhos e sem formula — o valor
+                    // vem de lancamentos diretos via category_mapping, entao
+                    // drilldown faz sentido. Antes, a checagem por is_summary
+                    // bloqueava o drilldown e o clique tentava expandir uma lista
+                    // de filhos vazia.
+                    const canDrilldown = !row.hasChildren && row.type !== "calculado";
+                    return (
+                      <div key={`${row.id}-${column.key}`} className="text-right">
+                        <button
+                          type="button"
+                          className={`w-full text-right ${canDrilldown ? "hover:underline" : ""}`}
+                          onClick={() => {
+                            if (row.hasChildren) {
+                              setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }));
+                            } else if (canDrilldown) {
+                              void openDrilldown(
+                                row,
+                                column,
+                                1,
+                                drillSearch,
+                                row.valuesByBucket[column.key] ?? 0,
+                              );
+                            }
+                          }}
+                        >
+                          {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
+                        </button>
+                      </div>
+                    );
+                  })}
 
                   {/* Total column */}
                   <div className="text-right font-semibold">
@@ -830,7 +855,7 @@ export function DashboardDreView({
               <AreaChart data={evolutionData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
-                <YAxis tickFormatter={(value) => formatCurrency(Number(value))} />
+                <YAxis tickFormatter={(value) => formatCurrencyCompact(Number(value))} width={72} />
                 <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                 <Legend />
                 {selectedCompanyIds.map((companyId, index) => {
