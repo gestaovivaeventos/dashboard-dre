@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { sendNewUserPendingApprovalEmail } from "@/lib/notifications/resend";
 import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
 
 export type { ModuleAccess, UnifiedProfile };
@@ -53,7 +54,7 @@ export async function getSessionContext(): Promise<SessionContext> {
   if (!profileRow) {
     const fallbackName =
       typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null;
-    await supabase.from("users").upsert(
+    const { error: upsertError } = await supabase.from("users").upsert(
       {
         id: user.id,
         email: user.email ?? `${user.id}@placeholder.local`,
@@ -64,6 +65,16 @@ export async function getSessionContext(): Promise<SessionContext> {
       },
       { onConflict: "id" },
     );
+
+    // Novo signup detectado (perfil acabou de ser criado com active=false):
+    // notifica o admin pra autorizar. Só dispara quando o upsert teve sucesso
+    // pra não enviar email por race conditions de duplicação.
+    if (!upsertError) {
+      await sendNewUserPendingApprovalEmail({
+        userEmail: user.email ?? `(sem email — ${user.id})`,
+        userName: fallbackName,
+      });
+    }
     return empty;
   }
 
