@@ -21,6 +21,12 @@ export default async function ProtectedLayout({
   const contractsOnly = profile?.contracts_only === true;
 
   // Fetch segments the user has access to.
+  // 1) Admin: vê todos os segmentos ativos.
+  // 2) Outros: primeiro tenta user_segment_access; se vazio, deriva dos
+  //    companies em user_company_access (cada company carrega segment_id).
+  //    Esse fallback cobre franqueado e qualquer perfil que só recebeu
+  //    vínculo por unidade — o sidebar precisa de um slug válido pra
+  //    renderizar itens scope:"segment" (/s/<slug>/dashboard, etc.).
   let segments: Segment[] = [];
   if (userRole === "admin") {
     const { data } = await supabase
@@ -38,6 +44,22 @@ export default async function ProtectedLayout({
       .map((row) => row.segments)
       .filter((s) => s && s.active)
       .sort((a, b) => a.display_order - b.display_order);
+
+    if (segments.length === 0 && profile.company_ids.length > 0) {
+      const { data: companiesData } = await supabase
+        .from("companies")
+        .select("segment_id, segments!inner(id,name,slug,display_order,active)")
+        .in("id", profile.company_ids)
+        .eq("active", true);
+      const segmentMap = new Map<string, Segment>();
+      ((companiesData ?? []) as unknown as Array<{ segments: Segment }>).forEach((row) => {
+        const seg = row.segments;
+        if (seg && seg.active && !segmentMap.has(seg.id)) segmentMap.set(seg.id, seg);
+      });
+      segments = Array.from(segmentMap.values()).sort(
+        (a, b) => a.display_order - b.display_order,
+      );
+    }
   }
 
   // Resolve module/segment context.
