@@ -31,6 +31,8 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const body = (await request.json()) as {
     name?: string;
+    phone?: string | null;
+    position?: string | null;
     profile?: UserProfileType;
     can_financeiro?: boolean;
     can_compras?: boolean;
@@ -53,6 +55,8 @@ export async function PATCH(request: Request, { params }: Params) {
   // ── Patch users row ──
   const patch: Record<string, unknown> = {};
   if (typeof body.name === "string") patch.name = body.name.trim();
+  if (body.phone !== undefined) patch.phone = body.phone?.trim() || null;
+  if (body.position !== undefined) patch.position = body.position?.trim() || null;
   if (body.profile !== undefined) {
     patch.profile = body.profile;
     // Mantém o flag legado contracts_only em sincronia

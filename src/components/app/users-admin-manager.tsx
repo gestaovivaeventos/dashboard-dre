@@ -54,6 +54,8 @@ interface UserItem {
   id: string;
   name: string;
   email: string;
+  phone: string;
+  position: string;
   profile: string;
   can_financeiro: boolean;
   can_compras: boolean;
@@ -140,6 +142,8 @@ function profileNeedsSectors(p: Profile): boolean {
 interface FormState {
   email: string;
   name: string;
+  phone: string;
+  position: string;
   profile: Profile;
   can_financeiro: boolean;
   can_compras: boolean;
@@ -150,6 +154,8 @@ interface FormState {
 const emptyForm: FormState = {
   email: "",
   name: "",
+  phone: "",
+  position: "",
   profile: "solicitante",
   can_financeiro: true,
   can_compras: true,
@@ -161,6 +167,8 @@ function userToForm(u: UserItem): FormState {
   return {
     email: u.email,
     name: u.name,
+    phone: u.phone ?? "",
+    position: u.position ?? "",
     profile: (u.profile as Profile) ?? "solicitante",
     can_financeiro: u.can_financeiro,
     can_compras: u.can_compras,
@@ -260,6 +268,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         id: string;
         email: string;
         name: string;
+        phone: string | null;
+        position: string | null;
         profile: string;
         can_financeiro: boolean;
         can_compras: boolean;
@@ -273,6 +283,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         id: u.id,
         email: u.email,
         name: u.name,
+        phone: u.phone ?? "",
+        position: u.position ?? "",
         profile: u.profile,
         can_financeiro: u.can_financeiro,
         can_compras: u.can_compras,
@@ -317,6 +329,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       body: JSON.stringify({
         email: form.email.trim(),
         name: form.name.trim(),
+        phone: form.phone.trim() || null,
+        position: form.position.trim() || null,
         profile: form.profile,
         can_financeiro: form.can_financeiro,
         can_compras: form.can_compras,
@@ -349,6 +363,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: form.name.trim(),
+        phone: form.phone.trim() || null,
+        position: form.position.trim() || null,
         profile: form.profile,
         can_financeiro: form.can_financeiro,
         can_compras: form.can_compras,
@@ -399,8 +415,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Nome</TableHead>
-            <TableHead>E-mail</TableHead>
+            <TableHead>Nome / Cargo</TableHead>
+            <TableHead>Contato</TableHead>
             <TableHead>Perfil</TableHead>
             <TableHead>Módulos</TableHead>
             <TableHead>Setores</TableHead>
@@ -412,8 +428,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         <TableBody>
           {users.map((u) => (
             <TableRow key={u.id}>
-              <TableCell className="font-medium">{u.name || "—"}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{u.email}</TableCell>
+              <TableCell>
+                <div className="font-medium">{u.name || "—"}</div>
+                {u.position && (
+                  <div className="text-xs text-muted-foreground">{u.position}</div>
+                )}
+              </TableCell>
+              <TableCell className="text-xs">
+                <div className="text-muted-foreground">{u.email}</div>
+                {u.phone && <div className="text-muted-foreground">{u.phone}</div>}
+              </TableCell>
               <TableCell>
                 <Badge className={PROFILE_BADGE_CLASS[u.profile] ?? "bg-slate-100 text-slate-800"}>
                   {PROFILE_LABEL[u.profile] ?? u.profile}
@@ -617,7 +641,7 @@ function UserForm({
         )}
         <div className={`space-y-1.5 ${includesEmail ? "" : "sm:col-span-2"}`}>
           <Label htmlFor="user-name">
-            Nome <span className="text-destructive">*</span>
+            Nome completo <span className="text-destructive">*</span>
           </Label>
           <Input
             id="user-name"
@@ -625,7 +649,27 @@ function UserForm({
             required
             value={form.name}
             onChange={(e) => onChange("name", e.target.value)}
-            placeholder="Nome completo"
+            placeholder="Ex: Maria da Silva"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="user-position">Cargo</Label>
+          <Input
+            id="user-position"
+            type="text"
+            value={form.position}
+            onChange={(e) => onChange("position", e.target.value)}
+            placeholder="Ex: Gerente Comercial"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="user-phone">Telefone</Label>
+          <Input
+            id="user-phone"
+            type="tel"
+            value={form.phone}
+            onChange={(e) => onChange("phone", e.target.value)}
+            placeholder="(11) 99999-9999"
           />
         </div>
       </div>
