@@ -111,17 +111,22 @@ function formatBRLMil(n: number): string {
 //
 // Regra especial: o card "FEE Disponível" NAO tem variacao vs orcamento. A
 // rota envia variationLabel="Saldo atual" com variationValue=null. O mapper
-// preserva esse rotulo no campo `variation` do componente. Observacao: o
-// componente atual concatena " vs orçamento" no template do card, o que
-// pode resultar em "Saldo atual vs orçamento" na UI — gap visual conhecido
-// que sera resolvido em PR proprio (ver relatorio ao final).
-function mapKpiCard(api: ApiKpiCard | undefined, fallbackLabel: string): KpiCard {
+// preserva esse rotulo no campo `variation` e marca `omitComparisonSuffix:
+// true` para o componente NAO concatenar " vs orçamento" no render.
+function mapKpiCard(
+  api: ApiKpiCard | undefined,
+  fallbackLabel: string,
+  options: { omitComparisonSuffix?: boolean } = {},
+): KpiCard {
   if (!api) {
     return {
       label: fallbackLabel,
       value: "—",
       variation: "",
       sign: "Neutro",
+      ...(options.omitComparisonSuffix
+        ? { omitComparisonSuffix: true }
+        : {}),
     };
   }
 
@@ -134,6 +139,7 @@ function mapKpiCard(api: ApiKpiCard | undefined, fallbackLabel: string): KpiCard
     value: api.formattedValue ?? "—",
     variation: api.variationLabel ?? "",
     sign: statusToSign(api.status),
+    ...(options.omitComparisonSuffix ? { omitComparisonSuffix: true } : {}),
   };
 }
 
@@ -142,7 +148,9 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     mapKpiCard(api?.receita, "Receita"),
     mapKpiCard(api?.resultado, "Resultado"),
     mapKpiCard(api?.margem, "Margem"),
-    mapKpiCard(api?.fee_disponivel, "FEE disponível"),
+    mapKpiCard(api?.fee_disponivel, "FEE disponível", {
+      omitComparisonSuffix: true,
+    }),
     mapKpiCard(api?.vvr, "VVR"),
   ];
 }

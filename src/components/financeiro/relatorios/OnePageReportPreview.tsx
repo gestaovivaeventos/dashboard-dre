@@ -48,6 +48,10 @@ export interface KpiCard {
   sign: ImpactSign;
   // Algumas variacoes (margem) sao em p.p. — sufixo opcional explicito.
   variationSuffix?: string;
+  // Quando true, o card NAO concatena " vs orçamento" no final da variacao.
+  // Usado para KPIs que nao tem comparacao com orcamento — ex.: FEE
+  // Disponível, que e um saldo e mostra apenas "Saldo atual".
+  omitComparisonSuffix?: boolean;
 }
 
 export interface PrevistoRealizadoItem {
@@ -121,7 +125,7 @@ const MOCK_DATA: OnePageReportPreviewData = {
     { label: "Receita", value: "R$ 118,9 mil", variation: "+8,1%", sign: "Positivo" },
     { label: "Resultado", value: "R$ 25,9 mil", variation: "+3,8%", sign: "Positivo" },
     { label: "Margem", value: "22,7%", variation: "-0,8", variationSuffix: "p.p.", sign: "Atenção" },
-    { label: "FEE disponível", value: "R$ 7,0 mil", variation: "+4,2%", sign: "Neutro" },
+    { label: "FEE disponível", value: "R$ 7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
     { label: "VVR", value: "R$ 180 mil", variation: "+9,1%", sign: "Positivo" },
   ],
   previstoRealizado: [
@@ -310,7 +314,8 @@ function KpiCardItem({ kpi }: { kpi: KpiCard }) {
           )}
           <span>
             {kpi.variation}
-            {kpi.variationSuffix ? ` ${kpi.variationSuffix}` : ""} vs orçamento
+            {kpi.variationSuffix ? ` ${kpi.variationSuffix}` : ""}
+            {kpi.omitComparisonSuffix ? "" : " vs orçamento"}
           </span>
         </div>
       </CardContent>
