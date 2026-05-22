@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertCircle, FlaskConical, Loader2, Sparkles } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Download,
+  FlaskConical,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 
 import { OnePageReportPreview } from "@/components/financeiro/relatorios/OnePageReportPreview";
 import type { OnePageReportPreviewData } from "@/components/financeiro/relatorios/OnePageReportPreview";
@@ -116,6 +122,12 @@ export function BusinessIntelligenceClient({
     undefined,
   );
 
+  // Ref para o container do relatorio (capturado pelo html2canvas na
+  // exportacao PDF). NAO inclui o card de filtros nem o alerta de erro —
+  // apenas o conteudo do OnePageReportPreview.
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+
   const loading = loadingMode !== null;
   const buttonDisabled =
     !canGenerate || loading || !companyId || !dateFrom || !dateTo;
@@ -188,6 +200,118 @@ export function BusinessIntelligenceClient({
 
   const handleGenerate = () => void runGenerate("ia");
   const handleGenerateNoAi = () => void runGenerate("no-ai");
+
+  // ─── Export PDF ───────────────────────────────────────────────────────────
+  //
+  // Captura o DOM do relatorio com html2canvas (alta resolucao via scale=2)
+  // e embute como imagem unica em PDF A4 paisagem via jsPDF. As bibliotecas
+  // sao carregadas DINAMICAMENTE — saem do bundle inicial e so chegam ao
+  // navegador na hora do clique. Custo do clique: ~250kb gz baixados +
+  // ~1-2s para renderizar capture e gerar PDF.
+  //
+  // Single-page: a imagem capturada e escalada para caber inteira em UMA
+  // pagina A4 paisagem. Escolhe entre fit-by-width ou fit-by-height de
+  // forma que tudo fique visivel sem quebra de pagina.
+  const sanitizeFilename = (s: string) =>
+    s.replace(/[/\\?%*:|"<>\s]+/g, "_").replace(/_+/g, "_");
+
+  const handleExportPdf = async () => {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+        // `onclone` roda no DOM clonado que o html2canvas usa para captura.
+        // Forca `overflow: visible` em wrappers do recharts e SVGs internos —
+        // sem isso os LabelList posicionados fora do plot area (position
+        // "right" nas barras horizontais e "top" nas barras verticais) sao
+        // clipados e nao aparecem no PDF.
+        onclone: (clonedDoc) => {
+          const selectors = [
+            ".recharts-wrapper",
+            ".recharts-surface",
+            ".recharts-responsive-container",
+            "svg",
+          ];
+          clonedDoc
+            .querySelectorAll<HTMLElement | SVGElement>(selectors.join(","))
+            .forEach((el) => {
+              (el as HTMLElement).style.overflow = "visible";
+              if ("setAttribute" in el) {
+                el.setAttribute("overflow", "visible");
+              }
+            });
+        },
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+        compress: true,
+      });
+
+      // A4 retrato (210 x 297 mm) — preenche a pagina inteira. A imagem do
+      // relatorio e ancorada no canto superior esquerdo (0, 0) e esticada
+      // para ocupar 210 mm de largura. A altura e proporcional ao aspect
+      // do canvas (preserva proporcao, sem distorcao).
+      //
+      // Quando a altura proporcional excederia 297 mm, fazemos o caminho
+      // inverso: ancorar pela altura (297 mm) e calcular largura. Garante
+      // que tudo cabe em UMA pagina e ainda assim usa o maximo do espaco
+      // disponivel.
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const canvasAspect = canvas.height / canvas.width;
+
+      let imgWidth: number;
+      let imgHeight: number;
+      if (pdfWidth * canvasAspect <= pdfHeight) {
+        // Fit-by-width: largura cheia, altura proporcional cabe na pagina.
+        imgWidth = pdfWidth;
+        imgHeight = pdfWidth * canvasAspect;
+      } else {
+        // Fit-by-height: altura cheia, largura proporcional.
+        imgHeight = pdfHeight;
+        imgWidth = pdfHeight / canvasAspect;
+      }
+      const xOffset = (pdfWidth - imgWidth) / 2;
+      const yOffset = (pdfHeight - imgHeight) / 2;
+
+      pdf.addImage(imgData, "PNG", xOffset, yOffset, imgWidth, imgHeight);
+
+      const empresa = data?.cabecalho.empresa ?? "preview";
+      const periodo = data?.cabecalho.periodo ?? "preview";
+      const filename = sanitizeFilename(
+        `OnePageReport_${empresa}_${periodo}.pdf`,
+      );
+      pdf.save(filename);
+
+      showToast({
+        title: "PDF gerado",
+        description: filename,
+        variant: "success",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro inesperado.";
+      showToast({
+        title: "Falha ao exportar PDF",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const isPreviewState = data === undefined;
 
@@ -299,6 +423,26 @@ export function BusinessIntelligenceClient({
                     )}
                   </Button>
                 ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleExportPdf}
+                  disabled={loading || exporting}
+                  className="w-full sm:w-auto"
+                  title="Exporta o relatório atual como PDF em uma única página A4 paisagem."
+                >
+                  {exporting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Gerando PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" />
+                      Exportar PDF
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
           </div>
@@ -329,8 +473,10 @@ export function BusinessIntelligenceClient({
         </div>
       ) : null}
 
-      {/* Preview / Relatorio */}
-      <OnePageReportPreview data={data} />
+      {/* Preview / Relatorio (envolvido em div com ref para o export PDF) */}
+      <div ref={reportRef} className="bg-background">
+        <OnePageReportPreview data={data} />
+      </div>
     </div>
   );
 }

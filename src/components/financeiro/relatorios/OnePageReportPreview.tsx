@@ -442,14 +442,24 @@ function PrevistoRealizadoLikeChart({
                 wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
                 iconType="circle"
               />
-              <Bar dataKey="Previsto" fill="#94a3b8" radius={[0, 4, 4, 0]}>
+              <Bar
+                dataKey="Previsto"
+                fill="#94a3b8"
+                radius={[0, 4, 4, 0]}
+                isAnimationActive={false}
+              >
                 <LabelList
                   dataKey="PrevistoLabel"
                   position="right"
                   style={{ fontSize: 11, fill: "#475569" }}
                 />
               </Bar>
-              <Bar dataKey="Realizado" fill="#0ea5e9" radius={[0, 4, 4, 0]}>
+              <Bar
+                dataKey="Realizado"
+                fill="#0ea5e9"
+                radius={[0, 4, 4, 0]}
+                isAnimationActive={false}
+              >
                 <LabelList
                   dataKey="RealizadoLabel"
                   position="right"
@@ -538,6 +548,22 @@ function ComposicaoBlock({ steps }: { steps: ComposicaoStep[] }) {
 function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
   // Barras = realizado; linha = meta. Composto num unico ComposedChart para
   // o eixo X e tooltip ficarem sincronizados.
+  //
+  // Rotulos pre-computados como strings — contorna a limitacao do
+  // `formatter` do LabelList que nao recebe a linha completa de dados.
+  const data = points.map((p) => ({
+    mes: p.mes,
+    realizado: p.realizado,
+    meta: p.meta,
+    realizadoLabel:
+      p.realizado === null
+        ? ""
+        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
+    metaLabel:
+      p.meta === null
+        ? ""
+        : p.meta.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
+  }));
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
@@ -547,11 +573,11 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
         </p>
       </CardHeader>
       <CardContent className="pb-4">
-        <div className="h-56 w-full">
+        <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
-              data={points}
-              margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+              data={data}
+              margin={{ top: 24, right: 16, bottom: 8, left: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "#64748b" }} />
@@ -571,7 +597,14 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
                 fill="#0ea5e9"
                 radius={[4, 4, 0, 0]}
                 barSize={28}
-              />
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="realizadoLabel"
+                  position="top"
+                  style={{ fontSize: 10, fill: "#0c4a6e", fontWeight: 600 }}
+                />
+              </Bar>
               <Line
                 type="monotone"
                 dataKey="meta"
@@ -579,7 +612,15 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
                 stroke="#f59e0b"
                 strokeWidth={2}
                 dot={{ r: 3, fill: "#f59e0b" }}
-              />
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="metaLabel"
+                  position="top"
+                  offset={10}
+                  style={{ fontSize: 10, fill: "#b45309" }}
+                />
+              </Line>
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -621,6 +662,7 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 stroke="#94a3b8"
                 strokeWidth={2}
                 dot={{ r: 3 }}
+                isAnimationActive={false}
               />
               <Line
                 type="monotone"
@@ -629,6 +671,7 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 stroke="#0ea5e9"
                 strokeWidth={2}
                 dot={{ r: 3 }}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
