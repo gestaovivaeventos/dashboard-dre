@@ -46,19 +46,33 @@ export default async function ProtectedLayout({
       .sort((a, b) => a.display_order - b.display_order);
 
     if (segments.length === 0 && profile.company_ids.length > 0) {
+      // Duas queries simples em vez de PostgREST embed (mais robusto contra
+      // ambiguidade de relations):
+      // 1) pega segment_ids distintos das companies do usuário
+      // 2) carrega segments por esses IDs
       const { data: companiesData } = await supabase
         .from("companies")
-        .select("segment_id, segments!inner(id,name,slug,display_order,active)")
+        .select("segment_id")
         .in("id", profile.company_ids)
         .eq("active", true);
-      const segmentMap = new Map<string, Segment>();
-      ((companiesData ?? []) as unknown as Array<{ segments: Segment }>).forEach((row) => {
-        const seg = row.segments;
-        if (seg && seg.active && !segmentMap.has(seg.id)) segmentMap.set(seg.id, seg);
-      });
-      segments = Array.from(segmentMap.values()).sort(
-        (a, b) => a.display_order - b.display_order,
+
+      const segmentIds = Array.from(
+        new Set(
+          ((companiesData ?? []) as Array<{ segment_id: string | null }>)
+            .map((c) => c.segment_id)
+            .filter((s): s is string => !!s),
+        ),
       );
+
+      if (segmentIds.length > 0) {
+        const { data: segData } = await supabase
+          .from("segments")
+          .select("id,name,slug,display_order,active")
+          .in("id", segmentIds)
+          .eq("active", true)
+          .order("display_order");
+        segments = (segData as Segment[]) ?? [];
+      }
     }
   }
 
