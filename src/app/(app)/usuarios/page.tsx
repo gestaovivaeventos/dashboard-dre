@@ -23,7 +23,7 @@ export default async function UsuariosPage() {
     adminClient
       .from("users")
       .select(
-        "id,email,name,profile,can_financeiro,can_compras,active,created_at",
+        "id,email,name,phone,position,profile,can_financeiro,can_compras,active,created_at",
       )
       .order("created_at", { ascending: false }),
     adminClient.from("companies").select("id,name").eq("active", true).order("name"),
@@ -59,6 +59,8 @@ export default async function UsuariosPage() {
     id: item.id as string,
     email: item.email as string,
     name: ((item.name as string | null) ?? "") as string,
+    phone: (item.phone as string | null) ?? "",
+    position: (item.position as string | null) ?? "",
     profile: (item.profile as string | null) ?? "solicitante",
     can_financeiro: Boolean(item.can_financeiro),
     can_compras: Boolean(item.can_compras),

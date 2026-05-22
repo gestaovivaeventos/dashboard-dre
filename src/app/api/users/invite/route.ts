@@ -14,8 +14,23 @@ const VALID_PROFILES: UserProfileType[] = [
   "franqueado",
 ];
 
+// Resolve a URL canônica da aplicação, preferindo a URL de produção do Vercel
+// quando rodando em prod. Evita o caso em que NEXT_PUBLIC_APP_URL acidentalmente
+// está apontando para localhost na production env.
+function resolveAppUrl(): string {
+  if (
+    process.env.VERCEL_ENV === "production" &&
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
 export async function POST(request: Request) {
-  const { supabase, user, profile } = await getCurrentSessionContext();
+  const { user, profile } = await getCurrentSessionContext();
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
@@ -26,6 +41,8 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     email?: string;
     name?: string;
+    phone?: string;
+    position?: string;
     profile?: UserProfileType;
     can_financeiro?: boolean;
     can_compras?: boolean;
@@ -35,6 +52,8 @@ export async function POST(request: Request) {
 
   const email = body.email?.trim().toLowerCase();
   const name = body.name?.trim();
+  const phone = body.phone?.trim() || null;
+  const position = body.position?.trim() || null;
   const userProfile = body.profile;
 
   if (!email || !name || !userProfile) {
@@ -74,9 +93,7 @@ export async function POST(request: Request) {
   }
 
   const adminClient = createAdminClient();
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+  const appUrl = resolveAppUrl();
 
   const landingPath =
     userProfile === "validador_contrato" ? "/contratos" : "/dashboard";
@@ -99,11 +116,17 @@ export async function POST(request: Request) {
   const newUserId = inviteData.user.id;
   const legacyDreRole = deriveLegacyDreRole(userProfile);
 
-  const { error: upsertError } = await supabase.from("users").upsert(
+  // IMPORTANTE: usar adminClient pra burlar RLS de users.
+  // A policy "Users can insert own profile" exige id = auth.uid(); como
+  // estamos criando perfil pra OUTRO usuario, precisamos do service role.
+  // O check de role admin acima ja garante seguranca.
+  const { error: upsertError } = await adminClient.from("users").upsert(
     {
       id: newUserId,
       email,
       name,
+      phone,
+      position,
       profile: userProfile,
       can_financeiro: canFinanceiro,
       can_compras: canCompras,

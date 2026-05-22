@@ -24,7 +24,7 @@ export async function GET() {
     supabase
       .from("users")
       .select(
-        "id,email,name,role,profile,can_financeiro,can_compras,company_id,active,contracts_only,created_at",
+        "id,email,name,phone,position,role,profile,can_financeiro,can_compras,company_id,active,contracts_only,created_at",
       )
       .order("created_at", { ascending: false }),
     adminClient.from("user_company_access").select("user_id,company_id"),
@@ -66,6 +66,8 @@ export async function GET() {
     id: item.id as string,
     email: item.email as string,
     name: (item.name as string | null) ?? "",
+    phone: (item.phone as string | null) ?? null,
+    position: (item.position as string | null) ?? null,
     profile: (item.profile as string | null) ?? "solicitante",
     can_financeiro: Boolean(item.can_financeiro),
     can_compras: Boolean(item.can_compras),

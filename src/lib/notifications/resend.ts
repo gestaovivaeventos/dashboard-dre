@@ -23,6 +23,57 @@ interface UnmappedEntryItem {
   newestPayment: string;
 }
 
+// Resolve a URL canônica priorizando a de produção quando rodando no Vercel
+// (evita o caso em que NEXT_PUBLIC_APP_URL aponta pra localhost na prod).
+function resolveAppUrl(): string {
+  if (
+    process.env.VERCEL_ENV === "production" &&
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
+
+/**
+ * Dispara um email avisando o admin que um novo usuário fez signup e está
+ * aguardando aprovação. Chamado uma única vez por usuário, no momento em
+ * que o perfil é criado pela primeira vez em `public.users` (active=false).
+ */
+export async function sendNewUserPendingApprovalEmail(params: {
+  userEmail: string;
+  userName: string | null;
+}) {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) return;
+
+  const appUrl = resolveAppUrl();
+  const safeName = params.userName?.trim() || "(sem nome)";
+
+  try {
+    await sendEmail({
+      to: adminEmail,
+      subject: `[Controll Hub] Novo usuário aguardando aprovação — ${params.userEmail}`,
+      html: `
+        <h2>Novo cadastro aguardando aprovação</h2>
+        <p>Um usuário criou conta no Controll Hub e está aguardando a sua autorização para acessar o sistema:</p>
+        <ul>
+          <li><strong>Nome:</strong> ${safeName}</li>
+          <li><strong>E-mail:</strong> ${params.userEmail}</li>
+        </ul>
+        <p>Para autorizar, abra a tela de usuários e defina o perfil + módulos do novo cadastro:</p>
+        <p><a href="${appUrl}/usuarios" style="display:inline-block;padding:10px 16px;background:#7c3aed;color:white;text-decoration:none;border-radius:6px;">Abrir /usuarios</a></p>
+        <p style="color:#666;font-size:12px;">Enquanto não for autorizado, o usuário só vê a página "/pendente".</p>
+      `,
+    });
+  } catch (err) {
+    // Email de notificação não pode quebrar o login do usuário.
+    console.error("[notifications] sendNewUserPendingApprovalEmail falhou:", err);
+  }
+}
+
 export async function sendSyncFailureEmail(failures: SyncFailureItem[]) {
   if (failures.length === 0) return;
 
