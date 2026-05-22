@@ -549,21 +549,54 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
   // Barras = realizado; linha = meta. Composto num unico ComposedChart para
   // o eixo X e tooltip ficarem sincronizados.
   //
-  // Rotulos pre-computados como strings — contorna a limitacao do
-  // `formatter` do LabelList que nao recebe a linha completa de dados.
-  const data = points.map((p) => ({
-    mes: p.mes,
-    realizado: p.realizado,
-    meta: p.meta,
-    realizadoLabel:
+  // Rotulo do realizado fica SEMPRE no topo da barra (posicao natural).
+  // Rotulo da meta tem posicao DINAMICA: quando meta >= realizado, label
+  // vai acima do ponto; quando meta < realizado, vai abaixo. Isso evita
+  // o overlap entre a label da meta e a label do topo da barra quando os
+  // valores ficam proximos ou quando a barra ultrapassa a meta.
+  const data = points.map((p) => {
+    const realizadoLabel =
       p.realizado === null
         ? ""
-        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
-    metaLabel:
+        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    const metaLabel =
       p.meta === null
         ? ""
-        : p.meta.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
-  }));
+        : p.meta.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    const metaAcima =
+      p.realizado !== null && p.meta !== null ? p.meta >= p.realizado : true;
+    return {
+      mes: p.mes,
+      realizado: p.realizado,
+      meta: p.meta,
+      realizadoLabel,
+      metaLabel,
+      metaAcima,
+    };
+  });
+
+  const renderMetaLabel = (props: LineLabelRenderProps) => {
+    const nx = toNum(props.x);
+    const ny = toNum(props.y);
+    const { index } = props;
+    if (nx === null || ny === null || index === undefined) return null;
+    const row = data[index];
+    if (!row || row.metaLabel === "") return null;
+    // -12 = acima do dot; 18 = abaixo. Quando meta < realizado, a label
+    // vai pra baixo, ficando claramente afastada do label do topo da barra.
+    const dy = row.metaAcima ? -12 : 18;
+    return (
+      <text
+        x={nx}
+        y={ny + dy}
+        textAnchor="middle"
+        style={{ fontSize: 10, fill: "#b45309" }}
+      >
+        {row.metaLabel}
+      </text>
+    );
+  };
+
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
@@ -577,7 +610,7 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={data}
-              margin={{ top: 24, right: 16, bottom: 8, left: 0 }}
+              margin={{ top: 24, right: 16, bottom: 24, left: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "#64748b" }} />
@@ -614,12 +647,7 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
                 dot={{ r: 3, fill: "#f59e0b" }}
                 isAnimationActive={false}
               >
-                <LabelList
-                  dataKey="metaLabel"
-                  position="top"
-                  offset={10}
-                  style={{ fontSize: 10, fill: "#b45309" }}
-                />
+                <LabelList content={renderMetaLabel} />
               </Line>
             </ComposedChart>
           </ResponsiveContainer>
@@ -629,23 +657,99 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
   );
 }
 
+// Tipos auxiliares para custom render de labels do recharts.
+// O recharts chama o `content` da LabelList com x/y/index do ponto. O
+// tipo Props do recharts declara x/y como `string | number | undefined`
+// (por causa de eixos de categoria) — convertemos para number ao usar.
+interface LineLabelRenderProps {
+  x?: number | string;
+  y?: number | string;
+  index?: number;
+}
+
+function toNum(v: number | string | undefined): number | null {
+  if (v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
-  // Rotulos pre-computados como string — contorna a limitacao do `formatter`
-  // do LabelList (nao recebe a linha completa) e garante que o html2canvas
-  // capture os rotulos no PDF, ja que sao apenas <text> SVG estatico.
-  const data = points.map((p) => ({
-    mes: p.mes,
-    previsto: p.previsto,
-    realizado: p.realizado,
-    previstoLabel:
+  // Pre-computa, por ponto, se realizado >= previsto. Isso permite
+  // posicionar os rotulos em lados OPOSTOS da intersecao das linhas —
+  // o rotulo da serie mais alta vai para cima, o da mais baixa pra baixo.
+  // Quando uma linha cruza a outra entre dois pontos, o lado da label
+  // automaticamente acompanha — sem overlap visual.
+  const data = points.map((p) => {
+    const previstoLabel =
       p.previsto === null
         ? ""
-        : p.previsto.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
-    realizadoLabel:
+        : p.previsto.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    const realizadoLabel =
       p.realizado === null
         ? ""
-        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
-  }));
+        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    // Default: realizado em cima quando nao da pra comparar (uma das series
+    // null) — mantem coerencia com o estado tipico.
+    const realizadoAcima =
+      p.realizado !== null && p.previsto !== null
+        ? p.realizado >= p.previsto
+        : true;
+    return {
+      mes: p.mes,
+      previsto: p.previsto,
+      realizado: p.realizado,
+      previstoLabel,
+      realizadoLabel,
+      realizadoAcima,
+    };
+  });
+
+  // Offsets verticais em pixels. -12 = label acima do dot; 18 = abaixo.
+  // (No SVG do recharts y cresce para baixo, entao offset negativo = acima.)
+  const OFFSET_UP = -12;
+  const OFFSET_DOWN = 18;
+
+  const renderRealizadoLabel = (props: LineLabelRenderProps) => {
+    const nx = toNum(props.x);
+    const ny = toNum(props.y);
+    const { index } = props;
+    if (nx === null || ny === null || index === undefined) return null;
+    const row = data[index];
+    if (!row || row.realizadoLabel === "") return null;
+    const dy = row.realizadoAcima ? OFFSET_UP : OFFSET_DOWN;
+    return (
+      <text
+        x={nx}
+        y={ny + dy}
+        textAnchor="middle"
+        style={{ fontSize: 10, fill: "#0c4a6e", fontWeight: 600 }}
+      >
+        {row.realizadoLabel}
+      </text>
+    );
+  };
+
+  const renderPrevistoLabel = (props: LineLabelRenderProps) => {
+    const nx = toNum(props.x);
+    const ny = toNum(props.y);
+    const { index } = props;
+    if (nx === null || ny === null || index === undefined) return null;
+    const row = data[index];
+    if (!row || row.previstoLabel === "") return null;
+    // Inverso do realizado: se realizado esta acima, previsto vai abaixo.
+    const dy = row.realizadoAcima ? OFFSET_DOWN : OFFSET_UP;
+    return (
+      <text
+        x={nx}
+        y={ny + dy}
+        textAnchor="middle"
+        style={{ fontSize: 10, fill: "#475569" }}
+      >
+        {row.previstoLabel}
+      </text>
+    );
+  };
+
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
@@ -682,12 +786,7 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 dot={{ r: 3 }}
                 isAnimationActive={false}
               >
-                <LabelList
-                  dataKey="previstoLabel"
-                  position="bottom"
-                  offset={8}
-                  style={{ fontSize: 10, fill: "#475569" }}
-                />
+                <LabelList content={renderPrevistoLabel} />
               </Line>
               <Line
                 type="monotone"
@@ -698,12 +797,7 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 dot={{ r: 3 }}
                 isAnimationActive={false}
               >
-                <LabelList
-                  dataKey="realizadoLabel"
-                  position="top"
-                  offset={8}
-                  style={{ fontSize: 10, fill: "#0c4a6e", fontWeight: 600 }}
-                />
+                <LabelList content={renderRealizadoLabel} />
               </Line>
             </LineChart>
           </ResponsiveContainer>
