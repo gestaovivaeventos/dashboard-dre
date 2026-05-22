@@ -2,13 +2,14 @@
 
 import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, FileUp, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, FileUp, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Table2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/toaster";
+import { SettingsFeeVvrTable } from "@/components/app/settings-fee-vvr-table";
 import { cn } from "@/lib/utils";
 
 interface SyncSelection {
@@ -57,6 +58,7 @@ interface CompanyItem {
 interface SettingsCompaniesProps {
   initialCompanies: CompanyItem[];
   segmentId: string | null;
+  currentSegmentSlug?: string | null;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -69,7 +71,12 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompaniesProps) {
+export function SettingsCompanies({
+  initialCompanies,
+  segmentId,
+  currentSegmentSlug,
+}: SettingsCompaniesProps) {
+  const showFeeVvr = currentSegmentSlug === "franquias-viva";
   const { showToast } = useToast();
   const router = useRouter();
   const [companies, setCompanies] = useState(initialCompanies);
@@ -113,6 +120,9 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
     for (let y = currentYear; y >= 2022; y--) years.push(y);
     return years;
   }, [currentYear]);
+
+  // FEE/VVR panel state (somente para segmento franquias-viva)
+  const [feeVvrOpen, setFeeVvrOpen] = useState<string | null>(null);
 
   // Budget upload state
   const [budgetOpen, setBudgetOpen] = useState<string | null>(null);
@@ -660,6 +670,25 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                       <FileUp className="mr-2 h-4 w-4" />
                       Orcamento
                     </Button>
+                    {showFeeVvr ? (
+                      <Button
+                        type="button"
+                        variant={feeVvrOpen === company.id ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setFeeVvrOpen(
+                            feeVvrOpen === company.id ? null : company.id,
+                          );
+                          setEditingName(null);
+                          setEditingCredentials(null);
+                          setConfirmingDelete(null);
+                          setBudgetOpen(null);
+                        }}
+                      >
+                        <Table2 className="mr-2 h-4 w-4" />
+                        FEE / VVR
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -670,6 +699,7 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                         setEditingName(null);
                         setEditingCredentials(null);
                         setBudgetOpen(null);
+                        setFeeVvrOpen(null);
                       }}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
@@ -875,6 +905,26 @@ export function SettingsCompanies({ initialCompanies, segmentId }: SettingsCompa
                         Fechar
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {/* FEE / VVR — segmento franquias-viva */}
+                {showFeeVvr && feeVvrOpen === company.id && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Registro mensal de FEE e VVR — exclusivo para anotacao.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFeeVvrOpen(null)}
+                      >
+                        Fechar
+                      </Button>
+                    </div>
+                    <SettingsFeeVvrTable companyId={company.id} />
                   </div>
                 )}
               </div>

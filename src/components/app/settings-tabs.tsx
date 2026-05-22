@@ -108,7 +108,11 @@ export function SettingsTabs({
       </div>
 
       {tab === "empresas" ? (
-        <SettingsCompanies initialCompanies={companies} segmentId={segmentId ?? null} />
+        <SettingsCompanies
+          initialCompanies={companies}
+          segmentId={segmentId ?? null}
+          currentSegmentSlug={currentSegmentSlug ?? null}
+        />
       ) : tab === "estrutura_dre" ? (
         <DreStructureManager
           initialAccounts={dreAccounts}
