@@ -20,11 +20,32 @@ export function defaultLandingFor(
   canCompras: boolean,
 ): string {
   if (profile === "validador_contrato") return "/contratos";
+  if (profile === "franqueado") return "/dashboard";
   if (profile === "admin") return canFinanceiro || !canCompras ? "/dashboard" : "/ctrl/requisicoes";
   if (canFinanceiro) return "/dashboard";
   if (canCompras) return "/ctrl/requisicoes";
   return "/pendente";
 }
+
+// Whitelist explícito de rotas que o perfil 'franqueado' pode acessar dentro
+// do módulo Financeiro. Tudo fora dessa lista (Conexões, Mapeamento,
+// Configurações, /admin, /ctrl, /contratos, /usuarios) é negado.
+const FRANQUEADO_BASE_PATHS = [
+  "/home",
+  "/dashboard",
+  "/fluxo-de-caixa",
+  "/budget-forecast",
+  "/kpis",
+  "/financeiro/business-intelligence",
+];
+
+// Sub-páginas permitidas dentro de /s/<segmentSlug>/... pra franqueado
+const FRANQUEADO_SEGMENT_SUBS = new Set([
+  "/dashboard",
+  "/fluxo-de-caixa",
+  "/budget-forecast",
+  "/kpis",
+]);
 
 /**
  * Decide se o usuário pode acessar uma URL com base no novo modelo.
@@ -44,6 +65,23 @@ export function canAccessPathByProfile(
   // Validador de contrato: ilha. Só /contratos.
   if (profile === "validador_contrato") {
     return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
+  // Franqueado: whitelist explícita de telas do Financeiro.
+  // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl,
+  // /contratos e qualquer página fora das 5 visualizações permitidas.
+  if (profile === "franqueado") {
+    if (FRANQUEADO_BASE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+      return true;
+    }
+    // Rotas com prefixo /s/<segmentSlug>/<sub> são as mesmas telas servidas
+    // por segmento — liberamos só os subs aceitos.
+    if (pathname.startsWith("/s/")) {
+      const parts = pathname.split("/");
+      const sub = parts[3] ? `/${parts[3]}` : "";
+      return FRANQUEADO_SEGMENT_SUBS.has(sub);
+    }
+    return false;
   }
 
   // Admin: tudo.
