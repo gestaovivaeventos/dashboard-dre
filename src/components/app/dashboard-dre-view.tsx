@@ -224,6 +224,7 @@ export function DashboardDreView({
   range,
   rows,
   companies,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   role,
   visibleBuckets,
   accumulatedBucket,
@@ -561,10 +562,8 @@ export function DashboardDreView({
               activeSegmentSlug={activeSegmentSlug}
               companies={companies}
               selected={companySelection}
-              onChange={(ids) => {
-                if (role !== "gestor_unidade") setCompanySelection(ids);
-              }}
-              disabled={role === "gestor_unidade"}
+              onChange={(ids) => setCompanySelection(ids)}
+              disabled={companies.length <= 1}
             />
             {/* Expandir / recolher todas — abaixo do seletor de empresa para
                 melhor visibilidade. Acao puramente client-side. */}
