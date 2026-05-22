@@ -31,6 +31,10 @@ import type {
   CashFlowRange,
   PeriodMode,
 } from "@/lib/dashboard/cash-flow";
+import {
+  saveSharedCompanyFilter,
+  useSharedCompanyFilterHydration,
+} from "@/lib/dashboard/shared-company-filter";
 import type { UserRole } from "@/lib/supabase/types";
 
 interface CompanyOption {
@@ -277,6 +281,9 @@ export function CashFlowView({
 }: CashFlowViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  // Compartilha filtro de empresas com Dashboard e Budget e Forecast via
+  // sessionStorage. Hidrata no mount quando a URL nao traz companyIds.
+  useSharedCompanyFilterHydration();
   const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState<null | "excel">(null);
@@ -287,6 +294,12 @@ export function CashFlowView({
   const [monthTo, setMonthTo] = useState(filter.monthTo);
   const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
+  // Re-sincroniza com a prop quando a URL muda (hidratacao do filtro
+  // compartilhado faz router.replace que troca filter.selectedCompanyIds).
+  useEffect(() => {
+    setCompanySelection(filter.selectedCompanyIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter.selectedCompanyIds.join(",")]);
   const [compareMode, setCompareMode] = useState(filter.compareCompanies);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
@@ -410,6 +423,8 @@ export function CashFlowView({
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
     if (compareMode) params.set("compareCompanies", "true");
+    // Persiste o filtro de empresas para Dashboard e Budget e Forecast.
+    saveSharedCompanyFilter(companySelection);
     router.push(`${pathname}?${params.toString()}`);
   };
 

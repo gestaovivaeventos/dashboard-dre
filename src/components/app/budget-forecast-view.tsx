@@ -34,6 +34,10 @@ import type {
   DashboardPeriodBucket,
   PeriodMode,
 } from "@/lib/dashboard/dre";
+import {
+  saveSharedCompanyFilter,
+  useSharedCompanyFilterHydration,
+} from "@/lib/dashboard/shared-company-filter";
 import type { UserRole } from "@/lib/supabase/types";
 
 type ViewTab = "orcamento" | "realizado" | "projecao" | "comparativo";
@@ -268,6 +272,9 @@ export function BudgetForecastView({
 }: BudgetForecastViewProps) {
   const router = useRouter();
   const pathname = usePathname();
+  // Compartilha filtro de empresas com Dashboard e Fluxo de Caixa via
+  // sessionStorage. Hidrata no mount quando a URL nao traz companyIds.
+  useSharedCompanyFilterHydration();
 
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
   const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
@@ -275,6 +282,12 @@ export function BudgetForecastView({
   const [monthTo, setMonthTo] = useState(filter.monthTo);
   const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
+  // Re-sincroniza com a prop quando a URL muda (hidratacao do filtro
+  // compartilhado faz router.replace que troca filter.selectedCompanyIds).
+  useEffect(() => {
+    setCompanySelection(filter.selectedCompanyIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter.selectedCompanyIds.join(",")]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     () =>
@@ -419,6 +432,8 @@ export function BudgetForecastView({
   };
 
   const handleApply = () => {
+    // Persiste o filtro de empresas para Dashboard e Fluxo de Caixa.
+    saveSharedCompanyFilter(companySelection);
     router.push(`${pathname}?${buildQuery({})}`);
   };
 

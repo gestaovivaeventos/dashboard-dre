@@ -42,6 +42,10 @@ import type {
   DashboardPeriodBucket,
   PeriodMode,
 } from "@/lib/dashboard/dre";
+import {
+  saveSharedCompanyFilter,
+  useSharedCompanyFilterHydration,
+} from "@/lib/dashboard/shared-company-filter";
 import type { Segment, UserRole } from "@/lib/supabase/types";
 
 interface CompanyOption {
@@ -236,6 +240,9 @@ export function DashboardDreView({
   const { showToast } = useToast();
   const router = useRouter();
   const pathname = usePathname();
+  // Compartilha filtro de empresas com Fluxo de Caixa e Budget e Forecast
+  // via sessionStorage. Hidrata no mount quando a URL nao traz companyIds.
+  useSharedCompanyFilterHydration();
   const [refreshing, setRefreshing] = useState(false);
 
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
@@ -244,6 +251,16 @@ export function DashboardDreView({
   const [monthTo, setMonthTo] = useState(filter.monthTo);
   const [yearTo, setYearTo] = useState(filter.yearTo);
   const [companySelection, setCompanySelection] = useState(filter.selectedCompanyIds);
+  // Re-sincroniza `companySelection` quando a prop muda — necessario para
+  // refletir a hidratacao do filtro vindo do sessionStorage (router.replace
+  // troca a URL e o servidor manda um novo `filter.selectedCompanyIds`,
+  // mas o useState so usa o valor inicial).
+  useEffect(() => {
+    setCompanySelection(filter.selectedCompanyIds);
+    // Dep como string estavel para nao re-rodar a cada render por causa
+    // de array recriado.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter.selectedCompanyIds.join(",")]);
   const [compareMode, setCompareMode] = useState(filter.compareCompanies);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
@@ -391,6 +408,9 @@ export function DashboardDreView({
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
     if (compareMode) params.set("compareCompanies", "true");
+    // Persiste o filtro de empresas para outras views financeiras
+    // (Fluxo de Caixa, Budget e Forecast) sob a mesma sessao do navegador.
+    saveSharedCompanyFilter(companySelection);
     router.push(`${pathname}?${params.toString()}`);
   };
 
