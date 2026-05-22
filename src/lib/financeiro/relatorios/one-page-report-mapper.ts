@@ -63,6 +63,12 @@ interface ApiHistorico {
   realizado: number | null;
 }
 
+interface ApiVvrSerieAnual {
+  mes: string;
+  realizado: number | null;
+  meta: number | null;
+}
+
 export interface OnePageApiResponse {
   analysis?: OnePageReport;
   input?: {
@@ -74,6 +80,8 @@ export interface OnePageApiResponse {
   previstoRealizado?: ApiPrevistoRealizado[];
   composicaoResultado?: ApiComposicao[];
   historicoResultado?: ApiHistorico[];
+  acumuladoAno?: ApiPrevistoRealizado[];
+  vvrSerieAnual?: ApiVvrSerieAnual[];
   error?: string;
 }
 
@@ -116,17 +124,23 @@ function formatBRLMil(n: number): string {
 function mapKpiCard(
   api: ApiKpiCard | undefined,
   fallbackLabel: string,
-  options: { omitComparisonSuffix?: boolean } = {},
+  options: {
+    omitComparisonSuffix?: boolean;
+    comparisonLabel?: string;
+  } = {},
 ): KpiCard {
+  const extra = {
+    ...(options.omitComparisonSuffix ? { omitComparisonSuffix: true } : {}),
+    ...(options.comparisonLabel ? { comparisonLabel: options.comparisonLabel } : {}),
+  };
+
   if (!api) {
     return {
       label: fallbackLabel,
       value: "—",
       variation: "",
       sign: "Neutro",
-      ...(options.omitComparisonSuffix
-        ? { omitComparisonSuffix: true }
-        : {}),
+      ...extra,
     };
   }
 
@@ -139,7 +153,7 @@ function mapKpiCard(
     value: api.formattedValue ?? "—",
     variation: api.variationLabel ?? "",
     sign: statusToSign(api.status),
-    ...(options.omitComparisonSuffix ? { omitComparisonSuffix: true } : {}),
+    ...extra,
   };
 }
 
@@ -151,7 +165,9 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     mapKpiCard(api?.fee_disponivel, "FEE disponível", {
       omitComparisonSuffix: true,
     }),
-    mapKpiCard(api?.vvr, "VVR"),
+    // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
+    // VVR META, nao contra orcamento contabil.
+    mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
   ];
 }
 
@@ -183,8 +199,12 @@ function mapPrevistoRealizado(
   api: ApiPrevistoRealizado[] | undefined,
 ): PrevistoRealizadoItem[] {
   if (!api) return [];
+  // VVR foi removido do grafico Previsto x Realizado por decisao de produto
+  // — o VVR tem grafico proprio (serie temporal anual). FEE Disponivel
+  // tambem nunca entra aqui (saldo, nao comparacao).
+  const EXCLUDED = new Set(["fee disponível", "fee disponivel", "vvr"]);
   return api
-    .filter((item) => item.label.toLowerCase() !== "fee disponível") // garantia: nunca incluir FEE aqui
+    .filter((item) => !EXCLUDED.has(item.label.toLowerCase()))
     .map(mapPrevistoRealizadoItem)
     .filter((x): x is PrevistoRealizadoItem => x !== null);
 }
@@ -205,6 +225,39 @@ function mapComposicaoItem(item: ApiComposicao): ComposicaoStep {
 function mapComposicao(api: ApiComposicao[] | undefined): ComposicaoStep[] {
   if (!api) return [];
   return api.map(mapComposicaoItem);
+}
+
+// ─── Acumulado do ano ─────────────────────────────────────────────────────
+//
+// Mesma forma do `previstoRealizado` — reusa o mapper item-a-item. NUNCA
+// inclui VVR nem FEE (sao tratados em outros blocos).
+function mapAcumuladoAno(
+  api: ApiPrevistoRealizado[] | undefined,
+): PrevistoRealizadoItem[] {
+  if (!api) return [];
+  const EXCLUDED = new Set(["fee disponível", "fee disponivel", "vvr"]);
+  return api
+    .filter((item) => !EXCLUDED.has(item.label.toLowerCase()))
+    .map(mapPrevistoRealizadoItem)
+    .filter((x): x is PrevistoRealizadoItem => x !== null);
+}
+
+// ─── VVR serie anual ──────────────────────────────────────────────────────
+//
+// Mesma escala usada nos demais graficos: rota envia R$ bruto, mapper divide
+// por 1000. Pontos com realizado e meta ambos null sao descartados — nao
+// poluem o eixo X com mes vazio.
+function mapVvrSerieAnual(
+  api: ApiVvrSerieAnual[] | undefined,
+): Array<{ mes: string; realizado: number | null; meta: number | null }> {
+  if (!api || api.length === 0) return [];
+  return api
+    .filter((p) => p.realizado !== null || p.meta !== null)
+    .map((p) => ({
+      mes: p.mes,
+      realizado: p.realizado === null ? null : p.realizado / 1000,
+      meta: p.meta === null ? null : p.meta / 1000,
+    }));
 }
 
 // ─── Historico ─────────────────────────────────────────────────────────────
@@ -383,6 +436,8 @@ export function mapOnePageApiResponseToPreviewData(
     previstoRealizado: mapPrevistoRealizado(response.previstoRealizado),
     composicao: mapComposicao(response.composicaoResultado),
     historico: mapHistorico(response.historicoResultado),
+    acumuladoAno: mapAcumuladoAno(response.acumuladoAno),
+    vvrSerieAnual: mapVvrSerieAnual(response.vvrSerieAnual),
     alertas: mapAlertas(response.analysis),
     semaforo: mapSemaforo(response.analysis, response.kpis),
     diagnosticoPrincipal: mapDiagnostico(response.analysis),

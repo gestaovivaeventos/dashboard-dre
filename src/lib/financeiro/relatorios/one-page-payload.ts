@@ -63,6 +63,14 @@ export interface HistoricoPayload {
   realizado: number | null;
 }
 
+// Serie temporal do VVR de Jan/ano(dateTo) ate o mes(dateTo). Realizado vira
+// barras no chart; meta vira linha sobreposta.
+export interface VvrSerieAnualPayload {
+  mes: string;
+  realizado: number | null;
+  meta: number | null;
+}
+
 export interface OnePagePayload {
   input: OnePageInput;
   generatedAt: string;
@@ -70,6 +78,10 @@ export interface OnePagePayload {
   previstoRealizado: PrevistoRealizadoPayload[];
   composicaoResultado: ComposicaoPayload[];
   historicoResultado: HistoricoPayload[];
+  // Acumulado do ano: mesma forma do `previstoRealizado` mas com os valores
+  // somados de Jan/ano(dateTo) ate o mes(dateTo).
+  acumuladoAno: PrevistoRealizadoPayload[];
+  vvrSerieAnual: VvrSerieAnualPayload[];
 }
 
 export type BuildOnePagePayloadResult =
@@ -613,7 +625,139 @@ export async function buildOnePagePayload(
   }
 
   // -------------------------------------------------------------------------
-  // 10. Retorno consolidado
+  // 10. Acumulado do ano (Jan/ano de dateTo ate dateTo).
+  //
+  // Faz 1 RPC consolidando o range inteiro (Jan-1 ate dateTo) + 1 query
+  // ao budget cobrindo o mesmo range. Em seguida aplica
+  // `buildDashboardRows` para extrair Receita/Despesas/Resultado/Margem.
+  // -------------------------------------------------------------------------
+  const ytdYear = toYear;
+  const ytdDateFrom = `${ytdYear}-01-01`;
+  const ytdDateTo = dateTo;
+
+  const { data: ytdRealizedAgg } = await supabase.rpc(
+    "dashboard_dre_aggregate",
+    {
+      p_company_ids: [companyId],
+      p_date_from: ytdDateFrom,
+      p_date_to: ytdDateTo,
+    },
+  );
+
+  const ytdRealizedMap = new Map<string, number>();
+  ((ytdRealizedAgg ?? []) as AggregateRow[]).forEach((r) => {
+    ytdRealizedMap.set(
+      r.dre_account_id,
+      (ytdRealizedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
+    );
+  });
+
+  const { data: ytdBudgetRows } = await supabase
+    .from("budget_entries")
+    .select("dre_account_id, amount, year, month")
+    .eq("company_id", companyId)
+    .eq("year", ytdYear)
+    .lte("month", toMonth);
+
+  const ytdBudgetMap = new Map<string, number>();
+  ((ytdBudgetRows ?? []) as BudgetRow[]).forEach((b) => {
+    ytdBudgetMap.set(
+      b.dre_account_id,
+      (ytdBudgetMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
+    );
+  });
+
+  const { rows: ytdRealizedRows } = buildDashboardRows(accounts, ytdRealizedMap);
+  const { rows: ytdBudgetedRows } = buildDashboardRows(accounts, ytdBudgetMap);
+
+  const ytdRealizedByCode = new Map<string, number>();
+  ytdRealizedRows.forEach((r) => ytdRealizedByCode.set(r.code, r.value));
+  const ytdBudgetedByCode = new Map<string, number>();
+  ytdBudgetedRows.forEach((r) => ytdBudgetedByCode.set(r.code, r.value));
+
+  const ytdGetR = (code: string): number => ytdRealizedByCode.get(code) ?? 0;
+  const ytdGetB = (code: string): number | null => {
+    const v = ytdBudgetedByCode.get(code);
+    return v === undefined ? null : v;
+  };
+
+  const ytdReceitaLiqR = ytdGetR("4");
+  const ytdResultadoR = ytdGetR("11");
+  const ytdReceitaLiqB = ytdGetB("4");
+  const ytdResultadoB = ytdGetB("11");
+
+  const ytdMargemR =
+    ytdReceitaLiqR > 0 ? (ytdResultadoR / ytdReceitaLiqR) * 100 : null;
+  const ytdMargemB =
+    ytdReceitaLiqB !== null && ytdReceitaLiqB > 0 && ytdResultadoB !== null
+      ? (ytdResultadoB / ytdReceitaLiqB) * 100
+      : null;
+
+  const acumuladoAno: PrevistoRealizadoPayload[] = [
+    {
+      label: "Receita",
+      realizado: ytdGetR("1"),
+      previsto: ytdGetB("1"),
+      unidade: "currency",
+    },
+    {
+      label: "Despesas",
+      realizado: ytdGetR("7"),
+      previsto: ytdGetB("7"),
+      unidade: "currency",
+    },
+    {
+      label: "Resultado",
+      realizado: ytdResultadoR,
+      previsto: ytdResultadoB,
+      unidade: "currency",
+    },
+    {
+      label: "Margem",
+      realizado: ytdMargemR,
+      previsto: ytdMargemB,
+      unidade: "percent",
+    },
+  ];
+
+  // -------------------------------------------------------------------------
+  // 11. VVR serie anual: Jan/ano(dateTo) ate mes(dateTo). Realizado e meta
+  //     mensais — para grafico com barras (realizado) + linha (meta).
+  // -------------------------------------------------------------------------
+  const { data: vvrYtdRows } = await supabase
+    .from("company_fee_vvr")
+    .select("vvr_meta, vvr, year, month")
+    .eq("company_id", companyId)
+    .eq("year", ytdYear)
+    .lte("month", toMonth);
+
+  const vvrByMonth = new Map<
+    number,
+    { meta: number | null; realizado: number | null }
+  >();
+  (
+    (vvrYtdRows ?? []) as Array<FeeVvrRow & { year: number; month: number }>
+  ).forEach((row) => {
+    vvrByMonth.set(row.month, {
+      meta: row.vvr_meta !== null ? Number(row.vvr_meta) : null,
+      realizado: row.vvr !== null ? Number(row.vvr) : null,
+    });
+  });
+
+  const vvrSerieAnual: VvrSerieAnualPayload[] = [];
+  for (let m = 1; m <= toMonth; m++) {
+    const yShort = String(ytdYear).slice(-2);
+    const mes = `${MONTH_NAMES_SHORT[m - 1]}/${yShort}`;
+    const entry = vvrByMonth.get(m);
+    vvrSerieAnual.push({
+      mes,
+      realizado: entry?.realizado ?? null,
+      meta: entry?.meta ?? null,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // 12. Retorno consolidado
   // -------------------------------------------------------------------------
   return {
     ok: true,
@@ -624,6 +768,8 @@ export async function buildOnePagePayload(
       previstoRealizado,
       composicaoResultado,
       historicoResultado,
+      acumuladoAno,
+      vvrSerieAnual,
     },
   };
 }

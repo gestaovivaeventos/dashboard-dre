@@ -4,6 +4,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -48,10 +50,12 @@ export interface KpiCard {
   sign: ImpactSign;
   // Algumas variacoes (margem) sao em p.p. — sufixo opcional explicito.
   variationSuffix?: string;
-  // Quando true, o card NAO concatena " vs orçamento" no final da variacao.
-  // Usado para KPIs que nao tem comparacao com orcamento — ex.: FEE
-  // Disponível, que e um saldo e mostra apenas "Saldo atual".
+  // Quando true, o card NAO concatena " vs <comparisonLabel>" no final.
+  // Usado para KPIs que nao tem comparacao — ex.: FEE Disponível, que e
+  // um saldo e mostra apenas "Saldo atual".
   omitComparisonSuffix?: boolean;
+  // Palavra usada no sufixo " vs X". Default "orçamento". VVR usa "meta".
+  comparisonLabel?: string;
 }
 
 export interface PrevistoRealizadoItem {
@@ -75,6 +79,12 @@ export interface HistoricoPoint {
   // Nunca masquaramos ausencia com 0.
   previsto: number | null;
   realizado: number | null;
+}
+
+export interface VvrSerieAnualPoint {
+  mes: string;
+  realizado: number | null;
+  meta: number | null;
 }
 
 export interface AlertaCard {
@@ -107,6 +117,8 @@ export interface OnePageReportPreviewData {
   previstoRealizado: PrevistoRealizadoItem[];
   composicao: ComposicaoStep[];
   historico: HistoricoPoint[];
+  acumuladoAno: PrevistoRealizadoItem[];
+  vvrSerieAnual: VvrSerieAnualPoint[];
   alertas: AlertaCard[];
   semaforo: SemaforoItem[];
   diagnosticoPrincipal: string;
@@ -128,14 +140,25 @@ const MOCK_DATA: OnePageReportPreviewData = {
     { label: "Resultado", value: "R$ 25,9 mil", variation: "+3,8%", sign: "Positivo" },
     { label: "Margem", value: "22,7%", variation: "-0,8", variationSuffix: "p.p.", sign: "Atenção" },
     { label: "FEE disponível", value: "R$ 7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
-    { label: "VVR", value: "R$ 180 mil", variation: "+9,1%", sign: "Positivo" },
+    { label: "VVR", value: "R$ 180 mil", variation: "+9,1%", sign: "Positivo", comparisonLabel: "meta" },
   ],
   previstoRealizado: [
     { indicador: "Receita", realizado: 118.9, previsto: 110.0, unidade: "mil" },
     { indicador: "Despesas", realizado: 85.6, previsto: 80.0, unidade: "mil" },
     { indicador: "Resultado", realizado: 25.9, previsto: 25.0, unidade: "mil" },
     { indicador: "Margem", realizado: 22.7, previsto: 23.5, unidade: "%" },
-    { indicador: "VVR", realizado: 180, previsto: 165, unidade: "mil" },
+  ],
+  acumuladoAno: [
+    { indicador: "Receita", realizado: 432.0, previsto: 410.0, unidade: "mil" },
+    { indicador: "Despesas", realizado: 320.5, previsto: 305.0, unidade: "mil" },
+    { indicador: "Resultado", realizado: 92.4, previsto: 95.0, unidade: "mil" },
+    { indicador: "Margem", realizado: 21.5, previsto: 23.2, unidade: "%" },
+  ],
+  vvrSerieAnual: [
+    { mes: "Jan/26", realizado: 142, meta: 150 },
+    { mes: "Fev/26", realizado: 156, meta: 155 },
+    { mes: "Mar/26", realizado: 168, meta: 160 },
+    { mes: "Abr/26", realizado: 180, meta: 165 },
   ],
   composicao: [
     { label: "Receita Bruta", valueLabel: "R$ 118,9 mil", kind: "entrada" },
@@ -317,7 +340,9 @@ function KpiCardItem({ kpi }: { kpi: KpiCard }) {
           <span>
             {kpi.variation}
             {kpi.variationSuffix ? ` ${kpi.variationSuffix}` : ""}
-            {kpi.omitComparisonSuffix ? "" : " vs orçamento"}
+            {kpi.omitComparisonSuffix
+              ? ""
+              : ` vs ${kpi.comparisonLabel ?? "orçamento"}`}
           </span>
         </div>
       </CardContent>
@@ -343,29 +368,55 @@ function DiagnosticoBlock({ texto }: { texto: string }) {
   );
 }
 
-function PrevistoRealizadoChart({
+// Formata o numero conforme a unidade do item para uso em LabelList/Tooltip.
+function formatValueWithUnit(value: number, unidade: "mil" | "%"): string {
+  if (unidade === "%") {
+    return `${value.toLocaleString("pt-BR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })}%`;
+  }
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  });
+}
+
+function PrevistoRealizadoLikeChart({
+  title,
+  subtitle,
   items,
 }: {
+  title: string;
+  subtitle?: string;
   items: PrevistoRealizadoItem[];
 }) {
+  // Pre-computamos os rotulos como string no proprio data, com a unidade
+  // correta (% ou "mil" via numero puro). LabelList le esses campos via
+  // `dataKey` — soluciona a limitacao do `formatter` que nao recebe a row.
   const data = items.map((i) => ({
     indicador: i.indicador,
     Realizado: i.realizado,
     Previsto: i.previsto,
     unidade: i.unidade,
+    RealizadoLabel: formatValueWithUnit(i.realizado, i.unidade),
+    PrevistoLabel: formatValueWithUnit(i.previsto, i.unidade),
   }));
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Previsto x Realizado</CardTitle>
+        <CardTitle className="text-base">{title}</CardTitle>
+        {subtitle ? (
+          <p className="text-xs text-slate-500">{subtitle}</p>
+        ) : null}
       </CardHeader>
       <CardContent className="pb-4">
-        <div className="h-64 w-full">
+        <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data}
               layout="vertical"
-              margin={{ top: 8, right: 16, bottom: 8, left: 8 }}
+              margin={{ top: 8, right: 56, bottom: 8, left: 8 }}
               barGap={4}
               barCategoryGap="20%"
             >
@@ -391,8 +442,20 @@ function PrevistoRealizadoChart({
                 wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
                 iconType="circle"
               />
-              <Bar dataKey="Previsto" fill="#94a3b8" radius={[0, 4, 4, 0]} />
-              <Bar dataKey="Realizado" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="Previsto" fill="#94a3b8" radius={[0, 4, 4, 0]}>
+                <LabelList
+                  dataKey="PrevistoLabel"
+                  position="right"
+                  style={{ fontSize: 11, fill: "#475569" }}
+                />
+              </Bar>
+              <Bar dataKey="Realizado" fill="#0ea5e9" radius={[0, 4, 4, 0]}>
+                <LabelList
+                  dataKey="RealizadoLabel"
+                  position="right"
+                  style={{ fontSize: 11, fill: "#0c4a6e", fontWeight: 600 }}
+                />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -402,33 +465,123 @@ function PrevistoRealizadoChart({
 }
 
 function ComposicaoBlock({ steps }: { steps: ComposicaoStep[] }) {
-  const kindStyle: Record<ComposicaoStep["kind"], string> = {
-    entrada: "bg-emerald-50 border-emerald-200 text-emerald-800",
-    saida: "bg-rose-50 border-rose-200 text-rose-800",
-    final: "bg-sky-100 border-sky-300 text-sky-900",
+  // Visualizacao em LINHAS (uma por etapa) — melhora a leitura vertical
+  // e permite alinhar labels e valores em colunas. Borda lateral colorida
+  // reforça a natureza de cada item (entrada/saida/final).
+  const kindStyle: Record<
+    ComposicaoStep["kind"],
+    { bar: string; valueColor: string; bg: string }
+  > = {
+    entrada: {
+      bar: "bg-emerald-500",
+      valueColor: "text-emerald-700",
+      bg: "bg-emerald-50/40",
+    },
+    saida: {
+      bar: "bg-rose-500",
+      valueColor: "text-rose-700",
+      bg: "bg-rose-50/40",
+    },
+    final: {
+      bar: "bg-sky-600",
+      valueColor: "text-sky-900",
+      bg: "bg-sky-50",
+    },
   };
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Composição do Resultado</CardTitle>
       </CardHeader>
-      <CardContent className="pb-5">
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-1">
-          {steps.map((step, idx) => (
-            <div key={step.label} className="flex flex-1 items-center gap-1">
+      <CardContent className="pb-4">
+        <div className="divide-y divide-slate-100">
+          {steps.map((step) => {
+            const style = kindStyle[step.kind];
+            return (
               <div
-                className={`flex flex-1 flex-col rounded-lg border px-3 py-3 ${kindStyle[step.kind]}`}
+                key={step.label}
+                className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+                  step.kind === "final" ? `${style.bg} rounded-md` : ""
+                }`}
               >
-                <span className="text-[10px] font-semibold uppercase tracking-wider opacity-70">
-                  {step.label}
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden
+                    className={`h-6 w-1 shrink-0 rounded-full ${style.bar}`}
+                  />
+                  <span
+                    className={`text-sm ${
+                      step.kind === "final"
+                        ? "font-semibold text-slate-900"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {step.label}
+                  </span>
+                </div>
+                <span
+                  className={`font-mono text-sm tabular-nums ${style.valueColor} ${
+                    step.kind === "final" ? "font-bold" : "font-medium"
+                  }`}
+                >
+                  {step.valueLabel}
                 </span>
-                <span className="mt-1 text-sm font-bold">{step.valueLabel}</span>
               </div>
-              {idx < steps.length - 1 ? (
-                <ArrowRight className="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
+  // Barras = realizado; linha = meta. Composto num unico ComposedChart para
+  // o eixo X e tooltip ficarem sincronizados.
+  return (
+    <Card className="border-slate-200 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">VVR — Realizado x Meta</CardTitle>
+        <p className="text-xs text-slate-500">
+          Janeiro do ano selecionado até o mês de análise.
+        </p>
+      </CardHeader>
+      <CardContent className="pb-4">
+        <div className="h-56 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={points}
+              margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "#64748b" }} />
+              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={48} />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+                formatter={(value) =>
+                  value === null || value === undefined
+                    ? "—"
+                    : `${Number(value).toLocaleString("pt-BR")} mil`
+                }
+              />
+              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 4 }} iconType="circle" />
+              <Bar
+                dataKey="realizado"
+                name="Realizado"
+                fill="#0ea5e9"
+                radius={[4, 4, 0, 0]}
+                barSize={28}
+              />
+              <Line
+                type="monotone"
+                dataKey="meta"
+                name="Meta"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                dot={{ r: 3, fill: "#f59e0b" }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>
@@ -622,17 +775,34 @@ export function OnePageReportPreview({
         ))}
       </div>
 
-      {/* 3 + 4. Previsto x Realizado + Composicao (lado a lado em desktop) */}
+      {/* Previsto x Realizado (mes) + Composicao (lado a lado em desktop) */}
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
-          <PrevistoRealizadoChart items={data.previstoRealizado} />
+          <PrevistoRealizadoLikeChart
+            title="Previsto x Realizado"
+            items={data.previstoRealizado}
+          />
         </div>
         <div className="lg:col-span-2">
           <ComposicaoBlock steps={data.composicao} />
         </div>
       </div>
 
-      {/* 5 + 7. Historico + Semaforo */}
+      {/* Acumulado do Ano + VVR Serie Anual (lado a lado em desktop) */}
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <PrevistoRealizadoLikeChart
+            title="Acumulado do Ano"
+            subtitle="Janeiro do ano selecionado até o mês de análise"
+            items={data.acumuladoAno}
+          />
+        </div>
+        <div className="lg:col-span-2">
+          <VvrTemporalChart points={data.vvrSerieAnual} />
+        </div>
+      </div>
+
+      {/* Historico + Semaforo */}
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <HistoricoChart points={data.historico} />
