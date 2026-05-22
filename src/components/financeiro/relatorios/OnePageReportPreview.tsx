@@ -71,8 +71,10 @@ export interface ComposicaoStep {
 
 export interface HistoricoPoint {
   mes: string;
-  previsto: number;
-  realizado: number;
+  // null preserva a ausencia de dado (recharts desenha gap na linha).
+  // Nunca masquaramos ausencia com 0.
+  previsto: number | null;
+  realizado: number | null;
 }
 
 export interface AlertaCard {
@@ -452,7 +454,11 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
               <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={36} />
               <Tooltip
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-                formatter={(value) => `${Number(value ?? 0).toLocaleString("pt-BR")} mil`}
+                formatter={(value) =>
+                  value === null || value === undefined
+                    ? "—"
+                    : `${Number(value).toLocaleString("pt-BR")} mil`
+                }
               />
               <Legend wrapperStyle={{ fontSize: 12, paddingTop: 4 }} iconType="circle" />
               <Line

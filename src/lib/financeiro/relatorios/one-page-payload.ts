@@ -1,0 +1,629 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import {
+  buildDashboardRows,
+  filterCoreDreAccounts,
+  type DreAccountBase,
+} from "@/lib/dashboard/dre";
+import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
+
+// ============================================================================
+// buildOnePagePayload — calculo numerico compartilhado entre a rota oficial
+// e a rota dev-only "sem IA".
+//
+// Recebe `supabase` + body (companyId, dateFrom, dateTo, periodLabel?) e
+// devolve TODOS os blocos numericos prontos para serem retornados ao
+// cliente: `input`, `kpis`, `previstoRealizado`, `composicaoResultado`,
+// `historicoResultado` e `generatedAt`.
+//
+// O caller decide o que fazer com `payload.input` — a rota oficial envia
+// para o motor de IA; a rota dev-only injeta uma analysis mockada.
+//
+// Errors sao retornados como `{ ok: false, status, error }`. O caller
+// transforma em `NextResponse.json(...)` com o status apropriado.
+// ============================================================================
+
+// ─── Tipos da resposta (espelho do que sai do helper) ─────────────────────
+
+type KpiStatus = "positivo" | "neutro" | "atencao" | "critico";
+
+export interface KpiCardPayload {
+  label: string;
+  value: number | null;
+  formattedValue: string | null;
+  variationValue: number | null;
+  variationLabel: string | null;
+  status: KpiStatus;
+}
+
+export interface KpisPayload {
+  receita: KpiCardPayload;
+  resultado: KpiCardPayload;
+  margem: KpiCardPayload;
+  fee_disponivel: KpiCardPayload;
+  vvr: KpiCardPayload;
+}
+
+export interface PrevistoRealizadoPayload {
+  label: string;
+  realizado: number | null;
+  previsto: number | null;
+  unidade: "currency" | "percent" | "number";
+}
+
+export interface ComposicaoPayload {
+  label: string;
+  value: number;
+  type: "entrada" | "saida" | "resultado";
+}
+
+export interface HistoricoPayload {
+  mes: string;
+  previsto: number | null;
+  realizado: number | null;
+}
+
+export interface OnePagePayload {
+  input: OnePageInput;
+  generatedAt: string;
+  kpis: KpisPayload;
+  previstoRealizado: PrevistoRealizadoPayload[];
+  composicaoResultado: ComposicaoPayload[];
+  historicoResultado: HistoricoPayload[];
+}
+
+export type BuildOnePagePayloadResult =
+  | { ok: true; payload: OnePagePayload }
+  | { ok: false; status: number; error: string };
+
+// ─── Tipos internos para queries ──────────────────────────────────────────
+
+interface BudgetRow {
+  dre_account_id: string;
+  amount: number | string;
+  year: number;
+  month: number;
+}
+
+interface AggregateRow {
+  dre_account_id: string;
+  amount: number | string;
+}
+
+interface FeeVvrRow {
+  vvr_meta: number | string | null;
+  vvr: number | string | null;
+}
+
+interface BuildOnePagePayloadBody {
+  companyId: string;
+  dateFrom: string;
+  dateTo: string;
+  periodLabel?: string;
+}
+
+// ─── Implementacao ────────────────────────────────────────────────────────
+
+export async function buildOnePagePayload(
+  supabase: SupabaseClient,
+  body: BuildOnePagePayloadBody,
+): Promise<BuildOnePagePayloadResult> {
+  const { companyId, dateFrom, dateTo, periodLabel } = body;
+
+  // -------------------------------------------------------------------------
+  // 1. Empresa + plano de contas DRE (scope custom/global, mesma logica do
+  //    dashboard).
+  // -------------------------------------------------------------------------
+  const { data: company } = await supabase
+    .from("companies")
+    .select("id,name,fee_disponivel,fee_a_receber")
+    .eq("id", companyId)
+    .maybeSingle<{
+      id: string;
+      name: string;
+      fee_disponivel: number | string | null;
+      fee_a_receber: number | string | null;
+    }>();
+  if (!company) {
+    return { ok: false, status: 404, error: "Empresa nao encontrada." };
+  }
+
+  const { data: rawAccounts } = await supabase
+    .from("dre_accounts")
+    .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+    .eq("active", true)
+    .order("code");
+
+  const allAccounts = (rawAccounts ?? []) as Array<
+    DreAccountBase & { company_id: string | null }
+  >;
+  const hasCustomPlan = allAccounts.some((a) => a.company_id === companyId);
+  const scopedAccounts: DreAccountBase[] = allAccounts
+    .filter((a) =>
+      hasCustomPlan ? a.company_id === companyId : a.company_id === null,
+    )
+    .map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      parent_id: a.parent_id,
+      level: a.level,
+      type: a.type,
+      is_summary: a.is_summary,
+      formula: a.formula,
+      sort_order: a.sort_order,
+      active: a.active,
+    }));
+  const accounts = filterCoreDreAccounts(scopedAccounts);
+
+  // -------------------------------------------------------------------------
+  // 2. Agregar DRE realizado no periodo
+  // -------------------------------------------------------------------------
+  const { data: realizedAgg, error: realizedErr } = await supabase.rpc(
+    "dashboard_dre_aggregate",
+    {
+      p_company_ids: [companyId],
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    },
+  );
+  if (realizedErr) {
+    return {
+      ok: false,
+      status: 500,
+      error: `Falha ao agregar DRE: ${realizedErr.message}`,
+    };
+  }
+  const realizedMap = new Map<string, number>();
+  ((realizedAgg ?? []) as AggregateRow[]).forEach((r) => {
+    realizedMap.set(
+      r.dre_account_id,
+      (realizedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // 3. Agregar orcamento no periodo
+  // -------------------------------------------------------------------------
+  const fromYear = parseInt(dateFrom.slice(0, 4), 10);
+  const fromMonth = parseInt(dateFrom.slice(5, 7), 10);
+  const toYear = parseInt(dateTo.slice(0, 4), 10);
+  const toMonth = parseInt(dateTo.slice(5, 7), 10);
+
+  const { data: budgetRows } = await supabase
+    .from("budget_entries")
+    .select("dre_account_id, amount, year, month")
+    .eq("company_id", companyId)
+    .gte("year", fromYear)
+    .lte("year", toYear);
+
+  const budgetMap = new Map<string, number>();
+  ((budgetRows ?? []) as BudgetRow[]).forEach((b) => {
+    const inRange =
+      b.year > fromYear || (b.year === fromYear && b.month >= fromMonth);
+    const beforeEnd =
+      b.year < toYear || (b.year === toYear && b.month <= toMonth);
+    if (inRange && beforeEnd) {
+      budgetMap.set(
+        b.dre_account_id,
+        (budgetMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
+      );
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Build de linhas com formulas aplicadas (mesmo motor do dashboard)
+  // -------------------------------------------------------------------------
+  const { rows: realizedRows } = buildDashboardRows(accounts, realizedMap);
+  const { rows: budgetedRows } = buildDashboardRows(accounts, budgetMap);
+  const budgetedById = new Map(budgetedRows.map((r) => [r.id, r]));
+
+  // -------------------------------------------------------------------------
+  // 5. Indicadores DRE enviados a IA (nivel <= 2, cap 30)
+  // -------------------------------------------------------------------------
+  const SELECTED_LEVELS = new Set([1, 2]);
+  const dreInput = realizedRows
+    .filter((r) => SELECTED_LEVELS.has(r.level))
+    .slice(0, 30)
+    .map((r) => {
+      const realizado = r.value;
+      const budgetedRow = budgetedById.get(r.id);
+      const orcado = budgetedRow ? budgetedRow.value : null;
+      const variacaoAbs =
+        orcado !== null ? Number((realizado - orcado).toFixed(2)) : null;
+      const variacaoPctV =
+        orcado !== null && orcado !== 0
+          ? Number((((realizado - orcado) / Math.abs(orcado)) * 100).toFixed(2))
+          : null;
+      return {
+        code: r.code,
+        name: r.name,
+        realizado: Number(realizado.toFixed(2)),
+        orcado: orcado !== null ? Number(orcado.toFixed(2)) : null,
+        variacao_absoluta: variacaoAbs,
+        variacao_percentual: variacaoPctV,
+        pct_receita_liquida:
+          r.percentageOverNetRevenue !== null &&
+          r.percentageOverNetRevenue !== undefined
+            ? Number(r.percentageOverNetRevenue.toFixed(2))
+            : null,
+      };
+    });
+
+  if (dreInput.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Nenhum indicador DRE disponivel para o periodo selecionado.",
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. FEE/VVR do periodo
+  // -------------------------------------------------------------------------
+  const { data: feeVvrRows } = await supabase
+    .from("company_fee_vvr")
+    .select("vvr_meta, vvr, year, month")
+    .eq("company_id", companyId)
+    .gte("year", fromYear)
+    .lte("year", toYear);
+
+  let feeSum = 0;
+  let vvrSum = 0;
+  let hasAny = false;
+  ((feeVvrRows ?? []) as Array<FeeVvrRow & { year: number; month: number }>).forEach(
+    (row) => {
+      const inRange =
+        row.year > fromYear || (row.year === fromYear && row.month >= fromMonth);
+      const beforeEnd =
+        row.year < toYear || (row.year === toYear && row.month <= toMonth);
+      if (inRange && beforeEnd) {
+        const vvrMeta = row.vvr_meta !== null ? Number(row.vvr_meta) : null;
+        const vvr = row.vvr !== null ? Number(row.vvr) : null;
+        if (vvrMeta !== null) {
+          feeSum += vvrMeta;
+          hasAny = true;
+        }
+        if (vvr !== null) {
+          vvrSum += vvr;
+          hasAny = true;
+        }
+      }
+    },
+  );
+
+  const feeVvrInput = hasAny
+    ? {
+        fee_mes: Number(feeSum.toFixed(2)),
+        vvr_mes: Number(vvrSum.toFixed(2)),
+        vvr_meta_mes: Number(feeSum.toFixed(2)),
+      }
+    : null;
+
+  // -------------------------------------------------------------------------
+  // 7. Input final (enviado a IA na rota oficial)
+  // -------------------------------------------------------------------------
+  const input: OnePageInput = {
+    empresa: { id: company.id, nome: company.name },
+    periodo: {
+      date_from: dateFrom,
+      date_to: dateTo,
+      label: periodLabel ?? `${dateFrom} a ${dateTo}`,
+    },
+    dre: dreInput,
+    fee_vvr: feeVvrInput,
+  };
+
+  // -------------------------------------------------------------------------
+  // 8. Derivacoes numericas (sem IA): KPIs, Previsto x Realizado, Composicao
+  // -------------------------------------------------------------------------
+  const realizedByCode = new Map<string, number>();
+  realizedRows.forEach((r) => realizedByCode.set(r.code, r.value));
+  const budgetedByCode = new Map<string, number>();
+  budgetedRows.forEach((r) => budgetedByCode.set(r.code, r.value));
+
+  const getRealized = (code: string): number => realizedByCode.get(code) ?? 0;
+  const getBudgeted = (code: string): number | null => {
+    const v = budgetedByCode.get(code);
+    return v === undefined ? null : v;
+  };
+
+  const receitaLiquidaRealizada = getRealized("4");
+  const resultadoRealizado = getRealized("11");
+  const receitaLiquidaOrcada = getBudgeted("4");
+  const resultadoOrcado = getBudgeted("11");
+
+  const margemRealizada =
+    receitaLiquidaRealizada > 0
+      ? (resultadoRealizado / receitaLiquidaRealizada) * 100
+      : null;
+  const margemPrevista =
+    receitaLiquidaOrcada !== null &&
+    receitaLiquidaOrcada > 0 &&
+    resultadoOrcado !== null
+      ? (resultadoOrcado / receitaLiquidaOrcada) * 100
+      : null;
+  const variacaoMargemPp =
+    margemRealizada !== null && margemPrevista !== null
+      ? margemRealizada - margemPrevista
+      : null;
+
+  const variacaoPct = (real: number, orc: number | null): number | null => {
+    if (orc === null || orc === 0) return null;
+    return ((real - orc) / Math.abs(orc)) * 100;
+  };
+
+  const statusFromVariacaoPercent = (varPct: number | null): KpiStatus => {
+    if (varPct === null) return "neutro";
+    if (varPct >= 0) return "positivo";
+    if (varPct >= -5) return "atencao";
+    return "critico";
+  };
+  const statusMargemPp = (varPp: number | null): KpiStatus => {
+    if (varPp === null) return "neutro";
+    if (varPp >= 0) return "positivo";
+    if (varPp >= -1) return "atencao";
+    return "critico";
+  };
+  const statusFeeDisponivel = (v: number | null): KpiStatus => {
+    if (v === null) return "neutro";
+    if (v > 0) return "neutro";
+    if (v === 0) return "atencao";
+    return "critico";
+  };
+
+  const formatBRL = (v: number) =>
+    v.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      maximumFractionDigits: 0,
+    });
+  const formatPctFn = (v: number) => `${v.toFixed(1)}%`;
+  const formatPp = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)} p.p.`;
+  const formatVarPct = (v: number | null) =>
+    v === null ? null : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+  const feeDisponivel =
+    company.fee_disponivel === null || company.fee_disponivel === undefined
+      ? null
+      : Number(company.fee_disponivel);
+
+  const vvrRealizado = feeVvrInput?.vvr_mes ?? null;
+  const vvrMetaPeriodo = feeVvrInput?.vvr_meta_mes ?? null;
+  const varReceita = variacaoPct(getRealized("1"), getBudgeted("1"));
+  const varResultado = variacaoPct(resultadoRealizado, resultadoOrcado);
+  const varVvr =
+    vvrRealizado !== null && vvrMetaPeriodo !== null
+      ? variacaoPct(vvrRealizado, vvrMetaPeriodo)
+      : null;
+
+  const kpis: KpisPayload = {
+    receita: {
+      label: "Receita",
+      value: getRealized("1"),
+      formattedValue: formatBRL(getRealized("1")),
+      variationValue: varReceita,
+      variationLabel: formatVarPct(varReceita),
+      status: statusFromVariacaoPercent(varReceita),
+    },
+    resultado: {
+      label: "Resultado",
+      value: resultadoRealizado,
+      formattedValue: formatBRL(resultadoRealizado),
+      variationValue: varResultado,
+      variationLabel: formatVarPct(varResultado),
+      status: statusFromVariacaoPercent(varResultado),
+    },
+    margem: {
+      label: "Margem",
+      value: margemRealizada,
+      formattedValue:
+        margemRealizada !== null ? formatPctFn(margemRealizada) : null,
+      variationValue: variacaoMargemPp,
+      variationLabel:
+        variacaoMargemPp !== null ? formatPp(variacaoMargemPp) : null,
+      status: statusMargemPp(variacaoMargemPp),
+    },
+    fee_disponivel: {
+      label: "FEE Disponível",
+      value: feeDisponivel,
+      formattedValue: feeDisponivel !== null ? formatBRL(feeDisponivel) : null,
+      variationValue: null,
+      variationLabel: "Saldo atual",
+      status: statusFeeDisponivel(feeDisponivel),
+    },
+    vvr: {
+      label: "VVR",
+      value: vvrRealizado,
+      formattedValue: vvrRealizado !== null ? formatBRL(vvrRealizado) : null,
+      variationValue: varVvr,
+      variationLabel: formatVarPct(varVvr),
+      status: statusFromVariacaoPercent(varVvr),
+    },
+  };
+
+  const previstoRealizado: PrevistoRealizadoPayload[] = [
+    {
+      label: "Receita",
+      realizado: getRealized("1"),
+      previsto: getBudgeted("1"),
+      unidade: "currency",
+    },
+    {
+      label: "Despesas",
+      realizado: getRealized("7"),
+      previsto: getBudgeted("7"),
+      unidade: "currency",
+    },
+    {
+      label: "Resultado",
+      realizado: resultadoRealizado,
+      previsto: resultadoOrcado,
+      unidade: "currency",
+    },
+    {
+      label: "Margem",
+      realizado: margemRealizada,
+      previsto: margemPrevista,
+      unidade: "percent",
+    },
+    {
+      label: "VVR",
+      realizado: vvrRealizado,
+      previsto: vvrMetaPeriodo,
+      unidade: "currency",
+    },
+  ];
+
+  const composicaoResultado: ComposicaoPayload[] = [
+    {
+      label: "Receita Bruta",
+      value: getRealized("1"),
+      type: "entrada",
+    },
+    {
+      label: "Custos",
+      value: -Math.abs(getRealized("5")),
+      type: "saida",
+    },
+    {
+      label: "Despesas",
+      value: -Math.abs(getRealized("7")),
+      type: "saida",
+    },
+    {
+      label: "Resultado",
+      value: resultadoRealizado,
+      type: "resultado",
+    },
+  ];
+
+  // -------------------------------------------------------------------------
+  // 9. Historico de 6 meses do Resultado do Exercicio (code "11")
+  // -------------------------------------------------------------------------
+  const MONTH_NAMES_SHORT = [
+    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+  ];
+
+  const account11 = accounts.find((a) => a.code === "11");
+  let historicoResultado: HistoricoPayload[] = [];
+
+  if (account11) {
+    const months: Array<{ year: number; month: number }> = [];
+    for (let i = 5; i >= 0; i--) {
+      let y = toYear;
+      let m = toMonth - i;
+      while (m <= 0) {
+        m += 12;
+        y -= 1;
+      }
+      months.push({ year: y, month: m });
+    }
+
+    const monthKey = (y: number, m: number) =>
+      `${y}-${String(m).padStart(2, "0")}`;
+
+    const minYear = months[0].year;
+    const maxYear = months[months.length - 1].year;
+    const { data: historicoBudgetRows } = await supabase
+      .from("budget_entries")
+      .select("dre_account_id, amount, year, month")
+      .eq("company_id", companyId)
+      .gte("year", minYear)
+      .lte("year", maxYear);
+
+    const validMonths = new Set(months.map((m) => monthKey(m.year, m.month)));
+    const budgetMaps = new Map<string, Map<string, number>>();
+    ((historicoBudgetRows ?? []) as BudgetRow[]).forEach((b) => {
+      const key = monthKey(b.year, b.month);
+      if (!validMonths.has(key)) return;
+      let mMap = budgetMaps.get(key);
+      if (!mMap) {
+        mMap = new Map();
+        budgetMaps.set(key, mMap);
+      }
+      mMap.set(
+        b.dre_account_id,
+        (mMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
+      );
+    });
+
+    const realizedPerMonth = await Promise.all(
+      months.map(async (m) => {
+        const lastDay = new Date(Date.UTC(m.year, m.month, 0)).getUTCDate();
+        const mm = String(m.month).padStart(2, "0");
+        const monthFrom = `${m.year}-${mm}-01`;
+        const monthTo = `${m.year}-${mm}-${String(lastDay).padStart(2, "0")}`;
+
+        const { data, error } = await supabase.rpc("dashboard_dre_aggregate", {
+          p_company_ids: [companyId],
+          p_date_from: monthFrom,
+          p_date_to: monthTo,
+        });
+
+        if (error || !data) {
+          return {
+            year: m.year,
+            month: m.month,
+            map: null as Map<string, number> | null,
+          };
+        }
+
+        const rows = data as AggregateRow[];
+        if (rows.length === 0) {
+          return {
+            year: m.year,
+            month: m.month,
+            map: null as Map<string, number> | null,
+          };
+        }
+        const map = new Map<string, number>();
+        rows.forEach((r) => {
+          map.set(
+            r.dre_account_id,
+            (map.get(r.dre_account_id) ?? 0) + Number(r.amount),
+          );
+        });
+        return { year: m.year, month: m.month, map };
+      }),
+    );
+
+    historicoResultado = realizedPerMonth.map((entry) => {
+      const yearShort = String(entry.year).slice(-2);
+      const mes = `${MONTH_NAMES_SHORT[entry.month - 1]}/${yearShort}`;
+
+      const realizado =
+        entry.map === null
+          ? null
+          : (buildDashboardRows(accounts, entry.map).rows.find(
+              (r) => r.code === "11",
+            )?.value ?? null);
+
+      const bMap = budgetMaps.get(monthKey(entry.year, entry.month));
+      const previsto =
+        !bMap || bMap.size === 0
+          ? null
+          : (buildDashboardRows(accounts, bMap).rows.find(
+              (r) => r.code === "11",
+            )?.value ?? null);
+
+      return { mes, previsto, realizado };
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // 10. Retorno consolidado
+  // -------------------------------------------------------------------------
+  return {
+    ok: true,
+    payload: {
+      input,
+      generatedAt: new Date().toISOString(),
+      kpis,
+      previstoRealizado,
+      composicaoResultado,
+      historicoResultado,
+    },
+  };
+}

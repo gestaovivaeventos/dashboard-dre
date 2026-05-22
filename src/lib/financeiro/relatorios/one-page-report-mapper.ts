@@ -60,7 +60,7 @@ interface ApiComposicao {
 interface ApiHistorico {
   mes: string;
   previsto: number | null;
-  realizado: number;
+  realizado: number | null;
 }
 
 export interface OnePageApiResponse {
@@ -208,15 +208,21 @@ function mapComposicao(api: ApiComposicao[] | undefined): ComposicaoStep[] {
 }
 
 // ─── Historico ─────────────────────────────────────────────────────────────
-
+//
+// Rota envia valores em REAL bruto. Aqui dividimos por 1000 para casar com
+// a escala "mil" do grafico (mesma convencao usada em previstoRealizado).
+// Pontos onde ambos previsto e realizado sao null sao descartados — nao
+// adianta plotar mes vazio. Quando apenas um dos dois e null, mantemos o
+// outro: o recharts (com connectNulls=false por padrao) desenha um "gap"
+// na linha nula, o que e o comportamento desejado.
 function mapHistorico(api: ApiHistorico[] | undefined): HistoricoPoint[] {
   if (!api || api.length === 0) return [];
   return api
-    .filter((p) => p.previsto !== null)
+    .filter((p) => p.previsto !== null || p.realizado !== null)
     .map((p) => ({
       mes: p.mes,
-      previsto: p.previsto ?? 0,
-      realizado: p.realizado,
+      previsto: p.previsto === null ? null : p.previsto / 1000,
+      realizado: p.realizado === null ? null : p.realizado / 1000,
     }));
 }
 

@@ -52,11 +52,17 @@ export default async function BusinessIntelligencePage() {
   // nao for admin, mostramos a UI mas com o botao desabilitado e um aviso.
   const canGenerate = profile?.role === "admin";
 
+  // Habilita o botao "Gerar teste sem IA" apenas em desenvolvimento. Em
+  // producao a rota dev-only nao existe (retorna 404), entao tambem nao
+  // renderizamos o botao no client — evita confusao do usuario.
+  const isDev = process.env.NODE_ENV !== "production";
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 p-4 sm:p-6">
       <BusinessIntelligenceClient
         companies={visibleCompanies}
         canGenerate={canGenerate}
+        isDev={isDev}
       />
     </div>
   );

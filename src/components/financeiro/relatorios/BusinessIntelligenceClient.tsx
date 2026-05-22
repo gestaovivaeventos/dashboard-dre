@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, Sparkles } from "lucide-react";
+import { AlertCircle, FlaskConical, Loader2, Sparkles } from "lucide-react";
 
 import { OnePageReportPreview } from "@/components/financeiro/relatorios/OnePageReportPreview";
 import type { OnePageReportPreviewData } from "@/components/financeiro/relatorios/OnePageReportPreview";
@@ -40,6 +40,12 @@ interface BusinessIntelligenceClientProps {
    * Se false, o botao "Gerar relatorio" fica desabilitado com aviso.
    */
   canGenerate: boolean;
+  /**
+   * True apenas quando NODE_ENV !== "production". Habilita o botao
+   * "Gerar teste sem IA" que chama a rota dev-only e nao consome creditos
+   * da OpenAI. Em producao essa prop e false e o botao nao e renderizado.
+   */
+  isDev: boolean;
 }
 
 // Retorna o ultimo dia do mes (1-indexed) no UTC.
@@ -86,6 +92,7 @@ function derivePeriodLabel(dateFrom: string, dateTo: string): string {
 export function BusinessIntelligenceClient({
   companies,
   canGenerate,
+  isDev,
 }: BusinessIntelligenceClientProps) {
   const { showToast } = useToast();
 
@@ -97,7 +104,11 @@ export function BusinessIntelligenceClient({
   const [dateFrom, setDateFrom] = useState<string>(defaults.dateFrom);
   const [dateTo, setDateTo] = useState<string>(defaults.dateTo);
 
-  const [loading, setLoading] = useState(false);
+  // `loadingMode` indica qual botao esta em andamento (ou null se nenhum).
+  // Permite desabilitar o outro botao enquanto um esta processando, sem
+  // confundir qual spinner mostrar.
+  type LoadingMode = "ia" | "no-ai" | null;
+  const [loadingMode, setLoadingMode] = useState<LoadingMode>(null);
   const [error, setError] = useState<string | null>(null);
   // `data` undefined -> componente cai no mock interno (preview visual).
   // Quando preenchido, vira dado real (mapeado da rota).
@@ -105,18 +116,29 @@ export function BusinessIntelligenceClient({
     undefined,
   );
 
+  const loading = loadingMode !== null;
   const buttonDisabled =
     !canGenerate || loading || !companyId || !dateFrom || !dateTo;
+  // Botao dev-only nao depende de canGenerate (mas ainda exige admin no
+  // backend). Aqui no client deixamos disponivel para qualquer usuario que
+  // veja a pagina em dev — o backend valida.
+  const devButtonDisabled = loading || !companyId || !dateFrom || !dateTo;
 
-  const handleGenerate = async () => {
+  // Executa a chamada conforme o modo: "ia" usa a rota oficial que consome
+  // creditos da OpenAI; "no-ai" usa a rota dev-only com analysis mockada.
+  const runGenerate = async (mode: "ia" | "no-ai") => {
     if (!companyId || !dateFrom || !dateTo) return;
-    setLoading(true);
+    setLoadingMode(mode);
     setError(null);
 
     const periodLabel = derivePeriodLabel(dateFrom, dateTo);
+    const endpoint =
+      mode === "ia"
+        ? "/api/intelligence/one-page"
+        : "/api/dev/intelligence/one-page-no-ai";
 
     try {
-      const r = await fetch("/api/intelligence/one-page", {
+      const r = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companyId, dateFrom, dateTo, periodLabel }),
@@ -144,7 +166,10 @@ export function BusinessIntelligenceClient({
       const mapped = mapOnePageApiResponseToPreviewData(payload);
       setData(mapped);
       showToast({
-        title: "Relatório gerado",
+        title:
+          mode === "ia"
+            ? "Relatório gerado"
+            : "Relatório de teste gerado (sem IA)",
         description: `${mapped.cabecalho.empresa} • ${mapped.cabecalho.periodo}`,
         variant: "success",
       });
@@ -157,9 +182,12 @@ export function BusinessIntelligenceClient({
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoadingMode(null);
     }
   };
+
+  const handleGenerate = () => void runGenerate("ia");
+  const handleGenerateNoAi = () => void runGenerate("no-ai");
 
   const isPreviewState = data === undefined;
 
@@ -230,24 +258,48 @@ export function BusinessIntelligenceClient({
               >
                 .
               </span>
-              <Button
-                type="button"
-                onClick={handleGenerate}
-                disabled={buttonDisabled}
-                className="w-full sm:w-auto"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Gerando relatório...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Gerar relatório
-                  </>
-                )}
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  onClick={handleGenerate}
+                  disabled={buttonDisabled}
+                  className="w-full sm:w-auto"
+                >
+                  {loadingMode === "ia" ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Gerando relatório...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Gerar relatório
+                    </>
+                  )}
+                </Button>
+                {isDev ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerateNoAi}
+                    disabled={devButtonDisabled}
+                    className="w-full sm:w-auto"
+                    title="Usa a rota /api/dev/intelligence/one-page-no-ai — dados financeiros reais com análise mockada. Não consome créditos da OpenAI. Disponível apenas em desenvolvimento."
+                  >
+                    {loadingMode === "no-ai" ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Gerando teste...
+                      </>
+                    ) : (
+                      <>
+                        <FlaskConical className="mr-2 h-4 w-4" />
+                        Gerar teste sem IA
+                      </>
+                    )}
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
 
