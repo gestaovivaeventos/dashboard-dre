@@ -47,7 +47,8 @@ type Profile =
   | "gerente"
   | "diretor"
   | "validador_contrato"
-  | "solicitante";
+  | "solicitante"
+  | "franqueado";
 
 interface UserItem {
   id: string;
@@ -107,6 +108,12 @@ const PROFILES: Array<{
     label: "Solicitante",
     description: "Cria requisições nos setores vinculados.",
   },
+  {
+    value: "franqueado",
+    label: "Franqueado",
+    description:
+      "Visão restrita ao Financeiro (Dashboard, Fluxo de Caixa, Budget, KPIs, BI) das unidades atribuídas.",
+  },
 ];
 
 const PROFILE_LABEL: Record<string, string> = Object.fromEntries(
@@ -120,6 +127,7 @@ const PROFILE_BADGE_CLASS: Record<string, string> = {
   diretor: "bg-emerald-100 text-emerald-800 border-transparent",
   validador_contrato: "bg-orange-100 text-orange-800 border-transparent",
   solicitante: "bg-slate-100 text-slate-800 border-transparent",
+  franqueado: "bg-amber-100 text-amber-800 border-transparent",
 };
 
 // Whether the profile needs sector assignments
@@ -211,6 +219,12 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_financeiro = true;
         next.can_compras = true;
         next.company_ids = []; // admin vê tudo, não precisa restringir
+      }
+      // Franqueado: só Financeiro, sem setores. Unidades obrigatórias.
+      if (key === "profile" && value === "franqueado") {
+        next.can_financeiro = true;
+        next.can_compras = false;
+        next.sector_ids = [];
       }
       // Sem Financeiro → limpa unidades
       if (key === "can_financeiro" && value === false) {
@@ -635,7 +649,7 @@ function UserForm({
         <p className="text-xs text-muted-foreground">{profileDescription}</p>
       </div>
 
-      {!isValidator && form.profile !== "admin" && (
+      {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && (
         <div className="space-y-1.5">
           <Label>Módulos visíveis</Label>
           <div className="flex gap-2">
@@ -708,6 +722,13 @@ function UserForm({
         <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
           Validador de Contrato é um perfil <strong>isolado</strong>: só enxerga a tela de
           Validação de Contratos. Sem setores ou unidades.
+        </p>
+      )}
+      {form.profile === "franqueado" && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+          Franqueado vê <strong>apenas</strong> o Financeiro das unidades selecionadas:
+          Dashboard, Fluxo de Caixa, Budget e Forecast, KPIs e Business Intelligence.
+          Sem acesso a Compras, Conexões, Mapeamento, Configurações ou Plataforma.
         </p>
       )}
     </form>

@@ -113,6 +113,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     | "diretor"
     | "validador_contrato"
     | "solicitante"
+    | "franqueado"
     | null;
   const canFinanceiro = Boolean(profileRow.can_financeiro);
   const canCompras = Boolean(profileRow.can_compras);
@@ -180,6 +181,10 @@ function deriveDreRole(
       // contracts_only users had a 'gestor_unidade' role in the legacy model;
       // they don't really use DRE but we keep a value so old checks don't fail.
       return "gestor_unidade";
+    case "franqueado":
+      // Restricted financeiro user. 'gestor_unidade' is the most restrictive
+      // legacy DRE role — keeps any legacy admin-only check denying access.
+      return "gestor_unidade";
   }
 }
 
@@ -189,7 +194,8 @@ type UserProfileEnum =
   | "gerente"
   | "diretor"
   | "validador_contrato"
-  | "solicitante";
+  | "solicitante"
+  | "franqueado";
 
 function deriveCtrlRoles(
   profile: UserProfileEnum | null,
@@ -203,6 +209,8 @@ function deriveCtrlRoles(
       .map((r) => r.role as CtrlRole);
   }
   if (profile === "validador_contrato") return [];
+  // Franqueado nunca tem acesso ao módulo Compras.
+  if (profile === "franqueado") return [];
   if (!canCompras && profile !== "admin") return [];
 
   switch (profile) {

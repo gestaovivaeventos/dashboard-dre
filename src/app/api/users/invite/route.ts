@@ -11,6 +11,7 @@ const VALID_PROFILES: UserProfileType[] = [
   "diretor",
   "validador_contrato",
   "solicitante",
+  "franqueado",
 ];
 
 export async function POST(request: Request) {
@@ -44,11 +45,21 @@ export async function POST(request: Request) {
   }
 
   // Validador de contrato: força sem módulos
+  // Franqueado: força só Financeiro, sem setores
   const canFinanceiro =
-    userProfile === "validador_contrato" ? false : Boolean(body.can_financeiro);
+    userProfile === "validador_contrato"
+      ? false
+      : userProfile === "franqueado"
+      ? true
+      : Boolean(body.can_financeiro);
   const canCompras =
-    userProfile === "validador_contrato" ? false : Boolean(body.can_compras);
-  const sectorIds = userProfile === "validador_contrato" ? [] : body.sector_ids ?? [];
+    userProfile === "validador_contrato" || userProfile === "franqueado"
+      ? false
+      : Boolean(body.can_compras);
+  const sectorIds =
+    userProfile === "validador_contrato" || userProfile === "franqueado"
+      ? []
+      : body.sector_ids ?? [];
   const companyIds = userProfile === "validador_contrato" ? [] : body.company_ids ?? [];
 
   // Gerente e Solicitante precisam de pelo menos um setor.
@@ -67,7 +78,8 @@ export async function POST(request: Request) {
     process.env.NEXT_PUBLIC_APP_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 
-  const landingPath = userProfile === "validador_contrato" ? "/contratos" : "/dashboard";
+  const landingPath =
+    userProfile === "validador_contrato" ? "/contratos" : "/dashboard";
 
   const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
     email,

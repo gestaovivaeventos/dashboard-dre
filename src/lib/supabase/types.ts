@@ -39,7 +39,8 @@ export type UserProfileType =
   | "gerente"
   | "diretor"
   | "validador_contrato"
-  | "solicitante";
+  | "solicitante"
+  | "franqueado";
 
 // ─── Perfil unificado ─────────────────────────────────────────────────────────
 export interface UnifiedProfile {
