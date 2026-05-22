@@ -630,18 +630,36 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
 }
 
 function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
+  // Rotulos pre-computados como string — contorna a limitacao do `formatter`
+  // do LabelList (nao recebe a linha completa) e garante que o html2canvas
+  // capture os rotulos no PDF, ja que sao apenas <text> SVG estatico.
+  const data = points.map((p) => ({
+    mes: p.mes,
+    previsto: p.previsto,
+    realizado: p.realizado,
+    previstoLabel:
+      p.previsto === null
+        ? ""
+        : p.previsto.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
+    realizadoLabel:
+      p.realizado === null
+        ? ""
+        : p.realizado.toLocaleString("pt-BR", { maximumFractionDigits: 0 }),
+  }));
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Histórico Previsto x Realizado</CardTitle>
+        <CardTitle className="text-base">
+          Previsto x Realizado — Resultado do Exercício
+        </CardTitle>
         <p className="text-xs text-slate-500">Últimos 6 meses — visão de tendência</p>
       </CardHeader>
       <CardContent className="pb-4">
-        <div className="h-48 w-full">
+        <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
-              data={points}
-              margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+              data={data}
+              margin={{ top: 24, right: 24, bottom: 24, left: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: "#64748b" }} />
@@ -663,7 +681,14 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="previstoLabel"
+                  position="bottom"
+                  offset={8}
+                  style={{ fontSize: 10, fill: "#475569" }}
+                />
+              </Line>
               <Line
                 type="monotone"
                 dataKey="realizado"
@@ -672,7 +697,14 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="realizadoLabel"
+                  position="top"
+                  offset={8}
+                  style={{ fontSize: 10, fill: "#0c4a6e", fontWeight: 600 }}
+                />
+              </Line>
             </LineChart>
           </ResponsiveContainer>
         </div>

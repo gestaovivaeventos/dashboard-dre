@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Download,
   FlaskConical,
+  History as HistoryIcon,
   Loader2,
   Sparkles,
 } from "lucide-react";
@@ -37,6 +38,18 @@ import {
 interface CompanyOption {
   id: string;
   name: string;
+}
+
+// Chave do sessionStorage usada para persistir o ultimo relatorio gerado.
+// Versionada — se o shape de OnePageReportPreviewData mudar, podemos
+// incrementar a versao para invalidar caches antigos sem precisar limpar
+// manualmente o storage do usuario.
+const STORAGE_KEY = "bi-one-page-state-v1";
+
+interface PersistedState {
+  data: OnePageReportPreviewData;
+  filters: { companyId: string; dateFrom: string; dateTo: string };
+  savedAt: string;
 }
 
 interface BusinessIntelligenceClientProps {
@@ -128,6 +141,48 @@ export function BusinessIntelligenceClient({
   const reportRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
 
+  // ─── Historico de relatorios (ultimos 30 dias, escopado por usuario) ────
+  interface HistoryEntry {
+    id: string;
+    empresa: string;
+    periodo: string;
+    generatedAt: string;
+  }
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyDownloadingId, setHistoryDownloadingId] = useState<
+    string | null
+  >(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  // Flag para disparar export PDF apos o `setData(historicoCarregado)` ser
+  // refletido no DOM. Resolve a corrida entre setState e captura.
+  const [pendingDownload, setPendingDownload] = useState(false);
+
+  // Hidrata data + filtros a partir do sessionStorage no mount. Sobrevive
+  // troca de menu/navegacao client-side e refresh, limpa ao fechar a aba.
+  // SSR-safe: roda apenas no useEffect (depois da hidratacao do React).
+  // Falhas de parsing sao silenciosas — caimos no estado default.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      if (parsed.data?.cabecalho?.empresa) {
+        setData(parsed.data as OnePageReportPreviewData);
+      }
+      if (parsed.filters) {
+        if (parsed.filters.companyId) setCompanyId(parsed.filters.companyId);
+        if (parsed.filters.dateFrom) setDateFrom(parsed.filters.dateFrom);
+        if (parsed.filters.dateTo) setDateTo(parsed.filters.dateTo);
+      }
+    } catch {
+      // Estado corrompido — ignora e segue com o default.
+    }
+    // Apenas no mount. Persistencia subsequente acontece em runGenerate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const loading = loadingMode !== null;
   const buttonDisabled =
     !canGenerate || loading || !companyId || !dateFrom || !dateTo;
@@ -177,6 +232,24 @@ export function BusinessIntelligenceClient({
       // Mapeia para o shape do componente visual e seta como dado ativo.
       const mapped = mapOnePageApiResponseToPreviewData(payload);
       setData(mapped);
+
+      // Persiste o relatorio + filtros para sobreviver troca de menu /
+      // refresh dentro da mesma sessao. Falhas (quota cheia, modo privado
+      // sem sessionStorage) sao silenciosas — o relatorio fica em memoria
+      // normalmente, so nao persiste.
+      try {
+        sessionStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            data: mapped,
+            filters: { companyId, dateFrom, dateTo },
+            savedAt: new Date().toISOString(),
+          } satisfies PersistedState),
+        );
+      } catch {
+        // ignore — relatorio segue funcional em memoria
+      }
+
       showToast({
         title:
           mode === "ia"
@@ -200,6 +273,110 @@ export function BusinessIntelligenceClient({
 
   const handleGenerate = () => void runGenerate("ia");
   const handleGenerateNoAi = () => void runGenerate("no-ai");
+
+  // ─── Historico: carrega lista quando dropdown abre ─────────────────────
+  useEffect(() => {
+    if (!historyOpen) return;
+    let active = true;
+    (async () => {
+      setHistoryLoading(true);
+      try {
+        const r = await fetch("/api/intelligence/one-page/history", {
+          cache: "no-store",
+        });
+        if (!active) return;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const payload = (await r.json()) as { reports?: HistoryEntry[] };
+        setHistoryList(payload.reports ?? []);
+      } catch (err) {
+        if (!active) return;
+        showToast({
+          title: "Falha ao carregar histórico",
+          description: err instanceof Error ? err.message : "Erro inesperado.",
+          variant: "destructive",
+        });
+      } finally {
+        if (active) setHistoryLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [historyOpen, showToast]);
+
+  // ─── Historico: fecha popover ao clicar fora ────────────────────────────
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHistoryOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [historyOpen]);
+
+  // ─── Historico: ao carregar JSON, dispara export PDF apos render ───────
+  useEffect(() => {
+    if (!pendingDownload || !data) return;
+    // Aguarda um tick + breve folga para recharts terminar layout no SVG.
+    const t = setTimeout(() => {
+      void handleExportPdf();
+      setPendingDownload(false);
+    }, 250);
+    return () => clearTimeout(t);
+    // handleExportPdf nao entra em deps de proposito — e recriada a cada
+    // render mas a versao capturada na execucao do timeout esta correta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDownload, data]);
+
+  // ─── Historico: baixa um relatorio salvo ────────────────────────────────
+  const handleDownloadFromHistory = async (id: string) => {
+    setHistoryDownloadingId(id);
+    try {
+      const r = await fetch(`/api/intelligence/one-page/history/${id}`, {
+        cache: "no-store",
+      });
+      if (!r.ok) {
+        const payload = (await r.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(payload?.error ?? `HTTP ${r.status}`);
+      }
+      const json = (await r.json()) as OnePageApiResponse;
+      const mapped = mapOnePageApiResponseToPreviewData(json);
+      setData(mapped);
+      setHistoryOpen(false);
+      // pendingDownload aciona o useEffect acima que dispara handleExportPdf.
+      setPendingDownload(true);
+    } catch (err) {
+      showToast({
+        title: "Falha ao baixar relatório",
+        description: err instanceof Error ? err.message : "Erro inesperado.",
+        variant: "destructive",
+      });
+    } finally {
+      setHistoryDownloadingId(null);
+    }
+  };
+
+  // Formata data/hora ISO em pt-BR curto: "dd/MM HH:mm".
+  const formatHistoryDate = (iso: string): string => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${dd}/${mm} ${hh}:${mi}`;
+  };
 
   // ─── Export PDF ───────────────────────────────────────────────────────────
   //
@@ -429,7 +606,7 @@ export function BusinessIntelligenceClient({
                   onClick={handleExportPdf}
                   disabled={loading || exporting}
                   className="w-full sm:w-auto"
-                  title="Exporta o relatório atual como PDF em uma única página A4 paisagem."
+                  title="Exporta o relatório atual como PDF em uma única página A4 retrato."
                 >
                   {exporting ? (
                     <>
@@ -443,6 +620,82 @@ export function BusinessIntelligenceClient({
                     </>
                   )}
                 </Button>
+
+                {/* Historico dos relatorios gerados nos ultimos 30 dias.
+                    Cada usuario ve apenas os seus proprios. */}
+                <div ref={historyRef} className="relative w-full sm:w-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setHistoryOpen((open) => !open)}
+                    disabled={loading || exporting}
+                    className="w-full sm:w-auto"
+                    title="Histórico dos seus relatórios nos últimos 30 dias."
+                  >
+                    <HistoryIcon className="mr-2 h-4 w-4" />
+                    Histórico
+                  </Button>
+                  {historyOpen ? (
+                    <div className="absolute right-0 top-full z-30 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-md border bg-popover p-2 text-popover-foreground shadow-lg">
+                      <div className="border-b px-2 pb-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Últimos 30 dias
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Apenas relatórios gerados por você.
+                        </p>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto py-1">
+                        {historyLoading ? (
+                          <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Carregando...
+                          </div>
+                        ) : historyList.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                            Nenhum relatório nos últimos 30 dias.
+                          </p>
+                        ) : (
+                          historyList.map((entry) => {
+                            const isDownloading = historyDownloadingId === entry.id;
+                            return (
+                              <div
+                                key={entry.id}
+                                className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-accent"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium">
+                                    {entry.empresa}
+                                  </p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {entry.periodo}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Gerado em {formatHistoryDate(entry.generatedAt)}
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void handleDownloadFromHistory(entry.id)}
+                                  disabled={isDownloading}
+                                  className="shrink-0"
+                                >
+                                  {isDownloading ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Download className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>

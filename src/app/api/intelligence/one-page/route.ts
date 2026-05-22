@@ -5,6 +5,7 @@ import {
   analyzeOnePageReport,
   OnePageReportError,
 } from "@/lib/financeiro/relatorios/one-page-analyzer";
+import { saveOnePageHistory } from "@/lib/financeiro/relatorios/one-page-history";
 import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
 
 // ============================================================================
@@ -82,7 +83,16 @@ export async function POST(request: Request) {
   // ── 3. Chamada do motor de IA + resposta unica ─────────────────────────
   try {
     const analysis = await analyzeOnePageReport(payload.input);
-    return NextResponse.json({ analysis, ...payload });
+    const responseBody = { analysis, ...payload };
+    // Salva no historico (best-effort, nao bloqueia a resposta em falha).
+    await saveOnePageHistory({
+      userId: user.id,
+      companyId,
+      dateFrom,
+      dateTo,
+      contentJson: responseBody as unknown as Record<string, unknown>,
+    });
+    return NextResponse.json(responseBody);
   } catch (err) {
     // Em falha do motor devolvemos os blocos numericos — a UI pode
     // renderizar KPIs e graficos enquanto retenta a analise textual.

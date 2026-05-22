@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { saveOnePageHistory } from "@/lib/financeiro/relatorios/one-page-history";
 import { MOCK_ANALYSIS } from "@/lib/financeiro/relatorios/one-page-mock-analysis";
 import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
 
@@ -75,8 +76,15 @@ export async function POST(request: Request) {
   }
 
   // ── Devolve payload + analysis mockada (sem chamar IA) ──────────────────
-  return NextResponse.json({
-    analysis: MOCK_ANALYSIS,
-    ...result.payload,
+  const responseBody = { analysis: MOCK_ANALYSIS, ...result.payload };
+  // Tambem salvamos no historico (best-effort). Em prod a rota nem existe
+  // (404 acima), entao essa entrada so aparece em dev.
+  await saveOnePageHistory({
+    userId: user.id,
+    companyId,
+    dateFrom,
+    dateTo,
+    contentJson: responseBody as unknown as Record<string, unknown>,
   });
+  return NextResponse.json(responseBody);
 }
