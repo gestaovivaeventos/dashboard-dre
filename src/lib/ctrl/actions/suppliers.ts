@@ -67,12 +67,19 @@ export async function approveSupplier(
 
   if (insertError) return { error: insertError.message };
 
+  await logSupplierHistory(supabase, {
+    supplierId,
+    userId: ctx.id,
+    action: "aprovado",
+    comment: `${expenseTypeIds.length} tipo(s) de despesa vinculado(s)`,
+  });
+
   revalidatePath("/ctrl/admin/fornecedores");
   return { ok: true };
 }
 
 export async function rejectSupplier(supplierId: string, reason: string) {
-  await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+  const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
@@ -86,6 +93,14 @@ export async function rejectSupplier(supplierId: string, reason: string) {
     .eq("id", supplierId);
 
   if (error) return { error: error.message };
+
+  await logSupplierHistory(supabase, {
+    supplierId,
+    userId: ctx.id,
+    action: "rejeitado",
+    comment: reason,
+  });
+
   revalidatePath("/ctrl/admin/fornecedores");
   return { ok: true };
 }
@@ -112,9 +127,18 @@ export async function updateSupplier(
   // resets the approval, so even non-approvers can effectively "demote"
   // a supplier back to pending — that's the desired behaviour (mistakes
   // in bank data need to be flagged for re-approval).
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
+  const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
+
+  // Snapshot do registro atual pra calcular diff antes do update.
+  const { data: current } = await supabase
+    .from("ctrl_suppliers")
+    .select(
+      "name, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao",
+    )
+    .eq("id", supplierId)
+    .maybeSingle();
 
   // Build an update payload that only touches the fields actually provided.
   // Empty strings explicitly mean "clear this field"; undefined means "leave
@@ -151,6 +175,42 @@ export async function updateSupplier(
     .eq("id", supplierId);
 
   if (error) return { error: error.message };
+
+  // Calcula diff campo a campo (so loga campos do payload — descarta os
+  // internos como status/approved_by que sao consequencia da edicao).
+  const TRACKED = [
+    "name",
+    "cnpj_cpf",
+    "email",
+    "phone",
+    "chave_pix",
+    "pix_key_type",
+    "banco",
+    "agencia",
+    "conta_corrente",
+    "titular_banco",
+    "doc_titular",
+    "transf_padrao",
+    "pix_padrao",
+  ] as const;
+  const changes: Record<string, [unknown, unknown]> = {};
+  if (current) {
+    for (const k of TRACKED) {
+      if (k in payload) {
+        const before = (current as Record<string, unknown>)[k] ?? null;
+        const after = payload[k] ?? null;
+        if (before !== after) changes[k] = [before, after];
+      }
+    }
+  }
+
+  await logSupplierHistory(supabase, {
+    supplierId,
+    userId: ctx.id,
+    action: "editado",
+    changes: Object.keys(changes).length > 0 ? changes : null,
+  });
+
   revalidatePath("/ctrl/admin/fornecedores");
   return { ok: true };
 }
@@ -211,6 +271,96 @@ export async function createSupplier(data: {
     .single();
 
   if (error) return { error: error.message };
+
+  await logSupplierHistory(supabase, {
+    supplierId: inserted.id,
+    userId: ctx.id,
+    action: "criado",
+  });
+
   revalidatePath("/ctrl/admin/fornecedores");
   return { supplierId: inserted.id };
+}
+
+// ─── Historico ───────────────────────────────────────────────────────────────
+
+async function logSupplierHistory(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  params: {
+    supplierId: string;
+    userId: string;
+    action: "criado" | "editado" | "aprovado" | "rejeitado";
+    changes?: Record<string, [unknown, unknown]> | null;
+    comment?: string | null;
+  },
+) {
+  const { error } = await supabase.from("ctrl_supplier_history").insert({
+    supplier_id: params.supplierId,
+    user_id: params.userId,
+    action: params.action,
+    changes: params.changes ?? null,
+    comment: params.comment ?? null,
+  });
+  if (error) console.error("[supplier_history] Falha ao registrar:", error);
+}
+
+export interface SupplierHistoryEntry {
+  id: string;
+  action: "criado" | "editado" | "aprovado" | "rejeitado" | string;
+  changes: Record<string, [unknown, unknown]> | null;
+  comment: string | null;
+  createdAt: string;
+  user: { id: string; name: string | null; email: string | null } | null;
+}
+
+export async function getSupplierHistory(
+  supplierId: string,
+): Promise<{ entries?: SupplierHistoryEntry[]; error?: string }> {
+  await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "admin",
+    "aprovacao_fornecedor",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data, error } = await supabase
+    .from("ctrl_supplier_history")
+    .select(
+      `id, action, changes, comment, created_at,
+       user:users!ctrl_supplier_history_user_id_fkey(id, name, email)`,
+    )
+    .eq("supplier_id", supplierId)
+    .order("created_at", { ascending: false });
+
+  if (error) return { error: error.message };
+
+  type Row = {
+    id: string;
+    action: string;
+    changes: Record<string, [unknown, unknown]> | null;
+    comment: string | null;
+    created_at: string;
+    user:
+      | { id: string; name: string | null; email: string | null }
+      | Array<{ id: string; name: string | null; email: string | null }>
+      | null;
+  };
+  const entries: SupplierHistoryEntry[] = ((data ?? []) as Row[]).map((row) => {
+    const u = Array.isArray(row.user) ? row.user[0] ?? null : row.user;
+    return {
+      id: row.id,
+      action: row.action,
+      changes: row.changes,
+      comment: row.comment,
+      createdAt: row.created_at,
+      user: u,
+    };
+  });
+
+  return { entries };
 }

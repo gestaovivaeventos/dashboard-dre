@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Banknote, CheckCircle2, Contact, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
+import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
 
 import { approveSupplier, rejectSupplier, updateSupplier } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
+import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
 
 interface SupplierRow {
   id: string;
@@ -73,6 +74,16 @@ export function FornecedoresTable({
   const [editForm, setEditForm] = useState<EditFormState>(emptyEditForm());
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // History modal — opened via the "Histórico" button on a row.
+  const [historySupplier, setHistorySupplier] = useState<SupplierRow | null>(null);
+
+  function openEditFromRow(supplier: SupplierRow) {
+    setDetailSupplier(supplier);
+    setEditForm(toEditForm(supplier));
+    setEditMode(true);
+    setEditError(null);
+  }
 
   function openDetail(supplier: SupplierRow) {
     setDetailSupplier(supplier);
@@ -319,7 +330,7 @@ export function FornecedoresTable({
               <th className="px-4 py-3">
                 {activeTab === "aprovado" ? "Aprovado por" : "Criado em"}
               </th>
-              {canApprove ? <th className="px-4 py-3 text-right">Ações</th> : null}
+              <th className="px-4 py-3 text-right">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -367,13 +378,31 @@ export function FornecedoresTable({
                       new Date(s.created_at).toLocaleDateString("pt-BR")
                     )}
                   </td>
-                  {canApprove ? (
-                    <td
-                      className="px-4 py-3"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {isPendente ? (
-                        <div className="flex justify-end gap-2">
+                  <td
+                    className="px-4 py-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditFromRow(s)}
+                        title="Editar fornecedor (volta a pendente apos salvar)"
+                        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHistorySupplier(s)}
+                        title="Ver historico de alteracoes"
+                        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        Histórico
+                      </button>
+                      {canApprove && isPendente && (
+                        <>
                           <button
                             type="button"
                             onClick={() => openApproveModal(s)}
@@ -396,12 +425,10 @@ export function FornecedoresTable({
                             <XCircle className="h-3.5 w-3.5" />
                             Rejeitar
                           </button>
-                        </div>
-                      ) : (
-                        <span className="block text-right text-xs text-muted-foreground">—</span>
+                        </>
                       )}
-                    </td>
-                  ) : null}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
@@ -829,6 +856,14 @@ export function FornecedoresTable({
           </div>
         </div>
       ) : null}
+
+      {historySupplier && (
+        <SupplierHistoryModal
+          supplierId={historySupplier.id}
+          supplierName={historySupplier.name}
+          onClose={() => setHistorySupplier(null)}
+        />
+      )}
     </div>
   );
 }
