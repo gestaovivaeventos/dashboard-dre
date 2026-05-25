@@ -362,5 +362,41 @@ export async function getSupplierHistory(
     };
   });
 
+  // Fornecedores aprovados antes do historico existir nao tem entry "aprovado".
+  // Sintetiza uma a partir de approved_by/approved_at quando ausente.
+  const hasApprovalEntry = entries.some((e) => e.action === "aprovado");
+  if (!hasApprovalEntry) {
+    const { data: sup } = await supabase
+      .from("ctrl_suppliers")
+      .select(
+        `status, approved_at,
+         approver:users!ctrl_suppliers_approved_by_fkey(id, name, email)`,
+      )
+      .eq("id", supplierId)
+      .maybeSingle<{
+        status: string;
+        approved_at: string | null;
+        approver:
+          | { id: string; name: string | null; email: string | null }
+          | Array<{ id: string; name: string | null; email: string | null }>
+          | null;
+      }>();
+
+    if (sup?.status === "aprovado" && sup.approved_at) {
+      const approver = Array.isArray(sup.approver) ? sup.approver[0] ?? null : sup.approver;
+      entries.push({
+        id: `synthetic-approval-${supplierId}`,
+        action: "aprovado",
+        changes: null,
+        comment: null,
+        createdAt: sup.approved_at,
+        user: approver,
+      });
+      // Reordena para manter desc por data (a nova entry pode ser mais antiga ou
+      // mais nova que algum edito subsequente).
+      entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }
+  }
+
   return { entries };
 }
