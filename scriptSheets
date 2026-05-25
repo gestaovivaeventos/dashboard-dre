@@ -1,0 +1,120 @@
+// Substitua pela URL REAL da sua Cloud Function!
+const CLOUD_FUNCTION_URL = "https://validador-contratos-266802480003.europe-west1.run.app";
+
+/**
+ * Função principal que será chamada (manualmente ou por menu/gatilho)
+ * para acionar a validação na Cloud Function.
+ */
+function acionarValidacaoContratos() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const nomePlanilha = ss.getName();
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(5000)) {
+    SpreadsheetApp.getUi().alert("Ja existe uma validacao em andamento. Aguarde terminar antes de iniciar outra.");
+    return;
+  }
+
+  try {
+  Logger.log(`Acionando Cloud Function para a planilha: ${nomePlanilha}`);
+  SpreadsheetApp.getUi().alert("Processamento iniciado. Acompanhe os avisos pelo Discord e os logs da Cloud Function.");
+
+  // Prepara os dados para enviar (payload JSON)
+  const payload = JSON.stringify({
+    planilha: nomePlanilha
+  });
+
+  // Configura a requisição HTTP POST
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: payload,
+    muteHttpExceptions: true // Importante para capturar erros e ver a resposta
+  };
+
+  try {
+    // Chama a URL da Cloud Function
+    const response = UrlFetchApp.fetch(CLOUD_FUNCTION_URL, options);
+    const responseCode = response.getResponseCode();
+    const responseBody = response.getContentText();
+
+    // Mostra o resultado no log do Apps Script
+    if (responseCode === 200) {
+      Logger.log(`Sucesso (${responseCode}): ${responseBody}`);
+      SpreadsheetApp.getUi().alert(`Validação Concluída! Resposta: ${responseBody}`); // Mostra pop-up de sucesso
+    } else {
+      Logger.log(`Erro (${responseCode}): ${responseBody}`);
+      SpreadsheetApp.getUi().alert(`Erro na Validação (${responseCode}): ${responseBody}`); // Mostra pop-up de erro
+    }
+
+  } catch (error) {
+    const errorText = String(error);
+    Logger.log(`Erro ao chamar a Cloud Function: ${errorText}`);
+    if (errorText.indexOf("Tempo limite") > -1 || errorText.indexOf("Timeout") > -1) {
+      SpreadsheetApp.getUi().alert("A chamada atingiu o tempo limite do Google Sheets, mas o processamento pode continuar no Cloud Run. Acompanhe os avisos pelo Discord.");
+    } else {
+      SpreadsheetApp.getUi().alert(`Erro critico ao chamar a funcao: ${errorText}`);
+    }
+    return;
+    Logger.log(`Erro crítico ao chamar a Cloud Function: ${error}`);
+    SpreadsheetApp.getUi().alert(`Erro crítico ao chamar a função: ${error}`); // Mostra pop-up de erro crítico
+  }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Função especial que roda quando a planilha é aberta.
+ * Cria um menu customizado para acionar a validação.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+      .createMenu('Validador Automático')
+      .addItem('Validar Requisições Agora', 'acionarValidacaoContratos')
+      .addSeparator() // Adiciona uma linha separadora visual
+      .addItem('Limpar Pendentes da Aba C', 'limparPendentesAbaC') // Nova opção
+      .addToUi();
+}
+
+/**
+ * Remove linhas da Aba C que contenham o status "Pendente de Extração".
+ */
+function limparPendentesAbaC() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("C"); // Nome da aba a ser limpa
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("Aba 'C' não encontrada!");
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("A aba C não tem dados suficientes para limpar.");
+    return;
+  }
+
+  var textoAlvo = "Pendente de Extração (Aba B vazia para este link)";
+  
+  // Lê todos os dados de uma vez para ser mais rápido
+  var range = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
+  var values = range.getValues();
+  
+  var deletados = 0;
+
+  // Itera de TRÁS PARA FRENTE (i--) para evitar erros de índice ao deletar linhas
+  for (var i = values.length - 1; i >= 0; i--) {
+    var linha = values[i];
+    
+    // Procura o texto em qualquer coluna daquela linha (mais seguro)
+    // Se quiser limitar a uma coluna específica, use: if (linha[índice_coluna] == textoAlvo)
+    var linhaTexto = linha.join("|||"); 
+
+    if (linhaTexto.indexOf(textoAlvo) > -1) {
+      sheet.deleteRow(i + 2); // +2 compensa o índice 0 do array e o cabeçalho (linha 1)
+      deletados++;
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Limpeza concluída!\n" + deletados + " linhas foram removidas.");
+}
