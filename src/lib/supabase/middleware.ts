@@ -43,32 +43,12 @@ export async function updateSession(request: NextRequest) {
     url.searchParams.set("redirectedFrom", pathname);
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && (pathname === "/login" || pathname === "/signup")) {
-    // Auth user em /login → manda pra landing apropriada. Crítico: checar
-    // `active` aqui também, senão usuário inativo entra em loop (login redireciona
-    // pra /dashboard, page redireciona pra /login porque session.ts retorna empty
-    // pra inativo).
-    const { data: postLoginProfile } = await supabase
-      .from("users")
-      .select("profile, active, can_financeiro, can_compras")
-      .eq("id", user.id)
-      .maybeSingle<{
-        profile: UserProfileType | null;
-        active: boolean | null;
-        can_financeiro: boolean | null;
-        can_compras: boolean | null;
-      }>();
-
+    // Auth user em /login ou /signup → manda pra raiz. A root page (server)
+    // faz redirect inteligente baseado em profile + active. Centraliza a
+    // decisão num único lugar pra evitar loops causados por destinos
+    // inconsistentes entre middleware e pages.
     const url = request.nextUrl.clone();
-    // Inativo (signup novo aguardando aprovação) → /pendente, não landing.
-    if (postLoginProfile && postLoginProfile.active === false) {
-      url.pathname = "/pendente";
-    } else {
-      url.pathname = defaultLandingFor(
-        postLoginProfile?.profile ?? "solicitante",
-        Boolean(postLoginProfile?.can_financeiro),
-        Boolean(postLoginProfile?.can_compras),
-      );
-    }
+    url.pathname = "/";
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase

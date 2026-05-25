@@ -61,8 +61,8 @@ export default function SignupPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        // Deixa o middleware decidir o destino (pode ser /pendente, /dashboard, /contratos, etc).
-        router.refresh();
+        // Navega pra raiz; a root page decide o destino (pendente/landing).
+        router.push("/");
       }
     };
 

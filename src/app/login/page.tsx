@@ -33,10 +33,10 @@ export default function LoginPage() {
       return;
     }
 
-    // Refresh em vez de hard-coded "/home". O middleware detecta auth em
-    // /login e redireciona pra landing correta (ou /pendente se inativo).
-    // Hard-coding "/home" gerava loop pra usuários inativos ou sem permissão.
-    router.refresh();
+    // Navega pra raiz. A root page faz redirect inteligente baseado em
+    // profile + active (single source of truth) — evita loop com /home
+    // hard-coded quando o user está inativo ou sem permissão.
+    router.push("/");
   };
 
   useEffect(() => {
@@ -44,8 +44,7 @@ export default function LoginPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        // Mesma estratégia do submit: deixar o middleware decidir o destino.
-        router.refresh();
+        router.push("/");
       }
     };
 
