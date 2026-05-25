@@ -8,6 +8,23 @@ async function getSupabase() {
   return createAdminClientIfAvailable() ?? (await createClient());
 }
 
+/** Quantas notificações nao lidas o usuario tem. Retorna 0 em caso de erro
+ *  (UI nao quebra por causa de contador). */
+export async function getUnreadNotificationsCount(userId: string): Promise<number> {
+  if (!userId) return 0;
+  const supabase = await getSupabase();
+  const { count, error } = await supabase
+    .from("ctrl_notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("is_read", false);
+  if (error) {
+    console.error("[notifications] Falha ao contar nao lidas:", error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 export async function notifyPendingApproval(params: {
   requestId: string;
   requestNumber: number;

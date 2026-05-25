@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/app-shell";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
+import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function ProtectedLayout({
@@ -84,6 +85,10 @@ export default async function ProtectedLayout({
     "dre",
   );
 
+  const unreadNotifications = profile?.id
+    ? await getUnreadNotificationsCount(profile.id)
+    : 0;
+
   return (
     <AppShell
       userName={userName}
@@ -95,6 +100,7 @@ export default async function ProtectedLayout({
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
       contractsOnly={contractsOnly}
+      unreadNotifications={unreadNotifications}
     >
       {children}
     </AppShell>

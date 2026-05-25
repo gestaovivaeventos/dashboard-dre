@@ -28,6 +28,7 @@ interface AppShellProps {
   availableModules: ModuleDefinition[];
   activeSegmentSlug: string | null;
   contractsOnly?: boolean;
+  unreadNotifications?: number;
 }
 
 export function AppShell({
@@ -43,6 +44,7 @@ export function AppShell({
   availableModules,
   activeSegmentSlug,
   contractsOnly,
+  unreadNotifications = 0,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -131,7 +133,7 @@ export function AppShell({
                 <p className="text-sm font-medium leading-none text-ink-primary">{userName}</p>
                 <p className="text-xs text-ink-muted">{userEmail}</p>
               </div>
-              <NotificationsLink visible={hasCtrl} />
+              <NotificationsLink visible={hasCtrl} unreadCount={unreadNotifications} />
               <ThemeToggle />
               <Separator className="hidden h-8 w-px bg-white/10 sm:block" />
               <SignOutButton />

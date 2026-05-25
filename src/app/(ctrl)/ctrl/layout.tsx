@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
+import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -48,6 +49,10 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     "ctrl",
   );
 
+  const unreadNotifications = profile?.id
+    ? await getUnreadNotificationsCount(profile.id)
+    : 0;
+
   return (
     <AppShell
       userName={userName}
@@ -58,6 +63,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       activeModule={activeModule}
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
+      unreadNotifications={unreadNotifications}
     >
       {children}
     </AppShell>
