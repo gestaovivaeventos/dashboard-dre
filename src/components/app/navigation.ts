@@ -140,7 +140,7 @@ export const CTRL_ADMIN_ITEMS = [
     title: "Fornecedores",
     href: "/ctrl/admin/fornecedores",
     icon: Truck,
-    roles: ["csc", "admin", "aprovacao_fornecedor"] as CtrlRole[],
+    roles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] as CtrlRole[],
   },
   {
     title: "Eventos",
@@ -213,7 +213,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "ct-cap", title: "Contas a Pagar", icon: Receipt, scope: "global", href: "/ctrl/contas-a-pagar", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-orc", title: "Orcamento", icon: DollarSign, scope: "global", href: "/ctrl/orcamento", ctrlRoles: ["gerente", "diretor", "csc", "admin"] },
       { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
-      { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["csc", "admin", "aprovacao_fornecedor"] },
+      { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
       { key: "ct-evt", title: "Eventos", icon: Calendar, scope: "global", href: "/ctrl/admin/eventos", ctrlRoles: ["csc", "admin"] },
     ],
   },

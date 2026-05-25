@@ -64,7 +64,9 @@ export default async function FornecedoresPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "csc", "admin", "aprovacao_fornecedor")) {
+  // Tela colaborativa: qualquer perfil do CTRL pode listar/cadastrar/editar.
+  // A aprovação fica restrita ao CSC/admin/aprovador.
+  if (!hasCtrlRole(ctx, "solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor")) {
     redirect("/ctrl/requisicoes");
   }
 

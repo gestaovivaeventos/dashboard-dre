@@ -113,9 +113,11 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
       return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
     }
-    // Fornecedores (admin do CTRL)
+    // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
+    // A aprovação em si fica restrita ao CSC/admin (gate no client + server
+    // action), mas a tela é colaborativa.
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
-      return profile === "contas_a_pagar";
+      return ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar"].includes(profile);
     }
     // Demais áreas administrativas do CTRL
     if (pathname.startsWith("/ctrl/admin")) {
