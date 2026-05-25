@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Eye, FileText, Loader2, MessageCircle, Paperclip, X } from "lucide-react";
+import { Download, Eye, FileText, Loader2, MessageCircle, Paperclip, X } from "lucide-react";
 
 import {
   sendToPayment,
@@ -742,7 +742,16 @@ function DetailModal({
           </Section>
         </div>
 
-        <div className="border-t px-6 py-3 flex justify-end">
+        <div className="border-t px-6 py-3 flex justify-end gap-2">
+          <a
+            href={`/api/ctrl/requests/${req.id}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
+          >
+            <Download className="h-4 w-4" />
+            Baixar PDF
+          </a>
           <button
             type="button"
             onClick={onClose}
