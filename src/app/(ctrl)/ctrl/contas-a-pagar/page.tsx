@@ -72,7 +72,7 @@ async function getContasAPagar() {
       creator:users!ctrl_requests_created_by_fkey(name, email),
       approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
-    .in("status", ["aprovado", "agendado", "inativado_csc"])
+    .in("status", ["aprovado", "agendado", "inativado_csc", "info_pagamento_pendente"])
     .order("due_date", { ascending: true, nullsFirst: false });
 
   if (error) return { error: error.message };

@@ -104,7 +104,8 @@ export type CtrlRequestStatus =
   | "agendado"
   | "travado"
   | "inativado_csc"
-  | "aguardando_aprovacao_fornecedor";
+  | "aguardando_aprovacao_fornecedor"
+  | "info_pagamento_pendente";
 
 export type CtrlSupplierStatus = "pendente" | "aprovado" | "rejeitado";
 
@@ -121,7 +122,9 @@ export type CtrlHistoryAction =
   | "fornecedor_aprovado"
   | "fornecedor_rejeitado"
   | "enviado_pagamento"
-  | "info_solicitada";
+  | "info_solicitada"
+  | "info_pagamento_solicitada"
+  | "info_pagamento_respondida";
 
 export interface CtrlSector {
   id: string;

@@ -1,7 +1,10 @@
 "use client";
 
-import { FileText, X } from "lucide-react";
+import { FileText, MessageCircle, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+
+import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 
 interface RequisicaoRow {
   id: string;
@@ -20,7 +23,14 @@ interface Props {
 const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function RequisicoesTable({ requests }: Props) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
+  const [infoModal, setInfoModal] = useState<{
+    id: string;
+    number: number;
+    title: string;
+    mode: "answer" | "view";
+  } | null>(null);
 
   // Filter by request number (exact prefix), title (substring), or status label.
   // Search is case-insensitive. Number-only search matches the request_number.
@@ -91,32 +101,67 @@ export function RequisicoesTable({ requests }: Props) {
                 <th className="px-4 py-3">Vencimento</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Criado em</th>
+                <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((req) => (
-                <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-mono text-muted-foreground">
-                    #{req.request_number}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{req.title}</td>
-                  <td className="px-4 py-3">{fmt.format(req.amount)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {req.due_date
-                      ? new Date(req.due_date + "T00:00:00").toLocaleDateString("pt-BR")
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={req.status} />
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(req.created_at).toLocaleDateString("pt-BR")}
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((req) => {
+                const hasPaymentInfo = req.status === "info_pagamento_pendente";
+                return (
+                  <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 font-mono text-muted-foreground">
+                      #{req.request_number}
+                    </td>
+                    <td className="px-4 py-3 font-medium">{req.title}</td>
+                    <td className="px-4 py-3">{fmt.format(req.amount)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {req.due_date
+                        ? new Date(req.due_date + "T00:00:00").toLocaleDateString("pt-BR")
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={req.status} />
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {new Date(req.created_at).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {hasPaymentInfo && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInfoModal({
+                              id: req.id,
+                              number: req.request_number,
+                              title: req.title,
+                              mode: "answer",
+                            })
+                          }
+                          className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                          title="Responder ao time de contas a pagar"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          Responder
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+      )}
+
+      {infoModal && (
+        <PaymentInfoThreadModal
+          requestId={infoModal.id}
+          requestNumber={infoModal.number}
+          requestTitle={infoModal.title}
+          mode={infoModal.mode}
+          onClose={() => setInfoModal(null)}
+          onSubmitted={() => router.refresh()}
+        />
       )}
     </div>
   );
@@ -132,6 +177,7 @@ const STATUS_LABEL: Record<string, string> = {
   travado: "Travado",
   inativado_csc: "Inativado",
   aguardando_aprovacao_fornecedor: "Aguard. Fornec.",
+  info_pagamento_pendente: "Info pendente",
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -147,6 +193,10 @@ function StatusBadge({ status }: { status: string }) {
     aguardando_aprovacao_fornecedor: {
       label: "Aguard. Fornec.",
       className: "bg-indigo-100 text-indigo-800",
+    },
+    info_pagamento_pendente: {
+      label: "Info pendente",
+      className: "bg-amber-100 text-amber-800",
     },
   };
   const config = map[status] ?? { label: status, className: "bg-gray-100 text-gray-800" };

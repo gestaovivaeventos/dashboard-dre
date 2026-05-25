@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Eye, FileText, Loader2, Paperclip, X } from "lucide-react";
+import { Eye, FileText, Loader2, MessageCircle, Paperclip, X } from "lucide-react";
 
 import {
   sendToPayment,
   inactivateRequests,
   getRequestAttachmentUrl,
 } from "@/lib/ctrl/actions/requests";
+import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { useRouter } from "next/navigation";
 
 type Supplier = {
   name: string;
@@ -90,10 +92,11 @@ const MONTHS = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
-type Tab = "aprovado" | "agendado" | "inativado_csc";
+type Tab = "aprovado" | "info_pagamento_pendente" | "agendado" | "inativado_csc";
 
 const TAB_LABELS: Record<Tab, string> = {
   aprovado: "Aguardando Envio",
+  info_pagamento_pendente: "Info Pendente",
   agendado: "Enviados",
   inativado_csc: "Inativados",
 };
@@ -136,6 +139,7 @@ function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
 const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("aprovado");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [payingCompany, setPayingCompany] = useState("");
@@ -149,6 +153,14 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   // Detail modal — opened by "Detalhes" button in any row.
   const [detail, setDetail] = useState<ContasRequest | null>(null);
   const [attachmentLoading, setAttachmentLoading] = useState(false);
+
+  // Modal de thread de info — aberto pelo botao "Pedir info" / "Continuar conversa".
+  const [infoModal, setInfoModal] = useState<{
+    req: ContasRequest;
+    mode: "ask" | "view";
+  } | null>(null);
+
+  const canAskInfo = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
 
   async function openAttachment(requestId: string) {
     setAttachmentLoading(true);
@@ -175,6 +187,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
 
   const counts: Record<Tab, number> = {
     aprovado: requests.filter((r) => r.status === "aprovado").length,
+    info_pagamento_pendente: requests.filter((r) => r.status === "info_pagamento_pendente").length,
     agendado: requests.filter((r) => r.status === "agendado").length,
     inativado_csc: requests.filter((r) => r.status === "inativado_csc").length,
   };
@@ -275,7 +288,13 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Dados de Pagamento</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Valor</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  {activeTab === "aprovado" ? "Vencimento" : activeTab === "agendado" ? "Empresa / Enviado em" : "Inativado em"}
+                  {activeTab === "aprovado"
+                    ? "Vencimento"
+                    : activeTab === "info_pagamento_pendente"
+                    ? "Vencimento"
+                    : activeTab === "agendado"
+                    ? "Empresa / Enviado em"
+                    : "Inativado em"}
                 </th>
                 <th className="w-20 px-4 py-3 text-right font-medium text-muted-foreground"></th>
               </tr>
@@ -315,6 +334,16 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                       {activeTab === "aprovado" && (
                         req.due_date ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00")) : "—"
                       )}
+                      {activeTab === "info_pagamento_pendente" && (
+                        <div className="flex flex-col gap-1">
+                          {req.due_date && (
+                            <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))}</p>
+                          )}
+                          <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                            <MessageCircle className="h-3 w-3" /> Aguardando resposta
+                          </span>
+                        </div>
+                      )}
                       {activeTab === "agendado" && (
                         <div>
                           {req.paying_company && <p className="font-medium text-sky-600">{req.paying_company}</p>}
@@ -332,14 +361,27 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                       className="px-4 py-3 text-right"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        type="button"
-                        onClick={() => setDetail(req)}
-                        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        Detalhes
-                      </button>
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setDetail(req)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Detalhes
+                        </button>
+                        {canAskInfo && (req.status === "aprovado" || req.status === "info_pagamento_pendente") && (
+                          <button
+                            type="button"
+                            onClick={() => setInfoModal({ req, mode: "ask" })}
+                            className="inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
+                            title={req.status === "info_pagamento_pendente" ? "Continuar conversa" : "Pedir info ao solicitante"}
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            {req.status === "info_pagamento_pendente" ? "Continuar" : "Pedir info"}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -485,6 +527,18 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
           onClose={() => setDetail(null)}
           onOpenAttachment={openAttachment}
           attachmentLoading={attachmentLoading}
+        />
+      )}
+
+      {/* Payment info thread modal */}
+      {infoModal && (
+        <PaymentInfoThreadModal
+          requestId={infoModal.req.id}
+          requestNumber={infoModal.req.request_number}
+          requestTitle={infoModal.req.title}
+          mode={infoModal.mode}
+          onClose={() => setInfoModal(null)}
+          onSubmitted={() => router.refresh()}
         />
       )}
     </div>

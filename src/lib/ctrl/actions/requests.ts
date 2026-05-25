@@ -859,6 +859,189 @@ export async function answerComplement(requestId: string, answer: string) {
   return { ok: true };
 }
 
+// ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────
+//
+// Diferente do fluxo de aprovacao (requestInfo/answerComplement), este e' usado
+// pelo contas_a_pagar quando a requisicao ja esta aprovada mas precisa de
+// esclarecimento antes do envio. Bloqueia o envio enquanto a info esta pendente.
+// Multiplas trocas formam uma thread (cada turno e' uma linha em ctrl_history
+// com action info_pagamento_solicitada ou info_pagamento_respondida).
+
+export async function requestPaymentInfo(requestId: string, question: string) {
+  const ctx = await requireCtrlRole("contas_a_pagar", "csc", "admin");
+  if (!question.trim()) return { error: "Informe a pergunta." };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("id, status, created_by, request_number")
+    .eq("id", requestId)
+    .single();
+
+  if (!req) return { error: "Requisição não encontrada." };
+  // Aceita pedir info enquanto a requisicao esta aguardando envio (aprovado)
+  // ou ja em outra rodada de info pendente (contas_a_pagar pergunta de novo
+  // sem precisar de uma resposta antes — caso raro mas valido).
+  if (req.status !== "aprovado" && req.status !== "info_pagamento_pendente") {
+    return { error: `Status atual: ${req.status}. Não é possível pedir info.` };
+  }
+
+  await supabase
+    .from("ctrl_requests")
+    .update({ status: "info_pagamento_pendente", updated_at: new Date().toISOString() })
+    .eq("id", requestId);
+
+  await supabase.from("ctrl_history").insert({
+    request_id: requestId,
+    user_id: ctx.id,
+    action: "info_pagamento_solicitada",
+    comment: question.trim(),
+    metadata: { requested_by_roles: ctx.ctrlRoles },
+  });
+
+  await notifyRequester({
+    userId: req.created_by,
+    requestId,
+    requestNumber: req.request_number,
+    title: "Info solicitada (pagamento)",
+    message: `${ctx.name ?? ctx.email} solicitou informação sobre a requisição #${req.request_number} antes do envio para pagamento: "${question.trim()}"`,
+    type: "info_pagamento_solicitada",
+  });
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  revalidatePath("/ctrl/requisicoes");
+  return { ok: true };
+}
+
+export async function answerPaymentInfo(requestId: string, answer: string) {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "admin",
+  );
+  if (!answer.trim()) return { error: "Resposta é obrigatória." };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("id, status, created_by, request_number")
+    .eq("id", requestId)
+    .single();
+
+  if (!req) return { error: "Requisição não encontrada." };
+  if (req.status !== "info_pagamento_pendente") {
+    return { error: "Esta requisição não está aguardando informação." };
+  }
+
+  // Resposta libera a requisicao para envio — volta para 'aprovado'.
+  await supabase
+    .from("ctrl_requests")
+    .update({ status: "aprovado", updated_at: new Date().toISOString() })
+    .eq("id", requestId);
+
+  await supabase.from("ctrl_history").insert({
+    request_id: requestId,
+    user_id: ctx.id,
+    action: "info_pagamento_respondida",
+    comment: answer.trim(),
+  });
+
+  // Notifica quem solicitou (ultimo info_pagamento_solicitada). Util pra
+  // contas_a_pagar saber que ja pode prosseguir com o envio.
+  const { data: lastAsk } = await supabase
+    .from("ctrl_history")
+    .select("user_id")
+    .eq("request_id", requestId)
+    .eq("action", "info_pagamento_solicitada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastAsk?.user_id) {
+    await notifyRequester({
+      userId: lastAsk.user_id as string,
+      requestId,
+      requestNumber: req.request_number,
+      title: "Info respondida (pagamento)",
+      message: `${ctx.name ?? ctx.email} respondeu à solicitação de info sobre a requisição #${req.request_number}.`,
+      type: "info_pagamento_respondida",
+    });
+  }
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  revalidatePath("/ctrl/requisicoes");
+  return { ok: true };
+}
+
+export interface PaymentInfoMessage {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  authorEmail: string | null;
+  authorKind: "solicitante" | "contas_a_pagar";
+  message: string;
+  createdAt: string;
+}
+
+export async function getPaymentInfoThread(
+  requestId: string,
+): Promise<{ messages?: PaymentInfoMessage[]; error?: string }> {
+  await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select(
+      `id, user_id, action, comment, created_at,
+       user:users!ctrl_history_user_id_fkey(name, email)`,
+    )
+    .eq("request_id", requestId)
+    .in("action", ["info_pagamento_solicitada", "info_pagamento_respondida"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  type Row = {
+    id: string;
+    user_id: string;
+    action: "info_pagamento_solicitada" | "info_pagamento_respondida";
+    comment: string | null;
+    created_at: string;
+    user:
+      | { name: string | null; email: string | null }
+      | Array<{ name: string | null; email: string | null }>
+      | null;
+  };
+  const messages: PaymentInfoMessage[] = ((data ?? []) as Row[]).map((row) => {
+    const u = Array.isArray(row.user) ? row.user[0] ?? null : row.user;
+    return {
+      id: row.id,
+      authorId: row.user_id,
+      authorName: u?.name ?? null,
+      authorEmail: u?.email ?? null,
+      authorKind: row.action === "info_pagamento_solicitada" ? "contas_a_pagar" : "solicitante",
+      message: row.comment ?? "",
+      createdAt: row.created_at,
+    };
+  });
+
+  return { messages };
+}
+
 // ─── Reverse (estorno) ────────────────────────────────────────────────────────
 
 export async function reverseRequest(requestId: string, reason: string) {
