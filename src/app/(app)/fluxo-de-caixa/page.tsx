@@ -3,9 +3,12 @@ import { redirect } from "next/navigation";
 import { CashFlowView } from "@/components/app/cash-flow-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
-  buildDashboardRows,
-  filterCoreDreAccounts,
-  type DreAccountBase,
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  aggregateDreRows,
+  aggregateDreRowsByCompany,
+  findResultadoExercicio,
+  scopeDreAccounts,
+  type RawDreAccount,
 } from "@/lib/dashboard/dre";
 import {
   buildCashFlowAccumulatedBucket,
@@ -68,7 +71,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       .order("sort_order"),
     supabase
       .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .select(SCOPED_DRE_ACCOUNTS_SELECT)
       .eq("active", true)
       .order("code"),
   ]);
@@ -129,7 +132,17 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       sort_order: a.sort_order,
       active: a.active,
     }));
-  const dreAccounts = filterCoreDreAccounts((dreAccountsData ?? []) as DreAccountBase[]);
+
+  // Escopo + tradutor de ids do plano DRE: USA o mesmo helper centralizado
+  // do Dashboard DRE (src/lib/dashboard/dre.ts). É deliberado que esta tela
+  // NÃO tenha lógica própria de cálculo do DRE — a linha "Resultado do
+  // Exercício" do Fluxo de Caixa precisa bater bit-a-bit com o valor exibido
+  // no Dashboard DRE, e a única forma de garantir isso através do tempo é
+  // compartilhando o mesmo caminho de código.
+  const dreScope = scopeDreAccounts(
+    (dreAccountsData ?? []) as RawDreAccount[],
+    filter.selectedCompanyIds,
+  );
 
   if (filter.selectedCompanyIds.length === 0) {
     return (
@@ -159,23 +172,23 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   const visibleBuckets = buildCashFlowBuckets(filter);
   const accumulatedBucket = buildCashFlowAccumulatedBucket(visibleBuckets);
 
-  // Helper: agrega DRE no periodo e devolve o valor da linha "Resultado do Exercicio" (code 11).
+  // "Resultado do Exercicio" (code 11) para um bucket — delega 100% para o
+  // helper compartilhado em src/lib/dashboard/dre.ts. NÃO duplicar o pipeline
+  // de cálculo aqui: a tela do Dashboard DRE usa o MESMO `aggregateDreRows`
+  // + `findResultadoExercicio`, então qualquer mudança futura na regra do
+  // DRE se propaga automaticamente para o Fluxo de Caixa.
   const computeDreResultado = async (
     bucket: CashFlowPeriodBucket,
     companies: string[] = filter.selectedCompanyIds,
   ): Promise<number> => {
-    const { data } = await supabase.rpc("dashboard_dre_aggregate", {
-      p_company_ids: companies,
-      p_date_from: bucket.dateFrom,
-      p_date_to: bucket.dateTo,
+    const rows = await aggregateDreRows({
+      supabase,
+      scope: dreScope,
+      companyIds: companies,
+      dateFrom: bucket.dateFrom,
+      dateTo: bucket.dateTo,
     });
-    const amounts = new Map<string, number>();
-    (data as Array<{ dre_account_id: string; amount: number | string | null }> | null ?? []).forEach((item) => {
-      amounts.set(item.dre_account_id, Number(item.amount ?? 0));
-    });
-    const dreRows = buildDashboardRows(dreAccounts, amounts).rows;
-    const resultado = dreRows.find((r) => r.code === "11");
-    return resultado?.value ?? 0;
+    return findResultadoExercicio(rows);
   };
 
   // Helper: agrega cash flow no periodo e devolve mapa accountId -> amount.
@@ -575,24 +588,17 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       m.set(item.cash_flow_account_id, Number(item.amount ?? 0));
     });
 
-    // Tambem precisamos do "Resultado do Exercicio" por empresa.
-    const { data: dreByCompanyData } = await supabase.rpc("dashboard_dre_aggregate_by_company", {
-      p_company_ids: filter.selectedCompanyIds,
-      p_date_from: accumulatedBucket.dateFrom,
-      p_date_to: accumulatedBucket.dateTo,
-    });
-    const dreAmountsByCompanyId = new Map<string, Map<string, number>>();
-    (dreByCompanyData as Array<{
-      company_id: string;
-      dre_account_id: string;
-      amount: number | string | null;
-    }> | null ?? []).forEach((item) => {
-      let m = dreAmountsByCompanyId.get(item.company_id);
-      if (!m) {
-        m = new Map();
-        dreAmountsByCompanyId.set(item.company_id, m);
-      }
-      m.set(item.dre_account_id, Number(item.amount ?? 0));
+    // "Resultado do Exercicio" por empresa: delega para o helper compartilhado
+    // (`aggregateDreRowsByCompany`) — mesmo caminho de código que o Dashboard
+    // DRE usa, garantindo que cada coluna por empresa exiba o MESMO valor de
+    // Resultado do Exercício que apareceria no Dashboard com filtro daquela
+    // empresa.
+    const dreRowsByCompany = await aggregateDreRowsByCompany({
+      supabase,
+      scope: dreScope,
+      companyIds: filter.selectedCompanyIds,
+      dateFrom: accumulatedBucket.dateFrom,
+      dateTo: accumulatedBucket.dateTo,
     });
 
     // Saldo inicial por empresa: usa entrada manual em
@@ -604,9 +610,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     await Promise.all(
       filter.selectedCompanyIds.map(async (companyId) => {
         const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
-        const companyDreAmounts = dreAmountsByCompanyId.get(companyId) ?? new Map();
-        const companyDreRows = buildDashboardRows(dreAccounts, companyDreAmounts).rows;
-        const companyResultado = companyDreRows.find((r) => r.code === "11")?.value ?? 0;
+        const companyResultado = findResultadoExercicio(
+          dreRowsByCompany.get(companyId) ?? [],
+        );
 
         const companyOpenings = openingByCompanyMonth.get(companyId) ?? new Map<string, number>();
         const resolveForCompany = buildSaldoInicialResolver([companyId], companyOpenings);

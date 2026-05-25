@@ -6,15 +6,18 @@ import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 import {
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  aggregateDreRows,
+  aggregateDreRowsByCompany,
   buildAccumulatedBucket,
   buildDashboardRows,
   buildDateRange,
   buildFilterState,
   buildVisibleBuckets,
-  filterCoreDreAccounts,
+  scopeDreAccounts,
   resolveAllowedCompanyIds,
   type DreAccountBase,
-  type DashboardPeriodBucket,
+  type RawDreAccount,
 } from "@/lib/dashboard/dre";
 
 interface DashboardPageProps {
@@ -73,7 +76,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     companiesQuery.order("name"),
     supabase
       .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+      .select(SCOPED_DRE_ACCOUNTS_SELECT)
       .eq("active", true)
       .order("code"),
   ]);
@@ -131,60 +134,26 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
 
   const range = buildDateRange(filter);
 
-  // Scope resolution for per-company custom DRE plans: when exactly ONE
-  // company is selected AND that company has a custom plan (any row with
-  // company_id === that companyId), display its rows; otherwise fall back
-  // to the global plan (company_id IS NULL). This prevents duplicate rows
-  // (global + custom appearing twice) when a single company is in view.
-  const allRawDreAccounts = (accountsData ?? []) as Array<
-    DreAccountBase & { company_id: string | null }
-  >;
-  const scopedCompanyId =
-    filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
-  const companyHasCustomPlan = scopedCompanyId
-    ? allRawDreAccounts.some((a) => a.company_id === scopedCompanyId)
-    : false;
-  const scopedDreAccounts: DreAccountBase[] = allRawDreAccounts
-    .filter((a) =>
-      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
-    )
-    .map((a) => ({
-      id: a.id,
-      code: a.code,
-      name: a.name,
-      parent_id: a.parent_id,
-      level: a.level,
-      type: a.type,
-      is_summary: a.is_summary,
-      formula: a.formula,
-      sort_order: a.sort_order,
-      active: a.active,
-    }));
-
-  const accounts = filterCoreDreAccounts(scopedDreAccounts);
+  // Escopo + tradutor de ids do plano DRE — centralizados em
+  // src/lib/dashboard/dre.ts para que Fluxo de Caixa e demais consumidores
+  // reusem EXATAMENTE a mesma lógica e o valor de "Resultado do Exercício"
+  // não divirja entre telas (ver comentário do bloco em dre.ts).
+  const scope = scopeDreAccounts(
+    (accountsData ?? []) as RawDreAccount[],
+    filter.selectedCompanyIds,
+  );
+  const accounts = scope.coreAccounts;
   const visibleBuckets = buildVisibleBuckets(filter);
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 
-  const aggregateBucket = async (bucket: DashboardPeriodBucket) => {
-    const { data, error } = await supabase.rpc("dashboard_dre_aggregate", {
-      p_company_ids: filter.selectedCompanyIds,
-      p_date_from: bucket.dateFrom,
-      p_date_to: bucket.dateTo,
+  const aggregateBucket = (bucket: { dateFrom: string; dateTo: string }) =>
+    aggregateDreRows({
+      supabase,
+      scope,
+      companyIds: filter.selectedCompanyIds,
+      dateFrom: bucket.dateFrom,
+      dateTo: bucket.dateTo,
     });
-    if (error) {
-      throw new Error(`Falha ao carregar agregados DRE: ${error.message}`);
-    }
-
-    const amountsByAccountId = new Map<string, number>();
-    (
-      data as Array<{ dre_account_id: string; amount: number | string | null }> | null
-    ?? []
-    ).forEach((item) => {
-      amountsByAccountId.set(item.dre_account_id, Number(item.amount ?? 0));
-    });
-
-    return buildDashboardRows(accounts, amountsByAccountId).rows;
-  };
 
   const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([
     Promise.all(visibleBuckets.map((bucket) => aggregateBucket(bucket))),
@@ -206,40 +175,23 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     accumulatedMap[row.id] = row.value;
   });
 
-  // Fetch per-company data for comparative mode
+  // Fetch per-company data for comparative mode. Reaproveita o helper
+  // centralizado para garantir que as linhas (incluindo Resultado do
+  // Exercício) sigam a mesma regra de cálculo do consolidado.
   const companyValuesMap: Record<string, Record<string, number>> = {};
   if (filter.compareCompanies && filter.selectedCompanyIds.length > 1) {
-    const { data: byCompanyData } = await supabase.rpc("dashboard_dre_aggregate_by_company", {
-      p_company_ids: filter.selectedCompanyIds,
-      p_date_from: accumulatedBucket.dateFrom,
-      p_date_to: accumulatedBucket.dateTo,
+    const rowsByCompany = await aggregateDreRowsByCompany({
+      supabase,
+      scope,
+      companyIds: filter.selectedCompanyIds,
+      dateFrom: accumulatedBucket.dateFrom,
+      dateTo: accumulatedBucket.dateTo,
     });
-
-    const rawByCompany = (byCompanyData as Array<{
-      company_id: string;
-      dre_account_id: string;
-      amount: number | string | null;
-    }> | null) ?? [];
-
-    // Group raw amounts by company
-    const amountsByCompanyId = new Map<string, Map<string, number>>();
-    rawByCompany.forEach((item) => {
-      let map = amountsByCompanyId.get(item.company_id);
-      if (!map) {
-        map = new Map();
-        amountsByCompanyId.set(item.company_id, map);
-      }
-      map.set(item.dre_account_id, Number(item.amount ?? 0));
-    });
-
-    // Build full DRE rows per company (so formulas/summaries are computed)
-    for (const companyId of filter.selectedCompanyIds) {
-      const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
-      const companyRows = buildDashboardRows(accounts, companyAmounts).rows;
+    rowsByCompany.forEach((companyRows, companyId) => {
       const byId: Record<string, number> = {};
       companyRows.forEach((r) => { byId[r.id] = r.value; });
       companyValuesMap[companyId] = byId;
-    }
+    });
   }
 
   const displayRows = zeroRows.map((row) => {

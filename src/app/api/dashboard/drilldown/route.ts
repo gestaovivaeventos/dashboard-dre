@@ -110,9 +110,39 @@ export async function GET(request: Request) {
       dre_account_id: string;
       amount: number | string | null;
     }> | null) ?? [];
-  const aggregateTotal = Number(
-    aggregateRows.find((r) => r.dre_account_id === accountId)?.amount ?? 0,
-  );
+
+  // O dre_account_id retornado pela agregação pode ser tanto o id GLOBAL
+  // (quando o mapping é global) quanto o id CLONADO (quando o mapping é
+  // específico da empresa após um fork). Para casar com o accountId que o
+  // cliente passou (sempre o do plano em escopo), resolvemos pelo `code` —
+  // estável entre planos. Sem isso, o aggregateTotal fica zerado e o
+  // dashboard alerta "valores divergentes" indevidamente.
+  const targetCode = await (async () => {
+    const { data } = await supabase
+      .from("dre_accounts")
+      .select("code")
+      .eq("id", accountId)
+      .maybeSingle<{ code: string }>();
+    return data?.code ?? null;
+  })();
+
+  let aggregateTotal = 0;
+  if (targetCode) {
+    const idsInAggregate = aggregateRows.map((r) => r.dre_account_id);
+    const { data: idToCodeRows } = await supabase
+      .from("dre_accounts")
+      .select("id,code")
+      .in("id", idsInAggregate.length > 0 ? idsInAggregate : ["00000000-0000-0000-0000-000000000000"]);
+    const codeById = new Map<string, string>();
+    (idToCodeRows ?? []).forEach((row) => {
+      codeById.set(row.id as string, row.code as string);
+    });
+    aggregateTotal = aggregateRows.reduce((sum, r) => {
+      const code = codeById.get(r.dre_account_id);
+      if (code === targetCode) return sum + Number(r.amount ?? 0);
+      return sum;
+    }, 0);
+  }
 
   return NextResponse.json({
     rows,

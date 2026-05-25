@@ -307,6 +307,238 @@ export function buildDashboardRows(
   };
 }
 
+// ============================================================================
+// FONTE DE VERDADE: "Resultado do Exercício" e demais valores agregados do DRE
+// ============================================================================
+//
+// As funções abaixo são o ponto ÚNICO de cálculo dos valores do DRE usados
+// pelo Dashboard DRE e por qualquer outra tela que precise dos mesmos números
+// (em especial a linha "Resultado do Exercício" no Fluxo de Caixa).
+//
+// Antes existia uma cópia paralela dessa lógica em cada página — toda vez
+// que alguém ajustava um lado (ex.: para suportar planos DRE custom por
+// empresa, com tradução raw_id → scoped_id pelo `code`), a outra página
+// ficava para trás e os valores divergiam. Centralizar aqui elimina essa
+// classe de bug: o Fluxo de Caixa REUSA literalmente o mesmo cálculo do
+// Dashboard.
+//
+// Use sempre estes helpers para qualquer valor do DRE — não recrie o pipeline
+// (carregar dre_accounts → escopar plano custom → traduzir id → buildDashboardRows)
+// inline em uma nova tela.
+export const DRE_RESULTADO_EXERCICIO_CODE = "11" as const;
+
+export interface ScopedDreAccounts {
+  // Lista completa do plano escopado (custom da empresa OU global), sem
+  // filtro de "core codes" — útil quando a tela precisa ver contas auxiliares.
+  scopedAccounts: DreAccountBase[];
+  // Lista filtrada apenas para os codes principais do DRE (1..11). Esta é a
+  // lista que entra no `buildDashboardRows` para o cálculo de Resultado do
+  // Exercício e demais totalizadoras.
+  coreAccounts: DreAccountBase[];
+  // Mapeia o dre_account_id retornado pelos RPCs (sempre vinculado ao plano
+  // GLOBAL, via category_mapping) para o id correspondente NO escopo exibido
+  // (que pode ser o clone forkado da empresa). Mapeamento é feito por `code`,
+  // estável entre planos. Retorna null quando o code não pertence ao escopo
+  // ativo (ex.: linhas auxiliares fora dos codes 1..11 ou contas inativas).
+  translateToScopedId: (rawId: string) => string | null;
+}
+
+/**
+ * Colunas que `loadScopedDreAccounts` e `scopeDreAccounts` precisam ler de
+ * `dre_accounts`. Exportado para que páginas que carregam o plano dentro de
+ * um Promise.all próprio passem a mesma SELECT sem risco de drift.
+ */
+export const SCOPED_DRE_ACCOUNTS_SELECT =
+  "id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id" as const;
+
+export type RawDreAccount = DreAccountBase & { company_id: string | null };
+
+/**
+ * Versão pura de `loadScopedDreAccounts`: recebe a linha crua de `dre_accounts`
+ * (já buscada pelo chamador, possivelmente em paralelo com outras queries)
+ * e produz o plano escopado + tradutor de ids.
+ *
+ * Regra de escopo: quando UMA única empresa está selecionada E ela possui
+ * plano custom (alguma linha em dre_accounts com company_id === essa
+ * empresa), usa só o plano dela; caso contrário (consolidado multi-empresa
+ * OU empresa sem plano custom), cai no plano global (company_id IS NULL).
+ *
+ * Esta é a regra ÚNICA que evita duplicidade de linhas e garante que o
+ * "Resultado do Exercício" seja idêntico no Dashboard DRE e no Fluxo de Caixa.
+ */
+export function scopeDreAccounts(
+  rawAccounts: RawDreAccount[],
+  selectedCompanyIds: string[],
+): ScopedDreAccounts {
+  const scopedCompanyId =
+    selectedCompanyIds.length === 1 ? selectedCompanyIds[0] : null;
+  const companyHasCustomPlan = scopedCompanyId
+    ? rawAccounts.some((a) => a.company_id === scopedCompanyId)
+    : false;
+
+  const scopedAccounts: DreAccountBase[] = rawAccounts
+    .filter((a) =>
+      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
+    )
+    .map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      parent_id: a.parent_id,
+      level: a.level,
+      type: a.type,
+      is_summary: a.is_summary,
+      formula: a.formula,
+      sort_order: a.sort_order,
+      active: a.active,
+    }));
+
+  const codeByRawId = new Map<string, string>();
+  rawAccounts.forEach((account) => {
+    codeByRawId.set(account.id, account.code);
+  });
+  const scopedIdByCode = new Map<string, string>();
+  scopedAccounts.forEach((account) => {
+    scopedIdByCode.set(account.code, account.id);
+  });
+  const translateToScopedId = (rawId: string): string | null => {
+    const code = codeByRawId.get(rawId);
+    if (!code) return null;
+    return scopedIdByCode.get(code) ?? null;
+  };
+
+  return {
+    scopedAccounts,
+    coreAccounts: filterCoreDreAccounts(scopedAccounts),
+    translateToScopedId,
+  };
+}
+
+/**
+ * Conveniência: carrega `dre_accounts` e já escopa para a seleção atual.
+ * Use quando não houver vantagem em paralelizar a query do plano com outras.
+ */
+export async function loadScopedDreAccounts(
+  supabase: SupabaseClient,
+  selectedCompanyIds: string[],
+): Promise<ScopedDreAccounts> {
+  const { data: dreAccountsData } = await supabase
+    .from("dre_accounts")
+    .select(SCOPED_DRE_ACCOUNTS_SELECT)
+    .eq("active", true)
+    .order("code");
+
+  return scopeDreAccounts((dreAccountsData ?? []) as RawDreAccount[], selectedCompanyIds);
+}
+
+/**
+ * Converte a resposta crua do RPC `dashboard_dre_aggregate` em um mapa
+ * (scoped_id -> amount) somando todas as entradas que caem no mesmo scoped
+ * id (necessário quando vários raw ids do plano global apontam para o
+ * mesmo code no plano custom).
+ */
+function aggregateRawAmounts(
+  rawData: Array<{ dre_account_id: string; amount: number | string | null }> | null | undefined,
+  translateToScopedId: (rawId: string) => string | null,
+): Map<string, number> {
+  const amounts = new Map<string, number>();
+  (rawData ?? []).forEach((item) => {
+    const scopedId = translateToScopedId(item.dre_account_id);
+    if (!scopedId) return;
+    const current = amounts.get(scopedId) ?? 0;
+    amounts.set(scopedId, current + Number(item.amount ?? 0));
+  });
+  return amounts;
+}
+
+/**
+ * Calcula as linhas do DRE (com formulas e totalizadoras) para um período /
+ * conjunto de empresas. Use SEMPRE esta função para obter valores do DRE;
+ * é o ponto único de cálculo compartilhado por Dashboard DRE e Fluxo de
+ * Caixa.
+ */
+export async function aggregateDreRows(params: {
+  supabase: SupabaseClient;
+  scope: ScopedDreAccounts;
+  companyIds: string[];
+  dateFrom: string;
+  dateTo: string;
+}): Promise<DashboardRow[]> {
+  const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate", {
+    p_company_ids: params.companyIds,
+    p_date_from: params.dateFrom,
+    p_date_to: params.dateTo,
+  });
+  if (error) {
+    throw new Error(`Falha ao carregar agregados DRE: ${error.message}`);
+  }
+  const amounts = aggregateRawAmounts(
+    data as Array<{ dre_account_id: string; amount: number | string | null }> | null,
+    params.scope.translateToScopedId,
+  );
+  return buildDashboardRows(params.scope.coreAccounts, amounts).rows;
+}
+
+/**
+ * Versão por empresa: roda `dashboard_dre_aggregate_by_company` UMA VEZ e
+ * devolve um mapa companyId -> rows. Garante uma entrada (mesmo que zerada)
+ * para cada companyId solicitado, de modo que o consumidor pode chamar
+ * `findResultadoExercicio` sem precisar tratar empresas sem lançamentos.
+ */
+export async function aggregateDreRowsByCompany(params: {
+  supabase: SupabaseClient;
+  scope: ScopedDreAccounts;
+  companyIds: string[];
+  dateFrom: string;
+  dateTo: string;
+}): Promise<Map<string, DashboardRow[]>> {
+  const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate_by_company", {
+    p_company_ids: params.companyIds,
+    p_date_from: params.dateFrom,
+    p_date_to: params.dateTo,
+  });
+  if (error) {
+    throw new Error(`Falha ao carregar agregados DRE por empresa: ${error.message}`);
+  }
+
+  const amountsByCompanyId = new Map<string, Map<string, number>>();
+  (
+    data as Array<{
+      company_id: string;
+      dre_account_id: string;
+      amount: number | string | null;
+    }> | null ?? []
+  ).forEach((item) => {
+    const scopedId = params.scope.translateToScopedId(item.dre_account_id);
+    if (!scopedId) return;
+    let map = amountsByCompanyId.get(item.company_id);
+    if (!map) {
+      map = new Map();
+      amountsByCompanyId.set(item.company_id, map);
+    }
+    const current = map.get(scopedId) ?? 0;
+    map.set(scopedId, current + Number(item.amount ?? 0));
+  });
+
+  const result = new Map<string, DashboardRow[]>();
+  params.companyIds.forEach((companyId) => {
+    const amounts = amountsByCompanyId.get(companyId) ?? new Map<string, number>();
+    result.set(companyId, buildDashboardRows(params.scope.coreAccounts, amounts).rows);
+  });
+  return result;
+}
+
+/**
+ * Extrai o valor de "Resultado do Exercício" (code "11") de uma lista de
+ * rows do DRE. Use junto com `aggregateDreRows` ou `aggregateDreRowsByCompany`.
+ *
+ * Esta é a fonte de verdade para o número que aparece na linha "Resultado
+ * do Exercício" tanto no Dashboard DRE quanto no Fluxo de Caixa.
+ */
+export function findResultadoExercicio(rows: DashboardRow[]): number {
+  return rows.find((r) => r.code === DRE_RESULTADO_EXERCICIO_CODE)?.value ?? 0;
+}
+
 /**
  * Resolve which companies the user is allowed to see.
  * - admin: all companies

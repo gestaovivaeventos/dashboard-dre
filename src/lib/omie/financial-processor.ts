@@ -368,7 +368,6 @@ function distribuirPorDepartamentos(
 function selectValueByCorretor(
   record: RawOmieMovimento,
   verificadorRateio: number,
-  type: "receita" | "despesa",
 ): {
   value: number;
   corretor_duplicidade: number;
@@ -389,9 +388,26 @@ function selectValueByCorretor(
     cGrupo === "CONTA_CORRENTE_PAG" || cGrupo === "CONTA_CORRENTE_REC";
 
   if (isContaCorrentePagRec) {
-    const value = parseNumber(record.nValPago);
+    const valPago = parseNumber(record.nValPago);
+    // Regime de caixa: quando o titulo tem desconto/juros/multa, o cash real
+    // difere de nValPago bruto. Aplica formula tanto para receita quanto
+    // despesa. Guarda `valPago > 0` evita valor negativo em lancamentos-sombra
+    // (nValPago=0 + nDesconto>0).
+    if (valPago > 0) {
+      const adj = extractCashAdjustment(record);
+      if (adj.hasAdjustment) {
+        const cashReal = Number(
+          (valPago - adj.desconto + adj.juros + adj.multa).toFixed(2),
+        );
+        return {
+          value: cashReal,
+          corretor_duplicidade: 1,
+          source_field_value: "nValLiquido",
+        };
+      }
+    }
     return {
-      value,
+      value: valPago,
       corretor_duplicidade: 1,
       source_field_value: "nValPago",
     };
@@ -406,19 +422,13 @@ function selectValueByCorretor(
     }
     // nValLiquido = 0: pode ser (a) titulo sem dado, ou (b) titulo onde
     // desconto/juros/multa zeram o cash real (caso classico: desconto >=
-    // nValPago).
-    //
-    // RECEITA: aplicamos a formula (nValPago - desconto + juros + multa).
-    // O fallback antigo para nValPago contabilizava o BRUTO como recebimento
-    // mesmo quando o desconto cancelava o pagamento — bug observado em
-    // Volta Redonda Mar/Abr 2023 (Cerimonial/Fee inflado em R$ 65.200).
-    //
-    // DESPESA: mantemos o fallback legado para nValPago. Em despesa, o
-    // desconto recebido nao reduz o valor da despesa em si — a despesa
-    // mantem o valor bruto (modelo contabil onde desconto vira receita
-    // financeira em outra linha).
+    // nValPago). Aplica a formula (nValPago - desconto + juros + multa)
+    // para receita E despesa — regime de caixa exige que o cash real
+    // entre na DRE, nao o bruto. Guarda `valPago > 0` evita entries
+    // negativas em lancamentos-sombra (nValPago=0 + nDesconto>0,
+    // tipicamente "Pagamento gerado automaticamente" via conciliacao).
     const valPago = parseNumber(record.nValPago);
-    if (type === "receita") {
+    if (valPago > 0) {
       const adj = extractCashAdjustment(record);
       if (adj.hasAdjustment) {
         const cashReal = Number(
@@ -809,7 +819,6 @@ export function processMovimento(
     const { value, corretor_duplicidade, source_field_value } = selectValueByCorretor(
       record,
       verificadorRateio,
-      type,
     );
 
     const categoryCode = getString(record as Record<string, unknown>, ["cCodCateg"]);
