@@ -105,6 +105,7 @@ export async function updateSupplier(
     titular_banco?: string | null;
     doc_titular?: string | null;
     transf_padrao?: boolean;
+    pix_padrao?: boolean;
   },
 ) {
   // Any user in CTRL can edit a supplier they can see. The act of editing
@@ -142,6 +143,7 @@ export async function updateSupplier(
   if (data.titular_banco !== undefined) payload.titular_banco = data.titular_banco?.trim() || null;
   if (data.doc_titular !== undefined) payload.doc_titular = data.doc_titular?.trim() || null;
   if (data.transf_padrao !== undefined) payload.transf_padrao = data.transf_padrao;
+  if (data.pix_padrao !== undefined) payload.pix_padrao = data.pix_padrao;
 
   const { error } = await supabase
     .from("ctrl_suppliers")
@@ -166,8 +168,15 @@ export async function createSupplier(data: {
   titular_banco?: string;
   doc_titular?: string;
   transf_padrao?: boolean;
+  pix_padrao?: boolean;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
+
+  // CNPJ ou CPF é obrigatório — sem documento, fornecedor nao pode ser
+  // identificado de forma unica e cria duplicatas no Omie.
+  if (!data.cnpj_cpf?.trim()) {
+    return { error: "Informe o CNPJ ou CPF do fornecedor." };
+  }
   // requireCtrlRole already enforces auth + role. We use the admin client
   // here because RLS on ctrl_suppliers checks has_ctrl_role() against
   // user_module_roles directly — DRE admins (who get an implicit ctrl admin
@@ -194,6 +203,7 @@ export async function createSupplier(data: {
       titular_banco: data.titular_banco?.trim() || null,
       doc_titular: data.doc_titular?.trim() || null,
       transf_padrao: data.transf_padrao ?? false,
+      pix_padrao: data.pix_padrao ?? false,
       status: "pendente",
       created_by: ctx.id,
     })

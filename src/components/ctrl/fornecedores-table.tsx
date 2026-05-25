@@ -22,6 +22,7 @@ interface SupplierRow {
   titular_banco: string | null;
   doc_titular: string | null;
   transf_padrao: boolean;
+  pix_padrao: boolean;
   status: string;
   rejection_reason: string | null;
   created_at: string;
@@ -114,6 +115,7 @@ export function FornecedoresTable({
       titular_banco: editForm.titular_banco,
       doc_titular: editForm.doc_titular,
       transf_padrao: editForm.transf_padrao,
+      pix_padrao: editForm.pix_padrao,
     });
     setEditSaving(false);
     if ("error" in result && result.error) {
@@ -561,6 +563,16 @@ export function FornecedoresTable({
                     <label className="flex items-center gap-2 text-sm sm:col-span-2">
                       <input
                         type="checkbox"
+                        checked={editForm.pix_padrao}
+                        onChange={(e) => setEditForm({ ...editForm, pix_padrao: e.target.checked })}
+                        disabled={!editForm.chave_pix.trim()}
+                        className="h-4 w-4 disabled:opacity-50"
+                      />
+                      Usar PIX como método padrão
+                    </label>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
                         checked={editForm.transf_padrao}
                         onChange={(e) => setEditForm({ ...editForm, transf_padrao: e.target.checked })}
                         className="h-4 w-4"
@@ -595,6 +607,10 @@ export function FornecedoresTable({
                         <DataField label="Conta corrente" value={detailSupplier.conta_corrente} mono />
                         <DataField label="Titular" value={detailSupplier.titular_banco} />
                         <DataField label="Doc. titular" value={detailSupplier.doc_titular} mono />
+                        <DataField
+                          label="PIX padrão"
+                          value={detailSupplier.pix_padrao ? "Sim" : "Não"}
+                        />
                         <DataField
                           label="Transf. padrão"
                           value={detailSupplier.transf_padrao ? "Sim" : "Não"}
@@ -738,6 +754,10 @@ export function FornecedoresTable({
                       <DataField label="Titular" value={approveModal.titular_banco} />
                       <DataField label="Doc. titular" value={approveModal.doc_titular} mono />
                       <DataField
+                        label="PIX padrão"
+                        value={approveModal.pix_padrao ? "Sim" : "Não"}
+                      />
+                      <DataField
                         label="Transf. padrão"
                         value={approveModal.transf_padrao ? "Sim" : "Não"}
                       />
@@ -849,6 +869,7 @@ interface EditFormState {
   titular_banco: string;
   doc_titular: string;
   transf_padrao: boolean;
+  pix_padrao: boolean;
 }
 
 function emptyEditForm(): EditFormState {
@@ -865,6 +886,7 @@ function emptyEditForm(): EditFormState {
     titular_banco: "",
     doc_titular: "",
     transf_padrao: false,
+    pix_padrao: false,
   };
 }
 
@@ -882,6 +904,7 @@ function toEditForm(s: SupplierRow): EditFormState {
     titular_banco: s.titular_banco ?? "",
     doc_titular: s.doc_titular ?? "",
     transf_padrao: !!s.transf_padrao,
+    pix_padrao: !!s.pix_padrao,
   };
 }
 

@@ -27,6 +27,7 @@ interface FormState {
   titular_banco: string;
   doc_titular: string;
   transf_padrao: boolean;
+  pix_padrao: boolean;
 }
 
 const emptyForm: FormState = {
@@ -43,6 +44,7 @@ const emptyForm: FormState = {
   titular_banco: "",
   doc_titular: "",
   transf_padrao: false,
+  pix_padrao: false,
 };
 
 // Light masks — apenas pra ajudar visualmente. Não bloqueia input livre.
@@ -117,6 +119,10 @@ export function CriarFornecedorButton() {
       setError("Informe o nome do fornecedor.");
       return;
     }
+    if (!form.cnpj_cpf.trim()) {
+      setError(form.personType === "pf" ? "Informe o CPF." : "Informe o CNPJ.");
+      return;
+    }
     // Se preencheu chave PIX, exige tipo (e vice-versa).
     if (form.chave_pix.trim() && !form.pix_key_type) {
       setError("Selecione o tipo da chave PIX.");
@@ -140,6 +146,7 @@ export function CriarFornecedorButton() {
       titular_banco: form.titular_banco || undefined,
       doc_titular: form.doc_titular || undefined,
       transf_padrao: form.transf_padrao,
+      pix_padrao: form.pix_padrao,
     });
     setLoading(false);
     if ("error" in result && result.error) {
@@ -258,11 +265,13 @@ export function CriarFornecedorButton() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="new-supplier-cnpj" className={LABEL_CLS}>
-                        {form.personType === "pj" ? "CNPJ" : "CPF"}
+                        {form.personType === "pj" ? "CNPJ" : "CPF"}{" "}
+                        <span className="text-destructive">*</span>
                       </label>
                       <input
                         id="new-supplier-cnpj"
                         type="text"
+                        required
                         value={form.cnpj_cpf}
                         onChange={(e) =>
                           update("cnpj_cpf", maskCpfCnpj(e.target.value, form.personType))
@@ -333,6 +342,16 @@ export function CriarFornecedorButton() {
                         <p className="text-xs text-muted-foreground">{pixTypeOption.hint}</p>
                       )}
                     </div>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={form.pix_padrao}
+                        onChange={(e) => update("pix_padrao", e.target.checked)}
+                        disabled={!form.chave_pix.trim()}
+                        className="h-4 w-4 disabled:opacity-50"
+                      />
+                      Usar PIX como método de pagamento padrão
+                    </label>
                   </div>
                 </section>
 

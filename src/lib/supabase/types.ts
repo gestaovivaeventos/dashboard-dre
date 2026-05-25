@@ -161,6 +161,7 @@ export interface CtrlSupplier {
   titular_banco: string | null;
   doc_titular: string | null;
   transf_padrao: boolean;
+  pix_padrao: boolean;
 }
 
 export interface CtrlRequest {
