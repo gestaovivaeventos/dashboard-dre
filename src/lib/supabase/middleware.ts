@@ -43,22 +43,32 @@ export async function updateSession(request: NextRequest) {
     url.searchParams.set("redirectedFrom", pathname);
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && (pathname === "/login" || pathname === "/signup")) {
+    // Auth user em /login → manda pra landing apropriada. Crítico: checar
+    // `active` aqui também, senão usuário inativo entra em loop (login redireciona
+    // pra /dashboard, page redireciona pra /login porque session.ts retorna empty
+    // pra inativo).
     const { data: postLoginProfile } = await supabase
       .from("users")
-      .select("profile, can_financeiro, can_compras")
+      .select("profile, active, can_financeiro, can_compras")
       .eq("id", user.id)
       .maybeSingle<{
         profile: UserProfileType | null;
+        active: boolean | null;
         can_financeiro: boolean | null;
         can_compras: boolean | null;
       }>();
 
     const url = request.nextUrl.clone();
-    url.pathname = defaultLandingFor(
-      postLoginProfile?.profile ?? "solicitante",
-      Boolean(postLoginProfile?.can_financeiro),
-      Boolean(postLoginProfile?.can_compras),
-    );
+    // Inativo (signup novo aguardando aprovação) → /pendente, não landing.
+    if (postLoginProfile && postLoginProfile.active === false) {
+      url.pathname = "/pendente";
+    } else {
+      url.pathname = defaultLandingFor(
+        postLoginProfile?.profile ?? "solicitante",
+        Boolean(postLoginProfile?.can_financeiro),
+        Boolean(postLoginProfile?.can_compras),
+      );
+    }
     supabaseResponse = NextResponse.redirect(url);
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase

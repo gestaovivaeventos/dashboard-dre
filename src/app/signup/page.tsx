@@ -61,7 +61,8 @@ export default function SignupPage() {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
       if (data.user) {
-        router.replace("/dashboard");
+        // Deixa o middleware decidir o destino (pode ser /pendente, /dashboard, /contratos, etc).
+        router.refresh();
       }
     };
 
