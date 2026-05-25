@@ -240,6 +240,11 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       return;
     }
 
+    if (paymentMethod === "boleto" && !attachment) {
+      setError("Anexe o boleto (PDF, imagem ou documento) antes de enviar.");
+      return;
+    }
+
     // Defensive due-date check: HTML `min` is enforced by most browsers but
     // some mobile webviews ignore it. Belt + suspenders.
     if (dueDate && dueDate < minDueDate) {
@@ -824,7 +829,13 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Anexo */}
       <div className="space-y-1.5">
         <label htmlFor="attachment" className={LABEL_CLS}>
-          Anexo (opcional, até 10 MB)
+          Anexo{" "}
+          {paymentMethod === "boleto" ? (
+            <span className="text-destructive">* obrigatório (boleto)</span>
+          ) : (
+            <span className="text-muted-foreground font-normal">(opcional)</span>
+          )}
+          <span className="text-muted-foreground font-normal"> · até 10 MB</span>
         </label>
         {!attachment ? (
           <div className="flex items-center gap-2">
