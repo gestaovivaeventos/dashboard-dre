@@ -83,19 +83,27 @@ export function MappingManager({
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [originalByCode, setOriginalByCode] = useState<Record<string, string>>({});
 
-  // Contas DRE relevantes para a empresa selecionada:
-  // - Contas globais (company_id === null) sempre aparecem
-  // - Contas customizadas (company_id === companyId) so aparecem para a empresa dona
-  // - Mapeamentos existentes que apontam para contas fora desse escopo continuam
-  //   funcionando (FK preservado), apenas nao aparecem como nova opcao para mapeamento.
-  const availableDreAccounts = useMemo(
-    () =>
-      dreAccounts.filter(
-        (account) =>
-          account.company_id == null || account.company_id === companyId,
-      ),
-    [dreAccounts, companyId],
-  );
+  // Contas DRE relevantes para a empresa selecionada. Espelha EXATAMENTE a
+  // regra de escopo usada no Dashboard DRE e no Fluxo de Caixa (ver
+  // `scopeDreAccounts` em src/lib/dashboard/dre.ts):
+  //   - Empresa com plano custom (alguma conta com company_id === companyId):
+  //     mostra SOMENTE essas contas. O plano global ja foi clonado para essa
+  //     empresa, entao incluir globais aqui gera opcoes duplicadas no dropdown
+  //     (mesmo code/name, ids diferentes) — exatamente o bug reportado para
+  //     viva curitiba/cuiaba/hero.
+  //   - Empresa sem plano custom: mostra somente o plano global.
+  // Mappings cujo dre_account_id ja foi salvo apontando para um ID global
+  // continuam funcionando porque o endpoint GET (`/api/category-mapping`)
+  // traduz IDs globais -> IDs clonados pelo `code` antes de devolver as
+  // linhas, garantindo que o `<option>` seja encontrado no dropdown.
+  const availableDreAccounts = useMemo(() => {
+    const hasCustomPlan = dreAccounts.some((a) => a.company_id === companyId);
+    return dreAccounts.filter((account) =>
+      hasCustomPlan
+        ? account.company_id === companyId
+        : account.company_id == null,
+    );
+  }, [dreAccounts, companyId]);
 
   // Budget tab state
   const [budgetRows, setBudgetRows] = useState<BudgetMappingRow[]>([]);

@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import {
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  scopeDreAccounts,
+  type RawDreAccount,
+} from "@/lib/dashboard/dre";
 
 interface CategoryMappingRow {
   code: string;
@@ -31,6 +36,7 @@ export async function GET(request: Request) {
   const [
     { data: categories, error: categoriesError },
     { data: mappings, error: mappingsError },
+    { data: dreAccountsData, error: dreAccountsError },
   ] = await Promise.all([
     supabase
       .from("omie_categories")
@@ -41,6 +47,13 @@ export async function GET(request: Request) {
       .from("category_mapping")
       .select("id,omie_category_code,omie_category_name,dre_account_id,company_id")
       .or(`company_id.eq.${companyId},company_id.is.null`),
+    // Carrega TODO o plano DRE ativo (global + custom de qualquer empresa) —
+    // precisamos das duas pontas para conseguir traduzir um dre_account_id
+    // global em seu equivalente clonado no plano custom da empresa selecionada.
+    supabase
+      .from("dre_accounts")
+      .select(SCOPED_DRE_ACCOUNTS_SELECT)
+      .eq("active", true),
   ]);
 
   if (categoriesError) {
@@ -49,25 +62,28 @@ export async function GET(request: Request) {
   if (mappingsError) {
     return NextResponse.json({ error: mappingsError.message }, { status: 400 });
   }
-
-  const accountIds = Array.from(
-    new Set((mappings ?? []).map((item) => item.dre_account_id as string | null).filter(Boolean)),
-  ) as string[];
-  const { data: accounts, error: accountsError } = accountIds.length
-    ? await supabase
-        .from("dre_accounts")
-        .select("id,code,name")
-        .in("id", accountIds)
-    : { data: [], error: null };
-
-  if (accountsError) {
-    return NextResponse.json({ error: accountsError.message }, { status: 400 });
+  if (dreAccountsError) {
+    return NextResponse.json({ error: dreAccountsError.message }, { status: 400 });
   }
 
+  // Escopo do plano DRE para esta empresa (mesma regra do Dashboard / Fluxo
+  // de Caixa). Se a empresa tem plano custom, `scope.scopedAccounts` contem
+  // SOMENTE as contas clonadas dela; `translateToScopedId` converte um id
+  // do plano global no id clonado equivalente (matchando por `code`). Se a
+  // empresa nao tem plano custom, o tradutor é identidade sobre o plano global.
+  //
+  // Sem essa traducao, mappings antigos (criados quando a empresa usava o
+  // plano global ou via "global mapping" company_id IS NULL) ficariam com
+  // `dreAccountId` apontando para um id que NAO aparece no dropdown (apos o
+  // fix de dedup), fazendo o vinculo parecer "perdido" na tela.
+  const dreScope = scopeDreAccounts(
+    (dreAccountsData ?? []) as RawDreAccount[],
+    [companyId],
+  );
   const accountById = new Map(
-    (accounts ?? []).map((account) => [
-      account.id as string,
-      { code: account.code as string, name: account.name as string },
+    dreScope.scopedAccounts.map((account) => [
+      account.id,
+      { code: account.code, name: account.name },
     ]),
   );
 
@@ -92,14 +108,22 @@ export async function GET(request: Request) {
     const companyMapping = companyMappingByCode.get(code);
     const globalMapping = globalMappingByCode.get(code);
     const effective = companyMapping ?? globalMapping ?? null;
-    const dreAccountId = (effective?.dre_account_id as string | null) ?? null;
-    const account = dreAccountId ? accountById.get(dreAccountId) : null;
+    const rawDreAccountId = (effective?.dre_account_id as string | null) ?? null;
+    // Traduz para o id no escopo da empresa selecionada. Quando a empresa
+    // tem plano custom, isso converte um id global em seu clone. Quando nao
+    // tem, devolve o proprio id global. Retorna null se a conta nao existe
+    // mais (inativa/removida) — nesse caso o vinculo aparece como "nao
+    // mapeado" e o admin pode remapear.
+    const scopedDreAccountId = rawDreAccountId
+      ? dreScope.translateToScopedId(rawDreAccountId)
+      : null;
+    const account = scopedDreAccountId ? accountById.get(scopedDreAccountId) : null;
 
     return {
       code,
       description: (category.description as string) || code,
       mappingId: (effective?.id as string | null) ?? null,
-      dreAccountId,
+      dreAccountId: scopedDreAccountId,
       dreAccountCode: account?.code ?? null,
       dreAccountName: account?.name ?? null,
       mappingScope: companyMapping ? "company" : globalMapping ? "global" : "none",
