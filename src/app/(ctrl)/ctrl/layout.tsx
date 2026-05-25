@@ -14,8 +14,11 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const { profile, supabase, modules } = ctx;
   const userName  = profile?.name || ctx.user.email || "Usuario";
   const userEmail = profile?.email || ctx.user.email || "";
-  const dreRole   = modules!.dre!.role;
-  const ctrlRoles = modules!.ctrl!.roles;
+  // dreRole pode não vir em `modules.dre` quando o user só tem Compras
+  // (can_financeiro=false). Fallback pro role legado derivado em
+  // session.ts → garante que o AppShell receba um valor válido.
+  const dreRole   = modules.dre?.role ?? profile?.role ?? "gestor_unidade";
+  const ctrlRoles = modules.ctrl?.roles ?? [];
 
   // Segmentos para o shell DRE (mesmo do (app) layout)
   let segments: Segment[] = [];
