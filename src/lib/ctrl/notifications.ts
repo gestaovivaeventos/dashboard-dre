@@ -37,20 +37,55 @@ export async function notifyPendingApproval(params: {
   const supabase = await getSupabase();
 
   // nivel_2 → notifica gerentes; nivel_3 → notifica diretores.
-  // 'admin' (DRE role) e sempre incluido.
+  // 'admin' (DRE role) e sempre incluido, sem filtro de setor.
   const targetCtrlRoles: CtrlRole[] =
     params.approvalTier === "nivel_3" ? ["diretor"] : ["gerente"];
 
-  // 1) Usuarios com a(s) role(s) granular(es) em user_module_roles
+  // 1) Usuarios com a(s) role(s) granular(es) — modelo antigo (user_module_roles)
   const { data: moduleRows } = await supabase
     .from("user_module_roles")
     .select("user_id")
     .eq("module", "ctrl")
     .in("role", targetCtrlRoles);
-
   const moduleUserIds = (moduleRows ?? []).map((r) => r.user_id as string);
 
-  // 2) Admins DRE (acesso implicito ao ctrl)
+  // 2) Modelo novo (users.profile + can_compras): gerente/diretor unificados.
+  const { data: profileRows } = await supabase
+    .from("users")
+    .select("id")
+    .eq("active", true)
+    .eq("can_compras", true)
+    .in("profile", targetCtrlRoles as string[]);
+  const profileUserIds = (profileRows ?? []).map((r) => r.id as string);
+
+  // Uniao dos candidatos antes do filtro de setor.
+  const candidateIds = Array.from(new Set([...moduleUserIds, ...profileUserIds]));
+
+  // 3) Filtra por setor da requisicao via user_sectors. Regra:
+  //    - quem NAO tem nenhum vinculo em user_sectors recebe tudo (fallback,
+  //      pra nao quebrar fluxo enquanto cadastros estao incompletos);
+  //    - quem tem vinculos so recebe se um deles for o setor da requisicao.
+  let sectorFilteredIds: string[] = [];
+  if (candidateIds.length > 0) {
+    const { data: linkRows } = await supabase
+      .from("user_sectors")
+      .select("user_id, sector_id")
+      .in("user_id", candidateIds);
+    const linksByUser = new Map<string, Set<string>>();
+    for (const row of linkRows ?? []) {
+      const uid = row.user_id as string;
+      const sid = row.sector_id as string;
+      if (!linksByUser.has(uid)) linksByUser.set(uid, new Set());
+      linksByUser.get(uid)!.add(sid);
+    }
+    sectorFilteredIds = candidateIds.filter((uid) => {
+      const links = linksByUser.get(uid);
+      if (!links || links.size === 0) return true; // sem vinculos => recebe tudo
+      return links.has(params.sectorId);
+    });
+  }
+
+  // 4) Admins DRE (acesso implicito ao ctrl, sem filtro de setor)
   const { data: adminRows } = await supabase
     .from("users")
     .select("id")
@@ -58,7 +93,7 @@ export async function notifyPendingApproval(params: {
     .eq("active", true);
   const adminUserIds = (adminRows ?? []).map((r) => r.id as string);
 
-  const userIds = Array.from(new Set([...moduleUserIds, ...adminUserIds]));
+  const userIds = Array.from(new Set([...sectorFilteredIds, ...adminUserIds]));
   if (userIds.length === 0) return;
 
   const { data: approvers } = await supabase
