@@ -27,10 +27,11 @@ import {
 // Regras:
 //   - NAO chama a rota automaticamente. Apenas quando o usuario clica em
 //     "Gerar relatório".
-//   - Estado inicial: data = undefined → componente de preview cai no mock
-//     interno. Texto explicativo informa o usuario.
-//   - Em caso de erro: mantem o ultimo `data` (mock ou ultimo sucesso) e
-//     mostra alerta no topo. NAO mistura mock com numeros parciais reais.
+//   - Estado inicial: data = undefined → NAO renderiza a prévia (nenhum
+//     dado fictício visível ao entrar na página). O texto explicativo
+//     orienta o usuário a aplicar os filtros.
+//   - Em caso de erro: mantem o ultimo `data` (ou undefined) e mostra
+//     alerta no topo. NAO mistura mock com numeros parciais reais.
 //   - Botao "Gerar relatório" so habilita com (companyId, dateFrom, dateTo).
 //   - Datas: native <input type="date">. Sem libraries extras.
 // ============================================================================
@@ -604,7 +605,7 @@ export function BusinessIntelligenceClient({
                   type="button"
                   variant="outline"
                   onClick={handleExportPdf}
-                  disabled={loading || exporting}
+                  disabled={loading || exporting || !data}
                   className="w-full sm:w-auto"
                   title="Exporta o relatório atual como PDF em uma única página A4 retrato."
                 >
@@ -703,13 +704,11 @@ export function BusinessIntelligenceClient({
           {!canGenerate ? (
             <p className="text-xs text-amber-700">
               Geração de relatório com IA disponível apenas para administradores.
-              A prévia visual abaixo usa dados de exemplo.
             </p>
           ) : isPreviewState ? (
             <p className="text-xs text-muted-foreground">
               Selecione empresa e período e clique em <strong>Gerar relatório</strong> para
-              produzir a análise com IA. A prévia abaixo usa dados de exemplo enquanto
-              nenhum relatório foi gerado.
+              produzir a análise com IA.
             </p>
           ) : null}
         </CardContent>
@@ -726,10 +725,14 @@ export function BusinessIntelligenceClient({
         </div>
       ) : null}
 
-      {/* Preview / Relatorio (envolvido em div com ref para o export PDF) */}
-      <div ref={reportRef} className="bg-background">
-        <OnePageReportPreview data={data} />
-      </div>
+      {/* Relatorio (envolvido em div com ref para o export PDF). Só
+          renderiza quando há dado gerado — no estado inicial a página
+          fica limpa, sem prévia/mock de empresa. */}
+      {data ? (
+        <div ref={reportRef} className="bg-background">
+          <OnePageReportPreview data={data} />
+        </div>
+      ) : null}
     </div>
   );
 }
