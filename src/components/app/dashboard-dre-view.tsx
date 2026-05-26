@@ -106,16 +106,16 @@ interface EvolutionPoint {
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
+  style: "decimal",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 // Formatador compacto usado apenas no eixo Y do grafico: o valor cheio
-// ("R$ 80.000,00") nao cabe na largura padrao do YAxis (60px) e fica cortado.
+// ("80.000,00") nao cabe na largura padrao do YAxis (60px) e fica cortado.
 // O tooltip continua exibindo o valor completo via `formatCurrency`.
 const currencyCompactFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
+  style: "decimal",
   notation: "compact",
   maximumFractionDigits: 1,
 });

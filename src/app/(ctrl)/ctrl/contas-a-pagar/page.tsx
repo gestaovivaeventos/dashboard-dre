@@ -92,7 +92,7 @@ export default async function ContasAPagarPage() {
     getCompanies(),
   ]);
 
-  const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const totalAprovado = requests.filter((r) => r.status === "aprovado").reduce((s, r) => s + Number(r.amount), 0);
   const totalAgendado = requests.filter((r) => r.status === "agendado").reduce((s, r) => s + Number(r.amount), 0);
 

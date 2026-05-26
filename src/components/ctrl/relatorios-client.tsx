@@ -58,7 +58,7 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
-const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function RelatoriosClient({ requests, sectors }: { requests: Req[]; sectors: Sector[] }) {
   const now = new Date();

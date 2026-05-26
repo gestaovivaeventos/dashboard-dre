@@ -39,8 +39,9 @@ interface SettingsPartnersProps {
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
+  style: "decimal",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 // Mantem o input numerico no formato "1234.56" (ponto decimal) para

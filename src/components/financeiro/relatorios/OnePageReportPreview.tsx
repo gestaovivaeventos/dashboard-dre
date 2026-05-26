@@ -136,11 +136,11 @@ const MOCK_DATA: OnePageReportPreviewData = {
     notaGeral: 78,
   },
   kpis: [
-    { label: "Receita", value: "R$ 118,9 mil", variation: "+8,1%", sign: "Positivo" },
-    { label: "Resultado", value: "R$ 25,9 mil", variation: "+3,8%", sign: "Positivo" },
+    { label: "Receita", value: "118,9 mil", variation: "+8,1%", sign: "Positivo" },
+    { label: "Resultado", value: "25,9 mil", variation: "+3,8%", sign: "Positivo" },
     { label: "Margem", value: "22,7%", variation: "-0,8", variationSuffix: "p.p.", sign: "Atenção" },
-    { label: "FEE disponível", value: "R$ 7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
-    { label: "VVR", value: "R$ 180 mil", variation: "+9,1%", sign: "Positivo", comparisonLabel: "meta" },
+    { label: "FEE disponível", value: "7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
+    { label: "VVR", value: "180 mil", variation: "+9,1%", sign: "Positivo", comparisonLabel: "meta" },
   ],
   previstoRealizado: [
     { indicador: "Receita", realizado: 118.9, previsto: 110.0, unidade: "mil" },
@@ -161,10 +161,10 @@ const MOCK_DATA: OnePageReportPreviewData = {
     { mes: "Abr/26", realizado: 180, meta: 165 },
   ],
   composicao: [
-    { label: "Receita Bruta", valueLabel: "R$ 118,9 mil", kind: "entrada" },
-    { label: "Custos", valueLabel: "-R$ 7,3 mil", kind: "saida" },
-    { label: "Despesas", valueLabel: "-R$ 85,6 mil", kind: "saida" },
-    { label: "Resultado", valueLabel: "R$ 25,9 mil", kind: "final" },
+    { label: "Receita Bruta", valueLabel: "118,9 mil", kind: "entrada" },
+    { label: "Custos", valueLabel: "-7,3 mil", kind: "saida" },
+    { label: "Despesas", valueLabel: "-85,6 mil", kind: "saida" },
+    { label: "Resultado", valueLabel: "25,9 mil", kind: "final" },
   ],
   historico: [
     { mes: "Nov/25", previsto: 18, realizado: 17 },

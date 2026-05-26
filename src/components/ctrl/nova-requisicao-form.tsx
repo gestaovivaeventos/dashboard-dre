@@ -21,7 +21,7 @@ const INPUT_CLS =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2";
 const LABEL_CLS = "text-sm font-medium";
 
-const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 interface Props {
   sectors: CtrlSector[];

@@ -97,7 +97,7 @@ export default async function OrcamentoPage() {
   const grandPendente = rows.reduce((s, r) => s + r.pendente, 0);
   const grandDisponivel = grandOrcado - grandAprovado - grandPendente;
 
-  const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   function pct(value: number, total: number) {
     if (total <= 0) return 0;

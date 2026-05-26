@@ -81,8 +81,9 @@ interface DrilldownRow {
 }
 
 const currencyFormatter = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
+  style: "decimal",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 function formatCurrency(value: number) {

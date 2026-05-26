@@ -68,7 +68,7 @@ async function fetchIndicators(): Promise<Indicator[]> {
       const pct = Number(usdData.USDBRL.pctChange);
       indicators.push({
         name: "dolar",
-        value: `R$ ${bid.toFixed(2)}`,
+        value: bid.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
         change: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% hoje`,
         changeType: pct < 0 ? "down" : pct > 0 ? "up" : "neutral",
         color: "#10b981",

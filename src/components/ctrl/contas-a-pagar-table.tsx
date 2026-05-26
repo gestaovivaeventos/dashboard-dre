@@ -136,7 +136,7 @@ function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
   return <span className="text-xs text-muted-foreground">Dados não informados</span>;
 }
 
-const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   const router = useRouter();

@@ -182,7 +182,7 @@ function formatValor(v: number | string | null): string {
   if (v === null || v === undefined || v === '') return '—'
   const num = Number(v)
   if (!Number.isFinite(num)) return String(v)
-  return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  return num.toLocaleString('pt-BR', { style: 'decimal', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function ContractsDetailView({ batch, items }: { batch: Batch; items: Item[] }) {

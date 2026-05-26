@@ -386,8 +386,7 @@ export async function buildOnePagePayload(
 
   const formatBRL = (v: number) =>
     v.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
+      style: "decimal",
       maximumFractionDigits: 0,
     });
   const formatPctFn = (v: number) => `${v.toFixed(1)}%`;

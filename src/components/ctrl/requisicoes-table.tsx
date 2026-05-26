@@ -20,7 +20,7 @@ interface Props {
   requests: RequisicaoRow[];
 }
 
-const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function RequisicoesTable({ requests }: Props) {
   const router = useRouter();

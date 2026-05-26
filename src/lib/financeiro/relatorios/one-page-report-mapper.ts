@@ -103,7 +103,7 @@ function statusToSign(status: ApiKpiStatus | undefined): Sign {
   }
 }
 
-// Formata numero como "R$ X,Y mil" — mesmo padrao do mock visual. Usa o
+// Formata numero como "X,Y mil" — mesmo padrao do mock visual. Usa o
 // valor absoluto / 1000 para escala "mil"; preserva o sinal explicitamente.
 function formatBRLMil(n: number): string {
   const v = Math.abs(n) / 1000;
@@ -112,7 +112,7 @@ function formatBRLMil(n: number): string {
     maximumFractionDigits: 1,
   });
   const sign = n < 0 ? "-" : "";
-  return `${sign}R$ ${formatted} mil`;
+  return `${sign}${formatted} mil`;
 }
 
 // ─── KPIs ──────────────────────────────────────────────────────────────────

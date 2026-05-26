@@ -56,7 +56,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   cartao_credito: "Cartão de Crédito", dinheiro: "Dinheiro",
 };
 
-const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function resolve<T>(v: T | T[] | null | undefined): T | null {
   if (!v) return null;
