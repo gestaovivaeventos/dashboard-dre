@@ -248,6 +248,27 @@ export async function createSupplier(data: {
   const trimmedName = data.name.trim();
   if (!trimmedName) return { error: "O nome do fornecedor é obrigatório." };
 
+  // Dedupe por CNPJ/CPF normalizado (só dígitos) — bloqueia mesmo se o
+  // existente ainda estiver pendente, pra evitar fila de duplicatas em
+  // aprovação.
+  const normalizedDoc = data.cnpj_cpf.replace(/\D/g, "");
+  if (normalizedDoc) {
+    const { data: existing, error: dupErr } = await supabase
+      .from("ctrl_suppliers")
+      .select("id, name, status, cnpj_cpf")
+      .neq("status", "rejeitado");
+    if (dupErr) return { error: dupErr.message };
+    const match = (existing ?? []).find(
+      (s) => (s.cnpj_cpf ?? "").replace(/\D/g, "") === normalizedDoc,
+    );
+    if (match) {
+      const statusLabel = match.status === "aprovado" ? "aprovado" : "em aprovação";
+      return {
+        error: `Já existe um fornecedor ${statusLabel} com este CNPJ/CPF: ${match.name}.`,
+      };
+    }
+  }
+
   const { data: inserted, error } = await supabase
     .from("ctrl_suppliers")
     .insert({
