@@ -38,6 +38,7 @@ interface ApiKpiCard {
 
 interface ApiKpis {
   receita: ApiKpiCard;
+  despesas: ApiKpiCard;
   resultado: ApiKpiCard;
   margem: ApiKpiCard;
   fee_disponivel: ApiKpiCard;
@@ -160,6 +161,7 @@ function mapKpiCard(
 function mapKpis(api: ApiKpis | undefined): KpiCard[] {
   return [
     mapKpiCard(api?.receita, "Receita"),
+    mapKpiCard(api?.despesas, "Despesas"),
     mapKpiCard(api?.resultado, "Resultado"),
     mapKpiCard(api?.margem, "Margem"),
     mapKpiCard(api?.fee_disponivel, "FEE disponível", {

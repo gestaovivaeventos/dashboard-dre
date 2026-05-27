@@ -137,6 +137,7 @@ const MOCK_DATA: OnePageReportPreviewData = {
   },
   kpis: [
     { label: "Receita", value: "118,9 mil", variation: "+8,1%", sign: "Positivo" },
+    { label: "Despesas", value: "85,6 mil", variation: "+7,0%", sign: "Atenção" },
     { label: "Resultado", value: "25,9 mil", variation: "+3,8%", sign: "Positivo" },
     { label: "Margem", value: "22,7%", variation: "-0,8", variationSuffix: "p.p.", sign: "Atenção" },
     { label: "FEE disponível", value: "7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
@@ -597,6 +598,19 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
     );
   };
 
+  // VVR Acumulado: somatorio dos pontos da serie YTD. Renderizado abaixo do
+  // grafico temporal, dentro do mesmo card — comparacao Meta x Realizado do
+  // ano todo (Jan ate o mes do periodo) em duas barras horizontais.
+  const acumuladoMeta = points.reduce((sum, p) => sum + (p.meta ?? 0), 0);
+  const acumuladoRealizado = points.reduce(
+    (sum, p) => sum + (p.realizado ?? 0),
+    0,
+  );
+  const acumuladoMax = Math.max(acumuladoMeta, acumuladoRealizado, 1);
+  const acumuladoAcima = acumuladoRealizado >= acumuladoMeta;
+  const formatAcum = (n: number) =>
+    n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
@@ -651,6 +665,58 @@ function VvrTemporalChart({ points }: { points: VvrSerieAnualPoint[] }) {
               </Line>
             </ComposedChart>
           </ResponsiveContainer>
+        </div>
+
+        {/* VVR Acumulado: somatorio Jan -> mes do periodo */}
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              VVR Acumulado
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Jan até o mês de análise
+            </span>
+          </div>
+          <div className="space-y-2">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="text-slate-600">Meta</span>
+                <span className="font-mono tabular-nums text-slate-700">
+                  {formatAcum(acumuladoMeta)} mil
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full bg-amber-400"
+                  style={{
+                    width: `${(acumuladoMeta / acumuladoMax) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="text-slate-600">Realizado</span>
+                <span
+                  className={`font-mono tabular-nums font-semibold ${
+                    acumuladoAcima ? "text-emerald-700" : "text-rose-700"
+                  }`}
+                >
+                  {formatAcum(acumuladoRealizado)} mil
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full ${
+                    acumuladoAcima ? "bg-emerald-500" : "bg-rose-500"
+                  }`}
+                  style={{
+                    width: `${(acumuladoRealizado / acumuladoMax) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -938,7 +1004,7 @@ export function OnePageReportPreview({
       <DiagnosticoBlock texto={data.diagnosticoPrincipal} />
 
       {/* 2. KPI cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         {data.kpis.map((kpi) => (
           <KpiCardItem key={kpi.label} kpi={kpi} />
         ))}
