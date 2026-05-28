@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { CashFlowView } from "@/components/app/cash-flow-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { readActiveSegmentSlug } from "@/lib/context/active-context";
+import type { Segment } from "@/lib/supabase/types";
 import {
   SCOPED_DRE_ACCOUNTS_SELECT,
   aggregateDreRows,
@@ -45,16 +47,43 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     redirect("/login");
   }
 
-  // Resolve segment filter (mesma logica do dashboard DRE).
-  let segmentId: string | null = null;
-  if (params?.segmentSlug) {
-    const { data: seg } = await supabase
+  // Load all segments the user can access (for the SegmentCompanyPicker).
+  // Mesmo carregamento usado em dashboard/page.tsx.
+  let segments: Segment[] = [];
+  if (profile?.role === "admin") {
+    const { data } = await supabase
       .from("segments")
-      .select("id")
-      .eq("slug", params.segmentSlug)
+      .select("id,name,slug,display_order,active")
       .eq("active", true)
-      .maybeSingle<{ id: string }>();
-    segmentId = seg?.id ?? null;
+      .order("display_order");
+    segments = (data as Segment[]) ?? [];
+  } else if (profile) {
+    const { data } = await supabase
+      .from("user_segment_access")
+      .select("segments(id,name,slug,display_order,active)")
+      .eq("user_id", profile.id);
+    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
+      .map((row) => row.segments)
+      .filter((s) => s && s.active)
+      .sort((a, b) => a.display_order - b.display_order);
+  }
+
+  // Resolve segment filter. URL `/s/<slug>/fluxo-de-caixa` traz pelo params;
+  // `/fluxo-de-caixa` (sem segmento) recorre ao cookie active_segment_slug
+  // ou ao primeiro segmento disponível ao usuário.
+  let segmentId: string | null = null;
+  let activeSegmentSlug = params?.segmentSlug ?? null;
+  if (!activeSegmentSlug) {
+    const cookieSlug = await readActiveSegmentSlug();
+    if (cookieSlug && segments.some((s) => s.slug === cookieSlug)) {
+      activeSegmentSlug = cookieSlug;
+    } else {
+      activeSegmentSlug = segments[0]?.slug ?? null;
+    }
+  }
+  if (activeSegmentSlug) {
+    const found = segments.find((s) => s.slug === activeSegmentSlug);
+    segmentId = found?.id ?? null;
   }
 
   let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
@@ -158,6 +187,8 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         selectedCompanyIds={[]}
         lastSyncAt={null}
         accumulatedSection={EMPTY_CASH_FLOW_ACCUMULATED_SECTION}
+        segments={segments}
+        activeSegmentSlug={activeSegmentSlug}
       />
     );
   }
@@ -1100,6 +1131,8 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       selectedCompanyIds={filter.selectedCompanyIds}
       lastSyncAt={lastSyncAt}
       accumulatedSection={accumulatedSection}
+      segments={segments}
+      activeSegmentSlug={activeSegmentSlug}
     />
   );
 }

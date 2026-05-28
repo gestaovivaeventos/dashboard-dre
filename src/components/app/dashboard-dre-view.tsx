@@ -582,7 +582,13 @@ export function DashboardDreView({
               activeSegmentSlug={activeSegmentSlug}
               companies={companies}
               selected={companySelection}
-              onChange={(ids) => setCompanySelection(ids)}
+              onChange={(ids) => {
+                setCompanySelection(ids);
+                // Persiste imediatamente — a regra do produto e que a
+                // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
+                // e Budget e Forecast sem precisar clicar em Aplicar antes.
+                saveSharedCompanyFilter(ids);
+              }}
               disabled={companies.length <= 1}
             />
             {/* Expandir / recolher todas — abaixo do seletor de empresa para

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { KpiAllView } from "@/components/app/kpi-all-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { readActiveSegmentSlug } from "@/lib/context/active-context";
 
 export const dynamic = "force-dynamic";
 import {
@@ -27,12 +28,17 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
     redirect("/login");
   }
 
+  // URL `/s/<slug>/kpis` traz pelo params; `/kpis` (sem segmento) recorre ao
+  // cookie `active_segment_slug` — sem isso companies de outros segmentos
+  // entram na agregação e contaminam os KPIs.
   let segmentId: string | null = null;
-  if (params?.segmentSlug) {
+  const activeSegmentSlug =
+    params?.segmentSlug ?? (await readActiveSegmentSlug()) ?? null;
+  if (activeSegmentSlug) {
     const { data: seg } = await supabase
       .from("segments")
       .select("id")
-      .eq("slug", params.segmentSlug)
+      .eq("slug", activeSegmentSlug)
       .eq("active", true)
       .maybeSingle<{ id: string }>();
     segmentId = seg?.id ?? null;

@@ -2,7 +2,6 @@
 
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -16,13 +15,14 @@ import {
   Search,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
+import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import type {
   CashFlowAccountBase,
   CashFlowAccumulatedSection,
@@ -35,7 +35,7 @@ import {
   saveSharedCompanyFilter,
   useSharedCompanyFilterHydration,
 } from "@/lib/dashboard/shared-company-filter";
-import type { UserRole } from "@/lib/supabase/types";
+import type { Segment, UserRole } from "@/lib/supabase/types";
 
 interface CompanyOption {
   id: string;
@@ -61,6 +61,8 @@ interface CashFlowViewProps {
   selectedCompanyIds: string[];
   lastSyncAt: string | null;
   accumulatedSection: CashFlowAccumulatedSection;
+  segments: Segment[];
+  activeSegmentSlug: string | null;
 }
 
 interface DrilldownState {
@@ -181,92 +183,6 @@ function SyncFreshnessIndicator({
   );
 }
 
-function CompanyMultiSelect({
-  companies,
-  selected,
-  onChange,
-  disabled,
-}: {
-  companies: CompanyOption[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const allSelected = selected.length === companies.length;
-  const label =
-    selected.length === 0
-      ? "Nenhuma empresa"
-      : allSelected
-        ? "Todas as empresas"
-        : selected.length === 1
-          ? companies.find((c) => c.id === selected[0])?.name ?? "1 empresa"
-          : `${selected.length} empresas`;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        className="flex h-10 w-full min-w-[200px] items-center justify-between rounded-md border border-input bg-background px-3 text-sm hover:bg-accent disabled:opacity-50"
-      >
-        <span className="truncate">{label}</span>
-        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 max-h-60 w-full min-w-[240px] overflow-y-auto rounded-md border bg-background shadow-lg">
-          <label className="flex cursor-pointer items-center gap-2 border-b px-3 py-2 text-sm font-medium hover:bg-accent">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={(e) =>
-                onChange(e.target.checked ? companies.map((c) => c.id) : [])
-              }
-            />
-            Todas (Consolidado)
-          </label>
-          {companies.map((company) => (
-            <label
-              key={company.id}
-              className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(company.id)}
-                onChange={(e) =>
-                  onChange(
-                    e.target.checked
-                      ? [...selected, company.id]
-                      : selected.filter((id) => id !== company.id),
-                  )
-                }
-              />
-              {company.name}
-              {selected.includes(company.id) && (
-                <Check className="ml-auto h-3.5 w-3.5 text-primary" />
-              )}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function CashFlowView({
   filter,
   range,
@@ -279,6 +195,8 @@ export function CashFlowView({
   selectedCompanyIds,
   lastSyncAt,
   accumulatedSection,
+  segments,
+  activeSegmentSlug,
 }: CashFlowViewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -620,11 +538,21 @@ export function CashFlowView({
       <div className="space-y-4 rounded-xl border bg-background p-4">
         <div className="flex flex-wrap items-start gap-4">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Empresas</label>
-            <CompanyMultiSelect
+            <label className="text-xs font-medium text-muted-foreground">
+              Segmento e empresas
+            </label>
+            <SegmentCompanyPicker
+              segments={segments}
+              activeSegmentSlug={activeSegmentSlug}
               companies={companies}
               selected={companySelection}
-              onChange={(ids) => setCompanySelection(ids)}
+              onChange={(ids) => {
+                setCompanySelection(ids);
+                // Persiste imediatamente — a regra do produto e que a
+                // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
+                // e Budget e Forecast sem precisar clicar em Aplicar antes.
+                saveSharedCompanyFilter(ids);
+              }}
               disabled={companies.length <= 1}
             />
             {/* Expandir / recolher todas — abaixo do seletor de empresa para

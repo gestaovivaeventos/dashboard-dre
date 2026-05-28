@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { readActiveSegmentSlug } from "@/lib/context/active-context";
 import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -59,9 +60,21 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       .sort((a, b) => a.display_order - b.display_order);
   }
 
-  // Resolve segment filter if inside a segment route
+  // Resolve segment filter. Quando a URL é `/s/<slug>/dashboard`, vem por
+  // `params`; quando é `/dashboard` (default landing pós-login), caímos no
+  // cookie `active_segment_slug` mantido pelo SegmentCompanyPicker. Sem esse
+  // fallback, o picker mostra um segmento ativo mas a query não filtra
+  // companies por segment_id e empresas de outros segmentos aparecem.
   let segmentId: string | null = null;
-  const activeSegmentSlug = params?.segmentSlug ?? null;
+  let activeSegmentSlug = params?.segmentSlug ?? null;
+  if (!activeSegmentSlug) {
+    const cookieSlug = await readActiveSegmentSlug();
+    if (cookieSlug && segments.some((s) => s.slug === cookieSlug)) {
+      activeSegmentSlug = cookieSlug;
+    } else {
+      activeSegmentSlug = segments[0]?.slug ?? null;
+    }
+  }
   if (activeSegmentSlug) {
     const found = segments.find((s) => s.slug === activeSegmentSlug);
     segmentId = found?.id ?? null;

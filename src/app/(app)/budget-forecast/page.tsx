@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { BudgetForecastView } from "@/components/app/budget-forecast-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { readActiveSegmentSlug } from "@/lib/context/active-context";
+import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 import {
@@ -64,16 +66,43 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
         ? "orcamento"
         : "");
 
-  // Resolve segment filter if inside a segment route
-  let segmentId: string | null = null;
-  if (params?.segmentSlug) {
-    const { data: seg } = await supabase
+  // Load all segments the user can access (for the SegmentCompanyPicker).
+  // Mesmo carregamento usado em dashboard/page.tsx.
+  let segments: Segment[] = [];
+  if (profile?.role === "admin") {
+    const { data } = await supabase
       .from("segments")
-      .select("id")
-      .eq("slug", params.segmentSlug)
+      .select("id,name,slug,display_order,active")
       .eq("active", true)
-      .maybeSingle<{ id: string }>();
-    segmentId = seg?.id ?? null;
+      .order("display_order");
+    segments = (data as Segment[]) ?? [];
+  } else if (profile) {
+    const { data } = await supabase
+      .from("user_segment_access")
+      .select("segments(id,name,slug,display_order,active)")
+      .eq("user_id", profile.id);
+    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
+      .map((row) => row.segments)
+      .filter((s) => s && s.active)
+      .sort((a, b) => a.display_order - b.display_order);
+  }
+
+  // URL `/s/<slug>/budget-forecast` traz pelo params; `/budget-forecast` (sem
+  // segmento) recorre ao cookie `active_segment_slug` ou ao primeiro segmento
+  // disponível ao usuário.
+  let segmentId: string | null = null;
+  let activeSegmentSlug = params?.segmentSlug ?? null;
+  if (!activeSegmentSlug) {
+    const cookieSlug = await readActiveSegmentSlug();
+    if (cookieSlug && segments.some((s) => s.slug === cookieSlug)) {
+      activeSegmentSlug = cookieSlug;
+    } else {
+      activeSegmentSlug = segments[0]?.slug ?? null;
+    }
+  }
+  if (activeSegmentSlug) {
+    const found = segments.find((s) => s.slug === activeSegmentSlug);
+    segmentId = found?.id ?? null;
   }
 
   let companiesQuery = supabase.from("companies").select("id,name,active").eq("active", true);
@@ -128,6 +157,8 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
         accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "" }}
         selectedCompanyIds={[]}
         currentMonthIndex={-1}
+        segments={segments}
+        activeSegmentSlug={activeSegmentSlug}
       />
     );
   }
@@ -326,6 +357,8 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
           accumulatedBucket={effectiveAccumulated}
           selectedCompanyIds={filter.selectedCompanyIds}
           currentMonthIndex={currentMonthIndex}
+          segments={segments}
+          activeSegmentSlug={activeSegmentSlug}
         />
       );
     }
@@ -510,6 +543,8 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       accumulatedBucket={accumulatedBucket}
       selectedCompanyIds={filter.selectedCompanyIds}
       currentMonthIndex={currentMonthIndex}
+      segments={segments}
+      activeSegmentSlug={activeSegmentSlug}
     />
   );
 }
