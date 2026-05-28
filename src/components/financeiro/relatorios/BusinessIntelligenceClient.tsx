@@ -45,7 +45,11 @@ interface CompanyOption {
 // Versionada — se o shape de OnePageReportPreviewData mudar, podemos
 // incrementar a versao para invalidar caches antigos sem precisar limpar
 // manualmente o storage do usuario.
-const STORAGE_KEY = "bi-one-page-state-v1";
+//
+// v2: bump apos reordenar os KPIs (FEE | Sobrevivencia | VVR | Margem media
+//     dos eventos na segunda fileira). Estados v1 persistidos antes da
+//     mudanca exibiriam a ordem antiga ao hidratar — bumpar invalida.
+const STORAGE_KEY = "bi-one-page-state-v2";
 
 interface PersistedState {
   data: OnePageReportPreviewData;
