@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { sendNewUserPendingApprovalEmail } from "@/lib/notifications/resend";
 import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
 
 export type { ModuleAccess, UnifiedProfile };
@@ -50,31 +49,11 @@ export async function getSessionContext(): Promise<SessionContext> {
     .eq("id", user.id)
     .maybeSingle();
 
-  // Novo usuário — cria perfil mínimo
+  // Sem linha em public.users — não deveria mais acontecer: o trigger
+  // `on_auth_user_created` em auth.users cria a linha no momento do signup,
+  // e o backfill cobre cadastros antigos. Se ainda assim cair aqui, devolve
+  // sessão vazia (o usuário acaba na tela /pendente) sem mascarar o problema.
   if (!profileRow) {
-    const fallbackName =
-      typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null;
-    const { error: upsertError } = await supabase.from("users").upsert(
-      {
-        id: user.id,
-        email: user.email ?? `${user.id}@placeholder.local`,
-        name: fallbackName,
-        role: "gestor_unidade",
-        company_id: null,
-        active: false,
-      },
-      { onConflict: "id" },
-    );
-
-    // Novo signup detectado (perfil acabou de ser criado com active=false):
-    // notifica o admin pra autorizar. Só dispara quando o upsert teve sucesso
-    // pra não enviar email por race conditions de duplicação.
-    if (!upsertError) {
-      await sendNewUserPendingApprovalEmail({
-        userEmail: user.email ?? `(sem email — ${user.id})`,
-        userName: fallbackName,
-      });
-    }
     return empty;
   }
 
