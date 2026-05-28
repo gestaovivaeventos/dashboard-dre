@@ -97,6 +97,20 @@ export const FeeVvrInputSchema = z.object({
   vvr_meta_mes: z.number().nullable().optional(),
 });
 
+// Resumo do VVR acumulado no ano (de Janeiro ate o mes filtrado) +
+// sinalizador de queda recente. Usado pela IA para aplicar a regra de
+// nao sugerir aumentos comerciais quando a franquia ja esta a frente da
+// meta acumulada, exceto quando houver deterioracao nos 2 ultimos meses.
+export const VvrYtdResumoSchema = z.object({
+  realizado_acumulado: z.number(),
+  meta_acumulada: z.number(),
+  acima_da_meta: z.boolean(),
+  // True quando o VVR realizado mensal ficou abaixo da meta em CADA UM
+  // dos 2 ultimos meses da serie YTD (mes do periodo + mes anterior).
+  // Quando a serie tem menos de 2 pontos com dados, fica false.
+  abaixo_meta_ultimos_2_meses: z.boolean(),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -109,6 +123,14 @@ export const OnePageInputSchema = z.object({
   }),
   dre: z.array(IndicadorDreSchema).min(1).max(30),
   fee_vvr: FeeVvrInputSchema.nullable(),
+  // Saldo atual de FEE Disponivel da franquia (snapshot no momento da
+  // geracao, nao do periodo). Usado pela IA para calibrar a urgencia do
+  // saque e a classificacao de statusGeral — uma franquia com prejuizo
+  // mas com FEE Disponivel cobrindo varios meses de despesas nao deve
+  // ser tratada como critica. Null quando nao informado.
+  fee_disponivel: z.number().nullable().optional(),
+  // Resumo do VVR acumulado YTD (ver VvrYtdResumoSchema acima).
+  vvr_ytd_resumo: VvrYtdResumoSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;

@@ -38,6 +38,7 @@ export interface KpiCardPayload {
 
 export interface KpisPayload {
   receita: KpiCardPayload;
+  despesas: KpiCardPayload;
   resultado: KpiCardPayload;
   margem: KpiCardPayload;
   fee_disponivel: KpiCardPayload;
@@ -314,7 +315,17 @@ export async function buildOnePagePayload(
 
   // -------------------------------------------------------------------------
   // 7. Input final (enviado a IA na rota oficial)
+  //
+  // O `fee_disponivel` (snapshot atual) tambem entra no input pra IA poder
+  // calibrar a regra de saude financeira ("FEE Disponivel cobre 2+ meses
+  // de despesas? entao nao e Crítica"). O mesmo valor e reusado mais
+  // abaixo pelo KPI card de FEE Disponivel.
   // -------------------------------------------------------------------------
+  const feeDisponivel =
+    company.fee_disponivel === null || company.fee_disponivel === undefined
+      ? null
+      : Number(company.fee_disponivel);
+
   const input: OnePageInput = {
     empresa: { id: company.id, nome: company.name },
     periodo: {
@@ -324,6 +335,7 @@ export async function buildOnePagePayload(
     },
     dre: dreInput,
     fee_vvr: feeVvrInput,
+    fee_disponivel: feeDisponivel,
   };
 
   // -------------------------------------------------------------------------
@@ -371,6 +383,13 @@ export async function buildOnePagePayload(
     if (varPct >= -5) return "atencao";
     return "critico";
   };
+  // Despesas tem direcao invertida: gastar MENOS que o orcado = bom.
+  const statusDespesasFromVariacao = (varPct: number | null): KpiStatus => {
+    if (varPct === null) return "neutro";
+    if (varPct <= 0) return "positivo";
+    if (varPct <= 5) return "atencao";
+    return "critico";
+  };
   const statusMargemPp = (varPp: number | null): KpiStatus => {
     if (varPp === null) return "neutro";
     if (varPp >= 0) return "positivo";
@@ -394,14 +413,12 @@ export async function buildOnePagePayload(
   const formatVarPct = (v: number | null) =>
     v === null ? null : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
-  const feeDisponivel =
-    company.fee_disponivel === null || company.fee_disponivel === undefined
-      ? null
-      : Number(company.fee_disponivel);
-
   const vvrRealizado = feeVvrInput?.vvr_mes ?? null;
   const vvrMetaPeriodo = feeVvrInput?.vvr_meta_mes ?? null;
   const varReceita = variacaoPct(getRealized("1"), getBudgeted("1"));
+  const despesasRealizadas = getRealized("7");
+  const despesasOrcadas = getBudgeted("7");
+  const varDespesas = variacaoPct(despesasRealizadas, despesasOrcadas);
   const varResultado = variacaoPct(resultadoRealizado, resultadoOrcado);
   const varVvr =
     vvrRealizado !== null && vvrMetaPeriodo !== null
@@ -416,6 +433,14 @@ export async function buildOnePagePayload(
       variationValue: varReceita,
       variationLabel: formatVarPct(varReceita),
       status: statusFromVariacaoPercent(varReceita),
+    },
+    despesas: {
+      label: "Despesas",
+      value: despesasRealizadas,
+      formattedValue: formatBRL(Math.abs(despesasRealizadas)),
+      variationValue: varDespesas,
+      variationLabel: formatVarPct(varDespesas),
+      status: statusDespesasFromVariacao(varDespesas),
     },
     resultado: {
       label: "Resultado",
@@ -756,12 +781,52 @@ export async function buildOnePagePayload(
   }
 
   // -------------------------------------------------------------------------
+  // 11b. Resumo YTD do VVR para a IA (acumulado realizado vs meta +
+  //      flag de "ficou abaixo nos 2 ultimos meses"). Calculado a partir
+  //      do `vvrSerieAnual` ja montado acima — mesma fonte de dados.
+  //
+  //      "Ultimos 2 meses" = os 2 ultimos pontos da serie YTD, ou seja,
+  //      o mes do periodo + o mes imediatamente anterior. Quando ha
+  //      menos de 2 pontos com dados completos (meta e realizado), o
+  //      flag fica false.
+  // -------------------------------------------------------------------------
+  const vvrRealizadoAcumulado = vvrSerieAnual.reduce(
+    (sum, p) => sum + (p.realizado ?? 0),
+    0,
+  );
+  const vvrMetaAcumulada = vvrSerieAnual.reduce(
+    (sum, p) => sum + (p.meta ?? 0),
+    0,
+  );
+  const acimaDaMeta = vvrRealizadoAcumulado >= vvrMetaAcumulada;
+  const last2 = vvrSerieAnual.slice(-2);
+  const abaixoMetaUltimos2 =
+    last2.length === 2 &&
+    last2.every(
+      (p) =>
+        p.realizado !== null &&
+        p.meta !== null &&
+        p.realizado < p.meta,
+    );
+
+  const vvrYtdResumo = {
+    realizado_acumulado: Number(vvrRealizadoAcumulado.toFixed(2)),
+    meta_acumulada: Number(vvrMetaAcumulada.toFixed(2)),
+    acima_da_meta: acimaDaMeta,
+    abaixo_meta_ultimos_2_meses: abaixoMetaUltimos2,
+  };
+
+  // -------------------------------------------------------------------------
   // 12. Retorno consolidado
+  //
+  // `vvr_ytd_resumo` e injetado aqui (e nao na construcao inicial de
+  // `input`) porque depende de `vvrSerieAnual`, que e computado mais
+  // abaixo no fluxo. O input final que vai pra IA fica enriquecido.
   // -------------------------------------------------------------------------
   return {
     ok: true,
     payload: {
-      input,
+      input: { ...input, vvr_ytd_resumo: vvrYtdResumo },
       generatedAt: new Date().toISOString(),
       kpis,
       previstoRealizado,
