@@ -43,6 +43,10 @@ interface ApiKpis {
   margem: ApiKpiCard;
   fee_disponivel: ApiKpiCard;
   vvr: ApiKpiCard;
+  // Indicador derivado: FEE Disponivel / media das despesas operacionais
+  // dos meses fechados do ano corrente. value = quantidade arredondada de
+  // meses; null quando faltar FEE, faltar mes fechado ou media zerada.
+  sobrevivencia_caixa: ApiKpiCard;
   // Presente apenas para empresas do segmento Franquias Viva (preenchido
   // manualmente em Configuracoes > Empresas > FEE / VVR). Em outros
   // segmentos a chave nao vem da API e o card nao e renderizado.
@@ -174,6 +178,12 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
     // VVR META, nao contra orcamento contabil.
     mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
+    // Sobrevivencia de caixa: indicador derivado em meses (sem comparativo
+    // contra orcamento — omitComparisonSuffix=true preserva o rotulo
+    // "Cobertura do FEE" sem concatenar " vs orçamento").
+    mapKpiCard(api?.sobrevivencia_caixa, "Sobrevivência de caixa", {
+      omitComparisonSuffix: true,
+    }),
   ];
 
   // "Margem média dos eventos" so chega quando a empresa pertence ao

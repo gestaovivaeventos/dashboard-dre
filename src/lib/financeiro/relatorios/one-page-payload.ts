@@ -43,6 +43,13 @@ export interface KpisPayload {
   margem: KpiCardPayload;
   fee_disponivel: KpiCardPayload;
   vvr: KpiCardPayload;
+  // Sobrevivencia de caixa: por quantos meses o FEE disponivel cobre a
+  // media das despesas operacionais dos meses ja fechados do ano corrente.
+  // Calculado a partir do FEE Disponivel (mesma fonte do card acima) e da
+  // conta DRE code "7" (Despesas Operacionais). Aparece para todas as
+  // empresas; quando faltar FEE ou meses fechados, value=null e o mapper
+  // renderiza "—".
+  sobrevivencia_caixa: KpiCardPayload;
   // Presente apenas para empresas do segmento Franquias Viva — indicador
   // manual preenchido em Configuracoes > Empresas > FEE / VVR. Em demais
   // segmentos a chave nao e enviada (mapper ignora ausencia).
@@ -446,6 +453,70 @@ export async function buildOnePagePayload(
       ? variacaoPct(vvrRealizado, vvrMetaPeriodo)
       : null;
 
+  // -------------------------------------------------------------------------
+  // 8b. Sobrevivencia de caixa
+  //
+  // Por quantos meses o FEE disponivel cobre a media das despesas
+  // operacionais (code "7") dos meses JA FECHADOS do ano corrente. O
+  // calculo e independente do periodo selecionado: usa sempre o ano e o
+  // mes do "hoje" do servidor — o mes corrente nunca conta como fechado,
+  // mesmo quando o usuario esta visualizando-o.
+  //
+  // Atualizacao automatica: a cada virada de mes, o mes anterior passa a
+  // entrar na media sem nenhuma intervencao manual. Em janeiro nao ha
+  // meses fechados no ano corrente — o card cai para null/"—".
+  //
+  // Fontes reutilizadas (sem duplicar logica):
+  //   - FEE disponivel: `feeDisponivel` ja resolvido acima (mesma fonte
+  //     do card "FEE Disponivel").
+  //   - Despesas operacionais: RPC `dashboard_dre_aggregate` + plano DRE
+  //     escopado por empresa, mesmo motor do dashboard.
+  // -------------------------------------------------------------------------
+  const today = new Date();
+  const currentYear = today.getUTCFullYear();
+  const currentMonth = today.getUTCMonth() + 1;
+  const closedMonthsCount = currentMonth - 1;
+
+  let sobrevivenciaCaixaMeses: number | null = null;
+  if (closedMonthsCount >= 1 && feeDisponivel !== null) {
+    const lastDay = new Date(
+      Date.UTC(currentYear, closedMonthsCount, 0),
+    ).getUTCDate();
+    const closedFrom = `${currentYear}-01-01`;
+    const closedTo = `${currentYear}-${String(closedMonthsCount).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+
+    const { data: closedAgg, error: closedErr } = await supabase.rpc(
+      "dashboard_dre_aggregate",
+      {
+        p_company_ids: [companyId],
+        p_date_from: closedFrom,
+        p_date_to: closedTo,
+      },
+    );
+
+    if (!closedErr) {
+      const closedMap = new Map<string, number>();
+      ((closedAgg ?? []) as AggregateRow[]).forEach((r) => {
+        closedMap.set(
+          r.dre_account_id,
+          (closedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
+        );
+      });
+      const { rows: closedRows } = buildDashboardRows(accounts, closedMap);
+      const despesasOpTotal = Math.abs(
+        closedRows.find((r) => r.code === "7")?.value ?? 0,
+      );
+      if (despesasOpTotal > 0) {
+        const mediaDespesasOp = despesasOpTotal / closedMonthsCount;
+        if (mediaDespesasOp > 0) {
+          sobrevivenciaCaixaMeses = Math.round(feeDisponivel / mediaDespesasOp);
+        }
+      }
+    }
+  }
+
+  const formatMeses = (n: number) => `${n} ${n === 1 ? "mês" : "meses"}`;
+
   const kpis: KpisPayload = {
     receita: {
       label: "Receita",
@@ -496,6 +567,17 @@ export async function buildOnePagePayload(
       variationValue: varVvr,
       variationLabel: formatVarPct(varVvr),
       status: statusFromVariacaoPercent(varVvr),
+    },
+    sobrevivencia_caixa: {
+      label: "Sobrevivência de caixa",
+      value: sobrevivenciaCaixaMeses,
+      formattedValue:
+        sobrevivenciaCaixaMeses !== null
+          ? formatMeses(sobrevivenciaCaixaMeses)
+          : null,
+      variationValue: null,
+      variationLabel: "Cobertura do FEE",
+      status: "neutro",
     },
   };
 
