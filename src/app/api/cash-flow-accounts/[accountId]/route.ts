@@ -27,23 +27,6 @@ export async function PATCH(request: Request, { params }: Params) {
     active?: boolean;
   };
 
-  // Leaf-only edit rule: an account that has children is considered a
-  // parent/aggregator and must not be edited. The editor enforces this in
-  // the UI; we also enforce here for safety.
-  const { count: childCount, error: childError } = await supabase
-    .from("cash_flow_accounts")
-    .select("id", { count: "exact", head: true })
-    .eq("parent_id", params.accountId);
-  if (childError) {
-    return NextResponse.json({ error: childError.message }, { status: 400 });
-  }
-  if ((childCount ?? 0) > 0) {
-    return NextResponse.json(
-      { error: "Contas que possuem subcontas nao podem ser editadas. Apenas contas finais sao editaveis." },
-      { status: 400 },
-    );
-  }
-
   const patch: Record<string, unknown> = {};
   if (typeof body.name === "string") patch.name = body.name.trim();
   if (body.type) patch.type = body.type;

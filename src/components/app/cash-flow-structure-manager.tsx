@@ -6,7 +6,6 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Loader2,
-  Lock,
   Pencil,
   Plus,
   Save,
@@ -769,21 +768,10 @@ export function CashFlowStructureManager({
                         Cancelar
                       </Button>
                     </>
-                  ) : leaf ? (
+                  ) : (
                     <Button type="button" size="sm" variant="outline" onClick={() => startEdit(account)}>
                       <Pencil className="mr-2 h-3 w-3" />
                       Editar
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="Conta agrupadora — possui subcontas. Apenas contas finais sao editaveis."
-                    >
-                      <Lock className="mr-2 h-3 w-3" />
-                      Bloqueada
                     </Button>
                   )}
                   <Button type="button" size="sm" variant="outline" onClick={() => void moveSibling(account, "up")}>

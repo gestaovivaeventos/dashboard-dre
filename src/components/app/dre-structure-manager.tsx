@@ -7,7 +7,6 @@ import {
   ChevronsUpDown,
   Copy,
   Loader2,
-  Lock,
   Pencil,
   Plus,
   Save,
@@ -598,14 +597,16 @@ export function DreStructureManager({
     });
   };
 
-  // Eligible parents = aggregator accounts that already have children. We
-  // exclude leaves (adding under a leaf would silently turn it into a parent
-  // and block editing of the former leaf) and calculated rows (those compute
-  // from formulas and shouldn't have children).
+  // Eligible parents = aggregator accounts. Includes rows that already have
+  // children OR were explicitly flagged as `is_summary` (totalizadora) — the
+  // latter covers freshly-created aggregators in a custom plan that don't have
+  // children yet but were created precisely to host new subaccounts. We still
+  // exclude pure leaves (turning a leaf into a parent would silently change
+  // its role) and calculated rows (those compute from formulas).
   const parentOptions = useMemo(
     () =>
       accounts
-        .filter((a) => !isLeaf(a.id) && a.type !== "calculado")
+        .filter((a) => a.type !== "calculado" && (!isLeaf(a.id) || a.is_summary))
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [accounts, byParent],
@@ -1109,17 +1110,6 @@ export function DreStructureManager({
                         <Save className="mr-2 h-3 w-3" />
                       )}
                       Salvar
-                    </Button>
-                  ) : hasChildren ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="Conta agrupadora — possui subcontas. Apenas contas finais sao editaveis."
-                    >
-                      <Lock className="mr-2 h-3 w-3" />
-                      Bloqueada
                     </Button>
                   ) : (
                     <Button type="button" size="sm" variant="outline" onClick={() => startEdit(account)}>
