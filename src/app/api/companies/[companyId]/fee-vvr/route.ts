@@ -37,22 +37,30 @@ function normalize(row: RawRow): FeeVvrRow {
   };
 }
 
-// ─── Balanco por empresa (FEE Disponivel, FEE A Receber) ──────────────────
+// ─── Balanco por empresa (FEE Disponivel, FEE A Receber, Margem Media) ────
+//
+// `margem_media_eventos` e usado apenas por empresas do segmento Franquias
+// Viva (input manual no painel FEE/VVR). A coluna existe globalmente mas
+// vem NULL em empresas de outros segmentos.
 
 interface BalanceRow {
   fee_disponivel: number | null;
   fee_a_receber: number | null;
+  margem_media_eventos: number | null;
 }
 
 function normalizeBalance(row: {
   fee_disponivel: number | string | null;
   fee_a_receber: number | string | null;
+  margem_media_eventos: number | string | null;
 }): BalanceRow {
   return {
     fee_disponivel:
       row.fee_disponivel === null ? null : Number(row.fee_disponivel),
     fee_a_receber:
       row.fee_a_receber === null ? null : Number(row.fee_a_receber),
+    margem_media_eventos:
+      row.margem_media_eventos === null ? null : Number(row.margem_media_eventos),
   };
 }
 
@@ -91,11 +99,12 @@ export async function GET(_request: Request, { params }: Params) {
       .order("month", { ascending: true }),
     db
       .from("companies")
-      .select("fee_disponivel, fee_a_receber")
+      .select("fee_disponivel, fee_a_receber, margem_media_eventos")
       .eq("id", params.companyId)
       .maybeSingle<{
         fee_disponivel: number | string | null;
         fee_a_receber: number | string | null;
+        margem_media_eventos: number | string | null;
       }>(),
   ]);
 
@@ -109,7 +118,7 @@ export async function GET(_request: Request, { params }: Params) {
   const rows = (monthlyResult.data as RawRow[] | null ?? []).map(normalize);
   const balance: BalanceRow = companyResult.data
     ? normalizeBalance(companyResult.data)
-    : { fee_disponivel: null, fee_a_receber: null };
+    : { fee_disponivel: null, fee_a_receber: null, margem_media_eventos: null };
 
   return NextResponse.json({ rows, balance });
 }
@@ -192,6 +201,7 @@ export async function PATCH(request: Request, { params }: Params) {
   const body = (await request.json()) as {
     fee_disponivel?: number | null;
     fee_a_receber?: number | null;
+    margem_media_eventos?: number | null;
   };
 
   const update: Record<string, number | null> = {};
@@ -200,6 +210,9 @@ export async function PATCH(request: Request, { params }: Params) {
   }
   if ("fee_a_receber" in body) {
     update.fee_a_receber = parseNullableNumber(body.fee_a_receber);
+  }
+  if ("margem_media_eventos" in body) {
+    update.margem_media_eventos = parseNullableNumber(body.margem_media_eventos);
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json(
@@ -213,7 +226,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .from("companies")
     .update(update)
     .eq("id", params.companyId)
-    .select("fee_disponivel, fee_a_receber")
+    .select("fee_disponivel, fee_a_receber, margem_media_eventos")
     .single();
 
   if (error || !data) {

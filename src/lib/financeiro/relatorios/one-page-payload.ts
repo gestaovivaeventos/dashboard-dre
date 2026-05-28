@@ -43,6 +43,10 @@ export interface KpisPayload {
   margem: KpiCardPayload;
   fee_disponivel: KpiCardPayload;
   vvr: KpiCardPayload;
+  // Presente apenas para empresas do segmento Franquias Viva — indicador
+  // manual preenchido em Configuracoes > Empresas > FEE / VVR. Em demais
+  // segmentos a chave nao e enviada (mapper ignora ausencia).
+  margem_media_eventos?: KpiCardPayload;
 }
 
 export interface PrevistoRealizadoPayload {
@@ -129,17 +133,34 @@ export async function buildOnePagePayload(
   // -------------------------------------------------------------------------
   const { data: company } = await supabase
     .from("companies")
-    .select("id,name,fee_disponivel,fee_a_receber")
+    .select("id,name,fee_disponivel,fee_a_receber,margem_media_eventos,segment_id")
     .eq("id", companyId)
     .maybeSingle<{
       id: string;
       name: string;
       fee_disponivel: number | string | null;
       fee_a_receber: number | string | null;
+      margem_media_eventos: number | string | null;
+      segment_id: string | null;
     }>();
   if (!company) {
     return { ok: false, status: 404, error: "Empresa nao encontrada." };
   }
+
+  // Resolve o slug do segmento da empresa. O KPI "Margem media dos eventos"
+  // so e renderizado quando segmento = franquias-viva — empresas de outros
+  // segmentos nunca exibem esse indicador, mesmo que o valor tenha sido
+  // gravado por engano via API.
+  let segmentSlug: string | null = null;
+  if (company.segment_id) {
+    const { data: seg } = await supabase
+      .from("segments")
+      .select("slug")
+      .eq("id", company.segment_id)
+      .maybeSingle<{ slug: string }>();
+    segmentSlug = seg?.slug ?? null;
+  }
+  const isFranquiasViva = segmentSlug === "franquias-viva";
 
   const { data: rawAccounts } = await supabase
     .from("dre_accounts")
@@ -477,6 +498,27 @@ export async function buildOnePagePayload(
       status: statusFromVariacaoPercent(varVvr),
     },
   };
+
+  // KPI extra "Margem media dos eventos": valor manual por empresa,
+  // exibido como percentual. So entra no payload para empresas do segmento
+  // Franquias Viva — para outros segmentos a chave fica ausente e o mapper
+  // nao renderiza o card. NULL e tratado como "—" no formattedValue.
+  if (isFranquiasViva) {
+    const margemMediaEventos =
+      company.margem_media_eventos === null ||
+      company.margem_media_eventos === undefined
+        ? null
+        : Number(company.margem_media_eventos);
+    kpis.margem_media_eventos = {
+      label: "Margem média dos eventos",
+      value: margemMediaEventos,
+      formattedValue:
+        margemMediaEventos !== null ? formatPctFn(margemMediaEventos) : null,
+      variationValue: null,
+      variationLabel: "Valor informado",
+      status: "neutro",
+    };
+  }
 
   const previstoRealizado: PrevistoRealizadoPayload[] = [
     {

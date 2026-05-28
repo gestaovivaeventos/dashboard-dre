@@ -23,6 +23,7 @@ interface ServerRow {
 interface ServerBalance {
   fee_disponivel: number | null;
   fee_a_receber: number | null;
+  margem_media_eventos: number | null;
 }
 
 interface ClientRow {
@@ -113,14 +114,16 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
-  // Campos de balanco da empresa (FEE Disponivel / FEE A Receber) — nao sao
-  // por mes; um unico valor por empresa.
+  // Campos de balanco da empresa (FEE Disponivel / FEE A Receber / Margem
+  // Media dos Eventos) — nao sao por mes; um unico valor por empresa.
   const [feeDisponivelText, setFeeDisponivelText] = useState("");
   const [feeAReceberText, setFeeAReceberText] = useState("");
+  const [margemMediaText, setMargemMediaText] = useState("");
   const [feeDisponivelPersisted, setFeeDisponivelPersisted] = useState("");
   const [feeAReceberPersisted, setFeeAReceberPersisted] = useState("");
+  const [margemMediaPersisted, setMargemMediaPersisted] = useState("");
   const [savingBalance, setSavingBalance] = useState<
-    "fee_disponivel" | "fee_a_receber" | null
+    "fee_disponivel" | "fee_a_receber" | "margem_media_eventos" | null
   >(null);
 
   // Carrega valores persistidos e mescla com os defaults.
@@ -139,13 +142,24 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
         };
         if (!active) return;
         setRows(mergeServerWithDefaults(payload.rows ?? []));
-        const balance = payload.balance ?? { fee_disponivel: null, fee_a_receber: null };
+        const balance =
+          payload.balance ?? {
+            fee_disponivel: null,
+            fee_a_receber: null,
+            margem_media_eventos: null,
+          };
         const fdText = balance.fee_disponivel !== null ? formatNumberPtBr(balance.fee_disponivel) : "";
         const farText = balance.fee_a_receber !== null ? formatNumberPtBr(balance.fee_a_receber) : "";
+        const mmText =
+          balance.margem_media_eventos !== null
+            ? formatNumberPtBr(balance.margem_media_eventos)
+            : "";
         setFeeDisponivelText(fdText);
         setFeeDisponivelPersisted(fdText);
         setFeeAReceberText(farText);
         setFeeAReceberPersisted(farText);
+        setMargemMediaText(mmText);
+        setMargemMediaPersisted(mmText);
       } catch (err) {
         if (!active) return;
         showToast({
@@ -274,12 +288,23 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
     }
   };
 
-  // Persiste um campo de balanco (FEE Disponivel ou FEE A Receber) no blur.
-  const persistBalance = async (field: "fee_disponivel" | "fee_a_receber") => {
+  // Persiste um campo de balanco (FEE Disponivel, FEE A Receber ou Margem
+  // Media dos Eventos) no blur.
+  const persistBalance = async (
+    field: "fee_disponivel" | "fee_a_receber" | "margem_media_eventos",
+  ) => {
     const currentText =
-      field === "fee_disponivel" ? feeDisponivelText : feeAReceberText;
+      field === "fee_disponivel"
+        ? feeDisponivelText
+        : field === "fee_a_receber"
+          ? feeAReceberText
+          : margemMediaText;
     const persistedText =
-      field === "fee_disponivel" ? feeDisponivelPersisted : feeAReceberPersisted;
+      field === "fee_disponivel"
+        ? feeDisponivelPersisted
+        : field === "fee_a_receber"
+          ? feeAReceberPersisted
+          : margemMediaPersisted;
     if (currentText === persistedText) return;
 
     const value = parseNumberPtBr(currentText);
@@ -307,12 +332,19 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
           saved.fee_a_receber !== null
             ? formatNumberPtBr(saved.fee_a_receber)
             : "";
+        const mmText =
+          saved.margem_media_eventos !== null
+            ? formatNumberPtBr(saved.margem_media_eventos)
+            : "";
         if (field === "fee_disponivel") {
           setFeeDisponivelText(fdText);
           setFeeDisponivelPersisted(fdText);
-        } else {
+        } else if (field === "fee_a_receber") {
           setFeeAReceberText(farText);
           setFeeAReceberPersisted(farText);
+        } else {
+          setMargemMediaText(mmText);
+          setMargemMediaPersisted(mmText);
         }
       }
     } catch (err) {
@@ -344,7 +376,7 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
   return (
     <div className="space-y-4">
       {/* Campos de balanco por empresa (nao sao mensais) */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">
             FEE Disponível
@@ -376,6 +408,28 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
             onBlur={() => void persistBalance("fee_a_receber")}
             disabled={loading}
           />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Margem média dos eventos (%)
+            {savingBalance === "margem_media_eventos" ? (
+              <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
+            ) : null}
+          </label>
+          <div className="relative">
+            <Input
+              inputMode="decimal"
+              placeholder="0,00"
+              className="pr-8"
+              value={margemMediaText}
+              onChange={(e) => setMargemMediaText(e.target.value)}
+              onBlur={() => void persistBalance("margem_media_eventos")}
+              disabled={loading}
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
+              %
+            </span>
+          </div>
         </div>
       </div>
 

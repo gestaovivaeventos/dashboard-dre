@@ -43,6 +43,10 @@ interface ApiKpis {
   margem: ApiKpiCard;
   fee_disponivel: ApiKpiCard;
   vvr: ApiKpiCard;
+  // Presente apenas para empresas do segmento Franquias Viva (preenchido
+  // manualmente em Configuracoes > Empresas > FEE / VVR). Em outros
+  // segmentos a chave nao vem da API e o card nao e renderizado.
+  margem_media_eventos?: ApiKpiCard;
 }
 
 interface ApiPrevistoRealizado {
@@ -159,7 +163,7 @@ function mapKpiCard(
 }
 
 function mapKpis(api: ApiKpis | undefined): KpiCard[] {
-  return [
+  const cards: KpiCard[] = [
     mapKpiCard(api?.receita, "Receita"),
     mapKpiCard(api?.despesas, "Despesas"),
     mapKpiCard(api?.resultado, "Resultado"),
@@ -171,6 +175,19 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     // VVR META, nao contra orcamento contabil.
     mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
   ];
+
+  // "Margem média dos eventos" so chega quando a empresa pertence ao
+  // segmento Franquias Viva. Sem comparativo (e um valor informado), entao
+  // omitComparisonSuffix=true para nao concatenar "vs orçamento".
+  if (api?.margem_media_eventos) {
+    cards.push(
+      mapKpiCard(api.margem_media_eventos, "Margem média dos eventos", {
+        omitComparisonSuffix: true,
+      }),
+    );
+  }
+
+  return cards;
 }
 
 // ─── Previsto x Realizado ──────────────────────────────────────────────────
