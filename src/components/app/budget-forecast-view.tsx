@@ -5,8 +5,10 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   ChevronsLeft,
   ChevronsRight,
+  ChevronsUpDown,
   Inbox,
   Loader2,
   Search,
@@ -211,6 +213,21 @@ export function BudgetForecastView({
       rows.filter((row) => row.hasChildren).reduce((acc, row) => ({ ...acc, [row.id]: true }), {}),
   );
 
+  const expandAllRows = () => {
+    setExpanded(
+      rows
+        .filter((row) => row.hasChildren)
+        .reduce((acc, row) => ({ ...acc, [row.id]: true }), {} as Record<string, boolean>),
+    );
+  };
+  const collapseAllRows = () => {
+    setExpanded(
+      rows
+        .filter((row) => row.hasChildren)
+        .reduce((acc, row) => ({ ...acc, [row.id]: false }), {} as Record<string, boolean>),
+    );
+  };
+
   const [selectedAccountId, setSelectedAccountId] = useState(rows[0]?.id ?? "");
   const [evolutionData, setEvolutionData] = useState<EvolutionPoint[]>([]);
   const [evolutionLoading, setEvolutionLoading] = useState(false);
@@ -408,7 +425,7 @@ export function BudgetForecastView({
 
       {/* Filters */}
       <div className="space-y-4 rounded-xl border bg-background p-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-wrap items-start gap-4">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">
               Segmento e empresas
@@ -427,6 +444,30 @@ export function BudgetForecastView({
               }}
               disabled={companies.length <= 1}
             />
+            <div className="flex gap-1 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={expandAllRows}
+                title="Expandir todas as linhas"
+                aria-label="Expandir todas as linhas"
+              >
+                <ChevronsUpDown className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={collapseAllRows}
+                title="Recolher todas as linhas"
+                aria-label="Recolher todas as linhas"
+              >
+                <ChevronsDownUp className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-1">
@@ -551,7 +592,12 @@ export function BudgetForecastView({
             </div>
           )}
 
-          <Button type="button" onClick={handleApply}>Aplicar</Button>
+          {/* Spacer simula altura do label para alinhar o Aplicar com a
+              linha dos outros botoes apos mudanca para items-start. */}
+          <div className="space-y-1">
+            <span aria-hidden className="block text-xs font-medium opacity-0">.</span>
+            <Button type="button" onClick={handleApply}>Aplicar</Button>
+          </div>
         </div>
       </div>
 
