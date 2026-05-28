@@ -167,6 +167,10 @@ function mapKpiCard(
 }
 
 function mapKpis(api: ApiKpis | undefined): KpiCard[] {
+  // Ordem dos cards: define a leitura visual da grade 4x2 do BI.
+  // Linha 1: Receita | Despesas | Resultado | Margem
+  // Linha 2: FEE disponível | Sobrevivência de caixa | VVR | Margem média
+  //          dos eventos (este ultimo so renderiza para Franquias Viva)
   const cards: KpiCard[] = [
     mapKpiCard(api?.receita, "Receita"),
     mapKpiCard(api?.despesas, "Despesas"),
@@ -175,15 +179,15 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     mapKpiCard(api?.fee_disponivel, "FEE disponível", {
       omitComparisonSuffix: true,
     }),
-    // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
-    // VVR META, nao contra orcamento contabil.
-    mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
     // Sobrevivencia de caixa: indicador derivado em meses (sem comparativo
     // contra orcamento — omitComparisonSuffix=true preserva o rotulo
     // "Cobertura do FEE" sem concatenar " vs orçamento").
     mapKpiCard(api?.sobrevivencia_caixa, "Sobrevivência de caixa", {
       omitComparisonSuffix: true,
     }),
+    // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
+    // VVR META, nao contra orcamento contabil.
+    mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
   ];
 
   // "Margem média dos eventos" so chega quando a empresa pertence ao

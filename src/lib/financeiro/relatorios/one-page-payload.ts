@@ -430,6 +430,23 @@ export async function buildOnePagePayload(
     if (v === 0) return "atencao";
     return "critico";
   };
+  // Farol da Sobrevivencia de caixa (em meses). Regra: >=6 verde, <=3
+  // vermelho, intermediario amarelo. Calculado a partir do valor ja
+  // computado (sobrevivenciaCaixaMeses); nao altera o calculo.
+  const statusSobrevivenciaCaixa = (n: number | null): KpiStatus => {
+    if (n === null) return "neutro";
+    if (n >= 6) return "positivo";
+    if (n <= 3) return "critico";
+    return "atencao";
+  };
+  // Farol da Margem media dos eventos (em %). Regra: >=15 verde, <=5
+  // vermelho, intermediario amarelo. So aplica ao valor informado.
+  const statusMargemMediaEventos = (v: number | null): KpiStatus => {
+    if (v === null) return "neutro";
+    if (v >= 15) return "positivo";
+    if (v <= 5) return "critico";
+    return "atencao";
+  };
 
   const formatBRL = (v: number) =>
     v.toLocaleString("pt-BR", {
@@ -577,7 +594,7 @@ export async function buildOnePagePayload(
           : null,
       variationValue: null,
       variationLabel: "Cobertura do FEE",
-      status: "neutro",
+      status: statusSobrevivenciaCaixa(sobrevivenciaCaixaMeses),
     },
   };
 
@@ -598,7 +615,7 @@ export async function buildOnePagePayload(
         margemMediaEventos !== null ? formatPctFn(margemMediaEventos) : null,
       variationValue: null,
       variationLabel: "Valor informado",
-      status: "neutro",
+      status: statusMargemMediaEventos(margemMediaEventos),
     };
   }
 

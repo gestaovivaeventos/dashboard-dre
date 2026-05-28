@@ -136,12 +136,16 @@ const MOCK_DATA: OnePageReportPreviewData = {
     notaGeral: 78,
   },
   kpis: [
+    // Linha 1: visao operacional do periodo
     { label: "Receita", value: "118,9 mil", variation: "+8,1%", sign: "Positivo" },
     { label: "Despesas", value: "85,6 mil", variation: "+7,0%", sign: "Atenção" },
     { label: "Resultado", value: "25,9 mil", variation: "+3,8%", sign: "Positivo" },
     { label: "Margem", value: "22,7%", variation: "-0,8", variationSuffix: "p.p.", sign: "Atenção" },
+    // Linha 2: visao de caixa/saude do negocio
     { label: "FEE disponível", value: "7,0 mil", variation: "Saldo atual", sign: "Neutro", omitComparisonSuffix: true },
+    { label: "Sobrevivência de caixa", value: "8 meses", variation: "Cobertura do FEE", sign: "Positivo", omitComparisonSuffix: true },
     { label: "VVR", value: "180 mil", variation: "+9,1%", sign: "Positivo", comparisonLabel: "meta" },
+    { label: "Margem média dos eventos", value: "18,0%", variation: "Valor informado", sign: "Positivo", omitComparisonSuffix: true },
   ],
   previstoRealizado: [
     { indicador: "Receita", realizado: 118.9, previsto: 110.0, unidade: "mil" },
@@ -1003,8 +1007,9 @@ export function OnePageReportPreview({
       {/* 8. Diagnostico principal (subi para logo apos o header — e a tese) */}
       <DiagnosticoBlock texto={data.diagnosticoPrincipal} />
 
-      {/* 2. KPI cards */}
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      {/* 2. KPI cards — grade 4x2 em desktop. Em telas menores o numero
+            de colunas reduz progressivamente para preservar legibilidade. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {data.kpis.map((kpi) => (
           <KpiCardItem key={kpi.label} kpi={kpi} />
         ))}
