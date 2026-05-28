@@ -729,12 +729,13 @@ export function DashboardDreView({
             });
           }
         });
-        // Reorganize: Company1 | Company2 | Var%(1vs2) | Company3 | Var%(2vs3) ...
+        // Reorganize: Company1 | Company2 | Var%(1vs2) | Company3 | Var%(1vs3) ...
+        // Var% sempre compara contra a primeira empresa selecionada (referência fixa).
         const orderedCols: typeof compCols = [];
         for (let i = 0; i < selectedCompanies.length; i++) {
           orderedCols.push({ type: "company", companyId: selectedCompanies[i].id, name: selectedCompanies[i].name });
           if (i > 0) {
-            orderedCols.push({ type: "var", leftId: selectedCompanies[i - 1].id, rightId: selectedCompanies[i].id });
+            orderedCols.push({ type: "var", leftId: selectedCompanies[0].id, rightId: selectedCompanies[i].id });
           }
         }
         const gridCols = orderedCols.length;

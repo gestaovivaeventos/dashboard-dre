@@ -754,10 +754,11 @@ export function CashFlowView({
           { type: "company"; companyId: string; name: string }
           | { type: "var"; leftId: string; rightId: string }
         > = [];
+        // Var% sempre compara contra a primeira empresa selecionada (referência fixa).
         for (let i = 0; i < selectedCompanies.length; i += 1) {
           orderedCols.push({ type: "company", companyId: selectedCompanies[i].id, name: selectedCompanies[i].name });
           if (i > 0) {
-            orderedCols.push({ type: "var", leftId: selectedCompanies[i - 1].id, rightId: selectedCompanies[i].id });
+            orderedCols.push({ type: "var", leftId: selectedCompanies[0].id, rightId: selectedCompanies[i].id });
           }
         }
         const gridCols = orderedCols.length;
