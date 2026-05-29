@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { createClient } from "@/lib/supabase/server";
+import { BudgetUpload } from "@/components/ctrl/budget-upload";
 
 interface BudgetRow {
   expense_type_id: string | null;
@@ -90,6 +91,7 @@ export default async function OrcamentoPage() {
   }
 
   const year = new Date().getFullYear();
+  const canEditBudget = hasCtrlRole(ctx, "csc", "admin");
   const { rows = [], error } = await getOrcamentoData(year);
 
   const grandOrcado = rows.reduce((s, r) => s + r.orcado, 0);
@@ -116,6 +118,8 @@ export default async function OrcamentoPage() {
       {error && (
         <p className="text-sm text-destructive">{error}</p>
       )}
+
+      {canEditBudget && <BudgetUpload defaultYear={year} />}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
