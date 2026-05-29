@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
-import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
+import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import type { DreAccountBase } from "@/lib/dashboard/dre";
@@ -38,14 +38,18 @@ export async function generateComparison(
     (companies ?? []).map((c: { id: string; name: string }) => [c.id, c.name])
   );
 
-  // 2. Fetch DRE accounts
-  const { data: rawAccounts } = await supabase
-    .from("dre_accounts")
-    .select("id, code, name, parent_id, level, type, is_summary, formula, sort_order, active")
-    .eq("active", true)
-    .order("code");
+  // 2. Fetch DRE accounts (paginado: o cap de 1000 do PostgREST truncava os
+  // codes "8"/"9" — ver fetchAllDreAccountRows).
+  const rawAccounts = await fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+    supabase
+      .from("dre_accounts")
+      .select("id, code, name, parent_id, level, type, is_summary, formula, sort_order, active")
+      .eq("active", true)
+      .order("code")
+      .range(from, to),
+  );
 
-  const accounts: DreAccountBase[] = filterCoreDreAccounts(rawAccounts ?? []);
+  const accounts: DreAccountBase[] = filterCoreDreAccounts(rawAccounts);
 
   // 3. Aggregate by company
   const { data: byCompanyAgg } = await supabase.rpc(

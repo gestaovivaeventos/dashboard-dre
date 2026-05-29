@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 import {
   buildDateRange,
   buildFilterState,
+  fetchAllDreAccountRows,
   resolveAllowedCompanyIds,
   type DreAccountBase,
 } from "@/lib/dashboard/dre";
@@ -49,9 +50,12 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: accountsData }, { data: kpisData }] = await Promise.all([
+  const [{ data: companiesData }, accountsData, { data: kpisData }] = await Promise.all([
     companiesQuery.order("name"),
-    supabase.from("dre_accounts").select("id,code").eq("active", true),
+    // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<Pick<DreAccountBase, "id" | "code">>((from, to) =>
+      supabase.from("dre_accounts").select("id,code").eq("active", true).order("code").range(from, to),
+    ),
     supabase
       .from("kpi_definitions")
       .select(
@@ -66,10 +70,7 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
     name: company.name as string,
   }));
   const accountCodeById = new Map(
-    ((accountsData ?? []) as Pick<DreAccountBase, "id" | "code">[]).map((account) => [
-      account.id,
-      account.code,
-    ]),
+    accountsData.map((account) => [account.id, account.code]),
   );
   const kpis = ((kpisData ?? []) as KpiDefinition[]) ?? [];
   if (kpis.length === 0) {

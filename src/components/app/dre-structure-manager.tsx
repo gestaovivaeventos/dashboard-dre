@@ -7,7 +7,6 @@ import {
   ChevronsUpDown,
   Copy,
   Loader2,
-  Lock,
   Pencil,
   Plus,
   Save,
@@ -474,10 +473,14 @@ export function DreStructureManager({
       showToast({ title: "Nome obrigatorio", variant: "destructive" });
       return;
     }
-    if (!createDraft.parent_id) {
+    // No plano global a conta pai e obrigatoria (mantem a estrutura validada
+    // intacta). Num plano customizado por empresa, deixar a conta pai vazia cria
+    // uma conta de nivel 1 (top-level) — usado para particularidades como as
+    // linhas extras da Viva Juiz de Fora.
+    if (!createDraft.parent_id && selectedCompanyId === null) {
       showToast({
         title: "Selecione uma conta pai",
-        description: "Novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
+        description: "No plano global, novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
         variant: "destructive",
       });
       return;
@@ -507,7 +510,7 @@ export function DreStructureManager({
         code,
         name,
         type: createDraft.type,
-        parent_id: parentId,
+        parent_id: parentId || null,
         is_summary: createDraft.type === "calculado" ? true : createDraft.is_summary,
         formula: createDraft.formula.trim() || null,
         sort_order: createDraft.sort_order,
@@ -598,14 +601,16 @@ export function DreStructureManager({
     });
   };
 
-  // Eligible parents = aggregator accounts that already have children. We
-  // exclude leaves (adding under a leaf would silently turn it into a parent
-  // and block editing of the former leaf) and calculated rows (those compute
-  // from formulas and shouldn't have children).
+  // Eligible parents = aggregator accounts. Includes rows that already have
+  // children OR were explicitly flagged as `is_summary` (totalizadora) — the
+  // latter covers freshly-created aggregators in a custom plan that don't have
+  // children yet but were created precisely to host new subaccounts. We still
+  // exclude pure leaves (turning a leaf into a parent would silently change
+  // its role) and calculated rows (those compute from formulas).
   const parentOptions = useMemo(
     () =>
       accounts
-        .filter((a) => !isLeaf(a.id) && a.type !== "calculado")
+        .filter((a) => a.type !== "calculado" && (!isLeaf(a.id) || a.is_summary))
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [accounts, byParent],
@@ -857,7 +862,11 @@ export function DreStructureManager({
                   onChange={(e) => setCreateDraft({ ...createDraft, parent_id: e.target.value })}
                   className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">(selecione uma conta agrupadora)</option>
+                  <option value="">
+                    {selectedCompanyId === null
+                      ? "(selecione uma conta agrupadora)"
+                      : "(nenhuma — criar conta de nivel 1 / top-level)"}
+                  </option>
                   {parentOptions.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.code} - {a.name}
@@ -865,7 +874,9 @@ export function DreStructureManager({
                   ))}
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  A nova conta sera criada como conta final desta conta agrupadora.
+                  {selectedCompanyId === null
+                    ? "A nova conta sera criada como conta final desta conta agrupadora."
+                    : "Com conta pai: criada como conta final dela. Sem conta pai: criada como conta de nivel 1 (top-level) deste plano da empresa."}
                 </p>
               </div>
               {createDraft.type === "calculado" && (
@@ -1109,17 +1120,6 @@ export function DreStructureManager({
                         <Save className="mr-2 h-3 w-3" />
                       )}
                       Salvar
-                    </Button>
-                  ) : hasChildren ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled
-                      title="Conta agrupadora — possui subcontas. Apenas contas finais sao editaveis."
-                    >
-                      <Lock className="mr-2 h-3 w-3" />
-                      Bloqueada
                     </Button>
                   ) : (
                     <Button type="button" size="sm" variant="outline" onClick={() => startEdit(account)}>

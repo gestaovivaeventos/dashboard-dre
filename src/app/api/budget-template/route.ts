@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { fetchAllDreAccountRows } from "@/lib/dashboard/dre";
 
 export async function GET(request: Request) {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -11,16 +12,19 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const companyName = url.searchParams.get("companyName") ?? "Empresa";
 
-  const { data: accounts } = await supabase
-    .from("dre_accounts")
-    .select("code,name,is_summary")
-    .eq("active", true)
-    .order("code");
+  // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+  const accounts = await fetchAllDreAccountRows<{ code: string; name: string; is_summary: boolean }>(
+    (from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select("code,name,is_summary")
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+  );
 
   // Only leaf accounts (non-summary) receive direct values
-  const leafAccounts = (accounts ?? []).filter(
-    (a) => !(a.is_summary as boolean),
-  );
+  const leafAccounts = accounts.filter((a) => !a.is_summary);
 
   const lines: string[] = [];
   lines.push("Empresa,Ano,Mes,Conta do DRE,Valor orcado");

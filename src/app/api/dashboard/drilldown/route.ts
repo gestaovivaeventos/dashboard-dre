@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
+import { getManagerialDrilldownRows } from "@/lib/dashboard/managerial-adjustments";
 
 export async function GET(request: Request) {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -27,8 +28,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const { data: companiesData } = await supabase.from("companies").select("id");
+  const { data: companiesData } = await supabase.from("companies").select("id,name");
   const allCompanyIds = (companiesData ?? []).map((company) => company.id as string);
+  const companyNameById = new Map(
+    (companiesData ?? []).map((company) => [company.id as string, company.name as string]),
+  );
   const allowedCompanyIds = await resolveAllowedCompanyIds(supabase, profile, allCompanyIds);
   const scopedCompanyIds =
     requestedCompanyIds.length > 0
@@ -45,6 +49,33 @@ export async function GET(request: Request) {
       totalValue: 0,
       aggregateTotal: 0,
     });
+  }
+
+  // Resolve o `code` da conta clicada (estável entre planos custom/global).
+  const targetCode = await (async () => {
+    const { data } = await supabase
+      .from("dre_accounts")
+      .select("code")
+      .eq("id", accountId)
+      .maybeSingle<{ code: string }>();
+    return data?.code ?? null;
+  })();
+
+  // Linhas gerenciais (ex.: VJF "12. Margens Ensino Médio") não têm
+  // category_mapping — o drilldown vem da camada de ajuste gerencial, não do
+  // RPC. Só dispara para a empresa configurada (ver managerial-adjustments.ts).
+  const managerial = getManagerialDrilldownRows({
+    companyIds: scopedCompanyIds,
+    code: targetCode,
+    companyName: companyNameById.get(scopedCompanyIds[0]) ?? "",
+    dateFrom,
+    dateTo,
+    search,
+    page,
+    pageSize,
+  });
+  if (managerial) {
+    return NextResponse.json(managerial);
   }
 
   // Roda em paralelo:
@@ -115,17 +146,9 @@ export async function GET(request: Request) {
   // (quando o mapping é global) quanto o id CLONADO (quando o mapping é
   // específico da empresa após um fork). Para casar com o accountId que o
   // cliente passou (sempre o do plano em escopo), resolvemos pelo `code` —
-  // estável entre planos. Sem isso, o aggregateTotal fica zerado e o
-  // dashboard alerta "valores divergentes" indevidamente.
-  const targetCode = await (async () => {
-    const { data } = await supabase
-      .from("dre_accounts")
-      .select("code")
-      .eq("id", accountId)
-      .maybeSingle<{ code: string }>();
-    return data?.code ?? null;
-  })();
-
+  // estável entre planos (já resolvido como `targetCode` acima). Sem isso, o
+  // aggregateTotal fica zerado e o dashboard alerta "valores divergentes"
+  // indevidamente.
   let aggregateTotal = 0;
   if (targetCode) {
     const idsInAggregate = aggregateRows.map((r) => r.dre_account_id);

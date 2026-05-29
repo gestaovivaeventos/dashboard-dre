@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { fetchAllDreAccountRows } from "@/lib/dashboard/dre";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
 interface Params {
@@ -130,10 +131,11 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   // Load DRE accounts for matching (by code, exact name, or normalized name)
-  const { data: dreAccounts } = await db
-    .from("dre_accounts")
-    .select("id,code,name")
-    .eq("active", true);
+  // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+  const dreAccounts = await fetchAllDreAccountRows<{ id: string; code: string; name: string }>(
+    (from, to) =>
+      db.from("dre_accounts").select("id,code,name").eq("active", true).order("code").range(from, to),
+  );
 
   function normalize(s: string): string {
     return s.toLowerCase().trim()
@@ -145,11 +147,11 @@ export async function POST(request: Request, { params }: Params) {
   const accountByCode = new Map<string, string>();
   const accountByExactName = new Map<string, string>();
   const accountByNormName = new Map<string, string>();
-  const allAccounts = (dreAccounts ?? []).map((a) => ({
-    id: a.id as string,
-    code: a.code as string,
-    name: a.name as string,
-    norm: normalize(a.name as string),
+  const allAccounts = dreAccounts.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    norm: normalize(a.name),
   }));
 
   allAccounts.forEach((a) => {

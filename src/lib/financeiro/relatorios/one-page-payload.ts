@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   buildDashboardRows,
+  fetchAllDreAccountRows,
   filterCoreDreAccounts,
   type DreAccountBase,
 } from "@/lib/dashboard/dre";
@@ -169,15 +170,16 @@ export async function buildOnePagePayload(
   }
   const isFranquiasViva = segmentSlug === "franquias-viva";
 
-  const { data: rawAccounts } = await supabase
-    .from("dre_accounts")
-    .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
-    .eq("active", true)
-    .order("code");
-
-  const allAccounts = (rawAccounts ?? []) as Array<
-    DreAccountBase & { company_id: string | null }
-  >;
+  // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+  const allAccounts = await fetchAllDreAccountRows<DreAccountBase & { company_id: string | null }>(
+    (from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+  );
   const hasCustomPlan = allAccounts.some((a) => a.company_id === companyId);
   const scopedAccounts: DreAccountBase[] = allAccounts
     .filter((a) =>
