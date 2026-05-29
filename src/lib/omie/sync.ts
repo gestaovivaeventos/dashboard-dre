@@ -1038,6 +1038,108 @@ async function syncEntries({
     }
   }
 
+  // 3.2 Roteamento por projeto (qualquer empresa com linhas em project_mapping).
+  //     Usado por empresas do segmento Real Estate (ex.: SGX), onde cada
+  //     imovel / empreendimento tem uma conta DRE propria e o lancamento e
+  //     classificado no Omie via cCodProjeto em vez de categoria.
+  //
+  //     Regra:
+  //       - Entry sem cCodProjeto             → mantem mapeamento por categoria (fallback)
+  //       - Entry com projeto NAO mapeado     → mantem mapeamento por categoria (fallback)
+  //       - Entry com projeto mapeado:
+  //           type=receita  → roteia para dre_account_revenue_id
+  //           type=despesa  → roteia para dre_account_expense_id
+  //
+  //     Mesmo padrao da regra de Fundos (Viva): reescreve o category_code do
+  //     entry para uma sintetica `__proj_<projeto>_<rec|desp>` e cria/atualiza
+  //     a linha correspondente em category_mapping (delete + insert idempotente).
+  //     Isso preserva o pipeline do dashboard_dre_aggregate sem mudar a RPC.
+  //
+  //     Empresas sem linhas em project_mapping ignoram este bloco inteiro —
+  //     comportamento atual preservado para Viva, Hero, Feat, etc.
+  {
+    const { data: projectMappings } = await supabase
+      .from("project_mapping")
+      .select("omie_project_code,dre_account_revenue_id,dre_account_expense_id")
+      .eq("company_id", companyId);
+
+    if (projectMappings && projectMappings.length > 0) {
+      const byProject = new Map<string, { rev: string | null; exp: string | null }>(
+        projectMappings.map((p: {
+          omie_project_code: string;
+          dre_account_revenue_id: string | null;
+          dre_account_expense_id: string | null;
+        }) => [
+          p.omie_project_code,
+          { rev: p.dre_account_revenue_id, exp: p.dre_account_expense_id },
+        ]),
+      );
+
+      const projectMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
+      const newEntries: typeof entries = [];
+
+      for (const entry of entries) {
+        const raw = entry.raw_json ?? {};
+        const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
+          ? (raw.detalhes as Record<string, unknown>)
+          : raw;
+        const projeto = getString(det, ["cCodProjeto"]);
+
+        if (!projeto) {
+          newEntries.push(entry);
+          continue;
+        }
+
+        const mapping = byProject.get(projeto);
+        if (!mapping) {
+          // projeto preenchido mas nao mapeado → fallback para categoria
+          newEntries.push(entry);
+          continue;
+        }
+
+        const targetDreId = entry.type === "receita" ? mapping.rev : mapping.exp;
+        if (!targetDreId) {
+          // mapeamento incompleto (faltando conta para esse tipo) → fallback
+          newEntries.push(entry);
+          continue;
+        }
+
+        const suffix = entry.type === "receita" ? "rec" : "desp";
+        const newCode = `__proj_${projeto}_${suffix}`;
+        const redirected = Object.assign({}, entry, { category_code: newCode });
+        newEntries.push(redirected);
+
+        if (!projectMappingsNeeded.has(newCode)) {
+          projectMappingsNeeded.set(newCode, {
+            code: newCode,
+            dreId: targetDreId,
+            name: `Projeto ${projeto} (${entry.type})`,
+          });
+        }
+      }
+
+      entries.length = 0;
+      entries.push(...newEntries);
+
+      if (projectMappingsNeeded.size > 0) {
+        const codes = Array.from(projectMappingsNeeded.keys());
+        await supabase
+          .from("category_mapping")
+          .delete()
+          .eq("company_id", companyId)
+          .in("omie_category_code", codes);
+
+        const rows = Array.from(projectMappingsNeeded.values()).map((m) => ({
+          omie_category_code: m.code,
+          omie_category_name: m.name,
+          dre_account_id: m.dreId,
+          company_id: companyId,
+        }));
+        await supabase.from("category_mapping").insert(rows);
+      }
+    }
+  }
+
   // 4. Deduplicar por omie_id (ultima ocorrencia vence).
   const deduped = new Map<string, NormalizedEntry>();
   for (const entry of entries) {

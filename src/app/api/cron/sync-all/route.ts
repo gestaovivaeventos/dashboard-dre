@@ -6,6 +6,7 @@ import {
   sendUnmappedEntriesAlertEmail,
 } from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
+import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -129,6 +130,35 @@ export async function GET(request: Request) {
     }
   }
 
+  // Sincroniza planilha Google Sheets da Feat Producoes (receitas/impostos
+  // por evento). Roda apos os syncs do Omie — falha aqui nao impede o
+  // restante. So executa se as env vars estiverem configuradas.
+  let featSheetsSync: {
+    ok: boolean;
+    rowsRead?: number;
+    periodsUpserted?: number;
+    error?: string;
+  } | null = null;
+  if (process.env.FEAT_PRODUCOES_SHEET_ID && process.env.FEAT_PRODUCOES_SHEET_TAB) {
+    try {
+      const result = await syncFeatSheetsToManualValues();
+      featSheetsSync = {
+        ok: true,
+        rowsRead: result.rowsRead,
+        periodsUpserted: result.periodsUpserted,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Falha desconhecida no sync da planilha Feat.";
+      featSheetsSync = { ok: false, error: message };
+      failures.push({
+        companyId: "feat-sheets",
+        companyName: "Feat Producoes (planilha)",
+        error: message,
+      });
+    }
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -142,5 +172,6 @@ export async function GET(request: Request) {
     unmappedCategories: unmappedCategories.length,
     unmappedEntries: unmappedEntries.length,
     results,
+    featSheetsSync,
   });
 }

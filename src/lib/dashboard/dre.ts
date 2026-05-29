@@ -61,7 +61,13 @@ export interface DashboardRow extends DreAccountBase {
 
 export function isCoreDreCode(code: string) {
   const topLevel = Number(code.split(".")[0]);
-  return Number.isInteger(topLevel) && topLevel >= 1 && topLevel <= 11;
+  if (!Number.isInteger(topLevel) || topLevel < 1) return false;
+  // 20..24 sao contas de fluxo de caixa no plano global (Emprestimos,
+  // Investimentos, Dividendos, Aportes, Fluxo de Caixa) — nao entram na DRE.
+  // 1..19 ficam disponiveis para planos custom per-company (ex.: SGX usa
+  // 1..15 para Locacao/Operacional/Projetos com 4 subresultados).
+  if (topLevel >= 20 && topLevel <= 24) return false;
+  return topLevel <= 19;
 }
 
 export function filterCoreDreAccounts(accounts: DreAccountBase[]) {

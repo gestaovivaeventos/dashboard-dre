@@ -50,14 +50,14 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
     await Promise.all([
       supabase
         .from("dre_accounts")
-        .select("id,code,name,active,company_id")
+        .select("id,code,name,active,company_id,type,is_summary")
         .eq("active", true)
         .is("company_id", null)
         .order("code"),
       companyIds.length > 0
         ? supabase
             .from("dre_accounts")
-            .select("id,code,name,active,company_id")
+            .select("id,code,name,active,company_id,type,is_summary")
             .eq("active", true)
             .in("company_id", companyIds)
             .order("code")
@@ -83,6 +83,8 @@ export default async function MapeamentoPage({ params }: MapeamentoPageProps) {
       code: account.code as string,
       name: account.name as string,
       company_id: (account.company_id as string | null) ?? null,
+      type: (account.type as "receita" | "despesa" | "calculado" | "misto") ?? "misto",
+      is_summary: Boolean(account.is_summary),
     }))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 

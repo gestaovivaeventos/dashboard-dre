@@ -67,6 +67,30 @@ export async function POST(request: Request) {
 
   // Processar cada mapeamento
   const codes = mappings.map((m) => m.omieCategoryCode.trim());
+  const clearedCodes = mappings
+    .filter((m) => !m.dreAccountId)
+    .map((m) => m.omieCategoryCode.trim());
+
+  // Identifica codes desmapeados que tem mapeamento GLOBAL (company_id IS NULL).
+  // Estes precisam de uma linha company-scoped com dre_account_id = NULL
+  // (tombstone) para sobrescrever o global — apenas deletar a linha
+  // company-scoped faria o global ressurgir na proxima carga.
+  //
+  // Codes sem global mapping nao precisam de tombstone — DELETE basta.
+  const codesNeedingTombstone = new Set<string>();
+  if (clearedCodes.length > 0) {
+    const { data: globalMappings, error: globalErr } = await supabase
+      .from("category_mapping")
+      .select("omie_category_code")
+      .is("company_id", null)
+      .in("omie_category_code", clearedCodes);
+    if (globalErr) {
+      return NextResponse.json({ error: globalErr.message }, { status: 400 });
+    }
+    (globalMappings ?? []).forEach((g) =>
+      codesNeedingTombstone.add(g.omie_category_code as string),
+    );
+  }
 
   // Deletar mapeamentos existentes para os códigos alterados
   const { error: deleteError } = await supabase
@@ -78,13 +102,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: deleteError.message }, { status: 400 });
   }
 
-  // Inserir novos mapeamentos (apenas os que têm conta DRE)
+  // Inserir novos mapeamentos (com conta DRE) + tombstones (sem conta) para
+  // codes que precisam sobrescrever um mapeamento global.
   const toInsert = mappings
-    .filter((m) => m.dreAccountId)
+    .filter(
+      (m) =>
+        m.dreAccountId ||
+        codesNeedingTombstone.has(m.omieCategoryCode.trim()),
+    )
     .map((m) => ({
       omie_category_code: m.omieCategoryCode.trim(),
       omie_category_name: m.omieCategoryName.trim() || m.omieCategoryCode.trim(),
-      dre_account_id: m.dreAccountId,
+      dre_account_id: m.dreAccountId ?? null,
       company_id: companyId,
       updated_by: user.id,
     }));
@@ -98,10 +127,13 @@ export async function POST(request: Request) {
     }
   }
 
+  const savedNonNull = toInsert.filter((r) => r.dre_account_id !== null).length;
+  const tombstones = toInsert.filter((r) => r.dre_account_id === null).length;
   revalidatePath("/(app)", "layout");
   return NextResponse.json({
     ok: true,
-    saved: toInsert.length,
-    cleared: codes.length - toInsert.length,
+    saved: savedNonNull,
+    cleared: clearedCodes.length,
+    tombstones,
   });
 }

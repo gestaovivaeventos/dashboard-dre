@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCcw, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FileSpreadsheet, Loader2, RefreshCcw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +76,12 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [expandedCompanyId, setExpandedCompanyId] = useState<string | null>(null);
   const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | "success" | "error">("all");
+  const [featSheetsSyncing, setFeatSheetsSyncing] = useState(false);
+  const [featSheetsResult, setFeatSheetsResult] = useState<{
+    rowsRead: number;
+    periodsUpserted: number;
+    warnings: string[];
+  } | null>(null);
 
   const loadCompanies = useCallback(async () => {
     setLoading(true);
@@ -142,6 +148,37 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
     setSyncingByCompany((previous) => ({ ...previous, [companyId]: false }));
   };
 
+  const handleFeatSheetsSync = async () => {
+    setFeatSheetsSyncing(true);
+    setStatusMessage(null);
+    const response = await fetch("/api/feat-sheets/sync", { method: "POST" });
+    const payload = (await response.json()) as {
+      error?: string;
+      rowsRead?: number;
+      periodsUpserted?: number;
+      warnings?: string[];
+    };
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao sincronizar planilha Feat",
+        description: payload.error ?? "Nao foi possivel sincronizar.",
+        variant: "destructive",
+      });
+    } else {
+      setFeatSheetsResult({
+        rowsRead: payload.rowsRead ?? 0,
+        periodsUpserted: payload.periodsUpserted ?? 0,
+        warnings: payload.warnings ?? [],
+      });
+      showToast({
+        title: "Planilha Feat sincronizada",
+        description: `${payload.rowsRead ?? 0} eventos lidos, ${payload.periodsUpserted ?? 0} meses atualizados.`,
+        variant: "success",
+      });
+    }
+    setFeatSheetsSyncing(false);
+  };
+
   const handleFullSync = async (companyId: string, isFirstTime: boolean) => {
     const message = isFirstTime
       ? "Primeira sincronizacao — sera buscado historico desde 2022. Isso pode levar varios minutos. Continuar?"
@@ -205,6 +242,53 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
           </p>
         </CardContent>
       </Card>
+
+      {segmentSlug === "feat" ? (
+        <Card>
+          <CardHeader className="space-y-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileSpreadsheet className="h-5 w-5" />
+              Planilha Feat Producoes (Google Sheets)
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Le os eventos da planilha e atualiza receitas/impostos das contas
+              Resultado dos Eventos, ISS, PIS, COFINS, IRPJ e Contribuicao Social.
+              Demais contas continuam vindo do Omie.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void handleFeatSheetsSync()}
+              disabled={featSheetsSyncing}
+            >
+              {featSheetsSyncing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+              )}
+              Sincronizar Planilha
+            </Button>
+            {featSheetsResult ? (
+              <div className="space-y-1 rounded-md bg-muted/40 p-3 text-xs">
+                <p>
+                  <span className="font-medium">{featSheetsResult.rowsRead}</span> eventos lidos
+                  · <span className="font-medium">{featSheetsResult.periodsUpserted}</span> meses
+                  atualizados
+                </p>
+                {featSheetsResult.warnings.length > 0 ? (
+                  <ul className="list-disc space-y-0.5 pl-4 text-amber-700">
+                    {featSheetsResult.warnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {companies.map((company) => {

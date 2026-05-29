@@ -8,10 +8,11 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
 import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
+import { ProjectMappingTab, type ProjectMappingAccountOption } from "@/components/app/project-mapping-tab";
 import { SegmentSelector } from "@/components/app/segment-selector";
 import type { Segment } from "@/lib/supabase/types";
 
-type Tab = "omie" | "cashflow" | "budget";
+type Tab = "omie" | "cashflow" | "budget" | "projects";
 
 interface CompanyOption {
   id: string;
@@ -25,6 +26,10 @@ interface DreAccountOption {
   // null = conta do plano global; uuid = conta customizada de uma empresa.
   // Usado para filtrar quais contas aparecem como opcao para cada empresa.
   company_id?: string | null;
+  // type e is_summary alimentam a aba "Projetos" — opcionais aqui porque
+  // outras abas (Omie/Cashflow/Budget) so usam id/code/name/company_id.
+  type?: "receita" | "despesa" | "calculado" | "misto";
+  is_summary?: boolean;
 }
 
 interface MappingRow {
@@ -397,6 +402,14 @@ export function MappingManager({
         >
           Linhas do Orcamento
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={tab === "projects" ? "default" : "outline"}
+          onClick={() => setTab("projects")}
+        >
+          Projetos
+        </Button>
       </div>
 
       <Card>
@@ -464,6 +477,27 @@ export function MappingManager({
           companyId={companyId}
           search={search}
           cashFlowAccounts={cashFlowAccounts}
+        />
+      ) : tab === "projects" ? (
+        <ProjectMappingTab
+          companyId={companyId}
+          search={search}
+          // Projeto-mapping aceita apenas contas analiticas do plano custom da
+          // empresa. availableDreAccounts ja aplica o escopo "plano custom"
+          // (quando a empresa tem um) e o filtro por type acontece dentro
+          // do ProjectMappingTab. is_summary e type vem opcionais — quando
+          // faltam, type default 'misto' e is_summary default true (sao
+          // filtrados das dropdowns).
+          dreAccounts={availableDreAccounts
+            .filter((a) => a.company_id === companyId)
+            .map((a): ProjectMappingAccountOption => ({
+              id: a.id,
+              code: a.code,
+              name: a.name,
+              type: a.type ?? "misto",
+              is_summary: a.is_summary ?? true,
+              company_id: a.company_id ?? null,
+            }))}
         />
       ) : tab === "omie" ? (
       <Card>
