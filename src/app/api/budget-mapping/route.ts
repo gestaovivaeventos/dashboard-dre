@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
+import { fetchAllDreAccountRows } from "@/lib/dashboard/dre";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
 interface BudgetMappingRow {
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     { data: mappings, error: mappingsErr },
     { data: rawCounts, error: rawErr },
     { data: companyOmieMappings, error: companyOmieErr },
-    { data: allAccounts, error: allAccountsErr },
+    allAccounts,
   ] = await Promise.all([
     supabase
       .from("budget_account_mappings")
@@ -69,25 +70,23 @@ export async function GET(request: Request) {
       .select("dre_account_id")
       .eq("company_id", companyId)
       .not("dre_account_id", "is", null),
-    supabase
-      .from("dre_accounts")
-      .select("id,code,name,active")
-      .eq("active", true),
+    // Paginado: o cap de 1000 do PostgREST truncava ids de contas (codes "8"/"9")
+    // que a empresa referencia, quebrando o lookup accountById (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<{ id: string; code: string; name: string; active: boolean }>((from, to) =>
+      supabase.from("dre_accounts").select("id,code,name,active").eq("active", true).order("code").range(from, to),
+    ),
   ]);
 
   if (mappingsErr) return NextResponse.json({ error: mappingsErr.message }, { status: 400 });
   if (rawErr) return NextResponse.json({ error: rawErr.message }, { status: 400 });
   if (companyOmieErr) return NextResponse.json({ error: companyOmieErr.message }, { status: 400 });
-  if (allAccountsErr) return NextResponse.json({ error: allAccountsErr.message }, { status: 400 });
 
   const labelCounts = new Map<string, number>();
   ((rawCounts ?? []) as Array<{ label: string }>).forEach((row) => {
     labelCounts.set(row.label, (labelCounts.get(row.label) ?? 0) + 1);
   });
 
-  const accountById = new Map(
-    ((allAccounts ?? []) as Array<{ id: string; code: string; name: string }>).map((a) => [a.id, a]),
-  );
+  const accountById = new Map(allAccounts.map((a) => [a.id, a]));
 
   // Set de contas DRE que esta empresa "usa": tudo que ja foi referenciado nos
   // mapeamentos Omie/DRE da empresa ou em mapeamentos de orcamento ja salvos.

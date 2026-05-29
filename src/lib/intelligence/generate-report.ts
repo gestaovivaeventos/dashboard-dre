@@ -3,7 +3,7 @@ import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
+import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { REPORT_SYSTEM_PROMPT, getSegmentReportPrompt } from "@/lib/intelligence/prompts";
 import { renderReportEmail, renderNarrativeEmail } from "@/lib/intelligence/render-email";
@@ -75,14 +75,18 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
         ? companies.map((c: { id: string; name: string }) => c.name).join(", ")
         : "Empresas Selecionadas";
 
-  // 2. Fetch DRE accounts
-  const { data: rawAccounts } = await supabase
-    .from("dre_accounts")
-    .select("id, code, name, parent_id, level, type, is_summary, formula, sort_order, active")
-    .eq("active", true)
-    .order("code");
+  // 2. Fetch DRE accounts (paginado: o cap de 1000 do PostgREST truncava os
+  // codes "8"/"9" — ver fetchAllDreAccountRows).
+  const rawAccounts = await fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+    supabase
+      .from("dre_accounts")
+      .select("id, code, name, parent_id, level, type, is_summary, formula, sort_order, active")
+      .eq("active", true)
+      .order("code")
+      .range(from, to),
+  );
 
-  const accounts: DreAccountBase[] = filterCoreDreAccounts(rawAccounts ?? []);
+  const accounts: DreAccountBase[] = filterCoreDreAccounts(rawAccounts);
 
   // 3. Aggregate current period
   const { data: currentAgg } = await supabase.rpc("dashboard_dre_aggregate", {

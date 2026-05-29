@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
   SCOPED_DRE_ACCOUNTS_SELECT,
+  fetchAllDreAccountRows,
   scopeDreAccounts,
   type RawDreAccount,
 } from "@/lib/dashboard/dre";
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
   const [
     { data: categories, error: categoriesError },
     { data: mappings, error: mappingsError },
-    { data: dreAccountsData, error: dreAccountsError },
+    dreAccountsData,
   ] = await Promise.all([
     supabase
       .from("omie_categories")
@@ -50,10 +51,16 @@ export async function GET(request: Request) {
     // Carrega TODO o plano DRE ativo (global + custom de qualquer empresa) —
     // precisamos das duas pontas para conseguir traduzir um dre_account_id
     // global em seu equivalente clonado no plano custom da empresa selecionada.
-    supabase
-      .from("dre_accounts")
-      .select(SCOPED_DRE_ACCOUNTS_SELECT)
-      .eq("active", true),
+    // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver
+    // fetchAllDreAccountRows).
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+    ),
   ]);
 
   if (categoriesError) {
@@ -61,9 +68,6 @@ export async function GET(request: Request) {
   }
   if (mappingsError) {
     return NextResponse.json({ error: mappingsError.message }, { status: 400 });
-  }
-  if (dreAccountsError) {
-    return NextResponse.json({ error: dreAccountsError.message }, { status: 400 });
   }
 
   // Escopo do plano DRE para esta empresa (mesma regra do Dashboard / Fluxo
@@ -77,7 +81,7 @@ export async function GET(request: Request) {
   // `dreAccountId` apontando para um id que NAO aparece no dropdown (apos o
   // fix de dedup), fazendo o vinculo parecer "perdido" na tela.
   const dreScope = scopeDreAccounts(
-    (dreAccountsData ?? []) as RawDreAccount[],
+    dreAccountsData,
     [companyId],
   );
   const accountById = new Map(

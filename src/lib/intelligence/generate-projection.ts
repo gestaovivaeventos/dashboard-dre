@@ -3,7 +3,7 @@ import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-import { buildDashboardRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
+import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { PROJECTION_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
 import { renderProjectionEmail } from "@/lib/intelligence/render-email";
@@ -26,12 +26,16 @@ export async function generateProjection({
     .maybeSingle<{ name: string }>();
   const companyName = companyData?.name ?? "Empresa";
 
-  const { data: accountsData } = await supabase
-    .from("dre_accounts")
-    .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
-    .eq("active", true)
-    .order("code");
-  const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
+  // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+  const accountsData = await fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+    supabase
+      .from("dre_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .eq("active", true)
+      .order("code")
+      .range(from, to),
+  );
+  const accounts = filterCoreDreAccounts(accountsData);
 
   // Fetch last 12 months of data
   const now = new Date();

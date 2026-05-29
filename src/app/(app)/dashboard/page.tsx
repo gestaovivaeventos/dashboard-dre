@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { getManagerialAmountsByCode } from "@/lib/dashboard/managerial-adjustments";
 import { readActiveSegmentSlug } from "@/lib/context/active-context";
 import type { Segment } from "@/lib/supabase/types";
 
@@ -15,6 +16,7 @@ import {
   buildDateRange,
   buildFilterState,
   buildVisibleBuckets,
+  fetchAllDreAccountRows,
   scopeDreAccounts,
   resolveAllowedCompanyIds,
   type DreAccountBase,
@@ -85,13 +87,18 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: accountsData }] = await Promise.all([
+  const [{ data: companiesData }, accountsData] = await Promise.all([
     companiesQuery.order("name"),
-    supabase
-      .from("dre_accounts")
-      .select(SCOPED_DRE_ACCOUNTS_SELECT)
-      .eq("active", true)
-      .order("code"),
+    // Paginado: o plano (global + todos os custom) já passa de 1000 linhas e
+    // o cap do PostgREST truncava os codes "8"/"9"/"9.x" (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+    ),
   ]);
 
   const companies = (companiesData ?? []).map((company) => ({
@@ -152,7 +159,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
   // reusem EXATAMENTE a mesma lógica e o valor de "Resultado do Exercício"
   // não divirja entre telas (ver comentário do bloco em dre.ts).
   const scope = scopeDreAccounts(
-    (accountsData ?? []) as RawDreAccount[],
+    accountsData,
     filter.selectedCompanyIds,
   );
   const accounts = scope.coreAccounts;
@@ -166,6 +173,14 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       companyIds: filter.selectedCompanyIds,
       dateFrom: bucket.dateFrom,
       dateTo: bucket.dateTo,
+      // Ajustes gerenciais pontuais (ex.: VJF linha 12 "Margens Ensino Médio").
+      // Só tem efeito quando a empresa selecionada tem config; demais empresas
+      // e o consolidado recebem mapa vazio (ver managerial-adjustments.ts).
+      extraAmountsByCode: getManagerialAmountsByCode(
+        filter.selectedCompanyIds,
+        bucket.dateFrom,
+        bucket.dateTo,
+      ),
     });
 
   const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([

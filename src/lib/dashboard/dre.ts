@@ -59,9 +59,17 @@ export interface DashboardRow extends DreAccountBase {
   hasChildren: boolean;
 }
 
+// "Core DRE" = linhas de resultado (top-level 1..19). O plano global encerra o
+// DRE no code 11 (Resultado do Exercício), mas planos customizados por empresa
+// estendem o DRE com linhas próprias acima de 11 — ex.: Viva Juiz de Fora (12
+// Margens Ensino Médio, 13 Resultado do Exercício Ajustado) e SGX (12-15
+// Projetos / Resultados). O bloco do Fluxo de Caixa começa em 20 (Empréstimos,
+// Investimentos, Dividendos, Aportes, Fluxo de Caixa) e segue EXCLUÍDO do
+// dashboard DRE — por isso o teto é 19, não "qualquer code". Empresas sem
+// codes 12-19 não são afetadas.
 export function isCoreDreCode(code: string) {
   const topLevel = Number(code.split(".")[0]);
-  return Number.isInteger(topLevel) && topLevel >= 1 && topLevel <= 11;
+  return Number.isInteger(topLevel) && topLevel >= 1 && topLevel <= 19;
 }
 
 export function filterCoreDreAccounts(accounts: DreAccountBase[]) {
@@ -354,6 +362,45 @@ export const SCOPED_DRE_ACCOUNTS_SELECT =
 export type RawDreAccount = DreAccountBase & { company_id: string | null };
 
 /**
+ * Carrega TODAS as linhas de uma query de `dre_accounts` paginando em blocos.
+ *
+ * POR QUÊ: o PostgREST do projeto tem `db-max-rows = 1000` (limite HARD do
+ * servidor — `.limit()`/`.range()` com janela maior NÃO o ultrapassam). Como
+ * `dre_accounts` soma o plano global + os planos custom de TODAS as empresas,
+ * o total já passou de 1000 linhas. Uma query única `.eq("active",true)
+ * .order("code")` era truncada silenciosamente nas primeiras 1000 linhas — e,
+ * por ordenar `code` como STRING, os primeiros cortados eram exatamente "8",
+ * "9" e "9.x" (vêm depois de "1".."7.x" na ordem lexicográfica). Isso sumia
+ * com "Receitas Não Operacionais" (9) e "Lucro Operacional" (8) do dashboard
+ * e zerava o "Resultado do Exercício" (fórmula `8+9-10`).
+ *
+ * A paginação por `range` DESLOCA a janela, então cada página respeita o cap
+ * de 1000 mas no conjunto trazemos todas as linhas. NÃO altera nenhuma lógica
+ * de cálculo: apenas devolve o conjunto completo que o código já esperava.
+ *
+ * `makeQuery(from, to)` deve montar a query JÁ com `.range(from, to)` aplicado.
+ */
+export async function fetchAllDreAccountRows<T>(
+  makeQuery: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await makeQuery(from, from + PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(`Falha ao carregar dre_accounts: ${error.message}`);
+    }
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+/**
  * Versão pura de `loadScopedDreAccounts`: recebe a linha crua de `dre_accounts`
  * (já buscada pelo chamador, possivelmente em paralelo com outras queries)
  * e produz o plano escopado + tradutor de ids.
@@ -422,13 +469,18 @@ export async function loadScopedDreAccounts(
   supabase: SupabaseClient,
   selectedCompanyIds: string[],
 ): Promise<ScopedDreAccounts> {
-  const { data: dreAccountsData } = await supabase
-    .from("dre_accounts")
-    .select(SCOPED_DRE_ACCOUNTS_SELECT)
-    .eq("active", true)
-    .order("code");
+  // Pagina para não esbarrar no cap de 1000 linhas do PostgREST (ver
+  // fetchAllDreAccountRows) — senão os codes "8"/"9"/"9.x" são truncados.
+  const dreAccountsData = await fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+    supabase
+      .from("dre_accounts")
+      .select(SCOPED_DRE_ACCOUNTS_SELECT)
+      .eq("active", true)
+      .order("code")
+      .range(from, to),
+  );
 
-  return scopeDreAccounts((dreAccountsData ?? []) as RawDreAccount[], selectedCompanyIds);
+  return scopeDreAccounts(dreAccountsData, selectedCompanyIds);
 }
 
 /**
@@ -463,6 +515,12 @@ export async function aggregateDreRows(params: {
   companyIds: string[];
   dateFrom: string;
   dateTo: string;
+  // Ajustes gerenciais PONTUAIS por `code` (ex.: linha "12. Margens Ensino
+  // Médio" da Viva Juiz de Fora). Somados ao mapa de amounts ANTES de
+  // `buildDashboardRows`, de modo que linhas `calculado` que referenciem o
+  // code (ex.: "13" = `11+12`) já incorporem o efeito. Opcional: chamadores
+  // que não passam nada (Fluxo de Caixa etc.) ficam idênticos.
+  extraAmountsByCode?: Map<string, number>;
 }): Promise<DashboardRow[]> {
   const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate", {
     p_company_ids: params.companyIds,
@@ -476,6 +534,16 @@ export async function aggregateDreRows(params: {
     data as Array<{ dre_account_id: string; amount: number | string | null }> | null,
     params.scope.translateToScopedId,
   );
+  if (params.extraAmountsByCode && params.extraAmountsByCode.size > 0) {
+    const scopedIdByCode = new Map(
+      params.scope.scopedAccounts.map((account) => [account.code, account.id]),
+    );
+    params.extraAmountsByCode.forEach((amount, code) => {
+      const scopedId = scopedIdByCode.get(code);
+      if (!scopedId) return;
+      amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + amount);
+    });
+  }
   return buildDashboardRows(params.scope.coreAccounts, amounts).rows;
 }
 

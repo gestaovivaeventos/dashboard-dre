@@ -12,6 +12,7 @@ import {
   buildDateRange,
   buildFilterState,
   buildVisibleBuckets,
+  fetchAllDreAccountRows,
   filterCoreDreAccounts,
   resolveAllowedCompanyIds,
   type DreAccountBase,
@@ -110,13 +111,17 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: accountsData }] = await Promise.all([
+  const [{ data: companiesData }, accountsData] = await Promise.all([
     companiesQuery.order("name"),
-    supabase
-      .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
-      .eq("active", true)
-      .order("code"),
+    // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<DreAccountBase & { company_id: string | null }>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+    ),
   ]);
 
   const companies = (companiesData ?? []).map((company) => ({
@@ -171,9 +176,7 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   // plano dela; caso contrario, cai no plano global (company_id IS NULL).
   // Sem isso, contas que existem em ambos os planos aparecem duplicadas
   // na grade do Budget/Forecast.
-  const allRawDreAccounts = (accountsData ?? []) as Array<
-    DreAccountBase & { company_id: string | null }
-  >;
+  const allRawDreAccounts = accountsData;
   const scopedCompanyId =
     filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
   const companyHasCustomPlan = scopedCompanyId

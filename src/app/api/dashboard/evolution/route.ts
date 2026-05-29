@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
   buildDashboardRows,
+  fetchAllDreAccountRows,
   filterCoreDreAccounts,
   resolveAllowedCompanyIds,
   type DreAccountBase,
@@ -32,13 +33,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Parametros obrigatorios: accountId e endDate." }, { status: 400 });
   }
 
-  const [{ data: companiesData }, { data: accountsData }] = await Promise.all([
+  const [{ data: companiesData }, accountsData] = await Promise.all([
     supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
-    supabase
-      .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
-      .eq("active", true)
-      .order("code"),
+    // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+    ),
   ]);
   const companies = (companiesData ?? []).map((company) => ({
     id: company.id as string,
@@ -57,7 +62,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ points: [] });
   }
 
-  const accounts = filterCoreDreAccounts((accountsData ?? []) as DreAccountBase[]);
+  const accounts = filterCoreDreAccounts(accountsData);
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
   const ranges = Array.from({ length: 12 }).map((_, index) =>
     monthRange(new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - (11 - index), 1))),

@@ -473,10 +473,14 @@ export function DreStructureManager({
       showToast({ title: "Nome obrigatorio", variant: "destructive" });
       return;
     }
-    if (!createDraft.parent_id) {
+    // No plano global a conta pai e obrigatoria (mantem a estrutura validada
+    // intacta). Num plano customizado por empresa, deixar a conta pai vazia cria
+    // uma conta de nivel 1 (top-level) — usado para particularidades como as
+    // linhas extras da Viva Juiz de Fora.
+    if (!createDraft.parent_id && selectedCompanyId === null) {
       showToast({
         title: "Selecione uma conta pai",
-        description: "Novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
+        description: "No plano global, novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
         variant: "destructive",
       });
       return;
@@ -506,7 +510,7 @@ export function DreStructureManager({
         code,
         name,
         type: createDraft.type,
-        parent_id: parentId,
+        parent_id: parentId || null,
         is_summary: createDraft.type === "calculado" ? true : createDraft.is_summary,
         formula: createDraft.formula.trim() || null,
         sort_order: createDraft.sort_order,
@@ -858,7 +862,11 @@ export function DreStructureManager({
                   onChange={(e) => setCreateDraft({ ...createDraft, parent_id: e.target.value })}
                   className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">(selecione uma conta agrupadora)</option>
+                  <option value="">
+                    {selectedCompanyId === null
+                      ? "(selecione uma conta agrupadora)"
+                      : "(nenhuma — criar conta de nivel 1 / top-level)"}
+                  </option>
                   {parentOptions.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.code} - {a.name}
@@ -866,7 +874,9 @@ export function DreStructureManager({
                   ))}
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  A nova conta sera criada como conta final desta conta agrupadora.
+                  {selectedCompanyId === null
+                    ? "A nova conta sera criada como conta final desta conta agrupadora."
+                    : "Com conta pai: criada como conta final dela. Sem conta pai: criada como conta de nivel 1 (top-level) deste plano da empresa."}
                 </p>
               </div>
               {createDraft.type === "calculado" && (

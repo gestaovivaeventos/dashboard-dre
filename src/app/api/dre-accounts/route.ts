@@ -142,7 +142,9 @@ export async function POST(request: Request) {
   }
 
   const companyId = body.company_id ?? null;
-  const parentId = body.parent_id ?? null;
+  // Trata string vazia (vinda do select "selecione uma conta pai") como ausencia
+  // de pai → conta de nivel 1 (top-level).
+  const parentId = body.parent_id && body.parent_id.length > 0 ? body.parent_id : null;
   const formula = body.formula?.trim() || null;
   const isSummary = type === "calculado" ? true : Boolean(body.is_summary);
 
@@ -153,32 +155,37 @@ export async function POST(request: Request) {
     );
   }
 
-  // Per the editor rule, new accounts are always created as leaves and must
-  // attach to an existing parent in the same scope. Top-level creation is
-  // disallowed (use the global plan for that).
-  if (!parentId) {
+  // Regra do editor: no plano GLOBAL novas contas sao sempre folhas e precisam
+  // se anexar a uma conta pai existente — criar contas de nivel 1 no plano
+  // global mudaria a estrutura validada compartilhada por todas as empresas
+  // sem plano customizado. Ja num plano CUSTOMIZADO por empresa (companyId !=
+  // null) permitimos contas de nivel 1 (top-level), pois cada plano e isolado
+  // e nao afeta outras empresas (ex.: linhas extras da Viva Juiz de Fora).
+  if (!parentId && !companyId) {
     return NextResponse.json(
-      { error: "Selecione uma conta pai. Novas contas so podem ser criadas no ultimo nivel da estrutura." },
+      { error: "No plano global, novas contas so podem ser criadas no ultimo nivel da estrutura. Selecione uma conta pai." },
       { status: 400 },
     );
   }
 
-  const { data: parent, error: parentError } = await supabase
-    .from("dre_accounts")
-    .select("id,company_id")
-    .eq("id", parentId)
-    .maybeSingle<{ id: string; company_id: string | null }>();
-  if (parentError) {
-    return NextResponse.json({ error: parentError.message }, { status: 400 });
-  }
-  if (!parent) {
-    return NextResponse.json({ error: "Conta pai nao encontrada." }, { status: 400 });
-  }
-  if ((parent.company_id ?? null) !== companyId) {
-    return NextResponse.json(
-      { error: "Conta pai pertence a outro escopo (global ou empresa diferente)." },
-      { status: 400 },
-    );
+  if (parentId) {
+    const { data: parent, error: parentError } = await supabase
+      .from("dre_accounts")
+      .select("id,company_id")
+      .eq("id", parentId)
+      .maybeSingle<{ id: string; company_id: string | null }>();
+    if (parentError) {
+      return NextResponse.json({ error: parentError.message }, { status: 400 });
+    }
+    if (!parent) {
+      return NextResponse.json({ error: "Conta pai nao encontrada." }, { status: 400 });
+    }
+    if ((parent.company_id ?? null) !== companyId) {
+      return NextResponse.json(
+        { error: "Conta pai pertence a outro escopo (global ou empresa diferente)." },
+        { status: 400 },
+      );
+    }
   }
 
   const insertPayload = {

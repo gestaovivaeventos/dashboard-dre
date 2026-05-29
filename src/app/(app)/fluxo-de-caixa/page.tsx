@@ -8,6 +8,7 @@ import {
   SCOPED_DRE_ACCOUNTS_SELECT,
   aggregateDreRows,
   aggregateDreRowsByCompany,
+  fetchAllDreAccountRows,
   findResultadoExercicio,
   scopeDreAccounts,
   type RawDreAccount,
@@ -91,18 +92,23 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: cashFlowAccountsData }, { data: dreAccountsData }] = await Promise.all([
+  const [{ data: companiesData }, { data: cashFlowAccountsData }, dreAccountsData] = await Promise.all([
     companiesQuery.order("name"),
     supabase
       .from("cash_flow_accounts")
       .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active,company_id")
       .eq("active", true)
       .order("sort_order"),
-    supabase
-      .from("dre_accounts")
-      .select(SCOPED_DRE_ACCOUNTS_SELECT)
-      .eq("active", true)
-      .order("code"),
+    // Paginado: evita o truncamento em 1000 linhas do PostgREST que sumia
+    // com os codes "8"/"9" do DRE (ver fetchAllDreAccountRows).
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true)
+        .order("code")
+        .range(from, to),
+    ),
   ]);
 
   const companies = (companiesData ?? []).map((company) => ({
@@ -169,7 +175,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   // no Dashboard DRE, e a única forma de garantir isso através do tempo é
   // compartilhando o mesmo caminho de código.
   const dreScope = scopeDreAccounts(
-    (dreAccountsData ?? []) as RawDreAccount[],
+    dreAccountsData,
     filter.selectedCompanyIds,
   );
 
