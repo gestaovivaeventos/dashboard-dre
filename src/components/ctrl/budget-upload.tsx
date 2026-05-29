@@ -25,6 +25,7 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
+  const [createdTypes, setCreatedTypes] = useState<string[]>([]);
 
   const years = [defaultYear - 1, defaultYear, defaultYear + 1].map(String);
 
@@ -35,6 +36,7 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
     }
     setSubmitting(true);
     setError(null);
+    setCreatedTypes([]);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -53,10 +55,16 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
         return;
       }
       const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+      const extras: string[] = [];
+      if (data.createdTypes?.length) extras.push(`${data.createdTypes.length} tipo(s) criado(s)`);
+      if (data.skippedBlankType) extras.push(`${data.skippedBlankType} linha(s) sem tipo ignorada(s)`);
       showToast({
         title: `Orçamento ${data.year} importado`,
-        description: `${data.entriesInserted} lançamentos — total ${fmt.format(data.totalAmount)}.`,
+        description:
+          `${data.entriesInserted} lançamentos — total ${fmt.format(data.totalAmount)}.` +
+          (extras.length ? ` (${extras.join("; ")})` : ""),
       });
+      if (data.createdTypes?.length) setCreatedTypes(data.createdTypes);
       setFile(null);
       router.refresh();
     } catch (e) {
@@ -73,8 +81,11 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
       <h2 className="mb-4 text-base font-semibold">Subir orçamento base</h2>
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Planilha .xlsx com colunas <strong>Setor</strong>, <strong>Tipo de Despesa</strong> e os 12 meses.
-          O upload <strong>substitui todo o orçamento do ano selecionado</strong>.
+          Planilha .xlsx com colunas <strong>Setor</strong>, <strong>Tipo de Despesa</strong>,{" "}
+          <strong>Data</strong> (mês) e <strong>Valor orçado</strong> — uma linha por mês. Também aceita
+          o modelo gerado pelo sistema (Setor, Tipo de Despesa, Jan…Dez). Tipos de despesa que não
+          existirem no cadastro são <strong>criados automaticamente</strong>. O upload{" "}
+          <strong>substitui todo o orçamento do ano selecionado</strong>.
         </p>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -132,6 +143,18 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
                 <strong>Tipos de despesa não encontrados:</strong> {error.unknownTypes.join(", ")}
               </p>
             )}
+          </div>
+        )}
+
+        {createdTypes.length > 0 && (
+          <div className="rounded-md border border-sky-500/40 bg-sky-500/5 p-3 text-sm">
+            <p className="font-medium text-sky-700">
+              {createdTypes.length} tipo(s) de despesa criado(s) automaticamente
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {createdTypes.join(", ")}. Revise em Admin → Tipos de Despesa se algum for duplicado de
+              um nome já existente.
+            </p>
           </div>
         )}
       </div>
