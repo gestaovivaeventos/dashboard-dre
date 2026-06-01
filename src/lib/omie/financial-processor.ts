@@ -97,6 +97,13 @@ export interface ProcessedFinancialEntry {
   category_code: string | null;
   category_name?: string | null;
 
+  // Projeto Omie (cCodProjeto). Null quando o lancamento nao tem projeto
+  // vinculado. O `project_name` e resolvido pelo sync via catalogo de
+  // projetos (ListarProjetos) — o processador so conhece o codigo. Usado
+  // pela regra da Feat Producoes (projetos fora da DRE, exceto "N.O.").
+  project_code: string | null;
+  project_name?: string | null;
+
   // Departamento Omie (rateio por unidade de negocio). Null quando o
   // lancamento nao esta vinculado a nenhum departamento. O filtro da DRE
   // por departamento (configurado por empresa) usa esse campo.
@@ -661,6 +668,11 @@ export function processMovimento(
       "numero_documento",
     ]);
 
+    // Projeto vinculado (cCodProjeto). Carregado em TODAS as entries geradas
+    // por este movimento — o nome e resolvido depois, no sync. Usado pela
+    // regra de exclusao de DRE da Feat Producoes.
+    const project_code = getString(record as Record<string, unknown>, ["cCodProjeto"]);
+
     // ====================================================================
     // REGRA 3: VERIFICADOR_RATEIO
     // ====================================================================
@@ -778,6 +790,7 @@ export function processMovimento(
               ano_pgto,
               mes_pagamento,
               category_code: parcela.categoria,
+              project_code,
               department_code: dp.code,
               raw_json: rawRecord,
               processing_metadata: { ...baseMetadata },
@@ -796,6 +809,7 @@ export function processMovimento(
             ano_pgto,
             mes_pagamento,
             category_code: parcela.categoria,
+            project_code,
             department_code: singleDeptCode,
             raw_json: rawRecord,
             processing_metadata: { ...baseMetadata },
@@ -855,6 +869,7 @@ export function processMovimento(
           ano_pgto,
           mes_pagamento,
           category_code: categoryCode,
+          project_code,
           department_code: dp.code,
           raw_json: rawRecord,
           processing_metadata: { ...baseMetadataNoRateio },
@@ -877,6 +892,7 @@ export function processMovimento(
       ano_pgto,
       mes_pagamento,
       category_code: categoryCode,
+      project_code,
       department_code: singleDeptCode,
       raw_json: rawRecord,
       processing_metadata: { ...baseMetadataNoRateio },
@@ -1089,6 +1105,13 @@ function processBaixasDoTitulo(
         "numero_documento",
       ]);
 
+      // Projeto vinculado: o projeto e propriedade do titulo, entao herdamos
+      // do pai quando disponivel; a propria baixa tambem costuma trazer o
+      // cCodProjeto (fallback p/ sync incremental que so pegou a baixa).
+      const project_code =
+        getString(metaSource as Record<string, unknown>, ["cCodProjeto"]) ??
+        getString(baixa as Record<string, unknown>, ["cCodProjeto"]);
+
       // Prioridade: nCodMovCC (id do movimento bancario) — mesma chave
       // que processMovimento usa, garantindo que parent e baixa colapsem
       // em UM unico omie_id quando representam a mesma transacao real.
@@ -1201,6 +1224,7 @@ function processBaixasDoTitulo(
                 ano_pgto: year,
                 mes_pagamento: month,
                 category_code: r.categoria,
+                project_code,
                 department_code: dp.code,
                 raw_json: rawBaixa as Record<string, unknown>,
                 processing_metadata: { ...baseMetaRateio },
@@ -1219,6 +1243,7 @@ function processBaixasDoTitulo(
               ano_pgto: year,
               mes_pagamento: month,
               category_code: r.categoria,
+              project_code,
               department_code: singleDeptCode,
               raw_json: rawBaixa as Record<string, unknown>,
               processing_metadata: { ...baseMetaRateio },
@@ -1247,6 +1272,7 @@ function processBaixasDoTitulo(
               ano_pgto: year,
               mes_pagamento: month,
               category_code: categoryCode,
+              project_code,
               department_code: dp.code,
               raw_json: rawBaixa as Record<string, unknown>,
               processing_metadata: { ...baseMetaSemRateio },
@@ -1265,6 +1291,7 @@ function processBaixasDoTitulo(
             ano_pgto: year,
             mes_pagamento: month,
             category_code: categoryCode,
+            project_code,
             department_code: singleDeptCode,
             raw_json: rawBaixa as Record<string, unknown>,
             processing_metadata: { ...baseMetaSemRateio },

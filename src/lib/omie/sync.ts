@@ -17,6 +17,8 @@ const OMIE_CLIENTES_URL =
   "https://app.omie.com.br/api/v1/geral/clientes/";
 const OMIE_DEPARTAMENTOS_URL =
   "https://app.omie.com.br/api/v1/geral/departamentos/";
+const OMIE_PROJETOS_URL =
+  "https://app.omie.com.br/api/v1/geral/projetos/";
 const REQUEST_INTERVAL_MS = 350;
 
 // ===========================================================================
@@ -39,6 +41,11 @@ interface NormalizedEntry {
   mes_pagamento: number;
   category_code: string | null;
   category_name?: string | null;
+  // Projeto Omie: codigo (cCodProjeto) extraido pelo processador e nome
+  // resolvido via catalogo (ListarProjetos). Usado pela regra de exclusao
+  // de DRE da Feat Producoes. Null quando nao ha projeto vinculado.
+  project_code: string | null;
+  project_name?: string | null;
   department_code: string | null;
   supplier_customer: string | null;
   document_number: string | null;
@@ -212,40 +219,70 @@ async function omieRequest(
   params: Record<string, unknown>,
   lastRequestRef: { value: number },
 ) {
-  const elapsed = Date.now() - lastRequestRef.value;
-  if (lastRequestRef.value > 0 && elapsed < REQUEST_INTERVAL_MS) {
-    await sleep(REQUEST_INTERVAL_MS - elapsed);
+  // Retry em erros TRANSIENTES da Omie: HTTP 5xx (servidor sobrecarregado —
+  // comum em sync de historico completo, onde ListarMovimentos pagina muitas
+  // vezes) e falhas de rede (fetch failed / timeout). Leituras como
+  // ListarMovimentos/Categorias/Projetos sao idempotentes, entao re-tentar e
+  // seguro. Erros de negocio (faultstring / HTTP 4xx) NAO sao re-tentados —
+  // sao deterministicos. Backoff: 600ms, 1.2s, 2.4s.
+  const MAX_ATTEMPTS = 4;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const elapsed = Date.now() - lastRequestRef.value;
+    if (lastRequestRef.value > 0 && elapsed < REQUEST_INTERVAL_MS) {
+      await sleep(REQUEST_INTERVAL_MS - elapsed);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          call,
+          app_key: appKey,
+          app_secret: appSecret,
+          param: [params],
+        }),
+        cache: "no-store",
+      });
+    } catch (err) {
+      // Falha de rede (undici "fetch failed", ECONNRESET, etc.) — transiente.
+      lastRequestRef.value = Date.now();
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === MAX_ATTEMPTS) throw lastError;
+      await sleep(600 * 2 ** (attempt - 1));
+      continue;
+    }
+    lastRequestRef.value = Date.now();
+
+    if (!response.ok) {
+      // 5xx = transiente (re-tenta); 4xx = erro definitivo (aborta ja).
+      if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
+        lastError = new Error(`Omie HTTP ${response.status} em ${call}.`);
+        await sleep(600 * 2 ** (attempt - 1));
+        continue;
+      }
+      throw new Error(`Omie HTTP ${response.status} em ${call}.`);
+    }
+
+    const data = (await response.json()) as Record<string, unknown>;
+    const faultString =
+      getString(data, ["faultstring", "error_description", "message"]) ??
+      getString(data, ["descricao_status"]);
+    if (
+      data.faultcode ||
+      (faultString && String(faultString).toLowerCase().includes("erro"))
+    ) {
+      throw new Error(faultString ?? `Erro retornado pela Omie em ${call}.`);
+    }
+
+    return data;
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      call,
-      app_key: appKey,
-      app_secret: appSecret,
-      param: [params],
-    }),
-    cache: "no-store",
-  });
-  lastRequestRef.value = Date.now();
-
-  if (!response.ok) {
-    throw new Error(`Omie HTTP ${response.status} em ${call}.`);
-  }
-
-  const data = (await response.json()) as Record<string, unknown>;
-  const faultString =
-    getString(data, ["faultstring", "error_description", "message"]) ??
-    getString(data, ["descricao_status"]);
-  if (
-    data.faultcode ||
-    (faultString && String(faultString).toLowerCase().includes("erro"))
-  ) {
-    throw new Error(faultString ?? `Erro retornado pela Omie em ${call}.`);
-  }
-
-  return data;
+  // Inalcancavel na pratica (o loop retorna ou lanca), mas satisfaz o tipo.
+  throw lastError ?? new Error(`Falha ao chamar Omie em ${call}.`);
 }
 
 // ===========================================================================
@@ -401,6 +438,77 @@ async function fetchClientNames(
 }
 
 // ===========================================================================
+// Fetch project catalog (ListarProjetos)
+// ===========================================================================
+// A Omie expoe os projetos cadastrados via `geral/projetos/`. ListarMovimentos
+// so traz o cCodProjeto (codigo numerico) — para conhecer o NOME do projeto
+// (necessario p/ a regra da Feat Producoes: projetos "N.O." entram na DRE,
+// demais ficam de fora) resolvemos codigo -> nome aqui.
+//
+// Retorna Map<codigo, nome>. Em caso de falha (sem permissao na API, etc.)
+// devolve o que tiver — o sync continua e os entries ficam sem project_name
+// (tratados como "tem projeto e nao e N.O." pela regra, default seguro).
+async function fetchProjectCatalog(
+  appKey: string,
+  appSecret: string,
+  lastRequestRef: { value: number },
+): Promise<Map<string, string>> {
+  const projectsByCode = new Map<string, string>();
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    try {
+      const response = await omieRequest(
+        OMIE_PROJETOS_URL,
+        "ListarProjetos",
+        appKey,
+        appSecret,
+        { pagina: page, registros_por_pagina: 500 },
+        lastRequestRef,
+      );
+      const records = extractArray(response);
+      for (const record of records) {
+        // ListarProjetos retorna { nCodProj, cCodIntProj, cNome, cInativo }.
+        // nCodProj e o codigo numerico que casa com cCodProjeto dos movimentos.
+        // Mantemos chaves alternativas por robustez a variacoes de payload.
+        const code = getString(record, [
+          "nCodProj",
+          "codigo",
+          "nCodProjeto",
+          "codInt",
+          "cCodIntProj",
+        ]);
+        const name = getString(record, [
+          "cNome",
+          "nome",
+          "cNomeProjeto",
+          "nome_projeto",
+          "descricao",
+        ]);
+        if (code && name) {
+          projectsByCode.set(code, name);
+        }
+      }
+      totalPages = Number(
+        getString(response, [
+          "total_de_paginas",
+          "total_paginas",
+          "nTotPaginas",
+        ]) ?? "1",
+      );
+      if (!Number.isFinite(totalPages) || totalPages < 1) totalPages = page;
+      page += 1;
+    } catch {
+      // API indisponivel/sem permissao: retorna o catalogo parcial.
+      break;
+    }
+  }
+
+  return projectsByCode;
+}
+
+// ===========================================================================
 // Fetch department catalog (ListarDepartamentos)
 // ===========================================================================
 // A Omie expoe os departamentos cadastrados em cada empresa via a API
@@ -412,15 +520,28 @@ export interface OmieDepartment {
   name: string;
 }
 
+interface DepartmentCatalog {
+  /** Todos os departamentos do catalogo Omie (folhas + agregadores). */
+  all: OmieDepartment[];
+  /**
+   * Codigos detectados como AGREGADORES (nos com filhos na arvore). O chamador
+   * decide o que fazer: por padrao sao escondidos da DRE, mas um agregador que
+   * recebe lancamentos diretamente deve ser resgatado (ver syncCompanyDepartments).
+   */
+  aggregatorCodes: Set<string>;
+}
+
 async function fetchDepartmentCatalog(
   appKey: string,
   appSecret: string,
   lastRequestRef: { value: number },
-): Promise<OmieDepartment[]> {
-  // Coletamos TODOS os departamentos do catalogo, incluindo agregadores.
-  // Depois filtramos para deixar apenas FOLHAS — agregadores (ex.: "Sua Empresa"
-  // que e raiz da arvore VIVA GO/HERO) nao recebem lancamentos diretamente
-  // e por isso nao fazem sentido como opcao de filtro na DRE.
+): Promise<DepartmentCatalog> {
+  // Coletamos TODOS os departamentos do catalogo, incluindo agregadores, e
+  // devolvemos quais sao agregadores (nos com filhos). Agregadores como
+  // "Sua Empresa" (raiz da arvore VIVA GO/HERO) normalmente nao recebem
+  // lancamentos diretamente e por isso nao fazem sentido como opcao de filtro;
+  // mas um no com filhos pode AINDA receber lancamentos diretos (ex.: CUBO na
+  // Feat Producoes), entao a decisao final de esconder fica com o chamador.
   //
   // A Omie expoe a hierarquia de varias formas dependendo do plano. Detectamos
   // agregadores por DOIS criterios (qualquer um marca como agregador):
@@ -511,13 +632,17 @@ async function fetchDepartmentCatalog(
     }
   }
 
-  // Dedup por code e mantem apenas folhas.
+  // Dedup por code, retornando TODOS os departamentos + o conjunto de
+  // agregadores. O filtro de "esconder agregadores" e aplicado pelo chamador,
+  // que resgata os que estao em uso (recebem lancamentos).
   const byCode = new Map<string, OmieDepartment>();
   for (const d of all) {
-    if (hasChildren.has(d.code)) continue;
     if (!byCode.has(d.code)) byCode.set(d.code, { code: d.code, name: d.name });
   }
-  return Array.from(byCode.values());
+  return {
+    all: Array.from(byCode.values()),
+    aggregatorCodes: hasChildren,
+  };
 }
 
 /**
@@ -551,7 +676,35 @@ export async function syncCompanyDepartments(companyId: string) {
   const appKey = decryptSecret(company.omie_app_key);
   const appSecret = decryptSecret(company.omie_app_secret);
   const lastRequestRef = { value: 0 };
-  const departments = await fetchDepartmentCatalog(appKey, appSecret, lastRequestRef);
+  const catalog = await fetchDepartmentCatalog(appKey, appSecret, lastRequestRef);
+
+  // Codigos que efetivamente recebem lancamentos (DISTINCT no banco, sem o cap
+  // de 1000 linhas do PostgREST). Usado para RESGATAR agregadores em uso: um no
+  // com filhos que tambem recebe lancamentos diretos (ex.: CUBO) deve continuar
+  // selecionavel na DRE, em vez de ser escondido como simples agregador.
+  const usedCodes = new Set<string>();
+  {
+    const { data: usedRows, error: usedError } = await supabase.rpc(
+      "company_used_department_codes",
+      { p_company_id: companyId },
+    );
+    if (usedError) {
+      // Best-effort: se falhar, caimos no comportamento antigo (so folhas).
+      console.warn("[syncCompanyDepartments] used codes warning:", usedError.message);
+    } else {
+      for (const row of (usedRows ?? []) as { department_code: string | null }[]) {
+        if (row.department_code) usedCodes.add(row.department_code);
+      }
+    }
+  }
+
+  // Mantem um departamento quando: e folha (nao e agregador) OU, sendo
+  // agregador, recebe lancamentos diretamente (esta em uso). Isso esconde
+  // apenas o no raiz sintetico ("Sua Empresa"), sem perder departamentos
+  // operacionais que tem sub-departamentos mas tambem lancamentos proprios.
+  const departments = catalog.all.filter(
+    (d) => !catalog.aggregatorCodes.has(d.code) || usedCodes.has(d.code),
+  );
 
   const now = new Date().toISOString();
 
@@ -830,6 +983,15 @@ async function syncEntries({
     fetchCategoryCatalog(appKey, appSecret, lastRequestRef),
     fetchClientNames(appKey, appSecret, lastRequestRef),
   ]);
+
+  // Catalogo de projetos buscado SEQUENCIALMENTE (fora do Promise.all acima)
+  // de proposito: o rate-limiter da Omie e compartilhado por `lastRequestRef`
+  // e, sob concorrencia, rajadas escapam do intervalo de 350ms. Em sync de
+  // historico completo (muitas paginas de ListarMovimentos) um endpoint
+  // concorrente a mais derrubava a Omie com HTTP 500. Como ListarProjetos so
+  // alimenta a regra da Feat (e e tolerante a falha — retorna Map vazio), nao
+  // ha perda em busca-lo depois, sem competir com a carga pesada.
+  const projectCatalog = await fetchProjectCatalog(appKey, appSecret, lastRequestRef);
 
   // 2. Enriquecer os dados brutos ANTES de processar.
   //    A API ListarMovimentos NAO retorna nome do cliente nem observacao.
@@ -1138,6 +1300,24 @@ async function syncEntries({
         await supabase.from("category_mapping").insert(rows);
       }
     }
+  }
+
+  // 3.3 Resolver o NOME do projeto vinculado (project_name) a partir do
+  //     catalogo Omie (ListarProjetos). O processador ja preencheu
+  //     project_code; aqui anexamos o nome. Setamos project_name em TODAS as
+  //     entries (null quando nao ha projeto ou o codigo nao consta no
+  //     catalogo) para manter o conjunto de colunas uniforme no upsert em
+  //     lote do PostgREST.
+  //
+  //     Esses campos sao consumidos pela regra de DRE da Feat Producoes
+  //     (RPCs dashboard_dre_aggregate/_by_company/drilldown via
+  //     dre_entry_excluded_by_project). Para as demais empresas os campos
+  //     ficam gravados mas inertes (a flag dre_exclude_linked_projects e
+  //     false), entao nada muda no comportamento delas.
+  for (const entry of entries) {
+    entry.project_name = entry.project_code
+      ? projectCatalog.get(entry.project_code) ?? null
+      : null;
   }
 
   // 4. Deduplicar por omie_id (ultima ocorrencia vence).
