@@ -89,7 +89,7 @@ async function performBudgetVerification(
   // Budget accumulated Jan → referenceMonth
   const { data: budgetUpTo } = await supabase
     .from("ctrl_budget")
-    .select("amount")
+    .select("amount, realized")
     .eq("sector_id", sectorId)
     .eq("expense_type_id", expenseTypeId)
     .eq("period_year", referenceYear)
@@ -99,17 +99,25 @@ async function performBudgetVerification(
     (s, b) => s + Number(b.amount),
     0
   );
+  const realizedUpToMonth = (budgetUpTo ?? []).reduce(
+    (s, b) => s + Number(b.realized ?? 0),
+    0
+  );
 
   // Budget annual Jan → Dec
   const { data: budgetAnnual } = await supabase
     .from("ctrl_budget")
-    .select("amount")
+    .select("amount, realized")
     .eq("sector_id", sectorId)
     .eq("expense_type_id", expenseTypeId)
     .eq("period_year", referenceYear);
 
   const budgetedAnnual = (budgetAnnual ?? []).reduce(
     (s, b) => s + Number(b.amount),
+    0
+  );
+  const realizedAnnual = (budgetAnnual ?? []).reduce(
+    (s, b) => s + Number(b.realized ?? 0),
     0
   );
 
@@ -129,8 +137,9 @@ async function performBudgetVerification(
     0
   );
 
-  const currentBalance = budgetedUpToMonth - totalApproved;
-  const futureBalance = budgetedAnnual - totalApproved;
+  // Realizado total = importado da planilha + requisições já aprovadas.
+  const currentBalance = budgetedUpToMonth - realizedUpToMonth - totalApproved;
+  const futureBalance = budgetedAnnual - realizedAnnual - totalApproved;
 
   // Rule 1: currentBalance >= amount → auto approve
   if (currentBalance >= amount) {

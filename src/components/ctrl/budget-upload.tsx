@@ -26,6 +26,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
   const [createdTypes, setCreatedTypes] = useState<string[]>([]);
+  const [removedTypes, setRemovedTypes] = useState<string[]>([]);
+  const [keptTypesWithRequests, setKeptTypesWithRequests] = useState<string[]>([]);
 
   const years = [defaultYear - 1, defaultYear, defaultYear + 1].map(String);
 
@@ -37,6 +39,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
     setSubmitting(true);
     setError(null);
     setCreatedTypes([]);
+    setRemovedTypes([]);
+    setKeptTypesWithRequests([]);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -57,14 +61,18 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
       const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       const extras: string[] = [];
       if (data.createdTypes?.length) extras.push(`${data.createdTypes.length} tipo(s) criado(s)`);
+      if (data.removedTypes?.length) extras.push(`${data.removedTypes.length} tipo(s) removido(s)`);
       if (data.skippedBlankType) extras.push(`${data.skippedBlankType} linha(s) sem tipo ignorada(s)`);
+      const realizadoMsg = data.totalRealized ? ` — realizado ${fmt.format(data.totalRealized)}` : "";
       showToast({
         title: `Orçamento ${data.year} importado`,
         description:
-          `${data.entriesInserted} lançamentos — total ${fmt.format(data.totalAmount)}.` +
+          `${data.entriesInserted} lançamentos — orçado ${fmt.format(data.totalAmount)}${realizadoMsg}.` +
           (extras.length ? ` (${extras.join("; ")})` : ""),
       });
       if (data.createdTypes?.length) setCreatedTypes(data.createdTypes);
+      if (data.removedTypes?.length) setRemovedTypes(data.removedTypes);
+      if (data.keptTypesWithRequests?.length) setKeptTypesWithRequests(data.keptTypesWithRequests);
       setFile(null);
       router.refresh();
     } catch (e) {
@@ -154,6 +162,27 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
             <p className="mt-1 text-muted-foreground">
               {createdTypes.join(", ")}. Revise em Admin → Tipos de Despesa se algum for duplicado de
               um nome já existente.
+            </p>
+          </div>
+        )}
+
+        {removedTypes.length > 0 && (
+          <div className="rounded-md border border-muted-foreground/30 bg-muted/30 p-3 text-sm">
+            <p className="font-medium">
+              {removedTypes.length} tipo(s) de despesa removido(s) (não constavam no orçamento)
+            </p>
+            <p className="mt-1 text-muted-foreground">{removedTypes.join(", ")}.</p>
+          </div>
+        )}
+
+        {keptTypesWithRequests.length > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+            <p className="font-medium text-amber-700">
+              {keptTypesWithRequests.length} tipo(s) mantido(s) por terem requisições vinculadas
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {keptTypesWithRequests.join(", ")}. Não estavam no orçamento, mas têm requisições e por
+              isso não foram removidos.
             </p>
           </div>
         )}
