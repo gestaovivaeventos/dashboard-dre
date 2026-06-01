@@ -229,3 +229,23 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
 ] as const;
+
+/**
+ * Chaves dos itens de menu visíveis ao perfil 'franqueado'.
+ *
+ * O franqueado é mapeado para o dreRole mais restritivo ('gestor_unidade' em
+ * deriveDreRole), que esconderia o Business Intelligence (restrito a
+ * admin/gestor_hero). Como a sidebar filtra por dreRole e não conhece o perfil
+ * unificado, a visibilidade do menu para o franqueado é decidida por esta lista.
+ *
+ * Deve espelhar a whitelist de rotas FRANQUEADO_BASE_PATHS em
+ * `@/lib/auth/access.ts`. Ao liberar uma nova tela para o franqueado, atualize
+ * os dois lugares.
+ */
+export const FRANQUEADO_NAV_KEYS: ReadonlySet<string> = new Set([
+  "fin-dashboard",
+  "fin-fluxo",
+  "fin-budget",
+  "fin-kpis",
+  "fin-bi",
+]);

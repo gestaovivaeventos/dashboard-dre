@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import {
+  FRANQUEADO_NAV_KEYS,
   NAV_GROUPS,
   type NavGroup,
   type NavGroupId,
@@ -21,6 +22,12 @@ interface NavLinksProps {
   collapsed?: boolean;
   onNavigate?: () => void;
   contractsOnly?: boolean;
+  /**
+   * Perfil 'franqueado': cai no dreRole 'gestor_unidade', que esconderia o
+   * Business Intelligence. Quando true, a visibilidade do menu segue
+   * FRANQUEADO_NAV_KEYS em vez do dreRole.
+   */
+  isFranqueado?: boolean;
 }
 
 interface RenderItem {
@@ -69,6 +76,7 @@ export function NavLinks({
   collapsed,
   onNavigate,
   contractsOnly,
+  isFranqueado,
 }: NavLinksProps) {
   const pathname = usePathname();
 
@@ -77,7 +85,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug });
+    : buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug, isFranqueado });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -210,6 +218,7 @@ interface BuildInput {
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
   activeSegmentSlug: string | null;
+  isFranqueado?: boolean;
 }
 
 function buildContractsOnlyGroups(): RenderGroup[] {
@@ -236,6 +245,7 @@ function buildGroups({
   ctrlRoles,
   segments,
   activeSegmentSlug,
+  isFranqueado,
 }: BuildInput): RenderGroup[] {
   const ctrlSet = new Set(ctrlRoles ?? []);
   const slug =
@@ -249,7 +259,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, isFranqueado)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -269,7 +279,13 @@ function isItemVisible(
   item: NavItem,
   dreRole: DreRole | null,
   ctrlSet: Set<CtrlRole>,
+  isFranqueado?: boolean,
 ): boolean {
+  // Franqueado: a visibilidade não segue o dreRole (cai em 'gestor_unidade',
+  // que esconderia o Business Intelligence). Mostra exatamente as telas da
+  // whitelist, espelhando FRANQUEADO_BASE_PATHS em access.ts.
+  if (isFranqueado) return FRANQUEADO_NAV_KEYS.has(item.key);
+
   const dreOk =
     item.dreRoles && dreRole !== null
       ? item.dreRoles.includes(dreRole)

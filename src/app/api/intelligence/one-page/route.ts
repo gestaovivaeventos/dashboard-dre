@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import {
   analyzeOnePageReport,
   OnePageReportError,
@@ -45,7 +46,10 @@ export async function POST(request: Request) {
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
-  if (profile.role !== "admin") {
+  // Acesso ao modulo Financeiro e o pre-requisito. A autorizacao fina e por
+  // empresa (abaixo): admin gera para qualquer empresa; demais perfis (ex.:
+  // franqueado) apenas para as empresas liberadas em user_company_access.
+  if (!profile.can_financeiro) {
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
   }
 
@@ -63,6 +67,21 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Datas devem estar no formato YYYY-MM-DD." },
       { status: 400 },
+    );
+  }
+
+  // ── 1b. Autorizacao por empresa ─────────────────────────────────────────
+  // Garante que o usuario so gere relatorio de empresa que pode acessar.
+  // Para admin, resolveAllowedCompanyIds devolve a lista recebida intacta;
+  // para os demais, filtra por user_company_access. Passamos [companyId] e
+  // checamos se sobreviveu ao filtro.
+  const allowedCompanyIds = await resolveAllowedCompanyIds(supabase, profile, [
+    companyId,
+  ]);
+  if (!allowedCompanyIds.includes(companyId)) {
+    return NextResponse.json(
+      { error: "Sem acesso a esta empresa." },
+      { status: 403 },
     );
   }
 

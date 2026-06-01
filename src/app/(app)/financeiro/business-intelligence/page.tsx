@@ -48,9 +48,12 @@ export default async function BusinessIntelligencePage() {
       ? allCompanies
       : allCompanies.filter((c) => allowedCompanyIds.includes(c.id));
 
-  // A rota /api/intelligence/one-page exige role admin. Quando o usuario
-  // nao for admin, mostramos a UI mas com o botao desabilitado e um aviso.
-  const canGenerate = profile?.role === "admin";
+  // Geracao liberada para quem tem acesso ao modulo Financeiro. A rota
+  // /api/intelligence/one-page valida, por empresa, se o usuario pode gerar
+  // (admin: qualquer empresa; franqueado e demais: apenas as liberadas em
+  // user_company_access). As empresas no seletor ja sao as visiveis ao
+  // usuario, entao o botao fica habilitado normalmente.
+  const canGenerate = profile?.can_financeiro === true;
 
   // Habilita o botao "Gerar teste sem IA" apenas em desenvolvimento. Em
   // producao a rota dev-only nao existe (retorna 404), entao tambem nao

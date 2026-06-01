@@ -28,6 +28,7 @@ interface AppShellProps {
   availableModules: ModuleDefinition[];
   activeSegmentSlug: string | null;
   contractsOnly?: boolean;
+  isFranqueado?: boolean;
   unreadNotifications?: number;
 }
 
@@ -44,6 +45,7 @@ export function AppShell({
   availableModules,
   activeSegmentSlug,
   contractsOnly,
+  isFranqueado,
   unreadNotifications = 0,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
@@ -61,6 +63,7 @@ export function AppShell({
       collapsed={!mobile && collapsed}
       onNavigate={mobile ? () => setOpen(false) : undefined}
       contractsOnly={contractsOnly}
+      isFranqueado={isFranqueado}
     />
   );
 

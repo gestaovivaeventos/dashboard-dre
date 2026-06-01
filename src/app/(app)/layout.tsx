@@ -20,6 +20,7 @@ export default async function ProtectedLayout({
   const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
   const ctrlRoles = modules?.ctrl?.roles ?? [];
   const contractsOnly = profile?.contracts_only === true;
+  const isFranqueado = profile?.profile === "franqueado";
 
   // Fetch segments the user has access to.
   // 1) Admin: vê todos os segmentos ativos.
@@ -100,6 +101,7 @@ export default async function ProtectedLayout({
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
       contractsOnly={contractsOnly}
+      isFranqueado={isFranqueado}
       unreadNotifications={unreadNotifications}
     >
       {children}

@@ -27,7 +27,9 @@ export async function GET(_request: Request, { params }: Params) {
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
-  if (profile.role !== "admin") {
+  // Pre-requisito: acesso ao modulo Financeiro. A propriedade do relatorio
+  // (created_by) e validada em duas camadas abaixo.
+  if (!profile.can_financeiro) {
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
   }
 

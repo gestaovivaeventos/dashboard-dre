@@ -61,6 +61,12 @@ export function SegmentCompanyPicker({
   const allSelected = selected.length === companies.length && companies.length > 0;
 
   const triggerLabel = useMemo(() => {
+    // Acesso a uma unica empresa: fixa o nome dela no filtro. O picker ja vem
+    // desabilitado nesse caso (disabled={companies.length <= 1} nas views),
+    // entao mostrar o nome — em vez de "Sem segmento · todas" — deixa claro
+    // para o usuario de qual empresa sao os dados exibidos.
+    if (companies.length === 1) return companies[0].name;
+
     const segName = activeSegment?.name ?? "Sem segmento";
     if (companies.length === 0) return `${segName} · sem empresas`;
     if (selected.length === 0) return `${segName} · nenhuma empresa`;

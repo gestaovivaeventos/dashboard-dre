@@ -40,7 +40,9 @@ export async function GET() {
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
-  if (profile.role !== "admin") {
+  // A listagem ja e escopada por created_by = user.id, entao cada usuario ve
+  // apenas seus proprios relatorios. Exigimos so acesso ao modulo Financeiro.
+  if (!profile.can_financeiro) {
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
   }
 

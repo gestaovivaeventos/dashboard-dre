@@ -60,8 +60,9 @@ interface PersistedState {
 interface BusinessIntelligenceClientProps {
   companies: CompanyOption[];
   /**
-   * Indica se o usuario tem permissao de admin (a rota exige admin).
-   * Se false, o botao "Gerar relatorio" fica desabilitado com aviso.
+   * Indica se o usuario pode gerar relatorios (acesso ao modulo Financeiro).
+   * A autorizacao por empresa e feita na rota. Se false, o botao "Gerar
+   * relatorio" fica desabilitado com aviso.
    */
   canGenerate: boolean;
   /**
@@ -707,7 +708,7 @@ export function BusinessIntelligenceClient({
 
           {!canGenerate ? (
             <p className="text-xs text-amber-700">
-              Geração de relatório com IA disponível apenas para administradores.
+              Você não tem permissão para gerar relatórios nesta área.
             </p>
           ) : isPreviewState ? (
             <p className="text-xs text-muted-foreground">
