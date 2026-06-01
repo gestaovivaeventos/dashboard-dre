@@ -8,7 +8,7 @@ interface BudgetRow {
   expense_type_id: string | null;
   name: string;
   orcado: number;
-  aprovado: number;
+  realizado: number; // realizado importado (planilha) + requisições aprovadas
   pendente: number;
 }
 
@@ -18,7 +18,7 @@ async function getOrcamentoData(year: number) {
   const [budgetRes, requestsRes, typesRes] = await Promise.all([
     supabase
       .from("ctrl_budget")
-      .select("expense_type_id, amount, ctrl_expense_types(name)")
+      .select("expense_type_id, amount, realized, ctrl_expense_types(name)")
       .eq("period_year", year),
     supabase
       .from("ctrl_requests")
@@ -41,24 +41,25 @@ async function getOrcamentoData(year: number) {
   const nameMap = new Map<string, string>(types.map((t) => [t.id, t.name]));
   nameMap.set("__none__", "Sem categoria");
 
-  // Aggregate budget per expense_type
+  // Aggregate budget + realizado importado per expense_type
   const budgetMap = new Map<string, number>();
+  const realizadoMap = new Map<string, number>();
   for (const b of budgetRes.data ?? []) {
     const key = b.expense_type_id ?? "__none__";
     const expType = b.ctrl_expense_types as { name: string } | { name: string }[] | null;
     const typeName = (Array.isArray(expType) ? expType[0]?.name : expType?.name) ?? "Sem categoria";
     if (!nameMap.has(key)) nameMap.set(key, typeName);
     budgetMap.set(key, (budgetMap.get(key) ?? 0) + Number(b.amount));
+    realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(b.realized ?? 0));
   }
 
-  // Aggregate realized per expense_type
-  const aprovadoMap = new Map<string, number>();
+  // Requisições aprovadas somam ao realizado; pendentes ficam à parte
   const pendenteMap = new Map<string, number>();
   for (const r of requestsRes.data ?? []) {
     const key = r.expense_type_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
     if (isApproved) {
-      aprovadoMap.set(key, (aprovadoMap.get(key) ?? 0) + Number(r.amount));
+      realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(r.amount));
     } else {
       pendenteMap.set(key, (pendenteMap.get(key) ?? 0) + Number(r.amount));
     }
@@ -67,7 +68,7 @@ async function getOrcamentoData(year: number) {
   // Merge all keys that appear in any map
   const allKeys = new Set<string>([
     ...Array.from(budgetMap.keys()),
-    ...Array.from(aprovadoMap.keys()),
+    ...Array.from(realizadoMap.keys()),
     ...Array.from(pendenteMap.keys()),
   ]);
 
@@ -75,9 +76,9 @@ async function getOrcamentoData(year: number) {
     expense_type_id: key === "__none__" ? null : key,
     name: nameMap.get(key) ?? key,
     orcado: budgetMap.get(key) ?? 0,
-    aprovado: aprovadoMap.get(key) ?? 0,
+    realizado: realizadoMap.get(key) ?? 0,
     pendente: pendenteMap.get(key) ?? 0,
-  })).sort((a, b) => b.orcado - a.orcado || b.aprovado - a.aprovado);
+  })).sort((a, b) => b.orcado - a.orcado || b.realizado - a.realizado);
 
   return { rows };
 }
@@ -95,9 +96,9 @@ export default async function OrcamentoPage() {
   const { rows = [], error } = await getOrcamentoData(year);
 
   const grandOrcado = rows.reduce((s, r) => s + r.orcado, 0);
-  const grandAprovado = rows.reduce((s, r) => s + r.aprovado, 0);
+  const grandRealizado = rows.reduce((s, r) => s + r.realizado, 0);
   const grandPendente = rows.reduce((s, r) => s + r.pendente, 0);
-  const grandDisponivel = grandOrcado - grandAprovado - grandPendente;
+  const grandDisponivel = grandOrcado - grandRealizado - grandPendente;
 
   const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -128,8 +129,8 @@ export default async function OrcamentoPage() {
           <p className="text-xl font-bold">{fmt.format(grandOrcado)}</p>
         </div>
         <div className="rounded-lg border p-4 space-y-1">
-          <p className="text-xs font-medium uppercase text-muted-foreground">Aprovado</p>
-          <p className="text-xl font-bold text-green-600">{fmt.format(grandAprovado)}</p>
+          <p className="text-xs font-medium uppercase text-muted-foreground">Realizado</p>
+          <p className="text-xl font-bold text-green-600">{fmt.format(grandRealizado)}</p>
         </div>
         <div className="rounded-lg border p-4 space-y-1">
           <p className="text-xs font-medium uppercase text-muted-foreground">Pendente</p>
@@ -157,7 +158,7 @@ export default async function OrcamentoPage() {
               <tr className="border-b bg-muted/40">
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tipo de despesa</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Orçado</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Aprovado</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Realizado</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Pendente</th>
                 <th className="px-4 py-3 text-right font-medium text-muted-foreground">Disponível</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground w-32">Execução</th>
@@ -165,16 +166,16 @@ export default async function OrcamentoPage() {
             </thead>
             <tbody className="divide-y">
               {rows.map((row) => {
-                const usado = row.aprovado + row.pendente;
+                const usado = row.realizado + row.pendente;
                 const disponivel = row.orcado - usado;
-                const execPct = pct(row.aprovado, row.orcado);
+                const execPct = pct(row.realizado, row.orcado);
                 const pendPct = pct(row.pendente, row.orcado);
                 const overBudget = row.orcado > 0 && usado > row.orcado;
                 return (
                   <tr key={row.name} className="hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3 font-medium">{row.name}</td>
                     <td className="px-4 py-3 text-right">{fmt.format(row.orcado)}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{fmt.format(row.aprovado)}</td>
+                    <td className="px-4 py-3 text-right text-green-600">{fmt.format(row.realizado)}</td>
                     <td className="px-4 py-3 text-right text-amber-600">{fmt.format(row.pendente)}</td>
                     <td className={`px-4 py-3 text-right font-medium ${disponivel < 0 ? "text-red-600" : "text-sky-600"}`}>
                       {row.orcado > 0 ? fmt.format(disponivel) : "—"}

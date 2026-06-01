@@ -52,7 +52,8 @@ function parseAmount(raw: unknown): number | null {
 interface ParsedRow {
   sectorName: string;
   typeName: string;
-  values: Record<number, number>; // month -> amount
+  values: Record<number, number>; // month -> valor orçado
+  realized: Record<number, number>; // month -> valor realizado
 }
 
 interface ParseResult {
@@ -72,6 +73,7 @@ function parseLong(data: unknown[][]): ParsedRow[] | null {
   let cTipo = -1;
   let cMonth = -1;
   let cValue = -1;
+  let cRealized = -1;
 
   for (let i = 0; i < Math.min(data.length, 25); i += 1) {
     const row = data[i] ?? [];
@@ -79,6 +81,7 @@ function parseLong(data: unknown[][]): ParsedRow[] | null {
     let tipo = -1;
     let month = -1;
     let value = -1;
+    let realized = -1;
     for (let c = 0; c < row.length; c += 1) {
       const h = normalize(row[c]);
       if (!h) continue;
@@ -88,6 +91,8 @@ function parseLong(data: unknown[][]): ParsedRow[] | null {
       if (month === -1 && (h === "data" || h.includes("mes") || h.includes("competenc"))) month = c;
       // valor orçado (e não "realizado")
       if (value === -1 && h.includes("orcado")) value = c;
+      // valor realizado (opcional)
+      if (realized === -1 && h.includes("realizado")) realized = c;
     }
     if (setor !== -1 && tipo !== -1 && month !== -1 && value !== -1) {
       headerRowIdx = i;
@@ -95,6 +100,7 @@ function parseLong(data: unknown[][]): ParsedRow[] | null {
       cTipo = tipo;
       cMonth = month;
       cValue = value;
+      cRealized = realized;
       break;
     }
   }
@@ -112,15 +118,18 @@ function parseLong(data: unknown[][]): ParsedRow[] | null {
     if (!month) continue;
 
     const amount = parseAmount(row[cValue]);
-    if (amount == null || amount === 0) continue;
+    const realizedAmount = cRealized === -1 ? null : parseAmount(row[cRealized]);
+    // Mantém a linha se houver orçado OU realizado; descarta a vazia.
+    if ((amount == null || amount === 0) && (realizedAmount == null || realizedAmount === 0)) continue;
 
     const key = `${normalize(sectorName)}|${normalize(typeName)}`;
     let entry = map.get(key);
     if (!entry) {
-      entry = { sectorName, typeName, values: {} };
+      entry = { sectorName, typeName, values: {}, realized: {} };
       map.set(key, entry);
     }
-    entry.values[month] = (entry.values[month] ?? 0) + amount;
+    if (amount != null && amount !== 0) entry.values[month] = (entry.values[month] ?? 0) + amount;
+    if (realizedAmount != null && realizedAmount !== 0) entry.realized[month] = (entry.realized[month] ?? 0) + realizedAmount;
   }
 
   return Array.from(map.values());
@@ -181,7 +190,7 @@ function parseWide(data: unknown[][]): ParsedRow[] | null {
       }
     }
     if (!hasAny) continue;
-    rows.push({ sectorName, typeName, values });
+    rows.push({ sectorName, typeName, values, realized: {} });
   }
 
   return rows;
@@ -320,18 +329,31 @@ export async function POST(request: Request) {
   // Build entries, summing duplicate (setor, tipo, mês) lines.
   const entryMap = new Map<
     string,
-    { sector_id: string; expense_type_id: string; period_year: number; period_month: number; amount: number }
+    { sector_id: string; expense_type_id: string; period_year: number; period_month: number; amount: number; realized: number }
   >();
+  const usedTypeIds = new Set<string>();
   for (const row of parsed.rows) {
     const sectorId = sectorByName.get(normalize(row.sectorName))!;
     const typeId = typeByName.get(normalize(row.typeName));
     if (!typeId) continue; // linha com tipo em branco — ignorada
-    for (const [monthStr, amount] of Object.entries(row.values)) {
-      const month = Number(monthStr);
+    usedTypeIds.add(typeId);
+    const months = Array.from(
+      new Set<number>([
+        ...Object.keys(row.values).map(Number),
+        ...Object.keys(row.realized).map(Number),
+      ]),
+    );
+    for (const month of months) {
+      const amount = row.values[month] ?? 0;
+      const realized = row.realized[month] ?? 0;
       const key = `${sectorId}|${typeId}|${month}`;
       const existing = entryMap.get(key);
-      if (existing) existing.amount += amount;
-      else entryMap.set(key, { sector_id: sectorId, expense_type_id: typeId, period_year: year, period_month: month, amount });
+      if (existing) {
+        existing.amount += amount;
+        existing.realized += realized;
+      } else {
+        entryMap.set(key, { sector_id: sectorId, expense_type_id: typeId, period_year: year, period_month: month, amount, realized });
+      }
     }
   }
   const entries = Array.from(entryMap.values());
@@ -356,7 +378,46 @@ export async function POST(request: Request) {
     }
   }
 
+  // Cadastro fica espelhando a planilha: tipos de despesa que não aparecem nela
+  // são removidos. Exceção: tipos já referenciados por alguma requisição (FK
+  // RESTRICT) — esses são preservados e reportados.
+  const allTypeIds = Array.from(new Set(Array.from(typeByName.values())));
+  const orphanIds = allTypeIds.filter((id) => !usedTypeIds.has(id));
+  const removedTypes: string[] = [];
+  const keptTypesWithRequests: string[] = [];
+  if (orphanIds.length > 0) {
+    const idToName = new Map(Array.from(typeByName.entries()).map(([n, id]) => [id, n]));
+    const { data: reqRows, error: reqErr } = await db
+      .from("ctrl_requests")
+      .select("expense_type_id")
+      .in("expense_type_id", orphanIds);
+    if (reqErr) {
+      return NextResponse.json(
+        { error: `Falha ao verificar requisições dos tipos de despesa: ${reqErr.message}` },
+        { status: 500 },
+      );
+    }
+    const protectedIds = new Set((reqRows ?? []).map((r) => r.expense_type_id));
+    const deletableIds = orphanIds.filter((id) => !protectedIds.has(id));
+    // Nomes para o feedback (usa o catálogo original, não o normalizado).
+    const nameById = new Map((typesRes.data ?? []).map((t) => [t.id, t.name]));
+    for (const id of orphanIds) {
+      if (protectedIds.has(id)) keptTypesWithRequests.push(nameById.get(id) ?? idToName.get(id) ?? id);
+    }
+    if (deletableIds.length > 0) {
+      const { error: delTypeErr } = await db.from("ctrl_expense_types").delete().in("id", deletableIds);
+      if (delTypeErr) {
+        return NextResponse.json(
+          { error: `Falha ao remover tipos de despesa fora do orçamento: ${delTypeErr.message}` },
+          { status: 500 },
+        );
+      }
+      for (const id of deletableIds) removedTypes.push(nameById.get(id) ?? id);
+    }
+  }
+
   const totalAmount = entries.reduce((s, e) => s + e.amount, 0);
+  const totalRealized = entries.reduce((s, e) => s + e.realized, 0);
   return NextResponse.json({
     ok: true,
     year,
@@ -364,7 +425,10 @@ export async function POST(request: Request) {
     rowsParsed: parsed.rows.length,
     entriesInserted: entries.length,
     totalAmount,
+    totalRealized,
     createdTypes,
+    removedTypes,
+    keptTypesWithRequests,
     skippedBlankType,
   });
 }
