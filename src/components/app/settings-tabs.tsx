@@ -34,6 +34,7 @@ interface SettingsTabsProps {
       name: string;
       included: boolean;
       synced_at: string | null;
+      routed_to_company_id: string | null;
     }>;
   }>;
   dreAccounts: Array<{
@@ -130,7 +131,10 @@ export function SettingsTabs({
           dreAccounts={dreAccounts.map((account) => ({ code: account.code, name: account.name }))}
         />
       ) : tab === "departamentos" ? (
-        <SettingsDepartments companies={companiesWithDepartments} />
+        <SettingsDepartments
+          companies={companiesWithDepartments}
+          allCompanies={allCompanies ?? companies.map((c) => ({ id: c.id, name: c.name }))}
+        />
       ) : (
         <SettingsPartners companies={companies.map((c) => ({ id: c.id, name: c.name }))} />
       )}

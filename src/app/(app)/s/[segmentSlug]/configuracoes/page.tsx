@@ -89,7 +89,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
   const departmentsResult = companyIds.length > 0
     ? await supabase
         .from("company_departments")
-        .select("id,company_id,omie_code,name,included,synced_at")
+        .select("id,company_id,omie_code,name,included,synced_at,routed_to_company_id")
         .in("company_id", companyIds)
         .order("omie_code")
     : { data: [] as Array<Record<string, unknown>> };
@@ -102,6 +102,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
       name: string;
       included: boolean;
       synced_at: string | null;
+      routed_to_company_id: string | null;
     }>
   >();
   (departmentsResult.data ?? []).forEach((row) => {
@@ -113,6 +114,7 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
       name: row.name as string,
       included: row.included as boolean,
       synced_at: (row.synced_at as string | null) ?? null,
+      routed_to_company_id: (row.routed_to_company_id as string | null) ?? null,
     });
     departmentsByCompany.set(companyId, list);
   });
