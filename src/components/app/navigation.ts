@@ -62,6 +62,12 @@ export const DRE_SEGMENT_ADMIN_ITEMS = [
     roles: ["admin"] as DreRole[],
   },
   {
+    title: "Lancamentos manuais",
+    suffix: "/lancamentos-manuais",
+    icon: FileText,
+    roles: ["admin"] as DreRole[],
+  },
+  {
     title: "Configuracoes",
     suffix: "/configuracoes",
     icon: Cog,
@@ -201,6 +207,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
       { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ["admin", "gestor_hero"] },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
+      { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
       { key: "fin-config", title: "Configuracoes", icon: Cog, scope: "segment", suffix: "/configuracoes", dreRoles: ["admin"] },
     ],
   },
