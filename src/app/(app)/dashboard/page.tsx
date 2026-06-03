@@ -87,24 +87,32 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, accountsData] = await Promise.all([
-    companiesQuery.order("name"),
-    // Paginado: o plano (global + todos os custom) já passa de 1000 linhas e
-    // o cap do PostgREST truncava os codes "8"/"9"/"9.x" (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
-      supabase
-        .from("dre_accounts")
-        .select(SCOPED_DRE_ACCOUNTS_SELECT)
-        .eq("active", true)
-        .order("code")
-        .range(from, to),
-    ),
-  ]);
+  const { data: companiesData } = await companiesQuery.order("name");
 
   const companies = (companiesData ?? []).map((company) => ({
     id: company.id as string,
     name: company.name as string,
   }));
+
+  // Escopa a busca do plano DRE ao segmento (global + empresas do segmento) em
+  // vez de carregar TODAS as contas de TODAS as empresas. scopeDreAccounts so
+  // usa o plano global e, no maximo, o da unica empresa selecionada (sempre
+  // deste segmento) — resultado identico, consulta bem menor. Paginado por
+  // causa do cap de 1000 do PostgREST (ver fetchAllDreAccountRows).
+  const scopeCompanyIds = companies.map((c) => c.id);
+  const accountsData = await fetchAllDreAccountRows<RawDreAccount>((from, to) => {
+    let query = supabase
+      .from("dre_accounts")
+      .select(SCOPED_DRE_ACCOUNTS_SELECT)
+      .eq("active", true);
+    if (segmentId) {
+      query =
+        scopeCompanyIds.length > 0
+          ? query.or(`company_id.is.null,company_id.in.(${scopeCompanyIds.join(",")})`)
+          : query.is("company_id", null);
+    }
+    return query.order("code").range(from, to);
+  });
   const allowedCompanyIds = await resolveAllowedCompanyIds(
     supabase,
     profile,

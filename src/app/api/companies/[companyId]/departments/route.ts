@@ -16,6 +16,7 @@ interface DepartmentRow {
   name: string;
   included: boolean;
   synced_at: string | null;
+  routed_to_company_id: string | null;
 }
 
 interface CompanyRow {
@@ -65,7 +66,7 @@ export async function GET(request: Request, { params }: Params) {
       .single<CompanyRow>(),
     db
       .from("company_departments")
-      .select("id, omie_code, name, included, synced_at")
+      .select("id, omie_code, name, included, synced_at, routed_to_company_id")
       .eq("company_id", params.companyId)
       .order("omie_code"),
   ]);
@@ -86,15 +87,22 @@ export async function GET(request: Request, { params }: Params) {
  * Body:
  *   {
  *     has_department_apportionment: boolean,
- *     included_codes: string[]   // codigos Omie marcados (inclui "__none__"
+ *     included_codes: string[],  // codigos Omie marcados (inclui "__none__"
  *                                // se o usuario quer trazer lancamentos
  *                                // sem departamento vinculado)
+ *     routing?: { [omie_code: string]: string | null }
+ *                                // por departamento, a empresa de DESTINO para
+ *                                // a qual os lancamentos devem ser roteados
+ *                                // (null/ausente = nao roteia, fica na origem)
  *   }
  *
  * Estrategia de update:
  *   - Atualiza flag em `companies`.
  *   - Marca `included = true` somente para os codigos em `included_codes`,
  *     `false` para todos os outros (single source of truth).
+ *   - Aplica o roteamento: zera todos os `routed_to_company_id` e seta os
+ *     destinos enviados. Departamento roteado e forcado a `included = true`
+ *     (precisa passar pelo filtro da origem para chegar ao destino).
  *   - Se nao houver `__none__` na tabela ainda (empresa que nunca rodou
  *     sync de departamentos), cria a sentinela.
  */
@@ -113,10 +121,24 @@ export async function PUT(request: Request, { params }: Params) {
   const body = (await request.json()) as {
     has_department_apportionment?: boolean;
     included_codes?: string[];
+    routing?: Record<string, string | null>;
   };
 
   const hasFlag = Boolean(body.has_department_apportionment);
   const includedCodes = Array.isArray(body.included_codes) ? body.included_codes : [];
+  // Destinos de roteamento por departamento. Apenas entradas com destino
+  // valido (uuid != empresa atual) sao consideradas; demais limpam o roteamento.
+  const routing =
+    body.routing && typeof body.routing === "object" ? body.routing : {};
+  const routedCodes = Object.entries(routing)
+    .filter(
+      ([code, target]) =>
+        code !== "__none__" &&
+        typeof target === "string" &&
+        target.length > 0 &&
+        target !== params.companyId,
+    )
+    .map(([code, target]) => ({ code, target: target as string }));
 
   const db = createAdminClientIfAvailable() ?? supabase;
 
@@ -163,6 +185,28 @@ export async function PUT(request: Request, { params }: Params) {
       .in("omie_code", includedCodes);
     if (setError) {
       return NextResponse.json({ error: setError.message }, { status: 400 });
+    }
+  }
+
+  // Roteamento entre empresas: primeiro zera todos os destinos da empresa,
+  // depois aplica os destinos enviados. Departamento roteado entra forcado na
+  // origem (included = true) para passar pelo filtro e chegar ao destino.
+  const { error: clearRoutingError } = await db
+    .from("company_departments")
+    .update({ routed_to_company_id: null })
+    .eq("company_id", params.companyId);
+  if (clearRoutingError) {
+    return NextResponse.json({ error: clearRoutingError.message }, { status: 400 });
+  }
+
+  for (const { code, target } of routedCodes) {
+    const { error: routeError } = await db
+      .from("company_departments")
+      .update({ routed_to_company_id: target, included: true })
+      .eq("company_id", params.companyId)
+      .eq("omie_code", code);
+    if (routeError) {
+      return NextResponse.json({ error: routeError.message }, { status: 400 });
     }
   }
 

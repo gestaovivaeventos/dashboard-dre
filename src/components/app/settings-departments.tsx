@@ -13,6 +13,7 @@ interface DepartmentItem {
   name: string;
   included: boolean;
   synced_at: string | null;
+  routed_to_company_id: string | null;
 }
 
 interface CompanyWithDepartments {
@@ -24,8 +25,16 @@ interface CompanyWithDepartments {
   departments: DepartmentItem[];
 }
 
+interface CompanyOption {
+  id: string;
+  name: string;
+}
+
 interface SettingsDepartmentsProps {
   companies: CompanyWithDepartments[];
+  // Todas as empresas do sistema (cross-segment) — destinos possiveis de
+  // roteamento de um departamento.
+  allCompanies: CompanyOption[];
 }
 
 const NONE_CODE = "__none__";
@@ -44,24 +53,29 @@ interface CompanyEditState {
   hasFlag: boolean;
   // codigos selecionados (incluindo possivelmente "__none__")
   selected: Set<string>;
+  // codigo do departamento -> empresa de destino do roteamento
+  routing: Map<string, string>;
   departments: DepartmentItem[];
   syncedOnce: boolean;
 }
 
 function buildInitialState(company: CompanyWithDepartments): CompanyEditState {
   const selected = new Set<string>();
+  const routing = new Map<string, string>();
   for (const d of company.departments) {
     if (d.included) selected.add(d.omie_code);
+    if (d.routed_to_company_id) routing.set(d.omie_code, d.routed_to_company_id);
   }
   return {
     hasFlag: company.has_department_apportionment,
     selected,
+    routing,
     departments: company.departments,
     syncedOnce: company.departments.length > 0,
   };
 }
 
-export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
+export function SettingsDepartments({ companies, allCompanies }: SettingsDepartmentsProps) {
   const { showToast } = useToast();
 
   const [stateByCompany, setStateByCompany] = useState<Record<string, CompanyEditState>>(
@@ -108,12 +122,15 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
     }
 
     const selected = new Set<string>();
+    const routing = new Map<string, string>();
     for (const d of payload.departments) {
       if (d.included) selected.add(d.omie_code);
+      if (d.routed_to_company_id) routing.set(d.omie_code, d.routed_to_company_id);
     }
     updateState(companyId, {
       hasFlag: Boolean(payload.has_department_apportionment),
       selected,
+      routing,
       departments: payload.departments,
       syncedOnce: true,
     });
@@ -155,18 +172,41 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
     });
   };
 
+  // Define (ou limpa, quando target === "") a empresa de destino do roteamento
+  // de um departamento. Departamento roteado entra forcado na selecao (included).
+  const handleRoutingChange = (companyId: string, code: string, target: string) => {
+    setStateByCompany((prev) => {
+      const current = prev[companyId];
+      if (!current) return prev;
+      const routing = new Map(current.routing);
+      const selected = new Set(current.selected);
+      if (target) {
+        routing.set(code, target);
+        selected.add(code);
+      } else {
+        routing.delete(code);
+      }
+      return { ...prev, [companyId]: { ...current, routing, selected } };
+    });
+  };
+
   const saveCompany = async (companyId: string) => {
     const current = stateByCompany[companyId];
     if (!current) return;
 
     setLoading(companyId, "save");
     const includedCodes = current.hasFlag ? Array.from(current.selected) : [];
+    // Roteamento so faz sentido quando ha rateio por departamento marcado.
+    const routing = current.hasFlag
+      ? Object.fromEntries(current.routing)
+      : {};
     const response = await fetch(`/api/companies/${companyId}/departments`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         has_department_apportionment: current.hasFlag,
         included_codes: includedCodes,
+        routing,
       }),
     });
     const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
@@ -180,10 +220,13 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
       return;
     }
 
-    // Reflete localmente: atualiza `included` em cada item.
+    // Reflete localmente: atualiza `included` e o destino de roteamento.
     const nextDepts = current.departments.map((d) => ({
       ...d,
       included: current.hasFlag && current.selected.has(d.omie_code),
+      routed_to_company_id: current.hasFlag
+        ? current.routing.get(d.omie_code) ?? null
+        : null,
     }));
     updateState(companyId, { departments: nextDepts });
     setLoading(companyId, null);
@@ -239,6 +282,7 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
                       name: "Sem departamento vinculado",
                       included: state.selected.has(NONE_CODE),
                       synced_at: null,
+                      routed_to_company_id: null,
                     },
                   ]
                 : [];
@@ -315,7 +359,9 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
                       Departamentos a incluir na DRE — apenas lancamentos
                       vinculados a um dos departamentos selecionados (ou ao
                       pseudo &quot;Sem departamento vinculado&quot;, se marcado) entrarao
-                      no Dashboard.
+                      no Dashboard. Em &quot;Enviar para&quot;, escolha outra empresa para
+                      rotear os lancamentos daquele departamento para a DRE e o
+                      Fluxo de Caixa dela (eles somem desta empresa).
                     </p>
                     {departmentsDisplay.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
@@ -323,33 +369,67 @@ export function SettingsDepartments({ companies }: SettingsDepartmentsProps) {
                         &quot;Atualizar lista Omie&quot; para buscar.
                       </p>
                     ) : (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {departmentsDisplay.map((d) => (
-                          <label
-                            key={d.id}
-                            className="flex items-center gap-2 text-sm"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={state.selected.has(d.omie_code)}
-                              onChange={() =>
-                                handleToggleCode(company.id, d.omie_code)
-                              }
-                              disabled={loading !== null}
-                              className="h-4 w-4 rounded border-input"
-                            />
-                            <span>
-                              {d.omie_code === NONE_CODE
-                                ? "Sem departamento vinculado"
-                                : d.name}
-                              {d.omie_code !== NONE_CODE ? (
-                                <span className="ml-1 text-xs text-muted-foreground">
-                                  ({d.omie_code})
+                      <div className="space-y-2">
+                        {departmentsDisplay.map((d) => {
+                          const routedTarget = state.routing.get(d.omie_code) ?? "";
+                          const isRouted = routedTarget !== "";
+                          const canRoute = d.omie_code !== NONE_CODE;
+                          return (
+                            <div
+                              key={d.id}
+                              className="flex flex-wrap items-center gap-2 text-sm"
+                            >
+                              <label className="flex min-w-[14rem] flex-1 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={state.selected.has(d.omie_code)}
+                                  onChange={() =>
+                                    handleToggleCode(company.id, d.omie_code)
+                                  }
+                                  disabled={loading !== null || isRouted}
+                                  className="h-4 w-4 rounded border-input"
+                                />
+                                <span>
+                                  {d.omie_code === NONE_CODE
+                                    ? "Sem departamento vinculado"
+                                    : d.name}
+                                  {d.omie_code !== NONE_CODE ? (
+                                    <span className="ml-1 text-xs text-muted-foreground">
+                                      ({d.omie_code})
+                                    </span>
+                                  ) : null}
                                 </span>
+                              </label>
+
+                              {canRoute ? (
+                                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>Enviar para</span>
+                                  <select
+                                    value={routedTarget}
+                                    onChange={(e) =>
+                                      handleRoutingChange(
+                                        company.id,
+                                        d.omie_code,
+                                        e.target.value,
+                                      )
+                                    }
+                                    disabled={loading !== null}
+                                    className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                  >
+                                    <option value="">Esta empresa</option>
+                                    {allCompanies
+                                      .filter((c) => c.id !== company.id)
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </label>
                               ) : null}
-                            </span>
-                          </label>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
