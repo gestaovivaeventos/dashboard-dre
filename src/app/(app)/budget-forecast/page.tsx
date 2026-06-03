@@ -111,23 +111,36 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, accountsData] = await Promise.all([
-    companiesQuery.order("name"),
-    // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<DreAccountBase & { company_id: string | null }>((from, to) =>
-      supabase
-        .from("dre_accounts")
-        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
-        .eq("active", true)
-        .order("code")
-        .range(from, to),
-    ),
-  ]);
+  const { data: companiesData } = await companiesQuery.order("name");
 
   const companies = (companiesData ?? []).map((company) => ({
     id: company.id as string,
     name: company.name as string,
   }));
+
+  // Escopa a busca do plano DRE ao segmento (global + empresas do segmento) em
+  // vez de carregar TODAS as contas de TODAS as empresas do sistema. O scope
+  // abaixo so usa o plano global e, no maximo, o da unica empresa selecionada
+  // — que sempre pertence a este segmento —, entao o resultado e identico,
+  // porem a consulta fica muito menor (ganho relevante em segmentos com muitas
+  // empresas, como franquias-viva). Paginado por causa do cap de 1000 do
+  // PostgREST (ver fetchAllDreAccountRows).
+  const scopeCompanyIds = companies.map((c) => c.id);
+  const accountsData = await fetchAllDreAccountRows<
+    DreAccountBase & { company_id: string | null }
+  >((from, to) => {
+    let query = supabase
+      .from("dre_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+      .eq("active", true);
+    if (segmentId) {
+      query =
+        scopeCompanyIds.length > 0
+          ? query.or(`company_id.is.null,company_id.in.(${scopeCompanyIds.join(",")})`)
+          : query.is("company_id", null);
+    }
+    return query.order("code").range(from, to);
+  });
   const allowedCompanyIds = await resolveAllowedCompanyIds(
     supabase,
     profile,
@@ -201,6 +214,30 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
 
   const accounts = filterCoreDreAccounts(scopedDreAccounts);
   const visibleBuckets = buildVisibleBuckets(filter);
+
+  // Periodo invalido (ex.: customizado com inicio > fim) gera zero buckets.
+  // Sem este guard, as agregacoes rodariam com datas vazias e a pagina
+  // quebraria. Renderiza o estado vazio em vez de 500.
+  if (visibleBuckets.length === 0) {
+    return (
+      <BudgetForecastView
+        view={view}
+        subView={subView}
+        filter={filter}
+        range={range}
+        rows={[]}
+        companies={visibleCompanies}
+        role={profile?.role ?? "gestor_hero"}
+        visibleBuckets={[]}
+        accumulatedBucket={{ key: "", label: "", dateFrom: "", dateTo: "" }}
+        selectedCompanyIds={filter.selectedCompanyIds}
+        currentMonthIndex={-1}
+        segments={segments}
+        activeSegmentSlug={activeSegmentSlug}
+      />
+    );
+  }
+
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 
   const aggregateRealizedBucket = async (bucket: DashboardPeriodBucket) => {

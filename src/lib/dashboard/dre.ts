@@ -219,13 +219,16 @@ export function buildVisibleBuckets(filter: DashboardFilterState) {
 }
 
 export function buildAccumulatedBucket(buckets: DashboardPeriodBucket[]) {
+  // Guarda contra lista vazia (ex.: periodo customizado invertido onde
+  // mes/ano inicial > final). Sem isso, `first.dateFrom` derefenciaria
+  // undefined e derrubava a pagina inteira com um 500 (server exception).
   const first = buckets[0];
   const last = buckets[buckets.length - 1];
   return {
     key: "total",
     label: "Total",
-    dateFrom: first.dateFrom,
-    dateTo: last.dateTo,
+    dateFrom: first?.dateFrom ?? "",
+    dateTo: last?.dateTo ?? "",
   } satisfies DashboardPeriodBucket;
 }
 
