@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 
 // Override de mapeamento de departamento roteado (Fase 2). Para a empresa de
 // DESTINO, lista os departamentos roteados PARA ela (de outras empresas), as
@@ -255,6 +256,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     saved += 1;
+  }
+
+  // Override de mapeamento roteado mudou -> recalcula a pre-agregacao do DRE da
+  // empresa de DESTINO (cujos agregados incluem os lancamentos roteados).
+  if (kind.table === "routed_category_mapping") {
+    await refreshDreAggregatesForSource(db, companyId);
   }
 
   revalidatePath("/(app)", "layout");

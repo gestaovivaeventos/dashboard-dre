@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 import { decryptSecret } from "@/lib/security/encryption";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
@@ -1462,6 +1463,16 @@ async function syncEntries({
     );
     newUnmappedCategories = categories.filter(
       (c) => !mappedCodes.has(c.code),
+    );
+  }
+
+  // 8. Atualiza a pre-agregacao do DRE (dre_monthly_aggregates) desta empresa e
+  //    dos destinos para onde ela roteia departamentos. Best-effort: nao
+  //    derruba o sync se falhar (o agregado so fica defasado ate o proximo).
+  const aggRefresh = await refreshDreAggregatesForSource(supabase, companyId);
+  if (!aggRefresh.ok) {
+    console.error(
+      `[sync] Falha ao atualizar dre_monthly_aggregates de ${companyId}: ${aggRefresh.error}`,
     );
   }
 

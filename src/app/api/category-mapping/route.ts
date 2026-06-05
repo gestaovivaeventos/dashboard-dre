@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 import {
   SCOPED_DRE_ACCOUNTS_SELECT,
   fetchAllDreAccountRows,
@@ -222,6 +223,7 @@ export async function POST(request: Request) {
   }
 
   if (!dreAccountId) {
+    await refreshDreAggregatesForSource(supabase, companyId);
     revalidatePath("/(app)", "layout");
     return NextResponse.json({ ok: true, mapping: null });
   }
@@ -242,6 +244,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  await refreshDreAggregatesForSource(supabase, companyId);
   revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true, mapping: data });
 }

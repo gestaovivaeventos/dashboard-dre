@@ -78,7 +78,14 @@ interface ParsedRow {
   values: Record<number, number>; // month -> amount
 }
 
-function parseSheet(sheet: XLSX.WorkSheet): { rows: ParsedRow[]; warnings: string[] } {
+function parseSheet(
+  sheet: XLSX.WorkSheet,
+  // Nomes (normalizados) das contas-resumo do plano DRE da empresa. Servem para
+  // detectar as linhas de GRUPO da planilha (ex.: "Despesas com Imoveis
+  // Locados") e, assim, diferenciar itens de mesmo nome que aparecem em grupos
+  // diferentes (ex.: "TERRAZZO" como receita e como despesa na SGX).
+  summaryNames: Set<string>,
+): { rows: ParsedRow[]; warnings: string[] } {
   const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     raw: true,
@@ -127,7 +134,19 @@ function parseSheet(sheet: XLSX.WorkSheet): { rows: ParsedRow[]; warnings: strin
     throw new Error("Nao foi possivel localizar a coluna de nome das contas.");
   }
 
-  const rows: ParsedRow[] = [];
+  // 1a passada: coleta cada linha com o GRUPO a que pertence. Uma linha cujo
+  // nome bate com uma conta-resumo do plano vira o "grupo corrente"; as linhas
+  // seguintes (itens) herdam esse grupo. Nao filtramos linhas vazias aqui — a
+  // deteccao de colisao precisa enxergar TODAS as ocorrencias para ficar
+  // estavel (independente de quais meses tem valor).
+  interface RawEntry {
+    label: string;
+    group: string | null;
+    values: Record<number, number>;
+    hasAny: boolean;
+  }
+  const entries: RawEntry[] = [];
+  let currentGroup: string | null = null;
 
   for (let i = headerRowIdx + 1; i < data.length; i += 1) {
     const raw = data[i] ?? [];
@@ -157,9 +176,48 @@ function parseSheet(sheet: XLSX.WorkSheet): { rows: ParsedRow[]; warnings: strin
         hasAny = true;
       }
     }
-    if (!hasAny) continue;
 
-    rows.push({ label, values });
+    // Linha de grupo (conta-resumo do plano): atualiza o grupo corrente e e
+    // emitida como rotulo "solto" (sem grupo) — segue aparecendo no Mapeamento
+    // como nao mapeada, igual antes.
+    if (summaryNames.has(norm)) {
+      currentGroup = label;
+      entries.push({ label, group: null, values, hasAny });
+      continue;
+    }
+
+    entries.push({ label, group: currentGroup, values, hasAny });
+  }
+
+  // Detecta colisoes: o MESMO nome de item sob 2+ grupos distintos. A chave e
+  // NORMALIZADA (ignora acento/espaco/maiusculas) para pegar grafias levemente
+  // diferentes do mesmo item entre os grupos (ex.: "PREDIO" vs "PRÉDIO").
+  const groupsByLabel = new Map<string, Set<string>>();
+  entries.forEach((e) => {
+    if (e.group == null) return;
+    const key = normalize(e.label);
+    const set = groupsByLabel.get(key) ?? new Set<string>();
+    set.add(e.group);
+    groupsByLabel.set(key, set);
+  });
+
+  // 2a passada: monta as linhas finais. So os nomes que colidem recebem o
+  // prefixo do grupo — nomes unicos (e outras empresas) ficam IDENTICOS. O
+  // rotulo final preserva a grafia original da propria ocorrencia.
+  const disambiguated = new Set<string>();
+  const rows: ParsedRow[] = [];
+  entries.forEach((e) => {
+    if (!e.hasAny) return; // mantem o comportamento: linha sem valores nao entra
+    const collides = e.group != null && (groupsByLabel.get(normalize(e.label))?.size ?? 0) > 1;
+    const finalLabel = collides ? `${e.group} - ${e.label}` : e.label;
+    if (collides) disambiguated.add(e.label);
+    rows.push({ label: finalLabel, values: e.values });
+  });
+
+  if (disambiguated.size > 0) {
+    warnings.push(
+      `Nomes repetidos em grupos diferentes foram diferenciados pelo grupo: ${Array.from(disambiguated).join(", ")}.`,
+    );
   }
 
   return { rows, warnings };
@@ -213,9 +271,22 @@ export async function POST(request: Request, { params }: Params) {
   }
   const sheet = workbook.Sheets[sheetName];
 
+  // Nomes das contas-resumo (is_summary) do plano da empresa (ou global). Sao
+  // os marcadores de GRUPO usados para diferenciar itens de mesmo nome (ex.:
+  // SGX tem "TERRAZZO" em receita e em despesa).
+  const { data: summaryAccounts } = await db
+    .from("dre_accounts")
+    .select("name")
+    .eq("active", true)
+    .eq("is_summary", true)
+    .or(`company_id.eq.${companyId},company_id.is.null`);
+  const summaryNames = new Set(
+    ((summaryAccounts ?? []) as Array<{ name: string }>).map((a) => normalize(a.name)),
+  );
+
   let parsed: { rows: ParsedRow[]; warnings: string[] };
   try {
-    parsed = parseSheet(sheet);
+    parsed = parseSheet(sheet, summaryNames);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
@@ -243,24 +314,27 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
-  const rawInserts: Array<{
-    company_id: string;
-    year: number;
-    month: number;
-    label: string;
-    amount: number;
-  }> = [];
+  // Agrega por (mes, label) somando — alem de evitar o erro do Postgres
+  // "ON CONFLICT DO UPDATE cannot affect row a second time" (que so ocorreria
+  // se restasse alguma colisao apos a desambiguacao por grupo), garante 1 linha
+  // por chave unica (company_id, year, month, label).
+  const rawByKey = new Map<
+    string,
+    { company_id: string; year: number; month: number; label: string; amount: number }
+  >();
   parsed.rows.forEach((row) => {
     Object.entries(row.values).forEach(([monthStr, amount]) => {
-      rawInserts.push({
-        company_id: companyId,
-        year,
-        month: Number(monthStr),
-        label: row.label,
-        amount,
-      });
+      const month = Number(monthStr);
+      const key = `${month} ${row.label}`;
+      const existing = rawByKey.get(key);
+      if (existing) {
+        existing.amount += amount;
+      } else {
+        rawByKey.set(key, { company_id: companyId, year, month, label: row.label, amount });
+      }
     });
   });
+  const rawInserts = Array.from(rawByKey.values());
 
   const batchSize = 500;
   for (let i = 0; i < rawInserts.length; i += batchSize) {

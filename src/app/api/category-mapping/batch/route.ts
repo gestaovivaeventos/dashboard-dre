@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 
 interface BatchMappingItem {
   omieCategoryCode: string;
@@ -129,6 +130,11 @@ export async function POST(request: Request) {
 
   const savedNonNull = toInsert.filter((r) => r.dre_account_id !== null).length;
   const tombstones = toInsert.filter((r) => r.dre_account_id === null).length;
+
+  // Mudou o mapeamento -> recalcula a pre-agregacao do DRE desta empresa (e dos
+  // destinos de roteamento). Best-effort (nao lanca).
+  await refreshDreAggregatesForSource(supabase, companyId);
+
   revalidatePath("/(app)", "layout");
   return NextResponse.json({
     ok: true,

@@ -13,7 +13,7 @@ import {
   buildFilterState,
   buildVisibleBuckets,
   fetchAllDreAccountRows,
-  filterCoreDreAccounts,
+  scopeDreAccounts,
   resolveAllowedCompanyIds,
   type DreAccountBase,
   type DashboardPeriodBucket,
@@ -183,36 +183,15 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
 
   const range = buildDateRange(filter);
 
-  // Scope resolution for per-company custom DRE plans (espelha dashboard/page.tsx):
-  // quando UMA unica empresa esta selecionada E ela possui plano custom
-  // (alguma linha em dre_accounts com company_id === essa empresa), usa o
-  // plano dela; caso contrario, cai no plano global (company_id IS NULL).
-  // Sem isso, contas que existem em ambos os planos aparecem duplicadas
-  // na grade do Budget/Forecast.
-  const allRawDreAccounts = accountsData;
-  const scopedCompanyId =
-    filter.selectedCompanyIds.length === 1 ? filter.selectedCompanyIds[0] : null;
-  const companyHasCustomPlan = scopedCompanyId
-    ? allRawDreAccounts.some((a) => a.company_id === scopedCompanyId)
-    : false;
-  const scopedDreAccounts: DreAccountBase[] = allRawDreAccounts
-    .filter((a) =>
-      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
-    )
-    .map((a) => ({
-      id: a.id,
-      code: a.code,
-      name: a.name,
-      parent_id: a.parent_id,
-      level: a.level,
-      type: a.type,
-      is_summary: a.is_summary,
-      formula: a.formula,
-      sort_order: a.sort_order,
-      active: a.active,
-    }));
-
-  const accounts = filterCoreDreAccounts(scopedDreAccounts);
+  // Escopo + tradutor de ids do plano DRE: USA o MESMO helper do Dashboard DRE
+  // (scopeDreAccounts). Alem de escolher o plano custom da empresa (ou o global),
+  // ele expoe `translateToScopedId`, que converte o id cru devolvido pelos RPCs
+  // (que pode ser do plano global) para o id de mesmo CODIGO no plano custom.
+  // Sem essa traducao, contas cujo mapeamento aponta para um id global eram
+  // ZERADAS no Budget (Realizado divergia do DRE) — exatamente o bug relatado
+  // na Village (ex.: "Clientes - Servicos Prestados").
+  const scope = scopeDreAccounts(accountsData, filter.selectedCompanyIds);
+  const accounts = scope.coreAccounts;
   const visibleBuckets = buildVisibleBuckets(filter);
 
   // Periodo invalido (ex.: customizado com inicio > fim) gera zero buckets.
@@ -251,7 +230,9 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     }
     const amounts = new Map<string, number>();
     ((data as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((item) => {
-      amounts.set(item.dre_account_id, Number(item.amount ?? 0));
+      const scopedId = scope.translateToScopedId(item.dre_account_id);
+      if (!scopedId) return;
+      amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
     return buildDashboardRows(accounts, amounts).rows;
   };
@@ -267,7 +248,9 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     }
     const amounts = new Map<string, number>();
     ((data as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((item) => {
-      amounts.set(item.dre_account_id, Number(item.amount ?? 0));
+      const scopedId = scope.translateToScopedId(item.dre_account_id);
+      if (!scopedId) return;
+      amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
     return buildDashboardRows(accounts, amounts).rows;
   };
@@ -454,7 +437,9 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
         if (error) throw new Error(`Falha ao carregar orcamento por empresa: ${error.message}`);
         const amounts = new Map<string, number>();
         ((data as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((item) => {
-          amounts.set(item.dre_account_id, Number(item.amount ?? 0));
+          const scopedId = scope.translateToScopedId(item.dre_account_id);
+          if (!scopedId) return;
+          amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
         });
         return { companyId, rows: buildDashboardRows(accounts, amounts).rows };
       }),
@@ -488,12 +473,14 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
         dre_account_id: string;
         amount: number | string | null;
       }> | null) ?? []).forEach((item) => {
+        const scopedId = scope.translateToScopedId(item.dre_account_id);
+        if (!scopedId) return;
         let map = amountsByCompanyId.get(item.company_id);
         if (!map) {
           map = new Map();
           amountsByCompanyId.set(item.company_id, map);
         }
-        map.set(item.dre_account_id, Number(item.amount ?? 0));
+        map.set(scopedId, (map.get(scopedId) ?? 0) + Number(item.amount ?? 0));
       });
 
       for (const companyId of filter.selectedCompanyIds) {
