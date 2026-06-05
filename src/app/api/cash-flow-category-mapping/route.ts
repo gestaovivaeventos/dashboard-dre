@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { refreshCashFlowAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 
 interface CashFlowMappingRow {
   code: string;
@@ -172,6 +173,7 @@ export async function POST(request: Request) {
   }
 
   if (!cashFlowAccountId) {
+    await refreshCashFlowAggregatesForSource(supabase, companyId);
     revalidatePath("/(app)", "layout");
     return NextResponse.json({ ok: true, mapping: null });
   }
@@ -192,6 +194,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  await refreshCashFlowAggregatesForSource(supabase, companyId);
   revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true, mapping: data });
 }

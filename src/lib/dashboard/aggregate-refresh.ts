@@ -45,6 +45,38 @@ export async function refreshDreAggregatesForSource(
   }
 }
 
+/**
+ * Igual a refreshDreAggregatesForSource, mas para a pre-agregacao do FLUXO DE
+ * CAIXA (cash_flow_monthly_aggregates), consumida por cash_flow_aggregate /
+ * _by_company.
+ */
+export async function refreshCashFlowAggregatesForSource(
+  db: SupabaseClient,
+  sourceCompanyId: string,
+): Promise<RefreshResult> {
+  try {
+    const targets = new Set<string>([sourceCompanyId]);
+
+    const { data: routes } = await db
+      .from("company_departments")
+      .select("routed_to_company_id")
+      .eq("company_id", sourceCompanyId)
+      .not("routed_to_company_id", "is", null);
+    (routes ?? []).forEach((row) => {
+      const dest = (row as { routed_to_company_id: string | null }).routed_to_company_id;
+      if (dest) targets.add(dest);
+    });
+
+    const { error } = await db.rpc("refresh_cash_flow_monthly_aggregates", {
+      p_company_ids: Array.from(targets),
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** Recalcula os agregados de TODAS as empresas (mudancas globais / backfill). */
 export async function refreshAllDreAggregates(db: SupabaseClient): Promise<RefreshResult> {
   try {
