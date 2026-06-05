@@ -204,7 +204,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "fin-dashboard", title: "Dashboard", icon: PieChart, scope: "segment", suffix: "/dashboard", dreRoles: ALL_DRE_ROLES },
       { key: "fin-fluxo", title: "Fluxo de Caixa", icon: Wallet, scope: "segment", suffix: "/fluxo-de-caixa", dreRoles: ALL_DRE_ROLES },
       { key: "fin-budget", title: "Budget e Forecast", icon: Target, scope: "segment", suffix: "/budget-forecast", dreRoles: ALL_DRE_ROLES },
-      { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
+      // [KPIs OCULTO] Item escondido do menu a pedido (a pagina e a rota continuam existindo).
+      // Para reexibir: descomente a linha abaixo e a entrada "fin-kpis" em FRANQUEADO_NAV_KEYS.
+      // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
       { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ["admin", "gestor_hero"] },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
       { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
@@ -253,6 +255,6 @@ export const FRANQUEADO_NAV_KEYS: ReadonlySet<string> = new Set([
   "fin-dashboard",
   "fin-fluxo",
   "fin-budget",
-  "fin-kpis",
+  // "fin-kpis", // [KPIs OCULTO] reexibir junto com a linha em NAV_GROUPS
   "fin-bi",
 ]);
