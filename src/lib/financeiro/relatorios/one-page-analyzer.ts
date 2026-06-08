@@ -2,7 +2,7 @@ import { generateObject, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 import {
-  ONE_PAGE_REPORT_SYSTEM_PROMPT,
+  resolveOnePageSystemPrompt,
   buildOnePageReportUserPrompt,
 } from "@/lib/financeiro/relatorios/one-page-prompt";
 import {
@@ -87,6 +87,10 @@ export async function analyzeOnePageReport(
 
   const provider = createOpenAI({ apiKey });
   const userPrompt = buildOnePageReportUserPrompt(input);
+  // Seleciona o contexto de negocio conforme o segmento da empresa: as regras
+  // das Franquias Viva so se aplicam ao segmento "franquias-viva"; demais
+  // segmentos recebem o prompt generico.
+  const systemPrompt = resolveOnePageSystemPrompt(input);
 
   // 2. Chama o LLM forcando estrutura via schema. O generateObject usa o
   //    response_format do OpenAI por baixo e valida internamente — quando
@@ -95,7 +99,7 @@ export async function analyzeOnePageReport(
     const { object } = await generateObject({
       model: provider(opts.model),
       schema: OnePageReportSchema,
-      system: ONE_PAGE_REPORT_SYSTEM_PROMPT,
+      system: systemPrompt,
       prompt: userPrompt,
       temperature: opts.temperature,
       maxOutputTokens: opts.maxOutputTokens,
@@ -121,7 +125,7 @@ export async function analyzeOnePageReport(
         const { object } = await generateObject({
           model: provider(opts.model),
           schema: OnePageReportSchema,
-          system: ONE_PAGE_REPORT_SYSTEM_PROMPT,
+          system: systemPrompt,
           prompt:
             userPrompt +
             "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +

@@ -160,13 +160,15 @@ export async function buildOnePagePayload(
   // segmentos nunca exibem esse indicador, mesmo que o valor tenha sido
   // gravado por engano via API.
   let segmentSlug: string | null = null;
+  let segmentNome: string | null = null;
   if (company.segment_id) {
     const { data: seg } = await supabase
       .from("segments")
-      .select("slug")
+      .select("slug,name")
       .eq("id", company.segment_id)
-      .maybeSingle<{ slug: string }>();
+      .maybeSingle<{ slug: string; name: string }>();
     segmentSlug = seg?.slug ?? null;
+    segmentNome = seg?.name ?? null;
   }
   const isFranquiasViva = segmentSlug === "franquias-viva";
 
@@ -366,6 +368,9 @@ export async function buildOnePagePayload(
     dre: dreInput,
     fee_vvr: feeVvrInput,
     fee_disponivel: feeDisponivel,
+    // Segmento da empresa — usado pelo motor de IA para escolher o contexto
+    // de negocio correto (regras Franquias Viva vs. prompt generico).
+    segmento: { slug: segmentSlug, nome: segmentNome },
   };
 
   // -------------------------------------------------------------------------

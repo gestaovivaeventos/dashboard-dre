@@ -131,6 +131,18 @@ export const OnePageInputSchema = z.object({
   fee_disponivel: z.number().nullable().optional(),
   // Resumo do VVR acumulado YTD (ver VvrYtdResumoSchema acima).
   vvr_ytd_resumo: VvrYtdResumoSchema.nullable().optional(),
+  // Segmento/grupo ao qual a empresa pertence. Define QUAL contexto de
+  // negocio a IA aplica: quando `slug` === "franquias-viva", o motor usa o
+  // system prompt com as regras especificas das Franquias Viva; qualquer
+  // outro segmento (ou ausencia) recebe o prompt generico. Cada grupo tera
+  // seu proprio contexto — por isso as regras Viva NAO vazam para os demais.
+  segmento: z
+    .object({
+      slug: z.string().min(1).max(60).nullable(),
+      nome: z.string().min(1).max(120).nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
