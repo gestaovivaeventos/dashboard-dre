@@ -974,7 +974,11 @@ export async function buildOnePagePayload(
   return {
     ok: true,
     payload: {
-      input: { ...input, vvr_ytd_resumo: vvrYtdResumo },
+      input: {
+        ...input,
+        vvr_ytd_resumo: vvrYtdResumo,
+        sobrevivencia_caixa_meses: sobrevivenciaCaixaMeses,
+      },
       generatedAt: new Date().toISOString(),
       kpis,
       previstoRealizado,

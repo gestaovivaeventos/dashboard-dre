@@ -131,6 +131,11 @@ export const OnePageInputSchema = z.object({
   fee_disponivel: z.number().nullable().optional(),
   // Resumo do VVR acumulado YTD (ver VvrYtdResumoSchema acima).
   vvr_ytd_resumo: VvrYtdResumoSchema.nullable().optional(),
+  // Sobrevivencia de caixa, em MESES — quantos meses de despesas operacionais
+  // o FEE Disponivel atual cobre (KPI do topo do One Page Report). Usado pela
+  // IA para calibrar acoes de revisao de despesas quando a cobertura e baixa.
+  // Null quando nao foi possivel calcular (sem despesas/FEE de referencia).
+  sobrevivencia_caixa_meses: z.number().nullable().optional(),
   // Segmento/grupo ao qual a empresa pertence. Define QUAL contexto de
   // negocio a IA aplica: quando `slug` === "franquias-viva", o motor usa o
   // system prompt com as regras especificas das Franquias Viva; qualquer

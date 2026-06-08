@@ -230,12 +230,15 @@ fechamento final do fundo.
 
 ### Sobrevivencia de caixa
 Quantidade de MESES de cobertura das despesas OPERACIONAIS da franquia com o
-FEE Disponivel atual. Quanto MAIOR, melhor (mais folego financeiro).
-- Alta → maior conforto financeiro.
-- Baixa → necessidade de acompanhamento mais proximo, sem tom alarmista.
-- Analise sempre em conjunto com o FEE Disponivel. Em cenarios baixos,
-  sugira acompanhamento, revisao de despesas e fortalecimento da geracao de
-  receita — de forma construtiva.
+FEE Disponivel atual. O valor chega no input em \`sobrevivencia_caixa_meses\`
+(quando informado). Quanto MAIOR, melhor (mais folego financeiro).
+- Alta (>= 6 meses) → maior conforto financeiro.
+- Intermediaria (4 a 5 meses) → acompanhar a evolucao, sem tom alarmista.
+- Baixa (<= 3 meses) → poucos meses de cobertura: ponto de atencao que pede
+  acompanhamento mais proximo e, sobretudo, REVISAO DAS DESPESAS
+  OPERACIONAIS (ver alavanca em "acoesRecomendadas"). Comunique de forma
+  construtiva, sem alarmismo.
+- Analise sempre em conjunto com o FEE Disponivel e com a geracao de receita.
 
 ### Margem media dos eventos
 NAO confundir com a linha "Margem de Contribuicao de Eventos" da DRE. A
@@ -308,6 +311,12 @@ esperado; observar se a carteira de fundos ativos gera potencial futuro de
 receita.
 
 Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
+- Quando \`sobrevivencia_caixa_meses\` for baixa (<= 3 meses), INCLUA uma acao
+  de REVISAO DAS DESPESAS OPERACIONAIS — justifique pelos poucos meses de
+  cobertura de caixa. Tom construtivo (ponto de atencao, nao emergencia);
+  area "Controladoria" ou "Diretoria", impacto "Alto", urgencia "Média".
+  Pode combinar com fortalecimento da geracao de receita. Quando a cobertura
+  for confortavel (>= 6 meses), NAO sugira cortes de despesa por esse motivo.
 - Regra do VVR para acoes comerciais: use \`vvr_ytd_resumo\` (acumulado do ano):
   - Se \`acima_da_meta\` === true: a franquia esta a frente da meta comercial.
     NAO sugira "aumentar VVR", "fortalecer comercial", "prospectar mais" nem
@@ -417,6 +426,10 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
     input.fee_disponivel !== null && input.fee_disponivel !== undefined
       ? `FEE Disponivel (saldo atual da franquia, em R$): ${input.fee_disponivel}`
       : "FEE Disponivel: nao informado",
+    input.sobrevivencia_caixa_meses !== null &&
+    input.sobrevivencia_caixa_meses !== undefined
+      ? `Sobrevivencia de caixa (meses de despesas operacionais cobertos pelo FEE Disponivel): ${input.sobrevivencia_caixa_meses}`
+      : "Sobrevivencia de caixa: nao informada",
     input.vvr_ytd_resumo
       ? `VVR YTD: realizado=${input.vvr_ytd_resumo.realizado_acumulado}, meta=${input.vvr_ytd_resumo.meta_acumulada}, acima_da_meta=${input.vvr_ytd_resumo.acima_da_meta}, abaixo_meta_ultimos_2_meses=${input.vvr_ytd_resumo.abaixo_meta_ultimos_2_meses}`
       : "VVR YTD: nao informado",
