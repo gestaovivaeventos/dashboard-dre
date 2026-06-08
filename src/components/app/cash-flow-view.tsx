@@ -11,7 +11,6 @@ import {
   FileSpreadsheet,
   Inbox,
   Loader2,
-  RefreshCw,
   Search,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -124,12 +123,8 @@ const MONTHS = [
 
 function SyncFreshnessIndicator({
   lastSyncAt,
-  refreshing,
-  onRefresh,
 }: {
   lastSyncAt: string | null;
-  refreshing: boolean;
-  onRefresh: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -170,15 +165,6 @@ function SyncFreshnessIndicator({
         }`}
       />
       <span className="text-muted-foreground">{label}</span>
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="inline-flex items-center gap-1 text-foreground hover:underline disabled:opacity-50"
-      >
-        <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
-        Atualizar
-      </button>
     </div>
   );
 }
@@ -204,7 +190,6 @@ export function CashFlowView({
   // sessionStorage. Hidrata no mount quando a URL nao traz companyIds.
   useSharedCompanyFilterHydration();
   const { showToast } = useToast();
-  const [refreshing, setRefreshing] = useState(false);
   const [exporting, setExporting] = useState<null | "excel">(null);
 
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
@@ -500,15 +485,7 @@ export function CashFlowView({
             <p className="text-sm text-muted-foreground">{range.label}</p>
           </div>
           <div className="flex items-center gap-2">
-            <SyncFreshnessIndicator
-              lastSyncAt={lastSyncAt}
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                router.refresh();
-                window.setTimeout(() => setRefreshing(false), 1500);
-              }}
-            />
+            <SyncFreshnessIndicator lastSyncAt={lastSyncAt} />
             <details className="relative">
               <summary className="list-none">
                 <span className={buttonVariants({ variant: "outline" })}>Exportar</span>

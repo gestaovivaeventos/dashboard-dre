@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
 import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
 import { ProjectMappingTab, type ProjectMappingAccountOption } from "@/components/app/project-mapping-tab";
+import { RoutedDepartmentMapping } from "@/components/app/routed-department-mapping";
 import { SegmentSelector } from "@/components/app/segment-selector";
 import type { Segment } from "@/lib/supabase/types";
 
@@ -109,6 +110,18 @@ export function MappingManager({
         : account.company_id == null,
     );
   }, [dreAccounts, companyId]);
+
+  // Contas de Fluxo de Caixa mapeaveis para a empresa selecionada — mesma regra
+  // de escopo + analiticas usada em CashFlowMappingTab. Alimenta a secao de
+  // override de departamentos roteados na aba de Fluxo.
+  const availableCashFlowAccounts = useMemo(() => {
+    const hasCustomPlan = cashFlowAccounts.some((a) => a.company_id === companyId);
+    return cashFlowAccounts.filter((a) => {
+      if (!a.code || !a.code.includes(".")) return false;
+      const scope = a.company_id ?? null;
+      return hasCustomPlan ? scope === companyId : scope === null;
+    });
+  }, [cashFlowAccounts, companyId]);
 
   // Budget tab state
   const [budgetRows, setBudgetRows] = useState<BudgetMappingRow[]>([]);
@@ -473,11 +486,18 @@ export function MappingManager({
       </Card>
 
       {tab === "cashflow" ? (
-        <CashFlowMappingTab
-          companyId={companyId}
-          search={search}
-          cashFlowAccounts={cashFlowAccounts}
-        />
+        <div className="space-y-4">
+          <CashFlowMappingTab
+            companyId={companyId}
+            search={search}
+            cashFlowAccounts={cashFlowAccounts}
+          />
+          <RoutedDepartmentMapping
+            companyId={companyId}
+            kind="cashflow"
+            accounts={availableCashFlowAccounts}
+          />
+        </div>
       ) : tab === "projects" ? (
         <ProjectMappingTab
           companyId={companyId}
@@ -500,6 +520,7 @@ export function MappingManager({
             }))}
         />
       ) : tab === "omie" ? (
+      <div className="space-y-4">
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -590,6 +611,12 @@ export function MappingManager({
           </div>
         </CardContent>
       </Card>
+      <RoutedDepartmentMapping
+        companyId={companyId}
+        kind="dre"
+        accounts={availableDreAccounts}
+      />
+      </div>
 
       ) : (
       <>

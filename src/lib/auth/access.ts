@@ -167,6 +167,7 @@ const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
   { suffix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/mapeamento",       roles: ["admin"] },
+  { suffix: "/lancamentos-manuais", roles: ["admin"] },
   { suffix: "/configuracoes",    roles: ["admin"] },
 ];
 

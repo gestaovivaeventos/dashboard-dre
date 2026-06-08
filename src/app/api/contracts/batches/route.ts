@@ -126,6 +126,7 @@ export async function POST(request: Request) {
     conta: row.conta,
     valor: row.valor,
     link_contrato: row.link_contrato,
+    descricao: row.descricao,
     status: 'pending' as const,
   }))
 

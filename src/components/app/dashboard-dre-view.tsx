@@ -160,12 +160,8 @@ const MONTHS = [
 
 function SyncFreshnessIndicator({
   lastSyncAt,
-  refreshing,
-  onRefresh,
 }: {
   lastSyncAt: string | null;
-  refreshing: boolean;
-  onRefresh: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -208,16 +204,6 @@ function SyncFreshnessIndicator({
         }`}
       />
       <span className="text-muted-foreground">{label}</span>
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="inline-flex items-center gap-1 text-foreground hover:underline disabled:opacity-50"
-        title="Buscar dados atualizados"
-      >
-        <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
-        Atualizar
-      </button>
     </div>
   );
 }
@@ -243,8 +229,6 @@ export function DashboardDreView({
   // Compartilha filtro de empresas com Fluxo de Caixa e Budget e Forecast
   // via sessionStorage. Hidrata no mount quando a URL nao traz companyIds.
   useSharedCompanyFilterHydration();
-  const [refreshing, setRefreshing] = useState(false);
-
   const [periodMode, setPeriodMode] = useState<PeriodMode>(filter.periodMode);
   const [monthFrom, setMonthFrom] = useState(filter.monthFrom);
   const [yearFrom, setYearFrom] = useState(filter.yearFrom);
@@ -519,17 +503,7 @@ export function DashboardDreView({
             <p className="text-sm text-muted-foreground">{range.label}</p>
           </div>
           <div className="flex items-center gap-2">
-            <SyncFreshnessIndicator
-              lastSyncAt={lastSyncAt}
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                router.refresh();
-                // router.refresh() nao retorna Promise observavel; usamos
-                // timeout curto para o spinner sair quando o SSR terminar.
-                window.setTimeout(() => setRefreshing(false), 1500);
-              }}
-            />
+            <SyncFreshnessIndicator lastSyncAt={lastSyncAt} />
           <details className="relative">
             <summary className="list-none">
               <span className={buttonVariants({ variant: "outline" })}>Exportar</span>

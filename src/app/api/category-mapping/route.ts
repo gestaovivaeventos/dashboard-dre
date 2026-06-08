@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 import {
   SCOPED_DRE_ACCOUNTS_SELECT,
   fetchAllDreAccountRows,
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
 
   const [
     { data: categories, error: categoriesError },
+    { data: manualCategories, error: manualCategoriesError },
     { data: mappings, error: mappingsError },
     dreAccountsData,
   ] = await Promise.all([
@@ -44,6 +46,13 @@ export async function GET(request: Request) {
       .select("code,description")
       .eq("company_id", companyId)
       .order("code"),
+    // Categorias de lancamentos manuais (manual_entries) — surgem na MESMA
+    // lista de mapeamento das categorias Omie para que o admin vincule cada
+    // rotulo a uma conta DRE. category_code = rotulo digitado.
+    supabase
+      .from("manual_entries")
+      .select("category_code,category_name")
+      .eq("company_id", companyId),
     supabase
       .from("category_mapping")
       .select("id,omie_category_code,omie_category_name,dre_account_id,company_id")
@@ -65,6 +74,9 @@ export async function GET(request: Request) {
 
   if (categoriesError) {
     return NextResponse.json({ error: categoriesError.message }, { status: 400 });
+  }
+  if (manualCategoriesError) {
+    return NextResponse.json({ error: manualCategoriesError.message }, { status: 400 });
   }
   if (mappingsError) {
     return NextResponse.json({ error: mappingsError.message }, { status: 400 });
@@ -103,9 +115,25 @@ export async function GET(request: Request) {
   );
 
   // Filtrar categorias internas geradas automaticamente pelo sync (fundos ressarciveis)
-  const visibleCategories = (categories ?? []).filter(
+  const omieVisible = (categories ?? []).filter(
     (c) => !(c.code as string).startsWith("__fundos_"),
   );
+
+  // Mescla as categorias de lancamentos manuais (distinct por code). Quando um
+  // code existe nas duas fontes, a categoria Omie tem precedencia.
+  const seenCodes = new Set(omieVisible.map((c) => c.code as string));
+  const manualVisible: Array<{ code: string; description: string }> = [];
+  (manualCategories ?? []).forEach((c) => {
+    const code = (c.category_code as string)?.trim();
+    if (!code || seenCodes.has(code)) return;
+    seenCodes.add(code);
+    manualVisible.push({
+      code,
+      description: (c.category_name as string)?.trim() || code,
+    });
+  });
+
+  const visibleCategories = [...omieVisible, ...manualVisible];
 
   const rows: CategoryMappingRow[] = visibleCategories.map((category) => {
     const code = category.code as string;
@@ -195,6 +223,7 @@ export async function POST(request: Request) {
   }
 
   if (!dreAccountId) {
+    await refreshDreAggregatesForSource(supabase, companyId);
     revalidatePath("/(app)", "layout");
     return NextResponse.json({ ok: true, mapping: null });
   }
@@ -215,6 +244,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  await refreshDreAggregatesForSource(supabase, companyId);
   revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true, mapping: data });
 }

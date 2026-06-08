@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { refreshCashFlowAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
 
 interface BatchMappingItem {
   omieCategoryCode: string;
@@ -104,6 +105,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insertError.message }, { status: 400 });
     }
   }
+
+  // Mudou o mapeamento de fluxo -> recalcula a pre-agregacao do Fluxo desta
+  // empresa (e dos destinos de roteamento). Best-effort.
+  await refreshCashFlowAggregatesForSource(supabase, companyId);
 
   revalidatePath("/(app)", "layout");
   return NextResponse.json({

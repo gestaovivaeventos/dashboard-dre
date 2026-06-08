@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Regras de Validação de Contratos — Controll Hub</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #6d28d9;
+      --primary-soft: #f5f3ff;
+      --green: #047857;
+      --green-soft: #ecfdf5;
+      --red: #b91c1c;
+      --red-soft: #fef2f2;
+      --amber: #b45309;
+      --amber-soft: #fffbeb;
+      --code-bg: #f3f4f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 24px 80px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .container { max-width: 920px; margin: 0 auto; }
+    header { margin-bottom: 28px; }
+    header h1 {
+      margin: 0 0 4px;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header .lede {
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 36px 0 12px;
+      letter-spacing: -0.01em;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 24px 0 8px;
+    }
+    p { margin: 0 0 12px; }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: var(--code-bg);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 18px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      background: #f9fafb;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    .rule-id {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status.aprovada { background: var(--green-soft); color: var(--green); }
+    .status.reprovada { background: var(--red-soft); color: var(--red); }
+    .status.parcial { background: var(--amber-soft); color: var(--amber); }
+    .status.especialista { background: #eff6ff; color: #1d4ed8; }
+    .status.erro { background: #f3f4f6; color: #374151; }
+    ul { margin: 0 0 12px; padding-left: 22px; }
+    li { margin-bottom: 4px; }
+    .note {
+      border-left: 3px solid var(--primary);
+      background: var(--primary-soft);
+      padding: 12px 14px;
+      border-radius: 0 8px 8px 0;
+      margin: 14px 0 18px;
+      font-size: 14px;
+    }
+    footer {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    @media print {
+      body { background: white; padding: 0; }
+      .card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Regras de Validação de Contratos<span class="badge">Controll Hub</span></h1>
+      <p class="lede">
+        Lógica completa do módulo de validação documental, em duas camadas:
+        por documento individual (<code>analisarLinha</code>) e por requisição
+        agregada (<code>analisarRequisicao</code>). Implementação em
+        <code>src/lib/contracts/validate.ts</code>.
+      </p>
+    </header>
+
+    <div class="note">
+      <strong>Limite do escopo:</strong> estas regras auditam apenas o
+      <em>vínculo documental</em> — se os papéis anexados batem com a
+      requisição (identidade, valor, assinaturas). Quem decide o mérito da
+      despesa (orçamento, alçada) é o módulo de validação de requisições, que
+      é independente.
+    </div>
+
+    <h2>Parâmetros globais</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>Constante</th><th>Valor</th><th>O que faz</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>FUZZY_NAME_THRESHOLD</code></td>
+            <td><code>85</code></td>
+            <td>Score mínimo (WRatio da lib <code>fuzzball</code>) para
+              considerar dois nomes de empresa equivalentes.</td>
+          </tr>
+          <tr>
+            <td><code>VALUE_TOLERANCE</code></td>
+            <td><code>0,01</code></td>
+            <td>Tolerância de centavo na comparação de valores.</td>
+          </tr>
+          <tr>
+            <td><code>R10_THRESHOLD</code></td>
+            <td><code>R$ 1.000</code></td>
+            <td>Faixa que separa "só recibo" de "exige contrato/recibo
+              assinado/boleto".</td>
+          </tr>
+          <tr>
+            <td><code>LIMITE_ALTO_VALOR</code></td>
+            <td><code>R$ 10.000</code></td>
+            <td>Acima deste valor exige <strong>dados bancários + assinaturas</strong>
+              (R4/R5/R6 e R14/R15/R16). Abaixo, contrato precisa só de nome,
+              CPF/CNPJ e valor. Valor de referência = <strong>o maior</strong>
+              entre valor do contrato, soma das parcelas e valor da requisição
+              ("na dúvida, o maior" — nunca aprova de menos).</td>
+          </tr>
+          <tr>
+            <td><code>TERMOS_REMOVIVEIS</code></td>
+            <td class="mono">ltda · me · sa · s/a · eireli · epp · cia · companhia</td>
+            <td>Sufixos societários removidos antes do fuzzy match (evita
+              penalizar "ACME LTDA" vs "ACME").</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Camada 1 — Validação por documento (<code>analisarLinha</code>)</h2>
+    <p>
+      Cada documento é classificado num <strong>tipo</strong>
+      (Contrato/Aditivo, Nota Fiscal/Fatura, Recibo, Boleto, Ata/Orçamento,
+      Suporte/Evidências). Cada regra abaixo só roda nos tipos indicados.
+    </p>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:60px">ID</th>
+            <th>O que checa</th>
+            <th style="width:38%">Aplica em</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="rule-id">R1</span></td>
+            <td>Razão social/Nome bate (fuzzy ≥85) com <code>fornecedor</code>
+              <strong>ou</strong> <code>favorecido</code> da requisição.</td>
+            <td>Contrato · Nota Fiscal · Recibo</td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R2</span></td>
+            <td>CPF/CNPJ: comparação estrita só de dígitos.</td>
+            <td>Contrato · Nota Fiscal · Boleto · Ata/Orçamento</td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R3</span></td>
+            <td>Valor: <em>(a)</em> match individual com qualquer
+              <code>valor_contrato</code> ou <code>valores_pagamentos</code>
+              (±0,01) <strong>ou</strong> <em>(b)</em> soma do grupo
+              <code>(requisicao_codigo, tipo)</code> bate (±0,01).</td>
+            <td>Todos exceto Suporte/Evidências</td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R4</span></td>
+            <td>Conta bancária: dígitos da conta da req aparecem dentro dos
+              dígitos da conta do contrato (substring). Conta em branco no
+              contrato vira aprovação parcial ("sem dados bancários").</td>
+            <td>Só Contrato · <strong>só &gt; R$ 10k</strong></td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R5</span></td>
+            <td>Assinatura do contratante: campo
+              <code>assinatura_contratante == "sim"</code>.</td>
+            <td>Só Contrato · <strong>só &gt; R$ 10k</strong></td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R6</span></td>
+            <td>Assinatura do contratado: campo
+              <code>assinatura_contratado == "sim"</code>.</td>
+            <td>Contrato · Recibo · <strong>só &gt; R$ 10k</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Estados de saída — camada 1</h3>
+    <ul>
+      <li><span class="status aprovada">aprovada</span> passou em todas as regras aplicáveis</li>
+      <li><span class="status reprovada">reprovada</span> qualquer regra falhou</li>
+      <li><span class="status especialista">analise_especialista</span> sempre que o tipo é "Documentos de Suporte / Evidências" (informacional)</li>
+    </ul>
+
+    <h2>Camada 2 — Validação por requisição (<code>analisarRequisicao</code>)</h2>
+    <p>
+      Agrega <strong>todos os documentos da mesma requisição</strong> e roda
+      regras de grupo. Documentos do tipo "Suporte / Evidências" são
+      filtrados fora antes da avaliação.
+    </p>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:60px">ID</th>
+            <th>O que checa</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="rule-id">R1</span></td>
+            <td>Soma dos <code>valor_contrato</code> de todos os docs ≈ valor da requisição (±0,01).
+              Três desfechos possíveis:
+              <ul>
+                <li><strong>Match exato</strong> → segue;</li>
+                <li><strong>Soma maior</strong> e alguma parcela individual bate exatamente
+                  → marca como <span class="status parcial">verificar_saldo</span>;</li>
+                <li><strong>Soma menor</strong> ou maior sem parcela compatível → reprova.</li>
+              </ul>
+            </td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R6</span></td>
+            <td>Pelo menos <strong>um</strong> doc com fornecedor casando
+              (fuzzy ≥85) com fornecedor ou favorecido da requisição.</td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R9</span></td>
+            <td>Pelo menos <strong>um</strong> doc com CPF/CNPJ batendo.</td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R10</span></td>
+            <td>Documentos obrigatórios por faixa de valor:
+              <ul>
+                <li><code>req ≤ R$ 1.000</code> → exige pelo menos um <strong>Recibo</strong>;</li>
+                <li><code>req ≥ R$ 1.001</code> → exige <strong>Contrato</strong>
+                  <em>OU</em> <strong>Recibo assinado</strong> pelo contratado
+                  <em>OU</em> <strong>Boleto</strong>.</li>
+              </ul>
+            </td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R14</span></td>
+            <td>Se algum doc tem conta bancária preenchida, pelo menos uma das
+              contas tem que conter (substring de dígitos) a conta da requisição.
+              <strong>Só acima de R$ 10k.</strong></td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R15</span></td>
+            <td>Tendo Contrato no grupo → exige assinatura do
+              <strong>contratante E contratado</strong>.
+              <strong>Só acima de R$ 10k.</strong></td>
+          </tr>
+          <tr>
+            <td><span class="rule-id">R16</span></td>
+            <td>Sem Contrato mas com Recibo → o recibo precisa ter
+              <strong>assinatura do contratado</strong>.
+              <strong>Só acima de R$ 10k.</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Estados de saída — camada 2</h3>
+    <ul>
+      <li><span class="status aprovada">aprovada</span> passou em todas as regras</li>
+      <li><span class="status reprovada">reprovada</span> qualquer regra falhou</li>
+      <li><span class="status parcial">verificar_saldo</span> soma dos contratos
+        é maior que a req mas uma parcela bate exatamente — provável pagamento
+        parcial, exige conferência manual do saldo do contrato</li>
+      <li><span class="status especialista">analise_especialista</span> só veio Suporte/Evidências</li>
+      <li><span class="status erro">erro</span> algum doc falhou na extração — não dá pra auditar</li>
+    </ul>
+
+    <h2>Atalho FEE / Cerimonial</h2>
+    <div class="card">
+      <p style="margin:0">
+        Antes de qualquer leitura, requisições cuja <strong>descrição</strong>
+        contém <code>"fee"</code> (palavra isolada — não casa "coffee"/"feedback")
+        ou <code>"cerimonial"</code> (substring), sem distinção de acento ou
+        caixa, vão direto para <span class="status especialista">analise_especialista</span>
+        (aprovação manual). <strong>Não chamam o LLM</strong> — economiza crédito
+        de IA e tempo. A descrição vem da planilha de upload (colunas aceitas:
+        Descrição, Título, Histórico, Observação).
+      </p>
+    </div>
+
+    <h2>Pipeline de avaliação</h2>
+    <div class="card">
+      <ol>
+        <li><strong>FEE/Cerimonial:</strong> se a descrição da requisição casa o atalho → <span class="status especialista">analise_especialista</span>, sem leitura, e sai.</li>
+        <li>Se algum documento tem <code>extraction_failed = true</code> → retorna <span class="status erro">erro</span> e sai.</li>
+        <li>Remove documentos do tipo "Suporte / Evidências" da análise.</li>
+        <li>Se sobrou nenhum documento classificável → <span class="status especialista">analise_especialista</span>.</li>
+        <li>Roda <strong>R1, R6, R9, R10, R14, R15/R16</strong> em sequência, acumulando motivos de falha.</li>
+        <li>Se há motivos → <span class="status reprovada">reprovada</span> com a lista.</li>
+        <li>Sem motivos mas com pagamento parcial detectado → <span class="status parcial">verificar_saldo</span>.</li>
+        <li>Sem motivos e sem ressalva → <span class="status aprovada">aprovada</span>.</li>
+      </ol>
+    </div>
+
+    <h2>Observações importantes</h2>
+    <div class="card">
+      <ul>
+        <li><strong>Duas camadas independentes:</strong> a camada 1 valida cada
+          anexo isolado (gera o rótulo de cada documento); a camada 2 valida
+          a requisição inteira combinando docs. As regras se sobrepõem em
+          propósito mas têm lógica diferente — R3 (doc) exige match individual
+          ou soma do <em>tipo</em>; R1 (requisição) soma <em>todos</em> os
+          contratos.</li>
+        <li><strong>Limite de R$ 10.000:</strong> dados bancários e assinaturas
+          (R4/R5/R6 e R14/R15/R16) só são exigidos acima de R$ 10k. Abaixo,
+          o contrato é aceito só com nome, CPF/CNPJ e valor. O valor de
+          referência é o <strong>maior</strong> entre valor do contrato, soma
+          das parcelas e valor da requisição — então um contrato grande pago em
+          parcela pequena ainda exige as regras completas.</li>
+        <li><strong>Pagamento parcial</strong> é tratado com um terceiro
+          estado (<code>verificar_saldo</code>), não com aprovação automática
+          nem reprovação. O sistema não tem histórico de saldo dos contratos
+          abertos, então depende de revisão humana.</li>
+        <li>A validação <strong>não</strong> olha datas, vencimentos ou método
+          de pagamento. Quem audita "essa despesa é legítima?" é o módulo de
+          aprovação de requisições (orçamento + alçada).</li>
+        <li>Implementação é <strong>port direto</strong> da Cloud Function
+          Python original (<code>analisar_linha</code>) — preservando os
+          textos de motivos em português pra manter o histórico legível.</li>
+      </ul>
+    </div>
+
+    <footer>
+      Documento gerado a partir de <code>src/lib/contracts/validate.ts</code>.
+      Em caso de divergência entre este HTML e o código, prevalece o código.
+    </footer>
+  </div>
+</body>
+</html>

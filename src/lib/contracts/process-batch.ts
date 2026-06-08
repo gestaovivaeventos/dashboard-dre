@@ -11,7 +11,7 @@
 import { extractContract } from './extract'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
-import { analisarRequisicao, type RequisitionDocument } from './validate'
+import { analisarRequisicao, isFeeCerimonial, type RequisitionDocument } from './validate'
 import type { ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -99,6 +99,21 @@ export async function processBatch(
 
   console.log(`[contracts] processBatch start batch=${batchId} budget=${timeBudgetMs}ms maxItems=${maxItems ?? 'unlimited'}`)
 
+  // ── Phase 0: atalho FEE/Cerimonial ─────────────────────────────────────────
+  // Requisições cuja descrição contém FEE/Cerimonial não são lidas: vão direto
+  // para aprovação manual (análise especialista), sem gastar crédito de IA.
+  // A decisão é por requisição (a descrição é da requisição, não do documento).
+  const { data: descRows } = await db
+    .from('contract_validation_items')
+    .select('requisicao_codigo, descricao')
+    .eq('batch_id', batchId)
+
+  const feeReqs = new Set<string>()
+  for (const r of (descRows ?? []) as Array<{ requisicao_codigo: string; descricao: string | null }>) {
+    if (isFeeCerimonial(r.descricao)) feeReqs.add(r.requisicao_codigo)
+  }
+  console.log(`[contracts] phase0 FEE/Cerimonial reqs=${feeReqs.size}`)
+
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
     .from('contract_validation_items')
@@ -119,6 +134,20 @@ export async function processBatch(
     if (timeIsUp()) {
       console.log('[contracts] time budget exhausted, breaking extraction loop')
       break
+    }
+
+    // FEE/Cerimonial → aprovação manual, sem leitura (não chama o LLM).
+    if (feeReqs.has(item.requisicao_codigo)) {
+      await db
+        .from('contract_validation_items')
+        .update({
+          status: 'analise_especialista',
+          status_resumo: 'FEE/Cerimonial — aprovação manual (leitura dispensada)',
+          status_motivos: ['Requisição de FEE/Cerimonial: não exige leitura de documento'],
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', item.id)
+      continue
     }
     if (maxItems !== undefined && result.extracted + result.errors >= maxItems) {
       console.log(`[contracts] maxItems=${maxItems} reached, breaking extraction loop`)

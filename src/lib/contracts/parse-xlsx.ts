@@ -14,6 +14,7 @@ export interface RequisitionRow {
   conta: string | null
   valor: number | null
   link_contrato: string
+  descricao: string | null
 }
 
 export interface ParseXlsxResult {
@@ -42,6 +43,12 @@ const HEADER_ALIASES: Record<string, keyof RequisitionRow> = {
   dadosbancarios: 'conta',
 
   valor: 'valor',
+
+  descricao: 'descricao',
+  descricaorequisicao: 'descricao',
+  titulo: 'descricao',
+  historico: 'descricao',
+  observacao: 'descricao',
 
   linkdocontrato: 'link_contrato',
   link: 'link_contrato',
@@ -142,6 +149,7 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
         else if (field === 'favorecido') result.favorecido = stringValue
         else if (field === 'cpf_cnpj') result.cpf_cnpj = stringValue
         else if (field === 'conta') result.conta = stringValue
+        else if (field === 'descricao') result.descricao = stringValue
       }
     }
 
@@ -171,6 +179,7 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
       conta: result.conta ?? null,
       valor: result.valor ?? null,
       link_contrato: link,
+      descricao: result.descricao ?? null,
     })
   }
 

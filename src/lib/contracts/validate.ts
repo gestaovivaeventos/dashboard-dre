@@ -14,6 +14,30 @@ import {
 const FUZZY_NAME_THRESHOLD = 85
 const VALUE_TOLERANCE = 0.01
 
+// Acima deste valor, exige dados bancários + assinaturas (R4/R5/R6 na camada 1,
+// R14/R15/R16 na camada 2). Abaixo, contrato precisa só de nome + CPF/CNPJ +
+// valor. O valor de referência é o MAIOR entre valor do contrato, soma das
+// parcelas e valor da requisição — "na dúvida, o maior" (nunca aprova de menos).
+const LIMITE_ALTO_VALOR = 10000
+
+function maiorValor(...valores: Array<number | null | undefined>): number {
+  const nums = valores.map((v) => Number(v) || 0).filter((v) => Number.isFinite(v))
+  return nums.length ? Math.max(...nums) : 0
+}
+
+// Requisições de FEE/Cerimonial não passam por leitura de documento — vão
+// direto para aprovação manual (análise especialista). Casa "fee" como palavra
+// isolada (evita "coffee", "feedback") e "cerimonial" como substring, sem
+// acento e sem distinção de caixa.
+export function isFeeCerimonial(descricao: string | null | undefined): boolean {
+  if (!descricao) return false
+  const norm = descricao
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+  return /\bfee\b/.test(norm) || norm.includes('cerimonial')
+}
+
 const TERMOS_REMOVIVEIS = new Set([
   'ltda',
   'me',
@@ -68,6 +92,12 @@ export function analisarLinha(
 
   const docTipo = (doc.tipo_documento || DEFAULT_DOC_TYPE).trim() || DEFAULT_DOC_TYPE
   const somaDoGrupo = Number(opts.somaDoGrupo) || 0
+
+  // Gate de alto valor: conta bancária e assinaturas só são exigidas quando o
+  // valor de referência passa de R$ 10.000.
+  const somaParcelasDoc = (doc.valores_pagamentos ?? []).reduce((a, v) => a + (Number(v) || 0), 0)
+  const exigeAltoValor =
+    maiorValor(doc.valor_contrato, somaParcelasDoc, req.valor) > LIMITE_ALTO_VALOR
 
   // Rule 1: Razão social / Nome do favorecido
   if (
@@ -157,8 +187,8 @@ export function analisarLinha(
     }
   }
 
-  // Rule 4: Dados bancários (only for Contrato)
-  if (docTipo === 'Contrato / Aditivo Contratual') {
+  // Rule 4: Dados bancários (only for Contrato, e só acima de R$ 10.000)
+  if (docTipo === 'Contrato / Aditivo Contratual' && exigeAltoValor) {
     const contratoConta = (doc.conta ?? '').trim()
     const reqConta = (req.conta ?? '').trim()
 
@@ -178,17 +208,18 @@ export function analisarLinha(
     }
   }
 
-  // Rule 5: Assinatura do contratante (only Contrato)
-  if (docTipo === 'Contrato / Aditivo Contratual') {
+  // Rule 5: Assinatura do contratante (only Contrato, e só acima de R$ 10.000)
+  if (docTipo === 'Contrato / Aditivo Contratual' && exigeAltoValor) {
     if (!isAssinaturaPresente(doc.assinatura_contratante)) {
       motivos.push('Assinatura do contratante ausente')
     }
   }
 
-  // Rule 6: Assinatura do contratado (Contrato + Recibo)
+  // Rule 6: Assinatura do contratado (Contrato + Recibo, e só acima de R$ 10.000)
   if (
-    docTipo === 'Contrato / Aditivo Contratual' ||
-    docTipo === 'Recibo / Declaração de Quitação'
+    (docTipo === 'Contrato / Aditivo Contratual' ||
+      docTipo === 'Recibo / Declaração de Quitação') &&
+    exigeAltoValor
   ) {
     if (!isAssinaturaPresente(doc.assinatura_contratado)) {
       motivos.push('Assinatura do contratado ausente')
@@ -405,10 +436,19 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
-  // R14 — Se algum doc tem conta preenchida, pelo menos um deles tem que bater com a da req
+  // Gate de alto valor (requisição): conta bancária e assinaturas só são
+  // exigidas quando o valor de referência passa de R$ 10.000. Referência = o
+  // maior entre valor da req, soma dos contratos e todas as parcelas.
+  const somaContratosRef = docs.reduce((a, d) => a + (Number(d.valor_contrato) || 0), 0)
+  const todasParcelasRef = docs.flatMap((d) => (d.valores_pagamentos ?? []).map((v) => Number(v) || 0))
+  const exigeAltoValorReq =
+    maiorValor(reqValor, somaContratosRef, ...todasParcelasRef) > LIMITE_ALTO_VALOR
+
+  // R14 — Se algum doc tem conta preenchida, pelo menos um deles tem que bater
+  // com a da req (só acima de R$ 10.000)
   const reqConta = digitsOnly(req.conta)
   const docsComConta = docs.filter((d) => digitsOnly(d.conta))
-  if (docsComConta.length > 0) {
+  if (exigeAltoValorReq && docsComConta.length > 0) {
     if (!reqConta) {
       motivos.push('Documento(s) com conta bancária preenchida, mas a requisição está sem conta')
     } else {
@@ -422,18 +462,21 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
-  // R15 — Se tem Contrato, ele DEVE ter assinatura contratante e contratado
-  const contratos = docs.filter((d) => d.tipo_documento === TIPO_CONTRATO)
-  const recibos = docs.filter((d) => d.tipo_documento === TIPO_RECIBO)
-  if (contratos.length > 0) {
-    const semContratante = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratante))
-    const semContratado = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratado))
-    if (semContratante) motivos.push('Contrato sem assinatura do contratante')
-    if (semContratado) motivos.push('Contrato sem assinatura do contratado')
-  } else if (recibos.length > 0) {
-    // R16 — Sem Contrato, mas tem Recibo → recibo deve estar assinado pelo contratado
-    const semAssinatura = recibos.some((r) => !isAssinaturaPresente(r.assinatura_contratado))
-    if (semAssinatura) motivos.push('Recibo sem assinatura do contratado')
+  // R15/R16 — Assinaturas só são exigidas acima de R$ 10.000.
+  if (exigeAltoValorReq) {
+    // R15 — Se tem Contrato, ele DEVE ter assinatura contratante e contratado
+    const contratos = docs.filter((d) => d.tipo_documento === TIPO_CONTRATO)
+    const recibos = docs.filter((d) => d.tipo_documento === TIPO_RECIBO)
+    if (contratos.length > 0) {
+      const semContratante = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratante))
+      const semContratado = contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratado))
+      if (semContratante) motivos.push('Contrato sem assinatura do contratante')
+      if (semContratado) motivos.push('Contrato sem assinatura do contratado')
+    } else if (recibos.length > 0) {
+      // R16 — Sem Contrato, mas tem Recibo → recibo deve estar assinado pelo contratado
+      const semAssinatura = recibos.some((r) => !isAssinaturaPresente(r.assinatura_contratado))
+      if (semAssinatura) motivos.push('Recibo sem assinatura do contratado')
+    }
   }
 
   // V1 — Qualquer regra falhou → Reprovada

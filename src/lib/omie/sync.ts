@@ -2,6 +2,10 @@ import { revalidatePath } from "next/cache";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  refreshDreAggregatesForSource,
+  refreshCashFlowAggregatesForSource,
+} from "@/lib/dashboard/aggregate-refresh";
 import { decryptSecret } from "@/lib/security/encryption";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
@@ -1462,6 +1466,24 @@ async function syncEntries({
     );
     newUnmappedCategories = categories.filter(
       (c) => !mappedCodes.has(c.code),
+    );
+  }
+
+  // 8. Atualiza as pre-agregacoes (DRE + Fluxo de Caixa) desta empresa e dos
+  //    destinos para onde ela roteia departamentos. Best-effort: nao derruba o
+  //    sync se falhar (o agregado so fica defasado ate o proximo refresh).
+  const [aggDre, aggCash] = await Promise.all([
+    refreshDreAggregatesForSource(supabase, companyId),
+    refreshCashFlowAggregatesForSource(supabase, companyId),
+  ]);
+  if (!aggDre.ok) {
+    console.error(
+      `[sync] Falha ao atualizar dre_monthly_aggregates de ${companyId}: ${aggDre.error}`,
+    );
+  }
+  if (!aggCash.ok) {
+    console.error(
+      `[sync] Falha ao atualizar cash_flow_monthly_aggregates de ${companyId}: ${aggCash.error}`,
     );
   }
 

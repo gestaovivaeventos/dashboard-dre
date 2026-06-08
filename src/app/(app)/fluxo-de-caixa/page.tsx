@@ -423,10 +423,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     perCompany.set(monthKey, (perCompany.get(monthKey) ?? 0) + value);
   });
 
-  // Limite de recursao ao buscar caixa final retroativamente. Suficiente
-  // para cobrir todo o historico esperado (sync desde 2022) sem risco de
-  // loop infinito.
-  const SALDO_LOOKBACK_CAP_MONTHS = 120;
+  // Data-base "infinita" para a agregacao de saldo inicial (mesma ideia do
+  // baseline de dividendos mais abaixo). Cobre todo o historico.
+  const SALDO_BASELINE_FAR_PAST = "1900-01-01";
 
   const monthBucketFor = (year: number, month: number): CashFlowPeriodBucket => ({
     key: `m-${year}-${month}`,
@@ -437,62 +436,74 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     month,
   });
 
-  // Constroi um resolvedor recursivo de "Saldo Inicial de Caixa" para um
-  // determinado conjunto de empresas. Memoriza os caixas finais ja
-  // computados para nao reagregar o mesmo mes mais de uma vez.
+  // Resolve o "Saldo Inicial de Caixa" do primeiro mes exibido para um conjunto
+  // de empresas SEM recursao mes-a-mes. A versao antiga recuava ate ~120 meses,
+  // disparando 2-3 RPCs por mes (ate ~240 RPCs simultaneos) — o que estourava a
+  // funcao serverless / pool de conexoes em segmentos com muitas empresas
+  // (franquias-viva) e gerava os 500 intermitentes.
+  //
+  // Otimizacao (matematicamente identica): "Caixa Final" = "Saldo Inicial" +
+  // "Caixa Gerado", e "Caixa Gerado" e LINEAR nos lancamentos/resultado do mes
+  // (somas com sinal em buildCashFlowRows). Logo, o caixa final acumulado de um
+  // intervalo contiguo (sem reset por saldo manual) = saldo manual da ancora +
+  // "Caixa Gerado" de UMA agregacao sobre o intervalo inteiro. Isso troca a
+  // recursao por no maximo 2 RPCs.
   const buildSaldoInicialResolver = (
     companies: string[],
     openingsForScope: Map<string, number>,
   ) => {
-    const caixaFinalCache = new Map<string, number>();
+    return async (firstYear: number, firstMonth: number): Promise<number> => {
+      // Saldo manual cadastrado para o proprio primeiro mes vence tudo.
+      const manualFirst = openingsForScope.get(`${firstYear}-${firstMonth}`);
+      if (manualFirst !== undefined) return manualFirst;
 
-    const computeCaixaFinalEndOfMonth = async (
-      year: number,
-      month: number,
-      depth: number,
-    ): Promise<number> => {
-      const key = `${year}-${month}`;
-      const cached = caixaFinalCache.get(key);
-      if (cached !== undefined) return cached;
-      if (depth >= SALDO_LOOKBACK_CAP_MONTHS) {
-        caixaFinalCache.set(key, 0);
-        return 0;
-      }
-      const bucket = monthBucketFor(year, month);
-      const [saldoIni, dreResultado, amounts] = await Promise.all([
-        // resolveSaldoInicial dispara em paralelo com as agregacoes deste
-        // mes — recursoes mais profundas tambem disparam suas proprias
-        // agregacoes simultaneamente, o que mantem o wall-clock proximo a
-        // um unico round-trip independente da profundidade.
-        resolveSaldoInicial(year, month, depth),
-        computeDreResultado(bucket, companies),
-        computeCashFlowAmounts(bucket, companies),
+      // Ultimo mes a incluir no acumulado = mes anterior ao primeiro exibido.
+      const prev = previousMonth(firstYear, firstMonth);
+      const prevKey = prev.year * 100 + prev.month;
+
+      // Ancora = saldo manual MAIS RECENTE com mes <= prev (reinicia a cadeia).
+      let anchorYM = -1;
+      let anchorValue = 0;
+      openingsForScope.forEach((value, key) => {
+        const [yStr, mStr] = key.split("-");
+        const keyNum = Number(yStr) * 100 + Number(mStr);
+        if (keyNum <= prevKey && keyNum > anchorYM) {
+          anchorYM = keyNum;
+          anchorValue = value;
+        }
+      });
+      const hasAnchor = anchorYM >= 0;
+
+      const rangeFrom = hasAnchor
+        ? monthBucketFor(Math.floor(anchorYM / 100), anchorYM % 100).dateFrom
+        : SALDO_BASELINE_FAR_PAST;
+      const rangeTo = monthBucketFor(prev.year, prev.month).dateTo;
+      const openingValue = hasAnchor ? anchorValue : 0;
+
+      const rangeBucket: CashFlowPeriodBucket = {
+        key: "saldo-baseline",
+        label: "",
+        dateFrom: rangeFrom,
+        dateTo: rangeTo,
+        year: prev.year,
+        month: prev.month,
+      };
+
+      const [dreResultado, amounts] = await Promise.all([
+        computeDreResultado(rangeBucket, companies),
+        computeCashFlowAmounts(rangeBucket, companies),
       ]);
+      // saldoInicial: 0 -> "Caixa Final" calculado = exatamente o "Caixa Gerado"
+      // acumulado do intervalo.
       const { rows } = buildCashFlowRows(cashFlowAccounts, amounts, {
         dreResultadoExercicio: dreResultado,
-        saldoInicial: saldoIni,
+        saldoInicial: 0,
       });
-      const caixaFinal = caixaFinalId
+      const caixaGerado = caixaFinalId
         ? rows.find((r) => r.id === caixaFinalId)?.value ?? 0
         : 0;
-      caixaFinalCache.set(key, caixaFinal);
-      return caixaFinal;
+      return openingValue + caixaGerado;
     };
-
-    const resolveSaldoInicial = async (
-      year: number,
-      month: number,
-      depth = 0,
-    ): Promise<number> => {
-      const key = `${year}-${month}`;
-      const manual = openingsForScope.get(key);
-      if (manual !== undefined) return manual;
-      if (depth >= SALDO_LOOKBACK_CAP_MONTHS) return 0;
-      const prev = previousMonth(year, month);
-      return computeCaixaFinalEndOfMonth(prev.year, prev.month, depth + 1);
-    };
-
-    return resolveSaldoInicial;
   };
 
   const resolveSaldoInicialConsolidated = buildSaldoInicialResolver(
@@ -525,10 +536,27 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   const partnerValuesPerBucket = new Map<string, Map<string, Map<string, number>>>();
   let previousCaixaFinal = 0;
 
+  // Pre-busca as agregacoes de TODOS os meses em paralelo. Elas nao dependem do
+  // saldo inicial (que e encadeado em memoria logo abaixo), entao disparar tudo
+  // de uma vez troca N esperas sequenciais por um unico round-trip. Buckets
+  // futuros nao consultam o banco (ficam zerados).
+  const bucketAggregates = await Promise.all(
+    buckets.map(async (bucket) => {
+      if (isFutureBucket(bucket)) return null;
+      const [dreResultado, amounts, partnerBreakdown] = await Promise.all([
+        computeDreResultado(bucket),
+        computeCashFlowAmounts(bucket),
+        computePartnerBreakdown(bucket),
+      ]);
+      return { dreResultado, amounts, partnerBreakdown };
+    }),
+  );
+
   for (let i = 0; i < buckets.length; i += 1) {
     const bucket = buckets[i];
+    const agg = bucketAggregates[i];
 
-    if (isFutureBucket(bucket)) {
+    if (agg === null) {
       const byRowId: Record<string, number> = {};
       cashFlowAccounts.forEach((a) => {
         byRowId[a.id] = 0;
@@ -540,12 +568,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     }
 
     const saldoInicial = i === 0 ? saldoInicialBucket : previousCaixaFinal;
-
-    const [dreResultado, amounts, partnerBreakdown] = await Promise.all([
-      computeDreResultado(bucket),
-      computeCashFlowAmounts(bucket),
-      computePartnerBreakdown(bucket),
-    ]);
+    const { dreResultado, amounts, partnerBreakdown } = agg;
 
     if (isVvrExceptionMonth(bucket.year, bucket.month)) {
       applyVvrExceptionToPartnerBreakdown(partnerBreakdown);
