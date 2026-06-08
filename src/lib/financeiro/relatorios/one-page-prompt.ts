@@ -214,10 +214,12 @@ fechamento final do fundo.
   de fechamentos, nao necessariamente mudanca de performance comercial.
 - Receita do DRE abaixo do esperado NEM SEMPRE significa queda comercial.
   Causas comuns: (a) calendario de saque de FEE diferente do orcado, ou (b)
-  eventos JA REALIZADOS com FECHAMENTO ainda pendente. Quando a receita
-  estiver pressionada, a primeira hipotese a investigar e fechamentos de
-  eventos pendentes — e a alavanca operacional mais rapida para destravar
-  receita ja gerada (basta a franquia enviar os fechamentos para a Viva).
+  margem de eventos ainda nao reconhecida no DRE (eventos nao realizados, ou
+  realizados mas sem fechamento apurado). Use isso APENAS como LEITURA para
+  evitar alarmismo diante de receita baixa — o input NAO informa se a
+  franquia tem fundos com fechamentos pendentes de apuracao. Portanto isso
+  NUNCA pode virar acao recomendada (ver regra em "NAO recomende
+  automaticamente"); no maximo, mencione como hipotese no diagnostico.
 - Sazonalidade: eventos de formatura seguem o calendario academico, com
   concentracao nos meses de colacao. VVR e margens mes-a-mes devem ser lidos
   considerando esse ciclo, nao como tendencia linear. Indicadores podem ter
@@ -301,15 +303,11 @@ considere: acompanhar a evolucao do VVR; analisar a conversao de VVR em FEE
 orcado; acompanhar a disponibilidade de FEE para saque; avaliar a saude
 financeira dos fundos; revisar despesas operacionais; acompanhar a
 sobrevivencia de caixa; observar a evolucao da margem media dos eventos;
-analisar fechamento de eventos; acompanhar receitas de margem e BV; avaliar
-se os fundos performam dentro do esperado; observar se a carteira de fundos
-ativos gera potencial futuro de receita.
+acompanhar receitas de margem e BV; avaliar se os fundos performam dentro do
+esperado; observar se a carteira de fundos ativos gera potencial futuro de
+receita.
 
 Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
-- Quando a Receita do DRE estiver abaixo do orcado ou da tendencia
-  historica, INCLUA uma acao tipo "Verificar e enviar fechamentos de eventos
-  pendentes" — destrava margem ja gerada e e a alavanca de impacto mais
-  rapida.
 - Regra do VVR para acoes comerciais: use \`vvr_ytd_resumo\` (acumulado do ano):
   - Se \`acima_da_meta\` === true: a franquia esta a frente da meta comercial.
     NAO sugira "aumentar VVR", "fortalecer comercial", "prospectar mais" nem
@@ -327,6 +325,10 @@ Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
   urgencia Média — sem dramatizacao.
 
 NAO recomende automaticamente:
+- verificar, enviar, cobrar ou regularizar "fechamentos de eventos
+  pendentes" / "fechamentos pendentes de apuracao". O sistema NAO tem insumo
+  para saber se a franquia tem fundos com fechamento pendente — esse dado nao
+  esta no input. Logo, NUNCA gere essa acao recomendada (nem variacoes dela);
 - criar/aplicar/aumentar taxa de Assessoria para empresas que nao trabalham
   com Assessoria;
 - mudanca na regra de negocio das franquias;
