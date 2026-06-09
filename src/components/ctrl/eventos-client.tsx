@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Calendar } from "lucide-react";
+import { Calendar, Pencil } from "lucide-react";
 
 type Ev = {
   id: string;
@@ -14,11 +14,13 @@ type Ev = {
 interface Props {
   events: Ev[];
   createEvent: (formData: FormData) => Promise<{ error?: string } | undefined>;
+  updateEvent: (id: string, formData: FormData) => Promise<{ error?: string } | undefined>;
   toggleActive: (id: string, isActive: boolean) => Promise<{ error?: string } | undefined>;
 }
 
-export function EventosClient({ events, createEvent, toggleActive }: Props) {
+export function EventosClient({ events, createEvent, updateEvent, toggleActive }: Props) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -29,6 +31,16 @@ export function EventosClient({ events, createEvent, toggleActive }: Props) {
       const res = await createEvent(formData);
       if (res?.error) setFeedback(res.error);
       else { setShowForm(false); setFeedback(null); (e.target as HTMLFormElement).reset(); }
+    });
+  }
+
+  function handleUpdate(e: React.FormEvent<HTMLFormElement>, id: string) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const res = await updateEvent(id, formData);
+      if (res?.error) setFeedback(res.error);
+      else { setEditingId(null); setFeedback(null); }
     });
   }
 
@@ -96,31 +108,83 @@ export function EventosClient({ events, createEvent, toggleActive }: Props) {
         </div>
       ) : (
         <div className="rounded-lg border divide-y">
-          {events.map((ev) => (
-            <div key={ev.id} className="flex items-center justify-between gap-4 px-4 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{ev.name}</span>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${ev.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
-                    {ev.is_active ? "Ativo" : "Inativo"}
-                  </span>
+          {events.map((ev) =>
+            editingId === ev.id ? (
+              <form key={ev.id} onSubmit={(e) => handleUpdate(e, ev.id)} className="space-y-3 bg-muted/20 px-4 py-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Nome <span className="text-destructive">*</span></label>
+                  <input
+                    name="name"
+                    type="text"
+                    required
+                    defaultValue={ev.name}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
                 </div>
-                {ev.description && <p className="text-xs text-muted-foreground mt-0.5">{ev.description}</p>}
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Criado em {new Date(ev.created_at).toLocaleDateString("pt-BR")}
-                </p>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Descrição</label>
+                  <textarea
+                    name="description"
+                    rows={2}
+                    defaultValue={ev.description ?? ""}
+                    placeholder="Descrição opcional..."
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    disabled={isPending}
+                    className="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isPending}
+                    className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                  >
+                    {isPending ? "Salvando..." : "Salvar"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div key={ev.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{ev.name}</span>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${ev.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
+                      {ev.is_active ? "Ativo" : "Inativo"}
+                    </span>
+                  </div>
+                  {ev.description && <p className="text-xs text-muted-foreground mt-0.5">{ev.description}</p>}
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Criado em {new Date(ev.created_at).toLocaleDateString("pt-BR")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => { setEditingId(ev.id); setFeedback(null); }}
+                    disabled={isPending}
+                    className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => handleToggle(ev.id, ev.is_active)}
+                    disabled={isPending}
+                    className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      ev.is_active ? "hover:bg-red-50 hover:text-red-700 hover:border-red-300" : "hover:bg-green-50 hover:text-green-700 hover:border-green-300"
+                    }`}
+                  >
+                    {ev.is_active ? "Desativar" : "Ativar"}
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={() => handleToggle(ev.id, ev.is_active)}
-                disabled={isPending}
-                className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-                  ev.is_active ? "hover:bg-red-50 hover:text-red-700 hover:border-red-300" : "hover:bg-green-50 hover:text-green-700 hover:border-green-300"
-                }`}
-              >
-                {ev.is_active ? "Desativar" : "Ativar"}
-              </button>
-            </div>
-          ))}
+            )
+          )}
         </div>
       )}
     </div>

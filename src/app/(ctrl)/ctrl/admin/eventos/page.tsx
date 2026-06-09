@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { createClient } from "@/lib/supabase/server";
-import { createEvent, toggleEventActive } from "@/lib/ctrl/actions/events";
+import { createEvent, updateEvent, toggleEventActive } from "@/lib/ctrl/actions/events";
 import { EventosClient } from "@/components/ctrl/eventos-client";
 
 async function getEvents() {
@@ -34,7 +34,7 @@ export default async function EventosPage() {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <EventosClient events={events} createEvent={createEvent} toggleActive={toggleEventActive} />
+      <EventosClient events={events} createEvent={createEvent} updateEvent={updateEvent} toggleActive={toggleEventActive} />
     </div>
   );
 }

@@ -31,6 +31,28 @@ export async function createEvent(formData: FormData) {
   revalidatePath("/ctrl/admin/eventos");
 }
 
+export async function updateEvent(eventId: string, formData: FormData) {
+  const ctx = await getCtrlUser();
+  if (!ctx || !hasCtrlRole(ctx, "csc", "admin")) {
+    return { error: "Permissão negada." };
+  }
+
+  const name = (formData.get("name") as string)?.trim();
+  if (!name) return { error: "Nome é obrigatório." };
+
+  const supabase = await getAdminSupabase();
+  const { error } = await supabase
+    .from("ctrl_events")
+    .update({
+      name,
+      description: (formData.get("description") as string)?.trim() || null,
+    })
+    .eq("id", eventId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/ctrl/admin/eventos");
+}
+
 export async function toggleEventActive(eventId: string, isActive: boolean) {
   const ctx = await getCtrlUser();
   if (!ctx || !hasCtrlRole(ctx, "csc", "admin")) {
