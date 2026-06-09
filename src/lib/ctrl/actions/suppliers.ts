@@ -13,16 +13,24 @@ export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado
   await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
   const supabase = await createClient();
 
-  let query = supabase
-    .from("ctrl_suppliers")
-    .select("*, ctrl_supplier_expense_types(ctrl_expense_types(id, name))")
-    .order("name");
+  // A API limita 1000 linhas/requisição e já há >1000 fornecedores — pagina em
+  // blocos para não cortar a cauda da lista (nomes com "T" em diante sumiam).
+  const pageSize = 1000;
+  const all: CtrlSupplier[] = [];
+  for (let from = 0; ; from += pageSize) {
+    let query = supabase
+      .from("ctrl_suppliers")
+      .select("*, ctrl_supplier_expense_types(ctrl_expense_types(id, name))")
+      .order("name")
+      .range(from, from + pageSize - 1);
+    if (status) query = query.eq("status", status);
 
-  if (status) query = query.eq("status", status);
-
-  const { data, error } = await query;
-  if (error) return { error: error.message };
-  return { suppliers: data as CtrlSupplier[] };
+    const { data, error } = await query;
+    if (error) return { error: error.message };
+    all.push(...((data ?? []) as CtrlSupplier[]));
+    if (!data || data.length < pageSize) break;
+  }
+  return { suppliers: all };
 }
 
 export async function approveSupplier(

@@ -7,21 +7,39 @@ import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
 import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
+const SUPPLIERS_SELECT = `id, name, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
+   chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
+   status, rejection_reason, created_at, approved_at,
+   approver:users!ctrl_suppliers_approved_by_fkey(name, email),
+   ctrl_supplier_expense_types(expense_type_id)`;
+
+// A API do Supabase devolve no máximo 1000 linhas por requisição. Como já há
+// mais de 1000 fornecedores, paginamos em blocos para não cortar a cauda da
+// lista (ex.: nomes com "T" em diante sumiam da tela e da busca).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchAllSuppliers(supabase: any) {
+  const pageSize = 1000;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const all: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("ctrl_suppliers")
+      .select(SUPPLIERS_SELECT)
+      .order("name")
+      .range(from, from + pageSize - 1);
+    if (error) return { data: all, error };
+    all.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: all, error: null };
+}
+
 async function getData() {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
   const [suppliersResult, expenseTypesResult, omieCompaniesResult, linksResult] = await Promise.all([
-    supabase
-      .from("ctrl_suppliers")
-      .select(
-        `id, name, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
-         chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
-         status, rejection_reason, created_at, approved_at,
-         approver:users!ctrl_suppliers_approved_by_fkey(name, email),
-         ctrl_supplier_expense_types(expense_type_id)`,
-      )
-      .order("name"),
+    fetchAllSuppliers(supabase),
     supabase.from("ctrl_expense_types").select("id, name").order("name"),
     supabase
       .from("companies")
