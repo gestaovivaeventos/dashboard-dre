@@ -12,6 +12,8 @@ async function getCompanies() {
     .from("companies")
     .select("id, name")
     .eq("active", true)
+    .not("omie_app_key", "is", null)
+    .not("omie_app_secret", "is", null)
     .order("name");
   if (error) {
     console.error("[contas-a-pagar] Falha ao carregar empresas:", error);
@@ -41,6 +43,10 @@ async function getContasAPagar() {
       reference_year,
       status,
       paying_company,
+      paying_company_id,
+      omie_launch_status,
+      omie_contapagar_codigo,
+      omie_launch_error,
       sent_to_payment_at,
       inactivation_reason,
       inactivated_at,

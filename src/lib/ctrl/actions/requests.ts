@@ -1290,13 +1290,29 @@ export async function batchApproveRequests(
 
 export async function sendToPayment(
   requestIds: string[],
-  payingCompany?: string
+  payingCompanyId: string
 ) {
   const ctx = await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+
+  if (!payingCompanyId) return { error: "Empresa pagadora é obrigatória." };
+
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
+  // Validate company and Omie credentials
+  const { data: company, error: compErr } = await supabase
+    .from("companies")
+    .select("id, name, omie_app_key, omie_app_secret")
+    .eq("id", payingCompanyId)
+    .maybeSingle();
+
+  if (compErr || !company) return { error: "Empresa pagadora não encontrada." };
+  if (!company.omie_app_key || !company.omie_app_secret) {
+    return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
   const now = new Date().toISOString();
+  const companyName = company.name as string;
 
   const { error } = await supabase
     .from("ctrl_requests")
@@ -1304,7 +1320,8 @@ export async function sendToPayment(
       status: "agendado",
       sent_to_payment_at: now,
       sent_to_payment_by: ctx.id,
-      paying_company: payingCompany ?? null,
+      paying_company_id: payingCompanyId,
+      paying_company: companyName,
       updated_at: now,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)
@@ -1318,13 +1335,35 @@ export async function sendToPayment(
       request_id: id,
       user_id: ctx.id,
       action: "enviado_pagamento" as const,
-      comment: payingCompany ? `Empresa pagadora: ${payingCompany}` : null,
+      comment: `Empresa pagadora: ${companyName}`,
     }))
   );
 
+  // Launch each request to Omie
+  const { launchRequestToOmie } = await import("@/lib/ctrl/actions/contapagar-launch");
+  const results: { id: string; ok?: boolean; status?: string; error?: string }[] = [];
+
+  for (const id of requestIds) {
+    const res = await launchRequestToOmie(supabase, id, payingCompanyId);
+    if ("error" in res) {
+      // Persist error on the request (covers mapping-incomplete and other pre-launch errors)
+      await supabase
+        .from("ctrl_requests")
+        .update({
+          omie_launch_status: "erro",
+          omie_launch_error: res.error,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      results.push({ id, error: res.error });
+    } else {
+      results.push({ id, ok: true, status: res.status });
+    }
+  }
+
   revalidatePath("/ctrl/contas-a-pagar");
   revalidatePath("/ctrl/requisicoes");
-  return { ok: true };
+  return { ok: true as const, results };
 }
 
 // ─── Inactivate ───────────────────────────────────────────────────────────────
