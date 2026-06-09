@@ -21,7 +21,12 @@ async function getCompanies() {
 }
 
 async function getContasAPagar() {
-  const supabase = await createClient();
+  // Admin client (service role) para que o join embutido em `users` resolva
+  // criador/aprovador — a RLS de `users` só expõe a própria linha a não-admins,
+  // o que zeraria "Criado por"/"Aprovado por". A autorização já é feita na
+  // página (gate por papel) e replicada pela policy ctrl_requests_read_all.
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
 
   const { data, error } = await supabase
     .from("ctrl_requests")
