@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import type { CtrlSupplier } from "@/lib/supabase/types";
+import { decryptSecret } from "@/lib/security/encryption";
+import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
 
 export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado") {
   await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
@@ -26,6 +28,7 @@ export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado
 export async function approveSupplier(
   supplierId: string,
   expenseTypeIds: string[],
+  companyIds: string[] = [],
 ) {
   const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
 
@@ -35,6 +38,21 @@ export async function approveSupplier(
 
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
+
+  // Carrega o fornecedor (campos p/ Omie + flag).
+  const { data: supplier, error: supErr } = await supabase
+    .from("ctrl_suppliers")
+    .select(
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_sync_required",
+    )
+    .eq("id", supplierId)
+    .maybeSingle();
+
+  if (supErr || !supplier) return { error: "Fornecedor não encontrado." };
+
+  if (supplier.omie_sync_required && companyIds.length === 0) {
+    return { error: "Selecione ao menos uma unidade para cadastro no Omie." };
+  }
 
   const { error: updateError } = await supabase
     .from("ctrl_suppliers")
@@ -48,34 +66,165 @@ export async function approveSupplier(
 
   if (updateError) return { error: updateError.message };
 
-  // Substitui os vinculos existentes pelos selecionados (idempotente em re-aprovacoes).
+  // Substitui os vínculos de tipo de despesa pelos selecionados.
   const { error: deleteError } = await supabase
     .from("ctrl_supplier_expense_types")
     .delete()
     .eq("supplier_id", supplierId);
-
   if (deleteError) return { error: deleteError.message };
-
-  const rows = expenseTypeIds.map((expenseTypeId) => ({
-    supplier_id: supplierId,
-    expense_type_id: expenseTypeId,
-  }));
 
   const { error: insertError } = await supabase
     .from("ctrl_supplier_expense_types")
-    .insert(rows);
-
+    .insert(
+      expenseTypeIds.map((expenseTypeId) => ({
+        supplier_id: supplierId,
+        expense_type_id: expenseTypeId,
+      })),
+    );
   if (insertError) return { error: insertError.message };
 
+  // Sincroniza no Omie nas unidades selecionadas (só fornecedores do novo fluxo).
+  const omieResults: { companyId: string; ok: boolean; error?: string }[] = [];
+  if (supplier.omie_sync_required && companyIds.length > 0) {
+    const { data: companies } = await supabase
+      .from("companies")
+      .select("id, name, omie_app_key, omie_app_secret")
+      .in("id", companyIds);
+
+    const supplierData: OmieSupplierData = {
+      id: supplier.id,
+      name: supplier.name,
+      cnpj_cpf: supplier.cnpj_cpf,
+      email: supplier.email,
+      phone: supplier.phone,
+      banco: supplier.banco,
+      agencia: supplier.agencia,
+      conta_corrente: supplier.conta_corrente,
+      titular_banco: supplier.titular_banco,
+      doc_titular: supplier.doc_titular,
+      chave_pix: supplier.chave_pix,
+    };
+
+    for (const companyId of companyIds) {
+      const company = (companies ?? []).find((c) => c.id === companyId);
+      const now = new Date().toISOString();
+
+      await supabase.from("ctrl_supplier_omie_links").upsert(
+        { supplier_id: supplierId, company_id: companyId, sync_status: "pendente", updated_at: now },
+        { onConflict: "supplier_id,company_id" },
+      );
+
+      if (!company?.omie_app_key || !company?.omie_app_secret) {
+        await supabase
+          .from("ctrl_supplier_omie_links")
+          .update({ sync_status: "erro", sync_error: "Unidade sem credenciais Omie.", updated_at: now })
+          .eq("supplier_id", supplierId)
+          .eq("company_id", companyId);
+        omieResults.push({ companyId, ok: false, error: "Unidade sem credenciais Omie." });
+        continue;
+      }
+
+      try {
+        const appKey = decryptSecret(company.omie_app_key);
+        const appSecret = decryptSecret(company.omie_app_secret);
+        const { codigoCliente } = await syncSupplierToOmieUnit(appKey, appSecret, supplierData);
+        await supabase
+          .from("ctrl_supplier_omie_links")
+          .update({
+            sync_status: "ok",
+            omie_codigo_cliente: codigoCliente,
+            sync_error: null,
+            synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("supplier_id", supplierId)
+          .eq("company_id", companyId);
+        omieResults.push({ companyId, ok: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await supabase
+          .from("ctrl_supplier_omie_links")
+          .update({ sync_status: "erro", sync_error: msg, updated_at: new Date().toISOString() })
+          .eq("supplier_id", supplierId)
+          .eq("company_id", companyId);
+        omieResults.push({ companyId, ok: false, error: msg });
+      }
+    }
+  }
+
+  const okCount = omieResults.filter((r) => r.ok).length;
+  const errCount = omieResults.length - okCount;
   await logSupplierHistory(supabase, {
     supplierId,
     userId: ctx.id,
     action: "aprovado",
-    comment: `${expenseTypeIds.length} tipo(s) de despesa vinculado(s)`,
+    comment:
+      `${expenseTypeIds.length} tipo(s) de despesa` +
+      (omieResults.length ? ` · Omie: ${okCount} ok, ${errCount} erro` : ""),
   });
 
   revalidatePath("/ctrl/admin/fornecedores");
-  return { ok: true };
+  return { ok: true, omieResults };
+}
+
+// Reenvia o fornecedor ao Omie em uma unidade (botão "Reenviar ao Omie").
+export async function resyncSupplierOmie(supplierId: string, companyId: string) {
+  await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: supplier } = await supabase
+    .from("ctrl_suppliers")
+    .select(
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix",
+    )
+    .eq("id", supplierId)
+    .maybeSingle();
+  if (!supplier) return { error: "Fornecedor não encontrado." };
+
+  const { data: company } = await supabase
+    .from("companies")
+    .select("id, omie_app_key, omie_app_secret")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (!company?.omie_app_key || !company?.omie_app_secret) {
+    return { error: "Unidade sem credenciais Omie." };
+  }
+
+  const now = new Date().toISOString();
+  await supabase.from("ctrl_supplier_omie_links").upsert(
+    { supplier_id: supplierId, company_id: companyId, sync_status: "pendente", updated_at: now },
+    { onConflict: "supplier_id,company_id" },
+  );
+
+  try {
+    const { codigoCliente } = await syncSupplierToOmieUnit(
+      decryptSecret(company.omie_app_key),
+      decryptSecret(company.omie_app_secret),
+      supplier as OmieSupplierData,
+    );
+    await supabase
+      .from("ctrl_supplier_omie_links")
+      .update({
+        sync_status: "ok",
+        omie_codigo_cliente: codigoCliente,
+        sync_error: null,
+        synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("supplier_id", supplierId)
+      .eq("company_id", companyId);
+    revalidatePath("/ctrl/admin/fornecedores");
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await supabase
+      .from("ctrl_supplier_omie_links")
+      .update({ sync_status: "erro", sync_error: msg, updated_at: new Date().toISOString() })
+      .eq("supplier_id", supplierId)
+      .eq("company_id", companyId);
+    return { error: msg };
+  }
 }
 
 export async function rejectSupplier(supplierId: string, reason: string) {
@@ -150,6 +299,8 @@ export async function updateSupplier(
     approved_by: null,
     approved_at: null,
     rejection_reason: null,
+    // Qualquer edição passa a exigir (re)sync com o Omie na reaprovação.
+    omie_sync_required: true,
   };
   if (data.name !== undefined) {
     const trimmed = data.name.trim();
@@ -286,6 +437,7 @@ export async function createSupplier(data: {
       transf_padrao: data.transf_padrao ?? false,
       pix_padrao: data.pix_padrao ?? false,
       status: "pendente",
+      omie_sync_required: true,
       created_by: ctx.id,
     })
     .select("id")
