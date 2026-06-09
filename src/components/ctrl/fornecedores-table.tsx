@@ -170,18 +170,35 @@ export function FornecedoresTable({
   // Suppliers in the active tab, filtered by the free-text search.
   // Search matches on name (case-insensitive substring) OR CNPJ/CPF digits
   // (so the user can type "12.345" or "12345" and both work).
+  const matchesSearch = (s: SupplierRow, term: string, termDigits: string) => {
+    if (!term) return true;
+    if (s.name.toLowerCase().includes(term)) return true;
+    if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
+    return false;
+  };
+
+  // Resultados da aba ativa (mantém o significado das abas — um fornecedor só
+  // aparece na aba do seu status).
   const filteredSuppliers = useMemo(() => {
     const term = search.trim().toLowerCase();
     const termDigits = term.replace(/\D/g, "");
-    return suppliers.filter((s) => {
-      // Sem busca: escopo na aba ativa. Com busca: varre TODAS as abas — o
-      // usuário não deveria precisar adivinhar em qual status o fornecedor está
-      // (a coluna Status mostra de qual estado é cada resultado).
-      if (!term) return s.status === activeTab;
-      if (s.name.toLowerCase().includes(term)) return true;
-      if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
-      return false;
-    });
+    return suppliers.filter((s) => s.status === activeTab && matchesSearch(s, term, termDigits));
+  }, [suppliers, activeTab, search]);
+
+  // Quantos resultados da busca existem nas OUTRAS abas — para um aviso de
+  // descoberta ("encontrado em Pendentes"), já que a busca é escopada por aba.
+  const otherTabMatches = useMemo(() => {
+    const acc: Record<TabKey, number> = { pendente: 0, aprovado: 0, rejeitado: 0 };
+    const term = search.trim().toLowerCase();
+    if (!term) return acc;
+    const termDigits = term.replace(/\D/g, "");
+    for (const s of suppliers) {
+      if (s.status === activeTab) continue;
+      if ((s.status === "pendente" || s.status === "aprovado" || s.status === "rejeitado") && matchesSearch(s, term, termDigits)) {
+        acc[s.status] += 1;
+      }
+    }
+    return acc;
   }, [suppliers, activeTab, search]);
 
   const totalPages = Math.max(1, Math.ceil(filteredSuppliers.length / SUPPLIERS_PER_PAGE));
@@ -339,6 +356,27 @@ export function FornecedoresTable({
           {filteredSuppliers.length} resultado{filteredSuppliers.length === 1 ? "" : "s"}
         </p>
       </div>
+
+      {/* Dica: a busca achou resultados em outras abas */}
+      {search.trim() && (otherTabMatches.pendente + otherTabMatches.aprovado + otherTabMatches.rejeitado) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Também encontrado em:{" "}
+          {(Object.keys(otherTabMatches) as TabKey[])
+            .filter((k) => otherTabMatches[k] > 0)
+            .map((k, i) => (
+              <span key={k}>
+                {i > 0 ? " · " : ""}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(k)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {TAB_LABELS[k]} ({otherTabMatches[k]})
+                </button>
+              </span>
+            ))}
+        </p>
+      )}
 
       {visibleSuppliers.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">

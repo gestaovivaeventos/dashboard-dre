@@ -11,13 +11,22 @@ const lastRequest = { value: 0 };
 
 export const OMIE_CLIENTES_URL = "https://app.omie.com.br/api/v1/geral/clientes/";
 
-// Frases que a Omie retorna em faultstring quando não há registro — NÃO são erro.
+// Frases que a Omie retorna em faultstring quando não há registro — NÃO são erro
+// (a Omie devolve isso até com HTTP 500). Lista ampla pois o texto varia por
+// chamada (ListarClientes, ConsultarCliente, etc.).
 const NOT_FOUND_HINTS = [
   "não encontrado",
   "nao encontrado",
   "não existem registros",
   "nao existem registros",
+  "não existem clientes",
+  "nao existem clientes",
+  "não foram encontrados",
+  "nao foram encontrados",
+  "não existe cliente",
+  "nao existe cliente",
   "nenhum registro",
+  "nenhum cliente",
   "not found",
 ];
 
@@ -60,6 +69,24 @@ export async function omieCall(
     lastRequest.value = Date.now();
 
     if (!response.ok) {
+      // A Omie devolve HTTP 500 com um corpo JSON de faultstring para MUITOS
+      // erros de negócio — inclusive "não existem registros" no ListarClientes.
+      // Por isso interpretamos o corpo antes de classificar como transiente.
+      let body: Record<string, unknown> | null = null;
+      try {
+        body = (await response.json()) as Record<string, unknown>;
+      } catch {
+        body = null;
+      }
+      const fault = body?.faultstring ?? body?.faultcode;
+      if (fault) {
+        const msg = String(body?.faultstring ?? "").toLowerCase();
+        if (NOT_FOUND_HINTS.some((h) => msg.includes(h))) {
+          return { data: body ?? {}, notFound: true };
+        }
+        throw new Error(String(body?.faultstring ?? `Erro Omie em ${call}.`));
+      }
+      // Sem fault legível: 5xx é transiente (retry); 4xx é definitivo.
       if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
         lastError = new Error(`Omie HTTP ${response.status} em ${call}.`);
         await sleep(600 * 2 ** (attempt - 1));
