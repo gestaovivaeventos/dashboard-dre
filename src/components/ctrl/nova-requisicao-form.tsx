@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useMemo, useEffect, useRef } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Paperclip, Search, X, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X, Zap } from "lucide-react";
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
+import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
@@ -77,13 +78,25 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // emitida depois do pagamento e ainda não existe no momento da requisição.
   const [supplierIssuesInvoice, setSupplierIssuesInvoice] = useState("");
 
-  // ── Attachment (uploaded just-in-time on submit, before createRequest) ──────
+  // ── Boleto / Nota fiscal — campos preenchidos pela leitura do anexo ─────────
+  const [barcode, setBarcode] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+
+  // ── Attachment ──────────────────────────────────────────────────────────────
+  // O anexo é enviado JÁ no momento do upload (não só no submit) para permitir a
+  // leitura automática (OCR). `attachmentPath` guarda o objeto enviado; o submit
+  // reaproveita esse path em vez de re-enviar.
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentReading, setAttachmentReading] = useState(false);
+  const [attachmentReadMsg, setAttachmentReadMsg] = useState<string | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
-  function pickAttachment(file: File | null) {
+  async function pickAttachment(file: File | null) {
     setAttachmentError(null);
+    setAttachmentReadMsg(null);
+    setAttachmentPath(null);
     if (!file) {
       setAttachment(null);
       return;
@@ -93,11 +106,75 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       return;
     }
     setAttachment(file);
+
+    // Envia já para o storage e tenta ler o documento.
+    try {
+      const supabase = createSupabaseClient();
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) throw new Error("Sessão expirada — refaça o login.");
+
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+      const objectPath = `${userId}/${Date.now()}-${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from(ATTACHMENT_BUCKET)
+        .upload(objectPath, file, {
+          contentType: file.type || "application/octet-stream",
+          upsert: false,
+        });
+      if (upErr) throw upErr;
+      setAttachmentPath(objectPath);
+
+      // Tipo de leitura conforme o contexto. Boleto tem prioridade (o anexo é o
+      // boleto); senão, nota fiscal quando o fornecedor emite NF agora.
+      const kind: "nota" | "boleto" | null =
+        paymentMethod === "boleto"
+          ? "boleto"
+          : supplierIssuesInvoice === "sim"
+          ? "nota"
+          : null;
+      if (!kind) return;
+
+      setAttachmentReading(true);
+      const res = await extractAttachmentData(objectPath, kind);
+      setAttachmentReading(false);
+
+      if ("error" in res) {
+        setAttachmentReadMsg("Não consegui ler o documento automaticamente — preencha os campos manualmente.");
+        return;
+      }
+      if (kind === "nota") {
+        if (res.data.invoice_number) {
+          setInvoiceNumber(res.data.invoice_number);
+          setAttachmentReadMsg("Número da nota fiscal lido do documento.");
+        } else {
+          setAttachmentReadMsg("Não encontrei o número da nota — preencha manualmente.");
+        }
+      } else {
+        const d = res.data;
+        if (d.barcode) setBarcode(d.barcode);
+        if (d.favorecido && !favorecido) setFavorecido(d.favorecido);
+        if (d.cnpj_cpf && !bankCpfCnpj) setBankCpfCnpj(d.cnpj_cpf);
+        setAttachmentReadMsg(
+          d.barcode || d.favorecido || d.cnpj_cpf
+            ? "Dados do boleto lidos do documento — confira antes de enviar."
+            : "Não consegui ler os dados do boleto — preencha manualmente.",
+        );
+      }
+    } catch (err) {
+      setAttachmentReading(false);
+      setAttachment(null);
+      setAttachmentPath(null);
+      setAttachmentError(`Falha ao enviar o anexo: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   function clearAttachment() {
     setAttachment(null);
+    setAttachmentPath(null);
     setAttachmentError(null);
+    setAttachmentReadMsg(null);
+    setAttachmentReading(false);
     if (attachmentInputRef.current) attachmentInputRef.current.value = "";
   }
 
@@ -280,11 +357,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     // description as title — the UI now shows only one text field.
     const descriptionValue = (form.get("description") as string)?.trim() ?? "";
 
-    // If an attachment was selected, upload it first. We do this client-side
-    // (anon-key + RLS scoped to {auth.uid()}/) so failures stop the submission
-    // before any ctrl_requests row is created.
-    let attachmentPath: string | undefined;
-    if (attachment) {
+    // O anexo normalmente já foi enviado no momento do upload (para a leitura).
+    // Reaproveita esse path; só envia aqui se por algum motivo ainda não houver.
+    let finalAttachmentPath: string | undefined = attachmentPath ?? undefined;
+    if (attachment && !finalAttachmentPath) {
       try {
         const supabase = createSupabaseClient();
         const { data: userData } = await supabase.auth.getUser();
@@ -300,7 +376,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             upsert: false,
           });
         if (uploadErr) throw uploadErr;
-        attachmentPath = objectPath;
+        finalAttachmentPath = objectPath;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(`Falha ao enviar o anexo: ${msg}`);
@@ -312,7 +388,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     const result = await createRequest({
       title: descriptionValue,
       description: descriptionValue || undefined,
-      attachment_path: attachmentPath,
+      attachment_path: finalAttachmentPath,
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -325,6 +401,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       observations: (form.get("observations") as string) || undefined,
       event_id: (form.get("event_id") as string) || undefined,
       supplier_issues_invoice: supplierIssuesInvoice || undefined,
+      invoice_number: invoiceNumber.trim() || undefined,
       bank_name: bankName || undefined,
       bank_agency: bankAgency || undefined,
       bank_account: bankAccount || undefined,
@@ -333,7 +410,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       pix_key: pixKey || undefined,
       pix_key_type: pixKeyType || undefined,
       favorecido: favorecido || undefined,
-      barcode: (form.get("barcode") as string) || undefined,
+      barcode: barcode || undefined,
       installments: paymentMethod === "cartao_credito" ? installments : undefined,
       needs_credit_card:
         paymentMethod === "cartao_credito" && needsCreditCard
@@ -361,6 +438,65 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
+
+  // Bloco de anexo reutilizável — renderizado dentro da seção do boleto (antes
+  // dos campos de dados) ou na posição padrão para os demais métodos.
+  const attachmentBlock = (
+    <div className="space-y-1.5">
+      <label htmlFor="attachment" className={LABEL_CLS}>
+        Anexo{" "}
+        {attachmentRequired ? (
+          <span className="text-destructive">
+            * obrigatório ({paymentMethod === "boleto" ? "boleto" : "nota fiscal"})
+          </span>
+        ) : (
+          <span className="text-muted-foreground font-normal">(opcional)</span>
+        )}
+        <span className="text-muted-foreground font-normal"> · até 10 MB</span>
+      </label>
+      {!attachment ? (
+        <div className="flex items-center gap-2">
+          <input
+            ref={attachmentInputRef}
+            id="attachment"
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+            onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
+            className={INPUT_CLS}
+          />
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Paperclip className="h-4 w-4 text-muted-foreground" />
+            <span className="truncate">{attachment.name}</span>
+            <span className="text-xs text-muted-foreground">
+              ({(attachment.size / 1024 / 1024).toFixed(2)} MB)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={clearAttachment}
+            className="text-muted-foreground hover:text-destructive"
+            aria-label="Remover anexo"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      {attachmentReading && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Lendo documento…
+        </p>
+      )}
+      {attachmentReadMsg && !attachmentReading && (
+        <p className="text-xs text-violet-700 dark:text-violet-300">{attachmentReadMsg}</p>
+      )}
+      {attachmentError && <p className="text-xs text-destructive">{attachmentError}</p>}
+      <p className="text-xs text-muted-foreground">Formatos: PDF, JPG, PNG, DOC, XLS.</p>
+    </div>
+  );
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -746,14 +882,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       )}
 
-      {/* Boleto */}
+      {/* Boleto — anexo primeiro; os dados abaixo são preenchidos pela leitura */}
       {paymentMethod === "boleto" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
-          {selectedSupplier && (
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              Favorecido e CPF/CNPJ vêm do cadastro do fornecedor. Informe a linha digitável ou código de barras do boleto.
+          <div className="sm:col-span-2">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Anexe o boleto primeiro — o sistema tenta ler o código de barras, o
+              favorecido e o CPF/CNPJ e preencher os campos abaixo.
             </p>
-          )}
+            {attachmentBlock}
+          </div>
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
             <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
@@ -766,7 +904,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             <label htmlFor="barcode" className={LABEL_CLS}>
               Linha Digitável / Código de Barras <span className="text-destructive">*</span>
             </label>
-            <input id="barcode" name="barcode" type="text" required placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
+            <input id="barcode" name="barcode" type="text" required value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
           </div>
         </div>
       )}
@@ -847,56 +985,26 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         )}
       </div>
 
-      {/* Anexo */}
-      <div className="space-y-1.5">
-        <label htmlFor="attachment" className={LABEL_CLS}>
-          Anexo{" "}
-          {attachmentRequired ? (
-            <span className="text-destructive">
-              * obrigatório ({paymentMethod === "boleto" ? "boleto" : "nota fiscal"})
-            </span>
-          ) : (
-            <span className="text-muted-foreground font-normal">(opcional)</span>
-          )}
-          <span className="text-muted-foreground font-normal"> · até 10 MB</span>
-        </label>
-        {!attachment ? (
-          <div className="flex items-center gap-2">
-            <input
-              ref={attachmentInputRef}
-              id="attachment"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
-              onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
-              className={INPUT_CLS}
-            />
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Paperclip className="h-4 w-4 text-muted-foreground" />
-              <span className="truncate">{attachment.name}</span>
-              <span className="text-xs text-muted-foreground">
-                ({(attachment.size / 1024 / 1024).toFixed(2)} MB)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={clearAttachment}
-              className="text-muted-foreground hover:text-destructive"
-              aria-label="Remover anexo"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-        {attachmentError && (
-          <p className="text-xs text-destructive">{attachmentError}</p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Formatos: PDF, JPG, PNG, DOC, XLS.
-        </p>
-      </div>
+      {/* Número da nota fiscal — preenchido pela leitura do anexo, editável */}
+      {supplierIssuesInvoice === "sim" && (
+        <div className="space-y-1.5">
+          <label htmlFor="invoice_number" className={LABEL_CLS}>
+            Número da nota fiscal
+          </label>
+          <input
+            id="invoice_number"
+            name="invoice_number"
+            type="text"
+            value={invoiceNumber}
+            onChange={(e) => setInvoiceNumber(e.target.value)}
+            placeholder="Preenchido automaticamente ao anexar a nota"
+            className={INPUT_CLS}
+          />
+        </div>
+      )}
+
+      {/* Anexo — no boleto ele aparece dentro da seção do boleto (acima) */}
+      {paymentMethod !== "boleto" && attachmentBlock}
 
       {/* Observações */}
       <div className="space-y-1.5">

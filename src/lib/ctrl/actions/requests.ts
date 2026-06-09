@@ -63,6 +63,7 @@ export interface CreateRequestInput {
   observations?: string;
   event_id?: string;
   supplier_issues_invoice?: string;
+  invoice_number?: string;
   // Payment fields
   bank_name?: string;
   bank_agency?: string;
@@ -364,6 +365,7 @@ export async function createRequest(data: CreateRequestInput) {
     observations: data.observations ?? null,
     event_id: data.event_id ?? null,
     supplier_issues_invoice: data.supplier_issues_invoice ?? null,
+    invoice_number: data.invoice_number ?? null,
     bank_name: data.bank_name ?? null,
     bank_agency: data.bank_agency ?? null,
     bank_account: data.bank_account ?? null,

@@ -215,6 +215,7 @@ export interface CtrlRequest {
   barcode: string | null;
   // Extra
   supplier_issues_invoice: string | null;
+  invoice_number: string | null;
   justification: string | null;
   observations: string | null;
   is_budgeted: boolean;
