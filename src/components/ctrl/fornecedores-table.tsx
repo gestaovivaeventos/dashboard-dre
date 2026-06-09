@@ -393,7 +393,8 @@ export function FornecedoresTable({
                                   <button
                                     type="button"
                                     disabled={isPending}
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       setActingId(s.id);
                                       startTransition(async () => {
                                         const r = await resyncSupplierOmie(s.id, l.company_id);
