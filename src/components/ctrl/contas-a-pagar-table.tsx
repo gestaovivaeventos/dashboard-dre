@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Download, Eye, FileText, Loader2, MessageCircle, Paperclip, X } from "lucide-react";
+import { Download, Eye, FileText, Loader2, MessageCircle, Paperclip, RefreshCw, X } from "lucide-react";
 
 import {
   sendToPayment,
   inactivateRequests,
   getRequestAttachmentUrl,
 } from "@/lib/ctrl/actions/requests";
+import { resyncContaPagar } from "@/lib/ctrl/actions/contapagar-launch";
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { useRouter } from "next/navigation";
 
@@ -38,6 +39,10 @@ export type ContasRequest = {
   reference_year?: number | null;
   status: string;
   paying_company: string | null;
+  paying_company_id?: string | null;
+  omie_launch_status?: string | null;
+  omie_contapagar_codigo?: number | null;
+  omie_launch_error?: string | null;
   sent_to_payment_at: string | null;
   inactivation_reason: string | null;
   inactivated_at: string | null;
@@ -92,10 +97,6 @@ const MONTHS = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
-// Entidades pagadoras que não são empresas operacionais do DRE (ex.: holding),
-// portanto não vivem na tabela `companies` mas precisam aparecer no select.
-const EXTRA_PAYING_COMPANIES = ["V Company"];
-
 type Tab = "aprovado" | "info_pagamento_pendente" | "agendado" | "inativado_csc";
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -145,14 +146,9 @@ const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDi
 export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   const router = useRouter();
 
-  // Empresas do DRE + entidades pagadoras extras (ex.: holding), sem duplicar.
-  const payingCompanyOptions = Array.from(
-    new Set([...companies.map((c) => c.name), ...EXTRA_PAYING_COMPANIES]),
-  );
-
   const [activeTab, setActiveTab] = useState<Tab>("aprovado");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [payingCompany, setPayingCompany] = useState("");
+  const [payingCompanyId, setPayingCompanyId] = useState("");
   const [showEnviarModal, setShowEnviarModal] = useState(false);
   const [inactivateReason, setInactivateReason] = useState("");
   const [showInactivateModal, setShowInactivateModal] = useState(false);
@@ -216,15 +212,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   }
 
   function handleEnviar() {
-    if (selected.size === 0 || !payingCompany) return;
+    if (selected.size === 0 || !payingCompanyId) return;
     startTransition(async () => {
-      const result = await sendToPayment(Array.from(selected), payingCompany);
-      if (result?.error) { notify(result.error, false); }
-      else {
+      const result = await sendToPayment(Array.from(selected), payingCompanyId);
+      if (result && "error" in result) {
+        notify((result as { error: string }).error, false);
+      } else if (result && "results" in result) {
+        const failCount = result.results.filter((r) => r.error).length;
         setSelected(new Set());
-        setPayingCompany("");
+        setPayingCompanyId("");
         setShowEnviarModal(false);
-        notify(`${selected.size} requisição(ões) enviadas para pagamento.`);
+        if (failCount > 0) {
+          notify(`Enviado; ${failCount} falharam no Omie (mapeamento ou erro). Use Reenviar.`, false);
+        } else {
+          notify(`${result.results.length} requisição(ões) enviadas e lançadas no Omie.`);
+        }
       }
     });
   }
@@ -355,9 +357,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                         </div>
                       )}
                       {activeTab === "agendado" && (
-                        <div>
+                        <div className="space-y-1">
                           {req.paying_company && <p className="font-medium text-sky-600">{req.paying_company}</p>}
                           {req.sent_to_payment_at && <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.sent_to_payment_at))}</p>}
+                          <OmieLaunchBadge status={req.omie_launch_status} error={req.omie_launch_error} />
                         </div>
                       )}
                       {activeTab === "inativado_csc" && (
@@ -390,6 +393,9 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                             <MessageCircle className="h-3.5 w-3.5" />
                             {req.status === "info_pagamento_pendente" ? "Continuar" : "Pedir info"}
                           </button>
+                        )}
+                        {activeTab === "agendado" && req.omie_launch_status === "erro" && ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r)) && (
+                          <ResyncButton requestId={req.id} onDone={() => router.refresh()} />
                         )}
                       </div>
                     </td>
@@ -444,31 +450,24 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                 <label className="text-sm font-medium">
                   Empresa Pagadora <span className="text-destructive">*</span>
                 </label>
-                {payingCompanyOptions.length > 0 ? (
-                  <select
-                    value={payingCompany}
-                    onChange={(e) => setPayingCompany(e.target.value)}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">Selecione a empresa pagadora</option>
-                    {payingCompanyOptions.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={payingCompany}
-                    onChange={(e) => setPayingCompany(e.target.value)}
-                    placeholder="Nome da empresa pagadora"
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  />
+                <select
+                  value={payingCompanyId}
+                  onChange={(e) => setPayingCompanyId(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Selecione a empresa pagadora</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {companies.length === 0 && (
+                  <p className="text-xs text-destructive">Nenhuma empresa com conexão Omie configurada.</p>
                 )}
               </div>
             </div>
             <div className="border-t px-6 py-4 flex justify-end gap-3">
               <button
-                onClick={() => { setShowEnviarModal(false); setPayingCompany(""); }}
+                onClick={() => { setShowEnviarModal(false); setPayingCompanyId(""); }}
                 disabled={isPending}
                 className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
               >
@@ -476,7 +475,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
               </button>
               <button
                 onClick={handleEnviar}
-                disabled={isPending || !payingCompany}
+                disabled={isPending || !payingCompanyId}
                 className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isPending ? "Enviando..." : "Confirmar Envio"}
@@ -551,6 +550,79 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
           onSubmitted={() => router.refresh()}
         />
       )}
+    </div>
+  );
+}
+
+// ── Omie launch badge ────────────────────────────────────────────────────────
+
+function OmieLaunchBadge({
+  status,
+  error,
+}: {
+  status?: string | null;
+  error?: string | null;
+}) {
+  if (!status) return null;
+  if (status === "recebido") {
+    return (
+      <span className="inline-flex w-fit items-center rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-800 dark:bg-green-950/40 dark:text-green-300">
+        Recebido (Omie)
+      </span>
+    );
+  }
+  if (status === "lancado") {
+    return (
+      <span className="inline-flex w-fit items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+        Lançado (Omie)
+      </span>
+    );
+  }
+  if (status === "erro") {
+    return (
+      <span
+        title={error ?? undefined}
+        className="inline-flex w-fit cursor-help items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800 dark:bg-red-950/40 dark:text-red-300"
+      >
+        Falha Omie
+      </span>
+    );
+  }
+  return null;
+}
+
+// ── Resync button ─────────────────────────────────────────────────────────────
+
+function ResyncButton({ requestId, onDone }: { requestId: string; onDone: () => void }) {
+  const [isPending, startTransition] = useTransition();
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  function handleResync(e: React.MouseEvent) {
+    e.stopPropagation();
+    startTransition(async () => {
+      const result = await resyncContaPagar(requestId);
+      if ("error" in result) {
+        setFeedback(`Erro: ${result.error}`);
+      } else {
+        setFeedback(`OK (${result.status})`);
+        onDone();
+      }
+      setTimeout(() => setFeedback(null), 4000);
+    });
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        type="button"
+        onClick={handleResync}
+        disabled={isPending}
+        className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300"
+      >
+        {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        Reenviar ao Omie
+      </button>
+      {feedback && <p className="text-[10px] text-muted-foreground">{feedback}</p>}
     </div>
   );
 }
