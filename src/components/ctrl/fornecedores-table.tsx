@@ -174,8 +174,10 @@ export function FornecedoresTable({
     const term = search.trim().toLowerCase();
     const termDigits = term.replace(/\D/g, "");
     return suppliers.filter((s) => {
-      if (s.status !== activeTab) return false;
-      if (!term) return true;
+      // Sem busca: escopo na aba ativa. Com busca: varre TODAS as abas — o
+      // usuário não deveria precisar adivinhar em qual status o fornecedor está
+      // (a coluna Status mostra de qual estado é cada resultado).
+      if (!term) return s.status === activeTab;
       if (s.name.toLowerCase().includes(term)) return true;
       if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
       return false;
