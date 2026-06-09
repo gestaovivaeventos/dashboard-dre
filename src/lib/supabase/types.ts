@@ -241,6 +241,12 @@ export interface CtrlRequest {
   // Reversal
   reversed_at: string | null;
   reversal_reason: string | null;
+  // Omie launch
+  paying_company_id: string | null;
+  omie_launch_status: "pendente" | "recebido" | "lancado" | "erro" | null;
+  omie_contapagar_codigo: number | null;
+  omie_launch_error: string | null;
+  omie_launched_at: string | null;
 }
 
 export interface CtrlEvent {
