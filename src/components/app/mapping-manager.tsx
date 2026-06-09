@@ -102,7 +102,11 @@ export function MappingManager({
   // continuam funcionando porque o endpoint GET (`/api/category-mapping`)
   // traduz IDs globais -> IDs clonados pelo `code` antes de devolver as
   // linhas, garantindo que o `<option>` seja encontrado no dropdown.
-  const availableDreAccounts = useMemo(() => {
+  //
+  // FALLBACK (estado inicial / erro de rede): usa o `dreAccounts` pre-carregado
+  // pelo server component. Esse prop traz o plano global + os planos custom de
+  // TODAS as empresas do segmento num unico array, filtrado aqui no cliente.
+  const preloadedDreAccounts = useMemo(() => {
     const hasCustomPlan = dreAccounts.some((a) => a.company_id === companyId);
     return dreAccounts.filter((account) =>
       hasCustomPlan
@@ -110,6 +114,68 @@ export function MappingManager({
         : account.company_id == null,
     );
   }, [dreAccounts, companyId]);
+
+  // FONTE AUTORITATIVA do dropdown: a estrutura DRE EFETIVA da empresa
+  // selecionada, lida fresca do servidor (`/api/dre-accounts?companyId=X`).
+  // Esse endpoint ja aplica a regra de escopo (plano custom da empresa quando
+  // existir; plano global caso contrario), entao uma linha recem-criada na tela
+  // de Estrutura DRE aparece aqui assim que a empresa e selecionada / a tela e
+  // atualizada — sem depender do payload que o server component capturou no
+  // momento da navegacao (que pode estar defasado pelo Router Cache do Next ou
+  // truncado pelo cap de 1000 linhas do PostgREST conforme o segmento cresce).
+  const [scopedDre, setScopedDre] = useState<{
+    companyId: string;
+    accounts: DreAccountOption[];
+  } | null>(null);
+
+  const loadScopedDreAccounts = useCallback(async () => {
+    if (!companyId) return;
+    try {
+      const response = await fetch(
+        `/api/dre-accounts?companyId=${encodeURIComponent(companyId)}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) return; // mantem o fallback pre-carregado
+      const payload = (await response.json()) as {
+        accounts?: Array<{
+          id: string;
+          code: string;
+          name: string;
+          company_id: string | null;
+          type?: DreAccountOption["type"];
+          is_summary?: boolean;
+          active?: boolean;
+        }>;
+      };
+      const accounts = (payload.accounts ?? [])
+        .filter((a) => a.active !== false)
+        .map(
+          (a): DreAccountOption => ({
+            id: a.id,
+            code: a.code,
+            name: a.name,
+            company_id: a.company_id ?? null,
+            type: a.type ?? "misto",
+            is_summary: Boolean(a.is_summary),
+          }),
+        )
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+      setScopedDre({ companyId, accounts });
+    } catch {
+      // silencioso: mantem o fallback pre-carregado (`preloadedDreAccounts`).
+    }
+  }, [companyId]);
+
+  // Recarrega a estrutura sempre que a empresa selecionada muda, garantindo que
+  // o dropdown reflita o plano da empresa correta (e nada de outras empresas).
+  useEffect(() => {
+    void loadScopedDreAccounts();
+  }, [loadScopedDreAccounts]);
+
+  const availableDreAccounts =
+    scopedDre && scopedDre.companyId === companyId
+      ? scopedDre.accounts
+      : preloadedDreAccounts;
 
   // Contas de Fluxo de Caixa mapeaveis para a empresa selecionada — mesma regra
   // de escopo + analiticas usada em CashFlowMappingTab. Alimenta a secao de
@@ -445,7 +511,10 @@ export function MappingManager({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => (tab === "omie" ? void loadRows() : void loadBudgetRows())}
+                onClick={() => {
+                  void loadScopedDreAccounts();
+                  return tab === "omie" ? void loadRows() : void loadBudgetRows();
+                }}
                 disabled={loading || saving || budgetLoading || budgetSaving}
               >
                 {(tab === "omie" ? loading : budgetLoading) ? (

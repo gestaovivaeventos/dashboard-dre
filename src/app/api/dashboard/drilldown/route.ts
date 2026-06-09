@@ -106,7 +106,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: drillResult.error.message }, { status: 400 });
   }
 
-  const rows = (
+  const omieRows = (
     drillResult.data as
       | Array<{
           financial_entry_id: string;
@@ -132,8 +132,58 @@ export async function GET(request: Request) {
     company_name: row.company_name as string,
     total_count: Number(row.total_count ?? 0),
   }));
-  const total = rows[0]?.total_count ?? 0;
+  // `total`/`totalPages` contam apenas os LANCAMENTOS da Omie (paginados pelo
+  // RPC). A linha-base do Google Sheets (injetada abaixo) e um resumo fixado,
+  // nao um lancamento.
+  const total = omieRows[0]?.total_count ?? 0;
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+
+  // Linhas alimentadas por Google Sheets (`dre_accounts.data_source = 'sheets'`
+  // — hoje exclusivas da Feat Producoes) compoem o valor final como
+  // planilha + Omie elegivel. O drilldown ja lista os lancamentos da Omie
+  // elegiveis (RPC casa por `code`, sem filtro de data_source, aplicando a regra
+  // de projeto). Aqui acrescentamos UMA linha-base sintetica deixando explicito
+  // quanto veio da planilha, para o detalhamento reconciliar com o total da DRE.
+  // So na 1a pagina; gated por data_source='sheets' (inerte nas demais linhas).
+  let sheetsBaseValue = 0;
+  if (targetCode) {
+    const { data: sheetAccounts } = await supabase
+      .from("dre_accounts")
+      .select("id")
+      .eq("code", targetCode)
+      .eq("data_source", "sheets")
+      .in("company_id", scopedCompanyIds);
+    const sheetAccountIds = (sheetAccounts ?? []).map((r) => r.id as string);
+    if (sheetAccountIds.length > 0) {
+      const { data: manualValues } = await supabase
+        .from("manual_account_values")
+        .select("valor,ano,mes")
+        .in("dre_account_id", sheetAccountIds)
+        .in("company_id", scopedCompanyIds);
+      // Mesma janela de meses usada nas RPCs de agregacao (mes de dateFrom..dateTo).
+      const fromKey = Number(dateFrom.slice(0, 4)) * 12 + Number(dateFrom.slice(5, 7)) - 1;
+      const toKey = Number(dateTo.slice(0, 4)) * 12 + Number(dateTo.slice(5, 7)) - 1;
+      sheetsBaseValue = (manualValues ?? []).reduce((sum, r) => {
+        const key = Number(r.ano) * 12 + Number(r.mes) - 1;
+        return key >= fromKey && key <= toKey ? sum + Number(r.valor ?? 0) : sum;
+      }, 0);
+    }
+  }
+
+  const rows = [...omieRows];
+  if (sheetsBaseValue !== 0 && page === 1) {
+    rows.unshift({
+      id: `sheets-base-${targetCode}`,
+      payment_date: dateTo,
+      description: "Valor base (Google Sheets)",
+      supplier_customer: "Google Sheets",
+      document_number: "",
+      value: sheetsBaseValue,
+      company_id: scopedCompanyIds[0],
+      company_name: companyNameById.get(scopedCompanyIds[0]) ?? "",
+      total_count: total,
+    });
+  }
   const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
 
   const aggregateRows =
