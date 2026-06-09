@@ -19,11 +19,18 @@ export class LlmExtractionError extends Error {
 
 function buildPrompt(text: string): string {
   return `
-Você é um auditor robótico, altamente preciso e focado em detalhes. Sua função é ler o texto e preencher o JSON abaixo, seguindo 3 passos:
+Você é um auditor robótico de EXTRAÇÃO documental, altamente preciso e focado em detalhes.
+Sua função é classificar o documento e extrair os campos no JSON abaixo. Você NÃO julga
+aprovado/reprovado — a decisão é de outra etapa. Siga 3 passos.
+
+# REGRA DE OURO
+Nunca invente dado. Campo não encontrado = "" (string vazia), exceto assinaturas (use "Não").
+Nunca assuma valor, CNPJ/CPF, nome ou data que não esteja EXPLÍCITO no texto. Se houver dois
+candidatos para o mesmo campo, extraia o que está escrito de forma mais clara — não "resolva"
+a ambiguidade inventando um valor.
 
 # 1. CLASSIFICAÇÃO (Prioridade Máxima)
-Primeiro, classifique o documento em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome exato da categoria.
-Categorias:
+Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome exato:
 - "Contrato / Aditivo Contratual"
 - "Nota Fiscal / Fatura"
 - "Recibo / Declaração de Quitação"
@@ -34,42 +41,56 @@ Categorias:
 
 # 2. EXTRAÇÃO DE DADOS
 
-- **DATA DO BAILE/EVENTO:**
-    - \`data_baile\`: Procure pela data de realização do evento principal, data do baile, ou data da festa. Se houver, extraia no formato DD/MM/AAAA. Se não houver menção explícita a uma data de evento, deixe em branco.
-
 - **FAVORECIDO/CONTRATADO:**
     - \`favorecido.nome\`: O nome completo (pessoa ou empresa).
-    - \`favorecido.cpf_cnpj\`: O CNPJ ou CPF.
+        - **!!! NOTA FISCAL DE SERVIÇO (NFS-e) !!!:** o nome a extrair é o do **TOMADOR DO
+          SERVIÇO** (quem paga/contrata), **NÃO** o do Prestador. Em NF de produto, use o
+          destinatário.
+    - \`favorecido.cpf_cnpj\`: O CNPJ ou CPF (em NFS-e, o do TOMADOR).
 - **DADOS BANCÁRIOS (Se houver):**
     - \`favorecido.banco\`, \`favorecido.agencia\`, \`favorecido.conta\`.
+
+- **DATAS:**
+    - \`data_baile\`: data de realização do evento/baile/festa, no formato DD/MM/AAAA. Sem menção → "".
+    - \`data_contrato\`: data de **assinatura ou emissão** do documento (DD/MM/AAAA). É a data em
+      que o contrato/documento foi feito — não confundir com a data do evento. Sem menção → "".
 
 - **VALORES MONETÁRIOS:**
     - \`valor_contrato\`:
         - **REGRA GERAL:** O valor **PRINCIPAL** do documento (ex: valor total do contrato, valor da NF).
-        - **!!! PAGAMENTOS COM PORCENTAGEM !!!:** Se um pagamento (\`pagamentoX_valor\`) for definido como uma **porcentagem (%)** do valor total, **CALCULE** o valor correspondente (\`(porcentagem / 100) * valor_contrato\`) e coloque o **resultado numérico formatado** (como string "XXXX.YY") no campo \`pagamentoX_valor\`. Ex: Se valor_contrato é "9100.00" e o pagamento é 50%, preencha pagamentoX_valor com "4550.00".
-        - **PARA REEMBOLSO (ex: 99):** Este DEVE ser o **"Valor da Corrida"** (ex: "29.16"). A IA DEVE IGNORAR ATIVAMENTE valores de **"Desconto"** (ex: "3.24"), "Cupom" ou "Subtotal". Procure o valor principal da despesa.
+        - **!!! PAGAMENTOS COM PORCENTAGEM !!!:** Se uma parcela (\`pagamentoX_valor\`) for definida como
+          **porcentagem (%)** do total, **CALCULE** o valor (\`(porcentagem / 100) * valor_contrato\`),
+          coloque o resultado em \`pagamentoX_valor\` (string "XXXX.YY") **e registre a porcentagem original
+          em \`pagamentoX_obs\`** (ex: "50% do contrato"). Ex: total "9100.00" e parcela 50% → \`pagamentoX_valor\`
+          = "4550.00", \`pagamentoX_obs\` = "50%".
+        - **PARA REEMBOLSO (ex: 99):** Use o **"Valor da Corrida"** (ex: "29.16"). IGNORE ATIVAMENTE
+          "Desconto", "Cupom" ou "Subtotal".
         - **PARA CONTRATOS/ATAS:** O valor total ou o valor líquido da rescisão.
     - \`pagamentoX_valor\`: O valor de parcelas específicas.
+    - \`pagamentoX_obs\`: só preencha quando a parcela veio como porcentagem (senão "").
 
 - **DATAS DE PAGAMENTO:**
-    - \`pagamentoX_data_vencimento\`: Extraia as datas de vencimento para \`pagamentoX_data_vencimento\`. Se a data for relativa (ex: "7 dias antes do evento"), tente extrair a data exata se possível, senão extraia o texto relativo.
+    - \`pagamentoX_data_vencimento\`: data de vencimento da parcela. Se for relativa (ex: "7 dias antes
+      do evento"), extraia a data exata se der; senão, o texto relativo.
 
 - **ASSINATURAS (Sim/Não):**
-    - \`assinatura_contratante\`: Coloque **"Sim"** se houver QUALQUER assinatura (digital, manuscrita, rubrica) do CONTRATANTE. Senão, coloque **"Não"**.
-    - \`assinatura_contratado\`: Coloque **"Sim"** se houver QUALQUER assinatura (digital, manuscrita, rubrica) do CONTRATADO/FAVORECIDO. Senão, coloque **"Não"**.
-    - \`assinatura_digital_detectada\`: Coloque **"Sim"** se detectar um hash de assinatura digital. Senão, **"Não"**.
+    - \`assinatura_contratante\`: **"Sim"** se houver QUALQUER assinatura (digital, manuscrita, rubrica)
+      do CONTRATANTE; senão **"Não"**.
+    - \`assinatura_contratado\`: idem para o CONTRATADO/FAVORECIDO.
+    - \`assinatura_digital_detectada\`: **"Sim"** se houver hash/carimbo de assinatura digital
+      (ICP-Brasil ou equivalente verificável); senão **"Não"**.
 
 # 3. REGRAS DE FORMATAÇÃO
-- **VALORES (\`valor_contrato\`, \`pagamentoX_valor\`):**
-    - Retorne como **strings**, usando **apenas números e o ponto \`.\` como separador decimal**.
-    - **NÃO use** "R$" ou separador de milhar.
-    - Exemplo correto: \`"9100.00"\`. Exemplo para reembolso: \`"29.16"\`.
-- **Valores Não Encontrados**: Deixe a string vazia \`""\`, exceto para assinaturas, que devem ser "Não".
+- **VALORES:** strings, só números e ponto \`.\` decimal, sem "R$" e sem separador de milhar.
+  Ex.: \`"9100.00"\`. Reembolso: \`"29.16"\`.
+- **DATAS:** DD/MM/AAAA.
+- **Não encontrado:** string vazia \`""\` (assinaturas = "Não").
 
 # 4. FORMATO de SAÍDA (DEVOLVER APENAS ESTE JSON):
 {
   "tipo_documento": "",
   "data_baile": "",
+  "data_contrato": "",
   "favorecido": {
     "nome": "",
     "cpf_cnpj": "",
@@ -78,26 +99,16 @@ Categorias:
     "conta": ""
   },
   "valor_contrato": "",
-  "pagamento1_data_vencimento": "",
-  "pagamento1_valor": "",
-  "pagamento2_data_vencimento": "",
-  "pagamento2_valor": "",
-  "pagamento3_data_vencimento": "",
-  "pagamento3_valor": "",
-  "pagamento4_data_vencimento": "",
-  "pagamento4_valor": "",
-  "pagamento5_data_vencimento": "",
-  "pagamento5_valor": "",
-  "pagamento6_data_vencimento": "",
-  "pagamento6_valor": "",
-  "pagamento7_data_vencimento": "",
-  "pagamento7_valor": "",
-  "pagamento8_data_vencimento": "",
-  "pagamento8_valor": "",
-  "pagamento9_data_vencimento": "",
-  "pagamento9_valor": "",
-  "pagamento10_data_vencimento": "",
-  "pagamento10_valor": "",
+  "pagamento1_data_vencimento": "", "pagamento1_valor": "", "pagamento1_obs": "",
+  "pagamento2_data_vencimento": "", "pagamento2_valor": "", "pagamento2_obs": "",
+  "pagamento3_data_vencimento": "", "pagamento3_valor": "", "pagamento3_obs": "",
+  "pagamento4_data_vencimento": "", "pagamento4_valor": "", "pagamento4_obs": "",
+  "pagamento5_data_vencimento": "", "pagamento5_valor": "", "pagamento5_obs": "",
+  "pagamento6_data_vencimento": "", "pagamento6_valor": "", "pagamento6_obs": "",
+  "pagamento7_data_vencimento": "", "pagamento7_valor": "", "pagamento7_obs": "",
+  "pagamento8_data_vencimento": "", "pagamento8_valor": "", "pagamento8_obs": "",
+  "pagamento9_data_vencimento": "", "pagamento9_valor": "", "pagamento9_obs": "",
+  "pagamento10_data_vencimento": "", "pagamento10_valor": "", "pagamento10_obs": "",
   "assinatura_contratante": "Não",
   "assinatura_contratado": "Não",
   "assinatura_digital_detectada": "Não"

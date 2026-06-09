@@ -12,7 +12,9 @@ import {
 } from './types'
 
 const FUZZY_NAME_THRESHOLD = 85
-const VALUE_TOLERANCE = 0.01
+// Diferença de até R$ 0,02 entre documento e requisição é aceitável (arredondamentos
+// de parcela, centavos de OCR). Acima disso é divergência de valor.
+const VALUE_TOLERANCE = 0.02
 
 // Acima deste valor, exige dados bancários + assinaturas (R4/R5/R6 na camada 1,
 // R14/R15/R16 na camada 2). Abaixo, contrato precisa só de nome + CPF/CNPJ +
@@ -253,9 +255,9 @@ export function analisarLinha(
 
   if (contratoSemConta && docTipo === 'Contrato / Aditivo Contratual') {
     return {
-      status: 'aprovada',
-      motivos: [],
-      resumo: `Aprovada - Sem dados bancários no contrato (${docTipo})`,
+      status: 'aprovada_ressalva',
+      motivos: ['Contrato acima de R$ 10.000 sem dados bancários — confira a conta antes de pagar'],
+      resumo: `Aprovada com ressalva - Sem dados bancários no contrato (${docTipo})`,
     }
   }
 
@@ -500,6 +502,20 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
         `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
       ],
       resumo,
+    }
+  }
+
+  // Aprovada COM RESSALVA: contrato de alto valor (≥ R$ 10k) sem NENHUM dado
+  // bancário nos documentos. Não reprova (a conta pode estar na própria RP),
+  // mas sinaliza a pendência pro aprovador conferir.
+  const temContratoAltoValor =
+    exigeAltoValorReq && docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
+  const algumDocComConta = docs.some((d) => digitsOnly(d.conta))
+  if (temContratoAltoValor && !algumDocComConta) {
+    return {
+      status: 'aprovada_ressalva',
+      motivos: ['Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar'],
+      resumo: `Aprovada com ressalva — contrato ≥ R$ 10k sem dados bancários (${docs.length} doc${docs.length === 1 ? '' : 's'})`,
     }
   }
 

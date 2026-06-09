@@ -54,5 +54,6 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     valores_pagamentos: valoresPagamentos,
     assinatura_contratante: (raw.assinatura_contratante ?? '').toString().trim() || null,
     assinatura_contratado: (raw.assinatura_contratado ?? '').toString().trim() || null,
+    data_contrato: (raw.data_contrato ?? '').toString().trim() || null,
   }
 }

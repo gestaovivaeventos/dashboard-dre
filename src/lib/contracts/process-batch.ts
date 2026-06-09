@@ -166,6 +166,7 @@ export async function processBatch(
         .update({
           tipo_documento: normalized.tipo_documento,
           data_baile: extraction.raw.data_baile || null,
+          data_contrato: normalized.data_contrato || null,
           extracted_fornecedor: normalized.fornecedor,
           extracted_cpf_cnpj: normalized.cpf_cnpj,
           extracted_banco: extraction.raw.favorecido?.banco || null,
@@ -308,7 +309,9 @@ export async function processBatch(
   let totalCredits = 0
   let stillPending = 0
   for (const c of (counters ?? []) as Array<{ status: string; ai_credits: number | string }>) {
-    if (c.status === 'aprovada') approved += 1
+    // "aprovada_ressalva" conta como aprovada no resumo do lote; a ressalva
+    // fica visível no status/resumo de cada item ao abrir o lote.
+    if (c.status === 'aprovada' || c.status === 'aprovada_ressalva') approved += 1
     else if (c.status === 'reprovada') reproved += 1
     else if (c.status === 'erro') failed += 1
     else if (c.status === 'analise_especialista') specialist += 1

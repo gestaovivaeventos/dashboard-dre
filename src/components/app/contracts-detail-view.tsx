@@ -72,6 +72,7 @@ const STATUS_LABEL: Record<string, string> = {
   pending: 'Aguardando',
   processing: 'Processando',
   aprovada: 'Aprovada',
+  aprovada_ressalva: 'Aprovada c/ ressalva',
   reprovada: 'Reprovada',
   analise_especialista: 'Análise especialista',
   verificar_saldo: 'Verificar saldo',
@@ -82,6 +83,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
   pending: 'outline',
   processing: 'secondary',
   aprovada: 'default',
+  aprovada_ressalva: 'secondary',
   reprovada: 'destructive',
   analise_especialista: 'secondary',
   verificar_saldo: 'secondary',
@@ -92,6 +94,8 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | '
 // model (green = good, orange = check balance manually, amber = specialist).
 const STATUS_CLASS: Record<string, string> = {
   aprovada: 'bg-emerald-500 hover:bg-emerald-500 text-white border-transparent',
+  aprovada_ressalva:
+    'bg-lime-600 hover:bg-lime-600 text-white border-transparent',
   analise_especialista:
     'bg-amber-500 hover:bg-amber-500 text-white border-transparent',
   verificar_saldo:
@@ -105,6 +109,7 @@ const STATUS_RANK: Record<string, number> = {
   reprovada: 1,
   verificar_saldo: 2,
   analise_especialista: 3,
+  aprovada_ressalva: 3.5,
   pending: 4,
   processing: 5,
   aprovada: 6,
@@ -418,6 +423,7 @@ export function ContractsDetailView({ batch, items }: { batch: Batch; items: Ite
                 <SelectItem value="pending">Aguardando</SelectItem>
                 <SelectItem value="processing">Processando</SelectItem>
                 <SelectItem value="aprovada">Aprovadas</SelectItem>
+                <SelectItem value="aprovada_ressalva">Aprovadas c/ ressalva</SelectItem>
                 <SelectItem value="reprovada">Reprovadas</SelectItem>
                 <SelectItem value="verificar_saldo">Verificar saldo</SelectItem>
                 <SelectItem value="analise_especialista">Especialista</SelectItem>
