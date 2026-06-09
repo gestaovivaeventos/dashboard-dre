@@ -71,18 +71,17 @@ function normBV(s: string | null | undefined): string {
     .trim()
 }
 
-// Chave de casamento: fundo + CNPJ (só dígitos) + número do contrato.
-// Retorna null se faltar qualquer parte — sem os três não dá pra casar com segurança.
+// Chave de casamento do BV: fundo + CNPJ (só dígitos). A base de RPs pagas não
+// traz número de contrato, então o "contrato" é identificado por fundo+fornecedor
+// (decisão 2026-06-09). Retorna null se faltar fundo ou CNPJ.
 function bvKey(
   fundo: string | null | undefined,
   cnpj: string | null | undefined,
-  numeroContrato: string | null | undefined,
 ): string | null {
   const f = normBV(fundo)
   const c = String(cnpj ?? '').replace(/\D/g, '')
-  const n = normBV(numeroContrato)
-  if (!f || !c || !n) return null
-  return `${f}|${c}|${n}`
+  if (!f || !c) return null
+  return `${f}|${c}`
 }
 
 export async function processNextPendingBatch(
@@ -273,9 +272,9 @@ export async function processBatch(
   {
     const { data: paidRows } = await db
       .from('contract_paid_history')
-      .select('fundo, cpf_cnpj, numero_contrato, valor_pago')
-    for (const r of (paidRows ?? []) as Array<{ fundo: string | null; cpf_cnpj: string | null; numero_contrato: string | null; valor_pago: number | string | null }>) {
-      const key = bvKey(r.fundo, r.cpf_cnpj, r.numero_contrato)
+      .select('fundo, cpf_cnpj, valor_pago')
+    for (const r of (paidRows ?? []) as Array<{ fundo: string | null; cpf_cnpj: string | null; valor_pago: number | string | null }>) {
+      const key = bvKey(r.fundo, r.cpf_cnpj)
       if (!key) continue
       paidByKey.set(key, (paidByKey.get(key) ?? 0) + (Number(r.valor_pago) || 0))
     }
@@ -333,7 +332,7 @@ export async function processBatch(
         // BV: soma calculada da base de pagas quando casável (fundo+CNPJ+contrato);
         // senão, cai no valor manual da planilha (se houver).
         historico_rps_pagas: (() => {
-          const k = bvKey(first.fundo, first.cpf_cnpj, first.numero_contrato)
+          const k = bvKey(first.fundo, first.cpf_cnpj)
           if (k) return paidByKey.get(k) ?? 0
           return Number(first.historico_rps_pagas) || null
         })(),
