@@ -8,6 +8,7 @@ import {
   DollarSign,
   FileCheck,
   FileText,
+  GitMerge,
   LayoutDashboard,
   MapPinned,
   PieChart,
@@ -154,6 +155,12 @@ export const CTRL_ADMIN_ITEMS = [
     icon: Calendar,
     roles: ["csc", "admin"] as CtrlRole[],
   },
+  {
+    title: "Mapeamento Omie",
+    href: "/ctrl/admin/omie-mapeamento",
+    icon: GitMerge,
+    roles: ["csc", "admin"] as CtrlRole[],
+  },
 ] as const;
 
 /**
@@ -224,6 +231,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
       { key: "ct-evt", title: "Eventos", icon: Calendar, scope: "global", href: "/ctrl/admin/eventos", ctrlRoles: ["csc", "admin"] },
+      { key: "ct-omie", title: "Mapeamento Omie", icon: GitMerge, scope: "global", href: "/ctrl/admin/omie-mapeamento", ctrlRoles: ["csc", "admin"] },
     ],
   },
   {
