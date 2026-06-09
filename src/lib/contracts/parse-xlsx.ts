@@ -22,6 +22,9 @@ export interface RequisitionRow {
   valor_total_contrato: number | null
   historico_rps_pagas: number | null
   data_pagamento_prevista: string | null
+  // BV (saldo do contrato): chave de casamento com a base de RPs pagas.
+  fundo: string | null
+  numero_contrato: string | null
 }
 
 export interface ParseXlsxResult {
@@ -76,6 +79,14 @@ const HEADER_ALIASES: Record<string, keyof RequisitionRow> = {
   dataprevista: 'data_pagamento_prevista',
   dataprevistapagamento: 'data_pagamento_prevista',
   previsaopagamento: 'data_pagamento_prevista',
+
+  fundo: 'fundo',
+
+  numerocontrato: 'numero_contrato',
+  numerodocontrato: 'numero_contrato',
+  ncontrato: 'numero_contrato',
+  contrato: 'numero_contrato',
+  idcontrato: 'numero_contrato',
 
   linkdocontrato: 'link_contrato',
   link: 'link_contrato',
@@ -183,6 +194,8 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
         else if (field === 'descricao') result.descricao = stringValue
         else if (field === 'data_evento') result.data_evento = stringValue
         else if (field === 'data_pagamento_prevista') result.data_pagamento_prevista = stringValue
+        else if (field === 'fundo') result.fundo = stringValue
+        else if (field === 'numero_contrato') result.numero_contrato = stringValue
       }
     }
 
@@ -218,6 +231,8 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
       valor_total_contrato: result.valor_total_contrato ?? null,
       historico_rps_pagas: result.historico_rps_pagas ?? null,
       data_pagamento_prevista: result.data_pagamento_prevista ?? null,
+      fundo: result.fundo ?? null,
+      numero_contrato: result.numero_contrato ?? null,
     })
   }
 

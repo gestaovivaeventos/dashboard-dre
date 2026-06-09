@@ -232,7 +232,7 @@ export function ContractsListView({
             <DialogDescription>
               Obrigatórias: REQUISIÇÃO, Fornecedor, Favorecido, CPF/CNPJ, Conta, valor,
               Link do Contrato. Opcionais (cronograma/BV/vencimento): Descrição, Data do Evento,
-              Módulo, Valor do Contrato, RPs Pagas, Data Prevista de Pagamento.
+              Módulo, Valor do Contrato, Data Prevista de Pagamento, Fundo, Número do Contrato.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpload} className="space-y-4">

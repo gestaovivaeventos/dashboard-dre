@@ -132,6 +132,8 @@ export async function POST(request: Request) {
     valor_total_contrato: row.valor_total_contrato,
     historico_rps_pagas: row.historico_rps_pagas,
     data_pagamento_prevista: row.data_pagamento_prevista,
+    fundo: row.fundo,
+    numero_contrato: row.numero_contrato,
     status: 'pending' as const,
   }))
 

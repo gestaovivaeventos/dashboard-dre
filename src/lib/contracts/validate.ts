@@ -548,6 +548,21 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   }
 
   // V1 — Qualquer regra falhou → Reprovada
+  // BV — Saldo do contrato: o já-pago (somado da base de RPs pagas, casando
+  // fundo + CNPJ + nº do contrato) mais esta RP não pode estourar o valor do
+  // contrato. historico_rps_pagas vem calculado do pipeline; só roda quando há
+  // valor de contrato e histórico disponível (RP com fundo+contrato preenchidos).
+  const valorContratoBV = Number(req.valor_total_contrato) || 0
+  if (valorContratoBV > 0 && req.historico_rps_pagas != null) {
+    const jaPago = Number(req.historico_rps_pagas) || 0
+    const saldo = valorContratoBV - jaPago
+    if (reqValor > saldo + VALUE_TOLERANCE) {
+      motivos.push(
+        `BV estourado: já pago R$ ${jaPago.toFixed(2)} + esta RP R$ ${reqValor.toFixed(2)} excede o valor do contrato R$ ${valorContratoBV.toFixed(2)} (saldo disponível R$ ${saldo.toFixed(2)})`,
+      )
+    }
+  }
+
   // Alertas (não mudam o status): cronograma por módulo. Usa a data do contrato
   // do(s) documento(s), o módulo e a data do evento da RP. Fora da janela → avisa.
   const alertas: string[] = []

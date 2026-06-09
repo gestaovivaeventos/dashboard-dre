@@ -85,6 +85,9 @@ export interface RequisitionInput {
   valor_total_contrato?: number | null
   historico_rps_pagas?: number | null
   data_pagamento_prevista?: string | null
+  // BV: chave de casamento com a base de RPs pagas.
+  fundo?: string | null
+  numero_contrato?: string | null
 }
 
 export interface ExtractedContract {

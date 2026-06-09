@@ -48,6 +48,8 @@ interface ItemRow {
   historico_rps_pagas: number | string | null
   data_pagamento_prevista: string | null
   data_contrato: string | null
+  fundo: string | null
+  numero_contrato: string | null
 }
 
 export interface ProcessBatchResult {
@@ -57,6 +59,30 @@ export interface ProcessBatchResult {
   errors: number
   credits_used: number
   status: BatchRow['status']
+}
+
+// Normalização para o casamento do BV (saldo do contrato).
+function normBV(s: string | null | undefined): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Chave de casamento: fundo + CNPJ (só dígitos) + número do contrato.
+// Retorna null se faltar qualquer parte — sem os três não dá pra casar com segurança.
+function bvKey(
+  fundo: string | null | undefined,
+  cnpj: string | null | undefined,
+  numeroContrato: string | null | undefined,
+): string | null {
+  const f = normBV(fundo)
+  const c = String(cnpj ?? '').replace(/\D/g, '')
+  const n = normBV(numeroContrato)
+  if (!f || !c || !n) return null
+  return `${f}|${c}|${n}`
 }
 
 export async function processNextPendingBatch(
@@ -224,7 +250,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato',
     )
     .eq('batch_id', batchId)
 
@@ -239,6 +265,22 @@ export async function processBatch(
   }
 
   console.log(`[contracts] phase2 evaluating ${groups.size} requisitions (${items.length} items)`)
+
+  // BV (saldo do contrato): carrega a base de RPs pagas uma vez e soma o já-pago
+  // por (fundo + CNPJ + número do contrato), normalizado. O valor entra na RP
+  // como historico_rps_pagas e a regra pura (analisarRequisicao) faz a conta.
+  const paidByKey = new Map<string, number>()
+  {
+    const { data: paidRows } = await db
+      .from('contract_paid_history')
+      .select('fundo, cpf_cnpj, numero_contrato, valor_pago')
+    for (const r of (paidRows ?? []) as Array<{ fundo: string | null; cpf_cnpj: string | null; numero_contrato: string | null; valor_pago: number | string | null }>) {
+      const key = bvKey(r.fundo, r.cpf_cnpj, r.numero_contrato)
+      if (!key) continue
+      paidByKey.set(key, (paidByKey.get(key) ?? 0) + (Number(r.valor_pago) || 0))
+    }
+    console.log(`[contracts] BV paid-history rows aggregated into ${paidByKey.size} contracts`)
+  }
 
   // Materialize entries so we don't iterate Map directly (target=es5 limitation).
   const groupEntries: Array<[string, ItemRow[]]> = []
@@ -288,8 +330,16 @@ export async function processBatch(
         data_evento: first.data_evento,
         modulo: first.modulo,
         valor_total_contrato: Number(first.valor_total_contrato) || null,
-        historico_rps_pagas: Number(first.historico_rps_pagas) || null,
+        // BV: soma calculada da base de pagas quando casável (fundo+CNPJ+contrato);
+        // senão, cai no valor manual da planilha (se houver).
+        historico_rps_pagas: (() => {
+          const k = bvKey(first.fundo, first.cpf_cnpj, first.numero_contrato)
+          if (k) return paidByKey.get(k) ?? 0
+          return Number(first.historico_rps_pagas) || null
+        })(),
         data_pagamento_prevista: first.data_pagamento_prevista,
+        fundo: first.fundo,
+        numero_contrato: first.numero_contrato,
       },
       documentos,
     })
