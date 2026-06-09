@@ -9,6 +9,7 @@ const MONTHS = [
 
 const STATUS_LABELS: Record<string, string> = {
   pendente: "Pendente",
+  pendente_diretor: "Aguard. Diretor",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
@@ -21,6 +22,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_CLS: Record<string, string> = {
   pendente: "bg-yellow-100 text-yellow-800",
+  pendente_diretor: "bg-orange-100 text-orange-800",
   aprovado: "bg-green-100 text-green-800",
   rejeitado: "bg-red-100 text-red-800",
   aguardando_complementacao: "bg-blue-100 text-blue-800",

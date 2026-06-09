@@ -608,12 +608,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
               {verification.approvalTier === "nivel_3" && (
                 <p className="text-xs text-red-700 dark:text-red-300 font-medium">
-                  Saldo anual insuficiente — requer aprovação do Diretor e justificativa obrigatória.
+                  Fora do orçamento (saldo anual insuficiente) — requer aprovação do Gerente e depois do Diretor, com justificativa obrigatória.
                 </p>
               )}
-              {!verification.autoApproved && verification.approvalTier === "nivel_2" && (
+              {verification.approvalTier === "nivel_2" && (
                 <p className="text-xs text-amber-700 dark:text-amber-300">
-                  Saldo atual insuficiente, mas o saldo futuro cobre o valor — requer aprovação do Gerente.
+                  Dentro do orçamento — requer aprovação do gerente do setor.
                 </p>
               )}
             </div>

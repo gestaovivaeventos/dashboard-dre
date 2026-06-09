@@ -97,6 +97,7 @@ export interface UserSegmentAccess {
 // ─── Tipos da Controladoria ───────────────────────────────────────────────────
 export type CtrlRequestStatus =
   | "pendente"
+  | "pendente_diretor"
   | "aprovado"
   | "rejeitado"
   | "aguardando_complementacao"
@@ -177,6 +178,8 @@ export interface CtrlRequest {
   status: CtrlRequestStatus;
   approval_level: number;
   approval_tier: "nivel_2" | "nivel_3" | null;
+  // Etapa de origem guardada ao pedir complementação, para retornar a ela.
+  complement_return_status: CtrlRequestStatus | null;
   created_by: string;
   approved_by: string | null;
   approved_at: string | null;

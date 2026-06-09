@@ -13,7 +13,7 @@ export default async function AprovacoesPage() {
   }
 
   const { requests = [], error } = await getRequests({
-    statuses: ["pendente", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],
+    statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],
   });
 
   return (

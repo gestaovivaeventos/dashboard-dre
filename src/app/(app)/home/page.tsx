@@ -25,7 +25,7 @@ export default async function HomePage() {
       const { count } = await adminClient
         .from("ctrl_requests")
         .select("id", { count: "exact", head: true })
-        .eq("status", "pendente");
+        .in("status", ["pendente", "pendente_diretor"]);
       pendingApprovalsCount = count ?? 0;
     } catch {
       // non-fatal — ctrl tables may not exist yet

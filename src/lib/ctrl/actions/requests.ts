@@ -19,6 +19,22 @@ export type PaymentMethod =
 
 export type ApprovalTier = "nivel_2" | "nivel_3";
 
+// ─── Regras de roteamento de aprovação (overrides de negócio) ────────────────
+// Estes IDs são acordos de negócio explícitos, não dados derivados — por isso
+// ficam fixos no código. Mudaram? Atualize aqui.
+const APPROVAL_ROUTING = {
+  // Requisições deste solicitante pulam o gerente e nascem aguardando o diretor.
+  directorOnly: {
+    requesterId: "45a367ad-695e-4758-b033-470483758b4c",
+    directorId: "f159c959-55c2-4cc9-a1e4-acc4b2ab69c3",
+  },
+  // Tipo de despesa cuja etapa de gerente é direcionada a este gerente.
+  expenseTypeManager: {
+    expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
+    managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
+  },
+} as const;
+
 export interface BudgetVerification {
   approvalTier: ApprovalTier;
   autoApproved: boolean;
@@ -141,23 +157,8 @@ async function performBudgetVerification(
   const currentBalance = budgetedUpToMonth - realizedUpToMonth - totalApproved;
   const futureBalance = budgetedAnnual - realizedAnnual - totalApproved;
 
-  // Rule 1: currentBalance >= amount → auto approve
-  if (currentBalance >= amount) {
-    return {
-      approvalTier: "nivel_2",
-      autoApproved: true,
-      isBudgeted,
-      justificationRequired: false,
-      currentBalance,
-      futureBalance,
-      budgetedUpToMonth,
-      budgetedAnnual,
-      totalApproved,
-      statusLabel: `Aprovada automaticamente — saldo atual ${fmt.format(currentBalance)} suficiente`,
-    };
-  }
-
-  // Rule 2: currentBalance < amount but futureBalance >= amount → gerente
+  // Sem auto-aprovação: toda requisição passa por aprovação humana.
+  // Dentro do orçamento anual (saldo anual >= valor) → só o gerente do setor.
   if (futureBalance >= amount) {
     return {
       approvalTier: "nivel_2",
@@ -169,11 +170,12 @@ async function performBudgetVerification(
       budgetedUpToMonth,
       budgetedAnnual,
       totalApproved,
-      statusLabel: `Pendente — gerente (saldo futuro ${fmt.format(futureBalance)} suficiente)`,
+      statusLabel: `Dentro do orçamento — requer aprovação do gerente (saldo anual ${fmt.format(futureBalance)})`,
     };
   }
 
-  // Rule 3: futureBalance < amount → diretor + justification required
+  // Fora do orçamento anual (saldo anual < valor) → gerente e depois diretor,
+  // com justificativa obrigatória.
   return {
     approvalTier: "nivel_3",
     autoApproved: false,
@@ -184,7 +186,7 @@ async function performBudgetVerification(
     budgetedUpToMonth,
     budgetedAnnual,
     totalApproved,
-    statusLabel: `Pendente — diretor (saldo anual ${fmt.format(futureBalance)} insuficiente)`,
+    statusLabel: `Fora do orçamento — requer gerente e diretor (saldo anual ${fmt.format(futureBalance)} insuficiente)`,
   };
 }
 
@@ -317,9 +319,13 @@ export async function createRequest(data: CreateRequestInput) {
     }
   }
 
-  const approvalTier = verification?.approvalTier ?? "nivel_2";
-  const autoApproved = verification?.autoApproved ?? false;
-  const initialStatus: CtrlRequestStatus = autoApproved ? "aprovado" : "pendente";
+  // Solicitante especial pula o gerente e vai direto ao diretor.
+  const directorOnly = ctx.id === APPROVAL_ROUTING.directorOnly.requesterId;
+  const approvalTier: ApprovalTier = directorOnly
+    ? "nivel_3"
+    : verification?.approvalTier ?? "nivel_2";
+  // Sem auto-aprovação: toda requisição entra pendente.
+  const initialStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
 
   // Installments
   const isInstallment =
@@ -375,8 +381,8 @@ export async function createRequest(data: CreateRequestInput) {
     recurrence_group_id: recurrenceGroupId,
     installment_group_id: installmentGroupId,
     created_by: ctx.id,
-    approved_by: autoApproved ? ctx.id : null,
-    approved_at: autoApproved ? new Date().toISOString() : null,
+    approved_by: null,
+    approved_at: null,
   };
 
   // First (or only) request
@@ -431,36 +437,29 @@ export async function createRequest(data: CreateRequestInput) {
     metadata: verification
       ? {
           approval_tier: approvalTier,
-          auto_approved: autoApproved,
           current_balance: verification.currentBalance,
           future_balance: verification.futureBalance,
         }
       : null,
   });
 
-  if (autoApproved) {
-    await supabase.from("ctrl_history").insert({
-      request_id: newReq.id,
-      user_id: ctx.id,
-      action: "aprovado",
-      comment: "Aprovação automática — saldo orçamentário suficiente.",
-      metadata: { approver_name: "Sistema", auto_approved: true },
-    });
-
-    await notifyRequester({
-      userId: ctx.id,
-      requestId: newReq.id,
-      requestNumber: newReq.request_number,
-      title: "Requisição Aprovada Automaticamente",
-      message: `Sua requisição #${newReq.request_number} foi aprovada automaticamente.`,
-      type: "aprovacao",
-    });
-  } else {
+  {
     const { data: sec } = await supabase
       .from("ctrl_sectors")
       .select("name")
       .eq("id", data.sector_id)
       .single();
+
+    // Etapa inicial e quem notificar. Sem auto-aprovação.
+    const stage: "gerente" | "diretor" = directorOnly ? "diretor" : "gerente";
+    let explicitApproverIds: string[] | undefined;
+    if (directorOnly) {
+      explicitApproverIds = [APPROVAL_ROUTING.directorOnly.directorId];
+    } else if (
+      data.expense_type_id === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
+    ) {
+      explicitApproverIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
+    }
 
     await notifyPendingApproval({
       requestId: newReq.id,
@@ -469,7 +468,8 @@ export async function createRequest(data: CreateRequestInput) {
       sectorId: data.sector_id,
       sectorName: sec?.name ?? "Setor",
       amount: data.amount,
-      approvalTier,
+      stage,
+      explicitApproverIds,
     });
   }
 
@@ -495,9 +495,10 @@ export async function createRequest(data: CreateRequestInput) {
           inst.year
         );
       }
-      const instStatus: CtrlRequestStatus = instVerification?.autoApproved
-        ? "aprovado"
-        : "pendente";
+      const instTier: ApprovalTier = directorOnly
+        ? "nivel_3"
+        : instVerification?.approvalTier ?? "nivel_2";
+      const instStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
 
       const { data: instReq } = await supabase
         .from("ctrl_requests")
@@ -511,10 +512,10 @@ export async function createRequest(data: CreateRequestInput) {
           installment_number: inst.installment,
           installment_total: data.installments,
           status: instStatus,
-          approval_level: (instVerification?.approvalTier ?? "nivel_2") === "nivel_3" ? 2 : 1,
-          approval_tier: instVerification?.approvalTier ?? "nivel_2",
-          approved_by: instVerification?.autoApproved ? ctx.id : null,
-          approved_at: instVerification?.autoApproved ? new Date().toISOString() : null,
+          approval_level: instTier === "nivel_3" ? 2 : 1,
+          approval_tier: instTier,
+          approved_by: null,
+          approved_at: null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any)
         .select("id, request_number")
@@ -528,16 +529,6 @@ export async function createRequest(data: CreateRequestInput) {
           action: "criado",
           comment: `Parcela ${inst.installment}/${data.installments} (grupo #${newReq.request_number})`,
         });
-
-        if (instVerification?.autoApproved) {
-          await supabase.from("ctrl_history").insert({
-            request_id: instReq.id,
-            user_id: ctx.id,
-            action: "aprovado",
-            comment: `Aprovação automática — Parcela ${inst.installment}/${data.installments}`,
-            metadata: { auto_approved: true },
-          });
-        }
       }
     }
   }
@@ -561,9 +552,10 @@ export async function createRequest(data: CreateRequestInput) {
           data.reference_year
         );
       }
-      const monthStatus: CtrlRequestStatus = monthVerification?.autoApproved
-        ? "aprovado"
-        : "pendente";
+      const monthTier: ApprovalTier = directorOnly
+        ? "nivel_3"
+        : monthVerification?.approvalTier ?? "nivel_2";
+      const monthStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
 
       const { data: recReq } = await supabase
         .from("ctrl_requests")
@@ -574,10 +566,10 @@ export async function createRequest(data: CreateRequestInput) {
           reference_month: month,
           reference_year: data.reference_year,
           status: monthStatus,
-          approval_level: (monthVerification?.approvalTier ?? "nivel_2") === "nivel_3" ? 2 : 1,
-          approval_tier: monthVerification?.approvalTier ?? "nivel_2",
-          approved_by: monthVerification?.autoApproved ? ctx.id : null,
-          approved_at: monthVerification?.autoApproved ? new Date().toISOString() : null,
+          approval_level: monthTier === "nivel_3" ? 2 : 1,
+          approval_tier: monthTier,
+          approved_by: null,
+          approved_at: null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any)
         .select("id, request_number")
@@ -601,7 +593,7 @@ export async function createRequest(data: CreateRequestInput) {
     requestId: newReq.id,
     requestNumber: newReq.request_number,
     totalCreated,
-    autoApproved,
+    autoApproved: false,
     verification,
   };
 }
@@ -686,6 +678,147 @@ export async function getRequests(filters?: {
 
 // ─── Approve ──────────────────────────────────────────────────────────────────
 
+type ApprovableReq = {
+  id: string;
+  status: string;
+  approval_tier: string | null;
+  sector_id: string;
+  amount: number;
+  created_by: string;
+  request_number: number;
+};
+
+// Notifica os diretores quando uma requisição fora do orçamento avança da etapa
+// do gerente para a do diretor. Solicitante especial → diretor específico.
+async function notifyDirectorStage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  req: ApprovableReq,
+) {
+  const directorOnly = req.created_by === APPROVAL_ROUTING.directorOnly.requesterId;
+  const explicitApproverIds = directorOnly
+    ? [APPROVAL_ROUTING.directorOnly.directorId]
+    : undefined;
+
+  const { data: sec } = await supabase
+    .from("ctrl_sectors")
+    .select("name")
+    .eq("id", req.sector_id)
+    .maybeSingle();
+  const { data: requester } = await supabase
+    .from("users")
+    .select("name, email")
+    .eq("id", req.created_by)
+    .maybeSingle();
+
+  await notifyPendingApproval({
+    requestId: req.id,
+    requestNumber: req.request_number,
+    requesterName:
+      (requester?.name as string) ?? (requester?.email as string) ?? "Solicitante",
+    sectorId: req.sector_id,
+    sectorName: (sec?.name as string) ?? "Setor",
+    amount: Number(req.amount),
+    stage: "diretor",
+    explicitApproverIds,
+  });
+}
+
+// Aplica uma etapa de aprovação. Fluxo:
+//   pendente (gerente) → nivel_2: aprovado · nivel_3: pendente_diretor
+//   pendente_diretor (diretor) → aprovado
+// Não restringe a pessoa específica (qualquer gerente/diretor pode aprovar a
+// etapa correspondente); o direcionamento é só via notificação.
+async function applyApprovalStep(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
+  req: ApprovableReq,
+  comment?: string,
+): Promise<{ ok: true; finalized: boolean } | { error: string }> {
+  const now = new Date().toISOString();
+
+  if (req.status === "pendente_diretor") {
+    const isDirector = ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r));
+    if (!isDirector) return { error: "Esta etapa requer aprovação do Diretor." };
+
+    const { error } = await supabase
+      .from("ctrl_requests")
+      .update({ status: "aprovado", approved_by: ctx.id, approved_at: now, updated_at: now })
+      .eq("id", req.id);
+    if (error) return { error: error.message };
+
+    await supabase.from("ctrl_history").insert({
+      request_id: req.id,
+      user_id: ctx.id,
+      action: "aprovado",
+      comment: comment?.trim() || `Aprovada pelo Diretor ${ctx.name ?? ctx.email}`,
+      metadata: { approver_roles: ctx.ctrlRoles, stage: "diretor" },
+    });
+    await notifyRequester({
+      userId: req.created_by,
+      requestId: req.id,
+      requestNumber: req.request_number,
+      title: "Requisição Aprovada",
+      message: `Sua requisição #${req.request_number} foi aprovada por ${ctx.name ?? ctx.email}.`,
+      type: "aprovacao",
+    });
+    return { ok: true, finalized: true };
+  }
+
+  // status === "pendente" → etapa do gerente.
+  if ((req.approval_tier as string) === "nivel_3") {
+    // Fora do orçamento: gerente aprovou, encaminha ao diretor.
+    const { error } = await supabase
+      .from("ctrl_requests")
+      .update({ status: "pendente_diretor", updated_at: now })
+      .eq("id", req.id);
+    if (error) return { error: error.message };
+
+    await supabase.from("ctrl_history").insert({
+      request_id: req.id,
+      user_id: ctx.id,
+      action: "aprovado",
+      comment:
+        comment?.trim() ||
+        `Aprovada pelo Gerente ${ctx.name ?? ctx.email} — encaminhada ao Diretor`,
+      metadata: { approver_roles: ctx.ctrlRoles, stage: "gerente" },
+    });
+    await notifyDirectorStage(supabase, req);
+    await notifyRequester({
+      userId: req.created_by,
+      requestId: req.id,
+      requestNumber: req.request_number,
+      title: "Aprovada pelo Gerente",
+      message: `Sua requisição #${req.request_number} foi aprovada pelo gerente e aguarda o Diretor.`,
+      type: "aprovacao",
+    });
+    return { ok: true, finalized: false };
+  }
+
+  // Dentro do orçamento: aprovação final pelo gerente.
+  const { error } = await supabase
+    .from("ctrl_requests")
+    .update({ status: "aprovado", approved_by: ctx.id, approved_at: now, updated_at: now })
+    .eq("id", req.id);
+  if (error) return { error: error.message };
+
+  await supabase.from("ctrl_history").insert({
+    request_id: req.id,
+    user_id: ctx.id,
+    action: "aprovado",
+    comment: comment?.trim() || `Aprovada por ${ctx.name ?? ctx.email} (${ctx.ctrlRoles.join(", ")})`,
+    metadata: { approver_roles: ctx.ctrlRoles, stage: "gerente" },
+  });
+  await notifyRequester({
+    userId: req.created_by,
+    requestId: req.id,
+    requestNumber: req.request_number,
+    title: "Requisição Aprovada",
+    message: `Sua requisição #${req.request_number} foi aprovada por ${ctx.name ?? ctx.email}.`,
+    type: "aprovacao",
+  });
+  return { ok: true, finalized: true };
+}
+
 export async function approveRequest(requestId: string, comment?: string) {
   const ctx = await requireCtrlRole("gerente", "diretor", "csc", "admin");
   const adminClient = createAdminClientIfAvailable();
@@ -698,43 +831,11 @@ export async function approveRequest(requestId: string, comment?: string) {
     .single();
 
   if (fetchErr || !req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente")
+  if (req.status !== "pendente" && req.status !== "pendente_diretor")
     return { error: `Status atual: ${req.status}. Só é possível aprovar requisições pendentes.` };
 
-  // Gerente (sem diretor/csc/admin): only nivel_2
-  const hasHigherApproval = ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r));
-  if (!hasHigherApproval && (req.approval_tier as string) === "nivel_3") {
-    return { error: "Gerente não pode aprovar requisições de nível 3 (Diretor)." };
-  }
-
-  const { error } = await supabase
-    .from("ctrl_requests")
-    .update({
-      status: "aprovado",
-      approved_by: ctx.id,
-      approved_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", requestId);
-
-  if (error) return { error: error.message };
-
-  await supabase.from("ctrl_history").insert({
-    request_id: requestId,
-    user_id: ctx.id,
-    action: "aprovado",
-    comment: comment?.trim() || `Aprovada por ${ctx.name ?? ctx.email} (${ctx.ctrlRoles.join(", ")})`,
-    metadata: { approver_roles: ctx.ctrlRoles },
-  });
-
-  await notifyRequester({
-    userId: req.created_by,
-    requestId,
-    requestNumber: req.request_number,
-    title: "Requisição Aprovada",
-    message: `Sua requisição #${req.request_number} foi aprovada por ${ctx.name ?? ctx.email}.`,
-    type: "aprovacao",
-  });
+  const result = await applyApprovalStep(supabase, ctx, req as ApprovableReq, comment);
+  if ("error" in result) return result;
 
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
@@ -757,7 +858,11 @@ export async function rejectRequest(requestId: string, reason: string) {
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente" && req.status !== "aguardando_complementacao")
+  if (
+    req.status !== "pendente" &&
+    req.status !== "pendente_diretor" &&
+    req.status !== "aguardando_complementacao"
+  )
     return { error: `Status atual: ${req.status}. Não é possível rejeitar.` };
 
   await supabase
@@ -807,12 +912,18 @@ export async function requestInfo(requestId: string, question: string) {
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente")
+  if (req.status !== "pendente" && req.status !== "pendente_diretor")
     return { error: "Só é possível pedir informação de requisições pendentes." };
 
+  // Guarda a etapa de origem para retornar a ela quando o solicitante responder.
   await supabase
     .from("ctrl_requests")
-    .update({ status: "aguardando_complementacao", updated_at: new Date().toISOString() })
+    .update({
+      status: "aguardando_complementacao",
+      complement_return_status: req.status,
+      updated_at: new Date().toISOString(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -851,9 +962,28 @@ export async function answerComplement(requestId: string, answer: string) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
+  // Volta para a etapa de onde saiu (gerente ou diretor). Fallback: deriva do
+  // solicitante (especial → diretor; demais → gerente).
+  const { data: cur } = await supabase
+    .from("ctrl_requests")
+    .select("created_by, complement_return_status")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string; complement_return_status: string | null }>();
+
+  const returnStatus: CtrlRequestStatus =
+    (cur?.complement_return_status as CtrlRequestStatus | null) ??
+    (cur?.created_by === APPROVAL_ROUTING.directorOnly.requesterId
+      ? "pendente_diretor"
+      : "pendente");
+
   await supabase
     .from("ctrl_requests")
-    .update({ status: "pendente", updated_at: new Date().toISOString() })
+    .update({
+      status: returnStatus,
+      complement_return_status: null,
+      updated_at: new Date().toISOString(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -1122,53 +1252,25 @@ export async function batchApproveRequests(
 
   const { data: requests } = await supabase
     .from("ctrl_requests")
-    .select("id, status, approval_tier, created_by, request_number")
+    .select("id, status, approval_tier, sector_id, amount, created_by, request_number")
     .in("id", requestIds);
 
   if (!requests) return { error: "Erro ao buscar requisições." };
 
   const results: { id: string; number: number; ok: boolean; error?: string }[] =
     [];
-  const approvedAt = new Date().toISOString();
 
   for (const req of requests) {
-    if (req.status !== "pendente") {
+    if (req.status !== "pendente" && req.status !== "pendente_diretor") {
       results.push({ id: req.id, number: req.request_number, ok: false, error: "Não está pendente." });
       continue;
     }
-    const hasHigherApprovalBatch = ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r));
-    if (!hasHigherApprovalBatch && (req.approval_tier as string) === "nivel_3") {
-      results.push({ id: req.id, number: req.request_number, ok: false, error: "Requer aprovação de Diretor." });
+
+    const res = await applyApprovalStep(supabase, ctx, req as ApprovableReq, comment);
+    if ("error" in res) {
+      results.push({ id: req.id, number: req.request_number, ok: false, error: res.error });
       continue;
     }
-
-    const { error } = await supabase
-      .from("ctrl_requests")
-      .update({ status: "aprovado", approved_by: ctx.id, approved_at: approvedAt, updated_at: approvedAt })
-      .eq("id", req.id);
-
-    if (error) {
-      results.push({ id: req.id, number: req.request_number, ok: false, error: error.message });
-      continue;
-    }
-
-    await supabase.from("ctrl_history").insert({
-      request_id: req.id,
-      user_id: ctx.id,
-      action: "aprovado",
-      comment: comment?.trim() || `Aprovada em lote por ${ctx.name ?? ctx.email}`,
-      metadata: { batch_approval: true, batch_size: requestIds.length },
-    });
-
-    await notifyRequester({
-      userId: req.created_by,
-      requestId: req.id,
-      requestNumber: req.request_number,
-      title: "Requisição Aprovada",
-      message: `Sua requisição #${req.request_number} foi aprovada por ${ctx.name ?? ctx.email}.`,
-      type: "aprovacao",
-    });
-
     results.push({ id: req.id, number: req.request_number, ok: true });
   }
 
