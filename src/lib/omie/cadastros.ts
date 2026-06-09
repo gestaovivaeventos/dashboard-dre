@@ -67,7 +67,9 @@ export async function listDepartamentos(appKey: string, appSecret: string): Prom
 
 export async function listContasCorrentes(appKey: string, appSecret: string): Promise<OmieOption[]> {
   return paginate(
-    CONTAS_URL, "ListarContasCorrentes", appKey, appSecret,
+    // ListarResumoContasCorrentes devolve o array `conta_corrente_lista`
+    // (a ListarContasCorrentes "completa" usa a chave `ListarContasCorrentes`).
+    CONTAS_URL, "ListarResumoContasCorrentes", appKey, appSecret,
     { filtrar_apenas_ativo: "S" }, "conta_corrente_lista",
     (it) => ({
       codigo: String(it.nCodCC ?? ""),
