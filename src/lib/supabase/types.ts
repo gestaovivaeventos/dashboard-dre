@@ -97,6 +97,7 @@ export interface UserSegmentAccess {
 // ─── Tipos da Controladoria ───────────────────────────────────────────────────
 export type CtrlRequestStatus =
   | "pendente"
+  | "pendente_diretor"
   | "aprovado"
   | "rejeitado"
   | "aguardando_complementacao"
@@ -162,6 +163,19 @@ export interface CtrlSupplier {
   doc_titular: string | null;
   transf_padrao: boolean;
   pix_padrao: boolean;
+  omie_sync_required: boolean;
+}
+
+export interface CtrlSupplierOmieLink {
+  id: string;
+  supplier_id: string;
+  company_id: string;
+  omie_codigo_cliente: number | null;
+  sync_status: "pendente" | "ok" | "erro";
+  sync_error: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CtrlRequest {
@@ -177,6 +191,8 @@ export interface CtrlRequest {
   status: CtrlRequestStatus;
   approval_level: number;
   approval_tier: "nivel_2" | "nivel_3" | null;
+  // Etapa de origem guardada ao pedir complementação, para retornar a ela.
+  complement_return_status: CtrlRequestStatus | null;
   created_by: string;
   approved_by: string | null;
   approved_at: string | null;
@@ -199,6 +215,7 @@ export interface CtrlRequest {
   barcode: string | null;
   // Extra
   supplier_issues_invoice: string | null;
+  invoice_number: string | null;
   justification: string | null;
   observations: string | null;
   is_budgeted: boolean;
@@ -224,6 +241,12 @@ export interface CtrlRequest {
   // Reversal
   reversed_at: string | null;
   reversal_reason: string | null;
+  // Omie launch
+  paying_company_id: string | null;
+  omie_launch_status: "pendente" | "recebido" | "lancado" | "erro" | null;
+  omie_contapagar_codigo: number | null;
+  omie_launch_error: string | null;
+  omie_launched_at: string | null;
 }
 
 export interface CtrlEvent {

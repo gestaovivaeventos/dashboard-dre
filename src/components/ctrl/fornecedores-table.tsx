@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, X, XCircle } from "lucide-react";
+import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, Truck, X, XCircle } from "lucide-react";
 
-import { approveSupplier, rejectSupplier, updateSupplier } from "@/lib/ctrl/actions/suppliers";
+import { approveSupplier, rejectSupplier, updateSupplier, resyncSupplierOmie } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
 import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
 
@@ -30,6 +30,8 @@ interface SupplierRow {
   approved_at: string | null;
   approver_name: string | null;
   expense_type_ids: string[];
+  omie_sync_required: boolean;
+  omie_links: Array<{ company_id: string; sync_status: string; sync_error: string | null }>;
 }
 
 interface ExpenseTypeOption {
@@ -41,6 +43,7 @@ interface FornecedoresTableProps {
   suppliers: SupplierRow[];
   expenseTypes: ExpenseTypeOption[];
   canApprove: boolean;
+  omieCompanies: Array<{ id: string; name: string }>;
 }
 
 type TabKey = "aprovado" | "pendente" | "rejeitado";
@@ -60,6 +63,7 @@ export function FornecedoresTable({
   suppliers,
   expenseTypes,
   canApprove,
+  omieCompanies,
 }: FornecedoresTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actingId, setActingId] = useState<string | null>(null);
@@ -67,6 +71,7 @@ export function FornecedoresTable({
 
   const [approveModal, setApproveModal] = useState<SupplierRow | null>(null);
   const [selectedExpenseTypes, setSelectedExpenseTypes] = useState<Set<string>>(new Set());
+  const [selectedUnits, setSelectedUnits] = useState<Set<string>>(new Set());
 
   // Detail / edit modal — opened when the user clicks a row.
   const [detailSupplier, setDetailSupplier] = useState<SupplierRow | null>(null);
@@ -165,16 +170,35 @@ export function FornecedoresTable({
   // Suppliers in the active tab, filtered by the free-text search.
   // Search matches on name (case-insensitive substring) OR CNPJ/CPF digits
   // (so the user can type "12.345" or "12345" and both work).
+  const matchesSearch = (s: SupplierRow, term: string, termDigits: string) => {
+    if (!term) return true;
+    if (s.name.toLowerCase().includes(term)) return true;
+    if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
+    return false;
+  };
+
+  // Resultados da aba ativa (mantém o significado das abas — um fornecedor só
+  // aparece na aba do seu status).
   const filteredSuppliers = useMemo(() => {
     const term = search.trim().toLowerCase();
     const termDigits = term.replace(/\D/g, "");
-    return suppliers.filter((s) => {
-      if (s.status !== activeTab) return false;
-      if (!term) return true;
-      if (s.name.toLowerCase().includes(term)) return true;
-      if (termDigits && s.cnpj_cpf?.replace(/\D/g, "").includes(termDigits)) return true;
-      return false;
-    });
+    return suppliers.filter((s) => s.status === activeTab && matchesSearch(s, term, termDigits));
+  }, [suppliers, activeTab, search]);
+
+  // Quantos resultados da busca existem nas OUTRAS abas — para um aviso de
+  // descoberta ("encontrado em Pendentes"), já que a busca é escopada por aba.
+  const otherTabMatches = useMemo(() => {
+    const acc: Record<TabKey, number> = { pendente: 0, aprovado: 0, rejeitado: 0 };
+    const term = search.trim().toLowerCase();
+    if (!term) return acc;
+    const termDigits = term.replace(/\D/g, "");
+    for (const s of suppliers) {
+      if (s.status === activeTab) continue;
+      if ((s.status === "pendente" || s.status === "aprovado" || s.status === "rejeitado") && matchesSearch(s, term, termDigits)) {
+        acc[s.status] += 1;
+      }
+    }
+    return acc;
   }, [suppliers, activeTab, search]);
 
   const totalPages = Math.max(1, Math.ceil(filteredSuppliers.length / SUPPLIERS_PER_PAGE));
@@ -194,15 +218,26 @@ export function FornecedoresTable({
   const openApproveModal = (supplier: SupplierRow) => {
     setApproveModal(supplier);
     setSelectedExpenseTypes(new Set(supplier.expense_type_ids));
+    setSelectedUnits(new Set(supplier.omie_links.map((l) => l.company_id)));
   };
 
   const closeApproveModal = () => {
     setApproveModal(null);
     setSelectedExpenseTypes(new Set());
+    setSelectedUnits(new Set());
   };
 
   const toggleExpenseType = (id: string) => {
     setSelectedExpenseTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleUnit = (id: string) => {
+    setSelectedUnits((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -216,16 +251,26 @@ export function FornecedoresTable({
       setFeedback({ kind: "error", msg: "Selecione ao menos um tipo de despesa." });
       return;
     }
+    if (approveModal.omie_sync_required && selectedUnits.size === 0) {
+      setFeedback({ kind: "error", msg: "Selecione ao menos uma unidade para cadastro no Omie." });
+      return;
+    }
     const supplierId = approveModal.id;
     const ids = Array.from(selectedExpenseTypes);
+    const units = Array.from(selectedUnits);
     setActingId(supplierId);
     startTransition(async () => {
-      const result = await approveSupplier(supplierId, ids);
+      const result = await approveSupplier(supplierId, ids, units);
       setActingId(null);
       if ("error" in result && result.error) {
         setFeedback({ kind: "error", msg: `Falha ao aprovar: ${result.error}` });
       } else {
-        setFeedback({ kind: "success", msg: "Fornecedor aprovado." });
+        const errs = (result.omieResults ?? []).filter((r) => !r.ok);
+        setFeedback(
+          errs.length
+            ? { kind: "error", msg: `Aprovado, mas ${errs.length} unidade(s) falharam no Omie. Use "Reenviar" na lista.` }
+            : { kind: "success", msg: "Fornecedor aprovado e cadastrado no Omie." },
+        );
         closeApproveModal();
       }
     });
@@ -312,6 +357,27 @@ export function FornecedoresTable({
         </p>
       </div>
 
+      {/* Dica: a busca achou resultados em outras abas */}
+      {search.trim() && (otherTabMatches.pendente + otherTabMatches.aprovado + otherTabMatches.rejeitado) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Também encontrado em:{" "}
+          {(Object.keys(otherTabMatches) as TabKey[])
+            .filter((k) => otherTabMatches[k] > 0)
+            .map((k, i) => (
+              <span key={k}>
+                {i > 0 ? " · " : ""}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(k)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {TAB_LABELS[k]} ({otherTabMatches[k]})
+                </button>
+              </span>
+            ))}
+        </p>
+      )}
+
       {visibleSuppliers.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
           {search
@@ -350,6 +416,46 @@ export function FornecedoresTable({
                   <td className="px-4 py-3 font-mono text-muted-foreground">{s.cnpj_cpf ?? "—"}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {linkedNames.length > 0 ? linkedNames.join(", ") : "—"}
+                    {s.status === "aprovado" && s.omie_links.some((l) => l.sync_status === "erro") && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        {s.omie_links
+                          .filter((l) => l.sync_status === "erro")
+                          .map((l) => {
+                            const unit = omieCompanies.find((c) => c.id === l.company_id);
+                            return (
+                              <span
+                                key={l.company_id}
+                                className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"
+                                title={l.sync_error ?? undefined}
+                              >
+                                Falha no Omie: {unit?.name ?? l.company_id}
+                                {canApprove && (
+                                  <button
+                                    type="button"
+                                    disabled={isPending}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActingId(s.id);
+                                      startTransition(async () => {
+                                        const r = await resyncSupplierOmie(s.id, l.company_id);
+                                        setActingId(null);
+                                        setFeedback(
+                                          "error" in r && r.error
+                                            ? { kind: "error", msg: `Reenvio falhou: ${r.error}` }
+                                            : { kind: "success", msg: "Reenviado ao Omie." },
+                                        );
+                                      });
+                                    }}
+                                    className="ml-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                  >
+                                    Reenviar
+                                  </button>
+                                )}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={s.status} />
@@ -829,6 +935,49 @@ export function FornecedoresTable({
                   )}
                 </div>
               </section>
+
+              {approveModal.omie_sync_required && (
+                <section className="rounded-lg border bg-background shadow-sm">
+                  <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                    <Truck className="h-4 w-4 text-primary" />
+                    <h4 className="text-sm font-semibold">
+                      Unidades para cadastro no Omie <span className="text-destructive">*</span>
+                    </h4>
+                  </header>
+                  <div className="p-4">
+                    {omieCompanies.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhuma unidade com conexão Omie configurada.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="mb-2 text-xs text-muted-foreground">
+                          O fornecedor será cadastrado/atualizado no Omie de cada unidade marcada.
+                        </p>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {omieCompanies.map((c) => {
+                            const checked = selectedUnits.has(c.id);
+                            return (
+                              <label
+                                key={c.id}
+                                className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleUnit(c.id)}
+                                  className="h-4 w-4"
+                                />
+                                <span>{c.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </section>
+              )}
             </div>
             <div className="border-t px-6 py-4 flex justify-end gap-3">
               <button

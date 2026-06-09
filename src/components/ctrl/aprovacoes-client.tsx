@@ -44,6 +44,7 @@ const TAB_LABELS: Record<Tab, string> = {
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   pendente:                    { label: "Pendente",        cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  pendente_diretor:            { label: "Aguardando Diretor", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   aprovado:                    { label: "Aprovado",        cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   rejeitado:                   { label: "Rejeitado",       cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   aguardando_complementacao:   { label: "Complementação",  cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
@@ -80,9 +81,29 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const canApprove = hasRole("gerente", "diretor", "csc", "admin");
   const canReverse = hasRole("diretor", "admin");
 
-  const tabRequests = requests.filter((r) => r.status === activeTab);
-  const pendentes = requests.filter((r) => r.status === "pendente");
-  const allSelected = pendentes.length > 0 && selected.size === pendentes.length && activeTab === "pendente";
+  // Etapa atual da requisição e se o usuário pode agir nela.
+  // pendente → etapa do gerente (gerente/diretor/csc/admin podem aprovar);
+  // pendente_diretor → etapa do diretor (só diretor/csc/admin).
+  const isPendingStatus = (s: string) => s === "pendente" || s === "pendente_diretor";
+  const canActOn = (r: Req) =>
+    r.status === "pendente_diretor"
+      ? hasRole("diretor", "csc", "admin")
+      : r.status === "pendente"
+      ? canApprove
+      : false;
+
+  // Aba "Pendentes" agrupa as duas etapas de pendência.
+  const tabRequests =
+    activeTab === "pendente"
+      ? requests.filter((r) => isPendingStatus(r.status))
+      : requests.filter((r) => r.status === activeTab);
+  const pendentes = requests.filter((r) => isPendingStatus(r.status));
+  // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
+  const actionablePendentes = pendentes.filter(canActOn);
+  const allSelected =
+    actionablePendentes.length > 0 &&
+    selected.size === actionablePendentes.length &&
+    activeTab === "pendente";
 
   const counts: Record<Tab, number> = {
     pendente: pendentes.length,
@@ -161,7 +182,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
             <input
               type="checkbox"
               checked={allSelected}
-              onChange={() => setSelected(allSelected ? new Set() : new Set(pendentes.map((r) => r.id)))}
+              onChange={() => setSelected(allSelected ? new Set() : new Set(actionablePendentes.map((r) => r.id)))}
               className="h-4 w-4 rounded border-gray-300"
             />
             Selecionar todas
@@ -191,9 +212,9 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
           {tabRequests.map((req) => {
             const sector = resolve(req.ctrl_sectors);
             const expType = resolve(req.ctrl_expense_types);
-            const canSelectThis = activeTab === "pendente" && canApprove;
+            const actionable = canActOn(req);
+            const canSelectThis = activeTab === "pendente" && actionable;
             const isNivel3 = req.approval_tier === "nivel_3";
-            const gerente = ctrlRoles.includes("gerente");
 
             return (
               <div
@@ -208,7 +229,6 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                         type="checkbox"
                         checked={selected.has(req.id)}
                         onChange={() => toggleSelect(req.id)}
-                        disabled={gerente && isNivel3}
                         className="mt-0.5 h-4 w-4 rounded border-gray-300 shrink-0"
                       />
                     )}
@@ -219,7 +239,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                         {(() => { const b = STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
                         {isNivel3 && (
                           <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
-                            Diretor
+                            Fora do orçamento
                           </span>
                         )}
                       </div>
@@ -244,8 +264,8 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                       Detalhes
                     </button>
 
-                    {/* Approver actions on pendente */}
-                    {canApprove && req.status === "pendente" && !(gerente && isNivel3) && (
+                    {/* Approver actions on pendente / pendente_diretor */}
+                    {actionable && (
                       <>
                         <button
                           onClick={() => handleAction(() => approveRequest(req.id))}

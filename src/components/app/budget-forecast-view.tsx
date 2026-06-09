@@ -861,7 +861,7 @@ function MonthlyTable({
 
         {rows.map((row) => {
           const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-background";
           const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
 
           return (
@@ -956,7 +956,7 @@ function RealizadoTable({
 
         {rows.map((row) => {
           const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-background";
           const borderClass = isKeyResult ? "border-t-2 border-border" : "border-t border-border";
           const budgetVal = row.budgetValue ?? 0;
           const actualVal = row.realizedValue ?? row.accumulatedValue ?? 0;
@@ -1063,7 +1063,7 @@ function RealizadoMensalTable({
 
         {rows.map((row) => {
           const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-background";
           const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
           const canDrill = !row.is_summary;
           const totalReal = row.accumulatedValue ?? 0;
@@ -1202,7 +1202,7 @@ function ComparativoTable({
 
         {rows.map((row) => {
           const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
-          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-muted/50";
+          const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-background";
           const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
           const canDrill = !row.is_summary;
 

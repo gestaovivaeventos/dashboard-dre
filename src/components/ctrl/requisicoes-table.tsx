@@ -169,6 +169,7 @@ export function RequisicoesTable({ requests }: Props) {
 
 const STATUS_LABEL: Record<string, string> = {
   pendente: "Pendente",
+  pendente_diretor: "Aguard. Diretor",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
@@ -183,6 +184,7 @@ const STATUS_LABEL: Record<string, string> = {
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
     pendente: { label: "Pendente", className: "bg-yellow-100 text-yellow-800" },
+    pendente_diretor: { label: "Aguard. Diretor", className: "bg-orange-100 text-orange-800" },
     aprovado: { label: "Aprovado", className: "bg-green-100 text-green-800" },
     rejeitado: { label: "Rejeitado", className: "bg-red-100 text-red-800" },
     aguardando_complementacao: { label: "Complementação", className: "bg-blue-100 text-blue-800" },

@@ -606,14 +606,23 @@ export async function aggregateDreRowsByCompany(params: {
 }
 
 /**
- * Extrai o valor de "Resultado do Exercício" (code "11") de uma lista de
- * rows do DRE. Use junto com `aggregateDreRows` ou `aggregateDreRowsByCompany`.
+ * Extrai o valor de "Resultado do Exercício" de uma lista de rows do DRE.
+ * Use junto com `aggregateDreRows` ou `aggregateDreRowsByCompany`.
  *
  * Esta é a fonte de verdade para o número que aparece na linha "Resultado
  * do Exercício" tanto no Dashboard DRE quanto no Fluxo de Caixa.
+ *
+ * Por padrão usa o code "11" (DRE_RESULTADO_EXERCICIO_CODE), válido para o
+ * plano global e para os planos custom alinhados a ele. O parâmetro `code`
+ * permite sobrepor pontualmente o code de resultado para uma empresa com plano
+ * custom que feche o exercício em outra linha (ex.: SGX usa o code "15" —
+ * "Resultado 4 - Locação + Operacional + Projetos" — no Fluxo de Caixa).
  */
-export function findResultadoExercicio(rows: DashboardRow[]): number {
-  return rows.find((r) => r.code === DRE_RESULTADO_EXERCICIO_CODE)?.value ?? 0;
+export function findResultadoExercicio(
+  rows: DashboardRow[],
+  code: string = DRE_RESULTADO_EXERCICIO_CODE,
+): number {
+  return rows.find((r) => r.code === code)?.value ?? 0;
 }
 
 /**

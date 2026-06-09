@@ -5,6 +5,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveSegmentSlug } from "@/lib/context/active-context";
 import type { Segment } from "@/lib/supabase/types";
 import {
+  DRE_RESULTADO_EXERCICIO_CODE,
   SCOPED_DRE_ACCOUNTS_SELECT,
   aggregateDreRows,
   aggregateDreRowsByCompany,
@@ -179,6 +180,32 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     filter.selectedCompanyIds,
   );
 
+  // === Override EXCLUSIVO da SGX ============================================
+  // Por padrão a linha "Resultado do Exercício" do Fluxo de Caixa puxa o code
+  // "11" do DRE (DRE_RESULTADO_EXERCICIO_CODE). SOMENTE para a SGX o produto
+  // quer que essa linha reflita o "Resultado 4 - Locação + Operacional +
+  // Projetos" (code "15" no plano custom da SGX), em vez do "Resultado 2 -
+  // Locação + Operacional" (code "11").
+  //
+  // Aplica-se apenas quando a SGX é a ÚNICA empresa selecionada — que é
+  // exatamente quando o escopo do DRE (`dreScope`) é o plano custom da SGX,
+  // onde o code "15" existe (isCoreDreCode permite top-level 1..19). Em
+  // consolidado/comparativo multiempresa o escopo cai no plano global (sem
+  // code 15), então mantemos o code "11" padrão — sem afetar nenhuma outra
+  // empresa nem o cálculo geral. Como o "Resultado" alimenta Caixa Gerado →
+  // Caixa Final → Saldo Inicial, usar o code 15 em `computeDreResultado`
+  // mantém toda a matemática do caixa da SGX internamente consistente.
+  const SGX_RESULTADO_EXERCICIO_CODE = "15";
+  const sgxCompanyId =
+    companies.find((c) => c.name.trim().toUpperCase() === "SGX")?.id ?? null;
+  const isSgxOnly =
+    sgxCompanyId !== null &&
+    filter.selectedCompanyIds.length === 1 &&
+    filter.selectedCompanyIds[0] === sgxCompanyId;
+  const resultadoExercicioCode = isSgxOnly
+    ? SGX_RESULTADO_EXERCICIO_CODE
+    : DRE_RESULTADO_EXERCICIO_CODE;
+
   if (filter.selectedCompanyIds.length === 0) {
     return (
       <CashFlowView
@@ -209,11 +236,12 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   const visibleBuckets = buildCashFlowBuckets(filter);
   const accumulatedBucket = buildCashFlowAccumulatedBucket(visibleBuckets);
 
-  // "Resultado do Exercicio" (code 11) para um bucket — delega 100% para o
-  // helper compartilhado em src/lib/dashboard/dre.ts. NÃO duplicar o pipeline
-  // de cálculo aqui: a tela do Dashboard DRE usa o MESMO `aggregateDreRows`
+  // "Resultado do Exercicio" para um bucket — delega 100% para o helper
+  // compartilhado em src/lib/dashboard/dre.ts. NÃO duplicar o pipeline de
+  // cálculo aqui: a tela do Dashboard DRE usa o MESMO `aggregateDreRows`
   // + `findResultadoExercicio`, então qualquer mudança futura na regra do
-  // DRE se propaga automaticamente para o Fluxo de Caixa.
+  // DRE se propaga automaticamente para o Fluxo de Caixa. O code de resultado
+  // (`resultadoExercicioCode`) é "11" por padrão e "15" só no escopo da SGX.
   const computeDreResultado = async (
     bucket: CashFlowPeriodBucket,
     companies: string[] = filter.selectedCompanyIds,
@@ -225,7 +253,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       dateFrom: bucket.dateFrom,
       dateTo: bucket.dateTo,
     });
-    return findResultadoExercicio(rows);
+    return findResultadoExercicio(rows, resultadoExercicioCode);
   };
 
   // Helper: agrega cash flow no periodo e devolve mapa accountId -> amount.
