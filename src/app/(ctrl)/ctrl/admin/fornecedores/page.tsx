@@ -11,11 +11,11 @@ async function getData() {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
-  const [suppliersResult, expenseTypesResult] = await Promise.all([
+  const [suppliersResult, expenseTypesResult, omieCompaniesResult, linksResult] = await Promise.all([
     supabase
       .from("ctrl_suppliers")
       .select(
-        `id, name, cnpj_cpf, email, phone, omie_id, from_omie,
+        `id, name, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
          chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
          status, rejection_reason, created_at, approved_at,
          approver:users!ctrl_suppliers_approved_by_fkey(name, email),
@@ -23,7 +23,24 @@ async function getData() {
       )
       .order("name"),
     supabase.from("ctrl_expense_types").select("id, name").order("name"),
+    supabase
+      .from("companies")
+      .select("id, name")
+      .eq("active", true)
+      .not("omie_app_key", "is", null)
+      .not("omie_app_secret", "is", null)
+      .order("name"),
+    supabase
+      .from("ctrl_supplier_omie_links")
+      .select("supplier_id, company_id, sync_status, sync_error"),
   ]);
+
+  const linksBySupplier = new Map<string, Array<{ company_id: string; sync_status: string; sync_error: string | null }>>();
+  for (const link of (linksResult.data ?? []) as Array<{ supplier_id: string; company_id: string; sync_status: string; sync_error: string | null }>) {
+    const list = linksBySupplier.get(link.supplier_id) ?? [];
+    list.push({ company_id: link.company_id, sync_status: link.sync_status, sync_error: link.sync_error });
+    linksBySupplier.set(link.supplier_id, list);
+  }
 
   return {
     suppliersError: suppliersResult.error?.message ?? null,
@@ -35,6 +52,7 @@ async function getData() {
       phone: string | null;
       omie_id: number | null;
       from_omie: boolean | null;
+      omie_sync_required: boolean | null;
       chave_pix: string | null;
       pix_key_type: string | null;
       banco: string | null;
@@ -58,6 +76,8 @@ async function getData() {
       id: string;
       name: string;
     }>,
+    omieCompanies: (omieCompaniesResult.data ?? []) as Array<{ id: string; name: string }>,
+    linksBySupplier,
   };
 }
 
@@ -73,7 +93,7 @@ export default async function FornecedoresPage() {
 
   const canApprove = hasCtrlRole(ctx, "csc", "admin", "aprovacao_fornecedor");
 
-  const { suppliers, expenseTypes, suppliersError } = await getData();
+  const { suppliers, expenseTypes, suppliersError, omieCompanies, linksBySupplier } = await getData();
 
   return (
     <div className="space-y-6">
@@ -125,10 +145,13 @@ export default async function FornecedoresPage() {
               approver_name: approver?.name ?? approver?.email ?? null,
               expense_type_ids:
                 s.ctrl_supplier_expense_types?.map((l) => l.expense_type_id) ?? [],
+              omie_sync_required: s.omie_sync_required ?? false,
+              omie_links: linksBySupplier.get(s.id) ?? [],
             };
           })}
           expenseTypes={expenseTypes}
           canApprove={canApprove}
+          omieCompanies={omieCompanies}
         />
       )}
     </div>
