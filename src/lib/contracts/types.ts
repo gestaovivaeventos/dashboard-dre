@@ -99,6 +99,8 @@ export interface ExtractedContract {
   // Data de assinatura/emissão (DD/MM/AAAA). Disponível para regras futuras
   // (cronograma). Hoje não é consumida pela validação.
   data_contrato?: string | null
+  // Datas de vencimento das parcelas (DD/MM/AAAA). Usadas na regra de vencimento.
+  datas_vencimento?: string[]
 }
 
 export type ValidationStatus =

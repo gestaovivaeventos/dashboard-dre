@@ -70,6 +70,12 @@ export function parseDataBR(value: string | null | undefined): Date | null {
   return null
 }
 
+function formatarData(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
+}
+
 // Cronograma por módulo (janela de antecedência da contratação em relação ao
 // evento). Antecedência = data_evento − data_contrato, em dias.
 // Fora da janela NÃO reprova — só gera alerta. Tabela fácil de ajustar.
@@ -577,17 +583,42 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
-  // Aprovada COM RESSALVA: contrato de alto valor (≥ R$ 10k) sem NENHUM dado
-  // bancário nos documentos. Não reprova (a conta pode estar na própria RP),
-  // mas sinaliza a pendência pro aprovador conferir.
+  // Aprovada COM RESSALVA: tudo confere, mas há uma pendência que não reprova.
+  const ressalvas: string[] = []
+
+  // (a) Contrato de alto valor (≥ R$ 10k) sem NENHUM dado bancário nos documentos
+  // (a conta pode estar na própria RP, por isso não reprova).
   const temContratoAltoValor =
     exigeAltoValorReq && docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
   const algumDocComConta = docs.some((d) => digitsOnly(d.conta))
   if (temContratoAltoValor && !algumDocComConta) {
+    ressalvas.push('Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar')
+  }
+
+  // (b) Vencimento do documento posterior à data prevista de pagamento da RP.
+  const prevista = parseDataBR(req.data_pagamento_prevista)
+  if (prevista) {
+    let vencPosterior: Date | null = null
+    for (const d of docs) {
+      for (const v of d.datas_vencimento ?? []) {
+        const venc = parseDataBR(v)
+        if (venc && venc.getTime() > prevista.getTime() && (!vencPosterior || venc > vencPosterior)) {
+          vencPosterior = venc
+        }
+      }
+    }
+    if (vencPosterior) {
+      ressalvas.push(
+        `Vencimento do documento (${formatarData(vencPosterior)}) posterior à data prevista de pagamento (${formatarData(prevista)})`,
+      )
+    }
+  }
+
+  if (ressalvas.length > 0) {
     return {
       status: 'aprovada_ressalva',
-      motivos: ['Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar'],
-      resumo: `Aprovada com ressalva — contrato ≥ R$ 10k sem dados bancários (${docs.length} doc${docs.length === 1 ? '' : 's'})`,
+      motivos: ressalvas,
+      resumo: `Aprovada com ressalva — ${ressalvas.join(' · ')}`,
       ...comAlertas,
     }
   }

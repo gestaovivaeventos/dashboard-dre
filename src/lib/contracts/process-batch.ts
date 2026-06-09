@@ -37,6 +37,7 @@ interface ItemRow {
   extracted_conta: string | null
   extracted_valor_contrato: number | string | null
   extracted_pagamentos: number[] | null
+  extracted_vencimentos: string[] | null
   assinatura_contratante: string | null
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
@@ -180,6 +181,7 @@ export async function processBatch(
           extracted_conta: normalized.conta,
           extracted_valor_contrato: normalized.valor_contrato,
           extracted_pagamentos: payments,
+          extracted_vencimentos: normalized.datas_vencimento ?? [],
           assinatura_contratante: normalized.assinatura_contratante,
           assinatura_contratado: normalized.assinatura_contratado,
           assinatura_digital: extraction.raw.assinatura_digital_detectada || null,
@@ -222,7 +224,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato',
     )
     .eq('batch_id', batchId)
 
@@ -271,6 +273,7 @@ export async function processBatch(
       assinatura_contratante: i.assinatura_contratante,
       assinatura_contratado: i.assinatura_contratado,
       data_contrato: i.data_contrato,
+      datas_vencimento: i.extracted_vencimentos ?? [],
       extraction_failed: i.status === 'erro',
     }))
 

@@ -45,6 +45,21 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     .map(parseValor)
     .filter((v) => v > 0)
 
+  const datasVencimento = [
+    raw.pagamento1_data_vencimento,
+    raw.pagamento2_data_vencimento,
+    raw.pagamento3_data_vencimento,
+    raw.pagamento4_data_vencimento,
+    raw.pagamento5_data_vencimento,
+    raw.pagamento6_data_vencimento,
+    raw.pagamento7_data_vencimento,
+    raw.pagamento8_data_vencimento,
+    raw.pagamento9_data_vencimento,
+    raw.pagamento10_data_vencimento,
+  ]
+    .map((d) => (d ?? '').toString().trim())
+    .filter((d) => d.length > 0)
+
   return {
     tipo_documento: (raw.tipo_documento ?? '').toString().trim() || null,
     fornecedor: (raw.favorecido?.nome ?? '').toString().trim() || null,
@@ -55,5 +70,6 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     assinatura_contratante: (raw.assinatura_contratante ?? '').toString().trim() || null,
     assinatura_contratado: (raw.assinatura_contratado ?? '').toString().trim() || null,
     data_contrato: (raw.data_contrato ?? '').toString().trim() || null,
+    datas_vencimento: datasVencimento,
   }
 }
