@@ -71,38 +71,50 @@ Nova tela admin (ex.: `/ctrl/admin/omie-mapeamento`). Por empresa Omie:
   (default: a que tiver "omiecash"/"omie cash" no nome).
 - Indicador de cobertura ("X de Y tipos mapeados nesta empresa").
 
-### 2D — Matching de NF de produto (Compras)  ⚠️ requer spike de API
-Antes de lançar:
-1. Buscar no Omie da empresa pagadora uma **NF de produto** do fornecedor
-   (CNPJ) com **valor** igual ao da requisição.
-2. **Casou:** evoluir a NF para gerar a conta a pagar, **alterar a categoria**
-   para a do De-Para; card → `recebido` (`omie_launch_status='recebido'`,
-   guarda o código).
-3. **Não casou:** segue para 2E (IncluirContaPagar).
+### 2D — Matching de NF de produto (Compras)  ✅ API confirmada
+**Constatação da pesquisa:** o Omie **não** expõe API para "evoluir uma NF
+importada em conta a pagar". O `cGeraFinanceiro` só age na inclusão/alteração da
+nota. Na prática, o monitor de NF-e do Omie importa a NF e — **se a empresa
+estiver configurada para gerar financeiro** — já cria o título em contas a pagar
+com `id_origem = "NFEP"`. Logo o matching é feito contra o **título já existente**.
 
-**Spike (de-risco antes de implementar 2D):** confirmar na API do Omie:
-- endpoint que lista NFs de produto importadas (candidatos: `produtos/nfconsultar`,
-  recebimento/entrada de NF) e permite filtrar por fornecedor/valor;
-- como **gerar a conta a pagar a partir da NF** via API (a "opção de a NF gerar
-  contas a pagar") — se não houver chamada direta, alternativa: localizar a
-  conta a pagar já gerada (`ListarContasPagar` por fornecedor+valor) e
-  `AlterarContaPagar` para ajustar a categoria;
-- definir tolerância do valor (ex.: igualdade exata em centavos) e janela de
-  busca (período).
+Antes de lançar, na empresa pagadora:
+1. `ListarContasPagar` (`financas/contapagar/`) com `filtrar_por_cpf_cnpj =
+   <CNPJ do fornecedor>` (só dígitos) + janela de datas; **filtrar o valor no
+   nosso lado** (a API não filtra por valor) — match por `valor_documento`
+   igual em centavos.
+2. **Casou** (preferir registros com `id_origem='NFEP'`): `AlterarContaPagar`
+   com `{ codigo_lancamento_omie, codigo_categoria: <De-Para> }`; card →
+   `recebido` (guarda `omie_contapagar_codigo`).
+3. **Não casou:** segue para 2E (`IncluirContaPagar`).
 
-### 2E — Lançamento (`financas/contapagar` → `IncluirContaPagar`)
+**Pré-condição:** depende de a empresa estar configurada no Omie para gerar
+financeiro a partir da NF importada. Onde não gerar, não haverá título para
+casar → cai no lançamento manual (2E). (Confirmar a config por empresa.)
+
+**Parâmetros a definir:** tolerância de valor (default: igualdade exata em
+centavos) e janela de busca (ex.: emissão/vencimento nos últimos N dias).
+
+### 2E — Lançamento (`financas/contapagar/` → `IncluirContaPagar`)  (campos confirmados)
 Payload (empresa pagadora):
-- `codigo_cliente_fornecedor` = link da Fase 1 para (fornecedor, empresa
-  pagadora); se ausente, cadastra o fornecedor na empresa na hora.
+- `codigo_lancamento_integracao` = id da requisição (chave idempotente; evita
+  duplicar se reenviar).
+- `codigo_cliente_fornecedor` = `nCodCli` do fornecedor (link da Fase 1 em
+  `ctrl_supplier_omie_links` para (fornecedor, empresa pagadora); se ausente,
+  cadastra o fornecedor na empresa na hora e usa o código retornado).
 - `codigo_categoria` = De-Para (2A) do tipo de despesa nessa empresa.
-- `data_vencimento` = `due_date`.
-- `data_emissao` = dia **1** do mês/ano de competência.
+- `data_vencimento` = `due_date` (formato `dd/mm/aaaa`).
+- `data_previsao` = `due_date` (obrigatório pela Omie; usamos o vencimento).
+- `data_emissao` = dia **1** do mês/ano de competência (`dd/mm/aaaa`).
 - `valor_documento` = `amount`.
-- `codigo_departamento` (distribuição) = De-Para (2B) do setor nessa empresa.
-- `id_conta_corrente`/`codigo_conta_corrente` = OmieCash da empresa (2C).
+- `distribuicao` = `[{ cCodDep: <departamento do De-Para 2B>, nPerDep: 100 }]`.
+- `id_conta_corrente` = `nCodCC` da OmieCash da empresa (2C).
 - `observacao` = descrição da requisição.
-- `numero_documento` = `invoice_number`; `codigo_barras` = `barcode` (quando houver).
-- Sucesso → `omie_launch_status='lancado'` + `omie_contapagar_codigo`.
+- `numero_documento`/`numero_documento_fiscal` = `invoice_number` (quando houver).
+- Boleto: `cnab_integracao_bancaria = { codigo_forma_pagamento: "BOL",
+  codigo_barras_boleto: <barcode> }` (não há campo de código de barras na raiz).
+- Sucesso → `omie_launch_status='lancado'` + `omie_contapagar_codigo`
+  (`codigo_lancamento_omie`).
 
 ### 2F — Fluxo e estados no Control Hub
 - Seleção da empresa pagadora no Contas a Pagar passa a gravar

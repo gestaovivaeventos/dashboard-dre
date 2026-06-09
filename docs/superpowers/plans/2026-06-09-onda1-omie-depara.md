@@ -94,13 +94,11 @@ END $$;
 ## Task 2 — Cliente Omie de cadastros
 **Files:** Create `src/lib/omie/cadastros.ts`
 
-- [ ] **Step 1:** Implementar, usando `omieCall` de `@/lib/omie/client`, funções paginadas:
-  - `listCategorias(appKey, appSecret)` → `{ codigo, descricao }[]` (call `ListarCategorias`, endpoint `geral/categorias/`, campos a confirmar com a pesquisa de API — provável `codigo`/`descricao`).
-  - `listDepartamentos(appKey, appSecret)` → `{ codigo, descricao }[]` (`ListarDepartamentos`, `geral/departamentos/`).
-  - `listContasCorrentes(appKey, appSecret)` → `{ codigo, descricao }[]` (`ListarContasCorrentes`, `geral/contacorrente/`).
-  Cada uma pagina (registros_por_pagina 500) até acabar. Tolerante a `notFound`.
-  > NOTA: os nomes exatos de campos/calls devem ser confirmados com o relatório
-  > da pesquisa da API do Omie (em andamento) antes de finalizar este arquivo.
+- [ ] **Step 1:** Implementar, usando `omieCall` de `@/lib/omie/client`, funções paginadas (campos CONFIRMADos pela pesquisa da API):
+  - `listCategorias(appKey, appSecret)` → `{ codigo, descricao }[]` — call `ListarCategorias`, endpoint `geral/categorias/`, param `{ pagina, registros_por_pagina: 500, filtrar_apenas_ativo: "S" }`; array de resposta `categoria_cadastro`; campos `codigo`, `descricao`; **ignorar** itens com `totalizadora === "S"` ou `conta_inativa === "S"`. Total de páginas em `total_de_paginas`.
+  - `listDepartamentos(appKey, appSecret)` → `{ codigo, descricao }[]` — `ListarDepartamentos`, `geral/departamentos/`, param `{ pagina, registros_por_pagina: 500 }`; array `departamentos`; campos `codigo`, `descricao`; ignorar `inativo === "S"`.
+  - `listContasCorrentes(appKey, appSecret)` → `{ codigo, descricao, tipo }[]` — `ListarContasCorrentes`, `geral/contacorrente/`, param `{ pagina, registros_por_pagina: 500, filtrar_apenas_ativo: "S" }`; array `conta_corrente_lista`; campos `nCodCC` (→ codigo), `descricao`, `tipo_conta_corrente` (→ tipo).
+  Cada uma pagina até `pagina >= total_de_paginas`. Tolerante a `notFound`.
 - [ ] **Step 2:** Build. **Step 3:** Commit.
 
 ---
