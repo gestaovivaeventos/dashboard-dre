@@ -21,6 +21,9 @@ export const DEFAULT_DOC_TYPE: DocumentType = 'Contrato / Aditivo Contratual'
 export interface ContractExtraction {
   tipo_documento: DocumentType | string
   data_baile: string
+  // Data de assinatura/emissão do documento (DD/MM/AAAA). Usada no cálculo de
+  // antecedência do cronograma por módulo (etapa futura). Extração híbrida.
+  data_contrato?: string
   favorecido: {
     nome: string
     cpf_cnpj: string
@@ -29,26 +32,38 @@ export interface ContractExtraction {
     conta: string
   }
   valor_contrato: string
+  // pagamentoX_obs: registra a porcentagem original quando a parcela veio como
+  // "% do contrato" (o valor calculado fica em pagamentoX_valor).
   pagamento1_data_vencimento: string
   pagamento1_valor: string
+  pagamento1_obs?: string
   pagamento2_data_vencimento: string
   pagamento2_valor: string
+  pagamento2_obs?: string
   pagamento3_data_vencimento: string
   pagamento3_valor: string
+  pagamento3_obs?: string
   pagamento4_data_vencimento: string
   pagamento4_valor: string
+  pagamento4_obs?: string
   pagamento5_data_vencimento?: string
   pagamento5_valor?: string
+  pagamento5_obs?: string
   pagamento6_data_vencimento?: string
   pagamento6_valor?: string
+  pagamento6_obs?: string
   pagamento7_data_vencimento?: string
   pagamento7_valor?: string
+  pagamento7_obs?: string
   pagamento8_data_vencimento?: string
   pagamento8_valor?: string
+  pagamento8_obs?: string
   pagamento9_data_vencimento?: string
   pagamento9_valor?: string
+  pagamento9_obs?: string
   pagamento10_data_vencimento?: string
   pagamento10_valor?: string
+  pagamento10_obs?: string
   assinatura_contratante: 'Sim' | 'Não' | string
   assinatura_contratado: 'Sim' | 'Não' | string
   assinatura_digital_detectada: 'Sim' | 'Não' | string
@@ -63,6 +78,16 @@ export interface RequisitionInput {
   cpf_cnpj: string | null
   conta: string | null
   valor: number | null
+  // Campos opcionais da RP para regras futuras (cronograma/BV/vencimento).
+  // Transportados desde o upload; ainda não consumidos pela validação.
+  data_evento?: string | null
+  modulo?: number | null
+  valor_total_contrato?: number | null
+  historico_rps_pagas?: number | null
+  data_pagamento_prevista?: string | null
+  // BV: chave de casamento com a base de RPs pagas.
+  fundo?: string | null
+  numero_contrato?: string | null
 }
 
 export interface ExtractedContract {
@@ -74,10 +99,16 @@ export interface ExtractedContract {
   valores_pagamentos: number[]
   assinatura_contratante: string | null
   assinatura_contratado: string | null
+  // Data de assinatura/emissão (DD/MM/AAAA). Disponível para regras futuras
+  // (cronograma). Hoje não é consumida pela validação.
+  data_contrato?: string | null
+  // Datas de vencimento das parcelas (DD/MM/AAAA). Usadas na regra de vencimento.
+  datas_vencimento?: string[]
 }
 
 export type ValidationStatus =
   | 'aprovada'
+  | 'aprovada_ressalva'
   | 'reprovada'
   | 'analise_especialista'
   | 'verificar_saldo'
@@ -89,4 +120,7 @@ export interface ValidationResult {
   // Human-readable summary matching the legacy GCP string format.
   // Stored in contract_validation_items.status_resumo.
   resumo: string
+  // Avisos que NÃO mudam o status (ex.: contratação fora da janela do módulo,
+  // BV dentro do limite). Informacionais — exibidos junto aos motivos com prefixo.
+  alertas?: string[]
 }

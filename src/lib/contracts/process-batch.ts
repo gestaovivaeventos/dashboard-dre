@@ -37,10 +37,19 @@ interface ItemRow {
   extracted_conta: string | null
   extracted_valor_contrato: number | string | null
   extracted_pagamentos: number[] | null
+  extracted_vencimentos: string[] | null
   assinatura_contratante: string | null
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
   error_log: string | null
+  data_evento: string | null
+  modulo: number | null
+  valor_total_contrato: number | string | null
+  historico_rps_pagas: number | string | null
+  data_pagamento_prevista: string | null
+  data_contrato: string | null
+  fundo: string | null
+  numero_contrato: string | null
 }
 
 export interface ProcessBatchResult {
@@ -50,6 +59,29 @@ export interface ProcessBatchResult {
   errors: number
   credits_used: number
   status: BatchRow['status']
+}
+
+// Normalização para o casamento do BV (saldo do contrato).
+function normBV(s: string | null | undefined): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Chave de casamento do BV: fundo + CNPJ (só dígitos). A base de RPs pagas não
+// traz número de contrato, então o "contrato" é identificado por fundo+fornecedor
+// (decisão 2026-06-09). Retorna null se faltar fundo ou CNPJ.
+function bvKey(
+  fundo: string | null | undefined,
+  cnpj: string | null | undefined,
+): string | null {
+  const f = normBV(fundo)
+  const c = String(cnpj ?? '').replace(/\D/g, '')
+  if (!f || !c) return null
+  return `${f}|${c}`
 }
 
 export async function processNextPendingBatch(
@@ -166,6 +198,7 @@ export async function processBatch(
         .update({
           tipo_documento: normalized.tipo_documento,
           data_baile: extraction.raw.data_baile || null,
+          data_contrato: normalized.data_contrato || null,
           extracted_fornecedor: normalized.fornecedor,
           extracted_cpf_cnpj: normalized.cpf_cnpj,
           extracted_banco: extraction.raw.favorecido?.banco || null,
@@ -173,6 +206,7 @@ export async function processBatch(
           extracted_conta: normalized.conta,
           extracted_valor_contrato: normalized.valor_contrato,
           extracted_pagamentos: payments,
+          extracted_vencimentos: normalized.datas_vencimento ?? [],
           assinatura_contratante: normalized.assinatura_contratante,
           assinatura_contratado: normalized.assinatura_contratado,
           assinatura_digital: extraction.raw.assinatura_digital_detectada || null,
@@ -215,7 +249,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status, error_log',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato',
     )
     .eq('batch_id', batchId)
 
@@ -230,6 +264,22 @@ export async function processBatch(
   }
 
   console.log(`[contracts] phase2 evaluating ${groups.size} requisitions (${items.length} items)`)
+
+  // BV (saldo do contrato): carrega a base de RPs pagas uma vez e soma o já-pago
+  // por (fundo + CNPJ + número do contrato), normalizado. O valor entra na RP
+  // como historico_rps_pagas e a regra pura (analisarRequisicao) faz a conta.
+  const paidByKey = new Map<string, number>()
+  {
+    const { data: paidRows } = await db
+      .from('contract_paid_history')
+      .select('fundo, cpf_cnpj, valor_pago')
+    for (const r of (paidRows ?? []) as Array<{ fundo: string | null; cpf_cnpj: string | null; valor_pago: number | string | null }>) {
+      const key = bvKey(r.fundo, r.cpf_cnpj)
+      if (!key) continue
+      paidByKey.set(key, (paidByKey.get(key) ?? 0) + (Number(r.valor_pago) || 0))
+    }
+    console.log(`[contracts] BV paid-history rows aggregated into ${paidByKey.size} contracts`)
+  }
 
   // Materialize entries so we don't iterate Map directly (target=es5 limitation).
   const groupEntries: Array<[string, ItemRow[]]> = []
@@ -263,6 +313,8 @@ export async function processBatch(
       valores_pagamentos: i.extracted_pagamentos ?? [],
       assinatura_contratante: i.assinatura_contratante,
       assinatura_contratado: i.assinatura_contratado,
+      data_contrato: i.data_contrato,
+      datas_vencimento: i.extracted_vencimentos ?? [],
       extraction_failed: i.status === 'erro',
     }))
 
@@ -274,6 +326,19 @@ export async function processBatch(
         cpf_cnpj: first.cpf_cnpj,
         conta: first.conta,
         valor: Number(first.valor) || null,
+        data_evento: first.data_evento,
+        modulo: first.modulo,
+        valor_total_contrato: Number(first.valor_total_contrato) || null,
+        // BV: soma calculada da base de pagas quando casável (fundo+CNPJ+contrato);
+        // senão, cai no valor manual da planilha (se houver).
+        historico_rps_pagas: (() => {
+          const k = bvKey(first.fundo, first.cpf_cnpj)
+          if (k) return paidByKey.get(k) ?? 0
+          return Number(first.historico_rps_pagas) || null
+        })(),
+        data_pagamento_prevista: first.data_pagamento_prevista,
+        fundo: first.fundo,
+        numero_contrato: first.numero_contrato,
       },
       documentos,
     })
@@ -285,7 +350,12 @@ export async function processBatch(
       .from('contract_validation_items')
       .update({
         status: validation.status,
-        status_motivos: validation.motivos,
+        // Alertas (ex.: cronograma fora da janela) entram junto dos motivos com
+        // prefixo ⚠️ — são informativos e não mudam o status.
+        status_motivos: [
+          ...validation.motivos,
+          ...(validation.alertas ?? []).map((a) => `⚠️ ${a}`),
+        ],
         status_resumo: validation.resumo,
         processed_at: new Date().toISOString(),
       })
@@ -308,7 +378,9 @@ export async function processBatch(
   let totalCredits = 0
   let stillPending = 0
   for (const c of (counters ?? []) as Array<{ status: string; ai_credits: number | string }>) {
-    if (c.status === 'aprovada') approved += 1
+    // "aprovada_ressalva" conta como aprovada no resumo do lote; a ressalva
+    // fica visível no status/resumo de cada item ao abrir o lote.
+    if (c.status === 'aprovada' || c.status === 'aprovada_ressalva') approved += 1
     else if (c.status === 'reprovada') reproved += 1
     else if (c.status === 'erro') failed += 1
     else if (c.status === 'analise_especialista') specialist += 1

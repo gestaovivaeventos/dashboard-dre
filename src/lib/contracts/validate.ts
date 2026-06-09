@@ -12,7 +12,9 @@ import {
 } from './types'
 
 const FUZZY_NAME_THRESHOLD = 85
-const VALUE_TOLERANCE = 0.01
+// Diferença de até R$ 0,02 entre documento e requisição é aceitável (arredondamentos
+// de parcela, centavos de OCR). Acima disso é divergência de valor.
+const VALUE_TOLERANCE = 0.02
 
 // Acima deste valor, exige dados bancários + assinaturas (R4/R5/R6 na camada 1,
 // R14/R15/R16 na camada 2). Abaixo, contrato precisa só de nome + CPF/CNPJ +
@@ -36,6 +38,72 @@ export function isFeeCerimonial(descricao: string | null | undefined): boolean {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
   return /\bfee\b/.test(norm) || norm.includes('cerimonial')
+}
+
+// Parser tolerante de data: aceita "DD/MM/AAAA" (e variações com . ou -),
+// ISO "AAAA-MM-DD" e número serial do Excel. Retorna null se não der pra ler.
+export function parseDataBR(value: string | null | undefined): Date | null {
+  if (!value) return null
+  const s = String(value).trim()
+  if (!s) return null
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    // Serial do Excel (epoch 1899-12-30).
+    const serial = Number(s)
+    if (serial > 59 && serial < 100000) {
+      const d = new Date(Math.round((serial - 25569) * 86400000))
+      return Number.isNaN(d.getTime()) ? null : d
+    }
+    return null
+  }
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})/)
+  if (m) {
+    let year = Number(m[3])
+    if (year < 100) year += 2000
+    const d = new Date(year, Number(m[2]) - 1, Number(m[1]))
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
+function formatarData(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
+}
+
+// Cronograma por módulo (janela de antecedência da contratação em relação ao
+// evento). Antecedência = data_evento − data_contrato, em dias.
+// Fora da janela NÃO reprova — só gera alerta. Tabela fácil de ajustar.
+const CRONOGRAMA_MODULOS: Record<number, { nome: string; minDias: number; maxDias: number }> = {
+  1: { nome: 'Fotografia', minDias: -90, maxDias: Number.POSITIVE_INFINITY }, // até 3 meses após o evento (confirmado)
+  2: { nome: 'Local', minDias: 180, maxDias: 540 }, // 18 a 6 meses antes
+  3: { nome: 'Atração/Buffet', minDias: 180, maxDias: 365 }, // 12 a 6 meses antes
+  4: { nome: 'Complementos', minDias: 30, maxDias: 180 }, // 6 a 1 mês antes
+  5: { nome: 'Segurança/Staff', minDias: 7, maxDias: 90 }, // 3 meses a 7 dias antes
+}
+
+export function alertaCronograma(
+  modulo: number | null | undefined,
+  dataEvento: string | null | undefined,
+  dataContrato: string | null | undefined,
+): string | null {
+  if (!modulo) return null
+  const janela = CRONOGRAMA_MODULOS[modulo]
+  if (!janela) return null
+  const evento = parseDataBR(dataEvento)
+  const contrato = parseDataBR(dataContrato)
+  if (!evento || !contrato) return null
+  const diffDias = Math.round((evento.getTime() - contrato.getTime()) / 86400000)
+  if (diffDias < janela.minDias || diffDias > janela.maxDias) {
+    const max = Number.isFinite(janela.maxDias) ? `${janela.maxDias}` : '∞'
+    return `Módulo ${modulo} (${janela.nome}): contratação fora da janela — ${diffDias} dia(s) de antecedência (esperado ${janela.minDias} a ${max} dias)`
+  }
+  return null
 }
 
 const TERMOS_REMOVIVEIS = new Set([
@@ -253,9 +321,9 @@ export function analisarLinha(
 
   if (contratoSemConta && docTipo === 'Contrato / Aditivo Contratual') {
     return {
-      status: 'aprovada',
-      motivos: [],
-      resumo: `Aprovada - Sem dados bancários no contrato (${docTipo})`,
+      status: 'aprovada_ressalva',
+      motivos: ['Contrato acima de R$ 10.000 sem dados bancários — confira a conta antes de pagar'],
+      resumo: `Aprovada com ressalva - Sem dados bancários no contrato (${docTipo})`,
     }
   }
 
@@ -480,11 +548,37 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   }
 
   // V1 — Qualquer regra falhou → Reprovada
+  // BV — Saldo do contrato: o já-pago (somado da base de RPs pagas, casando
+  // fundo + CNPJ + nº do contrato) mais esta RP não pode estourar o valor do
+  // contrato. historico_rps_pagas vem calculado do pipeline; só roda quando há
+  // valor de contrato e histórico disponível (RP com fundo+contrato preenchidos).
+  const valorContratoBV = Number(req.valor_total_contrato) || 0
+  if (valorContratoBV > 0 && req.historico_rps_pagas != null) {
+    const jaPago = Number(req.historico_rps_pagas) || 0
+    const saldo = valorContratoBV - jaPago
+    if (reqValor > saldo + VALUE_TOLERANCE) {
+      motivos.push(
+        `BV estourado: já pago R$ ${jaPago.toFixed(2)} + esta RP R$ ${reqValor.toFixed(2)} excede o valor do contrato R$ ${valorContratoBV.toFixed(2)} (saldo disponível R$ ${saldo.toFixed(2)})`,
+      )
+    }
+  }
+
+  // Alertas (não mudam o status): cronograma por módulo. Usa a data do contrato
+  // do(s) documento(s), o módulo e a data do evento da RP. Fora da janela → avisa.
+  const alertas: string[] = []
+  if (req.modulo && req.data_evento) {
+    const contratoComData = docs.find((d) => d.data_contrato)
+    const al = alertaCronograma(req.modulo, req.data_evento, contratoComData?.data_contrato)
+    if (al) alertas.push(al)
+  }
+  const comAlertas = alertas.length ? { alertas } : {}
+
   if (motivos.length > 0) {
     return {
       status: 'reprovada',
       motivos,
       resumo: `Reprovada — ${motivos.join(' · ')}`,
+      ...comAlertas,
     }
   }
 
@@ -500,6 +594,47 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
         `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
       ],
       resumo,
+      ...comAlertas,
+    }
+  }
+
+  // Aprovada COM RESSALVA: tudo confere, mas há uma pendência que não reprova.
+  const ressalvas: string[] = []
+
+  // (a) Contrato de alto valor (≥ R$ 10k) sem NENHUM dado bancário nos documentos
+  // (a conta pode estar na própria RP, por isso não reprova).
+  const temContratoAltoValor =
+    exigeAltoValorReq && docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
+  const algumDocComConta = docs.some((d) => digitsOnly(d.conta))
+  if (temContratoAltoValor && !algumDocComConta) {
+    ressalvas.push('Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar')
+  }
+
+  // (b) Vencimento do documento posterior à data prevista de pagamento da RP.
+  const prevista = parseDataBR(req.data_pagamento_prevista)
+  if (prevista) {
+    let vencPosterior: Date | null = null
+    for (const d of docs) {
+      for (const v of d.datas_vencimento ?? []) {
+        const venc = parseDataBR(v)
+        if (venc && venc.getTime() > prevista.getTime() && (!vencPosterior || venc > vencPosterior)) {
+          vencPosterior = venc
+        }
+      }
+    }
+    if (vencPosterior) {
+      ressalvas.push(
+        `Vencimento do documento (${formatarData(vencPosterior)}) posterior à data prevista de pagamento (${formatarData(prevista)})`,
+      )
+    }
+  }
+
+  if (ressalvas.length > 0) {
+    return {
+      status: 'aprovada_ressalva',
+      motivos: ressalvas,
+      resumo: `Aprovada com ressalva — ${ressalvas.join(' · ')}`,
+      ...comAlertas,
     }
   }
 
@@ -507,5 +642,6 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     status: 'aprovada',
     motivos: [],
     resumo: `Aprovada (${docs.length} doc${docs.length === 1 ? '' : 's'}${tipos ? ': ' + tipos : ''})`,
+    ...comAlertas,
   }
 }
