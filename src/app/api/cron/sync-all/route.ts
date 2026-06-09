@@ -7,6 +7,7 @@ import {
 } from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
+import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -159,6 +160,36 @@ export async function GET(request: Request) {
     }
   }
 
+  // Sincroniza planilha Google Sheets da Terrazzo (linhas do DRE alimentadas
+  // pela planilha — mesmo padrao da Feat, config isolada). Roda apos os syncs
+  // do Omie; falha aqui nao impede o restante. Sempre tenta (a planilha tem
+  // default embutido); pode ser desabilitada via TERRAZZO_SHEETS_SYNC_DISABLED.
+  let terrazzoSheetsSync: {
+    ok: boolean;
+    yearsRead?: number[];
+    periodsUpserted?: number;
+    error?: string;
+  } | null = null;
+  if (process.env.TERRAZZO_SHEETS_SYNC_DISABLED !== "true") {
+    try {
+      const result = await syncTerrazzoSheetsToManualValues();
+      terrazzoSheetsSync = {
+        ok: true,
+        yearsRead: result.yearsRead,
+        periodsUpserted: result.periodsUpserted,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Falha desconhecida no sync da planilha Terrazzo.";
+      terrazzoSheetsSync = { ok: false, error: message };
+      failures.push({
+        companyId: "terrazzo-sheets",
+        companyName: "Terrazzo (planilha)",
+        error: message,
+      });
+    }
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -173,5 +204,6 @@ export async function GET(request: Request) {
     unmappedEntries: unmappedEntries.length,
     results,
     featSheetsSync,
+    terrazzoSheetsSync,
   });
 }

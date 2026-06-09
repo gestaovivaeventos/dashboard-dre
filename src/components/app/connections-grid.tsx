@@ -82,6 +82,12 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
     periodsUpserted: number;
     warnings: string[];
   } | null>(null);
+  const [terrazzoSheetsSyncing, setTerrazzoSheetsSyncing] = useState(false);
+  const [terrazzoSheetsResult, setTerrazzoSheetsResult] = useState<{
+    yearsRead: number[];
+    periodsUpserted: number;
+    warnings: string[];
+  } | null>(null);
 
   const loadCompanies = useCallback(async () => {
     setLoading(true);
@@ -177,6 +183,37 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
       });
     }
     setFeatSheetsSyncing(false);
+  };
+
+  const handleTerrazzoSheetsSync = async () => {
+    setTerrazzoSheetsSyncing(true);
+    setStatusMessage(null);
+    const response = await fetch("/api/terrazzo-sheets/sync", { method: "POST" });
+    const payload = (await response.json()) as {
+      error?: string;
+      yearsRead?: number[];
+      periodsUpserted?: number;
+      warnings?: string[];
+    };
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao sincronizar planilha Terrazzo",
+        description: payload.error ?? "Nao foi possivel sincronizar.",
+        variant: "destructive",
+      });
+    } else {
+      setTerrazzoSheetsResult({
+        yearsRead: payload.yearsRead ?? [],
+        periodsUpserted: payload.periodsUpserted ?? 0,
+        warnings: payload.warnings ?? [],
+      });
+      showToast({
+        title: "Planilha Terrazzo sincronizada",
+        description: `${(payload.yearsRead ?? []).join(", ") || "nenhum ano"} · ${payload.periodsUpserted ?? 0} meses atualizados.`,
+        variant: "success",
+      });
+    }
+    setTerrazzoSheetsSyncing(false);
   };
 
   const handleFullSync = async (companyId: string, isFirstTime: boolean) => {
@@ -280,6 +317,56 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
                 {featSheetsResult.warnings.length > 0 ? (
                   <ul className="list-disc space-y-0.5 pl-4 text-amber-700">
                     {featSheetsResult.warnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {companies.some((company) => company.name === "Terrazzo") ? (
+        <Card>
+          <CardHeader className="space-y-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileSpreadsheet className="h-5 w-5" />
+              Planilha Terrazzo (Google Sheets)
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Le a planilha da Terrazzo (abas por ano) e atualiza as contas
+              Locacao para Formaturas, Locacao para Shows/Palestras, PIS, COFINS,
+              IRPJ e Contribuicao Social. Demais contas continuam vindo do Omie.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void handleTerrazzoSheetsSync()}
+              disabled={terrazzoSheetsSyncing}
+            >
+              {terrazzoSheetsSyncing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+              )}
+              Sincronizar Planilha
+            </Button>
+            {terrazzoSheetsResult ? (
+              <div className="space-y-1 rounded-md bg-muted/40 p-3 text-xs">
+                <p>
+                  Anos lidos:{" "}
+                  <span className="font-medium">
+                    {terrazzoSheetsResult.yearsRead.join(", ") || "nenhum"}
+                  </span>{" "}
+                  · <span className="font-medium">{terrazzoSheetsResult.periodsUpserted}</span> meses
+                  atualizados
+                </p>
+                {terrazzoSheetsResult.warnings.length > 0 ? (
+                  <ul className="list-disc space-y-0.5 pl-4 text-amber-700">
+                    {terrazzoSheetsResult.warnings.map((warning, index) => (
                       <li key={index}>{warning}</li>
                     ))}
                   </ul>
