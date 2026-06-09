@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
-import { fetchAllDreAccountRows } from "@/lib/dashboard/dre";
+import {
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  fetchAllDreAccountRows,
+  scopeDreAccounts,
+  type RawDreAccount,
+} from "@/lib/dashboard/dre";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
 interface BudgetMappingRow {
@@ -70,10 +75,21 @@ export async function GET(request: Request) {
       .select("dre_account_id")
       .eq("company_id", companyId)
       .not("dre_account_id", "is", null),
-    // Paginado: o cap de 1000 do PostgREST truncava ids de contas (codes "8"/"9")
-    // que a empresa referencia, quebrando o lookup accountById (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<{ id: string; code: string; name: string; active: boolean }>((from, to) =>
-      supabase.from("dre_accounts").select("id,code,name,active").eq("active", true).order("code").range(from, to),
+    // ESCOPADO ao plano da empresa (custom) + global. Antes carregava TODAS as
+    // contas de TODAS as empresas, o que fazia a sugestao automatica casar um
+    // label (ex.: "Despesas Administrativas") com a conta de MESMO NOME de OUTRA
+    // empresa. Como o Budget traduz a conta por CODIGO, o valor caia na conta de
+    // mesmo code da empresa atual (ex.: code 7.1 = "Despesas Administrativas" em
+    // outra empresa vs. "Despesas de Vendas e Marketing" na SGX) — gerando
+    // valores fantasma. Paginado por causa do cap de 1000 do PostgREST.
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+      supabase
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true)
+        .or(`company_id.is.null,company_id.eq.${companyId}`)
+        .order("code")
+        .range(from, to),
     ),
   ]);
 
@@ -86,7 +102,11 @@ export async function GET(request: Request) {
     labelCounts.set(row.label, (labelCounts.get(row.label) ?? 0) + 1);
   });
 
-  const accountById = new Map(allAccounts.map((a) => [a.id, a]));
+  // Aplica o MESMO escopo do dropdown do cliente (plano custom da empresa OU
+  // global) para montar tanto o lookup de exibicao quanto o pool de sugestoes.
+  const scope = scopeDreAccounts(allAccounts, [companyId]);
+  const scopedAccounts = scope.scopedAccounts;
+  const accountById = new Map(scopedAccounts.map((a) => [a.id, a]));
 
   // Set de contas DRE que esta empresa "usa": tudo que ja foi referenciado nos
   // mapeamentos Omie/DRE da empresa ou em mapeamentos de orcamento ja salvos.
@@ -122,7 +142,7 @@ export async function GET(request: Request) {
   // priorizando contas que a empresa ja usa. Aceita o melhor match acima de
   // um limiar minimo de similaridade.
   const SIMILARITY_THRESHOLD = 0.5;
-  const accountsForMatching = ((allAccounts ?? []) as Array<{ id: string; code: string; name: string }>);
+  const accountsForMatching = scopedAccounts as Array<{ id: string; code: string; name: string }>;
   const suggestions: Record<string, { dreAccountId: string; dreAccountCode: string; dreAccountName: string }> = {};
 
   rows.forEach((row) => {
@@ -192,21 +212,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Empresa nao encontrada." }, { status: 404 });
   }
 
-  // Validate all dre_account_ids
+  // Valida que cada conta pertence ao plano da empresa (custom) OU ao global.
+  // Bloquear contas de OUTRA empresa e essencial: como o Budget traduz a conta
+  // por CODIGO, mapear para a conta de mesmo code de outra empresa jogaria o
+  // valor na conta errada da empresa atual (bug dos valores fantasma).
   const accountIds = Array.from(
     new Set(mappings.map((m) => m.dreAccountId).filter((id): id is string => Boolean(id))),
   );
   if (accountIds.length > 0) {
-    const { data: validAccounts, error: validErr } = await db
-      .from("dre_accounts")
-      .select("id")
-      .in("id", accountIds);
-    if (validErr) return NextResponse.json({ error: validErr.message }, { status: 400 });
-    const validSet = new Set(((validAccounts ?? []) as Array<{ id: string }>).map((a) => a.id));
+    const scopedRaw = await fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+      db
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true)
+        .or(`company_id.is.null,company_id.eq.${companyId}`)
+        .order("code")
+        .range(from, to),
+    );
+    const validSet = new Set(
+      scopeDreAccounts(scopedRaw, [companyId]).scopedAccounts.map((a) => a.id),
+    );
     for (const m of mappings) {
       if (m.dreAccountId && !validSet.has(m.dreAccountId)) {
         return NextResponse.json(
-          { error: `Conta DRE invalida: ${m.dreAccountId}` },
+          { error: `Conta DRE fora do plano da empresa: ${m.dreAccountId}` },
           { status: 400 },
         );
       }

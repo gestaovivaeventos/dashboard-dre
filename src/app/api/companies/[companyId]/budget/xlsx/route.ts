@@ -158,13 +158,19 @@ function parseSheet(
     // Skip rows that are aggregations / known totals
     const norm = normalize(label);
     if (SKIP_LABELS.has(norm)) continue;
-    // Heuristic: skip ALL-CAPS multi-word lines (visual headers like
-    // "LUCRO OPERACIONAL BRUTO" / "RESULTADO DO EXERCICIO"). Single-word
-    // ALL-CAPS labels are kept (e.g. "MARKETING", "FGTS") since those are
-    // typical leaf account names.
-    const letters = label.replace(/[^A-Za-zÀ-ÿ]/g, "");
-    const wordCount = label.split(/\s+/).filter(Boolean).length;
-    if (wordCount >= 2 && letters.length >= 10 && letters === letters.toUpperCase()) continue;
+    // NOTA: aqui existia uma heuristica que pulava linhas em CAIXA ALTA com
+    // 2+ palavras e >=10 letras (supostos cabecalhos visuais). Ela foi
+    // REMOVIDA porque descartava contas-folha legitimas que sao escritas em
+    // maiusculas — ex.: na SGX "PREDIO SAO PEDRO", "CASA SANTA LUZIA -
+    // TORREOES 196", "EMPREENDIMENTO GRAMINHA"/"...MARABO"/etc., "LOTEAMENTO
+    // BARBACENA", "TAMISA BOM PASTOR", "JARDIM DAS ACACIAS" — fazendo essas
+    // linhas (e suas repeticoes receita/despesa) simplesmente sumirem do
+    // Mapeamento. Os cabecalhos/totais reais ja sao tratados de forma
+    // confiavel por SKIP_LABELS (totais de formula) + summaryNames (linhas de
+    // grupo do plano) + o filtro de linhas sem valor (`hasAny`) mais abaixo.
+    // Verificado em todos os orcamentos 2026: a unica linha ALLCAPS das demais
+    // empresas e "LUCRO OPERACIONAL BRUTO", ja coberta por SKIP_LABELS — logo
+    // remover a heuristica nao afeta nenhuma outra empresa.
 
     const values: Record<number, number> = {};
     let hasAny = false;
