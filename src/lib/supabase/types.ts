@@ -163,6 +163,19 @@ export interface CtrlSupplier {
   doc_titular: string | null;
   transf_padrao: boolean;
   pix_padrao: boolean;
+  omie_sync_required: boolean;
+}
+
+export interface CtrlSupplierOmieLink {
+  id: string;
+  supplier_id: string;
+  company_id: string;
+  omie_codigo_cliente: number | null;
+  sync_status: "pendente" | "ok" | "erro";
+  sync_error: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CtrlRequest {
