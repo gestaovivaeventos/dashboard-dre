@@ -92,6 +92,10 @@ const MONTHS = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
+// Entidades pagadoras que não são empresas operacionais do DRE (ex.: holding),
+// portanto não vivem na tabela `companies` mas precisam aparecer no select.
+const EXTRA_PAYING_COMPANIES = ["V Company"];
+
 type Tab = "aprovado" | "info_pagamento_pendente" | "agendado" | "inativado_csc";
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -140,6 +144,12 @@ const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDi
 
 export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   const router = useRouter();
+
+  // Empresas do DRE + entidades pagadoras extras (ex.: holding), sem duplicar.
+  const payingCompanyOptions = Array.from(
+    new Set([...companies.map((c) => c.name), ...EXTRA_PAYING_COMPANIES]),
+  );
+
   const [activeTab, setActiveTab] = useState<Tab>("aprovado");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [payingCompany, setPayingCompany] = useState("");
@@ -434,15 +444,15 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                 <label className="text-sm font-medium">
                   Empresa Pagadora <span className="text-destructive">*</span>
                 </label>
-                {companies.length > 0 ? (
+                {payingCompanyOptions.length > 0 ? (
                   <select
                     value={payingCompany}
                     onChange={(e) => setPayingCompany(e.target.value)}
                     className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                   >
                     <option value="">Selecione a empresa pagadora</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
+                    {payingCompanyOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
                 ) : (
@@ -819,6 +829,7 @@ function DetailField({
 function formatIssuesInvoice(value: string | null | undefined): string {
   if (!value) return "—";
   if (value === "sim") return "Sim";
+  if (value === "sim_apos_pagamento") return "Sim, após o pagamento";
   if (value === "nao") return "Não";
   if (value === "nao_sei") return "Não sei";
   return value;

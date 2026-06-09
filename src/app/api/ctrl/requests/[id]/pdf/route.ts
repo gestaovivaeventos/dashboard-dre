@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 
 const MONTHS = [
@@ -66,7 +67,10 @@ export async function GET(
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const supabase = await createClient();
+  // Admin client (service role) para resolver o join em `users` (RLS de `users`
+  // só expõe a própria linha a não-admins). A visibilidade é garantida pela
+  // checagem explícita de propriedade/papel logo abaixo.
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { data: req, error } = await supabase
     .from("ctrl_requests")
     .select(
@@ -237,6 +241,7 @@ export async function GET(
 function formatIssuesInvoice(value: string | null): string {
   if (!value) return "—";
   if (value === "sim") return "Sim";
+  if (value === "sim_apos_pagamento") return "Sim, após o pagamento";
   if (value === "nao") return "Não";
   if (value === "nao_sei") return "Não sei";
   return value;

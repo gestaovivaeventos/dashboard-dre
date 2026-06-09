@@ -72,6 +72,11 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurMonths, setRecurMonths] = useState<number[]>([]);
 
+  // ── Nota fiscal ────────────────────────────────────────────────────────────
+  // "sim" exige o anexo da NF; "sim_apos_pagamento" não, pois a nota só será
+  // emitida depois do pagamento e ainda não existe no momento da requisição.
+  const [supplierIssuesInvoice, setSupplierIssuesInvoice] = useState("");
+
   // ── Attachment (uploaded just-in-time on submit, before createRequest) ──────
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -152,6 +157,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   }, [selectedSupplier]);
 
   const recurrenceDisabled = paymentMethod === "cartao_credito" && installments >= 2;
+
+  // Anexo é obrigatório no boleto (a linha digitável) e quando o fornecedor
+  // emite nota fiscal "agora" ("sim"). "Sim, após o pagamento" não exige.
+  const attachmentRequired = paymentMethod === "boleto" || supplierIssuesInvoice === "sim";
 
   // Budget check is only required when an expense type is selected
   const needsVerification = !!expenseTypeId;
@@ -240,8 +249,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       return;
     }
 
-    if (paymentMethod === "boleto" && !attachment) {
-      setError("Anexe o boleto (PDF, imagem ou documento) antes de enviar.");
+    if (attachmentRequired && !attachment) {
+      setError(
+        paymentMethod === "boleto"
+          ? "Anexe o boleto (PDF, imagem ou documento) antes de enviar."
+          : "O fornecedor emite nota fiscal — anexe a nota fiscal antes de enviar.",
+      );
       return;
     }
 
@@ -311,7 +324,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       justification: (form.get("justification") as string) || undefined,
       observations: (form.get("observations") as string) || undefined,
       event_id: (form.get("event_id") as string) || undefined,
-      supplier_issues_invoice: (form.get("supplier_issues_invoice") as string) || undefined,
+      supplier_issues_invoice: supplierIssuesInvoice || undefined,
       bank_name: bankName || undefined,
       bank_agency: bankAgency || undefined,
       bank_account: bankAccount || undefined,
@@ -817,21 +830,31 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           id="supplier_issues_invoice"
           name="supplier_issues_invoice"
           required
+          value={supplierIssuesInvoice}
+          onChange={(e) => setSupplierIssuesInvoice(e.target.value)}
           className={INPUT_CLS}
         >
           <option value="">Selecione uma resposta</option>
           <option value="sim">Sim</option>
+          <option value="sim_apos_pagamento">Sim, após o pagamento</option>
           <option value="nao">Não</option>
           <option value="nao_sei">Não sei</option>
         </select>
+        {supplierIssuesInvoice === "sim" && (
+          <p className="text-xs text-muted-foreground">
+            Anexe a nota fiscal abaixo para enviar a requisição.
+          </p>
+        )}
       </div>
 
       {/* Anexo */}
       <div className="space-y-1.5">
         <label htmlFor="attachment" className={LABEL_CLS}>
           Anexo{" "}
-          {paymentMethod === "boleto" ? (
-            <span className="text-destructive">* obrigatório (boleto)</span>
+          {attachmentRequired ? (
+            <span className="text-destructive">
+              * obrigatório ({paymentMethod === "boleto" ? "boleto" : "nota fiscal"})
+            </span>
           ) : (
             <span className="text-muted-foreground font-normal">(opcional)</span>
           )}
