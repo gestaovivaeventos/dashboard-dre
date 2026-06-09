@@ -98,20 +98,33 @@ funcionando (campos ausentes = regra não dispara).
 
 ---
 
-## Etapa 5 — BV (saldo do contrato)  *(lógica nova, isolada)*
+## Etapa 5 — BV (saldo do contrato)  *(lógica nova — DESENHO ATUALIZADO 2026-06-02)*
 
 **Objetivo:** impedir que RPs acumuladas estourem o valor do contrato.
 
-- Só roda se vierem `valor_total_contrato` **e** `historico_rps_pagas` (Etapa 3).
-- `soma = historico_rps_pagas + valor_solicitado`.
-  - `soma > valor_total_contrato` → **reprova** (divergência de valor) + alerta "BV estourado".
-  - dentro do limite → só **alerta**.
-- Relação com o `verificar_saldo` atual (pagamento parcial): unificar ou manter
-  separado — decidir. Hoje `verificar_saldo` é heurística por parcela; o BV é exato
-  quando temos o histórico. **Tendo histórico, o BV manda.**
+**Decisão do Marcelo (2026-06-02):** o total já pago **não** é uma coluna manual da
+RP. Em vez disso: o Marcelo sobe uma **planilha-banco com TODAS as RPs já pagas**. O
+sistema procura, nessa base, registros com **mesmo fundo + mesmo fornecedor** e
+confere se é **o mesmo contrato**; se for, calcula:
 
-**Risco:** médio. Depende de `historico_rps_pagas` confiável. Se o número vier
-errado, reprova indevidamente — validar a fonte antes de ligar o "reprova".
+  `saldo = valor_total_contrato − Σ(RPs já pagas do mesmo contrato)`
+
+e a RP atual só passa se couber no saldo.
+
+Implicações (a resolver no início da Etapa 5):
+- **Nova base de dados de RPs pagas** (tabela + upload próprio): precisa de fundo,
+  fornecedor, identificador do contrato e valor pago por linha.
+- **Campo `fundo` na RP** (hoje NÃO capturado — nem na Etapa 3). Precisa de mais um
+  campo na planilha de validação + coluna.
+- **Como identificar "o mesmo contrato"?** número do contrato? ou a combinação
+  fundo+fornecedor+valor_total? (decidir — é a chave do matching).
+- A coluna manual `historico_rps_pagas` (criada na Etapa 3) pode virar um override
+  opcional, ou ser descartada em favor do cálculo automático.
+- Relação com `verificar_saldo` (heurístico por parcela): tendo a base de pagos, o
+  BV exato manda; `verificar_saldo` vira fallback quando não há base.
+
+**Risco:** alto. É praticamente um subprojeto (nova base + matching). Validar a
+qualidade do match (fundo+fornecedor+contrato) antes de ligar o "reprova".
 
 ---
 

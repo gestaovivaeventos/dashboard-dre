@@ -41,6 +41,12 @@ interface ItemRow {
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
   error_log: string | null
+  data_evento: string | null
+  modulo: number | null
+  valor_total_contrato: number | string | null
+  historico_rps_pagas: number | string | null
+  data_pagamento_prevista: string | null
+  data_contrato: string | null
 }
 
 export interface ProcessBatchResult {
@@ -216,7 +222,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status, error_log',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato',
     )
     .eq('batch_id', batchId)
 
@@ -264,6 +270,7 @@ export async function processBatch(
       valores_pagamentos: i.extracted_pagamentos ?? [],
       assinatura_contratante: i.assinatura_contratante,
       assinatura_contratado: i.assinatura_contratado,
+      data_contrato: i.data_contrato,
       extraction_failed: i.status === 'erro',
     }))
 
@@ -275,6 +282,11 @@ export async function processBatch(
         cpf_cnpj: first.cpf_cnpj,
         conta: first.conta,
         valor: Number(first.valor) || null,
+        data_evento: first.data_evento,
+        modulo: first.modulo,
+        valor_total_contrato: Number(first.valor_total_contrato) || null,
+        historico_rps_pagas: Number(first.historico_rps_pagas) || null,
+        data_pagamento_prevista: first.data_pagamento_prevista,
       },
       documentos,
     })
@@ -286,7 +298,12 @@ export async function processBatch(
       .from('contract_validation_items')
       .update({
         status: validation.status,
-        status_motivos: validation.motivos,
+        // Alertas (ex.: cronograma fora da janela) entram junto dos motivos com
+        // prefixo ⚠️ — são informativos e não mudam o status.
+        status_motivos: [
+          ...validation.motivos,
+          ...(validation.alertas ?? []).map((a) => `⚠️ ${a}`),
+        ],
         status_resumo: validation.resumo,
         processed_at: new Date().toISOString(),
       })

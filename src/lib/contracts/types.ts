@@ -78,6 +78,13 @@ export interface RequisitionInput {
   cpf_cnpj: string | null
   conta: string | null
   valor: number | null
+  // Campos opcionais da RP para regras futuras (cronograma/BV/vencimento).
+  // Transportados desde o upload; ainda não consumidos pela validação.
+  data_evento?: string | null
+  modulo?: number | null
+  valor_total_contrato?: number | null
+  historico_rps_pagas?: number | null
+  data_pagamento_prevista?: string | null
 }
 
 export interface ExtractedContract {
@@ -108,4 +115,7 @@ export interface ValidationResult {
   // Human-readable summary matching the legacy GCP string format.
   // Stored in contract_validation_items.status_resumo.
   resumo: string
+  // Avisos que NÃO mudam o status (ex.: contratação fora da janela do módulo,
+  // BV dentro do limite). Informacionais — exibidos junto aos motivos com prefixo.
+  alertas?: string[]
 }

@@ -15,6 +15,13 @@ export interface RequisitionRow {
   valor: number | null
   link_contrato: string
   descricao: string | null
+  // Campos opcionais da RP usados pelas regras de cronograma/BV/vencimento
+  // (etapas futuras). Hoje só são transportados — nenhuma regra os consome.
+  data_evento: string | null
+  modulo: number | null
+  valor_total_contrato: number | null
+  historico_rps_pagas: number | null
+  data_pagamento_prevista: string | null
 }
 
 export interface ParseXlsxResult {
@@ -49,6 +56,26 @@ const HEADER_ALIASES: Record<string, keyof RequisitionRow> = {
   titulo: 'descricao',
   historico: 'descricao',
   observacao: 'descricao',
+
+  dataevento: 'data_evento',
+  datadoevento: 'data_evento',
+
+  modulo: 'modulo',
+  modulocronograma: 'modulo',
+
+  valortotalcontrato: 'valor_total_contrato',
+  valordocontrato: 'valor_total_contrato',
+  valorcontrato: 'valor_total_contrato',
+
+  historicorpspagas: 'historico_rps_pagas',
+  rpspagas: 'historico_rps_pagas',
+  totalpago: 'historico_rps_pagas',
+  japago: 'historico_rps_pagas',
+
+  datapagamentoprevista: 'data_pagamento_prevista',
+  dataprevista: 'data_pagamento_prevista',
+  dataprevistapagamento: 'data_pagamento_prevista',
+  previsaopagamento: 'data_pagamento_prevista',
 
   linkdocontrato: 'link_contrato',
   link: 'link_contrato',
@@ -139,8 +166,12 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
 
     for (const [col, field] of columnEntries) {
       const cell = raw[col]
-      if (field === 'valor') {
-        result.valor = cell == null || cell === '' ? null : parseValor(cell)
+      const isEmpty = cell == null || cell === ''
+      if (field === 'valor' || field === 'valor_total_contrato' || field === 'historico_rps_pagas') {
+        result[field] = isEmpty ? null : parseValor(cell)
+      } else if (field === 'modulo') {
+        const n = isEmpty ? NaN : parseInt(String(cell).replace(/\D/g, ''), 10)
+        result.modulo = Number.isFinite(n) ? n : null
       } else {
         const stringValue = cellToString(cell)
         if (field === 'requisicao_codigo') result.requisicao_codigo = stringValue ?? ''
@@ -150,6 +181,8 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
         else if (field === 'cpf_cnpj') result.cpf_cnpj = stringValue
         else if (field === 'conta') result.conta = stringValue
         else if (field === 'descricao') result.descricao = stringValue
+        else if (field === 'data_evento') result.data_evento = stringValue
+        else if (field === 'data_pagamento_prevista') result.data_pagamento_prevista = stringValue
       }
     }
 
@@ -180,6 +213,11 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
       valor: result.valor ?? null,
       link_contrato: link,
       descricao: result.descricao ?? null,
+      data_evento: result.data_evento ?? null,
+      modulo: result.modulo ?? null,
+      valor_total_contrato: result.valor_total_contrato ?? null,
+      historico_rps_pagas: result.historico_rps_pagas ?? null,
+      data_pagamento_prevista: result.data_pagamento_prevista ?? null,
     })
   }
 

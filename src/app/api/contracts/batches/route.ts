@@ -127,6 +127,11 @@ export async function POST(request: Request) {
     valor: row.valor,
     link_contrato: row.link_contrato,
     descricao: row.descricao,
+    data_evento: row.data_evento,
+    modulo: row.modulo,
+    valor_total_contrato: row.valor_total_contrato,
+    historico_rps_pagas: row.historico_rps_pagas,
+    data_pagamento_prevista: row.data_pagamento_prevista,
     status: 'pending' as const,
   }))
 
