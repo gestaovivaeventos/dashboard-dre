@@ -4,8 +4,10 @@ const CONTAPAGAR_URL = "https://app.omie.com.br/api/v1/financas/contapagar/";
 
 const cents = (v: number) => Math.round(v * 100);
 
-// Procura um título EM ABERTO do fornecedor (por CNPJ) com valor igual.
-// Prefere os originados de NF-e de entrada (id_origem === 'NFEP').
+// Procura um título de NF de produto (id_origem 'NFEP') do fornecedor (por CNPJ)
+// com valor igual, ainda em aberto. SÓ casa com NFEP — títulos de previsão
+// recorrente (RPTP), manuais (MANP) etc. NÃO contam como "faturado em compras"
+// e não devem ser evoluídos. Sem match NFEP → null (cria lançamento novo).
 export async function findContaPagarByCnpjValor(
   appKey: string,
   appSecret: string,
@@ -29,14 +31,15 @@ export async function findContaPagarByCnpjValor(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const arr = (data.conta_pagar_cadastro as any[] | undefined) ?? [];
     for (const t of arr) {
-      if (cents(Number(t.valor_documento)) === cents(valor)) matches.push(t);
+      if (t.id_origem === "NFEP" && cents(Number(t.valor_documento)) === cents(valor)) {
+        matches.push(t);
+      }
     }
     total = Number(data.total_de_paginas ?? 1);
     pagina += 1;
   } while (pagina <= total);
   if (matches.length === 0) return null;
-  const preferred = matches.find((t) => t.id_origem === "NFEP") ?? matches[0];
-  return { codigoLancamentoOmie: Number(preferred.codigo_lancamento_omie) };
+  return { codigoLancamentoOmie: Number(matches[0].codigo_lancamento_omie) };
 }
 
 export interface ContaPagarPayload {
