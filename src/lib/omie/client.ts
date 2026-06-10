@@ -30,6 +30,17 @@ const NOT_FOUND_HINTS = [
   "not found",
 ];
 
+// Faults TRANSITÓRIOS da Omie (HTTP 500 com faultstring) — devem ser re-tentadas,
+// não tratadas como erro definitivo. A principal é o lock de concorrência por
+// método ("Já existe uma requisição desse método sendo executada...").
+const TRANSIENT_HINTS = [
+  "já existe uma requisição desse método",
+  "ja existe uma requisicao desse metodo",
+  "tente novamente",
+  "consumo redundante",
+  "bloqueado por consumo",
+];
+
 export interface OmieResult {
   data: Record<string, unknown>;
   notFound: boolean;
@@ -83,6 +94,12 @@ export async function omieCall(
         const msg = String(body?.faultstring ?? "").toLowerCase();
         if (NOT_FOUND_HINTS.some((h) => msg.includes(h))) {
           return { data: body ?? {}, notFound: true };
+        }
+        // Lock de concorrência / "tente novamente" → transitório: re-tenta.
+        if (TRANSIENT_HINTS.some((h) => msg.includes(h)) && attempt < MAX_ATTEMPTS) {
+          lastError = new Error(String(body?.faultstring ?? `Omie transitório em ${call}.`));
+          await sleep(600 * 2 ** (attempt - 1));
+          continue;
         }
         throw new Error(String(body?.faultstring ?? `Erro Omie em ${call}.`));
       }
