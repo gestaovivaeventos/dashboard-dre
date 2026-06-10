@@ -13,10 +13,35 @@ import {
   alterarContaPagarCategoria,
   toOmieDate,
 } from "@/lib/omie/contapagar";
+import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" }
   | { error: string };
+
+const ATTACHMENT_BUCKET = "ctrl-attachments";
+
+// Anexa um arquivo do storage à conta a pagar do Omie. Best-effort: falha aqui
+// não derruba o lançamento (o título já existe).
+async function anexarNoOmie(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  appKey: string,
+  appSecret: string,
+  codigo: number,
+  path: string | null | undefined,
+) {
+  if (!path) return;
+  try {
+    const { data, error } = await supabase.storage.from(ATTACHMENT_BUCKET).download(path);
+    if (error || !data) return;
+    const bytes = Buffer.from(await data.arrayBuffer());
+    const fileName = (path.split("/").pop() ?? "anexo").replace(/^\d+-/, "");
+    await incluirAnexoContaPagar(appKey, appSecret, codigo, fileName, bytes);
+  } catch (e) {
+    console.error("[contapagar] falha ao anexar no Omie:", e);
+  }
+}
 
 export async function launchRequestToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,7 +53,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode",
+      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -239,7 +264,11 @@ export async function launchRequestToOmie(
     return { error: msg };
   }
 
-  // 6. Atualizar ctrl_requests
+  // 6. Anexa boleto e nota fiscal ao título no Omie (best-effort).
+  await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.attachment_path as string | null);
+  await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.invoice_attachment_path as string | null);
+
+  // 7. Atualizar ctrl_requests
   await supabase
     .from("ctrl_requests")
     .update({
