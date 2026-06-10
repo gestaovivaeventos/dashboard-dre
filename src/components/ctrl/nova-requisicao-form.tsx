@@ -441,6 +441,13 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   // Bloco de anexo reutilizável — renderizado dentro da seção do boleto (antes
   // dos campos de dados) ou na posição padrão para os demais métodos.
+  const attachLabel =
+    paymentMethod === "boleto"
+      ? "Adicionar boleto"
+      : supplierIssuesInvoice === "sim"
+      ? "Adicionar nota fiscal"
+      : "Adicionar anexo";
+
   const attachmentBlock = (
     <div className="space-y-1.5">
       <label htmlFor="attachment" className={LABEL_CLS}>
@@ -454,17 +461,25 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         )}
         <span className="text-muted-foreground font-normal"> · até 10 MB</span>
       </label>
+      {/* input escondido — acionado pelo botão abaixo */}
+      <input
+        ref={attachmentInputRef}
+        id="attachment"
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+        onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
+        className="hidden"
+      />
       {!attachment ? (
-        <div className="flex items-center gap-2">
-          <input
-            ref={attachmentInputRef}
-            id="attachment"
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
-            onChange={(e) => pickAttachment(e.target.files?.[0] ?? null)}
-            className={INPUT_CLS}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => attachmentInputRef.current?.click()}
+          disabled={attachmentReading}
+          className="inline-flex items-center gap-2 rounded-md border border-dashed px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+        >
+          <Paperclip className="h-4 w-4" />
+          {attachmentReading ? "Lendo documento…" : attachLabel}
+        </button>
       ) : (
         <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
           <div className="flex items-center gap-2 text-sm">
@@ -978,33 +993,33 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           <option value="nao">Não</option>
           <option value="nao_sei">Não sei</option>
         </select>
-        {supplierIssuesInvoice === "sim" && (
-          <p className="text-xs text-muted-foreground">
-            Anexe a nota fiscal abaixo para enviar a requisição.
-          </p>
-        )}
       </div>
 
-      {/* Número da nota fiscal — preenchido pela leitura do anexo, editável */}
+      {/* NF = Sim: botão para adicionar a nota (lê o número automaticamente) +
+          o número da NF. No boleto o anexo é o próprio boleto (seção acima),
+          então aqui mostramos só o campo do número. */}
       {supplierIssuesInvoice === "sim" && (
-        <div className="space-y-1.5">
-          <label htmlFor="invoice_number" className={LABEL_CLS}>
-            Número da nota fiscal
-          </label>
-          <input
-            id="invoice_number"
-            name="invoice_number"
-            type="text"
-            value={invoiceNumber}
-            onChange={(e) => setInvoiceNumber(e.target.value)}
-            placeholder="Preenchido automaticamente ao anexar a nota"
-            className={INPUT_CLS}
-          />
+        <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+          {paymentMethod !== "boleto" && attachmentBlock}
+          <div className="space-y-1.5">
+            <label htmlFor="invoice_number" className={LABEL_CLS}>
+              Número da nota fiscal
+            </label>
+            <input
+              id="invoice_number"
+              name="invoice_number"
+              type="text"
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+              placeholder="Preenchido automaticamente ao adicionar a nota"
+              className={INPUT_CLS}
+            />
+          </div>
         </div>
       )}
 
-      {/* Anexo — no boleto ele aparece dentro da seção do boleto (acima) */}
-      {paymentMethod !== "boleto" && attachmentBlock}
+      {/* Anexo genérico — só quando não é boleto nem NF "sim" (esses têm o seu) */}
+      {paymentMethod !== "boleto" && supplierIssuesInvoice !== "sim" && attachmentBlock}
 
       {/* Observações */}
       <div className="space-y-1.5">
