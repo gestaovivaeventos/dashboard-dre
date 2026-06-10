@@ -73,6 +73,18 @@ export interface PixKeyTypeOption {
   hint: string;
 }
 
+// A Omie só aceita chave PIX de telefone no formato internacional "+55DDDNUMERO".
+// Normaliza qualquer entrada (com/sem +55, com máscara) para esse formato.
+export function normalizePixTelefone(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  let digits = s.replace(/\D/g, "");
+  if (!digits) return "";
+  // Remove o código do país se já veio embutido (55 + 10/11 dígitos nacionais).
+  if (digits.length >= 12 && digits.startsWith("55")) digits = digits.slice(2);
+  return `+55${digits}`;
+}
+
 export const PIX_KEY_TYPES: PixKeyTypeOption[] = [
   {
     value: "cpf",
@@ -96,7 +108,7 @@ export const PIX_KEY_TYPES: PixKeyTypeOption[] = [
     value: "telefone",
     label: "Telefone",
     placeholder: "+55 11 99999-9999",
-    hint: "Celular cadastrado no banco como chave PIX.",
+    hint: "Celular com +55 na frente (ex: +5511999999999) — a Omie só aceita nesse formato.",
   },
   {
     value: "aleatoria",
