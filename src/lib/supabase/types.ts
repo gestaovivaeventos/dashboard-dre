@@ -216,6 +216,7 @@ export interface CtrlRequest {
   // Extra
   supplier_issues_invoice: string | null;
   invoice_number: string | null;
+  invoice_attachment_path: string | null;
   justification: string | null;
   observations: string | null;
   is_budgeted: boolean;

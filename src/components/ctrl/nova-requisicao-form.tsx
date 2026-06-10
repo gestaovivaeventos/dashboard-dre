@@ -82,10 +82,28 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   const [barcode, setBarcode] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
 
-  // ── Attachment ──────────────────────────────────────────────────────────────
-  // O anexo é enviado JÁ no momento do upload (não só no submit) para permitir a
-  // leitura automática (OCR). `attachmentPath` guarda o objeto enviado; o submit
-  // reaproveita esse path em vez de re-enviar.
+  // ── Anexos ──────────────────────────────────────────────────────────────────
+  // Dois anexos independentes: o documento de pagamento (boleto/comprovante) e a
+  // NOTA FISCAL. Ambos são enviados JÁ no upload (para a leitura OCR); o submit
+  // reaproveita os paths. Assim um boleto pode ter, além do boleto, a nota.
+  async function uploadAttachmentFile(file: File): Promise<string> {
+    const supabase = createSupabaseClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (!userId) throw new Error("Sessão expirada — refaça o login.");
+    const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+    const objectPath = `${userId}/${Date.now()}-${safeName}`;
+    const { error: upErr } = await supabase.storage
+      .from(ATTACHMENT_BUCKET)
+      .upload(objectPath, file, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false,
+      });
+    if (upErr) throw upErr;
+    return objectPath;
+  }
+
+  // Anexo de pagamento (boleto/comprovante). No boleto, lê o código de barras.
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -106,61 +124,27 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       return;
     }
     setAttachment(file);
-
-    // Envia já para o storage e tenta ler o documento.
     try {
-      const supabase = createSupabaseClient();
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Sessão expirada — refaça o login.");
-
-      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-      const objectPath = `${userId}/${Date.now()}-${safeName}`;
-      const { error: upErr } = await supabase.storage
-        .from(ATTACHMENT_BUCKET)
-        .upload(objectPath, file, {
-          contentType: file.type || "application/octet-stream",
-          upsert: false,
-        });
-      if (upErr) throw upErr;
+      const objectPath = await uploadAttachmentFile(file);
       setAttachmentPath(objectPath);
-
-      // Tipo de leitura conforme o contexto. Boleto tem prioridade (o anexo é o
-      // boleto); senão, nota fiscal quando o fornecedor emite NF agora.
-      const kind: "nota" | "boleto" | null =
-        paymentMethod === "boleto"
-          ? "boleto"
-          : supplierIssuesInvoice === "sim"
-          ? "nota"
-          : null;
-      if (!kind) return;
-
+      // Só o boleto é lido aqui (código de barras). A nota fiscal tem o seu anexo.
+      if (paymentMethod !== "boleto") return;
       setAttachmentReading(true);
-      const res = await extractAttachmentData(objectPath, kind);
+      const res = await extractAttachmentData(objectPath, "boleto");
       setAttachmentReading(false);
-
       if ("error" in res) {
-        setAttachmentReadMsg("Não consegui ler o documento automaticamente — preencha os campos manualmente.");
+        setAttachmentReadMsg("Não consegui ler o boleto — preencha os campos manualmente.");
         return;
       }
-      if (kind === "nota") {
-        if (res.data.invoice_number) {
-          setInvoiceNumber(res.data.invoice_number);
-          setAttachmentReadMsg("Número da nota fiscal lido do documento.");
-        } else {
-          setAttachmentReadMsg("Não encontrei o número da nota — preencha manualmente.");
-        }
-      } else {
-        const d = res.data;
-        if (d.barcode) setBarcode(d.barcode);
-        if (d.favorecido && !favorecido) setFavorecido(d.favorecido);
-        if (d.cnpj_cpf && !bankCpfCnpj) setBankCpfCnpj(d.cnpj_cpf);
-        setAttachmentReadMsg(
-          d.barcode || d.favorecido || d.cnpj_cpf
-            ? "Dados do boleto lidos do documento — confira antes de enviar."
-            : "Não consegui ler os dados do boleto — preencha manualmente.",
-        );
-      }
+      const d = res.data;
+      if (d.barcode) setBarcode(d.barcode);
+      if (d.favorecido && !favorecido) setFavorecido(d.favorecido);
+      if (d.cnpj_cpf && !bankCpfCnpj) setBankCpfCnpj(d.cnpj_cpf);
+      setAttachmentReadMsg(
+        d.barcode || d.favorecido || d.cnpj_cpf
+          ? "Dados do boleto lidos do documento — confira antes de enviar."
+          : "Não consegui ler os dados do boleto — preencha manualmente.",
+      );
     } catch (err) {
       setAttachmentReading(false);
       setAttachment(null);
@@ -176,6 +160,60 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     setAttachmentReadMsg(null);
     setAttachmentReading(false);
     if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+  }
+
+  // Anexo da NOTA FISCAL — independente do método de pagamento. Lê o número da NF.
+  const [invoiceAttachment, setInvoiceAttachment] = useState<File | null>(null);
+  const [invoiceAttachmentPath, setInvoiceAttachmentPath] = useState<string | null>(null);
+  const [invoiceAttachmentError, setInvoiceAttachmentError] = useState<string | null>(null);
+  const [invoiceReading, setInvoiceReading] = useState(false);
+  const [invoiceReadMsg, setInvoiceReadMsg] = useState<string | null>(null);
+  const invoiceInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function pickInvoiceAttachment(file: File | null) {
+    setInvoiceAttachmentError(null);
+    setInvoiceReadMsg(null);
+    setInvoiceAttachmentPath(null);
+    if (!file) {
+      setInvoiceAttachment(null);
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      setInvoiceAttachmentError("Arquivo excede o limite de 10 MB.");
+      return;
+    }
+    setInvoiceAttachment(file);
+    try {
+      const objectPath = await uploadAttachmentFile(file);
+      setInvoiceAttachmentPath(objectPath);
+      setInvoiceReading(true);
+      const res = await extractAttachmentData(objectPath, "nota");
+      setInvoiceReading(false);
+      if ("error" in res) {
+        setInvoiceReadMsg("Não consegui ler a nota — preencha o número manualmente.");
+        return;
+      }
+      if (res.data.invoice_number) {
+        setInvoiceNumber(res.data.invoice_number);
+        setInvoiceReadMsg("Número da nota fiscal lido do documento.");
+      } else {
+        setInvoiceReadMsg("Não encontrei o número da nota — preencha manualmente.");
+      }
+    } catch (err) {
+      setInvoiceReading(false);
+      setInvoiceAttachment(null);
+      setInvoiceAttachmentPath(null);
+      setInvoiceAttachmentError(`Falha ao enviar a nota: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function clearInvoiceAttachment() {
+    setInvoiceAttachment(null);
+    setInvoiceAttachmentPath(null);
+    setInvoiceAttachmentError(null);
+    setInvoiceReadMsg(null);
+    setInvoiceReading(false);
+    if (invoiceInputRef.current) invoiceInputRef.current.value = "";
   }
 
   // ── Budget verification ──────────────────────────────────────────────────────
@@ -235,9 +273,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   const recurrenceDisabled = paymentMethod === "cartao_credito" && installments >= 2;
 
-  // Anexo é obrigatório no boleto (a linha digitável) e quando o fornecedor
-  // emite nota fiscal "agora" ("sim"). "Sim, após o pagamento" não exige.
-  const attachmentRequired = paymentMethod === "boleto" || supplierIssuesInvoice === "sim";
+  // O anexo de pagamento é obrigatório no boleto (o boleto em si). A nota fiscal
+  // tem o seu próprio anexo, obrigatório quando o fornecedor emite NF "agora".
+  const attachmentRequired = paymentMethod === "boleto";
+  const invoiceAttachmentRequired = supplierIssuesInvoice === "sim";
 
   // Budget check is only required when an expense type is selected
   const needsVerification = !!expenseTypeId;
@@ -327,11 +366,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     }
 
     if (attachmentRequired && !attachment) {
-      setError(
-        paymentMethod === "boleto"
-          ? "Anexe o boleto (PDF, imagem ou documento) antes de enviar."
-          : "O fornecedor emite nota fiscal — anexe a nota fiscal antes de enviar.",
-      );
+      setError("Anexe o boleto (PDF, imagem ou documento) antes de enviar.");
+      return;
+    }
+
+    if (invoiceAttachmentRequired && !invoiceAttachment) {
+      setError("O fornecedor emite nota fiscal — adicione a nota fiscal antes de enviar.");
       return;
     }
 
@@ -357,38 +397,29 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     // description as title — the UI now shows only one text field.
     const descriptionValue = (form.get("description") as string)?.trim() ?? "";
 
-    // O anexo normalmente já foi enviado no momento do upload (para a leitura).
-    // Reaproveita esse path; só envia aqui se por algum motivo ainda não houver.
+    // Os anexos normalmente já foram enviados no momento do upload (para a
+    // leitura). Reaproveita os paths; só envia aqui se ainda não houver.
     let finalAttachmentPath: string | undefined = attachmentPath ?? undefined;
-    if (attachment && !finalAttachmentPath) {
-      try {
-        const supabase = createSupabaseClient();
-        const { data: userData } = await supabase.auth.getUser();
-        const userId = userData.user?.id;
-        if (!userId) throw new Error("Sessão expirada — refaça o login.");
-
-        const safeName = attachment.name.replace(/[^\w.\-]+/g, "_");
-        const objectPath = `${userId}/${Date.now()}-${safeName}`;
-        const { error: uploadErr } = await supabase.storage
-          .from(ATTACHMENT_BUCKET)
-          .upload(objectPath, attachment, {
-            contentType: attachment.type || "application/octet-stream",
-            upsert: false,
-          });
-        if (uploadErr) throw uploadErr;
-        finalAttachmentPath = objectPath;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(`Falha ao enviar o anexo: ${msg}`);
-        setLoading(false);
-        return;
+    let finalInvoicePath: string | undefined = invoiceAttachmentPath ?? undefined;
+    try {
+      if (attachment && !finalAttachmentPath) {
+        finalAttachmentPath = await uploadAttachmentFile(attachment);
       }
+      if (invoiceAttachment && !finalInvoicePath) {
+        finalInvoicePath = await uploadAttachmentFile(invoiceAttachment);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Falha ao enviar o anexo: ${msg}`);
+      setLoading(false);
+      return;
     }
 
     const result = await createRequest({
       title: descriptionValue,
       description: descriptionValue || undefined,
       attachment_path: finalAttachmentPath,
+      invoice_attachment_path: finalInvoicePath,
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -441,21 +472,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   // Bloco de anexo reutilizável — renderizado dentro da seção do boleto (antes
   // dos campos de dados) ou na posição padrão para os demais métodos.
-  const attachLabel =
-    paymentMethod === "boleto"
-      ? "Adicionar boleto"
-      : supplierIssuesInvoice === "sim"
-      ? "Adicionar nota fiscal"
-      : "Adicionar anexo";
+  const attachLabel = paymentMethod === "boleto" ? "Adicionar boleto" : "Adicionar comprovante";
 
   const attachmentBlock = (
     <div className="space-y-1.5">
       <label htmlFor="attachment" className={LABEL_CLS}>
-        Anexo{" "}
+        {paymentMethod === "boleto" ? "Boleto" : "Anexo"}{" "}
         {attachmentRequired ? (
-          <span className="text-destructive">
-            * obrigatório ({paymentMethod === "boleto" ? "boleto" : "nota fiscal"})
-          </span>
+          <span className="text-destructive">* obrigatório</span>
         ) : (
           <span className="text-muted-foreground font-normal">(opcional)</span>
         )}
@@ -510,6 +534,68 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       )}
       {attachmentError && <p className="text-xs text-destructive">{attachmentError}</p>}
       <p className="text-xs text-muted-foreground">Formatos: PDF, JPG, PNG, DOC, XLS.</p>
+    </div>
+  );
+
+  // Bloco do anexo da NOTA FISCAL — botão "Adicionar nota fiscal" + leitura do nº.
+  const invoiceAttachmentBlock = (
+    <div className="space-y-1.5">
+      <label htmlFor="invoice_attachment" className={LABEL_CLS}>
+        Nota fiscal{" "}
+        {invoiceAttachmentRequired ? (
+          <span className="text-destructive">* obrigatório</span>
+        ) : (
+          <span className="text-muted-foreground font-normal">(opcional)</span>
+        )}
+        <span className="text-muted-foreground font-normal"> · até 10 MB</span>
+      </label>
+      <input
+        ref={invoiceInputRef}
+        id="invoice_attachment"
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+        onChange={(e) => pickInvoiceAttachment(e.target.files?.[0] ?? null)}
+        className="hidden"
+      />
+      {!invoiceAttachment ? (
+        <button
+          type="button"
+          onClick={() => invoiceInputRef.current?.click()}
+          disabled={invoiceReading}
+          className="inline-flex items-center gap-2 rounded-md border border-dashed px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+        >
+          <Paperclip className="h-4 w-4" />
+          {invoiceReading ? "Lendo documento…" : "Adicionar nota fiscal"}
+        </button>
+      ) : (
+        <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Paperclip className="h-4 w-4 text-muted-foreground" />
+            <span className="truncate">{invoiceAttachment.name}</span>
+            <span className="text-xs text-muted-foreground">
+              ({(invoiceAttachment.size / 1024 / 1024).toFixed(2)} MB)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={clearInvoiceAttachment}
+            className="text-muted-foreground hover:text-destructive"
+            aria-label="Remover nota fiscal"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      {invoiceReading && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Lendo documento…
+        </p>
+      )}
+      {invoiceReadMsg && !invoiceReading && (
+        <p className="text-xs text-violet-700 dark:text-violet-300">{invoiceReadMsg}</p>
+      )}
+      {invoiceAttachmentError && <p className="text-xs text-destructive">{invoiceAttachmentError}</p>}
     </div>
   );
 
@@ -1000,7 +1086,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           então aqui mostramos só o campo do número. */}
       {supplierIssuesInvoice === "sim" && (
         <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-          {paymentMethod !== "boleto" && attachmentBlock}
+          {invoiceAttachmentBlock}
           <div className="space-y-1.5">
             <label htmlFor="invoice_number" className={LABEL_CLS}>
               Número da nota fiscal
