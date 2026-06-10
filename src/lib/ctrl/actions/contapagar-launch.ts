@@ -206,7 +206,23 @@ export async function launchRequestToOmie(
           : {}),
       };
 
-      const { codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload);
+      let codigoLancamentoOmie: number;
+      try {
+        ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
+      } catch (e) {
+        // Código de barras inválido (OCR errado / formato) não pode derrubar o
+        // lançamento inteiro: tenta de novo SEM o bloco do boleto. O título é
+        // criado; a linha digitável pode ser ajustada depois no Omie.
+        const msg = e instanceof Error ? e.message.toLowerCase() : "";
+        const isBarcode = msg.includes("código de barras") || msg.includes("codigo de barras") || msg.includes("codigo_barras");
+        if (isBarcode && "cnab_integracao_bancaria" in payload) {
+          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
+          void _drop;
+          ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));
+        } else {
+          throw e;
+        }
+      }
       omieStatus = "lancado";
       omieCode = codigoLancamentoOmie;
     }
