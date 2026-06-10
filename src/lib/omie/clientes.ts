@@ -34,14 +34,16 @@ function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown
     payload.telefone1_ddd = phone.slice(0, 2);
     payload.telefone1_numero = phone.slice(2);
   }
-  if (supplier.banco || supplier.agencia || supplier.conta_corrente || supplier.chave_pix) {
+  // dadosBancarios da Omie NÃO aceita chave_pix (Tag [CHAVE_PIX] não faz parte
+  // da estrutura). Só enviamos quando há dados bancários de fato — PIX-only não
+  // entra aqui (a chave não é necessária para o cadastro do cliente no Omie).
+  if (supplier.banco || supplier.agencia || supplier.conta_corrente) {
     payload.dadosBancarios = {
       codigo_banco: onlyDigits(supplier.banco),
       agencia: supplier.agencia ?? "",
       conta_corrente: onlyDigits(supplier.conta_corrente),
       doc_titular: onlyDigits(supplier.doc_titular) || doc,
       nome_titular: supplier.titular_banco ?? supplier.name,
-      chave_pix: supplier.chave_pix ?? "",
     };
   }
   return payload;
