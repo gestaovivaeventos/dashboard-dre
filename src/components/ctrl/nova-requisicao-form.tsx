@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
+import { isValidBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
@@ -140,11 +141,17 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       if (d.barcode) setBarcode(d.barcode);
       if (d.favorecido && !favorecido) setFavorecido(d.favorecido);
       if (d.cnpj_cpf && !bankCpfCnpj) setBankCpfCnpj(d.cnpj_cpf);
-      setAttachmentReadMsg(
-        d.barcode || d.favorecido || d.cnpj_cpf
-          ? "Dados do boleto lidos do documento — confira antes de enviar."
-          : "Não consegui ler os dados do boleto — preencha manualmente.",
-      );
+      if (d.barcode && !isValidBoletoLinhaDigitavel(d.barcode)) {
+        setAttachmentReadMsg(
+          "Li o código de barras, mas ele parece inválido — confira/corrija manualmente ou leia novamente.",
+        );
+      } else {
+        setAttachmentReadMsg(
+          d.barcode || d.favorecido || d.cnpj_cpf
+            ? "Dados do boleto lidos do documento — confira antes de enviar."
+            : "Não consegui ler os dados do boleto — preencha manualmente.",
+        );
+      }
     } catch (err) {
       setAttachmentReading(false);
       setAttachment(null);
@@ -160,6 +167,30 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     setAttachmentReadMsg(null);
     setAttachmentReading(false);
     if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+  }
+
+  // Relê o boleto já enviado (botão "Ler novamente" quando o código sai inválido).
+  async function rereadBoleto() {
+    if (!attachmentPath) return;
+    setAttachmentReadMsg(null);
+    setAttachmentReading(true);
+    const res = await extractAttachmentData(attachmentPath, "boleto");
+    setAttachmentReading(false);
+    if ("error" in res) {
+      setAttachmentReadMsg("Não consegui ler o boleto — preencha manualmente.");
+      return;
+    }
+    const d = res.data;
+    if (d.barcode) setBarcode(d.barcode);
+    if (d.favorecido) setFavorecido(d.favorecido);
+    if (d.cnpj_cpf) setBankCpfCnpj(d.cnpj_cpf);
+    if (d.barcode && !isValidBoletoLinhaDigitavel(d.barcode)) {
+      setAttachmentReadMsg("O código de barras lido continua inválido — preencha manualmente.");
+    } else {
+      setAttachmentReadMsg(
+        d.barcode ? "Boleto lido novamente — confira." : "Não encontrei o código de barras — preencha manualmente.",
+      );
+    }
   }
 
   // Anexo da NOTA FISCAL — independente do método de pagamento. Lê o número da NF.
@@ -1005,7 +1036,37 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             <label htmlFor="barcode" className={LABEL_CLS}>
               Linha Digitável / Código de Barras <span className="text-destructive">*</span>
             </label>
-            <input id="barcode" name="barcode" type="text" required value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="000000000000000000000000000000000000" className={INPUT_CLS} />
+            <input
+              id="barcode"
+              name="barcode"
+              type="text"
+              required
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="000000000000000000000000000000000000"
+              className={`${INPUT_CLS} ${barcode && !isValidBoletoLinhaDigitavel(barcode) ? "border-destructive focus:ring-destructive" : ""}`}
+            />
+            {barcode && !isValidBoletoLinhaDigitavel(barcode) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-destructive">
+                  Código de barras inválido. Confira/corrija manualmente
+                  {attachmentPath ? " ou leia o boleto novamente." : "."}
+                </p>
+                {attachmentPath && (
+                  <button
+                    type="button"
+                    onClick={rereadBoleto}
+                    disabled={attachmentReading}
+                    className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    {attachmentReading ? "Lendo…" : "Ler novamente"}
+                  </button>
+                )}
+              </div>
+            )}
+            {barcode && isValidBoletoLinhaDigitavel(barcode) && (
+              <p className="text-xs text-green-600 dark:text-green-400">Código de barras válido.</p>
+            )}
           </div>
         </div>
       )}
