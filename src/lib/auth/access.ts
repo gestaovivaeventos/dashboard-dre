@@ -37,6 +37,7 @@ const FRANQUEADO_BASE_PATHS = [
   "/budget-forecast",
   "/kpis",
   "/financeiro/business-intelligence",
+  "/financeiro/documentos",
 ];
 
 // Sub-páginas permitidas dentro de /s/<segmentSlug>/... pra franqueado
