@@ -44,12 +44,24 @@ interface DocumentRow {
   size_bytes: number | null;
   uploaded_by: string | null;
   uploaded_by_name: string | null;
+  reference_date: string | null;
   created_at: string;
 }
+
+// Referencia no formato mes/ano: "YYYY-MM" (ex.: "2026-05").
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+const SELECT_COLUMNS =
+  "id, company_id, file_name, file_type, storage_path, size_bytes, uploaded_by, uploaded_by_name, reference_date, created_at";
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+// Mes/ano "YYYY-MM" -> data armazenada como 1o dia do mes "YYYY-MM-01".
+function monthToStoredDate(month: string): string {
+  return `${month}-01`;
 }
 
 // ─── GET: lista documentos da empresa ──────────────────────────────────────
@@ -62,9 +74,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
   }
 
-  const companyId = new URL(request.url).searchParams.get("companyId");
+  const params = new URL(request.url).searchParams;
+  const companyId = params.get("companyId");
   if (!companyId) {
     return NextResponse.json({ error: "companyId obrigatorio." }, { status: 400 });
+  }
+
+  // Filtro opcional por mes/ano de referencia ("YYYY-MM"). Correspondencia
+  // exata: lista apenas os documentos com a mesma referencia. Em branco = sem
+  // restricao de data.
+  const ref = params.get("ref");
+  if (ref && !MONTH_RE.test(ref)) {
+    return NextResponse.json(
+      { error: "Data de referencia deve estar no formato mes/ano." },
+      { status: 400 },
+    );
   }
 
   const allowed = await resolveAllowedCompanyIds(supabase, profile, [companyId]);
@@ -73,13 +97,17 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const { data, error } = await admin
+  let query = admin
     .from("company_documents")
-    .select(
-      "id, company_id, file_name, file_type, storage_path, size_bytes, uploaded_by, uploaded_by_name, created_at",
-    )
-    .eq("company_id", companyId)
-    .order("created_at", { ascending: false });
+    .select(SELECT_COLUMNS)
+    .eq("company_id", companyId);
+
+  if (ref) query = query.eq("reference_date", monthToStoredDate(ref));
+
+  const { data, error } = await query.order("reference_date", {
+    ascending: false,
+    nullsFirst: false,
+  });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -109,6 +137,7 @@ export async function POST(request: Request) {
 
   const companyId = form.get("companyId");
   const file = form.get("file");
+  const referenceDateRaw = form.get("referenceDate");
 
   if (typeof companyId !== "string" || !companyId) {
     return NextResponse.json(
@@ -119,6 +148,21 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Arquivo obrigatorio." }, { status: 400 });
   }
+
+  // Data de referencia OBRIGATORIA no upload, formato mes/ano ("YYYY-MM").
+  if (typeof referenceDateRaw !== "string" || !referenceDateRaw.trim()) {
+    return NextResponse.json(
+      { error: "Data de referencia obrigatoria para o upload." },
+      { status: 400 },
+    );
+  }
+  if (!MONTH_RE.test(referenceDateRaw)) {
+    return NextResponse.json(
+      { error: "Data de referencia deve estar no formato mes/ano." },
+      { status: 400 },
+    );
+  }
+  const referenceDate = monthToStoredDate(referenceDateRaw);
 
   // Vinculo obrigatorio: a empresa precisa existir.
   const admin = createAdminClient();
@@ -175,10 +219,9 @@ export async function POST(request: Request) {
       size_bytes: file.size,
       uploaded_by: user.id,
       uploaded_by_name: profile.name ?? profile.email ?? null,
+      reference_date: referenceDate,
     })
-    .select(
-      "id, company_id, file_name, file_type, storage_path, size_bytes, uploaded_by, uploaded_by_name, created_at",
-    )
+    .select(SELECT_COLUMNS)
     .single();
 
   if (insErr) {

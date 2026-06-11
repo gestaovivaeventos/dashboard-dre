@@ -14,6 +14,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -53,6 +62,7 @@ interface DocumentItem {
   file_type: string | null;
   size_bytes: number | null;
   uploaded_by_name: string | null;
+  reference_date: string | null;
   created_at: string;
 }
 
@@ -85,6 +95,28 @@ function formatDate(iso: string): string {
   }
 }
 
+function formatRefDate(value: string | null): string {
+  if (!value) return "—";
+  // value vem como "YYYY-MM-DD" (1o dia do mes) — exibe como mes/ano.
+  const [y, m] = value.split("-");
+  if (!y || !m) return value;
+  return `${m}/${y}`;
+}
+
+// Aplica mascara "mm/aaaa" ao texto digitado (so digitos, barra automatica).
+function maskMonthYear(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 6); // MMAAAA
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
+// "mm/aaaa" digitado -> "AAAA-MM" para a API. null se incompleto/invalido.
+function monthYearToApi(value: string): string | null {
+  const m = value.trim().match(/^(0[1-9]|1[0-2])\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[2]}-${m[1]}`;
+}
+
 function isSpreadsheet(doc: DocumentItem): boolean {
   const t = (doc.file_type ?? "").toLowerCase();
   const n = doc.file_name.toLowerCase();
@@ -110,17 +142,34 @@ export function DocumentosAnexosClient({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Filtro opcional por mes/ano de referencia ("YYYY-MM"). Disponivel a todos.
+  const [refMonth, setRefMonth] = useState<string>("");
+
+  // Modal de upload (admin). Coleta arquivo + mes/ano antes de enviar.
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // Mes/ano de referencia do documento — OBRIGATORIO no upload. E a unica
+  // fonte da referencia consultada no filtro.
+  const [uploadRefMonth, setUploadRefMonth] = useState<string>("");
+
   const selectedCompany = companies.find((c) => c.id === companyId) ?? null;
 
+  function resetUploadForm() {
+    setPendingFile(null);
+    setUploadRefMonth("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   const loadDocuments = useCallback(
-    async (id: string) => {
+    async (id: string, ref: string) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/financeiro/documentos?companyId=${encodeURIComponent(id)}`,
-          { cache: "no-store" },
-        );
+        const qs = new URLSearchParams({ companyId: id });
+        if (ref) qs.set("ref", ref);
+        const res = await fetch(`/api/financeiro/documentos?${qs.toString()}`, {
+          cache: "no-store",
+        });
         const json = await res.json();
         if (!res.ok) {
           throw new Error(json.error ?? "Falha ao carregar documentos.");
@@ -136,17 +185,34 @@ export function DocumentosAnexosClient({
     [],
   );
 
+  // So aplica o filtro quando o texto digitado e um mes/ano valido; vazio ou
+  // incompleto = sem restricao (carrega todos). Memoizado para nao refazer a
+  // busca a cada tecla enquanto o usuario ainda esta digitando.
+  const refApi = monthYearToApi(refMonth) ?? "";
+
   useEffect(() => {
     if (companyId) {
-      void loadDocuments(companyId);
+      void loadDocuments(companyId, refApi);
     } else {
       setDocuments([]);
     }
-  }, [companyId, loadDocuments]);
+  }, [companyId, refApi, loadDocuments]);
 
-  async function handleUpload(file: File) {
+  async function handleUpload() {
     if (!companyId) {
       showToast({ title: "Selecione uma empresa antes de enviar.", variant: "destructive" });
+      return;
+    }
+    if (!pendingFile) {
+      showToast({ title: "Escolha um arquivo para enviar.", variant: "destructive" });
+      return;
+    }
+    const apiMonth = monthYearToApi(uploadRefMonth);
+    if (!apiMonth) {
+      showToast({
+        title: "Informe a data de referência no formato mm/aaaa.",
+        variant: "destructive",
+      });
       return;
     }
     setUploading(true);
@@ -154,7 +220,8 @@ export function DocumentosAnexosClient({
     try {
       const form = new FormData();
       form.append("companyId", companyId);
-      form.append("file", file);
+      form.append("file", pendingFile);
+      form.append("referenceDate", apiMonth);
       const res = await fetch("/api/financeiro/documentos", {
         method: "POST",
         body: form,
@@ -164,13 +231,14 @@ export function DocumentosAnexosClient({
         throw new Error(json.error ?? "Falha no upload.");
       }
       showToast({ title: "Documento enviado com sucesso." });
-      await loadDocuments(companyId);
+      setUploadOpen(false);
+      resetUploadForm();
+      await loadDocuments(companyId, refMonth);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Falha no upload.";
       showToast({ title: "Não foi possível enviar.", description: msg, variant: "destructive" });
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -206,53 +274,62 @@ export function DocumentosAnexosClient({
       </div>
 
       <Card>
-        <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium">Empresa / unidade</label>
-            <Select value={companyId} onValueChange={setCompanyId}>
-              <SelectTrigger className="w-72">
-                <SelectValue placeholder="Selecione uma empresa" />
-              </SelectTrigger>
-              <SelectContent>
-                {companies.length === 0 ? (
-                  <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                    Nenhuma empresa disponível.
-                  </div>
-                ) : (
-                  companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))
+        <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Empresa / unidade</label>
+              <Select value={companyId} onValueChange={setCompanyId}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="Selecione uma empresa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      Nenhuma empresa disponível.
+                    </div>
+                  ) : (
+                    companies.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Filtro opcional por mes/ano de referencia — disponivel a todos. */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Data de referência</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="mm/aaaa"
+                  maxLength={7}
+                  value={refMonth}
+                  onChange={(e) => setRefMonth(maskMonthYear(e.target.value))}
+                  className="w-32"
+                  aria-label="Filtrar por mês/ano de referência (mm/aaaa)"
+                />
+                {refMonth && (
+                  <Button variant="ghost" size="sm" onClick={() => setRefMonth("")}>
+                    Limpar
+                  </Button>
                 )}
-              </SelectContent>
-            </Select>
+              </div>
+            </div>
           </div>
 
           {canManage ? (
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={ACCEPT}
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void handleUpload(file);
-                }}
-              />
-              <Button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!companyId || uploading}
-              >
-                {uploading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                Enviar documento
-              </Button>
-            </div>
+            <Button
+              onClick={() => setUploadOpen(true)}
+              disabled={!companyId}
+              title={!companyId ? "Selecione uma empresa primeiro" : undefined}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Enviar documento
+            </Button>
           ) : null}
         </CardContent>
       </Card>
@@ -286,6 +363,7 @@ export function DocumentosAnexosClient({
                   <TableHead>Tamanho</TableHead>
                   <TableHead>Enviado por</TableHead>
                   <TableHead>Data de upload</TableHead>
+                  <TableHead>Data de referência</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -305,6 +383,7 @@ export function DocumentosAnexosClient({
                     <TableCell>{formatBytes(doc.size_bytes)}</TableCell>
                     <TableCell>{doc.uploaded_by_name ?? "—"}</TableCell>
                     <TableCell>{formatDate(doc.created_at)}</TableCell>
+                    <TableCell>{formatRefDate(doc.reference_date)}</TableCell>
                     <TableCell className="text-right">
                       <span className="inline-flex items-center justify-end gap-1">
                         <a
@@ -335,6 +414,88 @@ export function DocumentosAnexosClient({
           )}
         </CardContent>
       </Card>
+
+      {/* Modal de upload — coleta arquivo + mês/ano antes de enviar. */}
+      <Dialog
+        open={uploadOpen}
+        onOpenChange={(open) => {
+          if (uploading) return;
+          setUploadOpen(open);
+          if (!open) resetUploadForm();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enviar documento</DialogTitle>
+            <DialogDescription>
+              {selectedCompany
+                ? `O documento será vinculado a ${selectedCompany.name}.`
+                : "Selecione uma empresa antes de enviar."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Data de referência (mês/ano)</label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                placeholder="mm/aaaa"
+                maxLength={7}
+                value={uploadRefMonth}
+                onChange={(e) => setUploadRefMonth(maskMonthYear(e.target.value))}
+                className="w-32"
+                aria-label="Data de referência (mm/aaaa) do documento"
+              />
+              <p className="text-xs text-muted-foreground">Obrigatório. Formato mm/aaaa.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Arquivo</label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPT}
+                className="hidden"
+                onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                  Escolher arquivo
+                </Button>
+                <span className="truncate text-sm text-muted-foreground">
+                  {pendingFile ? pendingFile.name : "Nenhum arquivo selecionado"}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">PDF ou Excel (.pdf, .xls, .xlsx, .csv).</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setUploadOpen(false);
+                resetUploadForm();
+              }}
+              disabled={uploading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void handleUpload()}
+              disabled={!companyId || !pendingFile || !monthYearToApi(uploadRefMonth) || uploading}
+            >
+              {uploading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Enviar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
