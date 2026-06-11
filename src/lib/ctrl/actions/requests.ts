@@ -82,6 +82,7 @@ export interface CreateRequestInput {
   // Attachment (uploaded client-side to storage bucket 'ctrl-attachments'
   // before submit). Stored verbatim in every row of this submission.
   attachment_path?: string;
+  invoice_attachment_path?: string;
   // Operational signal for credit card payments: does the requester need
   // to receive the physical card to make the purchase? Only meaningful
   // when payment_method === 'cartao_credito'.
@@ -212,6 +213,21 @@ function calculateInstallmentDates(
     });
   }
   return results;
+}
+
+// Mantém o DIA da data escolhida, mas no mês/ano da recorrência. Faz clamp para
+// o último dia do mês quando o dia não existe (ex: dia 31 em fevereiro → 28/29).
+function dueDateForRecurrence(
+  baseDueDate: string | null | undefined,
+  month: number,
+  year: number,
+): string | null {
+  if (!baseDueDate) return null;
+  const base = new Date(baseDueDate + "T00:00:00");
+  const day = base.getDate();
+  const lastDay = new Date(year, month, 0).getDate(); // month 1-based → último dia do mês
+  const d = Math.min(day, lastDay);
+  return `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
 // ─── Create Request ───────────────────────────────────────────────────────────
@@ -376,6 +392,7 @@ export async function createRequest(data: CreateRequestInput) {
     favorecido: data.favorecido ?? null,
     barcode: data.barcode ?? null,
     attachment_path: data.attachment_path ?? null,
+    invoice_attachment_path: data.invoice_attachment_path ?? null,
     needs_credit_card: data.needs_credit_card ?? null,
     is_budgeted: verification?.isBudgeted ?? false,
     approval_tier: approvalTier,
@@ -567,6 +584,8 @@ export async function createRequest(data: CreateRequestInput) {
           amount: data.amount,
           reference_month: month,
           reference_year: data.reference_year,
+          // Cada recorrência vence no mesmo dia escolhido, mas no seu próprio mês.
+          due_date: dueDateForRecurrence(data.due_date, month, data.reference_year),
           status: monthStatus,
           approval_level: monthTier === "nivel_3" ? 2 : 1,
           approval_tier: monthTier,

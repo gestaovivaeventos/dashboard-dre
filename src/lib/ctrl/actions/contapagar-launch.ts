@@ -13,10 +13,35 @@ import {
   alterarContaPagarCategoria,
   toOmieDate,
 } from "@/lib/omie/contapagar";
+import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" }
   | { error: string };
+
+const ATTACHMENT_BUCKET = "ctrl-attachments";
+
+// Anexa um arquivo do storage à conta a pagar do Omie. Best-effort: falha aqui
+// não derruba o lançamento (o título já existe).
+async function anexarNoOmie(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  appKey: string,
+  appSecret: string,
+  codigo: number,
+  path: string | null | undefined,
+) {
+  if (!path) return;
+  try {
+    const { data, error } = await supabase.storage.from(ATTACHMENT_BUCKET).download(path);
+    if (error || !data) return;
+    const bytes = Buffer.from(await data.arrayBuffer());
+    const fileName = (path.split("/").pop() ?? "anexo").replace(/^\d+-/, "");
+    await incluirAnexoContaPagar(appKey, appSecret, codigo, fileName, bytes);
+  } catch (e) {
+    console.error("[contapagar] falha ao anexar no Omie:", e);
+  }
+}
 
 export async function launchRequestToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,7 +53,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode",
+      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -206,7 +231,23 @@ export async function launchRequestToOmie(
           : {}),
       };
 
-      const { codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload);
+      let codigoLancamentoOmie: number;
+      try {
+        ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
+      } catch (e) {
+        // Código de barras inválido (OCR errado / formato) não pode derrubar o
+        // lançamento inteiro: tenta de novo SEM o bloco do boleto. O título é
+        // criado; a linha digitável pode ser ajustada depois no Omie.
+        const msg = e instanceof Error ? e.message.toLowerCase() : "";
+        const isBarcode = msg.includes("código de barras") || msg.includes("codigo de barras") || msg.includes("codigo_barras");
+        if (isBarcode && "cnab_integracao_bancaria" in payload) {
+          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
+          void _drop;
+          ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));
+        } else {
+          throw e;
+        }
+      }
       omieStatus = "lancado";
       omieCode = codigoLancamentoOmie;
     }
@@ -223,7 +264,11 @@ export async function launchRequestToOmie(
     return { error: msg };
   }
 
-  // 6. Atualizar ctrl_requests
+  // 6. Anexa boleto e nota fiscal ao título no Omie (best-effort).
+  await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.attachment_path as string | null);
+  await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.invoice_attachment_path as string | null);
+
+  // 7. Atualizar ctrl_requests
   await supabase
     .from("ctrl_requests")
     .update({

@@ -30,6 +30,20 @@ const NOT_FOUND_HINTS = [
   "not found",
 ];
 
+// Lock de concorrência por método ("Já existe uma requisição desse método
+// sendo executada...") — clareia em 1-3s, então re-tentamos com backoff.
+// NÃO inclua "tente novamente" aqui: essa frase também aparece no "consumo
+// redundante" (que precisa de ~40s, tratado à parte abaixo).
+const TRANSIENT_HINTS = [
+  "já existe uma requisição desse método",
+  "ja existe uma requisicao desse metodo",
+];
+
+// Proteção anti-duplicidade da Omie: a MESMA chamada repetida numa janela curta
+// é bloqueada ("Consumo redundante detectado. Aguarde N segundos..."). Re-tentar
+// rápido é inútil — surfacea uma mensagem clara e acionável.
+const REDUNDANT_HINTS = ["consumo redundante", "redundant", "bloqueado por consumo"];
+
 export interface OmieResult {
   data: Record<string, unknown>;
   notFound: boolean;
@@ -83,6 +97,18 @@ export async function omieCall(
         const msg = String(body?.faultstring ?? "").toLowerCase();
         if (NOT_FOUND_HINTS.some((h) => msg.includes(h))) {
           return { data: body ?? {}, notFound: true };
+        }
+        // Consumo redundante (anti-duplicidade): não re-tenta; mensagem clara.
+        if (REDUNDANT_HINTS.some((h) => msg.includes(h))) {
+          throw new Error(
+            "Omie bloqueou por consumo redundante (proteção contra duplicidade). Aguarde cerca de 40 segundos e tente reenviar.",
+          );
+        }
+        // Lock de concorrência por método → transitório: re-tenta com backoff.
+        if (TRANSIENT_HINTS.some((h) => msg.includes(h)) && attempt < MAX_ATTEMPTS) {
+          lastError = new Error(String(body?.faultstring ?? `Omie transitório em ${call}.`));
+          await sleep(800 * 2 ** (attempt - 1));
+          continue;
         }
         throw new Error(String(body?.faultstring ?? `Erro Omie em ${call}.`));
       }

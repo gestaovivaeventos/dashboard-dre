@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
-import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, type PixKeyType } from "@/lib/ctrl/bancos";
+import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
 
 const INPUT_CLS =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2";
@@ -108,7 +108,7 @@ export function CriarFornecedorButton() {
     } else if (type === "email" && form.email && !form.chave_pix) {
       update("chave_pix", form.email);
     } else if (type === "telefone" && form.phone && !form.chave_pix) {
-      update("chave_pix", form.phone);
+      update("chave_pix", normalizePixTelefone(form.phone));
     }
   }
 
@@ -334,6 +334,11 @@ export function CriarFornecedorButton() {
                         type="text"
                         value={form.chave_pix}
                         onChange={(e) => update("chave_pix", e.target.value)}
+                        onBlur={(e) => {
+                          if (form.pix_key_type === "telefone" && e.target.value.trim()) {
+                            update("chave_pix", normalizePixTelefone(e.target.value));
+                          }
+                        }}
                         placeholder={pixTypeOption?.placeholder ?? "Selecione o tipo primeiro"}
                         disabled={!form.pix_key_type}
                         className={`${INPUT_CLS} font-mono disabled:opacity-60`}

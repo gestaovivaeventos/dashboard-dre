@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import type { CtrlSupplier } from "@/lib/supabase/types";
 import { decryptSecret } from "@/lib/security/encryption";
 import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
@@ -318,7 +319,11 @@ export async function updateSupplier(
   if (data.cnpj_cpf !== undefined) payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
   if (data.email !== undefined) payload.email = data.email?.trim() || null;
   if (data.phone !== undefined) payload.phone = data.phone?.trim() || null;
-  if (data.chave_pix !== undefined) payload.chave_pix = data.chave_pix?.trim() || null;
+  if (data.chave_pix !== undefined) {
+    const tipo = (data.pix_key_type ?? payload.pix_key_type)?.toString().trim();
+    const chave = data.chave_pix?.trim() || null;
+    payload.chave_pix = chave && tipo === "telefone" ? normalizePixTelefone(chave) : chave;
+  }
   if (data.pix_key_type !== undefined) payload.pix_key_type = data.pix_key_type?.trim() || null;
   if (data.banco !== undefined) payload.banco = data.banco?.trim() || null;
   if (data.agencia !== undefined) payload.agencia = data.agencia?.trim() || null;
@@ -435,7 +440,10 @@ export async function createSupplier(data: {
       cnpj_cpf: data.cnpj_cpf?.trim() || null,
       email: data.email?.trim() || null,
       phone: data.phone?.trim() || null,
-      chave_pix: data.chave_pix?.trim() || null,
+      chave_pix:
+        data.chave_pix?.trim() && data.pix_key_type?.trim() === "telefone"
+          ? normalizePixTelefone(data.chave_pix)
+          : data.chave_pix?.trim() || null,
       pix_key_type: data.pix_key_type?.trim() || null,
       banco: data.banco?.trim() || null,
       agencia: data.agencia?.trim() || null,

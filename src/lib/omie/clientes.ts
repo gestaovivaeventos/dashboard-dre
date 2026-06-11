@@ -34,23 +34,25 @@ function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown
     payload.telefone1_ddd = phone.slice(0, 2);
     payload.telefone1_numero = phone.slice(2);
   }
-  if (supplier.banco || supplier.agencia || supplier.conta_corrente || supplier.chave_pix) {
+  // dadosBancarios da Omie NÃO aceita chave_pix (Tag [CHAVE_PIX] não faz parte
+  // da estrutura). Só enviamos quando há dados bancários de fato — PIX-only não
+  // entra aqui (a chave não é necessária para o cadastro do cliente no Omie).
+  if (supplier.banco || supplier.agencia || supplier.conta_corrente) {
     payload.dadosBancarios = {
       codigo_banco: onlyDigits(supplier.banco),
       agencia: supplier.agencia ?? "",
       conta_corrente: onlyDigits(supplier.conta_corrente),
       doc_titular: onlyDigits(supplier.doc_titular) || doc,
       nome_titular: supplier.titular_banco ?? supplier.name,
-      chave_pix: supplier.chave_pix ?? "",
     };
   }
   return payload;
 }
 
 // Cadastra/atualiza o fornecedor em UMA unidade Omie, sem duplicar:
-//   1. Procura por CNPJ (cobre legado e re-sync) → AlterarCliente.
-//   2. Não achou → IncluirCliente.
-// Em ambos grava codigo_cliente_integracao = supplier.id para adotar o registro.
+//   1. Procura por CNPJ (cobre legado e re-sync) → AlterarCliente (por
+//      codigo_cliente_omie, SEM código de integração — ver nota abaixo).
+//   2. Não achou → IncluirCliente (com código de integração = supplier.id).
 export async function syncSupplierToOmieUnit(
   appKey: string,
   appSecret: string,
@@ -76,8 +78,13 @@ export async function syncSupplierToOmieUnit(
   const fields = buildClientePayload(supplier);
 
   if (existingCode) {
+    // Identifica só por codigo_cliente_omie. NÃO enviar codigo_cliente_integracao:
+    // num cliente legado que ainda não tem esse código, a Omie tenta resolver por
+    // ele e falha ("Cliente não cadastrado para o Código de Integração [uuid]").
+    const alterFields = { ...fields };
+    delete alterFields.codigo_cliente_integracao;
     const res = await omieCall(OMIE_CLIENTES_URL, "AlterarCliente", appKey, appSecret, {
-      ...fields,
+      ...alterFields,
       codigo_cliente_omie: existingCode,
     });
     return { codigoCliente: Number((res.data.codigo_cliente_omie as number) ?? existingCode) };
