@@ -243,7 +243,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "pf-contratos", title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: "/contratos", dreRoles: ["admin", "gestor_hero"] },
       { key: "pf-conex", title: "Conexoes", icon: Plug, scope: "global", href: "/conexoes", dreRoles: ["admin", "gestor_hero"] },
       { key: "pf-users", title: "Usuarios", icon: Users, scope: "global", href: "/usuarios", dreRoles: ["admin"] },
-      { key: "pf-intel", title: "Inteligencia", icon: Brain, scope: "global", href: "/admin/inteligencia", dreRoles: ["admin"] },
       { key: "pf-painel", title: "Painel Administrador", icon: LayoutDashboard, scope: "global", href: "/admin", dreRoles: ["admin"] },
     ],
   },
