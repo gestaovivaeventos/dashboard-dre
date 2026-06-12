@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Mail, Trash2 } from "lucide-react";
+import { Loader2, Mail, Send, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +56,7 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
   const [saving, setSaving] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,6 +120,32 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSendNow(s: Subscription) {
+    setSendingId(s.id);
+    try {
+      const res = await fetch("/api/bi-subscriptions/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao enviar.");
+      showToast({
+        title: "Relatório enviado",
+        description: `Enviado para ${s.user_email} (${s.company_name}).`,
+        variant: "success",
+      });
+    } catch (err) {
+      showToast({
+        title: "Erro ao enviar",
+        description: err instanceof Error ? err.message : "Erro ao enviar.",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -236,7 +263,7 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
                   <TableHead>Usuário</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Unidade</TableHead>
-                  <TableHead className="w-12" />
+                  <TableHead className="w-44 text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -245,11 +272,26 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
                     <TableCell className="font-medium">{s.user_name ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{s.user_email}</TableCell>
                     <TableCell>{s.company_name}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleSendNow(s)}
+                        disabled={sendingId !== null}
+                        title="Gera e envia agora o relatório do mês anterior para este gestor"
+                      >
+                        {sendingId === s.id ? (
+                          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="mr-2 h-3.5 w-3.5" />
+                        )}
+                        Enviar agora
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => void handleRemove(s.id)}
+                        disabled={sendingId !== null}
                         title="Remover assinatura"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />

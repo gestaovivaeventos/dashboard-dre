@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { sendEmail } from "@/lib/email/gmail";
-import { analyzeOnePageReport } from "@/lib/financeiro/relatorios/one-page-analyzer";
-import { renderOnePageEmail } from "@/lib/financeiro/relatorios/one-page-email";
-import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
+import {
+  getPreviousMonthRange,
+  sendOnePageForCompany,
+} from "@/lib/financeiro/relatorios/monthly-bi-sender";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ============================================================================
@@ -14,37 +15,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // gerenciada em /admin/relatorios-bi). Agendado no vercel.json para o dia 5
 // de cada mes — margem para o fechamento do Omie ser sincronizado.
 //
-// Reusa exatamente o mesmo pipeline da tela /financeiro/business-intelligence:
-// buildOnePagePayload (numeros) → analyzeOnePageReport (IA) → email HTML.
+// A geracao/envio em si vive em sendOnePageForCompany (compartilhado com o
+// envio manual "Enviar agora").
 // ============================================================================
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const MONTH_NAMES = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
-
 function isAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
   return request.headers.get("authorization") === `Bearer ${secret}`;
-}
-
-function getPreviousMonthRange(now: Date): { dateFrom: string; dateTo: string; periodLabel: string } {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const prevMonthIndex = month === 0 ? 11 : month - 1;
-  const prevYear = month === 0 ? year - 1 : year;
-  const prevMonth1 = prevMonthIndex + 1;
-  const lastDay = new Date(Date.UTC(prevYear, prevMonthIndex + 1, 0)).getUTCDate();
-
-  return {
-    dateFrom: `${prevYear}-${String(prevMonth1).padStart(2, "0")}-01`,
-    dateTo: `${prevYear}-${String(prevMonth1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
-    periodLabel: `${MONTH_NAMES[prevMonthIndex]} ${prevYear}`,
-  };
 }
 
 interface SubscriptionRow {
@@ -59,7 +40,7 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const { dateFrom, dateTo, periodLabel } = getPreviousMonthRange(new Date());
+  const range = getPreviousMonthRange(new Date());
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   // Assinaturas ativas com usuario e empresa ativos.
@@ -85,56 +66,13 @@ export async function GET(request: Request) {
   const failures: Array<{ companyName: string; error: string }> = [];
 
   for (const [companyId, { companyName, emails }] of Array.from(byCompany.entries())) {
-    try {
-      const result = await buildOnePagePayload(admin, { companyId, dateFrom, dateTo, periodLabel });
-      if (!result.ok) throw new Error(result.error);
-
-      const analysis = await analyzeOnePageReport(result.payload.input);
-      const html = renderOnePageEmail({
-        companyName,
-        periodLabel,
-        payload: result.payload,
-        analysis,
-        appUrl,
-      });
-
-      const recipients = Array.from(emails);
-      const sendResult = await sendEmail({
-        to: recipients,
-        subject: `[Controll Hub] Relatório BI — ${companyName} — ${periodLabel}`,
-        html,
-      });
-      if (!sendResult.ok) throw new Error(sendResult.error ?? "Falha no envio do email.");
-
-      await admin.from("ai_reports").insert({
-        type: "one-page-monthly",
-        company_ids: [companyId],
-        period_from: dateFrom,
-        period_to: dateTo,
-        content_html: html,
-        content_json: { analysis, ...result.payload } as unknown as Record<string, unknown>,
-        recipients,
-        sent_at: new Date().toISOString(),
-        status: "sent",
-      });
-
+    const recipients = Array.from(emails);
+    const res = await sendOnePageForCompany({ admin, companyId, companyName, emails: recipients, range, appUrl });
+    if (res.ok) {
       results.push({ companyId, companyName, ok: true, recipients: recipients.length });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao gerar relatório.";
-      failures.push({ companyName, error: message });
-      results.push({ companyId, companyName, ok: false, error: message });
-
-      await admin.from("ai_reports").insert({
-        type: "one-page-monthly",
-        company_ids: [companyId],
-        period_from: dateFrom,
-        period_to: dateTo,
-        content_html: "",
-        content_json: {},
-        recipients: Array.from(emails),
-        status: "error",
-        error_message: message,
-      });
+    } else {
+      failures.push({ companyName, error: res.error ?? "Falha desconhecida." });
+      results.push({ companyId, companyName, ok: false, error: res.error });
     }
   }
 
@@ -143,14 +81,14 @@ export async function GET(request: Request) {
     const list = failures.map((f) => `<li><strong>${f.companyName}</strong>: ${f.error}</li>`).join("");
     await sendEmail({
       to: process.env.ADMIN_EMAIL,
-      subject: `[Controll Hub] Falhas no Relatório BI mensal — ${periodLabel}`,
-      html: `<h2>Falhas ao gerar o relatório BI mensal (${periodLabel})</h2><ul>${list}</ul>`,
+      subject: `[Controll Hub] Falhas no Relatório BI mensal — ${range.periodLabel}`,
+      html: `<h2>Falhas ao gerar o relatório BI mensal (${range.periodLabel})</h2><ul>${list}</ul>`,
     });
   }
 
   return NextResponse.json({
     ok: failures.length === 0,
-    period: periodLabel,
+    period: range.periodLabel,
     companies: byCompany.size,
     sent: results.filter((r) => r.ok).length,
     failed: failures.length,
