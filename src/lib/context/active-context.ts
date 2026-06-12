@@ -2,6 +2,12 @@ import { cookies } from "next/headers";
 
 export const ACTIVE_MODULE_COOKIE = "active_module";
 export const ACTIVE_SEGMENT_COOKIE = "active_segment_slug";
+// Filtro de empresas COMPARTILHADO entre Dashboard / Fluxo de Caixa / Budget.
+// Fonte de verdade lida no SERVIDOR ao renderizar essas telas, para que a
+// empresa selecionada sobreviva a navegacao sem depender de round-trip no
+// cliente. O nome e duplicado em `shared-company-filter.ts` (modulo client-only,
+// que nao pode importar `next/headers`) — manter os dois em sincronia.
+export const ACTIVE_COMPANY_IDS_COOKIE = "active_company_ids";
 
 export type ActiveModule = "dre" | "ctrl";
 
@@ -25,6 +31,28 @@ export async function readActiveModule(): Promise<ActiveModule | null> {
 export async function readActiveSegmentSlug(): Promise<string | null> {
   const store = await cookies();
   return store.get(ACTIVE_SEGMENT_COOKIE)?.value ?? null;
+}
+
+/**
+ * Le o filtro de empresas compartilhado (Dashboard/Fluxo/Budget) do cookie.
+ * Retorna a lista de company ids salva pela ultima selecao do usuario, ou []
+ * quando ausente. O CHAMADOR deve validar os ids contra as empresas que o
+ * usuario realmente pode ver (allowedCompanyIds) — isso garante o escopo por
+ * segmento e impede vazamento entre usuarios que compartilham o navegador.
+ */
+export async function readActiveCompanyIds(): Promise<string[]> {
+  const store = await cookies();
+  const raw = store.get(ACTIVE_COMPANY_IDS_COOKIE)?.value;
+  if (!raw) return [];
+  try {
+    return decodeURIComponent(raw)
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+  } catch {
+    // valor corrompido/mal-codificado — ignora e cai no default da tela
+    return [];
+  }
 }
 
 /**
