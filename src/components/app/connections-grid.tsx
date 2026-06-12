@@ -65,9 +65,16 @@ function formatDateTime(value: string | null) {
 
 interface ConnectionsGridProps {
   segmentSlug?: string;
+  /**
+   * Esconde as acoes de "Sincronizar Agora" e "Sincronizar Tudo" (sincronizacao
+   * sem selecao de periodo). Usado pelo Painel Administrador, que so exibe
+   * status, planilhas conectadas e historico. A logica de sync nao muda — apenas
+   * os botoes nao sao renderizados.
+   */
+  hideManualSync?: boolean;
 }
 
-export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
+export function ConnectionsGrid({ segmentSlug, hideManualSync = false }: ConnectionsGridProps = {}) {
   const { showToast } = useToast();
   const [companies, setCompanies] = useState<ConnectionCompany[]>([]);
   const [loading, setLoading] = useState(true);
@@ -280,7 +287,7 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
         </CardContent>
       </Card>
 
-      {segmentSlug === "feat" ? (
+      {companies.some((company) => company.name === "Feat Producoes") ? (
         <Card>
           <CardHeader className="space-y-2">
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -401,45 +408,49 @@ export function ConnectionsGrid({ segmentSlug }: ConnectionsGridProps = {}) {
                 {company.last_sync_error ? (
                   <p className="rounded-md bg-red-50 p-2 text-xs text-red-700">{company.last_sync_error}</p>
                 ) : null}
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={() => void handleSync(company.id)}
-                  disabled={syncing}
-                >
-                  {syncing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="mr-2 h-4 w-4" />
-                  )}
-                  Sincronizar Agora
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() =>
-                    void handleFullSync(
-                      company.id,
-                      !company.last_full_sync_at,
-                    )
-                  }
-                  disabled={
-                    (fullSyncingByCompany[company.id] ?? false) || syncing
-                  }
-                >
-                  {fullSyncingByCompany[company.id] ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="mr-2 h-4 w-4" />
-                  )}
-                  Sincronizar Tudo
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  {company.last_full_sync_at
-                    ? `Ultima sync completa: ${formatDateTime(company.last_full_sync_at)}`
-                    : "Sync completa: Pendente"}
-                </p>
+                {!hideManualSync ? (
+                  <>
+                    <Button
+                      type="button"
+                      className="w-full"
+                      onClick={() => void handleSync(company.id)}
+                      disabled={syncing}
+                    >
+                      {syncing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Sincronizar Agora
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        void handleFullSync(
+                          company.id,
+                          !company.last_full_sync_at,
+                        )
+                      }
+                      disabled={
+                        (fullSyncingByCompany[company.id] ?? false) || syncing
+                      }
+                    >
+                      {fullSyncingByCompany[company.id] ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Sincronizar Tudo
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      {company.last_full_sync_at
+                        ? `Ultima sync completa: ${formatDateTime(company.last_full_sync_at)}`
+                        : "Sync completa: Pendente"}
+                    </p>
+                  </>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"

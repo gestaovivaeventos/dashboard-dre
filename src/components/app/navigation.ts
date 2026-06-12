@@ -241,9 +241,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "PLATAFORMA",
     items: [
       { key: "pf-contratos", title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: "/contratos", dreRoles: ["admin", "gestor_hero"] },
-      { key: "pf-conex", title: "Conexoes", icon: Plug, scope: "global", href: "/conexoes", dreRoles: ["admin", "gestor_hero"] },
       { key: "pf-users", title: "Usuarios", icon: Users, scope: "global", href: "/usuarios", dreRoles: ["admin"] },
-      { key: "pf-painel", title: "Painel Administrador", icon: LayoutDashboard, scope: "global", href: "/admin", dreRoles: ["admin"] },
+      // Painel Administrador: reune gestao de empresas, Omie, orcamento, status,
+      // planilhas e historico por segmento. Segment-scoped (precisa do segmentId
+      // para criar empresa no segmento e para o painel FEE/VVR). Admin-only.
+      // Substitui a antiga aba "Configuracoes > Empresas", a tela "Conexoes" e o
+      // antigo Painel Administrador global (/admin), todos removidos.
+      { key: "pf-painel-admin", title: "Painel Administrador", icon: LayoutDashboard, scope: "segment", suffix: "/painel-administrador", dreRoles: ["admin"] },
     ],
   },
 ] as const;

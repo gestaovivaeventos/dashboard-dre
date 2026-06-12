@@ -170,6 +170,7 @@ const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
   { suffix: "/mapeamento",       roles: ["admin"] },
   { suffix: "/lancamentos-manuais", roles: ["admin"] },
   { suffix: "/configuracoes",    roles: ["admin"] },
+  { suffix: "/painel-administrador", roles: ["admin"] },
 ];
 
 const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [

@@ -1,7 +1,6 @@
 "use client";
 
-import { Building2, Check, ChevronDown, Plus, Search } from "lucide-react";
-import Link from "next/link";
+import { Building2, Check, ChevronDown, Search } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -211,17 +210,6 @@ export function SegmentChip({ segments, activeSlug }: SegmentChipProps) {
               })
             )}
           </ul>
-
-          <div className="border-t border-border px-3 py-2">
-            <Link
-              href="/admin"
-              onClick={() => setOpen(false)}
-              className="inline-flex items-center gap-1.5 text-[11px] text-ink-secondary hover:text-ink-primary"
-            >
-              <Plus className="h-3 w-3" />
-              Gerenciar segmentos
-            </Link>
-          </div>
         </div>
       )}
     </div>

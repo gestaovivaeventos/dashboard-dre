@@ -6,7 +6,6 @@ import { CashFlowStructureManager, type CashFlowAccountItem } from "@/components
 import { DreStructureManager } from "@/components/app/dre-structure-manager";
 import { KpiAdminManager } from "@/components/app/kpi-admin-manager";
 import { SegmentSelector } from "@/components/app/segment-selector";
-import { SettingsCompanies } from "@/components/app/settings-companies";
 import { SettingsDepartments } from "@/components/app/settings-departments";
 import { SettingsPartners } from "@/components/app/settings-partners";
 import { Button } from "@/components/ui/button";
@@ -64,7 +63,7 @@ interface SettingsTabsProps {
   allCompanies?: Array<{ id: string; name: string }>;
 }
 
-type TabValue = "empresas" | "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos" | "socios";
+type TabValue = "estrutura_dre" | "estrutura_fluxo_caixa" | "kpis" | "departamentos" | "socios";
 
 export function SettingsTabs({
   companies,
@@ -72,12 +71,13 @@ export function SettingsTabs({
   dreAccounts,
   cashFlowAccounts,
   kpis,
-  segmentId,
   segments,
   currentSegmentSlug,
   allCompanies,
 }: SettingsTabsProps) {
-  const [tab, setTab] = useState<TabValue>("empresas");
+  // A aba "Empresas" foi migrada para o novo Painel Administrador
+  // (/s/<slug>/painel-administrador). As demais abas permanecem aqui.
+  const [tab, setTab] = useState<TabValue>("estrutura_dre");
 
   return (
     <div className="space-y-4">
@@ -88,9 +88,6 @@ export function SettingsTabs({
         </div>
       )}
       <div className="flex flex-wrap gap-2 border-b pb-3">
-        <Button type="button" variant={tab === "empresas" ? "default" : "outline"} onClick={() => setTab("empresas")}>
-          Empresas
-        </Button>
         <Button type="button" variant={tab === "estrutura_dre" ? "default" : "outline"} onClick={() => setTab("estrutura_dre")}>
           Estrutura DRE
         </Button>
@@ -108,13 +105,7 @@ export function SettingsTabs({
         </Button>
       </div>
 
-      {tab === "empresas" ? (
-        <SettingsCompanies
-          initialCompanies={companies}
-          segmentId={segmentId ?? null}
-          currentSegmentSlug={currentSegmentSlug ?? null}
-        />
-      ) : tab === "estrutura_dre" ? (
+      {tab === "estrutura_dre" ? (
         <DreStructureManager
           initialAccounts={dreAccounts}
           companies={companies.map((c) => ({ id: c.id, name: c.name }))}
