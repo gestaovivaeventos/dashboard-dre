@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { BudgetForecastView } from "@/components/app/budget-forecast-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
-import { readActiveSegmentSlug } from "@/lib/context/active-context";
+import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +152,18 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
     : companies.filter((c) => allowedCompanyIds.includes(c.id));
 
   const filter = buildFilterState(searchParams, allowedCompanyIds);
+  // Filtro de empresa compartilhado entre Dashboard/Fluxo/Budget: quando a URL
+  // nao traz companyIds, herda a ultima selecao do cookie (fonte de verdade no
+  // servidor). Validado contra allowedCompanyIds — ja escopado por segmento e
+  // por acesso do usuario, entao nao vaza empresa entre segmentos nem usuarios.
+  if (!searchParams.companyIds) {
+    const cookieCompanyIds = (await readActiveCompanyIds()).filter((id) =>
+      allowedCompanyIds.includes(id),
+    );
+    if (cookieCompanyIds.length > 0) {
+      filter.selectedCompanyIds = cookieCompanyIds;
+    }
+  }
   if (profile?.role !== "admin") {
     filter.selectedCompanyIds = allowedCompanyIds.length > 0
       ? filter.selectedCompanyIds.filter((id) => allowedCompanyIds.includes(id))
