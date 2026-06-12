@@ -25,7 +25,7 @@ export default async function UsuariosPage() {
       .select(
         "id,email,name,phone,position,profile,can_financeiro,can_compras,active,created_at",
       )
-      .order("created_at", { ascending: false }),
+      .order("name", { ascending: true, nullsFirst: false }),
     adminClient.from("companies").select("id,name").eq("active", true).order("name"),
     adminClient.from("ctrl_sectors").select("id,name").eq("active", true).order("name"),
     adminClient.from("user_company_access").select("user_id,company_id"),

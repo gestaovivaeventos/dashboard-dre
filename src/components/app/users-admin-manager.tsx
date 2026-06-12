@@ -193,6 +193,18 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   );
   const sectorById = useMemo(() => new Map(sectors.map((s) => [s.id, s.name])), [sectors]);
 
+  // Ordem alfabetica (pt-BR, ignora caixa/acentos), por nome ou e-mail quando
+  // sem nome. Cobre o load inicial e os refetches apos convite/edicao.
+  const sortedUsers = useMemo(
+    () =>
+      [...users].sort((a, b) =>
+        (a.name?.trim() || a.email).localeCompare(b.name?.trim() || b.email, "pt-BR", {
+          sensitivity: "base",
+        }),
+      ),
+    [users],
+  );
+
   function openInvite() {
     setForm(emptyForm);
     setError(null);
@@ -426,7 +438,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {users.map((u) => (
+          {sortedUsers.map((u) => (
             <TableRow key={u.id}>
               <TableCell>
                 <div className="font-medium">{u.name || "—"}</div>
