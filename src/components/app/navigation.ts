@@ -11,6 +11,7 @@ import {
   FileText,
   GitMerge,
   LayoutDashboard,
+  Mail,
   MapPinned,
   PieChart,
   Plug,
@@ -242,6 +243,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: "pf-contratos", title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: "/contratos", dreRoles: ["admin", "gestor_hero"] },
       { key: "pf-users", title: "Usuarios", icon: Users, scope: "global", href: "/usuarios", dreRoles: ["admin"] },
+      { key: "pf-relatorios-bi", title: "Relatorios BI", icon: Mail, scope: "global", href: "/admin/relatorios-bi", dreRoles: ["admin"] },
       // Painel Administrador: reune gestao de empresas, Omie, orcamento, status,
       // planilhas e historico por segmento. Segment-scoped (precisa do segmentId
       // para criar empresa no segmento e para o painel FEE/VVR). Admin-only.
