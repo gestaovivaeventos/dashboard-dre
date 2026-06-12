@@ -59,6 +59,9 @@ interface DocumentItem {
   id: string;
   company_id: string;
   file_name: string;
+  // Nome de exibicao definido pelo admin no upload. Quando vazio (documentos
+  // antigos), a listagem cai no fallback do nome original do arquivo.
+  display_name: string | null;
   file_type: string | null;
   size_bytes: number | null;
   uploaded_by_name: string | null;
@@ -117,6 +120,13 @@ function monthYearToApi(value: string): string | null {
   return `${m[2]}-${m[1]}`;
 }
 
+// Nome principal exibido na listagem: o nome de exibicao informado pelo admin;
+// se ausente (documentos antigos), cai no nome original do arquivo.
+function displayNameOf(doc: DocumentItem): string {
+  const name = doc.display_name?.trim();
+  return name && name.length > 0 ? name : doc.file_name;
+}
+
 function isSpreadsheet(doc: DocumentItem): boolean {
   const t = (doc.file_type ?? "").toLowerCase();
   const n = doc.file_name.toLowerCase();
@@ -151,12 +161,16 @@ export function DocumentosAnexosClient({
   // Mes/ano de referencia do documento — OBRIGATORIO no upload. E a unica
   // fonte da referencia consultada no filtro.
   const [uploadRefMonth, setUploadRefMonth] = useState<string>("");
+  // Nome de exibicao do documento — OBRIGATORIO no upload. Vira o nome
+  // principal mostrado na listagem.
+  const [uploadName, setUploadName] = useState<string>("");
 
   const selectedCompany = companies.find((c) => c.id === companyId) ?? null;
 
   function resetUploadForm() {
     setPendingFile(null);
     setUploadRefMonth("");
+    setUploadName("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -215,6 +229,14 @@ export function DocumentosAnexosClient({
       });
       return;
     }
+    const trimmedName = uploadName.trim();
+    if (!trimmedName) {
+      showToast({
+        title: "Informe o nome do documento.",
+        variant: "destructive",
+      });
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -222,6 +244,7 @@ export function DocumentosAnexosClient({
       form.append("companyId", companyId);
       form.append("file", pendingFile);
       form.append("referenceDate", apiMonth);
+      form.append("displayName", trimmedName);
       const res = await fetch("/api/financeiro/documentos", {
         method: "POST",
         body: form,
@@ -243,7 +266,7 @@ export function DocumentosAnexosClient({
   }
 
   async function handleDelete(doc: DocumentItem) {
-    if (!window.confirm(`Excluir o documento "${doc.file_name}"?`)) return;
+    if (!window.confirm(`Excluir o documento "${displayNameOf(doc)}"?`)) return;
     try {
       const res = await fetch(
         `/api/financeiro/documentos?id=${encodeURIComponent(doc.id)}`,
@@ -359,7 +382,7 @@ export function DocumentosAnexosClient({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Nome do documento</TableHead>
                   <TableHead>Tamanho</TableHead>
                   <TableHead>Enviado por</TableHead>
                   <TableHead>Data de upload</TableHead>
@@ -373,11 +396,21 @@ export function DocumentosAnexosClient({
                     <TableCell className="font-medium">
                       <span className="flex items-center gap-2">
                         {isSpreadsheet(doc) ? (
-                          <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                          <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600" />
                         ) : (
-                          <FileText className="h-4 w-4 text-red-600" />
+                          <FileText className="h-4 w-4 shrink-0 text-red-600" />
                         )}
-                        {doc.file_name}
+                        <span className="flex flex-col">
+                          <span>{displayNameOf(doc)}</span>
+                          {/* Nome original do arquivo como informacao secundaria,
+                              quando ha um nome de exibicao distinto. */}
+                          {doc.display_name?.trim() &&
+                          doc.display_name.trim() !== doc.file_name ? (
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {doc.file_name}
+                            </span>
+                          ) : null}
+                        </span>
                       </span>
                     </TableCell>
                     <TableCell>{formatBytes(doc.size_bytes)}</TableCell>
@@ -451,6 +484,21 @@ export function DocumentosAnexosClient({
             </div>
 
             <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium">Nome do documento</label>
+              <Input
+                type="text"
+                placeholder="Ex.: Relatório Financeiro Maio/2026"
+                maxLength={200}
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+                aria-label="Nome do documento exibido na listagem"
+              />
+              <p className="text-xs text-muted-foreground">
+                Obrigatório. Nome exibido na listagem (mais claro que o nome do arquivo).
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium">Arquivo</label>
               <input
                 ref={fileInputRef}
@@ -484,7 +532,13 @@ export function DocumentosAnexosClient({
             </Button>
             <Button
               onClick={() => void handleUpload()}
-              disabled={!companyId || !pendingFile || !monthYearToApi(uploadRefMonth) || uploading}
+              disabled={
+                !companyId ||
+                !pendingFile ||
+                !monthYearToApi(uploadRefMonth) ||
+                !uploadName.trim() ||
+                uploading
+              }
             >
               {uploading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -39,6 +39,9 @@ interface DocumentRow {
   id: string;
   company_id: string;
   file_name: string;
+  // Nome de exibicao informado pelo admin no upload. Nome principal na
+  // listagem; file_name fica como fallback (documentos antigos) e info interna.
+  display_name: string | null;
   file_type: string | null;
   storage_path: string;
   size_bytes: number | null;
@@ -48,11 +51,14 @@ interface DocumentRow {
   created_at: string;
 }
 
+// Limite de caracteres do nome de exibicao (evita titulos absurdamente longos).
+const MAX_DISPLAY_NAME = 200;
+
 // Referencia no formato mes/ano: "YYYY-MM" (ex.: "2026-05").
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const SELECT_COLUMNS =
-  "id, company_id, file_name, file_type, storage_path, size_bytes, uploaded_by, uploaded_by_name, reference_date, created_at";
+  "id, company_id, file_name, display_name, file_type, storage_path, size_bytes, uploaded_by, uploaded_by_name, reference_date, created_at";
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -138,6 +144,7 @@ export async function POST(request: Request) {
   const companyId = form.get("companyId");
   const file = form.get("file");
   const referenceDateRaw = form.get("referenceDate");
+  const displayNameRaw = form.get("displayName");
 
   if (typeof companyId !== "string" || !companyId) {
     return NextResponse.json(
@@ -148,6 +155,15 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Arquivo obrigatorio." }, { status: 400 });
   }
+
+  // Nome de exibicao OBRIGATORIO no upload (definido pelo admin).
+  if (typeof displayNameRaw !== "string" || !displayNameRaw.trim()) {
+    return NextResponse.json(
+      { error: "Nome do documento obrigatorio para o upload." },
+      { status: 400 },
+    );
+  }
+  const displayName = displayNameRaw.trim().slice(0, MAX_DISPLAY_NAME);
 
   // Data de referencia OBRIGATORIA no upload, formato mes/ano ("YYYY-MM").
   if (typeof referenceDateRaw !== "string" || !referenceDateRaw.trim()) {
@@ -214,6 +230,7 @@ export async function POST(request: Request) {
     .insert({
       company_id: companyId,
       file_name: file.name,
+      display_name: displayName,
       file_type: mime || ext || null,
       storage_path: storagePath,
       size_bytes: file.size,
