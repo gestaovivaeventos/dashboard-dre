@@ -11,6 +11,7 @@ import {
   FileText,
   GitMerge,
   LayoutDashboard,
+  Mail,
   MapPinned,
   PieChart,
   Plug,
@@ -94,6 +95,12 @@ export const DRE_GLOBAL_ADMIN_ITEMS = [
     title: "Inteligencia",
     href: "/admin/inteligencia",
     icon: Brain,
+    roles: ["admin"] as DreRole[],
+  },
+  {
+    title: "Relatorios BI",
+    href: "/admin/relatorios-bi",
+    icon: Mail,
     roles: ["admin"] as DreRole[],
   },
   {
