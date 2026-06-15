@@ -8,11 +8,11 @@
 // the next run picks up where it left off because extraction is keyed off
 // "tipo_documento IS NULL".
 
-import { extractContract } from './extract'
+import { extractContract, mergeCpfCnpj } from './extract'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
 import { analisarRequisicao, isFeeCerimonial, type RequisitionDocument } from './validate'
-import type { ValidationStatus } from './types'
+import type { ContractExtraction, ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 interface BatchRow {
@@ -38,6 +38,9 @@ interface ItemRow {
   extracted_valor_contrato: number | string | null
   extracted_pagamentos: number[] | null
   extracted_vencimentos: string[] | null
+  // JSON cru da extração (contém cpf_cnpj_encontrados — todos os CPF/CNPJ do
+  // documento). Reidratado para reconstruir cpf_cnpj_todos na validação.
+  raw_extraction: ContractExtraction | null
   assinatura_contratante: string | null
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
@@ -249,7 +252,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, raw_extraction',
     )
     .eq('batch_id', batchId)
 
@@ -308,6 +311,9 @@ export async function processBatch(
       tipo_documento: i.tipo_documento,
       fornecedor: i.extracted_fornecedor,
       cpf_cnpj: i.extracted_cpf_cnpj,
+      // Todos os CPF/CNPJ do documento, reconstruídos do raw_extraction salvo.
+      // Itens antigos sem cpf_cnpj_encontrados caem só no principal (retrocompat).
+      cpf_cnpj_todos: mergeCpfCnpj(i.extracted_cpf_cnpj, i.raw_extraction?.cpf_cnpj_encontrados),
       conta: i.extracted_conta,
       valor_contrato: Number(i.extracted_valor_contrato) || null,
       valores_pagamentos: i.extracted_pagamentos ?? [],

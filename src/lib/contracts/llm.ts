@@ -50,6 +50,18 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
 - **DADOS BANCÁRIOS (Se houver):**
     - \`favorecido.banco\`, \`favorecido.agencia\`, \`favorecido.conta\`.
 
+- **TODOS OS CPF/CNPJ DO DOCUMENTO (MUITO IMPORTANTE — NÃO PARE NO PRIMEIRO):**
+    - \`cpf_cnpj_encontrados\`: liste **TODOS** os CPF e CNPJ que aparecem em
+      QUALQUER parte do documento, sem exceção — contratante, contratado,
+      favorecido, representantes, testemunhas, dados bancários, cabeçalho,
+      rodapé, anexos. Varra o documento inteiro.
+    - **POR QUÊ:** um contrato pode ser firmado por um CNPJ mas indicar OUTRO
+      CNPJ ou CPF como favorecido do pagamento. Ambos — e quaisquer outros —
+      devem entrar na lista. Não decida qual é o "certo"; liste todos.
+    - Cada item é a string exatamente como aparece no documento (com ou sem
+      pontuação). Nunca invente nem complete dígitos faltantes. Não duplique o
+      mesmo número. Nenhum CPF/CNPJ no documento → \`[]\`.
+
 - **DATAS:**
     - \`data_baile\`: data de realização do evento/baile/festa, no formato DD/MM/AAAA. Sem menção → "".
     - \`data_contrato\`: data de **assinatura ou emissão** do documento (DD/MM/AAAA). É a data em
@@ -98,6 +110,7 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
     "agencia": "",
     "conta": ""
   },
+  "cpf_cnpj_encontrados": [],
   "valor_contrato": "",
   "pagamento1_data_vencimento": "", "pagamento1_valor": "", "pagamento1_obs": "",
   "pagamento2_data_vencimento": "", "pagamento2_valor": "", "pagamento2_obs": "",

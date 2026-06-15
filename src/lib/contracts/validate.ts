@@ -205,15 +205,25 @@ export function analisarLinha(
     docTipo === 'Atas, Orçamentos, Ordens de Serviço'
   ) {
     const reqCnpj = digitsOnly(req.cpf_cnpj)
-    const docCnpj = digitsOnly(doc.cpf_cnpj)
+    // Casa contra TODOS os CPF/CNPJ do documento (favorecido + contratante +
+    // demais). O contrato pode ser firmado num CNPJ e indicar outro CPF/CNPJ
+    // como favorecido do pagamento — basta o documento da requisição constar em
+    // qualquer ponto do contrato. Fallback ao cpf_cnpj principal para extrações
+    // antigas sem a lista.
+    const docCnpjsTodos = (doc.cpf_cnpj_todos?.length ? doc.cpf_cnpj_todos : [doc.cpf_cnpj])
+      .map(digitsOnly)
+      .filter(Boolean)
 
     if (!reqCnpj) {
       motivos.push('CPF/CNPJ da requisição (Aba A) em branco')
-    } else if (!docCnpj) {
+    } else if (docCnpjsTodos.length === 0) {
       motivos.push('CPF/CNPJ não encontrado no documento (Aba B)')
-    } else if (reqCnpj !== docCnpj) {
+    } else if (!docCnpjsTodos.includes(reqCnpj)) {
+      const lista = doc.cpf_cnpj_todos?.length
+        ? doc.cpf_cnpj_todos.join(', ')
+        : doc.cpf_cnpj ?? ''
       motivos.push(
-        `CPF/CNPJ não confere (Doc: '${doc.cpf_cnpj ?? ''}' vs Req: '${req.cpf_cnpj ?? ''}')`,
+        `CPF/CNPJ não confere (Req: '${req.cpf_cnpj ?? ''}' não consta no documento. Encontrados: ${lista})`,
       )
     }
   }
@@ -479,7 +489,12 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   if (!reqCnpj) {
     motivos.push('CPF/CNPJ da requisição em branco')
   } else {
-    const algumBate = docs.some((d) => digitsOnly(d.cpf_cnpj) === reqCnpj)
+    // Casa contra todos os CPF/CNPJ de cada documento (não só o principal).
+    const algumBate = docs.some((d) =>
+      (d.cpf_cnpj_todos?.length ? d.cpf_cnpj_todos : [d.cpf_cnpj])
+        .map(digitsOnly)
+        .includes(reqCnpj),
+    )
     if (!algumBate) {
       motivos.push(`Nenhum documento com CPF/CNPJ correspondente (Req: ${req.cpf_cnpj ?? ''})`)
     }
