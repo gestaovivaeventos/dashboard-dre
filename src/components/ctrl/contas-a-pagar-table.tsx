@@ -5,8 +5,10 @@ import { Download, Eye, FileText, Loader2, MessageCircle, Paperclip, RefreshCw, 
 
 import {
   sendToPayment,
+  previewPrevisaoMatches,
   inactivateRequests,
   getRequestAttachmentUrl,
+  type PrevisaoMatch,
 } from "@/lib/ctrl/actions/requests";
 import { resyncContaPagar } from "@/lib/ctrl/actions/contapagar-launch";
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
@@ -150,6 +152,9 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [payingCompanyId, setPayingCompanyId] = useState("");
   const [showEnviarModal, setShowEnviarModal] = useState(false);
+  const [previsaoPreview, setPrevisaoPreview] = useState<PrevisaoMatch[] | null>(null);
+  // requestId -> decisão escolhida no diálogo
+  const [previsaoDecisoes, setPrevisaoDecisoes] = useState<Record<string, number | "novo">>({});
   const [inactivateReason, setInactivateReason] = useState("");
   const [showInactivateModal, setShowInactivateModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,10 +216,9 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
     setTimeout(() => { setSuccess(null); setError(null); }, 4000);
   }
 
-  function handleEnviar() {
-    if (selected.size === 0 || !payingCompanyId) return;
+  function executarEnvio(decisoes?: Record<string, number | "novo">) {
     startTransition(async () => {
-      const result = await sendToPayment(Array.from(selected), payingCompanyId);
+      const result = await sendToPayment(Array.from(selected), payingCompanyId, decisoes);
       if (result && "error" in result) {
         notify((result as { error: string }).error, false);
       } else if (result && "results" in result) {
@@ -222,12 +226,35 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
         setSelected(new Set());
         setPayingCompanyId("");
         setShowEnviarModal(false);
+        setPrevisaoPreview(null);
+        setPrevisaoDecisoes({});
         if (failCount > 0) {
           notify(`Enviado; ${failCount} falharam no Omie (mapeamento ou erro). Use Reenviar.`, false);
         } else {
           notify(`${result.results.length} requisição(ões) enviadas e lançadas no Omie.`);
         }
       }
+    });
+  }
+
+  function handleEnviar() {
+    if (selected.size === 0 || !payingCompanyId) return;
+    startTransition(async () => {
+      const preview = await previewPrevisaoMatches(Array.from(selected), payingCompanyId);
+      if ("error" in preview) {
+        notify(preview.error, false);
+        return;
+      }
+      const comPrevisao = preview.matches.filter((m) => m.previsao);
+      if (comPrevisao.length === 0) {
+        executarEnvio();
+        return;
+      }
+      const iniciais: Record<string, number | "novo"> = {};
+      for (const m of comPrevisao) iniciais[m.requestId] = m.previsao!.codigo;
+      setPrevisaoDecisoes(iniciais);
+      setPrevisaoPreview(comPrevisao);
+      setShowEnviarModal(false);
     });
   }
 
@@ -485,6 +512,86 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
         </div>
       )}
 
+      {/* Diálogo — Confirmar edição de previsões */}
+      {previsaoPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-xl border bg-background shadow-lg">
+            <div className="border-b px-6 py-4">
+              <h3 className="font-semibold">Previsões encontradas no Omie</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Para estes fornecedores existe uma previsão vencendo no mês. Escolha
+                editar a previsão (atualiza valor, vencimento e demais campos) ou criar
+                um título novo.
+              </p>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto px-6 py-4 space-y-3">
+              {previsaoPreview.map((m) => {
+                const decisao = previsaoDecisoes[m.requestId];
+                const editar = typeof decisao === "number";
+                return (
+                  <div key={m.requestId} className="rounded-lg border px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm">
+                        <p className="font-medium">
+                          #{m.requestNumber} — {m.supplierName}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Previsão vence {m.previsao!.vencimento} · valor atual{" "}
+                          {fmt.format(m.previsao!.valorAtual)} → novo {fmt.format(m.amount)}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1 rounded-md border p-0.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPrevisaoDecisoes((p) => ({ ...p, [m.requestId]: m.previsao!.codigo }))
+                          }
+                          className={`rounded px-2 py-1 text-xs font-medium ${
+                            editar ? "bg-violet-600 text-white" : "text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          Editar previsão
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPrevisaoDecisoes((p) => ({ ...p, [m.requestId]: "novo" }))
+                          }
+                          className={`rounded px-2 py-1 text-xs font-medium ${
+                            !editar ? "bg-violet-600 text-white" : "text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          Criar novo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setPrevisaoPreview(null);
+                  setPrevisaoDecisoes({});
+                }}
+                disabled={isPending}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => executarEnvio(previsaoDecisoes)}
+                disabled={isPending}
+                className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                {isPending ? "Enviando..." : "Confirmar e enviar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action bar — Enviados (inativar) */}
       {activeTab === "agendado" && canInactivate && selected.size > 0 && (
         <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
@@ -575,6 +682,13 @@ function OmieLaunchBadge({
     return (
       <span className="inline-flex w-fit items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
         Lançado (Omie)
+      </span>
+    );
+  }
+  if (status === "previsao_editada") {
+    return (
+      <span className="inline-flex w-fit items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+        Previsão editada
       </span>
     );
   }
