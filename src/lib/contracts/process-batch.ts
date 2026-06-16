@@ -314,6 +314,9 @@ export async function processBatch(
       // Todos os CPF/CNPJ do documento, reconstruídos do raw_extraction salvo.
       // Itens antigos sem cpf_cnpj_encontrados caem só no principal (retrocompat).
       cpf_cnpj_todos: mergeCpfCnpj(i.extracted_cpf_cnpj, i.raw_extraction?.cpf_cnpj_encontrados),
+      // Idoneidade fiscal reidratada do raw_extraction (sem coluna dedicada).
+      numero_documento: (i.raw_extraction?.numero_documento ?? '').toString().trim() || null,
+      chave_acesso: (i.raw_extraction?.chave_acesso ?? '').toString().trim() || null,
       conta: i.extracted_conta,
       valor_contrato: Number(i.extracted_valor_contrato) || null,
       valores_pagamentos: i.extracted_pagamentos ?? [],

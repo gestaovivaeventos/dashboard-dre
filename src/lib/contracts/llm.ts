@@ -81,6 +81,14 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
     - \`pagamentoX_valor\`: O valor de parcelas específicas.
     - \`pagamentoX_obs\`: só preencha quando a parcela veio como porcentagem (senão "").
 
+- **IDONEIDADE DO DOCUMENTO FISCAL (NF / Fatura / Boleto):**
+    - \`numero_documento\`: o número do documento fiscal — nº da Nota Fiscal/NFS-e,
+      nº da fatura ou nº/identificação do boleto (linha digitável quando for o
+      único identificador). Sem número → "".
+    - \`chave_acesso\`: a chave de acesso da NF-e/NFS-e (sequência de 44 dígitos),
+      quando houver. Extraia só os 44 dígitos. Sem chave → "".
+    - Não invente. Estes campos identificam a idoneidade do documento fiscal.
+
 - **DATAS DE PAGAMENTO:**
     - \`pagamentoX_data_vencimento\`: data de vencimento da parcela. Se for relativa (ex: "7 dias antes
       do evento"), extraia a data exata se der; senão, o texto relativo.
@@ -111,6 +119,8 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
     "conta": ""
   },
   "cpf_cnpj_encontrados": [],
+  "numero_documento": "",
+  "chave_acesso": "",
   "valor_contrato": "",
   "pagamento1_data_vencimento": "", "pagamento1_valor": "", "pagamento1_obs": "",
   "pagamento2_data_vencimento": "", "pagamento2_valor": "", "pagamento2_obs": "",

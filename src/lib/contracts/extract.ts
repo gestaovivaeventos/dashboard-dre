@@ -93,6 +93,8 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     fornecedor: (raw.favorecido?.nome ?? '').toString().trim() || null,
     cpf_cnpj: (raw.favorecido?.cpf_cnpj ?? '').toString().trim() || null,
     cpf_cnpj_todos: mergeCpfCnpj(raw.favorecido?.cpf_cnpj, raw.cpf_cnpj_encontrados),
+    numero_documento: (raw.numero_documento ?? '').toString().trim() || null,
+    chave_acesso: (raw.chave_acesso ?? '').toString().trim() || null,
     conta: (raw.favorecido?.conta ?? '').toString().trim() || null,
     valor_contrato: parseValor(raw.valor_contrato) || null,
     valores_pagamentos: valoresPagamentos,
