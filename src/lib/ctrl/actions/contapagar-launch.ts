@@ -10,13 +10,14 @@ import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/client
 import {
   findContaPagarByCnpjValor,
   incluirContaPagar,
+  alterarContaPagar,
   alterarContaPagarCategoria,
   toOmieDate,
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 
 type LaunchResult =
-  | { ok: true; status: "recebido" | "lancado" }
+  | { ok: true; status: "recebido" | "lancado" | "previsao_editada" }
   | { error: string };
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
@@ -48,6 +49,7 @@ export async function launchRequestToOmie(
   supabase: SupabaseClient<any>,
   requestId: string,
   companyId: string,
+  previsaoCodigo?: number,
 ): Promise<LaunchResult> {
   // 1. Fetch request
   const { data: request, error: reqErr } = await supabase
@@ -181,75 +183,112 @@ export async function launchRequestToOmie(
   }
 
   // 5. Matching + lançamento
-  let omieStatus: "recebido" | "lancado";
+  let omieStatus: "recebido" | "lancado" | "previsao_editada";
   let omieCode: number;
 
-  try {
-    const found = await findContaPagarByCnpjValor(
-      appKey,
-      appSecret,
-      supplier.cnpj_cpf as string,
-      Number(request.amount),
+  // Vencimento: fallback para competência se due_date for nulo
+  const dueDateIso: string =
+    request.due_date ??
+    `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
+  const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
+
+  // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
+  // codigo_lancamento_omie e remove codigo_lancamento_integracao).
+  const basePayload = {
+    codigo_cliente_fornecedor: codigoClienteFornecedor,
+    data_vencimento: toOmieDate(dueDateIso),
+    data_previsao: toOmieDate(dueDateIso),
+    data_emissao: toOmieDate(emissaoIso),
+    valor_documento: Number(request.amount),
+    codigo_categoria: codigoCategoria,
+    distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
+    id_conta_corrente: Number(codigoContaCorrente),
+    ...(request.description ? { observacao: request.description as string } : {}),
+    ...(request.invoice_number
+      ? {
+          numero_documento: request.invoice_number as string,
+          numero_documento_fiscal: request.invoice_number as string,
+        }
+      : {}),
+    ...(request.payment_method === "boleto" && request.barcode
+      ? {
+          cnab_integracao_bancaria: {
+            codigo_forma_pagamento: "BOL",
+            codigo_barras_boleto: request.barcode,
+          },
+        }
+      : {}),
+  };
+
+  // Retry sem o bloco de boleto quando o código de barras é rejeitado pelo Omie.
+  const isBarcodeError = (e: unknown) => {
+    const msg = e instanceof Error ? e.message.toLowerCase() : "";
+    return (
+      msg.includes("código de barras") ||
+      msg.includes("codigo de barras") ||
+      msg.includes("codigo_barras")
     );
+  };
 
-    if (found) {
-      await alterarContaPagarCategoria(appKey, appSecret, found.codigoLancamentoOmie, codigoCategoria);
-      omieStatus = "recebido";
-      omieCode = found.codigoLancamentoOmie;
-    } else {
-      // Vencimento: fallback para competência se due_date for nulo
-      const dueDateIso: string =
-        request.due_date ??
-        `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
-
-      const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
-
-      const payload = {
-        codigo_lancamento_integracao: request.id as string,
-        codigo_cliente_fornecedor: codigoClienteFornecedor,
-        data_vencimento: toOmieDate(dueDateIso),
-        data_previsao: toOmieDate(dueDateIso),
-        data_emissao: toOmieDate(emissaoIso),
-        valor_documento: Number(request.amount),
-        codigo_categoria: codigoCategoria,
-        distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
-        id_conta_corrente: Number(codigoContaCorrente),
-        ...(request.description ? { observacao: request.description as string } : {}),
-        ...(request.invoice_number
-          ? {
-              numero_documento: request.invoice_number as string,
-              numero_documento_fiscal: request.invoice_number as string,
-            }
-          : {}),
-        ...(request.payment_method === "boleto" && request.barcode
-          ? {
-              cnab_integracao_bancaria: {
-                codigo_forma_pagamento: "BOL",
-                codigo_barras_boleto: request.barcode,
-              },
-            }
-          : {}),
-      };
-
-      let codigoLancamentoOmie: number;
+  try {
+    if (previsaoCodigo) {
+      // Edita a previsão existente sobrescrevendo todos os campos.
       try {
-        ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
+        await alterarContaPagar(appKey, appSecret, {
+          ...basePayload,
+          codigo_lancamento_omie: previsaoCodigo,
+        });
       } catch (e) {
-        // Código de barras inválido (OCR errado / formato) não pode derrubar o
-        // lançamento inteiro: tenta de novo SEM o bloco do boleto. O título é
-        // criado; a linha digitável pode ser ajustada depois no Omie.
-        const msg = e instanceof Error ? e.message.toLowerCase() : "";
-        const isBarcode = msg.includes("código de barras") || msg.includes("codigo de barras") || msg.includes("codigo_barras");
-        if (isBarcode && "cnab_integracao_bancaria" in payload) {
-          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
+        if (isBarcodeError(e) && "cnab_integracao_bancaria" in basePayload) {
+          const { cnab_integracao_bancaria: _drop, ...noCnab } = basePayload;
           void _drop;
-          ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));
+          await alterarContaPagar(appKey, appSecret, {
+            ...noCnab,
+            codigo_lancamento_omie: previsaoCodigo,
+          });
         } else {
           throw e;
         }
       }
-      omieStatus = "lancado";
-      omieCode = codigoLancamentoOmie;
+      omieStatus = "previsao_editada";
+      omieCode = previsaoCodigo;
+    } else {
+      const found = await findContaPagarByCnpjValor(
+        appKey,
+        appSecret,
+        supplier.cnpj_cpf as string,
+        Number(request.amount),
+      );
+
+      if (found) {
+        await alterarContaPagarCategoria(
+          appKey,
+          appSecret,
+          found.codigoLancamentoOmie,
+          codigoCategoria,
+        );
+        omieStatus = "recebido";
+        omieCode = found.codigoLancamentoOmie;
+      } else {
+        const payload = {
+          codigo_lancamento_integracao: request.id as string,
+          ...basePayload,
+        };
+        let codigoLancamentoOmie: number;
+        try {
+          ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
+        } catch (e) {
+          if (isBarcodeError(e) && "cnab_integracao_bancaria" in payload) {
+            const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
+            void _drop;
+            ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));
+          } else {
+            throw e;
+          }
+        }
+        omieStatus = "lancado";
+        omieCode = codigoLancamentoOmie;
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro ao lançar conta a pagar no Omie.";
@@ -291,7 +330,7 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("paying_company_id")
+    .select("paying_company_id, omie_launch_status, omie_contapagar_codigo")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -299,7 +338,19 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
     return { error: "Requisição sem empresa pagadora." };
   }
 
-  const result = await launchRequestToOmie(supabase, requestId, req.paying_company_id as string);
+  // Se já havia editado uma previsão, reusa o mesmo título no reenvio (não cria
+  // duplicata).
+  const previsaoCodigo =
+    req.omie_launch_status === "previsao_editada" && req.omie_contapagar_codigo
+      ? Number(req.omie_contapagar_codigo)
+      : undefined;
+
+  const result = await launchRequestToOmie(
+    supabase,
+    requestId,
+    req.paying_company_id as string,
+    previsaoCodigo,
+  );
 
   revalidatePath("/ctrl/contas-a-pagar");
   return result;
