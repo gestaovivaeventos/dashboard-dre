@@ -149,6 +149,27 @@ export async function processBatch(
   }
   console.log(`[contracts] phase0 FEE/Cerimonial reqs=${feeReqs.size}`)
 
+  // Recupera itens presos em 'processing' por execuções anteriores que foram
+  // mortas no meio da extração (ex.: timeout do LandingAI estourando o
+  // maxDuration da função). Sem isso eles ficariam re-elegíveis para sempre,
+  // travariam o batch em 'processing' e — como o cron prioriza o batch mais
+  // antigo ainda em processing — bloqueariam todos os batches seguintes.
+  // Janela de 6 min > maxDuration (5 min): só recupera órfãos de execuções já
+  // mortas, nunca um item em extração por uma execução concorrente.
+  const orfaoLimite = new Date(Date.now() - 6 * 60 * 1000).toISOString()
+  await db
+    .from('contract_validation_items')
+    .update({
+      status: 'erro',
+      status_resumo: 'Extração interrompida (timeout) — marcada como erro',
+      status_motivos: ['Extração não concluiu dentro do tempo limite'],
+      error_log: 'Extração interrompida por timeout (item preso em processing)',
+      processed_at: new Date().toISOString(),
+    })
+    .eq('batch_id', batchId)
+    .eq('status', 'processing')
+    .lt('processed_at', orfaoLimite)
+
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
     .from('contract_validation_items')
@@ -157,7 +178,7 @@ export async function processBatch(
     )
     .eq('batch_id', batchId)
     .is('tipo_documento', null)
-    .neq('status', 'erro')
+    .eq('status', 'pending')
     .order('created_at', { ascending: true })
 
   const pendingList = (pendingExtraction ?? []) as Array<
@@ -188,6 +209,15 @@ export async function processBatch(
       console.log(`[contracts] maxItems=${maxItems} reached, breaking extraction loop`)
       break
     }
+    // Reserva o item antes de extrair: se a função morrer durante o LandingAI
+    // (timeout > maxDuration), o item fica em 'processing' (não volta a
+    // 'pending') e é recuperado como 'erro' na próxima execução — em vez de
+    // ser re-tentado indefinidamente e travar o batch.
+    await db
+      .from('contract_validation_items')
+      .update({ status: 'processing', processed_at: new Date().toISOString() })
+      .eq('id', item.id)
+
     const itemStart = Date.now()
     console.log(`[contracts] extracting req=${item.requisicao_codigo} link=${item.link_contrato.slice(0, 80)}`)
     try {
@@ -199,6 +229,10 @@ export async function processBatch(
       const { error: updateErr } = await db
         .from('contract_validation_items')
         .update({
+          // Volta a 'pending' (foi reservado como 'processing'): a fase de
+          // validação só processa itens extraídos que estejam em 'pending'.
+          status: 'pending',
+          processed_at: new Date().toISOString(),
           tipo_documento: normalized.tipo_documento,
           data_baile: extraction.raw.data_baile || null,
           data_contrato: normalized.data_contrato || null,
