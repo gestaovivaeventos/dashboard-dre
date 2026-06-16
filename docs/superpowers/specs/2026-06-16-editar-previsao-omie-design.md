@@ -141,7 +141,10 @@ CNAB/boleto) **mais** `codigo_lancamento_omie` como identificador. Não envia
   recebe o código da previsão editada.
 - UI de Contas a Pagar: badge própria para `previsao_editada` ("Previsão
   editada").
-- `ctrl_history`: ação registra "Previsão editada no Omie (código N)".
+- O registro do caso fica no próprio `omie_launch_status = previsao_editada` +
+  `omie_contapagar_codigo` (não há entrada extra em `ctrl_history`: o
+  `launchRequestToOmie` não tem o contexto do usuário, e o `sendToPayment` já
+  grava o histórico "enviado_pagamento" por requisição).
 
 ## Erros / bordas
 
