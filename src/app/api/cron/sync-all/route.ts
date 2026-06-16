@@ -20,6 +20,43 @@ function isAuthorized(request: Request) {
   return header === `Bearer ${secret}`;
 }
 
+// Quantas empresas sincronizam em paralelo. Antes o cron processava todas
+// em serie dentro de uma unica invocacao de 300s; conforme o volume cresceu,
+// o tempo total passou de 5 min e a Vercel matava a funcao no meio do loop —
+// as empresas no fim da ordem alfabetica (Terrazzo, Viva *) deixavam de
+// sincronizar silenciosamente (sem erro no sync_log, sem e-mail de alerta).
+// Rodar em pool concorrente divide o tempo total por ~CONCURRENCY. E seguro:
+// runCompanySyncAsSystem e autocontido (client + throttle proprios) e cada
+// empresa usa credenciais Omie distintas (rate-limit por app_key).
+// Ajustavel via env; este e o hotfix ate o fan-out definitivo (1 invocacao
+// por empresa), que remove de vez o teto compartilhado de 300s.
+const SYNC_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.SYNC_CONCURRENCY ?? "4") || 4,
+);
+
+// Pool de concorrencia: N workers consomem a fila de itens ate esvaziar.
+// Mantem no maximo `limit` execucoes simultaneas.
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const runners = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) break;
+        await worker(items[index], index);
+      }
+    },
+  );
+  await Promise.all(runners);
+}
+
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -52,7 +89,11 @@ export async function GET(request: Request) {
     error?: string;
   }> = [];
 
-  for (const company of companies ?? []) {
+  // Empresas rodam em pool concorrente (ver SYNC_CONCURRENCY). Os push em
+  // failures/unmappedCategories/results sao seguros: o event loop do Node e
+  // single-thread, entao nao ha escrita concorrente real nos arrays — cada
+  // worker so toca os arrays entre awaits.
+  await runWithConcurrency(companies ?? [], SYNC_CONCURRENCY, async (company) => {
     const companyId = company.id as string;
     const companyName = company.name as string;
 
@@ -86,7 +127,7 @@ export async function GET(request: Request) {
         error: message,
       });
     }
-  }
+  });
 
   // Auditoria de lancamentos invisiveis no dashboard apos os syncs:
   // varre os ultimos 90 dias de TODAS as empresas ativas. Se aparecer
