@@ -1401,7 +1401,8 @@ export async function previewPrevisaoMatches(
 
 export async function sendToPayment(
   requestIds: string[],
-  payingCompanyId: string
+  payingCompanyId: string,
+  decisoes?: Record<string, number | "novo">,
 ) {
   const ctx = await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
 
@@ -1455,7 +1456,9 @@ export async function sendToPayment(
   const results: { id: string; ok?: boolean; status?: string; error?: string }[] = [];
 
   for (const id of requestIds) {
-    const res = await launchRequestToOmie(supabase, id, payingCompanyId);
+    const decisao = decisoes?.[id];
+    const previsaoCodigo = typeof decisao === "number" ? decisao : undefined;
+    const res = await launchRequestToOmie(supabase, id, payingCompanyId, previsaoCodigo);
     if ("error" in res) {
       // Persist error on the request (covers mapping-incomplete and other pre-launch errors)
       await supabase
