@@ -27,6 +27,34 @@ export async function extractContract(documentUrl: string): Promise<ContractExtr
   }
 }
 
+/**
+ * Junta o CPF/CNPJ do favorecido + todos os encontrados no documento,
+ * deduplicando por dígitos (mantém a primeira grafia vista). A validação de
+ * CPF/CNPJ casa contra esta lista, então o favorecido da requisição pode ser um
+ * documento diferente do contratante desde que apareça no contrato.
+ *
+ * Compartilhado entre a extração (normalizeExtraction) e a reidratação a partir
+ * do `raw_extraction` salvo no banco (process-batch).
+ */
+export function mergeCpfCnpj(
+  principal: string | null | undefined,
+  encontrados: string[] | null | undefined,
+): string[] {
+  const resultado: string[] = []
+  const vistos = new Set<string>()
+  const lista = Array.isArray(encontrados) ? encontrados : []
+  for (const candidato of [principal, ...lista]) {
+    const texto = (candidato ?? '').toString().trim()
+    if (!texto) continue
+    const digitos = texto.replace(/\D/g, '')
+    const chave = digitos || texto.toLowerCase()
+    if (vistos.has(chave)) continue
+    vistos.add(chave)
+    resultado.push(texto)
+  }
+  return resultado
+}
+
 export function normalizeExtraction(raw: ContractExtraction): ExtractedContract {
   // The Gemini prompt asks for up to 10 installments. We capture all of them
   // so the partial-payment detection in analisarRequisicao can match any.
@@ -64,6 +92,9 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     tipo_documento: (raw.tipo_documento ?? '').toString().trim() || null,
     fornecedor: (raw.favorecido?.nome ?? '').toString().trim() || null,
     cpf_cnpj: (raw.favorecido?.cpf_cnpj ?? '').toString().trim() || null,
+    cpf_cnpj_todos: mergeCpfCnpj(raw.favorecido?.cpf_cnpj, raw.cpf_cnpj_encontrados),
+    numero_documento: (raw.numero_documento ?? '').toString().trim() || null,
+    chave_acesso: (raw.chave_acesso ?? '').toString().trim() || null,
     conta: (raw.favorecido?.conta ?? '').toString().trim() || null,
     valor_contrato: parseValor(raw.valor_contrato) || null,
     valores_pagamentos: valoresPagamentos,

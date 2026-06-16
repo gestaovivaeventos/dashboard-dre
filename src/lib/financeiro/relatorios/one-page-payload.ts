@@ -3,8 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildDashboardRows,
   fetchAllDreAccountRows,
-  filterCoreDreAccounts,
-  type DreAccountBase,
+  scopeDreAccounts,
+  type RawDreAccount,
 } from "@/lib/dashboard/dre";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
@@ -173,33 +173,20 @@ export async function buildOnePagePayload(
   const isFranquiasViva = segmentSlug === "franquias-viva";
 
   // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
-  const allAccounts = await fetchAllDreAccountRows<DreAccountBase & { company_id: string | null }>(
-    (from, to) =>
-      supabase
-        .from("dre_accounts")
-        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
-        .eq("active", true)
-        .order("code")
-        .range(from, to),
+  const allAccounts = await fetchAllDreAccountRows<RawDreAccount>((from, to) =>
+    supabase
+      .from("dre_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active,company_id")
+      .eq("active", true)
+      .order("code")
+      .range(from, to),
   );
-  const hasCustomPlan = allAccounts.some((a) => a.company_id === companyId);
-  const scopedAccounts: DreAccountBase[] = allAccounts
-    .filter((a) =>
-      hasCustomPlan ? a.company_id === companyId : a.company_id === null,
-    )
-    .map((a) => ({
-      id: a.id,
-      code: a.code,
-      name: a.name,
-      parent_id: a.parent_id,
-      level: a.level,
-      type: a.type,
-      is_summary: a.is_summary,
-      formula: a.formula,
-      sort_order: a.sort_order,
-      active: a.active,
-    }));
-  const accounts = filterCoreDreAccounts(scopedAccounts);
+  // Escopo + tradutor de ids identicos ao dashboard. CRITICO: a RPC
+  // `dashboard_dre_aggregate` devolve valores indexados pelo id da conta com
+  // que o agregado foi materializado (frequentemente a conta GLOBAL), mesmo
+  // quando a empresa tem plano custom. Sem traduzir rawId → code → scopedId,
+  // os valores nao casam com `accounts` (custom) e todos os KPIs zeram.
+  const { coreAccounts: accounts, translateToScopedId } = scopeDreAccounts(allAccounts, [companyId]);
 
   // -------------------------------------------------------------------------
   // 2. Agregar DRE realizado no periodo
@@ -221,10 +208,9 @@ export async function buildOnePagePayload(
   }
   const realizedMap = new Map<string, number>();
   ((realizedAgg ?? []) as AggregateRow[]).forEach((r) => {
-    realizedMap.set(
-      r.dre_account_id,
-      (realizedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
-    );
+    const scopedId = translateToScopedId(r.dre_account_id);
+    if (!scopedId) return;
+    realizedMap.set(scopedId, (realizedMap.get(scopedId) ?? 0) + Number(r.amount));
   });
 
   // -------------------------------------------------------------------------
@@ -249,10 +235,9 @@ export async function buildOnePagePayload(
     const beforeEnd =
       b.year < toYear || (b.year === toYear && b.month <= toMonth);
     if (inRange && beforeEnd) {
-      budgetMap.set(
-        b.dre_account_id,
-        (budgetMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
-      );
+      const scopedId = translateToScopedId(b.dre_account_id);
+      if (!scopedId) return;
+      budgetMap.set(scopedId, (budgetMap.get(scopedId) ?? 0) + Number(b.amount));
     }
   });
 
@@ -521,10 +506,9 @@ export async function buildOnePagePayload(
     if (!closedErr) {
       const closedMap = new Map<string, number>();
       ((closedAgg ?? []) as AggregateRow[]).forEach((r) => {
-        closedMap.set(
-          r.dre_account_id,
-          (closedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
-        );
+        const scopedId = translateToScopedId(r.dre_account_id);
+        if (!scopedId) return;
+        closedMap.set(scopedId, (closedMap.get(scopedId) ?? 0) + Number(r.amount));
       });
       const { rows: closedRows } = buildDashboardRows(accounts, closedMap);
       const despesasOpTotal = Math.abs(
@@ -727,10 +711,9 @@ export async function buildOnePagePayload(
         mMap = new Map();
         budgetMaps.set(key, mMap);
       }
-      mMap.set(
-        b.dre_account_id,
-        (mMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
-      );
+      const scopedId = translateToScopedId(b.dre_account_id);
+      if (!scopedId) return;
+      mMap.set(scopedId, (mMap.get(scopedId) ?? 0) + Number(b.amount));
     });
 
     const realizedPerMonth = await Promise.all(
@@ -764,10 +747,9 @@ export async function buildOnePagePayload(
         }
         const map = new Map<string, number>();
         rows.forEach((r) => {
-          map.set(
-            r.dre_account_id,
-            (map.get(r.dre_account_id) ?? 0) + Number(r.amount),
-          );
+          const scopedId = translateToScopedId(r.dre_account_id);
+          if (!scopedId) return;
+          map.set(scopedId, (map.get(scopedId) ?? 0) + Number(r.amount));
         });
         return { year: m.year, month: m.month, map };
       }),
@@ -818,10 +800,9 @@ export async function buildOnePagePayload(
 
   const ytdRealizedMap = new Map<string, number>();
   ((ytdRealizedAgg ?? []) as AggregateRow[]).forEach((r) => {
-    ytdRealizedMap.set(
-      r.dre_account_id,
-      (ytdRealizedMap.get(r.dre_account_id) ?? 0) + Number(r.amount),
-    );
+    const scopedId = translateToScopedId(r.dre_account_id);
+    if (!scopedId) return;
+    ytdRealizedMap.set(scopedId, (ytdRealizedMap.get(scopedId) ?? 0) + Number(r.amount));
   });
 
   const { data: ytdBudgetRows } = await supabase
@@ -833,10 +814,9 @@ export async function buildOnePagePayload(
 
   const ytdBudgetMap = new Map<string, number>();
   ((ytdBudgetRows ?? []) as BudgetRow[]).forEach((b) => {
-    ytdBudgetMap.set(
-      b.dre_account_id,
-      (ytdBudgetMap.get(b.dre_account_id) ?? 0) + Number(b.amount),
-    );
+    const scopedId = translateToScopedId(b.dre_account_id);
+    if (!scopedId) return;
+    ytdBudgetMap.set(scopedId, (ytdBudgetMap.get(scopedId) ?? 0) + Number(b.amount));
   });
 
   const { rows: ytdRealizedRows } = buildDashboardRows(accounts, ytdRealizedMap);

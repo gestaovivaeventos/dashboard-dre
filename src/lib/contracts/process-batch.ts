@@ -8,11 +8,11 @@
 // the next run picks up where it left off because extraction is keyed off
 // "tipo_documento IS NULL".
 
-import { extractContract } from './extract'
+import { extractContract, mergeCpfCnpj } from './extract'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
 import { analisarRequisicao, isFeeCerimonial, type RequisitionDocument } from './validate'
-import type { ValidationStatus } from './types'
+import type { ContractExtraction, ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 interface BatchRow {
@@ -38,6 +38,9 @@ interface ItemRow {
   extracted_valor_contrato: number | string | null
   extracted_pagamentos: number[] | null
   extracted_vencimentos: string[] | null
+  // JSON cru da extração (contém cpf_cnpj_encontrados — todos os CPF/CNPJ do
+  // documento). Reidratado para reconstruir cpf_cnpj_todos na validação.
+  raw_extraction: ContractExtraction | null
   assinatura_contratante: string | null
   assinatura_contratado: string | null
   status: ValidationStatus | 'pending' | 'processing'
@@ -146,6 +149,27 @@ export async function processBatch(
   }
   console.log(`[contracts] phase0 FEE/Cerimonial reqs=${feeReqs.size}`)
 
+  // Recupera itens presos em 'processing' por execuções anteriores que foram
+  // mortas no meio da extração (ex.: timeout do LandingAI estourando o
+  // maxDuration da função). Sem isso eles ficariam re-elegíveis para sempre,
+  // travariam o batch em 'processing' e — como o cron prioriza o batch mais
+  // antigo ainda em processing — bloqueariam todos os batches seguintes.
+  // Janela de 6 min > maxDuration (5 min): só recupera órfãos de execuções já
+  // mortas, nunca um item em extração por uma execução concorrente.
+  const orfaoLimite = new Date(Date.now() - 6 * 60 * 1000).toISOString()
+  await db
+    .from('contract_validation_items')
+    .update({
+      status: 'erro',
+      status_resumo: 'Extração interrompida (timeout) — marcada como erro',
+      status_motivos: ['Extração não concluiu dentro do tempo limite'],
+      error_log: 'Extração interrompida por timeout (item preso em processing)',
+      processed_at: new Date().toISOString(),
+    })
+    .eq('batch_id', batchId)
+    .eq('status', 'processing')
+    .lt('processed_at', orfaoLimite)
+
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
     .from('contract_validation_items')
@@ -154,7 +178,7 @@ export async function processBatch(
     )
     .eq('batch_id', batchId)
     .is('tipo_documento', null)
-    .neq('status', 'erro')
+    .eq('status', 'pending')
     .order('created_at', { ascending: true })
 
   const pendingList = (pendingExtraction ?? []) as Array<
@@ -185,6 +209,15 @@ export async function processBatch(
       console.log(`[contracts] maxItems=${maxItems} reached, breaking extraction loop`)
       break
     }
+    // Reserva o item antes de extrair: se a função morrer durante o LandingAI
+    // (timeout > maxDuration), o item fica em 'processing' (não volta a
+    // 'pending') e é recuperado como 'erro' na próxima execução — em vez de
+    // ser re-tentado indefinidamente e travar o batch.
+    await db
+      .from('contract_validation_items')
+      .update({ status: 'processing', processed_at: new Date().toISOString() })
+      .eq('id', item.id)
+
     const itemStart = Date.now()
     console.log(`[contracts] extracting req=${item.requisicao_codigo} link=${item.link_contrato.slice(0, 80)}`)
     try {
@@ -196,6 +229,10 @@ export async function processBatch(
       const { error: updateErr } = await db
         .from('contract_validation_items')
         .update({
+          // Volta a 'pending' (foi reservado como 'processing'): a fase de
+          // validação só processa itens extraídos que estejam em 'pending'.
+          status: 'pending',
+          processed_at: new Date().toISOString(),
           tipo_documento: normalized.tipo_documento,
           data_baile: extraction.raw.data_baile || null,
           data_contrato: normalized.data_contrato || null,
@@ -249,7 +286,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, raw_extraction',
     )
     .eq('batch_id', batchId)
 
@@ -308,6 +345,12 @@ export async function processBatch(
       tipo_documento: i.tipo_documento,
       fornecedor: i.extracted_fornecedor,
       cpf_cnpj: i.extracted_cpf_cnpj,
+      // Todos os CPF/CNPJ do documento, reconstruídos do raw_extraction salvo.
+      // Itens antigos sem cpf_cnpj_encontrados caem só no principal (retrocompat).
+      cpf_cnpj_todos: mergeCpfCnpj(i.extracted_cpf_cnpj, i.raw_extraction?.cpf_cnpj_encontrados),
+      // Idoneidade fiscal reidratada do raw_extraction (sem coluna dedicada).
+      numero_documento: (i.raw_extraction?.numero_documento ?? '').toString().trim() || null,
+      chave_acesso: (i.raw_extraction?.chave_acesso ?? '').toString().trim() || null,
       conta: i.extracted_conta,
       valor_contrato: Number(i.extracted_valor_contrato) || null,
       valores_pagamentos: i.extracted_pagamentos ?? [],

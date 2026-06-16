@@ -31,6 +31,14 @@ export interface ContractExtraction {
     agencia: string
     conta: string
   }
+  // Todos os CPF/CNPJ presentes no documento (contratante, contratado,
+  // favorecido, etc.). A IA varre o documento inteiro — a validação aprova se o
+  // CPF/CNPJ da requisição casar com QUALQUER um destes, não só o favorecido.
+  cpf_cnpj_encontrados?: string[]
+  // Idoneidade do documento fiscal (NF/Fatura/Boleto). Usados na Faixa 2-B:
+  // documento fiscal avulso precisa de número ou chave de acesso.
+  numero_documento?: string
+  chave_acesso?: string
   valor_contrato: string
   // pagamentoX_obs: registra a porcentagem original quando a parcela veio como
   // "% do contrato" (o valor calculado fica em pagamentoX_valor).
@@ -93,7 +101,15 @@ export interface RequisitionInput {
 export interface ExtractedContract {
   tipo_documento: string | null
   fornecedor: string | null
+  // CPF/CNPJ "principal" (do favorecido). Mantido para exibição/retrocompat.
   cpf_cnpj: string | null
+  // TODOS os CPF/CNPJ do documento, já incluindo o principal. A validação de
+  // CPF/CNPJ casa contra esta lista (o favorecido da requisição pode ser um
+  // CNPJ/CPF diferente do contratante, desde que conste no documento).
+  cpf_cnpj_todos: string[]
+  // Idoneidade fiscal (Faixa 2-B). null quando não extraído.
+  numero_documento: string | null
+  chave_acesso: string | null
   conta: string | null
   valor_contrato: number | null
   valores_pagamentos: number[]
