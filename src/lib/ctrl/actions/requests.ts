@@ -1305,6 +1305,98 @@ export async function batchApproveRequests(
   };
 }
 
+// ─── Preview de previsões (antes de enviar para pagamento) ──────────────────
+
+export interface PrevisaoMatch {
+  requestId: string;
+  requestNumber: number;
+  supplierName: string;
+  amount: number;
+  dueDate: string | null;
+  previsao:
+    | { codigo: number; valorAtual: number; vencimento: string; observacao: string }
+    | null;
+}
+
+export async function previewPrevisaoMatches(
+  requestIds: string[],
+  payingCompanyId: string,
+): Promise<{ ok: true; matches: PrevisaoMatch[] } | { error: string }> {
+  await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+  if (!payingCompanyId) return { error: "Empresa pagadora é obrigatória." };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: company } = await supabase
+    .from("companies")
+    .select("id, omie_app_key, omie_app_secret")
+    .eq("id", payingCompanyId)
+    .maybeSingle();
+
+  if (!company?.omie_app_key || !company?.omie_app_secret) {
+    return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
+  const { decryptSecret } = await import("@/lib/security/encryption");
+  const { findPrevisaoContaPagar } = await import("@/lib/omie/contapagar");
+  const appKey = decryptSecret(company.omie_app_key as string);
+  const appSecret = decryptSecret(company.omie_app_secret as string);
+
+  const { data: reqs } = await supabase
+    .from("ctrl_requests")
+    .select(
+      "id, request_number, amount, due_date, reference_year, reference_month, supplier_id, ctrl_suppliers(name, cnpj_cpf)",
+    )
+    .in("id", requestIds)
+    .eq("status", "aprovado");
+
+  const matches: PrevisaoMatch[] = [];
+  for (const r of reqs ?? []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sup = (r as any).ctrl_suppliers as { name?: string; cnpj_cpf?: string } | null;
+    const dueDateIso: string =
+      (r.due_date as string | null) ??
+      `${r.reference_year}-${String(r.reference_month).padStart(2, "0")}-01`;
+
+    let previsao: PrevisaoMatch["previsao"] = null;
+    if (sup?.cnpj_cpf) {
+      try {
+        const p = await findPrevisaoContaPagar(
+          appKey,
+          appSecret,
+          sup.cnpj_cpf,
+          dueDateIso,
+          Number(r.amount),
+        );
+        // findPrevisaoContaPagar usa `codigoLancamentoOmie`; o tipo de UI usa `codigo`.
+        previsao = p
+          ? {
+              codigo: p.codigoLancamentoOmie,
+              valorAtual: p.valorAtual,
+              vencimento: p.vencimento,
+              observacao: p.observacao,
+            }
+          : null;
+      } catch {
+        // Best-effort: falha na consulta → trata como "sem previsão" (cria novo).
+        previsao = null;
+      }
+    }
+
+    matches.push({
+      requestId: r.id as string,
+      requestNumber: Number(r.request_number),
+      supplierName: sup?.name ?? "—",
+      amount: Number(r.amount),
+      dueDate: (r.due_date as string | null) ?? null,
+      previsao,
+    });
+  }
+
+  return { ok: true, matches };
+}
+
 // ─── Send to Payment ──────────────────────────────────────────────────────────
 
 export async function sendToPayment(
