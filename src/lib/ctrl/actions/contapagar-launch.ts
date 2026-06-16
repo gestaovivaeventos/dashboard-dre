@@ -203,7 +203,6 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
-    ...(request.description ? { observacao: request.description as string } : {}),
     ...(request.invoice_number
       ? {
           numero_documento: request.invoice_number as string,
@@ -232,10 +231,13 @@ export async function launchRequestToOmie(
 
   try {
     if (previsaoCodigo) {
-      // Edita a previsão existente sobrescrevendo todos os campos.
+      // Edita a previsão existente sobrescrevendo todos os campos. A observação é
+      // sempre enviada (mesmo vazia) para apagar o marcador "previsão" do título.
+      const observacao = (request.description as string | null) ?? "";
       try {
         await alterarContaPagar(appKey, appSecret, {
           ...basePayload,
+          observacao,
           codigo_lancamento_omie: previsaoCodigo,
         });
       } catch (e) {
@@ -244,6 +246,7 @@ export async function launchRequestToOmie(
           void _drop;
           await alterarContaPagar(appKey, appSecret, {
             ...noCnab,
+            observacao,
             codigo_lancamento_omie: previsaoCodigo,
           });
         } else {
@@ -273,6 +276,7 @@ export async function launchRequestToOmie(
         const payload = {
           codigo_lancamento_integracao: request.id as string,
           ...basePayload,
+          ...(request.description ? { observacao: request.description as string } : {}),
         };
         let codigoLancamentoOmie: number;
         try {
