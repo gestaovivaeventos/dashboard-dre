@@ -509,10 +509,12 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
         motivos.push('Contrato sem assinatura do contratado')
       }
 
-      // Dados bancários compatíveis com o favorecido.
+      // Dados bancários compatíveis com o favorecido. Sem conta no documento →
+      // ressalva (a conta pode estar na própria RP), não reprova. Conta presente
+      // mas divergente → reprova (divergência explícita).
       const docsComConta = docs.filter((d) => digitsOnly(d.conta))
       if (docsComConta.length === 0) {
-        motivos.push('Contrato acima de R$ 10.000 sem dados bancários no documento')
+        ressalvas.push('Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar')
       } else if (!reqConta) {
         revisar.push('Documento com conta bancária, mas a requisição está sem conta para conferência')
       } else if (!docsComConta.some((d) => digitsOnly(d.conta).includes(reqConta))) {
