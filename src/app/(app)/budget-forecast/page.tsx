@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { BudgetForecastView } from "@/components/app/budget-forecast-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
-import type { Segment } from "@/lib/supabase/types";
+import { resolveUserSegments } from "@/lib/context/user-segments";
 
 export const dynamic = "force-dynamic";
 import {
@@ -68,25 +68,12 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
         : "");
 
   // Load all segments the user can access (for the SegmentCompanyPicker).
-  // Mesmo carregamento usado em dashboard/page.tsx.
-  let segments: Segment[] = [];
-  if (profile?.role === "admin") {
-    const { data } = await supabase
-      .from("segments")
-      .select("id,name,slug,display_order,active")
-      .eq("active", true)
-      .order("display_order");
-    segments = (data as Segment[]) ?? [];
-  } else if (profile) {
-    const { data } = await supabase
-      .from("user_segment_access")
-      .select("segments(id,name,slug,display_order,active)")
-      .eq("user_id", profile.id);
-    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
-      .map((row) => row.segments)
-      .filter((s) => s && s.active)
-      .sort((a, b) => a.display_order - b.display_order);
-  }
+  // Mesmo carregamento usado em dashboard/page.tsx (com fallback por empresa).
+  const segments = await resolveUserSegments(supabase, {
+    isAdmin: profile?.role === "admin",
+    userId: profile?.id ?? null,
+    companyIds: profile?.company_ids ?? [],
+  });
 
   // URL `/s/<slug>/budget-forecast` traz pelo params; `/budget-forecast` (sem
   // segmento) recorre ao cookie `active_segment_slug` ou ao primeiro segmento
