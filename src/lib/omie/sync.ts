@@ -474,24 +474,33 @@ async function fetchProjectCatalog(
       const records = extractArray(response);
       for (const record of records) {
         // ListarProjetos retorna { nCodProj, cCodIntProj, cNome, cInativo }.
-        // nCodProj e o codigo numerico que casa com cCodProjeto dos movimentos.
-        // Mantemos chaves alternativas por robustez a variacoes de payload.
-        const code = getString(record, [
-          "nCodProj",
-          "codigo",
-          "nCodProjeto",
-          "codInt",
-          "cCodIntProj",
-        ]);
-        const name = getString(record, [
+        // O movimento (ListarMovimentos) referencia o projeto via cCodProjeto,
+        // que em algumas empresas vem como o codigo NUMERICO (nCodProj) e em
+        // outras como o codigo de INTEGRACAO (cCodIntProj). Por isso indexamos
+        // o nome do projeto sob TODAS as chaves de codigo disponiveis no
+        // registro — assim a busca projectCatalog.get(cCodProjeto) casa
+        // independentemente de qual variante a empresa usa. (Antes so o
+        // primeiro code presente — nCodProj — virava chave; quando o movimento
+        // trazia cCodIntProj, o nome nao resolvia e a regra "N.O." da Viva nao
+        // disparava, deixando lancamentos N.O. presos em Fundos.)
+        const rec = record as Record<string, unknown>;
+        const name = getString(rec, [
           "cNome",
           "nome",
           "cNomeProjeto",
           "nome_projeto",
           "descricao",
         ]);
-        if (code && name) {
-          projectsByCode.set(code, name);
+        if (!name) continue;
+        for (const key of [
+          "nCodProj",
+          "codigo",
+          "nCodProjeto",
+          "codInt",
+          "cCodIntProj",
+        ]) {
+          const codeVariant = getString(rec, [key]);
+          if (codeVariant) projectsByCode.set(codeVariant, name);
         }
       }
       totalPages = Number(
@@ -1127,8 +1136,39 @@ async function syncEntries({
           }
         }
 
-        // Redirecionar entries com cCodProjeto preenchido.
-        // Reconstroi o array entries com category_code alterado onde necessario.
+        // Roteamento DETERMINISTICO das 4 linhas de ressarciveis.
+        //
+        // Para CADA lancamento de uma categoria ressarcivel (detectada pelo
+        // nome canonico no catalogo), reescrevemos o category_code para uma
+        // sintetica que aponta exatamente para a conta DRE correta, conforme
+        // o projeto vinculado:
+        //
+        //   • projeto OPERACIONAL (cCodProjeto preenchido e nome != "N.O.")
+        //       → Fundos: 5.8 (receita) / 5.9 (despesa)  — grupo "custos com
+        //         servicos prestados". Prefixo __fundos_rec_/__fundos_desp_.
+        //   • SEM projeto  OU  projeto "N.O." (nao-operacional)
+        //       → ressarcivel comum: 2.4 (receita) / 7.5.5 (despesa) — grupos
+        //         "outras receitas/despesas". Prefixo __ressarc_rec_/__ressarc_desp_.
+        //
+        // Por que rotear TAMBEM o caso "comum" (em vez de so manter o
+        // category_code original)? Porque o mapeamento-base da categoria na
+        // tela de mapeamento pode apontar para Fundos (5.8/5.9) — caso real da
+        // viva go, onde "Despesas/Receitas Ressarciveis" estao vinculadas a
+        // 5.9/5.8. Se apenas mantivessemos o codigo original, os lancamentos
+        // sem projeto e os "N.O." cairiam em Fundos junto com os operacionais,
+        // e a linha "outras despesas/receitas" ficaria zerada. Roteando para a
+        // conta canonica (2.4/7.5.5, ja resolvida em effectiveMapping/dreIdByCode
+        // com escopo da empresa) garantimos a separacao correta INDEPENDENTE do
+        // vinculo-base — sem alterar a tela de mapeamento. Para empresas ja
+        // configuradas com base = 2.4/7.5.5 o destino e o MESMO (no-op visivel).
+        //
+        // Exceção "N.O.": nome do projeto vem do catalogo da Omie
+        // (ListarProjetos) via `projectCatalog` (cCodProjeto → nome). Predicado
+        // literal/case-sensitive por "N.O." (N . O .), mesma semantica da regra
+        // da Feat Producoes (dre_entry_excluded_by_project). `replace(/^\s+/,"")`
+        // ignora apenas espacos a esquerda. Catalogo indisponivel (nome null) →
+        // projeto tratado como operacional → Fundos (default seguro, preserva o
+        // comportamento historico de quando o nome nao resolve).
         const fundosMappingsNeeded = new Map<string, { code: string; dreId: string; name: string }>();
         const newEntries: typeof entries = [];
 
@@ -1137,45 +1177,48 @@ async function syncEntries({
             newEntries.push(entry);
             continue;
           }
-          const mappedDreId = effectiveMapping.get(entry.category_code);
-          if (!mappedDreId) {
+          const canonicalRessarcId = effectiveMapping.get(entry.category_code);
+          if (!canonicalRessarcId) {
             newEntries.push(entry);
             continue;
           }
+          const isReceita = canonicalRessarcId === recRessarcId;
 
           const raw = entry.raw_json ?? {};
           const det = (typeof raw.detalhes === "object" && raw.detalhes !== null)
             ? (raw.detalhes as Record<string, unknown>)
             : raw;
           const projeto = getString(det, ["cCodProjeto"]);
+          const projetoNome = projeto ? (projectCatalog.get(projeto) ?? null) : null;
+          const isOperacional =
+            !!projeto &&
+            !(projetoNome !== null && projetoNome.replace(/^\s+/, "").startsWith("N.O."));
 
-          if (!projeto) {
-            // sem projeto → manter mapeamento normal
-            newEntries.push(entry);
-            continue;
-          }
-
-          // Com projeto → redirecionar para Fundos
-          let fundosId: string;
+          let targetDreId: string;
           let prefix: string;
           let label: string;
-          if (mappedDreId === recRessarcId) {
-            fundosId = fundosRecId;
-            prefix = "__fundos_rec_";
-            label = "Receitas Ressarciveis - Fundos (projeto)";
+          if (isOperacional) {
+            // projeto operacional → Fundos (custos com servicos prestados)
+            targetDreId = isReceita ? fundosRecId : fundosDespId;
+            prefix = isReceita ? "__fundos_rec_" : "__fundos_desp_";
+            label = isReceita
+              ? "Receitas Ressarciveis - Fundos (projeto)"
+              : "Despesas Ressarciveis - Fundos (projeto)";
           } else {
-            fundosId = fundosDespId;
-            prefix = "__fundos_desp_";
-            label = "Despesas Ressarciveis - Fundos (projeto)";
+            // sem projeto OU projeto "N.O." → ressarcivel comum (outras rec/desp)
+            targetDreId = canonicalRessarcId;
+            prefix = isReceita ? "__ressarc_rec_" : "__ressarc_desp_";
+            label = isReceita
+              ? "Receitas Ressarciveis (sem projeto/N.O.)"
+              : "Despesas Ressarciveis (sem projeto/N.O.)";
           }
 
           const newCode = `${prefix}${entry.category_code}`;
-          // Criar novo entry com category_code atualizado
           const redirected = Object.assign({}, entry, { category_code: newCode });
           newEntries.push(redirected);
 
           if (!fundosMappingsNeeded.has(newCode)) {
-            fundosMappingsNeeded.set(newCode, { code: newCode, dreId: fundosId, name: label });
+            fundosMappingsNeeded.set(newCode, { code: newCode, dreId: targetDreId, name: label });
           }
         }
 
