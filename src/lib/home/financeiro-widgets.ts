@@ -4,7 +4,6 @@ import {
   aggregateDreRows,
   findResultadoExercicio,
   loadScopedDreAccounts,
-  resolveAllowedCompanyIds,
 } from "@/lib/dashboard/dre";
 import { buildCashFlowRows, previousMonth } from "@/lib/dashboard/cash-flow";
 import type { CashFlowAccountBase } from "@/lib/dashboard/cash-flow";
@@ -77,9 +76,25 @@ async function allowedCompanies(
   supabase: SupabaseClient,
   profile: FinProfile,
 ): Promise<string[]> {
-  const { data } = await supabase.from("companies").select("id").eq("active", true);
-  const ids = (data ?? []).map((c) => c.id as string);
-  return resolveAllowedCompanyIds(supabase, profile, ids);
+  const { data: allData } = await supabase.from("companies").select("id").eq("active", true);
+  const allIds = (allData ?? []).map((c) => c.id as string);
+
+  // admin enxerga todas; demais consultam user_company_access.
+  if (profile.role === "admin") return allIds;
+
+  const { data: accessData } = await supabase
+    .from("user_company_access")
+    .select("company_id")
+    .eq("user_id", profile.id);
+  const accessIds = (accessData ?? []).map((r) => r.company_id as string);
+
+  if (accessIds.length > 0) return allIds.filter((id) => accessIds.includes(id));
+
+  // franqueado usa company_ids do perfil como fallback
+  if (profile.company_ids.length > 0)
+    return allIds.filter((id) => profile.company_ids.includes(id));
+
+  return [];
 }
 
 // KPIs do grupo (ou das empresas que o usuário enxerga): receita líquida,
