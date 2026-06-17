@@ -22,6 +22,17 @@ type LaunchResult =
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
+// Remove a palavra "previsão"/"previsao" (singular e plural, case/acento-insensível)
+// da observação ao converter uma previsão recorrente no lançamento real, e limpa
+// separadores/espaços que sobrem nas pontas.
+function removerPrevisao(texto: string): string {
+  return texto
+    .replace(/previs[õo]es|previs[ãa]o/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s\-–—:.,]+|[\s\-–—:.,]+$/g, "")
+    .trim();
+}
+
 // Anexa um arquivo do storage à conta a pagar do Omie. Best-effort: falha aqui
 // não derruba o lançamento (o título já existe).
 async function anexarNoOmie(
@@ -244,8 +255,9 @@ export async function launchRequestToOmie(
   try {
     if (previsaoCodigo) {
       // Edita a previsão existente sobrescrevendo todos os campos. A observação é
-      // sempre enviada (mesmo vazia) para apagar o marcador "previsão" do título.
-      const observacao = (request.description as string | null) ?? "";
+      // sempre enviada (mesmo vazia) e tem a palavra "previsão" removida — o
+      // título deixa de ser uma previsão ao virar o lançamento real.
+      const observacao = removerPrevisao((request.description as string | null) ?? "");
       try {
         await alterarContaPagar(appKey, appSecret, {
           ...basePayload,
