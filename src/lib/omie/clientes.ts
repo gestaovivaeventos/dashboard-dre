@@ -42,7 +42,10 @@ function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown
     payload.dadosBancarios = {
       codigo_banco: onlyDigits(supplier.banco),
       agencia: supplier.agencia ?? "",
-      conta_corrente: onlyDigits(supplier.conta_corrente),
+      // Conta crua (preserva o traço/dígito verificador). onlyDigits grudava o
+      // dígito no número (ex.: "20377589-9" → "203775899"), parecendo incompleto
+      // no Omie. A agência já vai crua; a conta segue o mesmo padrão.
+      conta_corrente: (supplier.conta_corrente ?? "").trim(),
       doc_titular: onlyDigits(supplier.doc_titular) || doc,
       nome_titular: supplier.titular_banco ?? supplier.name,
       cChavePix: chavePix,
