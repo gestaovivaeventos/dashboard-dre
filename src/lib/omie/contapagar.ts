@@ -182,6 +182,18 @@ export async function alterarContaPagar(
   return { codigoLancamentoOmie: code };
 }
 
+// Exclui um título (usado para remover a previsão recorrente após criar o
+// título real na substituição).
+export async function excluirContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+): Promise<void> {
+  await omieCall(CONTAPAGAR_URL, "ExcluirContaPagar", appKey, appSecret, {
+    codigo_lancamento_omie: codigoLancamentoOmie,
+  });
+}
+
 // dd/mm/aaaa a partir de 'YYYY-MM-DD'
 export function toOmieDate(iso: string): string {
   const [y, m, d] = iso.split("-");

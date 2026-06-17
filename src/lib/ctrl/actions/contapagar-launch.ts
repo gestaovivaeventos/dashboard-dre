@@ -10,8 +10,8 @@ import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/client
 import {
   findContaPagarByCnpjValor,
   incluirContaPagar,
-  alterarContaPagar,
   alterarContaPagarCategoria,
+  excluirContaPagar,
   toOmieDate,
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
@@ -263,31 +263,39 @@ export async function launchRequestToOmie(
 
   try {
     if (previsaoCodigo) {
-      // Edita a previsão existente sobrescrevendo todos os campos. A observação é
-      // sempre enviada (mesmo vazia) e tem a palavra "previsão" removida — o
-      // título deixa de ser uma previsão ao virar o lançamento real.
+      // Substituição de previsão: o Omie NÃO substitui a observação de título
+      // recorrente (RPTP) via AlterarContaPagar — ele mantém o texto da
+      // recorrência ("PREVISÃO - ...") e só anexa o nosso. Então, em vez de
+      // editar, criamos um título novo (observação limpa = descrição, sem a
+      // palavra "previsão") e excluímos a previsão recorrente.
       const observacao = removerPrevisao((request.description as string | null) ?? "");
+      const payload = {
+        codigo_lancamento_integracao: request.id as string,
+        ...basePayload,
+        ...(observacao ? { observacao } : {}),
+      };
+      let novoCodigo: number;
       try {
-        await alterarContaPagar(appKey, appSecret, {
-          ...basePayload,
-          observacao,
-          codigo_lancamento_omie: previsaoCodigo,
-        });
+        ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, payload));
       } catch (e) {
-        if (isBarcodeError(e) && "cnab_integracao_bancaria" in basePayload) {
-          const { cnab_integracao_bancaria: _drop, ...noCnab } = basePayload;
+        if (isBarcodeError(e) && "cnab_integracao_bancaria" in payload) {
+          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
           void _drop;
-          await alterarContaPagar(appKey, appSecret, {
-            ...noCnab,
-            observacao,
-            codigo_lancamento_omie: previsaoCodigo,
-          });
+          ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, noCnab));
         } else {
           throw e;
         }
       }
+      // Exclui a previsão recorrente DEPOIS de criar o título real (best-effort):
+      // se a exclusão falhar, fica um duplicado para limpeza manual, mas nunca se
+      // perde o lançamento.
+      try {
+        await excluirContaPagar(appKey, appSecret, previsaoCodigo);
+      } catch (e) {
+        console.error("[contapagar] título criado mas falha ao excluir previsão:", e);
+      }
       omieStatus = "previsao_editada";
-      omieCode = previsaoCodigo;
+      omieCode = novoCodigo;
     } else {
       const found = await findContaPagarByCnpjValor(
         appKey,
@@ -376,7 +384,7 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("paying_company_id, omie_launch_status, omie_contapagar_codigo")
+    .select("paying_company_id")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -384,18 +392,13 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
     return { error: "Requisição sem empresa pagadora." };
   }
 
-  // Se já havia editado uma previsão, reusa o mesmo título no reenvio (não cria
-  // duplicata).
-  const previsaoCodigo =
-    req.omie_launch_status === "previsao_editada" && req.omie_contapagar_codigo
-      ? Number(req.omie_contapagar_codigo)
-      : undefined;
-
+  // Reenvio não repassa previsaoCodigo: a substituição de previsão (criar título
+  // + excluir a previsão) só ocorre no envio inicial pelo diálogo. No reenvio a
+  // previsão já foi consumida; segue o fluxo normal de lançamento.
   const result = await launchRequestToOmie(
     supabase,
     requestId,
     req.paying_company_id as string,
-    previsaoCodigo,
   );
 
   revalidatePath("/ctrl/contas-a-pagar");
