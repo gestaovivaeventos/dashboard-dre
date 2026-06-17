@@ -1032,6 +1032,61 @@ export async function answerComplement(requestId: string, answer: string) {
   return { ok: true };
 }
 
+// Retorna a última pergunta de complementação feita pelo aprovador, para o
+// solicitante saber o que responder. Usa admin client (a RLS de ctrl_history não
+// expõe a linha do aprovador ao solicitante); a autorização é por papel + dono.
+export async function getComplementQuestion(
+  requestId: string,
+): Promise<{ question: string | null; askedBy: string | null } | { error: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("created_by")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string }>();
+
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const { data: hist } = await supabase
+    .from("ctrl_history")
+    .select("comment, user_id, created_at")
+    .eq("request_id", requestId)
+    .eq("action", "complementacao_solicitada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ comment: string | null; user_id: string; created_at: string }>();
+
+  if (!hist) return { question: null, askedBy: null };
+
+  const { data: asker } = await supabase
+    .from("users")
+    .select("name, email")
+    .eq("id", hist.user_id)
+    .maybeSingle<{ name: string | null; email: string | null }>();
+
+  return {
+    question: hist.comment,
+    askedBy: asker?.name ?? asker?.email ?? null,
+  };
+}
+
 // ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────
 //
 // Diferente do fluxo de aprovacao (requestInfo/answerComplement), este e' usado

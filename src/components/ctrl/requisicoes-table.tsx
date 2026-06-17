@@ -1,8 +1,8 @@
 "use client";
 
-import { Eye, FileText, MessageCircle, X } from "lucide-react";
+import { Eye, FileText, Loader2, MessageCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import {
@@ -10,7 +10,11 @@ import {
   fmt,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
-import { getRequestAttachmentUrl } from "@/lib/ctrl/actions/requests";
+import {
+  answerComplement,
+  getComplementQuestion,
+  getRequestAttachmentUrl,
+} from "@/lib/ctrl/actions/requests";
 
 interface Props {
   requests: RequestDetail[];
@@ -27,6 +31,12 @@ export function RequisicoesTable({ requests }: Props) {
     number: number;
     title: string;
     mode: "answer" | "view";
+  } | null>(null);
+  // Modal de resposta à complementação pedida pelo aprovador.
+  const [complementModal, setComplementModal] = useState<{
+    id: string;
+    number: number;
+    title: string;
   } | null>(null);
 
   async function openAttachment(requestId: string) {
@@ -122,6 +132,7 @@ export function RequisicoesTable({ requests }: Props) {
             <tbody>
               {filtered.map((req) => {
                 const hasPaymentInfo = req.status === "info_pagamento_pendente";
+                const needsComplement = req.status === "aguardando_complementacao";
                 return (
                   <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-muted-foreground">
@@ -152,6 +163,23 @@ export function RequisicoesTable({ requests }: Props) {
                           <Eye className="h-3.5 w-3.5" />
                           Detalhes
                         </button>
+                        {needsComplement && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setComplementModal({
+                                id: req.id,
+                                number: req.request_number,
+                                title: req.title,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60"
+                            title="Responder à pergunta do aprovador"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            Responder
+                          </button>
+                        )}
                         {hasPaymentInfo && (
                           <button
                             type="button"
@@ -205,6 +233,143 @@ export function RequisicoesTable({ requests }: Props) {
           onSubmitted={() => router.refresh()}
         />
       )}
+
+      {complementModal && (
+        <ComplementModal
+          requestId={complementModal.id}
+          requestNumber={complementModal.number}
+          requestTitle={complementModal.title}
+          onClose={() => setComplementModal(null)}
+          onSubmitted={() => {
+            setComplementModal(null);
+            router.refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Responder complementação (pergunta do aprovador) ──────────────────────────
+
+function ComplementModal({
+  requestId,
+  requestNumber,
+  requestTitle,
+  onClose,
+  onSubmitted,
+}: {
+  requestId: string;
+  requestNumber: number;
+  requestTitle: string;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [question, setQuestion] = useState<string | null>(null);
+  const [askedBy, setAskedBy] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [answer, setAnswer] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    let active = true;
+    getComplementQuestion(requestId).then((res) => {
+      if (!active) return;
+      if ("error" in res) {
+        setError(res.error);
+      } else {
+        setQuestion(res.question);
+        setAskedBy(res.askedBy);
+      }
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [requestId]);
+
+  function handleSubmit() {
+    if (!answer.trim()) return;
+    startTransition(async () => {
+      const res = await answerComplement(requestId, answer);
+      if (res && "error" in res && res.error) {
+        setError(res.error);
+        return;
+      }
+      onSubmitted();
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-lg rounded-xl border bg-background shadow-lg">
+        <div className="border-b px-6 py-4 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold">Responder — Requisição #{requestNumber}</h3>
+            <p className="text-sm text-muted-foreground">{requestTitle}</p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Fechar"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4">
+          {error && (
+            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          {/* Pergunta do aprovador */}
+          <div className="rounded-lg border bg-muted/30 px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Pergunta do aprovador{askedBy ? ` · ${askedBy}` : ""}
+            </p>
+            {loading ? (
+              <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando...
+              </p>
+            ) : (
+              <p className="mt-1 whitespace-pre-wrap text-sm">
+                {question ?? "Sem pergunta registrada."}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Sua resposta</label>
+            <textarea
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              rows={4}
+              placeholder="Digite a resposta para o aprovador..."
+              className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+        </div>
+
+        <div className="border-t px-6 py-4 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isPending || !answer.trim()}
+            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            {isPending ? "Enviando..." : "Enviar Resposta"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
