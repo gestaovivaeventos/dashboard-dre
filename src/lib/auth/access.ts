@@ -5,25 +5,17 @@ export type { DreRole as UserRole };
 
 // ─── Novo modelo: acesso por perfil unificado ───────────────────────────────
 
-/**
- * Para onde mandar o usuário no pós-login (ou quando tenta acessar uma rota
- * proibida). A regra de prioridade:
- *   1. Validador de contrato → /contratos (sempre)
- *   2. Sem nenhum módulo → /pendente (caso degenerado)
- *   3. Tem Financeiro → /dashboard
- *   4. Só Compras → /ctrl/requisicoes
- *   5. Admin sem módulos marcados → /dashboard como fallback
- */
 export function defaultLandingFor(
   profile: UserProfileType,
   canFinanceiro: boolean,
   canCompras: boolean,
 ): string {
+  // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
+  // Franqueado: mantém /dashboard até o Plano 2 entregar o widget Mini-DRE dele.
   if (profile === "franqueado") return "/dashboard";
-  if (profile === "admin") return canFinanceiro || !canCompras ? "/dashboard" : "/ctrl/requisicoes";
-  if (canFinanceiro) return "/dashboard";
-  if (canCompras) return "/ctrl/requisicoes";
+  // Demais perfis com algum módulo → cockpit /home.
+  if (canFinanceiro || canCompras || profile === "admin") return "/home";
   return "/pendente";
 }
 
