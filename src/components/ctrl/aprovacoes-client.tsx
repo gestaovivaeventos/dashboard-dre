@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   approveRequest,
@@ -70,6 +71,7 @@ interface Props {
 }
 
 export function AprovacoesClient({ requests, ctrlRoles }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ req: Req; mode: "reject" | "info" | "reverse" | "detail" | "answer" } | null>(null);
@@ -136,7 +138,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
     startTransition(async () => {
       const res = await fn() as { ok?: boolean; error?: string } | undefined;
       if (res && "error" in res && res.error) { notify(res.error, false); }
-      else { closeModal(); notify("Ação realizada com sucesso."); setSelected(new Set()); }
+      else { closeModal(); notify("Ação realizada com sucesso."); setSelected(new Set()); router.refresh(); }
     });
   }
 
@@ -212,6 +214,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
           {tabRequests.map((req) => {
             const sector = resolve(req.ctrl_sectors);
             const expType = resolve(req.ctrl_expense_types);
+            const supplier = resolve(req.ctrl_suppliers);
             const actionable = canActOn(req);
             const canSelectThis = activeTab === "pendente" && actionable;
             const isNivel3 = req.approval_tier === "nivel_3";
@@ -243,6 +246,11 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                           </span>
                         )}
                       </div>
+                      {supplier && (
+                        <p className="mt-0.5 text-xs font-medium text-foreground/80">
+                          {supplier.name}
+                        </p>
+                      )}
                       <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                         <span>{fmt.format(req.amount)}</span>
                         {sector && <span>{sector.name}</span>}

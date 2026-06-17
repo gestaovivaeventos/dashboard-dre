@@ -34,6 +34,11 @@ const APPROVAL_ROUTING = {
     expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
     managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
   },
+  // Setor cujas requisições vão sempre direto ao diretor, mesmo com orçamento
+  // aprovado (pula o gerente). Notifica todos os diretores.
+  directorSector: {
+    sectorId: "306ef9b3-7895-446d-b9d3-5537942627b2", // Diretoria
+  },
 } as const;
 
 export interface BudgetVerification {
@@ -339,11 +344,14 @@ export async function createRequest(data: CreateRequestInput) {
 
   // Solicitante especial pula o gerente e vai direto ao diretor.
   const directorOnly = ctx.id === APPROVAL_ROUTING.directorOnly.requesterId;
-  const approvalTier: ApprovalTier = directorOnly
+  // Setor Diretoria vai sempre direto ao diretor, independente do orçamento.
+  const directorSectorOnly = data.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+  const forceDirector = directorOnly || directorSectorOnly;
+  const approvalTier: ApprovalTier = forceDirector
     ? "nivel_3"
     : verification?.approvalTier ?? "nivel_2";
   // Sem auto-aprovação: toda requisição entra pendente.
-  const initialStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+  const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
   // Installments
   const isInstallment =
@@ -471,15 +479,18 @@ export async function createRequest(data: CreateRequestInput) {
       .single();
 
     // Etapa inicial e quem notificar. Sem auto-aprovação.
-    const stage: "gerente" | "diretor" = directorOnly ? "diretor" : "gerente";
+    const stage: "gerente" | "diretor" = forceDirector ? "diretor" : "gerente";
     let explicitApproverIds: string[] | undefined;
     if (directorOnly) {
       explicitApproverIds = [APPROVAL_ROUTING.directorOnly.directorId];
     } else if (
+      !forceDirector &&
       data.expense_type_id === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
     ) {
       explicitApproverIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
     }
+    // Setor Diretoria (directorSectorOnly): stage 'diretor' sem explicitApproverIds
+    // → notifyPendingApproval avisa todos os diretores.
 
     await notifyPendingApproval({
       requestId: newReq.id,
@@ -515,10 +526,10 @@ export async function createRequest(data: CreateRequestInput) {
           inst.year
         );
       }
-      const instTier: ApprovalTier = directorOnly
+      const instTier: ApprovalTier = forceDirector
         ? "nivel_3"
         : instVerification?.approvalTier ?? "nivel_2";
-      const instStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+      const instStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: instReq } = await supabase
         .from("ctrl_requests")
@@ -572,10 +583,10 @@ export async function createRequest(data: CreateRequestInput) {
           data.reference_year
         );
       }
-      const monthTier: ApprovalTier = directorOnly
+      const monthTier: ApprovalTier = forceDirector
         ? "nivel_3"
         : monthVerification?.approvalTier ?? "nivel_2";
-      const monthStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+      const monthStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: recReq } = await supabase
         .from("ctrl_requests")
@@ -675,9 +686,10 @@ export async function getRequests(filters?: {
   let query = supabase
     .from("ctrl_requests")
     .select(
-      `*, ctrl_sectors(name), ctrl_expense_types(name), ctrl_suppliers(name, cnpj_cpf),
+      `*, ctrl_sectors(name), ctrl_expense_types(name),
+       ctrl_suppliers(name, cnpj_cpf, chave_pix, banco, agencia, conta_corrente, titular_banco),
        creator:users!ctrl_requests_created_by_fkey(name, email),
-       approver:users!ctrl_requests_approved_by_fkey(name)`
+       approver:users!ctrl_requests_approved_by_fkey(name, email)`
     )
     .order("created_at", { ascending: false });
 

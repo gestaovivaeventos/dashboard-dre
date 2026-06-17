@@ -1,36 +1,51 @@
 "use client";
 
-import { FileText, MessageCircle, X } from "lucide-react";
+import { Eye, FileText, MessageCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
-
-interface RequisicaoRow {
-  id: string;
-  request_number: number;
-  title: string;
-  amount: number;
-  due_date: string | null;
-  status: string;
-  created_at: string;
-}
+import {
+  RequestDetailModal,
+  fmt,
+  type RequestDetail,
+} from "@/components/ctrl/request-detail-modal";
+import { getRequestAttachmentUrl } from "@/lib/ctrl/actions/requests";
 
 interface Props {
-  requests: RequisicaoRow[];
+  requests: RequestDetail[];
 }
-
-const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function RequisicoesTable({ requests }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [detail, setDetail] = useState<RequestDetail | null>(null);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [infoModal, setInfoModal] = useState<{
     id: string;
     number: number;
     title: string;
     mode: "answer" | "view";
   } | null>(null);
+
+  async function openAttachment(requestId: string) {
+    setAttachmentLoading(true);
+    setAttachmentError(null);
+    try {
+      const result = await getRequestAttachmentUrl(requestId);
+      if ("error" in result && result.error) {
+        setAttachmentError(result.error);
+        setTimeout(() => setAttachmentError(null), 4000);
+        return;
+      }
+      if ("url" in result && result.url) {
+        window.open(result.url, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setAttachmentLoading(false);
+    }
+  }
 
   // Filter by request number (exact prefix), title (substring), or status label.
   // Search is case-insensitive. Number-only search matches the request_number.
@@ -123,27 +138,39 @@ export function RequisicoesTable({ requests }: Props) {
                       <StatusBadge status={req.status} />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {new Date(req.created_at).toLocaleDateString("pt-BR")}
+                      {req.created_at
+                        ? new Date(req.created_at).toLocaleDateString("pt-BR")
+                        : "—"}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {hasPaymentInfo && (
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
-                          onClick={() =>
-                            setInfoModal({
-                              id: req.id,
-                              number: req.request_number,
-                              title: req.title,
-                              mode: "answer",
-                            })
-                          }
-                          className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
-                          title="Responder ao time de contas a pagar"
+                          onClick={() => setDetail(req)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
                         >
-                          <MessageCircle className="h-3.5 w-3.5" />
-                          Responder
+                          <Eye className="h-3.5 w-3.5" />
+                          Detalhes
                         </button>
-                      )}
+                        {hasPaymentInfo && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setInfoModal({
+                                id: req.id,
+                                number: req.request_number,
+                                title: req.title,
+                                mode: "answer",
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                            title="Responder ao time de contas a pagar"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" />
+                            Responder
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -151,6 +178,21 @@ export function RequisicoesTable({ requests }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {attachmentError && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground shadow-lg">
+          {attachmentError}
+        </div>
+      )}
+
+      {detail && (
+        <RequestDetailModal
+          req={detail}
+          onClose={() => setDetail(null)}
+          onOpenAttachment={openAttachment}
+          attachmentLoading={attachmentLoading}
+        />
       )}
 
       {infoModal && (
