@@ -100,14 +100,26 @@ export async function launchRequestToOmie(
 
   const { data: ccRow } = await supabase
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente")
+    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao")
     .eq("company_id", companyId)
     .maybeSingle();
+
+  // Conta corrente por método: dinheiro→caixa físico, cartão→cartão; ambos com
+  // fallback para a conta padrão. Demais métodos usam a padrão.
+  const ccPadrao = (ccRow?.codigo_conta_corrente as string | number | null) ?? null;
+  const ccCaixa = (ccRow?.codigo_conta_corrente_caixa as string | number | null) ?? null;
+  const ccCartao = (ccRow?.codigo_conta_corrente_cartao as string | number | null) ?? null;
+  const codigoContaCorrenteResolved =
+    request.payment_method === "dinheiro"
+      ? (ccCaixa ?? ccPadrao)
+      : request.payment_method === "cartao_credito"
+      ? (ccCartao ?? ccPadrao)
+      : ccPadrao;
 
   const missing: string[] = [];
   if (!catRow?.codigo_categoria) missing.push("categoria");
   if (!depRow?.codigo_departamento) missing.push("departamento");
-  if (!ccRow?.codigo_conta_corrente) missing.push("conta corrente");
+  if (!codigoContaCorrenteResolved) missing.push("conta corrente");
 
   if (missing.length > 0) {
     return {
@@ -117,7 +129,7 @@ export async function launchRequestToOmie(
 
   const codigoCategoria = catRow!.codigo_categoria as string;
   const codigoDepartamento = depRow!.codigo_departamento as string;
-  const codigoContaCorrente = ccRow!.codigo_conta_corrente as string | number;
+  const codigoContaCorrente = codigoContaCorrenteResolved as string | number;
 
   // 3. Credenciais
   if (!company.omie_app_key || !company.omie_app_secret) {
