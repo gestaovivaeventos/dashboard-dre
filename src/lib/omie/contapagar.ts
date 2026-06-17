@@ -135,7 +135,11 @@ export async function findPrevisaoContaPagar(
       const venc = String(t.data_vencimento ?? ""); // dd/mm/aaaa
       const [, vm, vy] = venc.split("/");
       const mesmoMes = vm === mes && vy === ano;
-      const ehPrevisao = normalize(String(t.observacao ?? "")).includes("previsao");
+      // Previsão recorrente nativa do Omie (id_origem 'RPTP', cuja observação
+      // costuma vir vazia) OU título marcado manualmente com "previsão" na obs.
+      const ehPrevisao =
+        String(t.id_origem ?? "") === "RPTP" ||
+        normalize(String(t.observacao ?? "")).includes("previsao");
       if (mesmoMes && ehPrevisao) candidatos.push(t);
     }
     total = Number(data.total_de_paginas ?? 1);
