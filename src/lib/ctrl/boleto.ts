@@ -83,3 +83,29 @@ export function isValidBoletoLinhaDigitavel(input: string): boolean {
   if (d.length === 48) return validarArrecadacao(d);
   return false;
 }
+
+// Converte o código de barras BANCÁRIO (44 dígitos) na linha digitável (47).
+// Os DVs mod10 dos 3 campos são recalculados; o DV geral (mod11) vem embutido no
+// código de barras (posição 5), então validar a linha resultante confere a
+// integridade da leitura do código de barras. Arrecadação (inicia em 8) → null.
+export function barcodeToLinhaDigitavel(input: string): string | null {
+  const b = onlyDigits(input);
+  if (b.length !== 44) return null;
+  if (b[0] === "8") return null; // arrecadação: conversão diferente, sem ganho de validação
+
+  const banco = b.slice(0, 3);
+  const moeda = b.slice(3, 4);
+  const dvGeral = b.slice(4, 5);
+  const fatorValor = b.slice(5, 19); // fator vencimento (4) + valor (10) = 14
+  const campoLivre = b.slice(19, 44); // 25
+
+  const c1 = banco + moeda + campoLivre.slice(0, 5); // 9
+  const c2 = campoLivre.slice(5, 15); // 10
+  const c3 = campoLivre.slice(15, 25); // 10
+
+  const campo1 = c1 + mod10(c1);
+  const campo2 = c2 + mod10(c2);
+  const campo3 = c3 + mod10(c3);
+
+  return campo1 + campo2 + campo3 + dvGeral + fatorValor; // 10+11+11+1+14 = 47
+}
