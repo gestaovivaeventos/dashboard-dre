@@ -468,7 +468,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       observations: (form.get("observations") as string) || undefined,
       event_id: (form.get("event_id") as string) || undefined,
       supplier_issues_invoice: supplierIssuesInvoice || undefined,
-      invoice_number: invoiceNumber.trim() || undefined,
+      invoice_number:
+        supplierIssuesInvoice === "sim_apos_pagamento"
+          ? "após pagamento"
+          : invoiceNumber.trim() || undefined,
       bank_name: bankName || undefined,
       bank_agency: bankAgency || undefined,
       bank_account: bankAccount || undefined,

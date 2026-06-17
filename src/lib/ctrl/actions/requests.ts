@@ -1582,7 +1582,12 @@ export async function verifyBudget(
     return { error: "Preencha setor, tipo de despesa e valor para verificar." };
   }
   await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
-  const supabase = await createClient();
+  // Usa o admin client (igual ao createRequest): a RLS de ctrl_budget só libera
+  // leitura para admin/gerente/diretor/csc/contas_a_pagar — um solicitante via
+  // client com RLS veria orçamento zerado e a verificação mostraria "não consta"
+  // / tier errado, divergindo do que a criação (admin) de fato calcula.
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
   return performBudgetVerification(
     supabase,
     sectorId,
