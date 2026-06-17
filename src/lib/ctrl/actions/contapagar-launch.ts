@@ -66,7 +66,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode, attachment_path, invoice_attachment_path",
+      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -97,10 +97,19 @@ export async function launchRequestToOmie(
   // 2. Resolve mapeamentos
   const { data: catRow } = await supabase
     .from("ctrl_expense_type_omie_categoria")
-    .select("codigo_categoria")
+    .select("codigo_categoria, codigo_categoria_sem_nota")
     .eq("expense_type_id", request.expense_type_id)
     .eq("company_id", companyId)
     .maybeSingle();
+
+  // Categoria depende de ter nota fiscal: "nao" usa a categoria sem nota (com
+  // fallback para a com nota); "sim"/"sim_apos_pagamento"/vazio usam a com nota.
+  const catComNota = (catRow?.codigo_categoria as string | null) ?? null;
+  const catSemNota = (catRow?.codigo_categoria_sem_nota as string | null) ?? null;
+  const codigoCategoriaResolved =
+    request.supplier_issues_invoice === "nao"
+      ? (catSemNota ?? catComNota)
+      : catComNota;
 
   const { data: depRow } = await supabase
     .from("ctrl_sector_omie_departamento")
@@ -128,7 +137,7 @@ export async function launchRequestToOmie(
       : ccPadrao;
 
   const missing: string[] = [];
-  if (!catRow?.codigo_categoria) missing.push("categoria");
+  if (!codigoCategoriaResolved) missing.push("categoria");
   if (!depRow?.codigo_departamento) missing.push("departamento");
   if (!codigoContaCorrenteResolved) missing.push("conta corrente");
 
@@ -138,7 +147,7 @@ export async function launchRequestToOmie(
     };
   }
 
-  const codigoCategoria = catRow!.codigo_categoria as string;
+  const codigoCategoria = codigoCategoriaResolved as string;
   const codigoDepartamento = depRow!.codigo_departamento as string;
   const codigoContaCorrente = codigoContaCorrenteResolved as string | number;
 
