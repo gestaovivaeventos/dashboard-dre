@@ -15,7 +15,8 @@ export type PaymentMethod =
   | "pix"
   | "transferencia"
   | "cartao_credito"
-  | "dinheiro";
+  | "dinheiro"
+  | "pix_copia_cola";
 
 export type ApprovalTier = "nivel_2" | "nivel_3";
 

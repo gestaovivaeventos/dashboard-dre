@@ -112,6 +112,8 @@ export interface OmieMappingData {
   expenseMap: Record<string, string>; // expenseTypeId → codigoCategoria
   sectorMap: Record<string, string>; // sectorId → codigoDepartamento
   contaCorrente: string | null;
+  contaCorrenteCaixa: string | null;
+  contaCorrenteCartao: string | null;
   lastSyncedAt: string | null;
 }
 
@@ -182,7 +184,7 @@ export async function getOmieMappingData(
   // Conta corrente config
   const { data: ccConfig, error: ccErr } = await db
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente")
+    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao")
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -207,6 +209,8 @@ export async function getOmieMappingData(
     expenseMap,
     sectorMap,
     contaCorrente: ccConfig?.codigo_conta_corrente ?? null,
+    contaCorrenteCaixa: ccConfig?.codigo_conta_corrente_caixa ?? null,
+    contaCorrenteCartao: ccConfig?.codigo_conta_corrente_cartao ?? null,
     lastSyncedAt,
   };
 }
@@ -292,16 +296,24 @@ export async function saveSectorDepartamento(
 export async function saveContaCorrente(
   companyId: string,
   codigo: string | null,
+  tipo: "padrao" | "caixa" | "cartao" = "padrao",
 ): Promise<{ ok: true } | { error: string }> {
   await requireCtrlRole("admin", "csc", "contas_a_pagar");
   const db = createAdminClient();
+
+  const coluna =
+    tipo === "caixa"
+      ? "codigo_conta_corrente_caixa"
+      : tipo === "cartao"
+      ? "codigo_conta_corrente_cartao"
+      : "codigo_conta_corrente";
 
   const { error } = await db
     .from("ctrl_company_omie_config")
     .upsert(
       {
         company_id: companyId,
-        codigo_conta_corrente: codigo ?? null,
+        [coluna]: codigo ?? null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "company_id" },
