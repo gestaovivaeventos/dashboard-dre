@@ -224,8 +224,8 @@ export async function launchRequestToOmie(
     `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
   const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
 
-  // Nº do documento = número da requisição do ControlHub.
-  const numeroDocumento = String(request.request_number ?? "");
+  // Nº do pedido (Omie) = número da requisição do ControlHub.
+  const numeroPedido = String(request.request_number ?? "");
   // Campo "Nota Fiscal" do Omie (numero_documento_fiscal) conforme o status de NF:
   //   nao → "SEM NOTA FISCAL"; sim_apos_pagamento → "APÓS PAGAMENTO";
   //   sim/demais → número da NF informado.
@@ -247,7 +247,7 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
-    ...(numeroDocumento ? { numero_documento: numeroDocumento } : {}),
+    ...(numeroPedido ? { numero_pedido: numeroPedido } : {}),
     ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
     ...(request.payment_method === "boleto" && request.barcode
       ? {

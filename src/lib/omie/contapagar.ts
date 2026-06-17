@@ -56,6 +56,7 @@ export interface ContaPagarPayload {
   observacao?: string;
   numero_documento?: string;
   numero_documento_fiscal?: string;
+  numero_pedido?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cnab_integracao_bancaria?: any;
 }
