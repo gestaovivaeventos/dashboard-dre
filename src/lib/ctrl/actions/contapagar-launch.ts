@@ -323,8 +323,10 @@ export async function launchRequestToOmie(
   await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.attachment_path as string | null);
   await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.invoice_attachment_path as string | null);
 
-  // 7. Atualizar ctrl_requests
-  await supabase
+  // 7. Atualizar ctrl_requests. Não ignora o erro do update: o título já foi
+  // lançado/editado no Omie, então uma falha aqui (ex.: valor fora de um CHECK)
+  // não pode passar silenciosa — vira erro visível para reenvio/inspeção.
+  const { error: updErr } = await supabase
     .from("ctrl_requests")
     .update({
       omie_launch_status: omieStatus,
@@ -334,6 +336,13 @@ export async function launchRequestToOmie(
       updated_at: new Date().toISOString(),
     })
     .eq("id", requestId);
+
+  if (updErr) {
+    console.error("[contapagar] título no Omie OK mas falha ao gravar status:", updErr.message);
+    return {
+      error: `Lançado no Omie (código ${omieCode}), mas falha ao gravar o status: ${updErr.message}`,
+    };
+  }
 
   return { ok: true, status: omieStatus };
 }
