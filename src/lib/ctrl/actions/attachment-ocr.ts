@@ -7,9 +7,13 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
-import { parseDocumentWithLandingAI } from "@/lib/contracts/landingai";
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
+
+// gpt-4o (visão) lê o documento direto — boletos exigem OCR preciso da linha
+// digitável (47-48 dígitos), o que o pipeline LandingAI→markdown não entregava
+// bem. A validação (isValidBoletoLinhaDigitavel) ainda barra leitura ruim.
+const OCR_MODEL = "gpt-4o";
 
 // Resultado da leitura. Campos por tipo de documento; ambos opcionais porque a
 // leitura é best-effort — o que não for lido fica para preenchimento manual.
@@ -42,6 +46,19 @@ const BoletoSchema = z.object({
     .describe("CNPJ ou CPF do beneficiário/cedente. Null se não encontrar."),
 });
 
+// Imagens vão como `image` part; PDF como `file` part. Outros formatos (docx
+// etc.) não são lidos por visão — retorna null e o cliente cai no manual.
+function detectMediaType(path: string, blobType: string | undefined): string | null {
+  const t = (blobType ?? "").toLowerCase();
+  if (t.startsWith("image/") || t === "application/pdf") return t;
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "application/pdf";
+  if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) {
+    return `image/${ext === "jpg" ? "jpeg" : ext}`;
+  }
+  return null;
+}
+
 // Lê um anexo já enviado ao bucket e extrai campos conforme o tipo:
 //   - "nota"   → número da nota fiscal
 //   - "boleto" → linha digitável + favorecido + CNPJ/CPF do beneficiário
@@ -57,46 +74,70 @@ export async function extractAttachmentData(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
 
-  // URL assinada para o LandingAI baixar o documento (bucket é privado).
+  // Baixa os bytes do anexo (bucket privado) para mandar direto ao GPT visão.
   const admin = createAdminClientIfAvailable() ?? (await createClient());
-  const { data: signed, error: signErr } = await admin.storage
+  const { data: blob, error: dlErr } = await admin.storage
     .from(ATTACHMENT_BUCKET)
-    .createSignedUrl(attachmentPath, 60 * 5);
-  if (signErr || !signed?.signedUrl) {
+    .download(attachmentPath);
+  if (dlErr || !blob) {
     return { error: "Não foi possível acessar o anexo para leitura." };
   }
 
-  let markdown: string;
-  try {
-    const parsed = await parseDocumentWithLandingAI(signed.signedUrl, { timeoutMs: 60_000 });
-    markdown = parsed.markdown;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { error: `Falha ao ler o documento: ${msg}` };
+  const mediaType = detectMediaType(attachmentPath, blob.type);
+  if (!mediaType) {
+    return { error: "Formato não suportado para leitura automática (use PDF ou imagem)." };
   }
+
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  const docPart =
+    mediaType === "application/pdf"
+      ? { type: "file" as const, data: bytes, mediaType }
+      : { type: "image" as const, image: bytes };
 
   const provider = createOpenAI({ apiKey });
 
   try {
     if (kind === "nota") {
       const { object } = await generateObject({
-        model: provider("gpt-4o-mini"),
+        model: provider(OCR_MODEL),
         schema: NotaSchema,
-        prompt:
-          "Extraia o número da nota fiscal do documento abaixo (markdown extraído de um PDF/imagem de NF-e). " +
-          "Se houver a chave de acesso de 44 dígitos, o número da nota são os dígitos 26 a 34 (nNF).\n\n" +
-          markdown.slice(0, 12000),
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text:
+                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia o número da nota fiscal. " +
+                  "Se houver a chave de acesso de 44 dígitos, o número da nota são os dígitos 26 a 34 (nNF).",
+              },
+              docPart,
+            ],
+          },
+        ],
       });
       return { data: { invoice_number: cleanInvoice(object.invoice_number) } };
     }
 
     const { object } = await generateObject({
-      model: provider("gpt-4o-mini"),
+      model: provider(OCR_MODEL),
       schema: BoletoSchema,
-      prompt:
-        "Extraia os dados do boleto bancário do documento abaixo (markdown extraído de um PDF/imagem). " +
-        "Quero a linha digitável (ou código de barras), o nome do beneficiário/cedente e o CNPJ/CPF dele.\n\n" +
-        markdown.slice(0, 12000),
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "Leia este boleto bancário (imagem ou PDF) e extraia: a linha digitável " +
+                "(47-48 dígitos) ou, na falta dela, o código de barras (44 dígitos) — retorne só os números; " +
+                "o nome do beneficiário/cedente (quem recebe); e o CNPJ/CPF dele. " +
+                "Leia os dígitos com atenção, sem inventar.",
+            },
+            docPart,
+          ],
+        },
+      ],
     });
     return {
       data: {
