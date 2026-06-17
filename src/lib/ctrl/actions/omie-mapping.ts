@@ -109,7 +109,8 @@ export interface OmieMappingData {
   contasCorrentes: OmieOption[];
   expenseTypes: { id: string; name: string }[];
   sectors: { id: string; name: string }[];
-  expenseMap: Record<string, string>; // expenseTypeId → codigoCategoria
+  expenseMap: Record<string, string>; // expenseTypeId → codigoCategoria (com NF)
+  expenseMapSemNota: Record<string, string>; // expenseTypeId → codigoCategoria (sem NF)
   sectorMap: Record<string, string>; // sectorId → codigoDepartamento
   contaCorrente: string | null;
   contaCorrenteCaixa: string | null;
@@ -165,10 +166,10 @@ export async function getOmieMappingData(
 
   if (secErr) return { error: secErr.message };
 
-  // Expense → categoria mapping
+  // Expense → categoria mapping (com nota fiscal / sem nota fiscal)
   const { data: expMapRaw, error: emErr } = await db
     .from("ctrl_expense_type_omie_categoria")
-    .select("expense_type_id, codigo_categoria")
+    .select("expense_type_id, codigo_categoria, codigo_categoria_sem_nota")
     .eq("company_id", companyId);
 
   if (emErr) return { error: emErr.message };
@@ -191,8 +192,11 @@ export async function getOmieMappingData(
   if (ccErr) return { error: ccErr.message };
 
   const expenseMap: Record<string, string> = {};
+  const expenseMapSemNota: Record<string, string> = {};
   for (const row of expMapRaw ?? []) {
-    expenseMap[row.expense_type_id] = row.codigo_categoria;
+    if (row.codigo_categoria) expenseMap[row.expense_type_id] = row.codigo_categoria;
+    if (row.codigo_categoria_sem_nota)
+      expenseMapSemNota[row.expense_type_id] = row.codigo_categoria_sem_nota;
   }
 
   const sectorMap: Record<string, string> = {};
@@ -207,6 +211,7 @@ export async function getOmieMappingData(
     expenseTypes: (expenseTypesRaw ?? []).map((r) => ({ id: r.id, name: r.name })),
     sectors: (sectorsRaw ?? []).map((r) => ({ id: r.id, name: r.name })),
     expenseMap,
+    expenseMapSemNota,
     sectorMap,
     contaCorrente: ccConfig?.codigo_conta_corrente ?? null,
     contaCorrenteCaixa: ccConfig?.codigo_conta_corrente_caixa ?? null,
@@ -221,33 +226,29 @@ export async function saveExpenseTypeCategoria(
   companyId: string,
   expenseTypeId: string,
   codigoCategoria: string | null,
+  tipo: "com_nota" | "sem_nota" = "com_nota",
 ): Promise<{ ok: true } | { error: string }> {
   await requireCtrlRole("admin", "csc", "contas_a_pagar");
   const db = createAdminClient();
 
-  if (!codigoCategoria) {
-    const { error } = await db
-      .from("ctrl_expense_type_omie_categoria")
-      .delete()
-      .eq("expense_type_id", expenseTypeId)
-      .eq("company_id", companyId);
+  // Cada tipo de despesa tem duas categorias (com/sem nota fiscal) na mesma
+  // linha. Upsert da coluna do tipo escolhido — sem apagar a outra. Valor vazio
+  // grava null naquela coluna (a linha permanece para a outra categoria).
+  const coluna = tipo === "sem_nota" ? "codigo_categoria_sem_nota" : "codigo_categoria";
 
-    if (error) return { error: error.message };
-  } else {
-    const { error } = await db
-      .from("ctrl_expense_type_omie_categoria")
-      .upsert(
-        {
-          expense_type_id: expenseTypeId,
-          company_id: companyId,
-          codigo_categoria: codigoCategoria,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "expense_type_id,company_id" },
-      );
+  const { error } = await db
+    .from("ctrl_expense_type_omie_categoria")
+    .upsert(
+      {
+        expense_type_id: expenseTypeId,
+        company_id: companyId,
+        [coluna]: codigoCategoria || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "expense_type_id,company_id" },
+    );
 
-    if (error) return { error: error.message };
-  }
+  if (error) return { error: error.message };
 
   revalidatePath("/ctrl/admin/omie-mapeamento");
   return { ok: true };
