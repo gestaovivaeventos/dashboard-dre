@@ -78,18 +78,28 @@ export function OmieMapeamentoClient({ companies }: Props) {
     });
   }
 
-  function handleContaCorrente(codigo: string) {
+  function handleContaCorrente(
+    codigo: string,
+    tipo: "padrao" | "caixa" | "cartao" = "padrao",
+  ) {
     if (!companyId || !data) return;
-    const prev = data.contaCorrente;
-    setData({ ...data, contaCorrente: codigo || null });
+    const campo =
+      tipo === "caixa"
+        ? "contaCorrenteCaixa"
+        : tipo === "cartao"
+        ? "contaCorrenteCartao"
+        : "contaCorrente";
+    const feedbackId = `cc_${tipo}`;
+    const prev = data[campo];
+    setData({ ...data, [campo]: codigo || null });
     startTransition(async () => {
-      const res = await saveContaCorrente(companyId, codigo || null);
+      const res = await saveContaCorrente(companyId, codigo || null, tipo);
       if ("error" in res) {
-        setData({ ...data, contaCorrente: prev });
-        setSaveFeedback({ id: "cc", ok: false, msg: res.error });
+        setData({ ...data, [campo]: prev });
+        setSaveFeedback({ id: feedbackId, ok: false, msg: res.error });
       } else {
-        setSaveFeedback({ id: "cc", ok: true, msg: "Salvo" });
-        setTimeout(() => setSaveFeedback((f) => (f?.id === "cc" ? null : f)), 2000);
+        setSaveFeedback({ id: feedbackId, ok: true, msg: "Salvo" });
+        setTimeout(() => setSaveFeedback((f) => (f?.id === feedbackId ? null : f)), 2000);
       }
     });
   }
@@ -228,30 +238,80 @@ export function OmieMapeamentoClient({ companies }: Props) {
 
           {!isEmpty && (
             <>
-              {/* ── Conta OmieCash ───────────────────────────────────── */}
+              {/* ── Contas OmieCash por método ───────────────────────── */}
               <section className="space-y-3">
-                <h2 className="text-base font-semibold">Conta OmieCash</h2>
-                <div className="flex items-center gap-3">
-                  <select
-                    value={data.contaCorrente ?? suggestedCc?.codigo ?? ""}
-                    onChange={(e) => handleContaCorrente(e.target.value)}
-                    disabled={isPending}
-                    className={INPUT_CLS + " max-w-sm"}
-                  >
-                    <option value="">— não mapeado —</option>
-                    {data.contasCorrentes.map((cc) => (
-                      <option key={cc.codigo} value={cc.codigo}>
-                        {cc.descricao}
-                      </option>
-                    ))}
-                  </select>
-                  {saveFeedback?.id === "cc" && (
-                    <span
-                      className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}
+                <h2 className="text-base font-semibold">Contas OmieCash</h2>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Conta padrão</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={data.contaCorrente ?? suggestedCc?.codigo ?? ""}
+                      onChange={(e) => handleContaCorrente(e.target.value, "padrao")}
+                      disabled={isPending}
+                      className={INPUT_CLS + " max-w-sm"}
                     >
-                      {saveFeedback.msg}
-                    </span>
-                  )}
+                      <option value="">— não mapeado —</option>
+                      {data.contasCorrentes.map((cc) => (
+                        <option key={cc.codigo} value={cc.codigo}>
+                          {cc.descricao}
+                        </option>
+                      ))}
+                    </select>
+                    {saveFeedback?.id === "cc_padrao" && (
+                      <span className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                        {saveFeedback.msg}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Dinheiro (caixa físico)</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={data.contaCorrenteCaixa ?? ""}
+                      onChange={(e) => handleContaCorrente(e.target.value, "caixa")}
+                      disabled={isPending}
+                      className={INPUT_CLS + " max-w-sm"}
+                    >
+                      <option value="">— não mapeado —</option>
+                      {data.contasCorrentes.map((cc) => (
+                        <option key={cc.codigo} value={cc.codigo}>
+                          {cc.descricao}
+                        </option>
+                      ))}
+                    </select>
+                    {saveFeedback?.id === "cc_caixa" && (
+                      <span className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                        {saveFeedback.msg}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Cartão de crédito</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={data.contaCorrenteCartao ?? ""}
+                      onChange={(e) => handleContaCorrente(e.target.value, "cartao")}
+                      disabled={isPending}
+                      className={INPUT_CLS + " max-w-sm"}
+                    >
+                      <option value="">— não mapeado —</option>
+                      {data.contasCorrentes.map((cc) => (
+                        <option key={cc.codigo} value={cc.codigo}>
+                          {cc.descricao}
+                        </option>
+                      ))}
+                    </select>
+                    {saveFeedback?.id === "cc_cartao" && (
+                      <span className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                        {saveFeedback.msg}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </section>
 

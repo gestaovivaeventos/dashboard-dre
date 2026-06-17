@@ -296,7 +296,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   }, [dueDate]);
 
   const availableMethods = useMemo(() => {
-    const avail = new Set(["boleto", "cartao_credito", "dinheiro"]);
+    const avail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
     if (!selectedSupplier || selectedSupplier.chave_pix) avail.add("pix");
     if (!selectedSupplier || (selectedSupplier.banco && selectedSupplier.conta_corrente)) avail.add("transferencia");
     return avail;
@@ -364,7 +364,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     setPixKey(sup.chave_pix ?? "");
     setPixKeyType("");
 
-    const newAvail = new Set(["boleto", "cartao_credito", "dinheiro"]);
+    const newAvail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
     if (sup.chave_pix) newAvail.add("pix");
     if (sup.banco && sup.conta_corrente) newAvail.add("transferencia");
     if (!newAvail.has(paymentMethod)) { setPaymentMethod("boleto"); setInstallments(1); }
@@ -403,6 +403,11 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
     if (invoiceAttachmentRequired && !invoiceAttachment) {
       setError("O fornecedor emite nota fiscal — adicione a nota fiscal antes de enviar.");
+      return;
+    }
+
+    if (paymentMethod === "pix_copia_cola" && !pixKey.trim()) {
+      setError("Cole o código PIX copia e cola antes de enviar.");
       return;
     }
 
@@ -458,12 +463,15 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       due_date: dueDate || undefined,
       reference_month: refMonth,
       reference_year: refYear,
-      payment_method: paymentMethod as "boleto" | "pix" | "transferencia" | "cartao_credito" | "dinheiro",
+      payment_method: paymentMethod as "boleto" | "pix" | "transferencia" | "cartao_credito" | "dinheiro" | "pix_copia_cola",
       justification: (form.get("justification") as string) || undefined,
       observations: (form.get("observations") as string) || undefined,
       event_id: (form.get("event_id") as string) || undefined,
       supplier_issues_invoice: supplierIssuesInvoice || undefined,
-      invoice_number: invoiceNumber.trim() || undefined,
+      invoice_number:
+        supplierIssuesInvoice === "sim_apos_pagamento"
+          ? "após pagamento"
+          : invoiceNumber.trim() || undefined,
       bank_name: bankName || undefined,
       bank_agency: bankAgency || undefined,
       bank_account: bankAccount || undefined,
@@ -910,6 +918,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             { value: "transferencia", label: "Transferência" },
             { value: "cartao_credito", label: "Cartão de Crédito" },
             { value: "dinheiro", label: "Dinheiro" },
+            { value: "pix_copia_cola", label: "PIX Copia e Cola" },
           ].map((opt) => {
             const unavailable = selectedSupplier && !availableMethods.has(opt.value);
             return (
@@ -972,6 +981,24 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
             <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
           </div>
+        </div>
+      )}
+
+      {/* PIX Copia e Cola — pagamento avulso; campo editável mesmo com fornecedor */}
+      {paymentMethod === "pix_copia_cola" && (
+        <div className="space-y-1.5 rounded-lg border bg-muted/20 p-4">
+          <label htmlFor="pix_copia_cola" className={LABEL_CLS}>
+            Código PIX (copia e cola) <span className="text-destructive">*</span>
+          </label>
+          <textarea
+            id="pix_copia_cola"
+            name="pix_copia_cola"
+            rows={3}
+            value={pixKey}
+            onChange={(e) => setPixKey(e.target.value)}
+            placeholder="Cole aqui o código PIX copia e cola"
+            className={`${INPUT_CLS} resize-none font-mono text-xs`}
+          />
         </div>
       )}
 
@@ -1138,7 +1165,6 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           <option value="sim">Sim</option>
           <option value="sim_apos_pagamento">Sim, após o pagamento</option>
           <option value="nao">Não</option>
-          <option value="nao_sei">Não sei</option>
         </select>
       </div>
 
