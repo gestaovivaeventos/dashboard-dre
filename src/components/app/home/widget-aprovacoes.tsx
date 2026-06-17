@@ -51,7 +51,7 @@ export function WidgetAprovacoes({ data }: { data: HomeApprovals }) {
               <button
                 type="button"
                 onClick={() => aprovar(r.id)}
-                disabled={isPending && busyId === r.id}
+                disabled={isPending}
                 className="inline-flex shrink-0 items-center gap-1 rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
                 {isPending && busyId === r.id ? (

@@ -58,8 +58,8 @@ export function AttentionStrip({ data }: { data: HomeCtrlData }) {
         Precisa da sua atenção
       </div>
       <ul className="flex flex-wrap gap-2">
-        {items.map((it, i) => (
-          <li key={i}>
+        {items.map((it) => (
+          <li key={it.href + it.label}>
             <Link
               href={it.href}
               className="inline-flex rounded-full border border-amber-300 bg-white/70 px-3 py-1 text-xs font-medium text-amber-900 transition-colors hover:bg-white dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
