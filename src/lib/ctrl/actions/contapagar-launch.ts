@@ -66,7 +66,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -224,6 +224,18 @@ export async function launchRequestToOmie(
     `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
   const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
 
+  // Nº do documento = número da requisição do ControlHub.
+  const numeroDocumento = String(request.request_number ?? "");
+  // Campo "Nota Fiscal" do Omie (numero_documento_fiscal) conforme o status de NF:
+  //   nao → "SEM NOTA FISCAL"; sim_apos_pagamento → "APÓS PAGAMENTO";
+  //   sim/demais → número da NF informado.
+  const numeroDocumentoFiscal =
+    request.supplier_issues_invoice === "nao"
+      ? "SEM NOTA FISCAL"
+      : request.supplier_issues_invoice === "sim_apos_pagamento"
+      ? "APÓS PAGAMENTO"
+      : ((request.invoice_number as string | null) ?? "");
+
   // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
   // codigo_lancamento_omie e remove codigo_lancamento_integracao).
   const basePayload = {
@@ -235,12 +247,8 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
-    ...(request.invoice_number
-      ? {
-          numero_documento: request.invoice_number as string,
-          numero_documento_fiscal: request.invoice_number as string,
-        }
-      : {}),
+    ...(numeroDocumento ? { numero_documento: numeroDocumento } : {}),
+    ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
     ...(request.payment_method === "boleto" && request.barcode
       ? {
           cnab_integracao_bancaria: {
