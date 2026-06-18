@@ -39,12 +39,19 @@ export function deriveFinanceiroCaps(
   };
 }
 
+export interface HomeKpiPoint {
+  label: string; // mês curto (ex.: "jun")
+  receita: number;
+  despesa: number;
+  resultado: number;
+}
 export interface HomeKpis {
   receita: number;
   despesa: number;
   resultado: number;
   resultadoVariacaoPct: number | null; // vs mês anterior; null se mês anterior = 0
   mesLabel: string;
+  series: HomeKpiPoint[]; // últimos 6 meses (asc), p/ sparkline e Receita×Despesa
 }
 export interface HomeCaixa {
   caixaGeradoMes: number;
@@ -61,11 +68,31 @@ const MES_LABELS = [
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ];
 
+const MES_SHORT = [
+  "jan", "fev", "mar", "abr", "mai", "jun",
+  "jul", "ago", "set", "out", "nov", "dez",
+];
+
 function monthBounds(year: number, month: number): { from: string; to: string } {
   return {
     from: new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10),
     to: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
   };
+}
+
+// Últimos N meses (incluindo o atual), em ordem ascendente.
+function lastNMonths(n: number): { year: number; month: number }[] {
+  const now = new Date();
+  let y = now.getUTCFullYear();
+  let m = now.getUTCMonth() + 1;
+  const out: { year: number; month: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    out.unshift({ year: y, month: m });
+    const p = previousMonth(y, m);
+    y = p.year;
+    m = p.month;
+  }
+  return out;
 }
 
 function receitaLiquida(rows: { code: string; value: number }[]): number {
@@ -108,35 +135,40 @@ export async function loadKpisGrupo(
     const companyIds = await allowedCompanies(supabase, profile);
     if (companyIds.length === 0) return null;
 
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
-    const cur = monthBounds(year, month);
-    const prev = previousMonth(year, month);
-    const prevB = monthBounds(prev.year, prev.month);
-
+    const months = lastNMonths(6);
     const scope = await loadScopedDreAccounts(supabase, companyIds);
 
-    const [curRows, prevRows] = await Promise.all([
-      aggregateDreRows({ supabase, scope, companyIds, dateFrom: cur.from, dateTo: cur.to }),
-      aggregateDreRows({ supabase, scope, companyIds, dateFrom: prevB.from, dateTo: prevB.to }),
-    ]);
+    // Um único lote de 6 agregações DRE (paralelas) alimenta a série inteira:
+    // sparkline de resultado, mini-gráfico Receita×Despesa, mês atual e variação.
+    const rowsByMonth = await Promise.all(
+      months.map(({ year, month }) => {
+        const { from, to } = monthBounds(year, month);
+        return aggregateDreRows({ supabase, scope, companyIds, dateFrom: from, dateTo: to });
+      }),
+    );
 
-    const receita = receitaLiquida(curRows);
-    const resultado = findResultadoExercicio(curRows);
-    const resultadoPrev = findResultadoExercicio(prevRows);
-    const despesa = receita - resultado;
+    const series: HomeKpiPoint[] = months.map((mo, i) => {
+      const rows = rowsByMonth[i];
+      const receita = receitaLiquida(rows);
+      const resultado = findResultadoExercicio(rows);
+      return { label: MES_SHORT[mo.month - 1], receita, despesa: receita - resultado, resultado };
+    });
+
+    const cur = series[series.length - 1];
+    const prev = series.length > 1 ? series[series.length - 2] : null;
     const resultadoVariacaoPct =
-      resultadoPrev !== 0
-        ? ((resultado - resultadoPrev) / Math.abs(resultadoPrev)) * 100
+      prev && prev.resultado !== 0
+        ? ((cur.resultado - prev.resultado) / Math.abs(prev.resultado)) * 100
         : null;
 
+    const last = months[months.length - 1];
     return {
-      receita,
-      despesa,
-      resultado,
+      receita: cur.receita,
+      despesa: cur.despesa,
+      resultado: cur.resultado,
       resultadoVariacaoPct,
-      mesLabel: `${MES_LABELS[month - 1]}/${year}`,
+      mesLabel: `${MES_LABELS[last.month - 1]}/${last.year}`,
+      series,
     };
   } catch {
     return null;
