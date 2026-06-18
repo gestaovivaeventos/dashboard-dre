@@ -2,6 +2,7 @@
 
 import { TrendingUp, TrendingDown } from "lucide-react";
 
+import { ReceitaDespesaBars, Sparkline } from "@/components/app/home/charts";
 import { WidgetCard } from "@/components/app/home/widget-card";
 import { fmtFin, type HomeKpis } from "@/lib/home/financeiro-widgets";
 
@@ -12,16 +13,16 @@ export function WidgetKpis({ data }: { data: HomeKpis }) {
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
           <p className="text-xs text-muted-foreground">Receita líquida</p>
-          <p className="mt-0.5 text-lg font-bold">{fmtFin.format(data.receita)}</p>
+          <p className="t-num mt-0.5 text-lg font-bold">{fmtFin.format(data.receita)}</p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Despesas</p>
-          <p className="mt-0.5 text-lg font-bold">{fmtFin.format(data.despesa)}</p>
+          <p className="t-num mt-0.5 text-lg font-bold">{fmtFin.format(data.despesa)}</p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Resultado</p>
           <p
-            className={`mt-0.5 text-lg font-bold ${
+            className={`t-num mt-0.5 text-lg font-bold ${
               resultadoPositivo ? "text-green-600" : "text-red-600"
             }`}
           >
@@ -29,6 +30,7 @@ export function WidgetKpis({ data }: { data: HomeKpis }) {
           </p>
         </div>
       </div>
+
       {data.resultadoVariacaoPct !== null && (
         <div className="mt-3 flex items-center justify-center gap-1 text-xs">
           {data.resultadoVariacaoPct >= 0 ? (
@@ -36,12 +38,33 @@ export function WidgetKpis({ data }: { data: HomeKpis }) {
           ) : (
             <TrendingDown className="h-3.5 w-3.5 text-red-600" />
           )}
-          <span
-            className={data.resultadoVariacaoPct >= 0 ? "text-green-600" : "text-red-600"}
-          >
+          <span className={data.resultadoVariacaoPct >= 0 ? "text-green-600" : "text-red-600"}>
             {data.resultadoVariacaoPct >= 0 ? "+" : ""}
             {data.resultadoVariacaoPct.toFixed(1)}% vs mês anterior
           </span>
+        </div>
+      )}
+
+      {data.series.length >= 2 && (
+        <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border pt-3">
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+              Resultado · 6 meses
+            </p>
+            <Sparkline values={data.series.map((p) => p.resultado)} />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+              Receita × Despesa
+            </p>
+            <ReceitaDespesaBars
+              data={data.series.map((p) => ({
+                label: p.label,
+                receita: p.receita,
+                despesa: p.despesa,
+              }))}
+            />
+          </div>
         </div>
       )}
     </WidgetCard>
