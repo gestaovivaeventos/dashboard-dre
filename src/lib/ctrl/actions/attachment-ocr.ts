@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { isValidBoletoLinhaDigitavel, barcodeToLinhaDigitavel } from "@/lib/ctrl/boleto";
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
@@ -32,10 +33,14 @@ const NotaSchema = z.object({
 });
 
 const BoletoSchema = z.object({
-  barcode: z
+  linha_digitavel: z
     .string()
     .nullable()
-    .describe("Linha digitável do boleto (47-48 dígitos, pode vir com pontos/espaços) ou o código de barras (44 dígitos). Retorne só os números. Null se não encontrar."),
+    .describe("A LINHA DIGITÁVEL impressa no topo do boleto (47 ou 48 dígitos, geralmente em 5 blocos separados por espaços/pontos). Retorne só os números, sem pontos nem espaços. Null se não encontrar."),
+  codigo_barras: z
+    .string()
+    .nullable()
+    .describe("O número do CÓDIGO DE BARRAS (44 dígitos), quando impresso abaixo das barras. Retorne só os números. Null se não encontrar."),
   favorecido: z
     .string()
     .nullable()
@@ -45,6 +50,28 @@ const BoletoSchema = z.object({
     .nullable()
     .describe("CNPJ ou CPF do beneficiário/cedente. Null se não encontrar."),
 });
+
+// Escolhe a melhor leitura: linha digitável e código de barras codificam o mesmo
+// dado, então tenta ambos e a reconstrução, retornando o primeiro que valida.
+// Se nenhum valida, devolve a melhor leitura crua (cliente mostra como inválido).
+function pickBarcode(
+  linhaDigitavel: string | null | undefined,
+  codigoBarras: string | null | undefined,
+): string | null {
+  const linha = (linhaDigitavel ?? "").replace(/\D/g, "");
+  const barras = (codigoBarras ?? "").replace(/\D/g, "");
+
+  const candidatos: string[] = [];
+  if (linha) candidatos.push(linha);
+  const reconstruida = barcodeToLinhaDigitavel(barras);
+  if (reconstruida) candidatos.push(reconstruida);
+
+  for (const c of candidatos) {
+    if (isValidBoletoLinhaDigitavel(c)) return c;
+  }
+  // Nenhum validou: prioriza a linha digitável crua, senão o código de barras.
+  return cleanDigitsKeep(linha) ?? cleanDigitsKeep(barras);
+}
 
 // Imagens vão como `image` part; PDF como `file` part. Outros formatos (docx
 // etc.) não são lidos por visão — retorna null e o cliente cai no manual.
@@ -89,10 +116,17 @@ export async function extractAttachmentData(
   }
 
   const bytes = Buffer.from(await blob.arrayBuffer());
+  // Imagens vão com detalhe ALTO — a linha digitável tem dígitos pequenos e o
+  // detalhe padrão downscaleia a imagem, derrubando a precisão do OCR.
   const docPart =
     mediaType === "application/pdf"
       ? { type: "file" as const, data: bytes, mediaType }
-      : { type: "image" as const, image: bytes };
+      : {
+          type: "file" as const,
+          data: bytes,
+          mediaType,
+          providerOptions: { openai: { imageDetail: "high" as const } },
+        };
 
   const provider = createOpenAI({ apiKey });
 
@@ -129,10 +163,12 @@ export async function extractAttachmentData(
             {
               type: "text",
               text:
-                "Leia este boleto bancário (imagem ou PDF) e extraia: a linha digitável " +
-                "(47-48 dígitos) ou, na falta dela, o código de barras (44 dígitos) — retorne só os números; " +
-                "o nome do beneficiário/cedente (quem recebe); e o CNPJ/CPF dele. " +
-                "Leia os dígitos com atenção, sem inventar.",
+                "Leia este boleto bancário (imagem ou PDF) e extraia, separadamente: " +
+                "(1) a LINHA DIGITÁVEL impressa no topo (47 ou 48 dígitos, em blocos); " +
+                "(2) o número do CÓDIGO DE BARRAS (44 dígitos) impresso abaixo das barras, se houver; " +
+                "(3) o nome do beneficiário/cedente; (4) o CNPJ/CPF dele. " +
+                "Leia cada dígito com extrema atenção, um a um, sem inventar nem completar. " +
+                "Confira a quantidade de dígitos antes de responder. Retorne só números nos campos numéricos.",
             },
             docPart,
           ],
@@ -141,7 +177,7 @@ export async function extractAttachmentData(
     });
     return {
       data: {
-        barcode: cleanDigitsKeep(object.barcode),
+        barcode: pickBarcode(object.linha_digitavel, object.codigo_barras),
         favorecido: emptyToNull(object.favorecido),
         cnpj_cpf: emptyToNull(object.cnpj_cpf),
       },

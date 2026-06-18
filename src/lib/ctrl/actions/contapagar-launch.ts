@@ -10,8 +10,8 @@ import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/client
 import {
   findContaPagarByCnpjValor,
   incluirContaPagar,
-  alterarContaPagar,
   alterarContaPagarCategoria,
+  excluirContaPagar,
   toOmieDate,
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
@@ -21,6 +21,17 @@ type LaunchResult =
   | { error: string };
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
+
+// Remove a palavra "previsão"/"previsao" (singular e plural, case/acento-insensível)
+// da observação ao converter uma previsão recorrente no lançamento real, e limpa
+// separadores/espaços que sobrem nas pontas.
+function removerPrevisao(texto: string): string {
+  return texto
+    .replace(/previs[õo]es|previs[ãa]o/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s\-–—:.,]+|[\s\-–—:.,]+$/g, "")
+    .trim();
+}
 
 // Anexa um arquivo do storage à conta a pagar do Omie. Best-effort: falha aqui
 // não derruba o lançamento (o título já existe).
@@ -55,7 +66,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, invoice_number, barcode, attachment_path, invoice_attachment_path",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -86,10 +97,19 @@ export async function launchRequestToOmie(
   // 2. Resolve mapeamentos
   const { data: catRow } = await supabase
     .from("ctrl_expense_type_omie_categoria")
-    .select("codigo_categoria")
+    .select("codigo_categoria, codigo_categoria_sem_nota")
     .eq("expense_type_id", request.expense_type_id)
     .eq("company_id", companyId)
     .maybeSingle();
+
+  // Categoria depende de ter nota fiscal: "nao" usa a categoria sem nota (com
+  // fallback para a com nota); "sim"/"sim_apos_pagamento"/vazio usam a com nota.
+  const catComNota = (catRow?.codigo_categoria as string | null) ?? null;
+  const catSemNota = (catRow?.codigo_categoria_sem_nota as string | null) ?? null;
+  const codigoCategoriaResolved =
+    request.supplier_issues_invoice === "nao"
+      ? (catSemNota ?? catComNota)
+      : catComNota;
 
   const { data: depRow } = await supabase
     .from("ctrl_sector_omie_departamento")
@@ -117,7 +137,7 @@ export async function launchRequestToOmie(
       : ccPadrao;
 
   const missing: string[] = [];
-  if (!catRow?.codigo_categoria) missing.push("categoria");
+  if (!codigoCategoriaResolved) missing.push("categoria");
   if (!depRow?.codigo_departamento) missing.push("departamento");
   if (!codigoContaCorrenteResolved) missing.push("conta corrente");
 
@@ -127,7 +147,7 @@ export async function launchRequestToOmie(
     };
   }
 
-  const codigoCategoria = catRow!.codigo_categoria as string;
+  const codigoCategoria = codigoCategoriaResolved as string;
   const codigoDepartamento = depRow!.codigo_departamento as string;
   const codigoContaCorrente = codigoContaCorrenteResolved as string | number;
 
@@ -204,6 +224,18 @@ export async function launchRequestToOmie(
     `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
   const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
 
+  // Nº do pedido (Omie) = número da requisição do ControlHub.
+  const numeroPedido = String(request.request_number ?? "");
+  // Campo "Nota Fiscal" do Omie (numero_documento_fiscal) conforme o status de NF:
+  //   nao → "SEM NOTA FISCAL"; sim_apos_pagamento → "APÓS PAGAMENTO";
+  //   sim/demais → número da NF informado.
+  const numeroDocumentoFiscal =
+    request.supplier_issues_invoice === "nao"
+      ? "SEM NOTA FISCAL"
+      : request.supplier_issues_invoice === "sim_apos_pagamento"
+      ? "APÓS PAGAMENTO"
+      : ((request.invoice_number as string | null) ?? "");
+
   // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
   // codigo_lancamento_omie e remove codigo_lancamento_integracao).
   const basePayload = {
@@ -215,12 +247,8 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
-    ...(request.invoice_number
-      ? {
-          numero_documento: request.invoice_number as string,
-          numero_documento_fiscal: request.invoice_number as string,
-        }
-      : {}),
+    ...(numeroPedido ? { numero_pedido: numeroPedido } : {}),
+    ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
     ...(request.payment_method === "boleto" && request.barcode
       ? {
           cnab_integracao_bancaria: {
@@ -243,30 +271,39 @@ export async function launchRequestToOmie(
 
   try {
     if (previsaoCodigo) {
-      // Edita a previsão existente sobrescrevendo todos os campos. A observação é
-      // sempre enviada (mesmo vazia) para apagar o marcador "previsão" do título.
-      const observacao = (request.description as string | null) ?? "";
+      // Substituição de previsão: o Omie NÃO substitui a observação de título
+      // recorrente (RPTP) via AlterarContaPagar — ele mantém o texto da
+      // recorrência ("PREVISÃO - ...") e só anexa o nosso. Então, em vez de
+      // editar, criamos um título novo (observação limpa = descrição, sem a
+      // palavra "previsão") e excluímos a previsão recorrente.
+      const observacao = removerPrevisao((request.description as string | null) ?? "");
+      const payload = {
+        codigo_lancamento_integracao: request.id as string,
+        ...basePayload,
+        ...(observacao ? { observacao } : {}),
+      };
+      let novoCodigo: number;
       try {
-        await alterarContaPagar(appKey, appSecret, {
-          ...basePayload,
-          observacao,
-          codigo_lancamento_omie: previsaoCodigo,
-        });
+        ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, payload));
       } catch (e) {
-        if (isBarcodeError(e) && "cnab_integracao_bancaria" in basePayload) {
-          const { cnab_integracao_bancaria: _drop, ...noCnab } = basePayload;
+        if (isBarcodeError(e) && "cnab_integracao_bancaria" in payload) {
+          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
           void _drop;
-          await alterarContaPagar(appKey, appSecret, {
-            ...noCnab,
-            observacao,
-            codigo_lancamento_omie: previsaoCodigo,
-          });
+          ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, noCnab));
         } else {
           throw e;
         }
       }
+      // Exclui a previsão recorrente DEPOIS de criar o título real (best-effort):
+      // se a exclusão falhar, fica um duplicado para limpeza manual, mas nunca se
+      // perde o lançamento.
+      try {
+        await excluirContaPagar(appKey, appSecret, previsaoCodigo);
+      } catch (e) {
+        console.error("[contapagar] título criado mas falha ao excluir previsão:", e);
+      }
       omieStatus = "previsao_editada";
-      omieCode = previsaoCodigo;
+      omieCode = novoCodigo;
     } else {
       const found = await findContaPagarByCnpjValor(
         appKey,
@@ -355,7 +392,7 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("paying_company_id, omie_launch_status, omie_contapagar_codigo")
+    .select("paying_company_id")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -363,18 +400,13 @@ export async function resyncContaPagar(requestId: string): Promise<LaunchResult>
     return { error: "Requisição sem empresa pagadora." };
   }
 
-  // Se já havia editado uma previsão, reusa o mesmo título no reenvio (não cria
-  // duplicata).
-  const previsaoCodigo =
-    req.omie_launch_status === "previsao_editada" && req.omie_contapagar_codigo
-      ? Number(req.omie_contapagar_codigo)
-      : undefined;
-
+  // Reenvio não repassa previsaoCodigo: a substituição de previsão (criar título
+  // + excluir a previsão) só ocorre no envio inicial pelo diálogo. No reenvio a
+  // previsão já foi consumida; segue o fluxo normal de lançamento.
   const result = await launchRequestToOmie(
     supabase,
     requestId,
     req.paying_company_id as string,
-    previsaoCodigo,
   );
 
   revalidatePath("/ctrl/contas-a-pagar");

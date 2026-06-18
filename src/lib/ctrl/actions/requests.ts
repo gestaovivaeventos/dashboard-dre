@@ -34,6 +34,11 @@ const APPROVAL_ROUTING = {
     expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
     managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
   },
+  // Setor cujas requisições vão sempre direto ao diretor, mesmo com orçamento
+  // aprovado (pula o gerente). Notifica todos os diretores.
+  directorSector: {
+    sectorId: "306ef9b3-7895-446d-b9d3-5537942627b2", // Diretoria
+  },
 } as const;
 
 export interface BudgetVerification {
@@ -339,11 +344,14 @@ export async function createRequest(data: CreateRequestInput) {
 
   // Solicitante especial pula o gerente e vai direto ao diretor.
   const directorOnly = ctx.id === APPROVAL_ROUTING.directorOnly.requesterId;
-  const approvalTier: ApprovalTier = directorOnly
+  // Setor Diretoria vai sempre direto ao diretor, independente do orçamento.
+  const directorSectorOnly = data.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+  const forceDirector = directorOnly || directorSectorOnly;
+  const approvalTier: ApprovalTier = forceDirector
     ? "nivel_3"
     : verification?.approvalTier ?? "nivel_2";
   // Sem auto-aprovação: toda requisição entra pendente.
-  const initialStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+  const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
   // Installments
   const isInstallment =
@@ -471,15 +479,18 @@ export async function createRequest(data: CreateRequestInput) {
       .single();
 
     // Etapa inicial e quem notificar. Sem auto-aprovação.
-    const stage: "gerente" | "diretor" = directorOnly ? "diretor" : "gerente";
+    const stage: "gerente" | "diretor" = forceDirector ? "diretor" : "gerente";
     let explicitApproverIds: string[] | undefined;
     if (directorOnly) {
       explicitApproverIds = [APPROVAL_ROUTING.directorOnly.directorId];
     } else if (
+      !forceDirector &&
       data.expense_type_id === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
     ) {
       explicitApproverIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
     }
+    // Setor Diretoria (directorSectorOnly): stage 'diretor' sem explicitApproverIds
+    // → notifyPendingApproval avisa todos os diretores.
 
     await notifyPendingApproval({
       requestId: newReq.id,
@@ -515,10 +526,10 @@ export async function createRequest(data: CreateRequestInput) {
           inst.year
         );
       }
-      const instTier: ApprovalTier = directorOnly
+      const instTier: ApprovalTier = forceDirector
         ? "nivel_3"
         : instVerification?.approvalTier ?? "nivel_2";
-      const instStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+      const instStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: instReq } = await supabase
         .from("ctrl_requests")
@@ -572,10 +583,10 @@ export async function createRequest(data: CreateRequestInput) {
           data.reference_year
         );
       }
-      const monthTier: ApprovalTier = directorOnly
+      const monthTier: ApprovalTier = forceDirector
         ? "nivel_3"
         : monthVerification?.approvalTier ?? "nivel_2";
-      const monthStatus: CtrlRequestStatus = directorOnly ? "pendente_diretor" : "pendente";
+      const monthStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: recReq } = await supabase
         .from("ctrl_requests")
@@ -675,9 +686,10 @@ export async function getRequests(filters?: {
   let query = supabase
     .from("ctrl_requests")
     .select(
-      `*, ctrl_sectors(name), ctrl_expense_types(name), ctrl_suppliers(name, cnpj_cpf),
+      `*, ctrl_sectors(name), ctrl_expense_types(name),
+       ctrl_suppliers(name, cnpj_cpf, chave_pix, banco, agencia, conta_corrente, titular_banco),
        creator:users!ctrl_requests_created_by_fkey(name, email),
-       approver:users!ctrl_requests_approved_by_fkey(name)`
+       approver:users!ctrl_requests_approved_by_fkey(name, email)`
     )
     .order("created_at", { ascending: false });
 
@@ -1018,6 +1030,61 @@ export async function answerComplement(requestId: string, answer: string) {
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
   return { ok: true };
+}
+
+// Retorna a última pergunta de complementação feita pelo aprovador, para o
+// solicitante saber o que responder. Usa admin client (a RLS de ctrl_history não
+// expõe a linha do aprovador ao solicitante); a autorização é por papel + dono.
+export async function getComplementQuestion(
+  requestId: string,
+): Promise<{ question: string | null; askedBy: string | null } | { error: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("created_by")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string }>();
+
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const { data: hist } = await supabase
+    .from("ctrl_history")
+    .select("comment, user_id, created_at")
+    .eq("request_id", requestId)
+    .eq("action", "complementacao_solicitada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ comment: string | null; user_id: string; created_at: string }>();
+
+  if (!hist) return { question: null, askedBy: null };
+
+  const { data: asker } = await supabase
+    .from("users")
+    .select("name, email")
+    .eq("id", hist.user_id)
+    .maybeSingle<{ name: string | null; email: string | null }>();
+
+  return {
+    question: hist.comment,
+    askedBy: asker?.name ?? asker?.email ?? null,
+  };
 }
 
 // ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────

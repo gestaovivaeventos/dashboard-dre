@@ -104,24 +104,31 @@ export function OmieMapeamentoClient({ companies }: Props) {
     });
   }
 
-  function handleExpenseMap(expenseTypeId: string, codigo: string) {
+  function handleExpenseMap(
+    expenseTypeId: string,
+    codigo: string,
+    tipo: "com_nota" | "sem_nota" = "com_nota",
+  ) {
     if (!companyId || !data) return;
-    const prev = data.expenseMap[expenseTypeId] ?? "";
-    const next = { ...data.expenseMap };
+    const campo = tipo === "sem_nota" ? "expenseMapSemNota" : "expenseMap";
+    const feedbackId = `${expenseTypeId}:${tipo}`;
+    const prevMap = data[campo];
+    const prev = prevMap[expenseTypeId] ?? "";
+    const next = { ...prevMap };
     if (codigo) next[expenseTypeId] = codigo;
     else delete next[expenseTypeId];
-    setData({ ...data, expenseMap: next });
+    setData({ ...data, [campo]: next });
     startTransition(async () => {
-      const res = await saveExpenseTypeCategoria(companyId, expenseTypeId, codigo || null);
+      const res = await saveExpenseTypeCategoria(companyId, expenseTypeId, codigo || null, tipo);
       if ("error" in res) {
-        const revert = { ...data.expenseMap };
+        const revert = { ...next };
         if (prev) revert[expenseTypeId] = prev;
         else delete revert[expenseTypeId];
-        setData({ ...data, expenseMap: revert });
-        setSaveFeedback({ id: expenseTypeId, ok: false, msg: res.error });
+        setData({ ...data, [campo]: revert });
+        setSaveFeedback({ id: feedbackId, ok: false, msg: res.error });
       } else {
-        setSaveFeedback({ id: expenseTypeId, ok: true, msg: "Salvo" });
-        setTimeout(() => setSaveFeedback((f) => (f?.id === expenseTypeId ? null : f)), 2000);
+        setSaveFeedback({ id: feedbackId, ok: true, msg: "Salvo" });
+        setTimeout(() => setSaveFeedback((f) => (f?.id === feedbackId ? null : f)), 2000);
       }
     });
   }
@@ -330,32 +337,57 @@ export function OmieMapeamentoClient({ companies }: Props) {
                   <p className="text-sm text-muted-foreground">Nenhum tipo de despesa cadastrado.</p>
                 ) : (
                   <div className="rounded-lg border divide-y">
+                    <div className="flex items-center gap-3 px-4 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground">
+                      <span className="w-48 shrink-0">Tipo de despesa</span>
+                      <span className="flex-1">Categoria — com nota fiscal</span>
+                      <span className="flex-1">Categoria — sem nota fiscal</span>
+                    </div>
                     {data.expenseTypes.map((et) => (
                       <div
                         key={et.id}
                         className="flex flex-wrap items-center gap-3 px-4 py-2.5"
                       >
                         <span className="w-48 shrink-0 text-sm font-medium">{et.name}</span>
-                        <select
-                          value={data.expenseMap[et.id] ?? ""}
-                          onChange={(e) => handleExpenseMap(et.id, e.target.value)}
-                          disabled={isPending}
-                          className={INPUT_CLS + " flex-1"}
-                        >
-                          <option value="">— não mapeado —</option>
-                          {data.categorias.map((c) => (
-                            <option key={c.codigo} value={c.codigo}>
-                              {c.descricao}
-                            </option>
-                          ))}
-                        </select>
-                        {saveFeedback?.id === et.id && (
-                          <span
-                            className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}
+                        <div className="flex-1 flex items-center gap-2">
+                          <select
+                            value={data.expenseMap[et.id] ?? ""}
+                            onChange={(e) => handleExpenseMap(et.id, e.target.value, "com_nota")}
+                            disabled={isPending}
+                            className={INPUT_CLS + " flex-1"}
                           >
-                            {saveFeedback.msg}
-                          </span>
-                        )}
+                            <option value="">— não mapeado —</option>
+                            {data.categorias.map((c) => (
+                              <option key={c.codigo} value={c.codigo}>
+                                {c.descricao}
+                              </option>
+                            ))}
+                          </select>
+                          {saveFeedback?.id === `${et.id}:com_nota` && (
+                            <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                              {saveFeedback.msg}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-1 flex items-center gap-2">
+                          <select
+                            value={data.expenseMapSemNota[et.id] ?? ""}
+                            onChange={(e) => handleExpenseMap(et.id, e.target.value, "sem_nota")}
+                            disabled={isPending}
+                            className={INPUT_CLS + " flex-1"}
+                          >
+                            <option value="">— não mapeado —</option>
+                            {data.categorias.map((c) => (
+                              <option key={c.codigo} value={c.codigo}>
+                                {c.descricao}
+                              </option>
+                            ))}
+                          </select>
+                          {saveFeedback?.id === `${et.id}:sem_nota` && (
+                            <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                              {saveFeedback.msg}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

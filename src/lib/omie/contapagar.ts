@@ -56,6 +56,7 @@ export interface ContaPagarPayload {
   observacao?: string;
   numero_documento?: string;
   numero_documento_fiscal?: string;
+  numero_pedido?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cnab_integracao_bancaria?: any;
 }
@@ -180,6 +181,18 @@ export async function alterarContaPagar(
   );
   const code = Number(data.codigo_lancamento_omie ?? payload.codigo_lancamento_omie);
   return { codigoLancamentoOmie: code };
+}
+
+// Exclui um título (usado para remover a previsão recorrente após criar o
+// título real na substituição).
+export async function excluirContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+): Promise<void> {
+  await omieCall(CONTAPAGAR_URL, "ExcluirContaPagar", appKey, appSecret, {
+    codigo_lancamento_omie: codigoLancamentoOmie,
+  });
 }
 
 // dd/mm/aaaa a partir de 'YYYY-MM-DD'

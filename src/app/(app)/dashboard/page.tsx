@@ -4,7 +4,7 @@ import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { getManagerialAmountsByCode } from "@/lib/dashboard/managerial-adjustments";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
-import type { Segment } from "@/lib/supabase/types";
+import { resolveUserSegments } from "@/lib/context/user-segments";
 
 export const dynamic = "force-dynamic";
 import {
@@ -42,25 +42,14 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     redirect("/login");
   }
 
-  // Load all segments the user can access (for the picker).
-  let segments: Segment[] = [];
-  if (profile?.role === "admin") {
-    const { data } = await supabase
-      .from("segments")
-      .select("id,name,slug,display_order,active")
-      .eq("active", true)
-      .order("display_order");
-    segments = (data as Segment[]) ?? [];
-  } else if (profile) {
-    const { data } = await supabase
-      .from("user_segment_access")
-      .select("segments(id,name,slug,display_order,active)")
-      .eq("user_id", profile.id);
-    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
-      .map((row) => row.segments)
-      .filter((s) => s && s.active)
-      .sort((a, b) => a.display_order - b.display_order);
-  }
+  // Load all segments the user can access (for the picker). Inclui o fallback
+  // por empresa — sem ele, usuário com acesso só por empresa carrega TODAS as
+  // empresas e a agregação estoura o statement_timeout (ver resolveUserSegments).
+  const segments = await resolveUserSegments(supabase, {
+    isAdmin: profile?.role === "admin",
+    userId: profile?.id ?? null,
+    companyIds: profile?.company_ids ?? [],
+  });
 
   // Resolve segment filter. Quando a URL é `/s/<slug>/dashboard`, vem por
   // `params`; quando é `/dashboard` (default landing pós-login), caímos no
