@@ -95,6 +95,12 @@ export function ConnectionsGrid({ segmentSlug, hideManualSync = false }: Connect
     periodsUpserted: number;
     warnings: string[];
   } | null>(null);
+  const [sirenaSheetsSyncing, setSirenaSheetsSyncing] = useState(false);
+  const [sirenaSheetsResult, setSirenaSheetsResult] = useState<{
+    yearsRead: number[];
+    periodsUpserted: number;
+    warnings: string[];
+  } | null>(null);
 
   const loadCompanies = useCallback(async () => {
     setLoading(true);
@@ -221,6 +227,37 @@ export function ConnectionsGrid({ segmentSlug, hideManualSync = false }: Connect
       });
     }
     setTerrazzoSheetsSyncing(false);
+  };
+
+  const handleSirenaSheetsSync = async () => {
+    setSirenaSheetsSyncing(true);
+    setStatusMessage(null);
+    const response = await fetch("/api/sirena-sheets/sync", { method: "POST" });
+    const payload = (await response.json()) as {
+      error?: string;
+      yearsRead?: number[];
+      periodsUpserted?: number;
+      warnings?: string[];
+    };
+    if (!response.ok) {
+      showToast({
+        title: "Falha ao sincronizar planilha Sirena",
+        description: payload.error ?? "Nao foi possivel sincronizar.",
+        variant: "destructive",
+      });
+    } else {
+      setSirenaSheetsResult({
+        yearsRead: payload.yearsRead ?? [],
+        periodsUpserted: payload.periodsUpserted ?? 0,
+        warnings: payload.warnings ?? [],
+      });
+      showToast({
+        title: "Planilha Sirena sincronizada",
+        description: `${(payload.yearsRead ?? []).join(", ") || "nenhum ano"} · ${payload.periodsUpserted ?? 0} meses atualizados.`,
+        variant: "success",
+      });
+    }
+    setSirenaSheetsSyncing(false);
   };
 
   const handleFullSync = async (companyId: string, isFirstTime: boolean) => {
@@ -374,6 +411,57 @@ export function ConnectionsGrid({ segmentSlug, hideManualSync = false }: Connect
                 {terrazzoSheetsResult.warnings.length > 0 ? (
                   <ul className="list-disc space-y-0.5 pl-4 text-amber-700">
                     {terrazzoSheetsResult.warnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {companies.some((company) => company.name === "Sirena") ? (
+        <Card>
+          <CardHeader className="space-y-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileSpreadsheet className="h-5 w-5" />
+              Planilha Sirena (Google Sheets)
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Le a planilha da Sirena (aba 2026, linha 11 &quot;total&quot;) e atualiza a
+              conta Locacao de Espaco. Os impostos (ISS, PIS, COFINS, IRPJ e
+              Contribuicao Social) sao calculados pelo sistema a partir de Receita
+              de Estacionamento e Locacao de Espaco. Demais contas vem do Omie.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => void handleSirenaSheetsSync()}
+              disabled={sirenaSheetsSyncing}
+            >
+              {sirenaSheetsSyncing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+              )}
+              Sincronizar Planilha
+            </Button>
+            {sirenaSheetsResult ? (
+              <div className="space-y-1 rounded-md bg-muted/40 p-3 text-xs">
+                <p>
+                  Anos lidos:{" "}
+                  <span className="font-medium">
+                    {sirenaSheetsResult.yearsRead.join(", ") || "nenhum"}
+                  </span>{" "}
+                  · <span className="font-medium">{sirenaSheetsResult.periodsUpserted}</span> meses
+                  atualizados
+                </p>
+                {sirenaSheetsResult.warnings.length > 0 ? (
+                  <ul className="list-disc space-y-0.5 pl-4 text-amber-700">
+                    {sirenaSheetsResult.warnings.map((warning, index) => (
                       <li key={index}>{warning}</li>
                     ))}
                   </ul>
