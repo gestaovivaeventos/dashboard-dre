@@ -48,6 +48,12 @@
   --status-progress-bg: rgba(59, 130, 246, 0.12);
   --status-success-bg:  rgba(18, 183, 106, 0.12);
 
+  /* ---------- Accent (destaque Viva) ---------- */
+  /* A cor de destaque e' o laranja --viva-orange-500. --accent-soft e' o
+     preenchimento translucido usado em estados ativos (aba ativa da sidebar,
+     chips selecionados). NAO confundir com a var shadcn --accent (neutra). */
+  --accent-soft: rgba(255, 107, 26, 0.10);
+
   /* ---------- Gradient cards (status) ---------- */
   --grad-critical: linear-gradient(135deg, rgba(240,68,56,0.25) 0%, rgba(240,68,56,0.05) 100%);
   --grad-warning:  linear-gradient(135deg, rgba(247,144, 9,0.25) 0%, rgba(247,144, 9,0.05) 100%);
@@ -79,6 +85,9 @@
   --text-secondary: #A8B1C1;
   --text-muted:     #6B7689;
   --text-disabled:  #454E60;
+
+  /* Destaque um pouco mais presente no escuro. */
+  --accent-soft: rgba(255, 107, 26, 0.16);
 
   --border-subtle:  rgba(255, 255, 255, 0.06);
   --border-default: rgba(255, 255, 255, 0.10);
@@ -115,6 +124,11 @@
   color: var(--text-primary);
 }
 .t-muted { color: var(--text-muted); }
+/* Numeros tabulares — alinha digitos em KPIs, tabelas e valores monetarios. */
+.t-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
 
 /* =========================================================
    Assinatura visual: borda laranja sob headers
