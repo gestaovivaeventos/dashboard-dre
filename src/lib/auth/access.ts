@@ -12,9 +12,7 @@ export function defaultLandingFor(
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
-  // Franqueado: mantém /dashboard até o Plano 2 entregar o widget Mini-DRE dele.
-  if (profile === "franqueado") return "/dashboard";
-  // Demais perfis com algum módulo → cockpit /home.
+  // Todos os demais perfis com algum módulo → cockpit /home.
   if (canFinanceiro || canCompras || profile === "admin") return "/home";
   return "/pendente";
 }
