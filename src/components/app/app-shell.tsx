@@ -1,9 +1,8 @@
 "use client";
 
-import { Menu, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useState } from "react";
 
-import { CommandPalette } from "@/components/app/command-palette";
 import { Logo, LogoFull } from "@/components/app/logo";
 import { NavLinks } from "@/components/app/nav-links";
 import { NotificationsLink } from "@/components/app/notifications-link";
@@ -31,7 +30,6 @@ interface AppShellProps {
   contractsOnly?: boolean;
   isFranqueado?: boolean;
   unreadNotifications?: number;
-  navBadges?: Record<string, number>;
 }
 
 export function AppShell({
@@ -49,11 +47,9 @@ export function AppShell({
   contractsOnly,
   isFranqueado,
   unreadNotifications = 0,
-  navBadges,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const hasCtrl = (ctrlRoles?.length ?? 0) > 0;
   const hasSegments = segments.length > 0;
@@ -68,7 +64,6 @@ export function AppShell({
       onNavigate={mobile ? () => setOpen(false) : undefined}
       contractsOnly={contractsOnly}
       isFranqueado={isFranqueado}
-      badges={navBadges}
     />
   );
 
@@ -84,12 +79,6 @@ export function AppShell({
           <a href="/home" className={`flex items-center p-4 ${collapsed ? "justify-center" : ""}`}>
             {collapsed ? <Logo size={32} /> : <LogoFull />}
           </a>
-
-          {!collapsed && hasSegments && (
-            <div className="px-3 pb-2">
-              <SegmentChip segments={segments} activeSlug={activeSegmentSlug} />
-            </div>
-          )}
 
           <div className="flex-1 overflow-y-auto px-2">{sidebarNav(false)}</div>
 
@@ -143,18 +132,6 @@ export function AppShell({
             </div>
 
             <div className="ml-auto flex items-center gap-3">
-              {/* Busca / command palette (Ctrl+K) */}
-              <button
-                type="button"
-                onClick={() => setPaletteOpen(true)}
-                className="hidden items-center gap-2 rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink-secondary sm:flex"
-              >
-                <Search className="h-3.5 w-3.5" />
-                <span>Buscar</span>
-                <kbd className="rounded border border-border bg-surface-2 px-1 py-0.5 text-[10px] font-medium">
-                  ⌘K
-                </kbd>
-              </button>
               <div className="hidden text-right md:block">
                 <p className="text-sm font-medium leading-none text-ink-primary">{userName}</p>
                 <p className="text-xs text-ink-muted">{userEmail}</p>
@@ -168,17 +145,6 @@ export function AppShell({
 
           <main className="p-4 md:p-6">{children}</main>
         </div>
-
-        <CommandPalette
-          open={paletteOpen}
-          onOpenChange={setPaletteOpen}
-          dreRole={userRole}
-          ctrlRoles={ctrlRoles}
-          segments={segments}
-          activeSegmentSlug={activeSegmentSlug}
-          contractsOnly={contractsOnly}
-          isFranqueado={isFranqueado}
-        />
       </div>
     </TooltipProvider>
   );

@@ -4,7 +4,6 @@ import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
-import { loadNavBadges } from "@/lib/home/nav-badges";
 import type { Segment } from "@/lib/supabase/types";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -50,12 +49,9 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     "ctrl",
   );
 
-  const [unreadNotifications, navBadges] = profile?.id
-    ? await Promise.all([
-        getUnreadNotificationsCount(profile.id),
-        loadNavBadges({ userId: profile.id, ctrlRoles }),
-      ])
-    : [0, {}];
+  const unreadNotifications = profile?.id
+    ? await getUnreadNotificationsCount(profile.id)
+    : 0;
 
   return (
     <AppShell
@@ -68,7 +64,6 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
       unreadNotifications={unreadNotifications}
-      navBadges={navBadges}
     >
       {children}
     </AppShell>

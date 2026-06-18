@@ -10,10 +10,6 @@ import { WidgetFilaPagamento } from "@/components/app/home/widget-fila-pagamento
 import { WidgetMinhasRequisicoes } from "@/components/app/home/widget-minhas-requisicoes";
 import { WidgetOrcamento } from "@/components/app/home/widget-orcamento";
 import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
-import { WidgetKpis } from "@/components/app/home/widget-kpis";
-import { WidgetCaixa } from "@/components/app/home/widget-caixa";
-import { WidgetMiniDre } from "@/components/app/home/widget-mini-dre";
-import type { HomeKpis, HomeCaixa, HomeMiniDre } from "@/lib/home/financeiro-widgets";
 
 interface Indicator {
   name: string;
@@ -40,9 +36,6 @@ interface HomeViewProps {
   caps: HomeCtrlCaps;
   ctrlData: HomeCtrlData;
   canFinanceiro: boolean;
-  kpis: HomeKpis | null;
-  caixa: HomeCaixa | null;
-  miniDre: HomeMiniDre | null;
 }
 
 function getGreeting(): string {
@@ -62,7 +55,7 @@ function alertDotColor(type: string): string {
   return "bg-blue-400";
 }
 
-export function HomeView({ userName, caps, ctrlData, canFinanceiro, kpis, caixa, miniDre }: HomeViewProps) {
+export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -132,23 +125,11 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, kpis, caixa,
         </div>
       )}
 
-      {/* Visão financeira (server-computed): KPIs + Caixa, ou Mini-DRE do franqueado */}
-      {(kpis || caixa || miniDre) && (
-        <section>
-          <h2 className="t-display viva-underline mb-3 inline-block pb-1 text-base">Visão financeira</h2>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {kpis && <WidgetKpis data={kpis} />}
-            {caixa && <WidgetCaixa data={caixa} />}
-            {miniDre && <WidgetMiniDre data={miniDre} />}
-          </div>
-        </section>
-      )}
-
       {/* Rodapé financeiro (gestão/financeiro) — Plano 2 expande com KPIs e Caixa */}
       {canFinanceiro && (
         <>
           <section>
-            <h2 className="t-display viva-underline mb-3 inline-block pb-1 text-base">Indicadores Econômicos</h2>
+            <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               {loadingIndicators
                 ? Array.from({ length: 4 }).map((_, i) => (
