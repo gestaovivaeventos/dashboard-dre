@@ -10,17 +10,26 @@ import { fetchSheetValues, type SheetCellValue, type SheetRow } from "@/lib/shee
 //   • Dentro de cada aba, os meses ficam em COLUNAS fixas (Janeiro=B ... Dez=M)
 //     e cada conta DRE fica em uma LINHA fixa.
 //
-// Mapeamento (linha da planilha -> code da conta no plano custom da Terrazzo):
-//   Linha 12 -> 1.1  Locacao de Espaco para Formaturas
-//   Linha 13 -> 1.2  Locacao de Espaco para Shows/Palestras
-//   Linha 16 -> 3.2  PIS
-//   Linha 17 -> 3.3  COFINS
-//   Linha 18 -> 9    IRPJ
-//   Linha 19 -> 10   Contribuicao Social
+// Mapeamento (linha da planilha -> conta no plano custom da Terrazzo):
+//   Linha 12 -> code 1.1   Locacao de Espaco para Formaturas
+//   Linha 13 -> code 1.2   Locacao de Espaco para Shows/Palestras
+//   Linha 14 -> nome "Insumos de operação"  (Insumos)          [NOVO]
+//   Linha 16 -> code 3.2   PIS
+//   Linha 17 -> code 3.3   COFINS
+//   Linha 18 -> code 9     IRPJ
+//   Linha 19 -> code 10    Contribuicao Social
+//
+// As 6 primeiras linhas resolvem a conta por CODE (regra validada, intacta). A
+// linha 14 (Insumos) resolve por NOME — o code da conta "Insumos de operação"
+// no plano custom da Terrazzo nao e conhecido no repo, e o destino foi definido
+// pelo gestor por nome. A resolucao por nome e escopada a Terrazzo, com match
+// exato normalizado (case/acentos-insensivel) e falha explicita se nao achar/
+// houver ambiguidade — nunca grava em conta errada silenciosamente.
 //
 // Isolamento: este modulo so toca a empresa Terrazzo e so as contas marcadas
-// como data_source='sheets' (migration 20260609120000). Nao mexe na Omie, no
-// mapeamento, na estrutura DRE nem em outra empresa.
+// como data_source='sheets' (migrations 20260609120000 + 20260618130000 p/
+// Insumos). Nao mexe na Omie, no mapeamento, na estrutura DRE nem em outra
+// empresa.
 // ===========================================================================
 const COMPANY_NAME = "Terrazzo";
 
@@ -37,8 +46,18 @@ const START_YEAR = 2025;
 interface SheetRowMapping {
   /** Numero da linha na planilha (1-based, como aparece no Google Sheets). */
   sheetRow: number;
-  /** Code da conta DRE no plano custom da Terrazzo. */
+  /**
+   * Chave interna ESTAVEL usada em byKey / source_metadata. Para as linhas
+   * resolvidas por code, e o proprio code da conta. Para a linha resolvida por
+   * nome (Insumos), e um sentinel `__nome__...` que NAO e procurado como code
+   * na Omie/DRE — serve so de identificador interno.
+   */
   accountCode: string;
+  /**
+   * Quando presente, a conta DRE e resolvida pelo NOME (match exato normalizado,
+   * escopo Terrazzo) em vez do code. Usado so pela linha 14 (Insumos).
+   */
+  accountName?: string;
   /** Rotulo so para logs/leitura. */
   label: string;
 }
@@ -46,11 +65,22 @@ interface SheetRowMapping {
 const ROW_MAPPINGS: SheetRowMapping[] = [
   { sheetRow: 12, accountCode: "1.1", label: "Locacao de Espaco para Formaturas" },
   { sheetRow: 13, accountCode: "1.2", label: "Locacao de Espaco para Shows/Palestras" },
+  { sheetRow: 14, accountCode: "__nome__insumos_de_operacao", accountName: "Insumos de operação", label: "Insumos" },
   { sheetRow: 16, accountCode: "3.2", label: "PIS" },
   { sheetRow: 17, accountCode: "3.3", label: "COFINS" },
   { sheetRow: 18, accountCode: "9", label: "IRPJ" },
   { sheetRow: 19, accountCode: "10", label: "Contribuicao Social" },
 ];
+
+/** Normaliza nome de conta para match robusto (case/acentos/espacos). */
+function normalizeAccountName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 // Meses em colunas: Janeiro=B (index 1) ... Dezembro=M (index 12).
 // columnIndex e 0-based (A=0, B=1, ..., M=12).
@@ -190,7 +220,14 @@ export async function syncTerrazzoSheetsToManualValues(): Promise<TerrazzoSheetS
   }
   const companyId = company.id as string;
 
-  const accountCodes = ROW_MAPPINGS.map((m) => m.accountCode);
+  // accountIdByCode: chave interna da mapping (code real ou sentinel) -> dre_account_id.
+  const accountIdByCode = new Map<string, string>();
+
+  const codeMappings = ROW_MAPPINGS.filter((m) => !m.accountName);
+  const nameMappings = ROW_MAPPINGS.filter((m) => m.accountName);
+
+  // ----- Linhas resolvidas por CODE (regra validada — inalterada) -----
+  const accountCodes = codeMappings.map((m) => m.accountCode);
   const { data: accountsData, error: accountsError } = await supabase
     .from("dre_accounts")
     .select("id,code,data_source")
@@ -201,7 +238,6 @@ export async function syncTerrazzoSheetsToManualValues(): Promise<TerrazzoSheetS
     throw new Error(`Falha ao carregar contas DRE da Terrazzo: ${accountsError.message}`);
   }
 
-  const accountIdByCode = new Map<string, string>();
   (accountsData ?? []).forEach((row) => {
     accountIdByCode.set(row.code as string, row.id as string);
     if (row.data_source !== "sheets") {
@@ -218,6 +254,45 @@ export async function syncTerrazzoSheetsToManualValues(): Promise<TerrazzoSheetS
         `Conta DRE com code '${code}' nao encontrada no plano da Terrazzo. ` +
           `Confirme que a estrutura DRE personalizada da Terrazzo possui essa linha.`,
       );
+    }
+  }
+
+  // ----- Linha(s) resolvida(s) por NOME (linha 14 Insumos) -----
+  // Busca as contas da Terrazzo e casa por nome normalizado (exato). Falha
+  // explicita se nenhuma ou mais de uma casar — nunca grava em conta errada.
+  if (nameMappings.length > 0) {
+    const { data: namedRows, error: namedError } = await supabase
+      .from("dre_accounts")
+      .select("id,name,data_source")
+      .eq("company_id", companyId);
+    if (namedError) {
+      throw new Error(`Falha ao carregar contas DRE da Terrazzo (por nome): ${namedError.message}`);
+    }
+    for (const mapping of nameMappings) {
+      const target = normalizeAccountName(mapping.accountName as string);
+      const matches = (namedRows ?? []).filter(
+        (row) => normalizeAccountName((row.name as string) ?? "") === target,
+      );
+      if (matches.length === 0) {
+        throw new Error(
+          `Conta DRE "${mapping.accountName}" (linha ${mapping.sheetRow} da planilha) nao encontrada ` +
+            `no plano da Terrazzo. Confirme que a estrutura DRE personalizada possui essa linha com esse nome.`,
+        );
+      }
+      if (matches.length > 1) {
+        throw new Error(
+          `Mais de uma conta DRE com nome "${mapping.accountName}" no plano da Terrazzo ` +
+            `(${matches.length} encontradas). Renomeie/desambigue antes de sincronizar a planilha.`,
+        );
+      }
+      const match = matches[0];
+      accountIdByCode.set(mapping.accountCode, match.id as string);
+      if (match.data_source !== "sheets") {
+        warnings.push(
+          `Conta "${mapping.accountName}" esta marcada como data_source='${match.data_source}' — esperado 'sheets'. ` +
+            `Rode a migration 20260618130000_terrazzo_sheets_insumos_account. Ate la o valor da planilha nao aparece no DRE.`,
+        );
+      }
     }
   }
 
