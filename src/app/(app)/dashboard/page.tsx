@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { getManagerialAmountsByCode } from "@/lib/dashboard/managerial-adjustments";
+import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 
@@ -175,6 +176,20 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
   const visibleBuckets = buildVisibleBuckets(filter);
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 
+  // Impostos calculados da Sirena: só quando a ÚNICA empresa selecionada é a
+  // Sirena (mesma regra de escopo do plano custom). Nesse caso o `scope` é o
+  // plano custom da Sirena e o hook calcula ISS/PIS/COFINS/IRPJ/Contrib. Social
+  // a partir de "Receita de Estacionamento" (Omie) + "Locação de Espaço"
+  // (planilha) de cada período. Demais empresas/consolidado: hook não é passado
+  // (comportamento idêntico ao anterior). Ver src/lib/dashboard/sirena-taxes.ts.
+  const isSingleSirena =
+    filter.selectedCompanyIds.length === 1 &&
+    companies.some(
+      (c) =>
+        c.id === filter.selectedCompanyIds[0] &&
+        c.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase(),
+    );
+
   const aggregateBucket = (bucket: { dateFrom: string; dateTo: string }) =>
     aggregateDreRows({
       supabase,
@@ -190,6 +205,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
         bucket.dateFrom,
         bucket.dateTo,
       ),
+      postProcessAmounts: isSingleSirena ? applySirenaCalculatedTaxes : undefined,
     });
 
   const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([

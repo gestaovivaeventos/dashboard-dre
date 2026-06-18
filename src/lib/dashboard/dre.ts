@@ -530,6 +530,17 @@ export async function aggregateDreRows(params: {
   // code (ex.: "13" = `11+12`) já incorporem o efeito. Opcional: chamadores
   // que não passam nada (Fluxo de Caixa etc.) ficam idênticos.
   extraAmountsByCode?: Map<string, number>;
+  // Hook GENÉRICO e OPCIONAL para derivar/sobrescrever amounts a partir do
+  // mapa já montado (Omie + planilha + extraAmountsByCode), ANTES de
+  // `buildDashboardRows` — então linhas calculadas/totalizadoras já incorporam
+  // o efeito. Usado pelos impostos calculados da Sirena
+  // (src/lib/dashboard/sirena-taxes.ts), que dependem dos valores agregados de
+  // "Receita de Estacionamento" + "Locação de Espaço" do próprio período.
+  // Chamadores que não passam nada ficam idênticos (inerte por padrão).
+  postProcessAmounts?: (
+    scopedAccounts: DreAccountBase[],
+    amountsByScopedId: Map<string, number>,
+  ) => void;
 }): Promise<DashboardRow[]> {
   const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate", {
     p_company_ids: params.companyIds,
@@ -552,6 +563,9 @@ export async function aggregateDreRows(params: {
       if (!scopedId) return;
       amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + amount);
     });
+  }
+  if (params.postProcessAmounts) {
+    params.postProcessAmounts(params.scope.scopedAccounts, amounts);
   }
   return buildDashboardRows(params.scope.coreAccounts, amounts).rows;
 }

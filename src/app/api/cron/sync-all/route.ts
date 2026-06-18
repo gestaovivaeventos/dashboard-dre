@@ -8,6 +8,7 @@ import {
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
+import { syncSirenaSheetsToManualValues } from "@/lib/sheets/sirena-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -231,6 +232,35 @@ export async function GET(request: Request) {
     }
   }
 
+  // Sincroniza planilha Google Sheets da Sirena (linha "Locação de Espaço";
+  // mesmo padrao da Terrazzo, config isolada). Falha aqui nao impede o restante.
+  // Pode ser desabilitada via SIRENA_SHEETS_SYNC_DISABLED.
+  let sirenaSheetsSync: {
+    ok: boolean;
+    yearsRead?: number[];
+    periodsUpserted?: number;
+    error?: string;
+  } | null = null;
+  if (process.env.SIRENA_SHEETS_SYNC_DISABLED !== "true") {
+    try {
+      const result = await syncSirenaSheetsToManualValues();
+      sirenaSheetsSync = {
+        ok: true,
+        yearsRead: result.yearsRead,
+        periodsUpserted: result.periodsUpserted,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Falha desconhecida no sync da planilha Sirena.";
+      sirenaSheetsSync = { ok: false, error: message };
+      failures.push({
+        companyId: "sirena-sheets",
+        companyName: "Sirena (planilha)",
+        error: message,
+      });
+    }
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -246,5 +276,6 @@ export async function GET(request: Request) {
     results,
     featSheetsSync,
     terrazzoSheetsSync,
+    sirenaSheetsSync,
   });
 }
