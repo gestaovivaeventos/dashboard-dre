@@ -499,8 +499,8 @@ export function DashboardDreView({
       <div className="rounded-xl border bg-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">DRE Gerencial</h2>
-            <p className="text-sm text-muted-foreground">{range.label}</p>
+            <h2 className="t-display viva-underline inline-block pb-1 text-2xl">DRE Gerencial</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{range.label}</p>
           </div>
           <div className="flex items-center gap-2">
             <SyncFreshnessIndicator lastSyncAt={lastSyncAt} />
@@ -869,14 +869,16 @@ export function DashboardDreView({
                             }
                           }}
                         >
-                          {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
+                          <span className={(row.valuesByBucket[column.key] ?? 0) < 0 ? "text-status-critical" : ""}>
+                            {formatCurrency(row.valuesByBucket[column.key] ?? 0)}
+                          </span>
                         </button>
                       </div>
                     );
                   })}
 
                   {/* Total column */}
-                  <div className="text-right font-semibold">
+                  <div className={`text-right font-semibold ${row.accumulatedValue < 0 ? "text-status-critical" : ""}`}>
                     {formatCurrency(row.accumulatedValue)}
                   </div>
                 </div>
