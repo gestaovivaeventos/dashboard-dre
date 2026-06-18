@@ -28,7 +28,12 @@ interface NavLinksProps {
    * FRANQUEADO_NAV_KEYS em vez do dreRole.
    */
   isFranqueado?: boolean;
+  /** Contadores por chave de item (ex.: { "ct-apr": 3 }). Renderizados como badge. */
+  badges?: Record<string, number>;
 }
+
+// Preenchimento translucido laranja da aba ativa (token --accent-soft).
+const ACTIVE_BG: React.CSSProperties = { backgroundColor: "var(--accent-soft)" };
 
 interface RenderItem {
   key: string;
@@ -44,30 +49,6 @@ interface RenderGroup {
   items: RenderItem[];
 }
 
-const MODULE_COLOR: Record<
-  NavGroupId,
-  { text: string; bg: string; rail: string; dot: string }
-> = {
-  financeiro: {
-    text: "text-blue-600 dark:text-blue-400",
-    bg: "bg-blue-600/[0.06] dark:bg-blue-400/[0.08]",
-    rail: "bg-blue-600 dark:bg-blue-400",
-    dot: "bg-blue-600 dark:bg-blue-400",
-  },
-  compras: {
-    text: "text-violet-600 dark:text-violet-400",
-    bg: "bg-violet-600/[0.06] dark:bg-violet-400/[0.08]",
-    rail: "bg-violet-600 dark:bg-violet-400",
-    dot: "bg-violet-600 dark:bg-violet-400",
-  },
-  plataforma: {
-    text: "text-slate-600 dark:text-slate-300",
-    bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
-    rail: "bg-slate-600 dark:bg-slate-400",
-    dot: "bg-slate-600 dark:bg-slate-400",
-  },
-};
-
 export function NavLinks({
   dreRole,
   ctrlRoles,
@@ -77,6 +58,7 @@ export function NavLinks({
   onNavigate,
   contractsOnly,
   isFranqueado,
+  badges,
 }: NavLinksProps) {
   const pathname = usePathname();
 
@@ -86,6 +68,16 @@ export function NavLinks({
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
     : buildGroups({ dreRole, ctrlRoles, segments, activeSegmentSlug, isFranqueado });
+
+  // Anexa os contadores (badges) aos itens pela chave.
+  if (badges) {
+    for (const group of groups) {
+      for (const item of group.items) {
+        const n = badges[item.key];
+        if (n && n > 0) item.badge = n;
+      }
+    }
+  }
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -101,10 +93,9 @@ export function NavLinks({
     );
   }
 
-  const renderItem = (item: RenderItem, groupId: NavGroupId) => {
+  const renderItem = (item: RenderItem) => {
     const Icon = item.icon;
     const isActive = item.href === activeHref;
-    const color = MODULE_COLOR[groupId];
 
     if (collapsed) {
       const collapsedLink = (
@@ -112,29 +103,33 @@ export function NavLinks({
           href={item.href}
           onClick={onNavigate}
           aria-current={isActive ? "page" : undefined}
+          style={isActive ? ACTIVE_BG : undefined}
           className={cn(
             "relative flex h-9 w-full items-center justify-center rounded-md transition-colors",
             isActive
-              ? cn(color.bg, color.text)
+              ? "text-viva-500"
               : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
           )}
         >
           {isActive && (
             <span
               aria-hidden
-              className={cn(
-                "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
-                color.rail,
-              )}
+              className="absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm bg-viva-500"
             />
           )}
           <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+          {item.badge != null && (
+            <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-viva-500" />
+          )}
         </Link>
       );
       return (
         <Tooltip key={item.key}>
           <TooltipTrigger asChild>{collapsedLink}</TooltipTrigger>
-          <TooltipContent side="right">{item.title}</TooltipContent>
+          <TooltipContent side="right">
+            {item.title}
+            {item.badge != null ? ` (${item.badge})` : ""}
+          </TooltipContent>
         </Tooltip>
       );
     }
@@ -145,20 +140,18 @@ export function NavLinks({
         href={item.href}
         onClick={onNavigate}
         aria-current={isActive ? "page" : undefined}
+        style={isActive ? ACTIVE_BG : undefined}
         className={cn(
           "relative flex h-[30px] items-center gap-2.5 rounded-md px-3 text-[12.5px] transition-colors",
           isActive
-            ? cn(color.text, color.bg, "font-semibold")
+            ? "text-viva-500 font-semibold"
             : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
         )}
       >
         {isActive && (
           <span
             aria-hidden
-            className={cn(
-              "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
-              color.rail,
-            )}
+            className="absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm bg-viva-500"
           />
         )}
         <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
@@ -166,10 +159,10 @@ export function NavLinks({
         {item.badge != null && (
           <span
             className={cn(
-              "text-[10px] font-semibold tabular-nums",
-              color.text,
-              !isActive && "opacity-80",
+              "min-w-[18px] rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums",
+              isActive ? "text-viva-500" : "text-white",
             )}
+            style={isActive ? undefined : { backgroundColor: "var(--viva-orange-500)" }}
           >
             {item.badge}
           </span>
@@ -181,21 +174,15 @@ export function NavLinks({
   return (
     <nav className={collapsed ? "space-y-1" : "space-y-0.5"}>
       {groups.map((group, idx) => {
-        const color = MODULE_COLOR[group.id];
         return (
           <div key={group.id} className={idx === 0 ? undefined : "mt-2"}>
             {!collapsed && (
               <div className="flex items-center gap-1.5 px-3 pt-3 pb-1.5">
                 <span
                   aria-hidden
-                  className={cn("h-[5px] w-[5px] rounded-full", color.dot)}
+                  className="h-[5px] w-[5px] rounded-full bg-ink-muted"
                 />
-                <span
-                  className={cn(
-                    "text-[10px] font-semibold uppercase tracking-[0.12em]",
-                    color.text,
-                  )}
-                >
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
                   {group.label}
                 </span>
               </div>
@@ -204,12 +191,29 @@ export function NavLinks({
               <div className="my-2 border-t border-border" />
             )}
             <div className={collapsed ? "space-y-1" : "space-y-px"}>
-              {group.items.map((item) => renderItem(item, group.id))}
+              {group.items.map((item) => renderItem(item))}
             </div>
           </div>
         );
       })}
     </nav>
+  );
+}
+
+// Lista achatada dos itens visiveis ao usuario — usada pelo command palette.
+export interface FlatNavItem {
+  key: string;
+  title: string;
+  href: string;
+  icon: NavItem["icon"];
+}
+
+export function getVisibleNavItems(input: BuildInput & { contractsOnly?: boolean }): FlatNavItem[] {
+  const groups = input.contractsOnly
+    ? buildContractsOnlyGroups()
+    : buildGroups(input);
+  return groups.flatMap((g) =>
+    g.items.map((i) => ({ key: i.key, title: i.title, href: i.href, icon: i.icon })),
   );
 }
 
