@@ -135,7 +135,7 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, kpis, caixa,
       {/* Visão financeira (server-computed): KPIs + Caixa, ou Mini-DRE do franqueado */}
       {(kpis || caixa || miniDre) && (
         <section>
-          <h2 className="mb-3 text-base font-semibold">Visão financeira</h2>
+          <h2 className="t-display viva-underline mb-3 inline-block pb-1 text-base">Visão financeira</h2>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {kpis && <WidgetKpis data={kpis} />}
             {caixa && <WidgetCaixa data={caixa} />}
@@ -148,7 +148,7 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, kpis, caixa,
       {canFinanceiro && (
         <>
           <section>
-            <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
+            <h2 className="t-display viva-underline mb-3 inline-block pb-1 text-base">Indicadores Econômicos</h2>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               {loadingIndicators
                 ? Array.from({ length: 4 }).map((_, i) => (
