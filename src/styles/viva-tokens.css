@@ -47,11 +47,17 @@
   --status-warning-bg:  rgba(247, 144,  9, 0.12);
   --status-progress-bg: rgba(59, 130, 246, 0.12);
   --status-success-bg:  rgba(18, 183, 106, 0.12);
+  --status-info-bg:     rgba(6, 174, 212, 0.12);
 
   /* ---------- Accent (destaque Viva) ---------- */
-  /* A cor de destaque e' o laranja --viva-orange-500. --accent-soft e' o
-     preenchimento translucido para estados ativos (aba ativa da sidebar etc.).
-     NAO confundir com a var shadcn --accent (neutra, em globals.css). */
+  /* A cor de destaque e' o laranja --viva-orange-500. Use --viva-accent como
+     referencia semantica unica (evita espalhar o hex pelo codigo).
+     NAO usar o nome --accent: ele e' a var neutra do shadcn (globals.css) e
+     seria sobrescrita/quebraria o hover dos componentes shadcn.
+     --accent-soft e' o preenchimento translucido para estados ativos
+     (aba ativa da sidebar etc.). */
+  --viva-accent:        var(--viva-orange-500);
+  --viva-accent-hover:  var(--viva-orange-600);
   --accent-soft: rgba(255, 107, 26, 0.10);
 
   /* ---------- Gradient cards (status) ---------- */
@@ -59,6 +65,17 @@
   --grad-warning:  linear-gradient(135deg, rgba(247,144, 9,0.25) 0%, rgba(247,144, 9,0.05) 100%);
   --grad-progress: linear-gradient(135deg, rgba(59,130,246,0.25) 0%, rgba(59,130,246,0.05) 100%);
   --grad-success:  linear-gradient(135deg, rgba(18,183,106,0.25) 0%, rgba(18,183,106,0.05) 100%);
+
+  /* ---------- Espacamentos (escala base 4px) ---------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
 
   /* ---------- Radii / sombras ---------- */
   --radius-sm: 4px;
