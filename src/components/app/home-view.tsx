@@ -128,44 +128,6 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
       {/* Rodapé financeiro (gestão/financeiro) — Plano 2 expande com KPIs e Caixa */}
       {canFinanceiro && (
         <>
-          <section>
-            <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {loadingIndicators
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <Card key={i} className="rounded-lg border bg-background">
-                      <CardContent className="space-y-2 p-4">
-                        <Skeleton className="h-4 w-24" />
-                        <Skeleton className="h-7 w-20" />
-                        <Skeleton className="h-4 w-16" />
-                      </CardContent>
-                    </Card>
-                  ))
-                : indicators.map((ind) => (
-                    <Card key={ind.name} className="rounded-lg border bg-background">
-                      <CardContent className="p-4">
-                        <div className="mb-1 flex items-center gap-2">
-                          <span
-                            className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                            style={{ backgroundColor: ind.color }}
-                          />
-                          <span className="truncate text-xs text-muted-foreground">
-                            {ind.label}
-                          </span>
-                        </div>
-                        <p className="text-2xl font-bold tracking-tight">{ind.value}</p>
-                        <p
-                          className="mt-1 text-xs font-medium"
-                          style={{ color: changeColor(ind.changeType) }}
-                        >
-                          {ind.change}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
-            </div>
-          </section>
-
           <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card className="rounded-lg border bg-background">
               <CardHeader className="pb-3">
@@ -205,6 +167,34 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
                 <CardTitle className="text-base font-semibold">Notícias Econômicas</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
+                {/* Indicadores econômicos compactos — faixa única no topo */}
+                {loadingIndicators ? (
+                  <div className="mb-2 flex flex-wrap gap-x-4 gap-y-2 border-b pb-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-4 w-28" />
+                    ))}
+                  </div>
+                ) : indicators.length > 0 ? (
+                  <div className="mb-2 flex flex-wrap gap-x-4 gap-y-2 border-b pb-3">
+                    {indicators.map((ind) => (
+                      <div key={ind.name} className="flex items-center gap-1.5 text-xs">
+                        <span
+                          className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                          style={{ backgroundColor: ind.color }}
+                        />
+                        <span className="text-muted-foreground">{ind.label}</span>
+                        <span className="font-semibold tabular-nums">{ind.value}</span>
+                        <span
+                          className="font-medium tabular-nums"
+                          style={{ color: changeColor(ind.changeType) }}
+                        >
+                          {ind.change}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
                 {loadingNews ? (
                   Array.from({ length: 4 }).map((_, i) => (
                     <div key={i} className="space-y-1 px-3 py-2.5">
