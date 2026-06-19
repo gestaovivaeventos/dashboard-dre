@@ -151,7 +151,7 @@ export function renderOnePageEmail({ companyName, periodLabel, payload, analysis
   const ctaUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/financeiro/business-intelligence` : null;
   const cta = ctaUrl
     ? `<div style="text-align:center;margin:28px 0 8px;">
-        <a href="${ctaUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:13px;font-weight:600;padding:10px 24px;border-radius:8px;text-decoration:none;">Ver relatório completo no Controll Hub</a>
+        <a href="${ctaUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:13px;font-weight:600;padding:10px 24px;border-radius:8px;text-decoration:none;">Ver relatório completo no Control Hub</a>
       </div>`
     : "";
 
@@ -163,7 +163,7 @@ export function renderOnePageEmail({ companyName, periodLabel, payload, analysis
     <tr><td align="center">
       <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;padding:32px;font-family:Arial,Helvetica,sans-serif;">
         <tr><td>
-          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;">Controll Hub — Business Intelligence</div>
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;">Control Hub — Business Intelligence</div>
           <h1 style="font-size:20px;color:#0f172a;margin:6px 0 2px;">${esc(companyName)}</h1>
           <div style="font-size:14px;color:#475569;">Relatório mensal — ${esc(periodLabel)}</div>
           <div style="margin-top:12px;">
@@ -195,7 +195,7 @@ export function renderOnePageEmail({ companyName, periodLabel, payload, analysis
           ${cta}
 
           <div style="font-size:11px;color:#94a3b8;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:12px;">
-            Relatório gerado automaticamente pelo Controll Hub com apoio de IA. Os números vêm do DRE realizado e orçado da unidade; a leitura textual é gerada por IA e deve ser validada pelo gestor.
+            Relatório gerado automaticamente pelo Control Hub com apoio de IA. Os números vêm do DRE realizado e orçado da unidade; a leitura textual é gerada por IA e deve ser validada pelo gestor.
           </div>
         </td></tr>
       </table>

@@ -19,12 +19,12 @@ const body = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Controll Hub",
+  title: "Control Hub",
   description: "Painel DRE com autenticação Supabase",
 };
 
 // Aplica o tema salvo antes da hidratacao para nao "piscar" ao carregar.
-// Padrao do Controll Hub e' o tema ESCURO; so vai para o claro com escolha
+// Padrao do Control Hub e' o tema ESCURO; so vai para o claro com escolha
 // explicita (localStorage 'theme' = 'light').
 const THEME_INIT_SCRIPT = `
 (function(){try{

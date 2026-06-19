@@ -108,7 +108,7 @@ export async function GET(request: Request) {
       const emails = contacts.map((c: { email: string; name: string }) => c.email);
       await sendEmail({
         to: emails,
-        subject: `[Controll Hub] Relatorio Mensal — ${companyName} — ${periodLabel}`,
+        subject: `[Control Hub] Relatorio Mensal — ${companyName} — ${periodLabel}`,
         html,
       });
 
@@ -160,7 +160,7 @@ export async function GET(request: Request) {
         .join("");
       await sendEmail({
         to: adminEmail,
-        subject: `[Controll Hub] Falhas no Relatorio Mensal — ${periodLabel}`,
+        subject: `[Control Hub] Falhas no Relatorio Mensal — ${periodLabel}`,
         html: `<h2>Falhas ao gerar relatório mensal (${periodLabel})</h2><ul>${failureList}</ul>`,
       });
     }

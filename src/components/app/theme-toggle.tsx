@@ -9,7 +9,7 @@ export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    // Padrão do Controll Hub é escuro; só cai no claro com escolha explícita.
+    // Padrão do Control Hub é escuro; só cai no claro com escolha explícita.
     const stored = localStorage.getItem("theme");
     const isDark = stored ? stored === "dark" : true;
     setDark(isDark);

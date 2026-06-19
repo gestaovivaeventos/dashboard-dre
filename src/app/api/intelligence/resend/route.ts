@@ -9,10 +9,10 @@ interface ResendBody {
 }
 
 function buildSubject(type: string): string {
-  if (type === "relatorio") return "[Controll Hub] Relatorio Mensal";
-  if (type === "comparativo") return "[Controll Hub] Comparativo de Empresas";
-  if (type === "projecao") return "[Controll Hub] Projecoes Financeiras";
-  return "[Controll Hub] Relatorio";
+  if (type === "relatorio") return "[Control Hub] Relatorio Mensal";
+  if (type === "comparativo") return "[Control Hub] Comparativo de Empresas";
+  if (type === "projecao") return "[Control Hub] Projecoes Financeiras";
+  return "[Control Hub] Relatorio";
 }
 
 export async function POST(request: Request) {

@@ -81,7 +81,7 @@ export async function GET(request: Request) {
     const list = failures.map((f) => `<li><strong>${f.companyName}</strong>: ${f.error}</li>`).join("");
     await sendEmail({
       to: process.env.ADMIN_EMAIL,
-      subject: `[Controll Hub] Falhas no Relatório BI mensal — ${range.periodLabel}`,
+      subject: `[Control Hub] Falhas no Relatório BI mensal — ${range.periodLabel}`,
       html: `<h2>Falhas ao gerar o relatório BI mensal (${range.periodLabel})</h2><ul>${list}</ul>`,
     });
   }
