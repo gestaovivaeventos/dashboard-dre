@@ -140,7 +140,9 @@ function varColor(a: number, b: number): string {
   if (a === 0 && b === 0) return "text-muted-foreground/60";
   if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? "text-emerald-700" : "text-red-700";
+  // Tokens de status (claro/escuro) em vez de emerald/red fixos, que perdiam
+  // contraste no tema escuro.
+  return pct >= 0 ? "text-status-success" : "text-status-critical";
 }
 
 const MONTHS = [
@@ -498,8 +500,8 @@ export function DashboardDreView({
       {/* Header */}
       <div className="rounded-xl border bg-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-semibold">DRE Gerencial</h2>
+          <div className="viva-underline pb-2">
+            <h2 className="font-display text-2xl font-semibold tracking-tight">DRE Gerencial</h2>
             <p className="text-sm text-muted-foreground">{range.label}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -722,7 +724,7 @@ export function DashboardDreView({
         const gridTemplate = `minmax(320px, 2.6fr) repeat(${gridCols}, minmax(100px, 1fr))`;
 
         return (
-          <div className="overflow-x-auto rounded-xl border bg-muted/50">
+          <div className="overflow-x-auto rounded-xl border bg-muted/50 tabular-nums">
             <div style={{ minWidth: `${320 + gridCols * 110}px` }}>
               {/* Header */}
               <div className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
@@ -788,7 +790,7 @@ export function DashboardDreView({
         );
       })() : (
         // Standard mode: monthly columns + total
-        <div className="overflow-x-auto rounded-xl border bg-muted/50">
+        <div className="overflow-x-auto rounded-xl border bg-muted/50 tabular-nums">
           <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
             {/* Header */}
             <div
@@ -813,7 +815,7 @@ export function DashboardDreView({
             {visibleRows.map((row) => {
               const isKeyResult = ["4", "6", "8", "11"].includes(row.code);
               const rowClass = isKeyResult ? "bg-background font-bold uppercase" : row.is_summary ? "bg-muted font-semibold" : "bg-card";
-              const borderClass = isKeyResult ? "border-t-2 border-slate-500" : "border-t border-slate-200";
+              const borderClass = isKeyResult ? "border-t-2 border-[color:var(--border-strong)]" : "border-t border-border";
 
               return (
                 <div
@@ -888,7 +890,7 @@ export function DashboardDreView({
 
       {/* Evolution chart */}
       <div className="rounded-xl border bg-background p-4">
-        <h3 className="text-lg font-semibold">Evolucao da Conta</h3>
+        <h3 className="font-display text-lg font-semibold tracking-tight">Evolucao da Conta</h3>
         <p className="mb-3 text-sm text-muted-foreground">
           Conta selecionada: {selectedAccount ? `${selectedAccount.code} - ${selectedAccount.name}` : "-"}
         </p>

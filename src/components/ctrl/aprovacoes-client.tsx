@@ -169,7 +169,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
           >
             {TAB_LABELS[tab]}
             {counts[tab] > 0 && (
-              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${activeTab === tab ? "bg-violet-100 text-violet-700" : "bg-muted text-muted-foreground"}`}>
+              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${activeTab === tab ? "bg-[var(--accent-soft)] text-viva-600 dark:text-viva-400" : "bg-muted text-muted-foreground"}`}>
                 {counts[tab]}
               </span>
             )}
@@ -222,7 +222,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
             return (
               <div
                 key={req.id}
-                className={`p-4 space-y-2 transition-colors ${canSelectThis && selected.has(req.id) ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
+                className={`p-4 space-y-2 transition-colors ${canSelectThis && selected.has(req.id) ? "bg-[var(--accent-soft)]" : "hover:bg-muted/20"}`}
               >
                 {/* Header row */}
                 <div className="flex items-start justify-between gap-4">
