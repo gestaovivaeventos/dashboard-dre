@@ -44,28 +44,14 @@ interface RenderGroup {
   items: RenderItem[];
 }
 
-const MODULE_COLOR: Record<
-  NavGroupId,
-  { text: string; bg: string; rail: string; dot: string }
-> = {
-  financeiro: {
-    text: "text-blue-600 dark:text-blue-400",
-    bg: "bg-blue-600/[0.06] dark:bg-blue-400/[0.08]",
-    rail: "bg-blue-600 dark:bg-blue-400",
-    dot: "bg-blue-600 dark:bg-blue-400",
-  },
-  compras: {
-    text: "text-violet-600 dark:text-violet-400",
-    bg: "bg-violet-600/[0.06] dark:bg-violet-400/[0.08]",
-    rail: "bg-violet-600 dark:bg-violet-400",
-    dot: "bg-violet-600 dark:bg-violet-400",
-  },
-  plataforma: {
-    text: "text-slate-600 dark:text-slate-300",
-    bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
-    rail: "bg-slate-600 dark:bg-slate-400",
-    dot: "bg-slate-600 dark:bg-slate-400",
-  },
+// Tema Viva: o item ativo usa o laranja da marca de forma unificada em todos os
+// modulos (fundo translucido --accent-soft + barra lateral laranja). Os rotulos
+// de grupo ficam neutros — a cor de destaque sinaliza "onde estou", nao "qual
+// modulo". (Antes havia cor por modulo: azul/violeta/cinza.)
+const ACTIVE_COLOR = {
+  text: "text-viva-500",
+  bg: "bg-[var(--accent-soft)]",
+  rail: "bg-viva-500",
 };
 
 export function NavLinks({
@@ -101,10 +87,10 @@ export function NavLinks({
     );
   }
 
-  const renderItem = (item: RenderItem, groupId: NavGroupId) => {
+  const renderItem = (item: RenderItem) => {
     const Icon = item.icon;
     const isActive = item.href === activeHref;
-    const color = MODULE_COLOR[groupId];
+    const color = ACTIVE_COLOR;
 
     if (collapsed) {
       const collapsedLink = (
@@ -181,21 +167,15 @@ export function NavLinks({
   return (
     <nav className={collapsed ? "space-y-1" : "space-y-0.5"}>
       {groups.map((group, idx) => {
-        const color = MODULE_COLOR[group.id];
         return (
           <div key={group.id} className={idx === 0 ? undefined : "mt-2"}>
             {!collapsed && (
               <div className="flex items-center gap-1.5 px-3 pt-3 pb-1.5">
                 <span
                   aria-hidden
-                  className={cn("h-[5px] w-[5px] rounded-full", color.dot)}
+                  className="h-[5px] w-[5px] rounded-full bg-ink-disabled"
                 />
-                <span
-                  className={cn(
-                    "text-[10px] font-semibold uppercase tracking-[0.12em]",
-                    color.text,
-                  )}
-                >
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
                   {group.label}
                 </span>
               </div>
@@ -204,7 +184,7 @@ export function NavLinks({
               <div className="my-2 border-t border-border" />
             )}
             <div className={collapsed ? "space-y-1" : "space-y-px"}>
-              {group.items.map((item) => renderItem(item, group.id))}
+              {group.items.map((item) => renderItem(item))}
             </div>
           </div>
         );
