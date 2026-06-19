@@ -24,12 +24,12 @@ export const metadata: Metadata = {
 };
 
 // Aplica o tema salvo antes da hidratacao para nao "piscar" ao carregar.
-// Se nao houver preferencia salva, usa a do sistema operacional.
+// Padrao do Controll Hub e' o tema ESCURO; so vai para o claro com escolha
+// explicita (localStorage 'theme' = 'light').
 const THEME_INIT_SCRIPT = `
 (function(){try{
   var stored = localStorage.getItem('theme');
-  var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  var isDark = stored === 'dark' || (!stored && prefersDark);
+  var isDark = stored ? stored === 'dark' : true;
   if (isDark) document.documentElement.classList.add('dark');
 }catch(e){}})();
 `;
