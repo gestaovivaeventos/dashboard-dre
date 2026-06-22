@@ -606,11 +606,23 @@ export function DreStructureManager({
   // latter covers freshly-created aggregators in a custom plan that don't have
   // children yet but were created precisely to host new subaccounts. We still
   // exclude pure leaves (turning a leaf into a parent would silently change
-  // its role) and calculated rows (those compute from formulas).
+  // its role).
+  //
+  // Contas calculadas normalmente derivam de uma formula e nao hospedam
+  // subcontas — por isso ficam de fora por padrao. Mas alguns planos usam uma
+  // conta calculada como total E agrupadora ao mesmo tempo (ex.: "5 - Custos
+  // com os Servicos Prestados" = 5.1+...+5.11, com as subcontas 5.1..5.x
+  // penduradas nela). Quando a calculada JA tem filhos, ela claramente serve
+  // de agrupadora, entao a liberamos como conta pai. Calculadas-folha (ex.:
+  // "4 - Receita Liquida") seguem excluidas: vira-las em pai mudaria seu papel.
   const parentOptions = useMemo(
     () =>
       accounts
-        .filter((a) => a.type !== "calculado" && (!isLeaf(a.id) || a.is_summary))
+        .filter((a) => {
+          const hasChildren = !isLeaf(a.id);
+          if (a.type === "calculado") return hasChildren;
+          return hasChildren || a.is_summary;
+        })
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [accounts, byParent],
