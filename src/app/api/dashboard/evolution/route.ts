@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { resolveCompanyPeriodFloor } from "@/lib/dashboard/company-period-limits";
 import {
   buildDashboardRows,
   fetchAllDreAccountRows,
@@ -64,9 +65,18 @@ export async function GET(request: Request) {
 
   const accounts = filterCoreDreAccounts(accountsData);
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
-  const ranges = Array.from({ length: 12 }).map((_, index) =>
+  let ranges = Array.from({ length: 12 }).map((_, index) =>
     monthRange(new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - (11 - index), 1))),
   );
+
+  // Piso de período da empresa (ex.: Sirena 2026+): a janela móvel de 12 meses
+  // alcança o ano anterior; descarta os meses abaixo do piso para que o gráfico
+  // de evolução não exiba dados anteriores ao ano permitido. Inerte sem piso
+  // (consolidado/multiempresa ou empresa sem limite).
+  const periodFloor = resolveCompanyPeriodFloor(scopedCompanyIds, companies);
+  if (periodFloor) {
+    ranges = ranges.filter((range) => range.dateFrom >= periodFloor.minDate);
+  }
 
   const points = await Promise.all(
     ranges.map(async (range) => {

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import {
+  clampDateFromToFloor,
+  resolveCompanyPeriodFloor,
+} from "@/lib/dashboard/company-period-limits";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { getManagerialDrilldownRows } from "@/lib/dashboard/managerial-adjustments";
 
@@ -51,6 +55,27 @@ export async function GET(request: Request) {
     });
   }
 
+  // Piso de período da empresa (ex.: Sirena 2026+): eleva o início do drilldown
+  // ao ano-piso e, se todo o intervalo está abaixo dele, devolve vazio. Só vale
+  // single-company da empresa-piso (resolveCompanyPeriodFloor) — não afeta a
+  // Feat Produções nem o consolidado. Ver company-period-limits.ts.
+  const periodFloor = resolveCompanyPeriodFloor(
+    scopedCompanyIds,
+    (companiesData ?? []).map((c) => ({ id: c.id as string, name: c.name as string })),
+  );
+  const effectiveDateFrom = clampDateFromToFloor(dateFrom, periodFloor);
+  if (effectiveDateFrom > dateTo) {
+    return NextResponse.json({
+      rows: [],
+      page,
+      pageSize,
+      total: 0,
+      totalPages: 0,
+      totalValue: 0,
+      aggregateTotal: 0,
+    });
+  }
+
   // Resolve o `code` da conta clicada (estável entre planos custom/global).
   const targetCode = await (async () => {
     const { data } = await supabase
@@ -68,7 +93,7 @@ export async function GET(request: Request) {
     companyIds: scopedCompanyIds,
     code: targetCode,
     companyName: companyNameById.get(scopedCompanyIds[0]) ?? "",
-    dateFrom,
+    dateFrom: effectiveDateFrom,
     dateTo,
     search,
     page,
@@ -89,7 +114,7 @@ export async function GET(request: Request) {
     supabase.rpc("dashboard_dre_drilldown", {
       p_dre_account_id: accountId,
       p_company_ids: scopedCompanyIds,
-      p_date_from: dateFrom,
+      p_date_from: effectiveDateFrom,
       p_date_to: dateTo,
       p_search: search,
       p_limit: pageSize,
@@ -97,7 +122,7 @@ export async function GET(request: Request) {
     }),
     supabase.rpc("dashboard_dre_aggregate", {
       p_company_ids: scopedCompanyIds,
-      p_date_from: dateFrom,
+      p_date_from: effectiveDateFrom,
       p_date_to: dateTo,
     }),
   ]);
@@ -161,7 +186,7 @@ export async function GET(request: Request) {
         .in("dre_account_id", sheetAccountIds)
         .in("company_id", scopedCompanyIds);
       // Mesma janela de meses usada nas RPCs de agregacao (mes de dateFrom..dateTo).
-      const fromKey = Number(dateFrom.slice(0, 4)) * 12 + Number(dateFrom.slice(5, 7)) - 1;
+      const fromKey = Number(effectiveDateFrom.slice(0, 4)) * 12 + Number(effectiveDateFrom.slice(5, 7)) - 1;
       const toKey = Number(dateTo.slice(0, 4)) * 12 + Number(dateTo.slice(5, 7)) - 1;
       sheetsBaseValue = (manualValues ?? []).reduce((sum, r) => {
         const key = Number(r.ano) * 12 + Number(r.mes) - 1;

@@ -4,6 +4,10 @@ import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { getManagerialAmountsByCode } from "@/lib/dashboard/managerial-adjustments";
 import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
+import {
+  applyPeriodFloor,
+  resolveCompanyPeriodFloor,
+} from "@/lib/dashboard/company-period-limits";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 
@@ -136,8 +140,17 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     }
   }
 
+  // Limite de período por empresa (ex.: Sirena exibe apenas 2026+). Aplica-se
+  // SÓ quando a empresa-piso é a ÚNICA selecionada — não afeta a Feat Produções
+  // (que alimenta a Sirena via departamento), o consolidado nem outra empresa.
+  // É um corte de visualização: eleva o início do período ao ano-piso e, quando
+  // todo o intervalo pedido está abaixo do piso, sinaliza estado vazio. Não
+  // apaga nem altera dados. Ver src/lib/dashboard/company-period-limits.ts.
+  const periodFloor = resolveCompanyPeriodFloor(filter.selectedCompanyIds, companies);
+  const { isEmpty: periodOutsideFloor } = applyPeriodFloor(filter, periodFloor);
+
   // If no companies selected, render empty state
-  if (filter.selectedCompanyIds.length === 0) {
+  if (filter.selectedCompanyIds.length === 0 || periodOutsideFloor) {
     return (
       <DashboardDreView
         filter={filter}

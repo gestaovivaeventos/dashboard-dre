@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import { CashFlowView } from "@/components/app/cash-flow-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
+import {
+  applyPeriodFloor,
+  clampDateFromToFloor,
+  resolveCompanyPeriodFloor,
+} from "@/lib/dashboard/company-period-limits";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import {
   DRE_RESULTADO_EXERCICIO_CODE,
@@ -28,6 +33,7 @@ import {
   type CashFlowAccumulatedSection,
   type CashFlowPeriodBucket,
 } from "@/lib/dashboard/cash-flow";
+import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +141,28 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     }
   }
 
+  // Limite de período por empresa (ex.: Sirena exibe apenas 2026+). Aplica-se
+  // SÓ quando a empresa-piso é a ÚNICA selecionada — não afeta a Feat Produções
+  // (que alimenta a Sirena via departamento), o consolidado nem outra empresa.
+  // Eleva o início do período ao ano-piso; `periodFloorDate` corta também os
+  // baselines "desde o início da história" (saldo inicial / acumulados) abaixo,
+  // garantindo que dados anteriores ao piso não componham os cálculos. Não
+  // apaga nem altera dados. Ver src/lib/dashboard/company-period-limits.ts.
+  const periodFloor = resolveCompanyPeriodFloor(filter.selectedCompanyIds, companies);
+  const { isEmpty: periodOutsideFloor } = applyPeriodFloor(filter, periodFloor);
+
+  // Impostos calculados da Sirena no "Resultado do Exercício" que alimenta o
+  // Fluxo de Caixa. O Dashboard DRE aplica o hook `applySirenaCalculatedTaxes`
+  // (postProcessAmounts) ao agregar o DRE; aqui o Fluxo PRECISA aplicar o mesmo
+  // hook, senão o Resultado do Exercício (e o Caixa Gerado dele derivado)
+  // ignora ISS/PIS/COFINS/IRPJ/Contrib. Social e diverge do Dashboard. Mesma
+  // regra de escopo single-Sirena. Ver src/lib/dashboard/sirena-taxes.ts e a
+  // nota de centralização em src/lib/dashboard/dre.ts.
+  const sirenaCompanyId =
+    companies.find(
+      (c) => c.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase(),
+    )?.id ?? null;
+
   // Escopo do plano de Fluxo de Caixa para exibicao:
   // - Empresa unica selecionada com plano customizado (qualquer linha com
   //   company_id = empresa): mostramos o plano dela e ignoramos o global,
@@ -205,7 +233,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     ? SGX_RESULTADO_EXERCICIO_CODE
     : DRE_RESULTADO_EXERCICIO_CODE;
 
-  if (filter.selectedCompanyIds.length === 0) {
+  if (filter.selectedCompanyIds.length === 0 || periodOutsideFloor) {
     return (
       <CashFlowView
         filter={filter}
@@ -245,12 +273,22 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     bucket: CashFlowPeriodBucket,
     companies: string[] = filter.selectedCompanyIds,
   ): Promise<number> => {
+    // Aplica os impostos calculados SÓ quando o conjunto agregado é exatamente
+    // a Sirena sozinha (mesmo escopo single-Sirena do Dashboard) — assim o
+    // Resultado do Exercício do Fluxo bate bit-a-bit com o do Dashboard DRE.
+    const useSirenaTaxes =
+      sirenaCompanyId !== null &&
+      companies.length === 1 &&
+      companies[0] === sirenaCompanyId;
     const rows = await aggregateDreRows({
       supabase,
       scope: dreScope,
       companyIds: companies,
-      dateFrom: bucket.dateFrom,
+      // Piso de período da empresa (ex.: Sirena 2026+): corta baselines que
+      // alcançam anos anteriores (saldo inicial). Inerte quando não há piso.
+      dateFrom: clampDateFromToFloor(bucket.dateFrom, periodFloor),
       dateTo: bucket.dateTo,
+      postProcessAmounts: useSirenaTaxes ? applySirenaCalculatedTaxes : undefined,
     });
     return findResultadoExercicio(rows, resultadoExercicioCode);
   };
@@ -262,7 +300,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   ): Promise<Map<string, number>> => {
     const { data, error } = await supabase.rpc("cash_flow_aggregate", {
       p_company_ids: companies,
-      p_date_from: bucket.dateFrom,
+      // Piso de período da empresa (ex.: Sirena 2026+): corta baselines que
+      // alcançam anos anteriores (saldo inicial / acumulados). Inerte sem piso.
+      p_date_from: clampDateFromToFloor(bucket.dateFrom, periodFloor),
       p_date_to: bucket.dateTo,
     });
     if (error) {
@@ -323,7 +363,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     }
     const { data, error } = await supabase.rpc("cash_flow_partner_breakdown", {
       p_company_id: singleCompanyId,
-      p_date_from: bucket.dateFrom,
+      // Piso de período da empresa (ex.: Sirena 2026+): corta o baseline de
+      // acumulados por sócio abaixo do piso. Inerte quando não há piso.
+      p_date_from: clampDateFromToFloor(bucket.dateFrom, periodFloor),
       p_date_to: bucket.dateTo,
     });
     if (error) {
@@ -439,6 +481,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     period_month: number;
     amount: number | string;
   }>).forEach((row) => {
+    // Saldos de abertura anteriores ao piso da empresa (ex.: Sirena 2026+) não
+    // entram — senão um saldo manual de 2025 semearia o saldo inicial de 2026.
+    if (periodFloor && row.period_year < periodFloor.minYear) return;
     const monthKey = `${row.period_year}-${row.period_month}`;
     const value = Number(row.amount ?? 0);
     openingByMonth.set(monthKey, (openingByMonth.get(monthKey) ?? 0) + value);

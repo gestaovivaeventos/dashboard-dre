@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/cash-flow";
+import {
+  clampDateFromToFloor,
+  resolveCompanyPeriodFloor,
+} from "@/lib/dashboard/company-period-limits";
 
 export async function GET(request: Request) {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -27,7 +31,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const { data: companiesData } = await supabase.from("companies").select("id");
+  const { data: companiesData } = await supabase.from("companies").select("id,name");
   const allCompanyIds = (companiesData ?? []).map((company) => company.id as string);
   const allowedCompanyIds = await resolveAllowedCompanyIds(supabase, profile, allCompanyIds);
   const scopedCompanyIds =
@@ -39,10 +43,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ rows: [], page, pageSize, total: 0, totalPages: 0, totalValue: 0 });
   }
 
+  // Piso de período da empresa (ex.: Sirena 2026+): eleva o início do drilldown
+  // ao ano-piso e, se todo o intervalo está abaixo dele, devolve vazio. Só vale
+  // single-company da empresa-piso — não afeta a Feat Produções nem o
+  // consolidado. Ver company-period-limits.ts.
+  const periodFloor = resolveCompanyPeriodFloor(
+    scopedCompanyIds,
+    (companiesData ?? []).map((c) => ({ id: c.id as string, name: c.name as string })),
+  );
+  const effectiveDateFrom = clampDateFromToFloor(dateFrom, periodFloor);
+  if (effectiveDateFrom > dateTo) {
+    return NextResponse.json({ rows: [], page, pageSize, total: 0, totalPages: 0, totalValue: 0 });
+  }
+
   const { data, error } = await supabase.rpc("cash_flow_drilldown", {
     p_cash_flow_account_id: accountId,
     p_company_ids: scopedCompanyIds,
-    p_date_from: dateFrom,
+    p_date_from: effectiveDateFrom,
     p_date_to: dateTo,
     p_search: search,
     p_limit: pageSize,
