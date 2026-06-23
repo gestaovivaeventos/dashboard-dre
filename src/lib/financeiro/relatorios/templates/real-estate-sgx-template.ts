@@ -62,11 +62,50 @@ export const realEstateSgxTemplate: ReportTemplate = {
     "Monitorar consumo de caixa dos projetos.",
     "Revisar contratos de locação com baixa rentabilidade.",
   ],
+  // Mapeamento CONFIRMADO pela auditoria de contas (plano custom da SGX).
   dreAccountMapping: {
-    receita_locacoes: { label: "Receita de Locações", byNameIncludes: ["locação", "locacao", "aluguel", "aluguéis"], status: "todo", note: "Confirmar contas de receita de aluguel no plano da SGX." },
-    despesas_imoveis: { label: "Despesas dos Imóveis Locados", byNameIncludes: ["imóvel", "imovel", "condomínio", "iptu", "manutenção"], status: "todo" },
-    receita_projetos: { label: "Receita de Projetos", byNameIncludes: ["projeto"], status: "todo" },
-    despesas_projetos: { label: "Despesas de Projetos", byNameIncludes: ["projeto", "obra", "terreno", "canteiro", "pré-operacional", "pre-operacional"], status: "todo", note: "SGX roteia entradas com cCodProjeto preenchido; ver project_mapping." },
-    administrativo: { label: "Despesas Administrativas", byNameIncludes: ["administrativ"], status: "todo" },
+    receita_locacoes: { label: "Receita com locação de imóvel", codes: ["1"], status: "confirmed" },
+    despesas_imoveis: { label: "Despesas com Imóveis Locados", codes: ["2"], status: "confirmed" },
+    resultado_locacoes: { label: "Resultado 1 - Locações", codes: ["3"], status: "confirmed", note: "calculado f=1-2" },
+    receitas_projetos: { label: "Receitas Projetos", codes: ["12"], status: "confirmed" },
+    despesas_projetos: { label: "Despesas Projetos", codes: ["13"], status: "confirmed" },
+    resultado_projetos: { label: "Resultado 3 - Projetos", codes: ["14"], status: "confirmed", note: "calculado f=12-13" },
+    resultado_consolidado: { label: "Resultado 4 - Locação + Operacional + Projetos", codes: ["15"], status: "confirmed", note: "calculado f=11+14" },
+  },
+
+  // ── Fase 2: relatório real da SGX por conta DRE (codes confirmados) ────────
+  // Sinais: despesas chegam como magnitude POSITIVA (fórmulas usam 1-2, 12-13).
+  // Reutilizamos os helpers do payload (Math.abs p/ exibir, statusDespesas...).
+  report: {
+    // Cards: 3 resultados (1ª linha) + Margem Líquida (2ª linha) → grade 3 cols.
+    kpiCards: [
+      { label: "Resultado Locações", code: "3", kind: "resultado" },
+      { label: "Resultado Projetos", code: "14", kind: "resultado" },
+      { label: "Resultado Final", code: "15", kind: "resultado" },
+      // Margem Líquida = Resultado Final (15) / (Locações + Outras + Projetos).
+      { label: "Margem Líquida", kind: "margem", ratio: { numerator: ["15"], denominator: ["1", "4", "12"] } },
+    ],
+    // 4 cards numa única linha (grade de 4 colunas — default).
+    kpiColumns: 4,
+    // Ordem por frente (Locações → Operacional → Projetos → Final). Despesas
+    // entram como magnitude positiva (padrão do gráfico). "Resultado
+    // Operacional" é derivado: Receitas Operacionais (4) − Despesas
+    // Operacionais (Deduções 5 + Desp. Op. 7 + IRPJ 9 + Contrib. Social 10).
+    previstoRealizado: [
+      { label: "Receita com Locações", code: "1", unidade: "currency" },
+      { label: "Despesas com Locações", code: "2", unidade: "currency" },
+      { label: "Receitas Operacionais", code: "4", unidade: "currency" },
+      { label: "Despesas Operacionais", codes: ["5", "7", "9", "10"], unidade: "currency" },
+      { label: "Resultado Operacional", codes: ["4"], minus: ["5", "7", "9", "10"], unidade: "currency" },
+      { label: "Receitas Projetos", code: "12", unidade: "currency" },
+      { label: "Despesas Projetos", code: "13", unidade: "currency" },
+      { label: "Resultado Projetos", code: "14", unidade: "currency" },
+      { label: "Resultado Final", code: "15", unidade: "currency" },
+    ],
+    // Composição do Resultado e Semáforo removidos a pedido (não habilitados).
+    // Histórico acompanha o Resultado Final (code 15).
+    historicoAccountCode: "15",
+    historicoTitle: "Histórico do Resultado Final",
+    enabledBlocks: ["diagnostico", "previstoRealizado", "historico", "alertas", "acoes"],
   },
 };

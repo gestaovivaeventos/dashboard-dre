@@ -38,6 +38,9 @@ export interface KpiCardPayload {
   variationValue: number | null;
   variationLabel: string | null;
   status: KpiStatus;
+  // Quando true, o card não concatena " vs orçamento" (ex.: Margem Líquida,
+  // que é um indicador % sem comparação com orçado).
+  omitComparisonSuffix?: boolean;
 }
 
 export interface KpisPayload {
@@ -92,6 +95,18 @@ export interface OnePagePayload {
   // Template de relatório resolvido para a empresa (rótulo discreto de debug).
   template: { id: ReportTemplateId; name: string };
   kpis: KpisPayload;
+  // KPIs CUSTOM por conta DRE (templates com `report.kpiCards`, ex.: SGX).
+  // Quando presente, a UI usa esta lista no lugar do conjunto fixo `kpis`.
+  kpisList?: KpiCardPayload[];
+  // Allowlist de blocos visíveis (templates com `report.enabledBlocks`).
+  // Ausência = todos os blocos (comportamento atual de Franquias Viva).
+  enabledBlocks?: string[];
+  // Título do gráfico de histórico (templates com `report.historicoTitle`).
+  // Ausência = título atual no componente (Franquias Viva inalterado).
+  historicoTitle?: string;
+  // Nº de colunas da grade de KPIs (templates com `report.kpiColumns`).
+  // Ausência = 4 (comportamento atual).
+  kpiColumns?: number;
   previstoRealizado: PrevistoRealizadoPayload[];
   composicaoResultado: ComposicaoPayload[];
   historicoResultado: HistoricoPayload[];
@@ -185,6 +200,9 @@ export async function buildOnePagePayload(
     companyName: company.name,
     segmentSlug,
   });
+  // Code do histórico principal: default "11" (Resultado do Exercício); o
+  // template pode sobrescrever (ex.: SGX usa "15" = Resultado Consolidado).
+  const historicoCode = template.report?.historicoAccountCode ?? "11";
 
   // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
   const allAccounts = await fetchAllDreAccountRows<RawDreAccount>((from, to) =>
@@ -384,6 +402,23 @@ export async function buildOnePagePayload(
   const getBudgeted = (code: string): number | null => {
     const v = budgetedByCode.get(code);
     return v === undefined ? null : v;
+  };
+
+  // Soma de várias contas (ex.: Receitas Operacionais = code 1 + code 12).
+  // Orçado: soma só as contas com orçamento; null quando nenhuma tem.
+  const sumRealized = (codes: string[]): number =>
+    codes.reduce((s, c) => s + getRealized(c), 0);
+  const sumBudgeted = (codes: string[]): number | null => {
+    let any = false;
+    let total = 0;
+    for (const c of codes) {
+      const b = getBudgeted(c);
+      if (b !== null) {
+        any = true;
+        total += b;
+      }
+    }
+    return any ? total : null;
   };
 
   const receitaLiquidaRealizada = getRealized("4");
@@ -635,6 +670,60 @@ export async function buildOnePagePayload(
     delete kpis.sobrevivencia_caixa;
   }
 
+  // KPIs CUSTOM por conta DRE (templates com report.kpiCards — ex.: SGX).
+  // Reutiliza os helpers acima: despesa exibe magnitude (Math.abs) e usa o
+  // farol invertido (gastar menos que o previsto = melhor). Receita/Resultado
+  // seguem o farol normal (maior = melhor). NÃO inverte sinal armazenado.
+  const kpisList: KpiCardPayload[] | undefined = template.report?.kpiCards?.map(
+    (spec) => {
+      // Margem (%): razão soma(numerador) / soma(denominador). É um indicador
+      // sem comparação com orçado — verde se positiva, vermelho se negativa.
+      if (spec.kind === "margem" && spec.ratio) {
+        const num = sumRealized(spec.ratio.numerator);
+        const den = sumRealized(spec.ratio.denominator);
+        const margem = den !== 0 ? (num / den) * 100 : null;
+        // Margem ORÇADA: o MESMO cálculo usando os valores orçados.
+        const numB = sumBudgeted(spec.ratio.numerator);
+        const denB = sumBudgeted(spec.ratio.denominator);
+        const margemPrevista =
+          numB !== null && denB !== null && denB !== 0
+            ? (numB / denB) * 100
+            : null;
+        // Variação em pontos percentuais (realizado − orçado), mesmo padrão
+        // do card "Margem" da Viva. Farol: acima do orçado = melhor.
+        const margemVarPp =
+          margem !== null && margemPrevista !== null
+            ? margem - margemPrevista
+            : null;
+        return {
+          label: spec.label,
+          value: margem,
+          formattedValue: margem !== null ? formatPctFn(margem) : null,
+          variationValue: margemVarPp,
+          variationLabel: margemVarPp !== null ? formatPp(margemVarPp) : null,
+          status: statusMargemPp(margemVarPp),
+          // Sem orçamento comparável → não exibe " vs orçamento" vazio.
+          omitComparisonSuffix: margemVarPp === null,
+        };
+      }
+      const codes = spec.codes ?? (spec.code ? [spec.code] : []);
+      const realized = sumRealized(codes);
+      const budgeted = sumBudgeted(codes);
+      const varp = variacaoPct(realized, budgeted);
+      const isDespesa = spec.kind === "despesa";
+      return {
+        label: spec.label,
+        value: realized,
+        formattedValue: formatBRL(isDespesa ? Math.abs(realized) : realized),
+        variationValue: varp,
+        variationLabel: formatVarPct(varp),
+        status: isDespesa
+          ? statusDespesasFromVariacao(varp)
+          : statusFromVariacaoPercent(varp),
+      };
+    },
+  );
+
   const previstoRealizado: PrevistoRealizadoPayload[] = [
     {
       label: "Receita",
@@ -699,10 +788,10 @@ export async function buildOnePagePayload(
     "Jul", "Ago", "Set", "Out", "Nov", "Dez",
   ];
 
-  const account11 = accounts.find((a) => a.code === "11");
+  const histAccount = accounts.find((a) => a.code === historicoCode);
   let historicoResultado: HistoricoPayload[] = [];
 
-  if (account11) {
+  if (histAccount) {
     const months: Array<{ year: number; month: number }> = [];
     for (let i = 5; i >= 0; i--) {
       let y = toYear;
@@ -788,7 +877,7 @@ export async function buildOnePagePayload(
         entry.map === null
           ? null
           : (buildDashboardRows(accounts, entry.map).rows.find(
-              (r) => r.code === "11",
+              (r) => r.code === historicoCode,
             )?.value ?? null);
 
       const bMap = budgetMaps.get(monthKey(entry.year, entry.month));
@@ -796,7 +885,7 @@ export async function buildOnePagePayload(
         !bMap || bMap.size === 0
           ? null
           : (buildDashboardRows(accounts, bMap).rows.find(
-              (r) => r.code === "11",
+              (r) => r.code === historicoCode,
             )?.value ?? null);
 
       return { mes, previsto, realizado };
@@ -976,6 +1065,43 @@ export async function buildOnePagePayload(
   // `input`) porque depende de `vvrSerieAnual`, que e computado mais
   // abaixo no fluxo. O input final que vai pra IA fica enriquecido.
   // -------------------------------------------------------------------------
+  // Blocos REAIS por conta DRE quando o template define (ex.: SGX). Ausência
+  // => mantém os blocos genéricos (Franquias Viva e demais ficam idênticos).
+  // Sinal: entrada = +valor; saida (despesa) = -|valor|; resultado = como está.
+  const previstoRealizadoFinal: PrevistoRealizadoPayload[] =
+    template.report?.previstoRealizado
+      ? template.report.previstoRealizado.map((s) => {
+          // Valor = soma(plus) − soma(minus). `minus` permite resultados
+          // derivados (ex.: Resultado Operacional = Receitas Op − Despesas Op).
+          const plusCodes = s.codes ?? (s.code ? [s.code] : []);
+          const minusCodes = s.minus ?? [];
+          const realizado = sumRealized(plusCodes) - sumRealized(minusCodes);
+          const prevPlus = sumBudgeted(plusCodes);
+          const prevMinus = sumBudgeted(minusCodes);
+          const previsto =
+            prevPlus === null && prevMinus === null
+              ? null
+              : (prevPlus ?? 0) - (prevMinus ?? 0);
+          return {
+            label: s.label,
+            realizado,
+            previsto,
+            unidade: s.unidade,
+          };
+        })
+      : previstoRealizado;
+
+  const composicaoResultadoFinal: ComposicaoPayload[] = template.report?.composicao
+    ? template.report.composicao.map((s) => ({
+        label: s.label,
+        value:
+          s.type === "saida"
+            ? -Math.abs(getRealized(s.code))
+            : getRealized(s.code),
+        type: s.type,
+      }))
+    : composicaoResultado;
+
   return {
     ok: true,
     payload: {
@@ -994,8 +1120,16 @@ export async function buildOnePagePayload(
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
       kpis,
-      previstoRealizado,
-      composicaoResultado,
+      // KPIs custom (SGX etc.) — quando presentes, a UI os usa no lugar do fixo.
+      kpisList,
+      // Allowlist de blocos visíveis (undefined = todos, comportamento Viva).
+      enabledBlocks: template.report?.enabledBlocks,
+      // Título do histórico (undefined = título atual no componente).
+      historicoTitle: template.report?.historicoTitle,
+      // Colunas da grade de KPIs (undefined = 4).
+      kpiColumns: template.report?.kpiColumns,
+      previstoRealizado: previstoRealizadoFinal,
+      composicaoResultado: composicaoResultadoFinal,
       historicoResultado,
       acumuladoAno,
       // Série anual de VVR só faz sentido para quem tem VVR (Franquias Viva).

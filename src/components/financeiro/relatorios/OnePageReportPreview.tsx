@@ -123,6 +123,15 @@ export interface OnePageReportPreviewData {
   semaforo: SemaforoItem[];
   diagnosticoPrincipal: string;
   acoes: AcaoCard[];
+  // Allowlist de blocos visíveis (ex.: SGX oculta VVR e Acumulado do Ano).
+  // undefined/ausente = renderiza TODOS os blocos (comportamento Franquias
+  // Viva, intocado). Controlado pelo template, não por heurística de texto.
+  blocks?: string[];
+  // Título do gráfico de histórico. Ausente = título atual
+  // ("Previsto x Realizado — Resultado do Exercício"). Só cosmético.
+  historicoTitle?: string;
+  // Nº de colunas da grade de KPIs (ex.: SGX usa 3). Ausente = 4 (Viva).
+  kpiColumns?: number;
 }
 
 // ─── Dados mockados (default) ─────────────────────────────────────────────
@@ -743,7 +752,13 @@ function toNum(v: number | string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
+function HistoricoChart({
+  points,
+  title,
+}: {
+  points: HistoricoPoint[];
+  title?: string;
+}) {
   // Pre-computa, por ponto, se realizado >= previsto. Isso permite
   // posicionar os rotulos em lados OPOSTOS da intersecao das linhas —
   // o rotulo da serie mais alta vai para cima, o da mais baixa pra baixo.
@@ -824,7 +839,7 @@ function HistoricoChart({ points }: { points: HistoricoPoint[] }) {
     <Card className="border-slate-200 shadow-sm">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
-          Previsto x Realizado — Resultado do Exercício
+          {title ?? "Previsto x Realizado — Resultado do Exercício"}
         </CardTitle>
         <p className="text-xs text-slate-500">Últimos 6 meses — visão de tendência</p>
       </CardHeader>
@@ -999,74 +1014,104 @@ interface OnePageReportPreviewProps {
 export function OnePageReportPreview({
   data = MOCK_DATA,
 }: OnePageReportPreviewProps) {
+  // Visibilidade de bloco controlada pelo template: sem `blocks`, mostra tudo
+  // (Franquias Viva). Com `blocks`, só os listados (ex.: SGX não tem VVR nem
+  // Acumulado do Ano — esses blocos simplesmente NÃO existem no relatório).
+  const show = (block: string) => !data.blocks || data.blocks.includes(block);
+  const showAcumuladoVvrRow = show("acumuladoAno") || show("vvrSerie");
+  // Grade de KPIs: 3 colunas (ex.: SGX) ou 4 (default Franquias Viva). Classes
+  // literais para o Tailwind não purgar.
+  const kpiGridClass =
+    data.kpiColumns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4";
+
   return (
     <div className="space-y-5">
       {/* 1. Cabecalho */}
       <HeaderBlock data={data.cabecalho} />
 
       {/* 8. Diagnostico principal (subi para logo apos o header — e a tese) */}
-      <DiagnosticoBlock texto={data.diagnosticoPrincipal} />
+      {show("diagnostico") ? (
+        <DiagnosticoBlock texto={data.diagnosticoPrincipal} />
+      ) : null}
 
-      {/* 2. KPI cards — grade 4x2 em desktop. Em telas menores o numero
-            de colunas reduz progressivamente para preservar legibilidade. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* 2. KPI cards — grade 4 cols (Viva, 4x2) ou 3 cols (ex.: SGX → 3 + 1).
+            Em telas menores o numero de colunas reduz para legibilidade. */}
+      <div className={`grid gap-3 sm:grid-cols-2 ${kpiGridClass}`}>
         {data.kpis.map((kpi) => (
           <KpiCardItem key={kpi.label} kpi={kpi} />
         ))}
       </div>
 
-      {/* Previsto x Realizado (mes) + Composicao (lado a lado em desktop) */}
+      {/* Previsto x Realizado + Composicao. Quando o template oculta a
+          Composição (ex.: SGX), o Previsto x Realizado ocupa a largura toda. */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className={show("composicao") ? "lg:col-span-3" : "lg:col-span-5"}>
           <PrevistoRealizadoLikeChart
             title="Previsto x Realizado"
             items={data.previstoRealizado}
           />
         </div>
-        <div className="lg:col-span-2">
-          <ComposicaoBlock steps={data.composicao} />
-        </div>
+        {show("composicao") ? (
+          <div className="lg:col-span-2">
+            <ComposicaoBlock steps={data.composicao} />
+          </div>
+        ) : null}
       </div>
 
-      {/* Acumulado do Ano + VVR Serie Anual (lado a lado em desktop) */}
-      <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <PrevistoRealizadoLikeChart
-            title="Acumulado do Ano"
-            subtitle="Janeiro do ano selecionado até o mês de análise"
-            items={data.acumuladoAno}
-          />
+      {/* Acumulado do Ano + VVR Serie Anual (lado a lado em desktop).
+          Ocultado por completo quando o template não habilita nenhum dos dois
+          (ex.: SGX) — sem placeholder, sem gráfico vazio, sem "sem dados". */}
+      {showAcumuladoVvrRow ? (
+        <div className="grid gap-4 lg:grid-cols-5">
+          {show("acumuladoAno") ? (
+            <div className="lg:col-span-3">
+              <PrevistoRealizadoLikeChart
+                title="Acumulado do Ano"
+                subtitle="Janeiro do ano selecionado até o mês de análise"
+                items={data.acumuladoAno}
+              />
+            </div>
+          ) : null}
+          {show("vvrSerie") ? (
+            <div className="lg:col-span-2">
+              <VvrTemporalChart points={data.vvrSerieAnual} />
+            </div>
+          ) : null}
         </div>
-        <div className="lg:col-span-2">
-          <VvrTemporalChart points={data.vvrSerieAnual} />
-        </div>
-      </div>
+      ) : null}
 
-      {/* Historico + Semaforo */}
+      {/* Historico + Semaforo. Quando o template oculta o Semáforo (ex.: SGX),
+          o histórico ocupa a largura toda. */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-3">
-          <HistoricoChart points={data.historico} />
+        <div className={show("semaforo") ? "lg:col-span-3" : "lg:col-span-5"}>
+          <HistoricoChart points={data.historico} title={data.historicoTitle} />
         </div>
-        <div className="lg:col-span-2">
-          <SemaforoBlock items={data.semaforo} />
-        </div>
+        {show("semaforo") ? (
+          <div className="lg:col-span-2">
+            <SemaforoBlock items={data.semaforo} />
+          </div>
+        ) : null}
       </div>
 
       {/* 6. Alertas */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
-          Alertas
-        </h2>
-        <AlertasGrid items={data.alertas} />
-      </section>
+      {show("alertas") ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
+            Alertas
+          </h2>
+          <AlertasGrid items={data.alertas} />
+        </section>
+      ) : null}
 
       {/* 9. Acoes recomendadas */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
-          Ações Recomendadas
-        </h2>
-        <AcoesGrid items={data.acoes} />
-      </section>
+      {show("acoes") ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-600">
+            Ações Recomendadas
+          </h2>
+          <AcoesGrid items={data.acoes} />
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -103,6 +103,80 @@ export interface TemplateDreMappingEntry {
 
 export type TemplateDreMapping = Record<string, TemplateDreMappingEntry>;
 
+// ── Fase 2: configuração de relatório REAL por conta DRE (opcional) ──────────
+// Quando um template define `report`, o payload monta os blocos a partir das
+// contas DRE indicadas (por CODE), substituindo os blocos genéricos. Ausência
+// de `report` = comportamento atual (Franquias Viva e demais ficam idênticos).
+
+/**
+ * Card de KPI ligado a conta(s) DRE. Use UM de: `code` (conta única),
+ * `codes` (soma de contas, ex.: Receitas Operacionais = 1+12) ou, para
+ * `kind: "margem"`, `ratio` (soma(numerator) / soma(denominator) * 100).
+ * `kind` define o sinal/farol: receita/resultado = maior melhor; despesa =
+ * menor que o previsto melhor; margem = % (verde se positiva).
+ */
+export interface TemplateKpiCardSpec {
+  label: string;
+  kind: "receita" | "despesa" | "resultado" | "margem";
+  code?: string;
+  codes?: string[];
+  ratio?: { numerator: string[]; denominator: string[] };
+}
+
+/**
+ * Linha do gráfico Previsto x Realizado ligada a conta(s) DRE.
+ * Valor = soma(`codes`/`code`) − soma(`minus`). Use `minus` para resultados
+ * derivados (ex.: Resultado Operacional = Receitas Op. − Despesas Op.).
+ */
+export interface TemplatePrevistoRealizadoSpec {
+  label: string;
+  unidade: "currency" | "percent";
+  code?: string;
+  codes?: string[];
+  /** Contas a SUBTRAIR (ex.: despesas) para linhas de resultado derivado. */
+  minus?: string[];
+}
+
+/** Etapa da Composição do Resultado ligada a uma conta DRE. */
+export interface TemplateComposicaoSpec {
+  label: string;
+  code: string;
+  /** entrada = +valor; saida = -|valor| (despesa); resultado = valor como está. */
+  type: "entrada" | "saida" | "resultado";
+}
+
+/** Blocos do OnePageReportPreview que podem ser ligados/desligados. */
+export type ReportBlockKey =
+  | "diagnostico"
+  | "previstoRealizado"
+  | "composicao"
+  | "acumuladoAno"
+  | "vvrSerie"
+  | "historico"
+  | "semaforo"
+  | "alertas"
+  | "acoes";
+
+export interface TemplateReportConfig {
+  /** KPIs por conta DRE (substituem o conjunto fixo). */
+  kpiCards?: TemplateKpiCardSpec[];
+  /** Linhas do Previsto x Realizado por conta DRE. */
+  previstoRealizado?: TemplatePrevistoRealizadoSpec[];
+  /** Composição do resultado por conta DRE. */
+  composicao?: TemplateComposicaoSpec[];
+  /** Code do histórico principal (default "11" quando ausente). */
+  historicoAccountCode?: string;
+  /**
+   * Título do gráfico de histórico. Ausência = título atual
+   * ("Previsto x Realizado — Resultado do Exercício"). Apenas cosmético.
+   */
+  historicoTitle?: string;
+  /** Allowlist de blocos visíveis. Ausência = TODOS (comportamento atual). */
+  enabledBlocks?: ReportBlockKey[];
+  /** Nº de colunas da grade de KPIs (default 4). Ex.: SGX usa 3 (3 + margem). */
+  kpiColumns?: number;
+}
+
 export interface ReportTemplate {
   id: ReportTemplateId;
   /** Nome exibível (rótulo de debug). Ex.: "Real Estate — SGX". */
@@ -128,6 +202,9 @@ export interface ReportTemplate {
   alertHints: string[];
   actionHints: string[];
   dreAccountMapping: TemplateDreMapping;
+
+  // ── Fase 2: relatório REAL por conta DRE (opcional). Ausência = genérico. ──
+  report?: TemplateReportConfig;
 }
 
 /** Capacidades "tudo desligado" — base para Real Estate e genérico. */

@@ -34,6 +34,9 @@ interface ApiKpiCard {
   variationValue: number | null;
   variationLabel: string | null;
   status: ApiKpiStatus;
+  // Card sem comparação com orçado (ex.: Margem Líquida) — não concatena
+  // " vs orçamento".
+  omitComparisonSuffix?: boolean;
 }
 
 interface ApiKpis {
@@ -85,6 +88,15 @@ export interface OnePageApiResponse {
   // Template de relatório resolvido (rótulo discreto de debug/admin).
   template?: { id?: string; name?: string };
   kpis?: ApiKpis;
+  // KPIs CUSTOM por conta DRE (templates com report.kpiCards — ex.: SGX).
+  // Quando presente, substitui o conjunto fixo `kpis` na renderização.
+  kpisList?: ApiKpiCard[];
+  // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).
+  enabledBlocks?: string[];
+  // Título do gráfico de histórico (undefined = título atual no componente).
+  historicoTitle?: string;
+  // Nº de colunas da grade de KPIs (undefined = 4).
+  kpiColumns?: number;
   previstoRealizado?: ApiPrevistoRealizado[];
   composicaoResultado?: ApiComposicao[];
   historicoResultado?: ApiHistorico[];
@@ -431,6 +443,24 @@ function mapSemaforo(
   });
 }
 
+// Semáforo para templates CUSTOM (kpisList — ex.: SGX): um item por KPI,
+// classificado pela leitura da IA (quando casar pelo rótulo) ou, no fallback,
+// pelo próprio status do KPI. Não usa os indicadores fixos da Viva.
+function mapSemaforoFromList(
+  analysis: OnePageReport | undefined,
+  list: ApiKpiCard[],
+): SemaforoItem[] {
+  return list.map((card) => {
+    const fromIa = findLeituraClassificacao(analysis?.leituraPorIndicador, [
+      card.label.toLowerCase(),
+    ]);
+    return {
+      indicador: card.label,
+      classificacao: fromIa ?? statusToSign(card.status),
+    };
+  });
+}
+
 // ─── Diagnostico principal ─────────────────────────────────────────────────
 
 function mapDiagnostico(analysis: OnePageReport | undefined): string {
@@ -478,17 +508,35 @@ function mapCabecalho(
 export function mapOnePageApiResponseToPreviewData(
   response: OnePageApiResponse,
 ): OnePageReportPreviewData {
+  // Templates com KPIs custom (ex.: SGX) trazem `kpisList`; nesse caso a UI usa
+  // essa lista (e o semáforo derivado dela) no lugar do conjunto fixo da Viva.
+  const customKpis =
+    Array.isArray(response.kpisList) && response.kpisList.length > 0
+      ? response.kpisList
+      : null;
   return {
     cabecalho: mapCabecalho(response),
-    kpis: mapKpis(response.kpis),
+    kpis: customKpis
+      ? customKpis.map((c) =>
+          mapKpiCard(c, c.label, { omitComparisonSuffix: c.omitComparisonSuffix }),
+        )
+      : mapKpis(response.kpis),
     previstoRealizado: mapPrevistoRealizado(response.previstoRealizado),
     composicao: mapComposicao(response.composicaoResultado),
     historico: mapHistorico(response.historicoResultado),
     acumuladoAno: mapAcumuladoAno(response.acumuladoAno),
     vvrSerieAnual: mapVvrSerieAnual(response.vvrSerieAnual),
     alertas: mapAlertas(response.analysis),
-    semaforo: mapSemaforo(response.analysis, response.kpis),
+    semaforo: customKpis
+      ? mapSemaforoFromList(response.analysis, customKpis)
+      : mapSemaforo(response.analysis, response.kpis),
     diagnosticoPrincipal: mapDiagnostico(response.analysis),
     acoes: mapAcoes(response.analysis),
+    // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).
+    blocks: response.enabledBlocks,
+    // Título do gráfico de histórico (undefined = título atual no componente).
+    historicoTitle: response.historicoTitle,
+    // Nº de colunas da grade de KPIs (undefined = 4).
+    kpiColumns: response.kpiColumns,
   };
 }
