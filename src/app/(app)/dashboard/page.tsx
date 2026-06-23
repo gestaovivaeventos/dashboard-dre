@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { DashboardDreView } from "@/components/app/dashboard-dre-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { getManagerialAmountsByCode } from "@/lib/dashboard/managerial-adjustments";
+import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 import {
   applyPeriodFloor,
@@ -186,6 +187,11 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
     filter.selectedCompanyIds,
   );
   const accounts = scope.coreAccounts;
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é uma RECEITA dentro
+  // do grupo de custos (5). Subtrai do total do grupo em vez de somar, sem
+  // alterar a estrutura DRE nem o valor exibido na própria linha. Inerte para
+  // outros segmentos. Ver src/lib/dashboard/franquias-viva-custos.ts.
+  const custosNegation = resolveFranquiasVivaCustosNegation(activeSegmentSlug, accounts);
   const visibleBuckets = buildVisibleBuckets(filter);
   const accumulatedBucket = buildAccumulatedBucket(visibleBuckets);
 
@@ -219,12 +225,17 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
         bucket.dateTo,
       ),
       postProcessAmounts: isSingleSirena ? applySirenaCalculatedTaxes : undefined,
+      negateChildCodesInSummary: custosNegation,
     });
 
   const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([
     Promise.all(visibleBuckets.map((bucket) => aggregateBucket(bucket))),
     aggregateBucket(accumulatedBucket),
-    Promise.resolve(buildDashboardRows(accounts, new Map()).rows),
+    Promise.resolve(
+      buildDashboardRows(accounts, new Map(), {
+        negateChildCodesInSummary: custosNegation,
+      }).rows,
+    ),
   ]);
 
   const valuesPerBucket = new Map<string, Record<string, number>>();
@@ -252,6 +263,7 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
       companyIds: filter.selectedCompanyIds,
       dateFrom: accumulatedBucket.dateFrom,
       dateTo: accumulatedBucket.dateTo,
+      negateChildCodesInSummary: custosNegation,
     });
     rowsByCompany.forEach((companyRows, companyId) => {
       const byId: Record<string, number> = {};

@@ -5,6 +5,7 @@ import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } fro
 
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import type { DreAccountBase } from "@/lib/dashboard/dre";
+import { resolveFranquiasVivaCustosNegationForCompanies } from "@/lib/dashboard/franquias-viva-custos";
 import { COMPARISON_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
 import { renderComparisonEmail } from "@/lib/intelligence/render-email";
 import type { ComparisonData } from "@/lib/intelligence/render-email";
@@ -51,6 +52,15 @@ export async function generateComparison(
 
   const accounts: DreAccountBase[] = filterCoreDreAccounts(rawAccounts);
 
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
+  // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE. Inerte
+  // para outros segmentos. Resolve o segmento a partir das empresas comparadas.
+  const custosNegation = await resolveFranquiasVivaCustosNegationForCompanies(
+    supabase,
+    companyIds,
+    accounts,
+  );
+
   // 3. Aggregate by company
   const { data: byCompanyAgg } = await supabase.rpc(
     "dashboard_dre_aggregate_by_company",
@@ -76,7 +86,9 @@ export async function generateComparison(
   const companiesContext: Record<string, unknown>[] = [];
   for (const companyId of companyIds) {
     const amountMap = amountsByCompany.get(companyId) ?? new Map<string, number>();
-    const { rows } = buildDashboardRows(accounts, amountMap);
+    const { rows } = buildDashboardRows(accounts, amountMap, {
+      negateChildCodesInSummary: custosNegation,
+    });
     const topRows = rows
       .filter((r) => r.level <= 2)
       .map((r) => ({

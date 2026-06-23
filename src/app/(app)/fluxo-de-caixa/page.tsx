@@ -34,6 +34,20 @@ import {
   type CashFlowPeriodBucket,
 } from "@/lib/dashboard/cash-flow";
 import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
+import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
+import {
+  CASE_SHOWS_CUSTODY_SOURCE,
+  COMPETENCIA_FLOOR_YEAR,
+  EMPTY_COMPETENCIA_SECTION,
+  buildCompetenciaSection,
+  custodyNetFromAmounts,
+  custodyNetFromRowValues,
+  resolveCaseShowsCompanyId,
+  resolveCustodyAccounts,
+  type CompetenciaRegistrationRow,
+  type CompetenciaSection,
+  type CustodyAccountIds,
+} from "@/lib/dashboard/case-shows-custody";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +61,8 @@ interface CashFlowDisplayRow extends CashFlowAccountBase {
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
   valuesByCompany?: Record<string, number>;
+  // Destaque visual do núcleo "Custódia de Artistas" da Case Shows.
+  custodyAccent?: boolean;
 }
 
 export default async function CashFlowPage({ searchParams, params }: CashFlowPageProps) {
@@ -207,6 +223,15 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     filter.selectedCompanyIds,
   );
 
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
+  // grupo de custos (5) e deve REDUZIR o total. O Resultado do Exercício do
+  // Fluxo precisa usar a MESMA regra do Dashboard DRE (senão diverge, ver nota
+  // de centralização em dre.ts). Inerte para outros segmentos.
+  const custosNegation = resolveFranquiasVivaCustosNegation(
+    activeSegmentSlug,
+    dreScope.coreAccounts,
+  );
+
   // === Override EXCLUSIVO da SGX ============================================
   // Por padrão a linha "Resultado do Exercício" do Fluxo de Caixa puxa o code
   // "11" do DRE (DRE_RESULTADO_EXERCICIO_CODE). SOMENTE para a SGX o produto
@@ -247,6 +272,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         selectedCompanyIds={[]}
         lastSyncAt={null}
         accumulatedSection={EMPTY_CASH_FLOW_ACCUMULATED_SECTION}
+        competenciaSection={EMPTY_COMPETENCIA_SECTION}
         segments={segments}
         activeSegmentSlug={activeSegmentSlug}
       />
@@ -289,6 +315,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       dateFrom: clampDateFromToFloor(bucket.dateFrom, periodFloor),
       dateTo: bucket.dateTo,
       postProcessAmounts: useSirenaTaxes ? applySirenaCalculatedTaxes : undefined,
+      negateChildCodesInSummary: custosNegation,
     });
     return findResultadoExercicio(rows, resultadoExercicioCode);
   };
@@ -603,10 +630,42 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   const isFutureBucket = (b: typeof buckets[number]) =>
     b.year > todayYear || (b.year === todayYear && b.month > todayMonth);
 
+  // === Núcleo "Custódia de Artistas" (EXCLUSIVO Case Shows) =================
+  // Análise independente, isolada por empresa E por grupo. Só dispara quando a
+  // Case Shows é a única empresa selecionada (escopo do plano custom, onde o
+  // grupo "6" existe). Ver src/lib/dashboard/case-shows-custody.ts.
+  const caseShowsCompanyId = resolveCaseShowsCompanyId(filter.selectedCompanyIds, companies);
+  const custody: CustodyAccountIds | null = caseShowsCompanyId
+    ? resolveCustodyAccounts(cashFlowAccounts)
+    : null;
+
+  // Saldo Anterior do PRIMEIRO mês exibido = saldo corrido de custódia até o
+  // fim do mês anterior. Como o saldo é linear no movimento líquido (Entradas-
+  // Saídas-Comissões), semeamos com UMA agregação sobre todo o histórico
+  // anterior — sem recursão mês-a-mês nem cascata no front.
+  let custodySeedSaldoAnterior = 0;
+  if (custody && buckets.length > 0) {
+    const prev = previousMonth(buckets[0].year, buckets[0].month);
+    const seedBucket: CashFlowPeriodBucket = {
+      key: "custody-seed",
+      label: "",
+      dateFrom: SALDO_BASELINE_FAR_PAST,
+      dateTo: monthBucketFor(prev.year, prev.month).dateTo,
+      year: prev.year,
+      month: prev.month,
+    };
+    const seedAmounts = await computeCashFlowAmounts(seedBucket);
+    custodySeedSaldoAnterior = custodyNetFromAmounts(seedAmounts, custody);
+  }
+  // Saldo de custódia do último mês COM dados (fecha o acumulado/coluna Total).
+  let custodyClosingSaldo = custodySeedSaldoAnterior;
+
   const valuesPerBucket = new Map<string, Record<string, number>>();
   // Para cada bucket, guarda partnerId -> (cashFlowAccountId -> amount).
   const partnerValuesPerBucket = new Map<string, Map<string, Map<string, number>>>();
   let previousCaixaFinal = 0;
+  // Saldo de custódia do mês anterior (encadeado em memória, como previousCaixaFinal).
+  let previousCustodiaSaldo = custodySeedSaldoAnterior;
 
   // Pre-busca as agregacoes de TODOS os meses em paralelo. Elas nao dependem do
   // saldo inicial (que e encadeado em memoria logo abaixo), entao disparar tudo
@@ -636,6 +695,14 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       valuesPerBucket.set(bucket.key, byRowId);
       partnerValuesPerBucket.set(bucket.key, new Map());
       previousCaixaFinal = 0;
+      // Mês futuro: zera o núcleo Custódia (mesma convenção de Saldo Inicial/
+      // Final). Não reinicia o encadeamento — futuros são sempre o final do
+      // range, então previousCustodiaSaldo/closing já refletem o último mês real.
+      if (custody) {
+        byRowId[custody.saldoAnteriorId] = 0;
+        byRowId[custody.saldoId] = 0;
+        byRowId[custody.groupId] = 0;
+      }
       continue;
     }
 
@@ -655,6 +722,24 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     rows.forEach((r) => {
       byRowId[r.id] = r.value;
     });
+
+    // Núcleo Custódia (Case Shows): sobrescreve 6.1/6.5 e o total do grupo 6
+    // ANTES de persistir o bucket. 6.2/6.3/6.4 permanecem com o valor mapeado.
+    //   6.1 Saldo Anterior = saldo do mês anterior (encadeado)
+    //   6.5 Saldo          = 6.1 + 6.2 - 6.3 - 6.4
+    //   6  (grupo)         = movimento líquido do mês (6.2 - 6.3 - 6.4),
+    //                        igual à totalização dos demais grupos (2..5).
+    if (custody) {
+      const saldoAnterior = previousCustodiaSaldo;
+      const net = custodyNetFromRowValues(byRowId, custody);
+      const saldo = saldoAnterior + net;
+      byRowId[custody.saldoAnteriorId] = saldoAnterior;
+      byRowId[custody.saldoId] = saldo;
+      byRowId[custody.groupId] = net;
+      previousCustodiaSaldo = saldo;
+      custodyClosingSaldo = saldo;
+    }
+
     valuesPerBucket.set(bucket.key, byRowId);
     partnerValuesPerBucket.set(bucket.key, partnerBreakdown);
 
@@ -692,6 +777,20 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   accRows.forEach((r) => {
     accumulatedMap[r.id] = r.value;
   });
+
+  // Núcleo Custódia (Case Shows) na coluna acumulada (Total):
+  //   6.1 Saldo Anterior = saldo de entrada do primeiro mês exibido (seed)
+  //   6.5 Saldo          = saldo de fechamento do último mês com dados
+  //   6  (grupo)         = movimento líquido do range (Entradas-Saídas-Comissões)
+  // 6.2/6.3/6.4 já vêm somados no range pela agregação padrão (mantidos).
+  if (custody) {
+    accumulatedMap[custody.saldoAnteriorId] = custodySeedSaldoAnterior;
+    accumulatedMap[custody.saldoId] = custodyClosingSaldo;
+    const entradasTot = accumulatedMap[custody.entradasId] ?? 0;
+    const saidasTot = accumulatedMap[custody.saidasId] ?? 0;
+    const comissoesTot = accumulatedMap[custody.comissoesId] ?? 0;
+    accumulatedMap[custody.groupId] = entradasTot - saidasTot - comissoesTot;
+  }
 
   // Comparativo entre empresas (modo comparativa). Para simplicidade, usa o
   // periodo acumulado e nao recursa saldo inicial entre meses por empresa —
@@ -731,6 +830,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       companyIds: filter.selectedCompanyIds,
       dateFrom: accumulatedBucket.dateFrom,
       dateTo: accumulatedBucket.dateTo,
+      negateChildCodesInSummary: custosNegation,
     });
 
     // Saldo inicial por empresa: usa entrada manual em
@@ -855,6 +955,26 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       valuesByCompany: filter.compareCompanies ? valuesByCompany : undefined,
     };
   });
+
+  // Núcleo Custódia (Case Shows): destaca visualmente as 6 linhas e desabilita
+  // o drilldown das DERIVADAS (6.1 Saldo Anterior / 6.5 Saldo) — não têm
+  // lançamentos Omie próprios. 6.2/6.3/6.4 continuam drilláveis normalmente.
+  if (custody) {
+    const accentIds = new Set([
+      custody.groupId,
+      custody.saldoAnteriorId,
+      custody.entradasId,
+      custody.saidasId,
+      custody.comissoesId,
+      custody.saldoId,
+    ]);
+    baseRows.forEach((row) => {
+      if (accentIds.has(row.id)) row.custodyAccent = true;
+      if (row.id === custody.saldoAnteriorId || row.id === custody.saldoId) {
+        row.source = CASE_SHOWS_CUSTODY_SOURCE;
+      }
+    });
+  }
 
   const displayRows: CashFlowDisplayRow[] = [...baseRows, ...partnerRows];
 
@@ -1219,6 +1339,47 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         ),
       };
 
+  // === Seção "Custódia de Artistas - Análise Competência" (Case Shows) ======
+  // Análise gerencial INDEPENDENTE renderada abaixo de ACUMULADOS, alocando os
+  // mesmos lançamentos das categorias da Custódia (de/para por código → 6.2/
+  // 6.3/6.4) pela DATA DE REGISTRO (Omie dDtRegistro), não pela data de
+  // pagamento. UMA única RPC cobre todos os meses; o saldo corrido é encadeado
+  // em memória (sem cascata no front). Piso: só acumula a partir de 2026. Não
+  // toca nenhuma linha/cálculo oficial. Escondida no comparativo entre empresas
+  // (colunas por empresa não comportam a leitura mês a mês).
+  let competenciaSection: CompetenciaSection = EMPTY_COMPETENCIA_SECTION;
+  if (custody && caseShowsCompanyId && !filter.compareCompanies && visibleBuckets.length > 0) {
+    const lastVisible = visibleBuckets[visibleBuckets.length - 1];
+    let registrationRows: CompetenciaRegistrationRow[] = [];
+    // Sem nenhum mês exibido em 2026+ a seção fica zerada — evita a RPC.
+    if (lastVisible.year >= COMPETENCIA_FLOOR_YEAR) {
+      const { data, error } = await supabase.rpc("cash_flow_aggregate_by_registration", {
+        p_company_ids: [caseShowsCompanyId],
+        p_date_from: `${COMPETENCIA_FLOOR_YEAR}-01-01`,
+        p_date_to: lastVisible.dateTo,
+      });
+      if (error) {
+        throw new Error(`Falha ao carregar Custódia (Análise Competência): ${error.message}`);
+      }
+      registrationRows = ((data as Array<{
+        period_year: number | string;
+        period_month: number | string;
+        cash_flow_account_id: string;
+        amount: number | string | null;
+      }> | null) ?? []).map((r) => ({
+        period_year: Number(r.period_year),
+        period_month: Number(r.period_month),
+        cash_flow_account_id: r.cash_flow_account_id,
+        amount: Number(r.amount ?? 0),
+      }));
+    }
+    competenciaSection = buildCompetenciaSection({
+      custody,
+      rows: registrationRows,
+      visibleBuckets: visibleBuckets.map((b) => ({ key: b.key, year: b.year, month: b.month })),
+    });
+  }
+
   return (
     <CashFlowView
       filter={filter}
@@ -1232,6 +1393,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       selectedCompanyIds={filter.selectedCompanyIds}
       lastSyncAt={lastSyncAt}
       accumulatedSection={accumulatedSection}
+      competenciaSection={competenciaSection}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
     />

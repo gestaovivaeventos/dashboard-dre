@@ -30,6 +30,7 @@ import type {
   CashFlowRange,
   PeriodMode,
 } from "@/lib/dashboard/cash-flow";
+import type { CompetenciaSection } from "@/lib/dashboard/case-shows-custody";
 import {
   saveSharedCompanyFilter,
   useSharedCompanyFilterHydration,
@@ -46,6 +47,8 @@ interface CashFlowDisplayRow extends CashFlowAccountBase {
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
   valuesByCompany?: Record<string, number>;
+  // Destaque visual do núcleo "Custódia de Artistas" da Case Shows.
+  custodyAccent?: boolean;
 }
 
 interface CashFlowViewProps {
@@ -60,6 +63,7 @@ interface CashFlowViewProps {
   selectedCompanyIds: string[];
   lastSyncAt: string | null;
   accumulatedSection: CashFlowAccumulatedSection;
+  competenciaSection: CompetenciaSection;
   segments: Segment[];
   activeSegmentSlug: string | null;
 }
@@ -181,6 +185,7 @@ export function CashFlowView({
   selectedCompanyIds,
   lastSyncAt,
   accumulatedSection,
+  competenciaSection,
   segments,
   activeSegmentSlug,
 }: CashFlowViewProps) {
@@ -686,8 +691,9 @@ export function CashFlowView({
               : row.is_summary
                 ? "bg-muted"
                 : "bg-card";
+          const accentClass = row.custodyAccent ? "border-l-4 border-l-amber-400" : "";
           return (
-            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass}`} style={{ gridTemplateColumns: gridTemplate }}>
+            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${accentClass}`} style={{ gridTemplateColumns: gridTemplate }}>
               <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                 {row.hasChildren && !isHighlight ? (
                   <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
@@ -781,10 +787,16 @@ export function CashFlowView({
               const borderClass = isMainTotal
                 ? "border-t-2 border-slate-500"
                 : "border-t border-slate-200";
+              // Acento lateral âmbar marca o núcleo "Custódia de Artistas"
+              // (Case Shows) como seção de análise própria, sem mexer no fundo
+              // nem nos cálculos.
+              const accentClass = row.custodyAccent
+                ? "border-l-4 border-l-amber-400"
+                : "";
               return (
                 <div
                   key={row.id}
-                  className={`grid ${borderClass} px-4 py-2 text-sm ${rowClass}`}
+                  className={`grid ${borderClass} ${accentClass} px-4 py-2 text-sm ${rowClass}`}
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
                   <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
@@ -982,6 +994,49 @@ export function CashFlowView({
                     ))}
                   </>
                 )}
+              </>
+            )}
+
+            {/* Bloco — Custodia de Artistas - Analise Competencia (Case Shows).
+                Secao gerencial INDEPENDENTE, alocada pela data de registro da
+                Omie. Renderizada apos "Acumulados". Acento ambar para amarrar
+                visualmente a secao de Custodia, sem impactar o fluxo oficial. */}
+            {competenciaSection.show && (
+              <>
+                <div
+                  className="grid border-t-4 border-amber-400 bg-amber-400/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-amber-700"
+                  style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                >
+                  <span className="sticky left-0 z-[2] bg-card">{competenciaSection.title}</span>
+                  {Array.from({ length: totalCols }).map((_, i) => (
+                    <span key={`comp-h-${i}`} />
+                  ))}
+                </div>
+                <div className="border-t border-amber-400/30 bg-amber-400/[0.04] px-4 py-1.5 text-[11px] italic text-muted-foreground">
+                  {competenciaSection.note}
+                </div>
+                {competenciaSection.lines.map((line) => (
+                  <div
+                    key={line.key}
+                    className={`grid border-t border-amber-400/20 px-4 py-2 text-sm ${
+                      line.emphasis ? "bg-amber-400/[0.06] font-semibold" : "bg-amber-400/[0.02]"
+                    }`}
+                    style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                  >
+                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                      <span className="w-4" />
+                      <span className="truncate">{line.label}</span>
+                    </div>
+                    {columns.map((column) => (
+                      <div key={`${line.key}-${column.key}`} className="text-right">
+                        {formatCurrency(line.valuesByBucket[column.key] ?? 0)}
+                      </div>
+                    ))}
+                    <div className="text-right font-semibold">
+                      {formatCurrency(line.accumulatedValue)}
+                    </div>
+                  </div>
+                ))}
               </>
             )}
           </div>
