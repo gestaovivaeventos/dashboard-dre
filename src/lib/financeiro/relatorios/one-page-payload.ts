@@ -8,6 +8,9 @@ import {
 } from "@/lib/dashboard/dre";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
+import { resolveReportTemplate } from "./templates/report-template-registry";
+import type { ReportTemplateId } from "./templates/report-template-types";
+
 // ============================================================================
 // buildOnePagePayload — calculo numerico compartilhado entre a rota oficial
 // e a rota dev-only "sem IA".
@@ -42,15 +45,14 @@ export interface KpisPayload {
   despesas: KpiCardPayload;
   resultado: KpiCardPayload;
   margem: KpiCardPayload;
-  fee_disponivel: KpiCardPayload;
-  vvr: KpiCardPayload;
+  // Blocos específicos de Franquias Viva — OPCIONAIS: só entram quando o
+  // template da empresa os suporta (capabilities.vvrFee / .sobrevivenciaCaixa).
+  // Templates Real Estate/genérico os omitem, e o mapper não renderiza o card.
+  fee_disponivel?: KpiCardPayload;
+  vvr?: KpiCardPayload;
   // Sobrevivencia de caixa: por quantos meses o FEE disponivel cobre a
   // media das despesas operacionais dos meses ja fechados do ano corrente.
-  // Calculado a partir do FEE Disponivel (mesma fonte do card acima) e da
-  // conta DRE code "7" (Despesas Operacionais). Aparece para todas as
-  // empresas; quando faltar FEE ou meses fechados, value=null e o mapper
-  // renderiza "—".
-  sobrevivencia_caixa: KpiCardPayload;
+  sobrevivencia_caixa?: KpiCardPayload;
   // Presente apenas para empresas do segmento Franquias Viva — indicador
   // manual preenchido em Configuracoes > Empresas > FEE / VVR. Em demais
   // segmentos a chave nao e enviada (mapper ignora ausencia).
@@ -87,6 +89,8 @@ export interface VvrSerieAnualPayload {
 export interface OnePagePayload {
   input: OnePageInput;
   generatedAt: string;
+  // Template de relatório resolvido para a empresa (rótulo discreto de debug).
+  template: { id: ReportTemplateId; name: string };
   kpis: KpisPayload;
   previstoRealizado: PrevistoRealizadoPayload[];
   composicaoResultado: ComposicaoPayload[];
@@ -171,6 +175,16 @@ export async function buildOnePagePayload(
     segmentNome = seg?.name ?? null;
   }
   const isFranquiasViva = segmentSlug === "franquias-viva";
+
+  // Template de relatório da empresa (camada de templates por empresa/segmento).
+  // Decide quais blocos específicos de Franquias Viva entram no payload e no
+  // input da IA. Franquias Viva resolve para um template com TODAS as
+  // capacidades ligadas → saída idêntica ao comportamento atual.
+  const template = resolveReportTemplate({
+    companyId,
+    companyName: company.name,
+    segmentSlug,
+  });
 
   // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
   const allAccounts = await fetchAllDreAccountRows<RawDreAccount>((from, to) =>
@@ -610,6 +624,17 @@ export async function buildOnePagePayload(
     };
   }
 
+  // Gating por template: remove os cards específicos de Franquias Viva quando o
+  // template da empresa não os suporta (Real Estate / genérico). Franquias Viva
+  // tem todas as capacidades = true, então NADA é removido (saída idêntica).
+  if (!template.capabilities.vvrFee) {
+    delete kpis.fee_disponivel;
+    delete kpis.vvr;
+  }
+  if (!template.capabilities.sobrevivenciaCaixa) {
+    delete kpis.sobrevivencia_caixa;
+  }
+
   const previstoRealizado: PrevistoRealizadoPayload[] = [
     {
       label: "Receita",
@@ -954,18 +979,27 @@ export async function buildOnePagePayload(
   return {
     ok: true,
     payload: {
+      // Gating dos campos enviados à IA: templates sem capacidade de VVR/FEE
+      // NÃO recebem esses indicadores (e o prompt do template não fala deles).
+      // Franquias Viva mantém todos (capacidades true) → input idêntico.
       input: {
         ...input,
-        vvr_ytd_resumo: vvrYtdResumo,
-        sobrevivencia_caixa_meses: sobrevivenciaCaixaMeses,
+        fee_vvr: template.capabilities.vvrFee ? input.fee_vvr : null,
+        fee_disponivel: template.capabilities.vvrFee ? input.fee_disponivel : null,
+        vvr_ytd_resumo: template.capabilities.vvrFee ? vvrYtdResumo : null,
+        sobrevivencia_caixa_meses: template.capabilities.sobrevivenciaCaixa
+          ? sobrevivenciaCaixaMeses
+          : null,
       },
       generatedAt: new Date().toISOString(),
+      template: { id: template.id, name: template.name },
       kpis,
       previstoRealizado,
       composicaoResultado,
       historicoResultado,
       acumuladoAno,
-      vvrSerieAnual,
+      // Série anual de VVR só faz sentido para quem tem VVR (Franquias Viva).
+      vvrSerieAnual: template.capabilities.vvrFee ? vvrSerieAnual : [],
     },
   };
 }

@@ -5,9 +5,10 @@ import { resolveCompanyPeriodFloor } from "@/lib/dashboard/company-period-limits
 import {
   buildDashboardRows,
   fetchAllDreAccountRows,
-  filterCoreDreAccounts,
   resolveAllowedCompanyIds,
-  type DreAccountBase,
+  scopeDreAccounts,
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  type RawDreAccount,
 } from "@/lib/dashboard/dre";
 
 function monthRange(date: Date) {
@@ -37,10 +38,11 @@ export async function GET(request: Request) {
   const [{ data: companiesData }, accountsData] = await Promise.all([
     supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
     // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+    // Carrega company_id (SCOPED_DRE_ACCOUNTS_SELECT) para escopar o plano por empresa.
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
       supabase
         .from("dre_accounts")
-        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
         .eq("active", true)
         .order("code")
         .range(from, to),
@@ -63,7 +65,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ points: [] });
   }
 
-  const accounts = filterCoreDreAccounts(accountsData);
+  // Escopa o plano DRE à seleção (mesma regra do dashboard/tabela). Com UMA
+  // empresa, usa o plano custom dela — onde a conta calculada "Resultado do
+  // Exercício" (ex.: code "15" da SGX) e sua fórmula existem. Sem escopar, a
+  // fórmula era avaliada contra a árvore global/misturada e dava 0, deixando o
+  // gráfico "vazio" nas linhas calculadas.
+  const scope = scopeDreAccounts(accountsData, scopedCompanyIds);
+  const accounts = scope.coreAccounts;
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
   let ranges = Array.from({ length: 12 }).map((_, index) =>
     monthRange(new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - (11 - index), 1))),
@@ -94,8 +102,12 @@ export async function GET(request: Request) {
         data as Array<{ company_id: string; dre_account_id: string; amount: number | string | null }> | null
       ?? []
       ).forEach((row) => {
+        // Traduz o id cru do RPC para o id no plano em escopo (por code) e soma
+        // — sem isso a fórmula das contas calculadas não casava com o plano.
+        const scopedId = scope.translateToScopedId(row.dre_account_id);
+        if (!scopedId) return;
         const map = byCompany.get(row.company_id) ?? new Map<string, number>();
-        map.set(row.dre_account_id, Number(row.amount ?? 0));
+        map.set(scopedId, (map.get(scopedId) ?? 0) + Number(row.amount ?? 0));
         byCompany.set(row.company_id, map);
       });
 

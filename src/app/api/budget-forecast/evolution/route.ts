@@ -4,9 +4,10 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
   buildDashboardRows,
   fetchAllDreAccountRows,
-  filterCoreDreAccounts,
   resolveAllowedCompanyIds,
-  type DreAccountBase,
+  scopeDreAccounts,
+  SCOPED_DRE_ACCOUNTS_SELECT,
+  type RawDreAccount,
 } from "@/lib/dashboard/dre";
 
 function monthRange(date: Date) {
@@ -38,10 +39,12 @@ export async function GET(request: Request) {
   const [{ data: companiesData }, accountsData] = await Promise.all([
     supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
     // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<DreAccountBase>((from, to) =>
+    // Carrega company_id (SCOPED_DRE_ACCOUNTS_SELECT) para permitir escopar o
+    // plano por empresa, igual ao dashboard e à tabela do Budget.
+    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
       supabase
         .from("dre_accounts")
-        .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
         .eq("active", true)
         .order("code")
         .range(from, to),
@@ -64,7 +67,31 @@ export async function GET(request: Request) {
     return NextResponse.json({ points: [] });
   }
 
-  const accounts = filterCoreDreAccounts(accountsData);
+  // Escopa o plano DRE à seleção, EXATAMENTE como o dashboard e a tabela do
+  // Budget. Com UMA empresa selecionada, usa o plano custom dela — onde a conta
+  // calculada "Resultado do Exercício" (ex.: code "15" da SGX) e sua fórmula
+  // realmente existem. Sem isso, `buildDashboardRows` avaliava a fórmula contra
+  // a árvore global/misturada (códigos duplicados entre planos), resolvendo para
+  // contas erradas e devolvendo 0 — o que deixava o gráfico "vazio" justamente
+  // nas linhas calculadas (Resultado do Exercício, Lucro Operacional, etc.).
+  const scope = scopeDreAccounts(accountsData, scopedCompanyIds);
+  const accounts = scope.coreAccounts;
+
+  // Converte as linhas cruas do RPC (dre_account_id no escopo do mapeamento:
+  // global ou custom) em um mapa scoped_id -> amount, somando quando vários ids
+  // caem no mesmo code do plano em escopo.
+  const buildScopedAmounts = (
+    rows: Array<{ dre_account_id: string; amount: number | string | null }> | null | undefined,
+  ): Map<string, number> => {
+    const amounts = new Map<string, number>();
+    (rows ?? []).forEach((row) => {
+      const scopedId = scope.translateToScopedId(row.dre_account_id);
+      if (!scopedId) return;
+      amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(row.amount ?? 0));
+    });
+    return amounts;
+  };
+
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
   const startDate = startDateRaw
     ? new Date(`${startDateRaw}T00:00:00Z`)
@@ -98,10 +125,9 @@ export async function GET(request: Request) {
           p_date_to: range.dateTo,
         });
         if (error) throw new Error(error.message);
-        const amounts = new Map<string, number>();
-        ((data as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((row) => {
-          amounts.set(row.dre_account_id, Number(row.amount ?? 0));
-        });
+        const amounts = buildScopedAmounts(
+          data as Array<{ dre_account_id: string; amount: number | string | null }> | null,
+        );
         const builtRows = buildDashboardRows(accounts, amounts).rows;
         const selected = builtRows.find((r) => r.id === accountId);
         return {
@@ -126,14 +152,12 @@ export async function GET(request: Request) {
       if (realizedErr) throw new Error(realizedErr.message);
       if (budgetErr) throw new Error(budgetErr.message);
 
-      const realizedAmounts = new Map<string, number>();
-      ((realizedData as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((row) => {
-        realizedAmounts.set(row.dre_account_id, Number(row.amount ?? 0));
-      });
-      const budgetAmounts = new Map<string, number>();
-      ((budgetData as Array<{ dre_account_id: string; amount: number | string | null }> | null) ?? []).forEach((row) => {
-        budgetAmounts.set(row.dre_account_id, Number(row.amount ?? 0));
-      });
+      const realizedAmounts = buildScopedAmounts(
+        realizedData as Array<{ dre_account_id: string; amount: number | string | null }> | null,
+      );
+      const budgetAmounts = buildScopedAmounts(
+        budgetData as Array<{ dre_account_id: string; amount: number | string | null }> | null,
+      );
 
       const realizedRows = buildDashboardRows(accounts, realizedAmounts).rows;
       const budgetRows = buildDashboardRows(accounts, budgetAmounts).rows;

@@ -41,15 +41,12 @@ interface ApiKpis {
   despesas: ApiKpiCard;
   resultado: ApiKpiCard;
   margem: ApiKpiCard;
-  fee_disponivel: ApiKpiCard;
-  vvr: ApiKpiCard;
-  // Indicador derivado: FEE Disponivel / media das despesas operacionais
-  // dos meses fechados do ano corrente. value = quantidade arredondada de
-  // meses; null quando faltar FEE, faltar mes fechado ou media zerada.
-  sobrevivencia_caixa: ApiKpiCard;
-  // Presente apenas para empresas do segmento Franquias Viva (preenchido
-  // manualmente em Configuracoes > Empresas > FEE / VVR). Em outros
-  // segmentos a chave nao vem da API e o card nao e renderizado.
+  // Blocos específicos de Franquias Viva — OPCIONAIS. Só chegam quando o
+  // template da empresa os suporta; templates Real Estate/genérico não os
+  // enviam e o card correspondente não é renderizado.
+  fee_disponivel?: ApiKpiCard;
+  vvr?: ApiKpiCard;
+  sobrevivencia_caixa?: ApiKpiCard;
   margem_media_eventos?: ApiKpiCard;
 }
 
@@ -85,6 +82,8 @@ export interface OnePageApiResponse {
     periodo?: { label?: string; date_from?: string; date_to?: string };
   };
   generatedAt?: string;
+  // Template de relatório resolvido (rótulo discreto de debug/admin).
+  template?: { id?: string; name?: string };
   kpis?: ApiKpis;
   previstoRealizado?: ApiPrevistoRealizado[];
   composicaoResultado?: ApiComposicao[];
@@ -176,19 +175,28 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     mapKpiCard(api?.despesas, "Despesas"),
     mapKpiCard(api?.resultado, "Resultado"),
     mapKpiCard(api?.margem, "Margem"),
-    mapKpiCard(api?.fee_disponivel, "FEE disponível", {
-      omitComparisonSuffix: true,
-    }),
+  ];
+
+  // Blocos específicos de Franquias Viva — só entram quando a rota os envia
+  // (templates Real Estate/genérico não enviam, então os cards não aparecem).
+  if (api?.fee_disponivel) {
+    cards.push(
+      mapKpiCard(api.fee_disponivel, "FEE disponível", { omitComparisonSuffix: true }),
+    );
+  }
+  if (api?.sobrevivencia_caixa) {
     // Sobrevivencia de caixa: indicador derivado em meses (sem comparativo
     // contra orcamento — omitComparisonSuffix=true preserva o rotulo
     // "Cobertura do FEE" sem concatenar " vs orçamento").
-    mapKpiCard(api?.sobrevivencia_caixa, "Sobrevivência de caixa", {
-      omitComparisonSuffix: true,
-    }),
+    cards.push(
+      mapKpiCard(api.sobrevivencia_caixa, "Sobrevivência de caixa", { omitComparisonSuffix: true }),
+    );
+  }
+  if (api?.vvr) {
     // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
     // VVR META, nao contra orcamento contabil.
-    mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
-  ];
+    cards.push(mapKpiCard(api.vvr, "VVR", { comparisonLabel: "meta" }));
+  }
 
   // "Margem média dos eventos" so chega quando a empresa pertence ao
   // segmento Franquias Viva. Sem comparativo (e um valor informado), entao
@@ -396,17 +404,24 @@ function mapSemaforo(
       searchTerms: ["margem"],
       fallbackKpi: kpis?.margem,
     },
-    {
+  ];
+
+  // FEE disponível e VVR no semáforo só quando o template os fornece (Franquias
+  // Viva). Templates Real Estate/genérico não enviam esses KPIs.
+  if (kpis?.fee_disponivel) {
+    config.push({
       indicador: "FEE disponível",
       searchTerms: ["fee disponível", "fee disponivel"],
-      fallbackKpi: kpis?.fee_disponivel,
-    },
-    {
+      fallbackKpi: kpis.fee_disponivel,
+    });
+  }
+  if (kpis?.vvr) {
+    config.push({
       indicador: "VVR",
       searchTerms: ["vvr"],
-      fallbackKpi: kpis?.vvr,
-    },
-  ];
+      fallbackKpi: kpis.vvr,
+    });
+  }
 
   return config.map(({ indicador, searchTerms, fallbackKpi }) => {
     const fromIa = findLeituraClassificacao(analysis?.leituraPorIndicador, searchTerms);

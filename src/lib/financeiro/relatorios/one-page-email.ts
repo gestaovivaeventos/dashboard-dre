@@ -82,13 +82,16 @@ export function renderOnePageEmail({ companyName, periodLabel, payload, analysis
   const status = STATUS_COLORS[analysis.statusGeral];
   const { kpis } = payload;
 
+  // FEE disponível, Sobrevivência de caixa e Margem média dos eventos são
+  // específicos de Franquias Viva e podem não vir (templates Real Estate/
+  // genérico os omitem). Inclui só quando presentes.
   const kpiList = [
     kpis.receita,
     kpis.despesas,
     kpis.resultado,
     kpis.margem,
-    kpis.fee_disponivel,
-    kpis.sobrevivencia_caixa,
+    ...(kpis.fee_disponivel ? [kpis.fee_disponivel] : []),
+    ...(kpis.sobrevivencia_caixa ? [kpis.sobrevivencia_caixa] : []),
     ...(kpis.margem_media_eventos ? [kpis.margem_media_eventos] : []),
   ];
 
