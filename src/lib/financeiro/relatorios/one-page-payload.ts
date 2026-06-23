@@ -6,6 +6,7 @@ import {
   scopeDreAccounts,
   type RawDreAccount,
 } from "@/lib/dashboard/dre";
+import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
 import { resolveReportTemplate } from "./templates/report-template-registry";
@@ -220,6 +221,12 @@ export async function buildOnePagePayload(
   // os valores nao casam com `accounts` (custom) e todos os KPIs zeram.
   const { coreAccounts: accounts, translateToScopedId } = scopeDreAccounts(allAccounts, [companyId]);
 
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
+  // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE, para o
+  // One Page (KPIs, Previsto x Realizado, Composição, Histórico) não divergir da
+  // tela. Inerte para outros segmentos. `segmentSlug` já resolvido acima.
+  const custosNegation = resolveFranquiasVivaCustosNegation(segmentSlug, accounts);
+
   // -------------------------------------------------------------------------
   // 2. Agregar DRE realizado no periodo
   // -------------------------------------------------------------------------
@@ -276,8 +283,12 @@ export async function buildOnePagePayload(
   // -------------------------------------------------------------------------
   // 4. Build de linhas com formulas aplicadas (mesmo motor do dashboard)
   // -------------------------------------------------------------------------
-  const { rows: realizedRows } = buildDashboardRows(accounts, realizedMap);
-  const { rows: budgetedRows } = buildDashboardRows(accounts, budgetMap);
+  const { rows: realizedRows } = buildDashboardRows(accounts, realizedMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
+  const { rows: budgetedRows } = buildDashboardRows(accounts, budgetMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
   const budgetedById = new Map(budgetedRows.map((r) => [r.id, r]));
 
   // -------------------------------------------------------------------------
@@ -559,7 +570,9 @@ export async function buildOnePagePayload(
         if (!scopedId) return;
         closedMap.set(scopedId, (closedMap.get(scopedId) ?? 0) + Number(r.amount));
       });
-      const { rows: closedRows } = buildDashboardRows(accounts, closedMap);
+      const { rows: closedRows } = buildDashboardRows(accounts, closedMap, {
+        negateChildCodesInSummary: custosNegation,
+      });
       const despesasOpTotal = Math.abs(
         closedRows.find((r) => r.code === "7")?.value ?? 0,
       );
@@ -876,17 +889,17 @@ export async function buildOnePagePayload(
       const realizado =
         entry.map === null
           ? null
-          : (buildDashboardRows(accounts, entry.map).rows.find(
-              (r) => r.code === historicoCode,
-            )?.value ?? null);
+          : (buildDashboardRows(accounts, entry.map, {
+              negateChildCodesInSummary: custosNegation,
+            }).rows.find((r) => r.code === historicoCode)?.value ?? null);
 
       const bMap = budgetMaps.get(monthKey(entry.year, entry.month));
       const previsto =
         !bMap || bMap.size === 0
           ? null
-          : (buildDashboardRows(accounts, bMap).rows.find(
-              (r) => r.code === historicoCode,
-            )?.value ?? null);
+          : (buildDashboardRows(accounts, bMap, {
+              negateChildCodesInSummary: custosNegation,
+            }).rows.find((r) => r.code === historicoCode)?.value ?? null);
 
       return { mes, previsto, realizado };
     });
@@ -933,8 +946,12 @@ export async function buildOnePagePayload(
     ytdBudgetMap.set(scopedId, (ytdBudgetMap.get(scopedId) ?? 0) + Number(b.amount));
   });
 
-  const { rows: ytdRealizedRows } = buildDashboardRows(accounts, ytdRealizedMap);
-  const { rows: ytdBudgetedRows } = buildDashboardRows(accounts, ytdBudgetMap);
+  const { rows: ytdRealizedRows } = buildDashboardRows(accounts, ytdRealizedMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
+  const { rows: ytdBudgetedRows } = buildDashboardRows(accounts, ytdBudgetMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
 
   const ytdRealizedByCode = new Map<string, number>();
   ytdRealizedRows.forEach((r) => ytdRealizedByCode.set(r.code, r.value));

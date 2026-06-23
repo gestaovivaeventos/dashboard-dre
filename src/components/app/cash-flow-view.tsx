@@ -30,6 +30,7 @@ import type {
   CashFlowRange,
   PeriodMode,
 } from "@/lib/dashboard/cash-flow";
+import type { CompetenciaLine, CompetenciaSection } from "@/lib/dashboard/case-shows-custody";
 import {
   saveSharedCompanyFilter,
   useSharedCompanyFilterHydration,
@@ -46,6 +47,8 @@ interface CashFlowDisplayRow extends CashFlowAccountBase {
   valuesByBucket: Record<string, number>;
   accumulatedValue: number;
   valuesByCompany?: Record<string, number>;
+  // Destaque visual do núcleo "Custódia de Artistas" da Case Shows.
+  custodyAccent?: boolean;
 }
 
 interface CashFlowViewProps {
@@ -60,15 +63,20 @@ interface CashFlowViewProps {
   selectedCompanyIds: string[];
   lastSyncAt: string | null;
   accumulatedSection: CashFlowAccumulatedSection;
+  competenciaSection: CompetenciaSection;
   segments: Segment[];
   activeSegmentSlug: string | null;
 }
 
 interface DrilldownState {
   open: boolean;
+  // "cash": lançamentos por data de pagamento (financial_entries, via accountId).
+  // "competencia": Custódia por data de registro (via codes de categoria Omie).
+  mode: "cash" | "competencia";
   accountId: string;
   accountName: string;
   bucket: CashFlowPeriodBucket;
+  codes: string[];
 }
 
 interface DrilldownRow {
@@ -181,6 +189,7 @@ export function CashFlowView({
   selectedCompanyIds,
   lastSyncAt,
   accumulatedSection,
+  competenciaSection,
   segments,
   activeSegmentSlug,
 }: CashFlowViewProps) {
@@ -238,9 +247,11 @@ export function CashFlowView({
 
   const [drilldown, setDrilldown] = useState<DrilldownState>({
     open: false,
+    mode: "cash",
     accountId: "",
     accountName: "",
     bucket: visibleBuckets[0] ?? accumulatedBucket,
+    codes: [],
   });
   const [drillRows, setDrillRows] = useState<DrilldownRow[]>([]);
   const [drillLoading, setDrillLoading] = useState(false);
@@ -280,39 +291,99 @@ export function CashFlowView({
     return { mainRows: flat, highlightRows: highlight };
   }, [rows, expanded]);
 
+  // Busca os lançamentos e popula o painel a partir de um estado de drilldown já
+  // definido (modo cash ou competência). Centraliza o fetch para paginação/busca.
+  const fetchDrilldown = async (state: DrilldownState, page: number, search: string) => {
+    setDrillLoading(true);
+    let url: string;
+    if (state.mode === "competencia") {
+      const params = new URLSearchParams({
+        companyId: selectedCompanyIds[0] ?? "",
+        codes: state.codes.join(","),
+        dateFrom: state.bucket.dateFrom,
+        dateTo: state.bucket.dateTo,
+        page: String(page),
+        pageSize: String(drillPageSize),
+        search,
+      });
+      url = `/api/cash-flow/custody-competencia-drilldown?${params.toString()}`;
+    } else {
+      const params = new URLSearchParams({
+        accountId: state.accountId,
+        dateFrom: state.bucket.dateFrom,
+        dateTo: state.bucket.dateTo,
+        companyIds: selectedCompanyIds.join(","),
+        page: String(page),
+        pageSize: String(drillPageSize),
+        search,
+      });
+      url = `/api/cash-flow/drilldown?${params.toString()}`;
+    }
+    const response = await fetch(url, { cache: "no-store" });
+    const payload = (await response.json()) as {
+      rows?: DrilldownRow[];
+      total?: number;
+      totalValue?: number;
+      error?: string;
+    };
+    // Sem isto, uma falha de RPC/rota cairia silenciosamente no estado vazio
+    // ("Nenhum lancamento"), indistinguivel de "tabela sem dados".
+    if (!response.ok || payload.error) {
+      showToast({
+        title: "Falha no drilldown",
+        description: payload.error ?? `Erro ${response.status} ao carregar lancamentos.`,
+        variant: "destructive",
+      });
+    }
+    setDrillRows(payload.rows ?? []);
+    setDrillTotal(payload.total ?? 0);
+    setDrillTotalValue(payload.totalValue ?? 0);
+    setDrillPage(page);
+    setDrillLoading(false);
+  };
+
   const openDrilldown = async (
     account: CashFlowDisplayRow,
     bucket: CashFlowPeriodBucket,
     page = 1,
     search = "",
   ) => {
-    setDrilldown({
+    const state: DrilldownState = {
       open: true,
+      mode: "cash",
       accountId: account.id,
       accountName: `${account.code} - ${account.name}`,
       bucket,
-    });
-    setDrillLoading(true);
-    const params = new URLSearchParams({
-      accountId: account.id,
-      dateFrom: bucket.dateFrom,
-      dateTo: bucket.dateTo,
-      companyIds: selectedCompanyIds.join(","),
-      page: String(page),
-      pageSize: String(drillPageSize),
-      search,
-    });
-    const response = await fetch(`/api/cash-flow/drilldown?${params.toString()}`, { cache: "no-store" });
-    const payload = (await response.json()) as {
-      rows?: DrilldownRow[];
-      total?: number;
-      totalValue?: number;
+      codes: [],
     };
-    setDrillRows(payload.rows ?? []);
-    setDrillTotal(payload.total ?? 0);
-    setDrillTotalValue(payload.totalValue ?? 0);
-    setDrillPage(page);
-    setDrillLoading(false);
+    setDrilldown(state);
+    await fetchDrilldown(state, page, search);
+  };
+
+  // Drilldown da seção Competência (Custódia): por data de REGISTRO, via os
+  // códigos de categoria Omie que compõem a linha (entradas/saídas/comissão).
+  const openCompetenciaDrilldown = async (
+    line: CompetenciaLine,
+    bucket: CashFlowPeriodBucket,
+    page = 1,
+    search = "",
+  ) => {
+    const state: DrilldownState = {
+      open: true,
+      mode: "competencia",
+      accountId: "",
+      accountName: `Custódia (Competência) · ${line.label}`,
+      bucket,
+      codes: line.omieCategoryCodes,
+    };
+    setDrilldown(state);
+    await fetchDrilldown(state, page, search);
+  };
+
+  // Re-busca (paginação/busca) reaproveitando o estado atual — funciona nos dois
+  // modos sem precisar reencontrar a linha de origem.
+  const reDrilldown = (page: number, search: string) => {
+    void fetchDrilldown(drilldown, page, search);
   };
 
   const handleApply = () => {
@@ -678,16 +749,13 @@ export function CashFlowView({
               ? "bg-background font-bold uppercase border-t-2 border-slate-500"
               : row.is_summary
                 ? "bg-muted font-semibold border-t border-border"
-                : "bg-muted/50 border-t border-border";
-          const stickyBgClass = isHighlight
-            ? "bg-viva-50"
-            : isMainTotal
-              ? "bg-background"
-              : row.is_summary
-                ? "bg-muted"
-                : "bg-card";
+                : "bg-background border-t border-border";
+          // O rotulo fica numa coluna sticky; herdar o fundo da linha evita a
+          // "caixa branca" que aparecia quando a celula forcava bg-card.
+          const stickyBgClass = "bg-inherit";
+          const accentClass = row.custodyAccent ? "border-l-4 border-l-amber-400" : "";
           return (
-            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass}`} style={{ gridTemplateColumns: gridTemplate }}>
+            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${accentClass}`} style={{ gridTemplateColumns: gridTemplate }}>
               <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                 {row.hasChildren && !isHighlight ? (
                   <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
@@ -772,19 +840,23 @@ export function CashFlowView({
                 ? "bg-background font-bold uppercase"
                 : row.is_summary
                   ? "bg-muted font-semibold"
-                  : "bg-muted/50";
-              const stickyBgClass = isMainTotal
-                ? "bg-background"
-                : row.is_summary
-                  ? "bg-muted"
-                  : "bg-card";
+                  : "bg-background";
+              // O rotulo fica numa coluna sticky; herdar o fundo da linha evita
+              // a "caixa branca" que aparecia quando a celula forcava bg-card.
+              const stickyBgClass = "bg-inherit";
               const borderClass = isMainTotal
                 ? "border-t-2 border-slate-500"
                 : "border-t border-slate-200";
+              // Acento lateral âmbar marca o núcleo "Custódia de Artistas"
+              // (Case Shows) como seção de análise própria, sem mexer no fundo
+              // nem nos cálculos.
+              const accentClass = row.custodyAccent
+                ? "border-l-4 border-l-amber-400"
+                : "";
               return (
                 <div
                   key={row.id}
-                  className={`grid ${borderClass} px-4 py-2 text-sm ${rowClass}`}
+                  className={`grid ${borderClass} ${accentClass} px-4 py-2 text-sm ${rowClass}`}
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
                   <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
@@ -832,7 +904,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-viva-500 bg-viva-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-viva-700"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span className="sticky left-0 z-[2] bg-card">Fluxo de Caixa</span>
+                  <span className="sticky left-0 z-[2] bg-transparent">Fluxo de Caixa</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`hl-h-${i}`} />
                   ))}
@@ -843,7 +915,7 @@ export function CashFlowView({
                     className="grid border-t border-viva-500/40 bg-viva-500/5 px-4 py-2 text-sm font-semibold"
                     style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                   >
-                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
                       <span className="w-4" />
                       <span className="truncate">{row.name}</span>
                     </div>
@@ -871,7 +943,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-indigo-500 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-indigo-700"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span className="sticky left-0 z-[2] bg-card">Acumulados</span>
+                  <span className="sticky left-0 z-[2] bg-transparent">Acumulados</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`acc-h-${i}`} />
                   ))}
@@ -880,10 +952,10 @@ export function CashFlowView({
                 {accumulatedSection.showAportes && (
                   <>
                     <div
-                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
+                      className="grid border-t border-indigo-500/40 bg-indigo-50 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
-                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
                         {accumulatedSection.aportes.partners.length > 0 ? (
                           <button
                             type="button"
@@ -913,7 +985,7 @@ export function CashFlowView({
                         className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
                         style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                       >
-                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card pl-4">
+                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit pl-4">
                           <span className="w-4" />
                           <span className="truncate text-muted-foreground">{p.name}</span>
                         </div>
@@ -933,10 +1005,10 @@ export function CashFlowView({
                 {accumulatedSection.showDividends && (
                   <>
                     <div
-                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
+                      className="grid border-t border-indigo-500/40 bg-indigo-50 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
-                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card">
+                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
                         {accumulatedSection.dividends.partners.length > 0 ? (
                           <button
                             type="button"
@@ -966,7 +1038,7 @@ export function CashFlowView({
                         className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
                         style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                       >
-                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-card pl-4">
+                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit pl-4">
                           <span className="w-4" />
                           <span className="truncate text-muted-foreground">{p.name}</span>
                         </div>
@@ -982,6 +1054,69 @@ export function CashFlowView({
                     ))}
                   </>
                 )}
+              </>
+            )}
+
+            {/* Bloco — Custodia de Artistas - Analise Competencia (Case Shows).
+                Secao gerencial INDEPENDENTE, alocada pela data de registro da
+                Omie. Renderizada apos "Acumulados". Acento ambar para amarrar
+                visualmente a secao de Custodia, sem impactar o fluxo oficial. */}
+            {competenciaSection.show && (
+              <>
+                <div
+                  className="grid border-t-4 border-amber-400 bg-amber-400/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-amber-700"
+                  style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                >
+                  <span className="sticky left-0 z-[2] bg-transparent">{competenciaSection.title}</span>
+                  {Array.from({ length: totalCols }).map((_, i) => (
+                    <span key={`comp-h-${i}`} />
+                  ))}
+                </div>
+                <div className="border-t border-amber-400/30 bg-amber-400/[0.04] px-4 py-1.5 text-[11px] italic text-muted-foreground">
+                  {competenciaSection.note}
+                </div>
+                {competenciaSection.lines.map((line) => (
+                  <div
+                    key={line.key}
+                    className={`grid border-t border-amber-400/20 px-4 py-2 text-sm ${
+                      line.emphasis ? "bg-amber-400/[0.06] font-semibold" : "bg-amber-400/[0.02]"
+                    }`}
+                    style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
+                  >
+                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
+                      <span className="w-4" />
+                      <span className="truncate">{line.label}</span>
+                    </div>
+                    {columns.map((column) => (
+                      <div key={`${line.key}-${column.key}`} className="text-right">
+                        {line.drillable ? (
+                          <button
+                            type="button"
+                            className="w-full text-right hover:underline"
+                            onClick={() => void openCompetenciaDrilldown(line, column, 1, drillSearch)}
+                          >
+                            {formatCurrency(line.valuesByBucket[column.key] ?? 0)}
+                          </button>
+                        ) : (
+                          formatCurrency(line.valuesByBucket[column.key] ?? 0)
+                        )}
+                      </div>
+                    ))}
+                    <div className="text-right font-semibold">
+                      {line.drillable ? (
+                        <button
+                          type="button"
+                          className="w-full text-right hover:underline"
+                          onClick={() => void openCompetenciaDrilldown(line, accumulatedBucket, 1, drillSearch)}
+                        >
+                          {formatCurrency(line.accumulatedValue)}
+                        </button>
+                      ) : (
+                        formatCurrency(line.accumulatedValue)
+                      )}
+                    </div>
+                  </div>
+                ))}
               </>
             )}
           </div>
@@ -1019,10 +1154,7 @@ export function CashFlowView({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  const account = rows.find((r) => r.id === drilldown.accountId);
-                  if (account) void openDrilldown(account, drilldown.bucket, 1, drillSearch);
-                }}
+                onClick={() => reDrilldown(1, drillSearch)}
               >
                 <Search className="mr-2 h-4 w-4" />
                 Buscar
@@ -1031,7 +1163,8 @@ export function CashFlowView({
 
             <div className="overflow-hidden rounded-md border">
               <div className="grid grid-cols-[100px_2fr_1.5fr_140px_1fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
-                <span>Data Pgto</span><span>Descricao</span><span>Fornecedor/Cliente</span>
+                <span>{drilldown.mode === "competencia" ? "Data Reg." : "Data Pgto"}</span>
+                <span>Descricao</span><span>Fornecedor/Cliente</span>
                 <span className="text-right">Valor</span><span>Unidade</span>
               </div>
               <div className="max-h-[420px] overflow-y-auto">
@@ -1070,10 +1203,7 @@ export function CashFlowView({
                     size="sm"
                     variant="outline"
                     disabled={drillPage <= 1}
-                    onClick={() => {
-                      const account = rows.find((r) => r.id === drilldown.accountId);
-                      if (account) void openDrilldown(account, drilldown.bucket, drillPage - 1, drillSearch);
-                    }}
+                    onClick={() => reDrilldown(drillPage - 1, drillSearch)}
                   >
                     <ChevronsLeft className="h-4 w-4" />
                   </Button>
@@ -1083,10 +1213,7 @@ export function CashFlowView({
                     size="sm"
                     variant="outline"
                     disabled={drillPage * drillPageSize >= drillTotal}
-                    onClick={() => {
-                      const account = rows.find((r) => r.id === drilldown.accountId);
-                      if (account) void openDrilldown(account, drilldown.bucket, drillPage + 1, drillSearch);
-                    }}
+                    onClick={() => reDrilldown(drillPage + 1, drillSearch)}
                   >
                     <ChevronsRight className="h-4 w-4" />
                   </Button>

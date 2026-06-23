@@ -85,8 +85,9 @@ export function CashFlowStructureManager({
     name: string;
     type: CashFlowType;
     parent_id: string;
+    is_summary: boolean;
     sort_order: number;
-  }>({ code: "", name: "", type: "despesa", parent_id: "", sort_order: 0 });
+  }>({ code: "", name: "", type: "despesa", parent_id: "", is_summary: false, sort_order: 0 });
   const [createSaving, setCreateSaving] = useState(false);
 
   const byParent = useMemo(() => {
@@ -368,13 +369,13 @@ export function CashFlowStructureManager({
   };
 
   const startCreate = () => {
-    setCreateDraft({ code: "", name: "", type: "despesa", parent_id: "", sort_order: 0 });
+    setCreateDraft({ code: "", name: "", type: "despesa", parent_id: "", is_summary: false, sort_order: 0 });
     setCreating(true);
   };
 
   const cancelCreate = () => {
     setCreating(false);
-    setCreateDraft({ code: "", name: "", type: "despesa", parent_id: "", sort_order: 0 });
+    setCreateDraft({ code: "", name: "", type: "despesa", parent_id: "", is_summary: false, sort_order: 0 });
   };
 
   const submitCreate = async () => {
@@ -396,10 +397,14 @@ export function CashFlowStructureManager({
       showToast({ title: "Nome obrigatorio", variant: "destructive" });
       return;
     }
-    if (!createDraft.parent_id) {
+    // No plano global a conta pai e obrigatoria (mantem a estrutura base
+    // compartilhada intacta). Num plano customizado por empresa, deixar a conta
+    // pai vazia cria uma conta totalizadora de nivel 1 (top-level) isolada
+    // naquela empresa.
+    if (!createDraft.parent_id && selectedCompanyId === null) {
       showToast({
         title: "Selecione uma conta pai",
-        description: "Novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
+        description: "No plano global, novas contas devem ser adicionadas no ultimo nivel de uma conta agrupadora.",
         variant: "destructive",
       });
       return;
@@ -429,8 +434,8 @@ export function CashFlowStructureManager({
         code,
         name,
         type: createDraft.type,
-        parent_id: parentId,
-        is_summary: false,
+        parent_id: parentId || null,
+        is_summary: createDraft.is_summary,
         formula: null,
         sort_order: createDraft.sort_order,
         active: true,
@@ -457,16 +462,18 @@ export function CashFlowStructureManager({
     });
   };
 
-  // Eligible parents = aggregator accounts that already have children. We
-  // intentionally exclude leaves (adding under a leaf would silently turn it
-  // into a parent and block editing of the former leaf), special-source rows
-  // (Saldo Inicial/Final, Resultado do Exercicio) and the calculated
+  // Eligible parents = aggregator accounts. Includes rows that already have
+  // children OR were explicitly flagged as `is_summary` (totalizadora) — the
+  // latter covers freshly-created aggregators that don't have children yet but
+  // were created precisely to host new subcontas. We still exclude pure leaves
+  // (turning a leaf into a parent would silently change its role), special-source
+  // rows (Saldo Inicial/Final, Resultado do Exercicio) and the calculated
   // highlight block (Caixa Gerado/Consumido, Caixa Final).
   const parentOptions = useMemo(
     () =>
       accounts
-        .filter((a) => !isLeaf(a.id))
         .filter((a) => !a.source && !a.is_highlight_block && a.type !== "calculado")
+        .filter((a) => !isLeaf(a.id) || a.is_summary)
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [accounts, byParent],
@@ -561,7 +568,11 @@ export function CashFlowStructureManager({
                   onChange={(e) => setCreateDraft({ ...createDraft, parent_id: e.target.value })}
                   className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm"
                 >
-                  <option value="">(selecione uma conta agrupadora)</option>
+                  <option value="">
+                    {selectedCompanyId === null
+                      ? "(selecione uma conta agrupadora)"
+                      : "(nenhuma — criar conta de nivel 1 / top-level)"}
+                  </option>
                   {parentOptions.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.code} - {a.name}
@@ -569,7 +580,9 @@ export function CashFlowStructureManager({
                   ))}
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  A nova conta sera criada como conta final desta conta agrupadora.
+                  {selectedCompanyId === null
+                    ? "A nova conta sera criada como conta final desta conta agrupadora."
+                    : "Com conta pai: criada como conta final dela. Sem conta pai: criada como conta de nivel 1 (top-level) deste plano da empresa."}
                 </p>
               </div>
               <div className="space-y-1">
@@ -601,6 +614,19 @@ export function CashFlowStructureManager({
                   <option value="despesa">despesa</option>
                   <option value="misto">misto</option>
                 </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="create-is-summary"
+                  type="checkbox"
+                  checked={createDraft.is_summary}
+                  onChange={(e) =>
+                    setCreateDraft({ ...createDraft, is_summary: e.target.checked })
+                  }
+                />
+                <label htmlFor="create-is-summary" className="text-xs text-muted-foreground">
+                  E uma conta totalizadora (somatorio dos filhos)
+                </label>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Ordem</label>

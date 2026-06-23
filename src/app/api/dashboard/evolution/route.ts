@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveCompanyPeriodFloor } from "@/lib/dashboard/company-period-limits";
 import {
+  FRANQUIAS_VIVA_SLUG,
+  resolveFranquiasVivaCustosNegation,
+} from "@/lib/dashboard/franquias-viva-custos";
+import {
   buildDashboardRows,
   fetchAllDreAccountRows,
   resolveAllowedCompanyIds,
@@ -36,7 +40,7 @@ export async function GET(request: Request) {
   }
 
   const [{ data: companiesData }, accountsData] = await Promise.all([
-    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    supabase.from("companies").select("id,name,active,segment_id").eq("active", true).order("name"),
     // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
     // Carrega company_id (SCOPED_DRE_ACCOUNTS_SELECT) para escopar o plano por empresa.
     fetchAllDreAccountRows<RawDreAccount>((from, to) =>
@@ -72,6 +76,28 @@ export async function GET(request: Request) {
   // gráfico "vazio" nas linhas calculadas.
   const scope = scopeDreAccounts(accountsData, scopedCompanyIds);
   const accounts = scope.coreAccounts;
+
+  // Franquias Viva: subtrai "Receitas Ressarciveis - Fundos" (5.8) do total de
+  // Custos, igual ao Dashboard DRE — senão a evolução da linha de custos diverge
+  // da célula clicada. Só quando TODAS as empresas do gráfico são do segmento
+  // (o dashboard sempre filtra por 1 segmento). Inerte caso contrário.
+  const segmentIdByCompany = new Map(
+    (companiesData ?? []).map((c) => [c.id as string, (c as { segment_id: string | null }).segment_id]),
+  );
+  const { data: franquiasVivaSegment } = await supabase
+    .from("segments")
+    .select("id")
+    .eq("slug", FRANQUIAS_VIVA_SLUG)
+    .maybeSingle();
+  const franquiasVivaSegmentId = (franquiasVivaSegment as { id: string } | null)?.id ?? null;
+  const allFranquiasViva =
+    franquiasVivaSegmentId !== null &&
+    scopedCompanyIds.every((id) => segmentIdByCompany.get(id) === franquiasVivaSegmentId);
+  const custosNegation = resolveFranquiasVivaCustosNegation(
+    allFranquiasViva ? FRANQUIAS_VIVA_SLUG : null,
+    accounts,
+  );
+
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
   let ranges = Array.from({ length: 12 }).map((_, index) =>
     monthRange(new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - (11 - index), 1))),
@@ -114,7 +140,9 @@ export async function GET(request: Request) {
       const point: Record<string, string | number> = { label: range.label };
       scopedCompanyIds.forEach((companyId) => {
         const map = byCompany.get(companyId) ?? new Map<string, number>();
-        const rows = buildDashboardRows(accounts, map).rows;
+        const rows = buildDashboardRows(accounts, map, {
+          negateChildCodesInSummary: custosNegation,
+        }).rows;
         const selected = rows.find((row) => row.id === accountId);
         point[companyId] = selected?.value ?? 0;
       });

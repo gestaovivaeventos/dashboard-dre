@@ -5,6 +5,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
+import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import { REPORT_SYSTEM_PROMPT, getSegmentReportPrompt } from "@/lib/intelligence/prompts";
 import { renderReportEmail, renderNarrativeEmail } from "@/lib/intelligence/render-email";
 import type { ReportData } from "@/lib/intelligence/render-email";
@@ -140,8 +141,16 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
   }
 
   // 6. Build DRE rows
-  const { rows: currentRows } = buildDashboardRows(accounts, currentMap);
-  const { rows: prevRows } = buildDashboardRows(accounts, prevMap);
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
+  // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE, para os
+  // números enviados à IA não divergirem da tela. Inerte para outros segmentos.
+  const custosNegation = resolveFranquiasVivaCustosNegation(segmentSlug ?? null, accounts);
+  const { rows: currentRows } = buildDashboardRows(accounts, currentMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
+  const { rows: prevRows } = buildDashboardRows(accounts, prevMap, {
+    negateChildCodesInSummary: custosNegation,
+  });
 
   const prevRowById = new Map(prevRows.map((r) => [r.id, r]));
 

@@ -538,5 +538,9 @@ export function mapOnePageApiResponseToPreviewData(
     historicoTitle: response.historicoTitle,
     // Nº de colunas da grade de KPIs (undefined = 4).
     kpiColumns: response.kpiColumns,
+    // Título da seção de KPIs. Templates com KPIs custom (ex.: SGX) trazem
+    // cards de resultado/indicador próprios — não os de "Saúde financeira &
+    // caixa" da Viva; um título neutro evita rótulo enganoso.
+    kpiSectionTitle: customKpis ? "Indicadores do mês" : undefined,
   };
 }

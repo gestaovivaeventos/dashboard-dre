@@ -247,6 +247,20 @@ function evaluateFormula(formula: string, getByCode: (code: string) => number) {
 export function buildDashboardRows(
   accounts: DreAccountBase[],
   amountsByAccountId: Map<string, number>,
+  options?: {
+    // Codes cujo valor deve ser SUBTRAÍDO (sinal invertido) ao compor o total
+    // do grupo-pai `is_summary`, em vez de somado. Existe para tratar contas de
+    // RECEITA que vivem dentro de um grupo de DESPESA — caso real: "Receitas
+    // Ressarciveis - Fundos" (5.8) dentro de "Custos com os Serviços Prestados"
+    // (5) nas franquias Viva. A conta está cadastrada como `despesa` na
+    // estrutura DRE (que não pode ser alterada), então o somatório do grupo a
+    // trataria como custo e inflaria o total. Subtraindo-a aqui o totalizador
+    // respeita o sinal correto, e como o valor é descontado apenas na soma do
+    // PAI, a própria linha continua exibindo seu valor positivo no drilldown.
+    // Inerte (default vazio) para todos os demais chamadores/segmentos. Ver
+    // src/lib/dashboard/franquias-viva-custos.ts.
+    negateChildCodesInSummary?: ReadonlySet<string>;
+  },
 ) {
   const byId = new Map(accounts.map((account) => [account.id, account]));
   const byCode = new Map(accounts.map((account) => [account.code, account]));
@@ -272,20 +286,32 @@ export function buildDashboardRows(
 
     let value = 0;
     const children = childrenByParent.get(account.id) ?? [];
+    // `negateChildCodesInSummary` inverte o sinal de codes específicos quando
+    // eles são agregados no total de um PAI — seja pela soma de filhos de um
+    // grupo `is_summary`, seja por uma conta `calculado` que os referencia na
+    // fórmula. Caso real: "Receitas Ressarciveis - Fundos" (5.8) é receita
+    // dentro de "Custos com os Serviços Prestados" (5). No plano global o code 5
+    // é `calculado` (`5.1+...+5.8+...-2.4`), então a inversão precisa valer
+    // também no ramo da fórmula — senão a correção não tem efeito. O valor da
+    // PRÓPRIA linha 5.8 (folha) não é afetado; só o sinal com que entra no total
+    // do pai. Inerte (default) para os demais chamadores. Ver
+    // src/lib/dashboard/franquias-viva-custos.ts.
+    const negate = options?.negateChildCodesInSummary;
     if (account.type === "calculado" && account.formula) {
       value = evaluateFormula(account.formula, (code) => {
         const ref = byCode.get(code);
-        return ref ? calculateValueById(ref.id) : 0;
+        const refValue = ref ? calculateValueById(ref.id) : 0;
+        return negate?.has(code) ? -refValue : refValue;
       });
     } else if (account.is_summary) {
       // Soma filhos + qualquer valor mapeado diretamente nesta conta.
       // Sem o "+ direto", contas summary sem filhos (ex.: 9 Receitas Não
       // Operacionais, 10 Despesas Não Operacionais) sempre rendem 0 mesmo
       // quando há entries com category_mapping apontando direto para elas.
-      const childrenSum = children.reduce(
-        (sum, child) => sum + calculateValueById(child.id),
-        0,
-      );
+      const childrenSum = children.reduce((sum, child) => {
+        const childValue = calculateValueById(child.id);
+        return sum + (negate?.has(child.code) ? -childValue : childValue);
+      }, 0);
       const directAmount = amountsByAccountId.get(account.id) ?? 0;
       value = childrenSum + directAmount;
     } else {
@@ -541,6 +567,10 @@ export async function aggregateDreRows(params: {
     scopedAccounts: DreAccountBase[],
     amountsByScopedId: Map<string, number>,
   ) => void;
+  // Codes a subtrair no total do grupo-pai (ver buildDashboardRows). Usado pelo
+  // segmento franquias-viva para "Receitas Ressarciveis - Fundos" dentro de
+  // Custos. Inerte por padrão. Ver src/lib/dashboard/franquias-viva-custos.ts.
+  negateChildCodesInSummary?: ReadonlySet<string>;
 }): Promise<DashboardRow[]> {
   const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate", {
     p_company_ids: params.companyIds,
@@ -567,7 +597,9 @@ export async function aggregateDreRows(params: {
   if (params.postProcessAmounts) {
     params.postProcessAmounts(params.scope.scopedAccounts, amounts);
   }
-  return buildDashboardRows(params.scope.coreAccounts, amounts).rows;
+  return buildDashboardRows(params.scope.coreAccounts, amounts, {
+    negateChildCodesInSummary: params.negateChildCodesInSummary,
+  }).rows;
 }
 
 /**
@@ -582,6 +614,9 @@ export async function aggregateDreRowsByCompany(params: {
   companyIds: string[];
   dateFrom: string;
   dateTo: string;
+  // Codes a subtrair no total do grupo-pai (ver buildDashboardRows). Inerte por
+  // padrão. Ver src/lib/dashboard/franquias-viva-custos.ts.
+  negateChildCodesInSummary?: ReadonlySet<string>;
 }): Promise<Map<string, DashboardRow[]>> {
   const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate_by_company", {
     p_company_ids: params.companyIds,
@@ -614,7 +649,12 @@ export async function aggregateDreRowsByCompany(params: {
   const result = new Map<string, DashboardRow[]>();
   params.companyIds.forEach((companyId) => {
     const amounts = amountsByCompanyId.get(companyId) ?? new Map<string, number>();
-    result.set(companyId, buildDashboardRows(params.scope.coreAccounts, amounts).rows);
+    result.set(
+      companyId,
+      buildDashboardRows(params.scope.coreAccounts, amounts, {
+        negateChildCodesInSummary: params.negateChildCodesInSummary,
+      }).rows,
+    );
   });
   return result;
 }

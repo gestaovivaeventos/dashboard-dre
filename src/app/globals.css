@@ -46,6 +46,13 @@
   --ring:                  20 100% 55%;
 
   --radius: 0.75rem;
+
+  /* Fontes do Relatório Financeiro Mensal. Carregadas via <link> em runtime
+     (layout.tsx) — não pelo next/font, para não acoplar o build da Vercel ao
+     fetch do Google Fonts. As variáveis abaixo resolvem o var(--font-plex-*)
+     usado no componente do relatório. */
+  --font-plex-sans: "IBM Plex Sans";
+  --font-plex-mono: "IBM Plex Mono";
 }
 
 /* Mantemos .dark como alias do :root para compatibilidade
@@ -83,5 +90,57 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-body), "Inter", system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* =========================================================
+   Relatório Financeiro Mensal (One Page Report) — documento
+   A4. Estilos de responsividade + impressão escopados em
+   .opr-page / .one-page-report para não vazar para o resto
+   do app. A paleta/tipografia vivem inline no componente.
+   ========================================================= */
+
+/* Em telas estreitas, as grades multi-coluna do relatório
+   colapsam para uma coluna para preservar a legibilidade
+   dentro do card. */
+@media (max-width: 760px) {
+  .opr-page .opr-resumo-grid,
+  .opr-page .opr-charts-2,
+  .opr-page .opr-cards-2 {
+    grid-template-columns: 1fr !important;
+  }
+  .opr-page .opr-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .opr-page .opr-cards-3 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Impressão direta pelo navegador (Ctrl+P). O export "Exportar
+   PDF" usa html2canvas e não depende disto, mas mantemos uma
+   saída de impressão fiel para quem imprimir a página. */
+@media print {
+  @page {
+    size: A4;
+    margin: 9mm;
+  }
+  .opr-page {
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+  .opr-page .one-page-report {
+    border: none !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  .opr-page * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .opr-page section,
+  .opr-page table tr {
+    break-inside: avoid;
   }
 }

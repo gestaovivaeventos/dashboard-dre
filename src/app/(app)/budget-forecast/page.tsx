@@ -4,6 +4,7 @@ import { BudgetForecastView } from "@/components/app/budget-forecast-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import { resolveUserSegments } from "@/lib/context/user-segments";
+import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 
 export const dynamic = "force-dynamic";
 import {
@@ -191,6 +192,10 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   // na Village (ex.: "Clientes - Servicos Prestados").
   const scope = scopeDreAccounts(accountsData, filter.selectedCompanyIds);
   const accounts = scope.coreAccounts;
+  // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
+  // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE, para o
+  // Realizado/Orçamento não divergirem. Inerte para outros segmentos.
+  const custosNegation = resolveFranquiasVivaCustosNegation(activeSegmentSlug, accounts);
   const visibleBuckets = buildVisibleBuckets(filter);
 
   // Periodo invalido (ex.: customizado com inicio > fim) gera zero buckets.
@@ -233,7 +238,9 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       if (!scopedId) return;
       amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
-    return buildDashboardRows(accounts, amounts).rows;
+    return buildDashboardRows(accounts, amounts, {
+      negateChildCodesInSummary: custosNegation,
+    }).rows;
   };
 
   const aggregateBudgetBucket = async (bucket: DashboardPeriodBucket) => {
@@ -251,10 +258,14 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       if (!scopedId) return;
       amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
-    return buildDashboardRows(accounts, amounts).rows;
+    return buildDashboardRows(accounts, amounts, {
+      negateChildCodesInSummary: custosNegation,
+    }).rows;
   };
 
-  const zeroRows = buildDashboardRows(accounts, new Map()).rows;
+  const zeroRows = buildDashboardRows(accounts, new Map(), {
+    negateChildCodesInSummary: custosNegation,
+  }).rows;
 
   const now = new Date();
   const currentMonth = now.getUTCMonth() + 1;
@@ -440,7 +451,12 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
           if (!scopedId) return;
           amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
         });
-        return { companyId, rows: buildDashboardRows(accounts, amounts).rows };
+        return {
+          companyId,
+          rows: buildDashboardRows(accounts, amounts, {
+            negateChildCodesInSummary: custosNegation,
+          }).rows,
+        };
       }),
     );
 
@@ -484,7 +500,9 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
 
       for (const companyId of filter.selectedCompanyIds) {
         const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
-        const companyRows = buildDashboardRows(accounts, companyAmounts).rows;
+        const companyRows = buildDashboardRows(accounts, companyAmounts, {
+          negateChildCodesInSummary: custosNegation,
+        }).rows;
         const byId: Record<string, number> = {};
         companyRows.forEach((r) => { byId[r.id] = r.value; });
         realizedByCompany[companyId] = byId;

@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import {
+  FRANQUIAS_VIVA_SLUG,
+  resolveFranquiasVivaCustosNegation,
+} from "@/lib/dashboard/franquias-viva-custos";
+import {
   buildDashboardRows,
   fetchAllDreAccountRows,
   resolveAllowedCompanyIds,
@@ -37,7 +41,7 @@ export async function GET(request: Request) {
   }
 
   const [{ data: companiesData }, accountsData] = await Promise.all([
-    supabase.from("companies").select("id,name,active").eq("active", true).order("name"),
+    supabase.from("companies").select("id,name,active,segment_id").eq("active", true).order("name"),
     // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
     // Carrega company_id (SCOPED_DRE_ACCOUNTS_SELECT) para permitir escopar o
     // plano por empresa, igual ao dashboard e à tabela do Budget.
@@ -92,6 +96,26 @@ export async function GET(request: Request) {
     return amounts;
   };
 
+  // Franquias Viva: subtrai "Receitas Ressarciveis - Fundos" (5.8) do total de
+  // Custos, igual ao Budget/Dashboard. Só quando TODAS as empresas do gráfico
+  // são do segmento. Inerte caso contrário.
+  const segmentIdByCompany = new Map(
+    (companiesData ?? []).map((c) => [c.id as string, (c as { segment_id: string | null }).segment_id]),
+  );
+  const { data: franquiasVivaSegment } = await supabase
+    .from("segments")
+    .select("id")
+    .eq("slug", FRANQUIAS_VIVA_SLUG)
+    .maybeSingle();
+  const franquiasVivaSegmentId = (franquiasVivaSegment as { id: string } | null)?.id ?? null;
+  const allFranquiasViva =
+    franquiasVivaSegmentId !== null &&
+    scopedCompanyIds.every((id) => segmentIdByCompany.get(id) === franquiasVivaSegmentId);
+  const custosNegation = resolveFranquiasVivaCustosNegation(
+    allFranquiasViva ? FRANQUIAS_VIVA_SLUG : null,
+    accounts,
+  );
+
   const endDate = new Date(`${endDateRaw}T00:00:00Z`);
   const startDate = startDateRaw
     ? new Date(`${startDateRaw}T00:00:00Z`)
@@ -128,7 +152,9 @@ export async function GET(request: Request) {
         const amounts = buildScopedAmounts(
           data as Array<{ dre_account_id: string; amount: number | string | null }> | null,
         );
-        const builtRows = buildDashboardRows(accounts, amounts).rows;
+        const builtRows = buildDashboardRows(accounts, amounts, {
+          negateChildCodesInSummary: custosNegation,
+        }).rows;
         const selected = builtRows.find((r) => r.id === accountId);
         return {
           label: range.label,
@@ -159,8 +185,12 @@ export async function GET(request: Request) {
         budgetData as Array<{ dre_account_id: string; amount: number | string | null }> | null,
       );
 
-      const realizedRows = buildDashboardRows(accounts, realizedAmounts).rows;
-      const budgetRows = buildDashboardRows(accounts, budgetAmounts).rows;
+      const realizedRows = buildDashboardRows(accounts, realizedAmounts, {
+        negateChildCodesInSummary: custosNegation,
+      }).rows;
+      const budgetRows = buildDashboardRows(accounts, budgetAmounts, {
+        negateChildCodesInSummary: custosNegation,
+      }).rows;
       const realizedRow = realizedRows.find((r) => r.id === accountId);
       const budgetRow = budgetRows.find((r) => r.id === accountId);
 
