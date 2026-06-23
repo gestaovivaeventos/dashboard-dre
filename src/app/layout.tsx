@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Chakra_Petch, Inter } from "next/font/google";
+import { Chakra_Petch, IBM_Plex_Mono, IBM_Plex_Sans, Inter } from "next/font/google";
 
 import { ToasterProvider } from "@/components/ui/toaster";
 import "./globals.css";
@@ -15,6 +15,23 @@ const body = Inter({
   weight: ["400", "500", "600", "700"],
   subsets: ["latin"],
   variable: "--font-body",
+  display: "swap",
+});
+
+// Fontes do Relatório Financeiro Mensal (One Page Report). Expostas como
+// variaveis CSS proprias (--font-plex-sans / --font-plex-mono) e aplicadas
+// SOMENTE no documento do relatorio — o resto do app continua em Inter.
+const plexSans = IBM_Plex_Sans({
+  weight: ["400", "500", "600", "700"],
+  subsets: ["latin"],
+  variable: "--font-plex-sans",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  weight: ["400", "500", "600"],
+  subsets: ["latin"],
+  variable: "--font-plex-mono",
   display: "swap",
 });
 
@@ -40,7 +57,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`${display.variable} ${body.variable}`} suppressHydrationWarning>
+    <html
+      lang="pt-BR"
+      className={`${display.variable} ${body.variable} ${plexSans.variable} ${plexMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

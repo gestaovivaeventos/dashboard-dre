@@ -53,6 +53,50 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+// Converte data da Omie ("dd/mm/yyyy") para ISO ("yyyy-mm-dd"). Devolve null se
+// não reconhecer o formato (cai no fallback do primeiro dia do mês no sync).
+function parseOmieDateToISO(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+  if (!m) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+/** Metadados por movimento (compartilhados por todas as porções), para o detalhe
+ *  por transação do drilldown. Mesmos campos que o financial-processor usa. */
+interface RecordMeta {
+  registrationDate: string | null;
+  description: string | null;
+  supplierCustomer: string | null;
+  documentNumber: string | null;
+  movementId: string | null;
+}
+
+function extractRecordMeta(record: Record<string, unknown>): RecordMeta {
+  const detalhes = asObj(record.detalhes);
+  const resumo = asObj(record.resumo);
+  const merged = { ...resumo, ...detalhes, ...record };
+  const str = (keys: string[]): string | null => {
+    const v = pick(merged, keys);
+    if (v === undefined || v === null) return null;
+    const s = String(v).trim();
+    return s === "" ? null : s;
+  };
+  return {
+    registrationDate: parseOmieDateToISO(pick(merged, ["dDtRegistro"])),
+    description:
+      str(["cDescricao", "descricao", "cObs", "observacao"]),
+    supplierCustomer: str([
+      "cNomeCliente",
+      "nome_cliente",
+      "nome_fornecedor",
+      "cNomeFornecedor",
+    ]),
+    documentNumber: str(["cNumDocFiscal", "cNumDocumento", "cNumParcela", "numero_documento"]),
+    movementId: str(["nCodTitulo", "cNumTitulo", "nCodMovCC"]),
+  };
+}
+
 function monthRange(year: number, month: number): { from: string; to: string } {
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return {
@@ -255,25 +299,67 @@ export async function syncCaseShowsCustodyCompetencia(params: {
 
   // (year-month-code) -> amount
   const agg = new Map<string, { year: number; month: number; code: string; amount: number }>();
+  // Detalhe por transação (uma linha por porção) — alimenta o drilldown da seção.
+  const entries: Array<{
+    company_id: string;
+    period_year: number;
+    period_month: number;
+    registration_date: string;
+    category_code: string;
+    category_name: string | null;
+    description: string | null;
+    supplier_customer: string | null;
+    document_number: string | null;
+    omie_movement_id: string | null;
+    amount: number;
+  }> = [];
   let totalRecords = 0;
 
   for (const { year, month } of months) {
     const records = await fetchMovimentosByRegistrationMonth(appKey, appSecret, year, month);
     totalRecords += records.length;
+    const monthFirstDay = `${year}-${pad2(month)}-01`;
     for (const record of records) {
-      for (const portion of extractPortions(record, codeSet)) {
+      const portions = extractPortions(record, codeSet);
+      if (portions.length === 0) continue;
+      const meta = extractRecordMeta(record);
+      for (const portion of portions) {
+        const amount = portion.values[valueField];
         const key = `${year}-${month}-${portion.code}`;
         const slot = agg.get(key) ?? { year, month, code: portion.code, amount: 0 };
-        slot.amount += portion.values[valueField];
+        slot.amount += amount;
         agg.set(key, slot);
+        if (amount !== 0) {
+          entries.push({
+            company_id: companyId,
+            period_year: year,
+            period_month: month,
+            // A data de registro alimenta o filtro por intervalo do drilldown;
+            // se a Omie não a devolver, cai no 1º dia do mês de busca (que já é
+            // por data de registro), preservando a consistência com a célula.
+            registration_date: meta.registrationDate ?? monthFirstDay,
+            category_code: portion.code,
+            category_name: categoryNames?.get(portion.code) ?? null,
+            description: meta.description,
+            supplier_customer: meta.supplierCustomer,
+            document_number: meta.documentNumber,
+            omie_movement_id: meta.movementId,
+            amount,
+          });
+        }
       }
     }
   }
 
   const years = Array.from(new Set(months.map((m) => m.year)));
-  // Espelho: limpa os anos sincronizados desta empresa e reinsere.
+  // Espelho: limpa os anos sincronizados desta empresa e reinsere (agregado + detalhe).
   await supabase
     .from("case_shows_custody_competencia")
+    .delete()
+    .eq("company_id", companyId)
+    .in("period_year", years);
+  await supabase
+    .from("case_shows_custody_competencia_entries")
     .delete()
     .eq("company_id", companyId)
     .in("period_year", years);
@@ -292,6 +378,15 @@ export async function syncCaseShowsCustodyCompetencia(params: {
   if (rows.length > 0) {
     const { error } = await supabase.from("case_shows_custody_competencia").insert(rows);
     if (error) throw new Error(`Falha ao gravar competência da Custódia: ${error.message}`);
+  }
+
+  // Detalhe em chunks (pode ter centenas/milhares de linhas).
+  for (let i = 0; i < entries.length; i += 500) {
+    const chunk = entries.slice(i, i + 500);
+    const { error } = await supabase
+      .from("case_shows_custody_competencia_entries")
+      .insert(chunk);
+    if (error) throw new Error(`Falha ao gravar detalhe da Custódia (competência): ${error.message}`);
   }
 
   return { rowsUpserted: rows.length, monthsFetched: months.length, totalRecords };

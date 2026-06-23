@@ -183,6 +183,19 @@ export interface CompetenciaLine {
   accumulatedValue: number;
   /** Linhas de saldo (anterior/final) recebem leve destaque visual. */
   emphasis: boolean;
+  /** Linhas de movimento (entradas/saídas/comissão) aceitam drilldown; as de
+   *  saldo são derivadas (saldo corrido) e não têm lançamento próprio. */
+  drillable: boolean;
+  /** Códigos de categoria Omie que compõem a linha — usados pelo drilldown por
+   *  data de registro. Vazio nas linhas de saldo. */
+  omieCategoryCodes: string[];
+}
+
+/** Códigos de categoria Omie por linha de movimento, para o drilldown. */
+export interface CompetenciaCategoryCodes {
+  entradas: string[];
+  saidas: string[];
+  comissoes: string[];
 }
 
 export interface CompetenciaSection {
@@ -228,8 +241,10 @@ export function buildCompetenciaSection(params: {
   visibleBuckets: CompetenciaBucket[];
   currentYear: number;
   currentMonth: number;
+  /** Códigos de categoria por linha de movimento, para habilitar o drilldown. */
+  categoryCodes?: CompetenciaCategoryCodes;
 }): CompetenciaSection {
-  const { custody, rows, visibleBuckets, currentYear, currentMonth } = params;
+  const { custody, rows, visibleBuckets, currentYear, currentMonth, categoryCodes } = params;
   if (visibleBuckets.length === 0) return EMPTY_COMPETENCIA_SECTION;
 
   // Indexa os movimentos por "ano-mês" e por linha (entradas/saídas/comissão).
@@ -307,6 +322,10 @@ export function buildCompetenciaSection(params: {
     }
   }
 
+  const entradasCodes = categoryCodes?.entradas ?? [];
+  const saidasCodes = categoryCodes?.saidas ?? [];
+  const comissoesCodes = categoryCodes?.comissoes ?? [];
+
   const lines: CompetenciaLine[] = [
     {
       key: "saldo_anterior",
@@ -314,6 +333,8 @@ export function buildCompetenciaSection(params: {
       valuesByBucket: saldoAnteriorByBucket,
       accumulatedValue: firstVisibleSaldoAnterior,
       emphasis: true,
+      drillable: false,
+      omieCategoryCodes: [],
     },
     {
       key: "entradas",
@@ -321,6 +342,8 @@ export function buildCompetenciaSection(params: {
       valuesByBucket: entradasByBucket,
       accumulatedValue: totalEntradas,
       emphasis: false,
+      drillable: entradasCodes.length > 0,
+      omieCategoryCodes: entradasCodes,
     },
     {
       key: "saidas",
@@ -328,6 +351,8 @@ export function buildCompetenciaSection(params: {
       valuesByBucket: saidasByBucket,
       accumulatedValue: totalSaidas,
       emphasis: false,
+      drillable: saidasCodes.length > 0,
+      omieCategoryCodes: saidasCodes,
     },
     {
       key: "comissoes",
@@ -335,6 +360,8 @@ export function buildCompetenciaSection(params: {
       valuesByBucket: comissoesByBucket,
       accumulatedValue: totalComissoes,
       emphasis: false,
+      drillable: comissoesCodes.length > 0,
+      omieCategoryCodes: comissoesCodes,
     },
     {
       key: "saldo_final",
@@ -342,6 +369,8 @@ export function buildCompetenciaSection(params: {
       valuesByBucket: saldoFinalByBucket,
       accumulatedValue: lastVisibleSaldoFinal,
       emphasis: true,
+      drillable: false,
+      omieCategoryCodes: [],
     },
   ];
 

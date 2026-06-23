@@ -1351,6 +1351,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   if (custody && caseShowsCompanyId && !filter.compareCompanies && visibleBuckets.length > 0) {
     const lastVisible = visibleBuckets[visibleBuckets.length - 1];
     let registrationRows: CompetenciaRegistrationRow[] = [];
+    // Códigos de categoria por linha de movimento — habilitam o drilldown por
+    // data de registro. Preenchidos a partir do mesmo de/para abaixo.
+    const codesByLine = { entradas: [] as string[], saidas: [] as string[], comissoes: [] as string[] };
 
     if (lastVisible.year >= COMPETENCIA_FLOOR_YEAR) {
       // De/para categoria→conta (6.2/6.3/6.4) para traduzir os códigos gravados
@@ -1372,6 +1375,12 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
             accountByCode.set(m.omie_category_code, m.cash_flow_account_id);
           }
         });
+      // Inverte o de/para: códigos Omie agrupados por linha de movimento.
+      accountByCode.forEach((accountId, code) => {
+        if (accountId === custody.entradasId) codesByLine.entradas.push(code);
+        else if (accountId === custody.saidasId) codesByLine.saidas.push(code);
+        else if (accountId === custody.comissoesId) codesByLine.comissoes.push(code);
+      });
 
       const { data: compData, error } = await supabase
         .from("case_shows_custody_competencia")
@@ -1407,6 +1416,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       // Zera meses futuros (sem cascata), igual ao "Saldo Inicial de Caixa".
       currentYear: todayYear,
       currentMonth: todayMonth,
+      categoryCodes: codesByLine,
     });
   }
 
