@@ -46,6 +46,13 @@
   --ring:                  20 100% 55%;
 
   --radius: 0.75rem;
+
+  /* Fontes do Relatório Financeiro Mensal. Carregadas via <link> em runtime
+     (layout.tsx) — não pelo next/font, para não acoplar o build da Vercel ao
+     fetch do Google Fonts. As variáveis abaixo resolvem o var(--font-plex-*)
+     usado no componente do relatório. */
+  --font-plex-sans: "IBM Plex Sans";
+  --font-plex-mono: "IBM Plex Mono";
 }
 
 /* Mantemos .dark como alias do :root para compatibilidade
