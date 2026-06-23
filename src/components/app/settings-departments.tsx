@@ -196,10 +196,15 @@ export function SettingsDepartments({ companies, allCompanies }: SettingsDepartm
 
     setLoading(companyId, "save");
     const includedCodes = current.hasFlag ? Array.from(current.selected) : [];
-    // Roteamento so faz sentido quando ha rateio por departamento marcado.
+    // Com rateio: envia os destinos por departamento. Sem rateio: so faz
+    // sentido a rota "todos os lancamentos" (mapeada no pseudo __none__), que
+    // cobre os lancamentos sem departamento vinculado.
     const routing = current.hasFlag
       ? Object.fromEntries(current.routing)
-      : {};
+      : (() => {
+          const allTarget = current.routing.get(NONE_CODE);
+          return allTarget ? { [NONE_CODE]: allTarget } : {};
+        })();
     const response = await fetch(`/api/companies/${companyId}/departments`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -224,17 +229,18 @@ export function SettingsDepartments({ companies, allCompanies }: SettingsDepartm
     const nextDepts = current.departments.map((d) => ({
       ...d,
       included: current.hasFlag && current.selected.has(d.omie_code),
-      routed_to_company_id: current.hasFlag
-        ? current.routing.get(d.omie_code) ?? null
-        : null,
+      routed_to_company_id: current.routing.get(d.omie_code) ?? null,
     }));
     updateState(companyId, { departments: nextDepts });
     setLoading(companyId, null);
+    const allTarget = current.routing.get(NONE_CODE);
     showToast({
       title: "Configuracao salva",
       description: current.hasFlag
         ? `${includedCodes.length} departamento(s) selecionado(s) para a DRE.`
-        : "Filtro por departamento desativado.",
+        : allTarget
+          ? "Todos os lancamentos desta empresa serao roteados para a empresa selecionada."
+          : "Filtro por departamento desativado.",
       variant: "success",
     });
   };
@@ -432,6 +438,44 @@ export function SettingsDepartments({ companies, allCompanies }: SettingsDepartm
                         })}
                       </div>
                     )}
+                  </div>
+                ) : null}
+
+                {!state.hasFlag ? (
+                  <div className="mt-3 rounded-md border bg-muted/30 p-3">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      Sem rateio por departamento, todos os lancamentos desta
+                      empresa entram na DRE/Fluxo dela. Se quiser, envie TODOS os
+                      lancamentos para outra empresa (&quot;Todos os
+                      departamentos&quot;): eles passam a compor a DRE, o Fluxo de
+                      Caixa e tudo mais da empresa escolhida (e somem desta).
+                    </p>
+                    <label className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">
+                        Enviar todos os lancamentos para
+                      </span>
+                      <select
+                        value={state.routing.get(NONE_CODE) ?? ""}
+                        onChange={(e) =>
+                          handleRoutingChange(company.id, NONE_CODE, e.target.value)
+                        }
+                        disabled={loading !== null}
+                        className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+                      >
+                        <option value="">Esta empresa (nao rotear)</option>
+                        {allCompanies
+                          .filter((c) => c.id !== company.id)
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Clique em Salvar para aplicar. A mudanca recalcula a DRE e o
+                      Fluxo das empresas envolvidas.
+                    </p>
                   </div>
                 ) : null}
               </div>

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import {
+  refreshCashFlowAggregatesForSource,
+  refreshDreAggregatesForSource,
+} from "@/lib/dashboard/aggregate-refresh";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { syncCompanyDepartments } from "@/lib/omie/sync";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
@@ -130,10 +134,13 @@ export async function PUT(request: Request, { params }: Params) {
   // valido (uuid != empresa atual) sao consideradas; demais limpam o roteamento.
   const routing =
     body.routing && typeof body.routing === "object" ? body.routing : {};
+  // Aceita tambem o pseudo-departamento "__none__": rotea-lo equivale a enviar
+  // todos os lancamentos SEM departamento vinculado para a empresa de destino.
+  // Numa empresa sem rateio por departamento, isso cobre 100% dos lancamentos
+  // (eles nao tem departamento) — e a opcao "Todos os departamentos".
   const routedCodes = Object.entries(routing)
     .filter(
-      ([code, target]) =>
-        code !== "__none__" &&
+      ([, target]) =>
         typeof target === "string" &&
         target.length > 0 &&
         target !== params.companyId,
@@ -209,6 +216,12 @@ export async function PUT(request: Request, { params }: Params) {
       return NextResponse.json({ error: routeError.message }, { status: 400 });
     }
   }
+
+  // Recalcula a pre-agregacao (DRE + Fluxo) da empresa de origem e, em cascata,
+  // dos destinos para onde ela rotea — para que a mudanca de inclusao/
+  // roteamento reflita imediatamente nas telas. Best-effort: nao derruba o PUT.
+  await refreshDreAggregatesForSource(db, params.companyId);
+  await refreshCashFlowAggregatesForSource(db, params.companyId);
 
   return NextResponse.json({ ok: true });
 }
