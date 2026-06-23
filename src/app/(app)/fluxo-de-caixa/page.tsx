@@ -1340,43 +1340,73 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       };
 
   // === Seção "Custódia de Artistas - Análise Competência" (Case Shows) ======
-  // Análise gerencial INDEPENDENTE renderada abaixo de ACUMULADOS, alocando os
-  // mesmos lançamentos das categorias da Custódia (de/para por código → 6.2/
-  // 6.3/6.4) pela DATA DE REGISTRO (Omie dDtRegistro), não pela data de
-  // pagamento. UMA única RPC cobre todos os meses; o saldo corrido é encadeado
-  // em memória (sem cascata no front). Piso: só acumula a partir de 2026. Não
-  // toca nenhuma linha/cálculo oficial. Escondida no comparativo entre empresas
-  // (colunas por empresa não comportam a leitura mês a mês).
+  // Análise gerencial INDEPENDENTE renderada abaixo de ACUMULADOS. Os valores
+  // por DATA DE REGISTRO vêm da tabela case_shows_custody_competencia, alimentada
+  // por uma ingestão dedicada que chama ListarMovimentos por dDtRegDe/dDtRegAte
+  // (igual à planilha antiga) — financial_entries é regime de caixa e NÃO
+  // reproduz esse relatório. Aqui apenas LEMOS a tabela e montamos o saldo
+  // corrido em memória (sem cascata no front). Piso 2026. Não toca nenhuma linha/
+  // cálculo oficial. Escondida no comparativo entre empresas.
   let competenciaSection: CompetenciaSection = EMPTY_COMPETENCIA_SECTION;
   if (custody && caseShowsCompanyId && !filter.compareCompanies && visibleBuckets.length > 0) {
     const lastVisible = visibleBuckets[visibleBuckets.length - 1];
     let registrationRows: CompetenciaRegistrationRow[] = [];
-    // Sem nenhum mês exibido em 2026+ a seção fica zerada — evita a RPC.
+
     if (lastVisible.year >= COMPETENCIA_FLOOR_YEAR) {
-      const { data, error } = await supabase.rpc("cash_flow_aggregate_by_registration", {
-        p_company_ids: [caseShowsCompanyId],
-        p_date_from: `${COMPETENCIA_FLOOR_YEAR}-01-01`,
-        p_date_to: lastVisible.dateTo,
-      });
+      // De/para categoria→conta (6.2/6.3/6.4) para traduzir os códigos gravados
+      // na tabela nas linhas da seção. Escopo da empresa tem prioridade sobre o
+      // global quando ambos existem para o mesmo código.
+      const { data: mapData } = await supabase
+        .from("cash_flow_category_mappings")
+        .select("omie_category_code, cash_flow_account_id, company_id")
+        .in("cash_flow_account_id", [custody.entradasId, custody.saidasId, custody.comissoesId]);
+      const accountByCode = new Map<string, string>();
+      ((mapData as Array<{
+        omie_category_code: string;
+        cash_flow_account_id: string;
+        company_id: string | null;
+      }> | null) ?? [])
+        .filter((m) => m.company_id === caseShowsCompanyId || m.company_id === null)
+        .forEach((m) => {
+          if (m.company_id === caseShowsCompanyId || !accountByCode.has(m.omie_category_code)) {
+            accountByCode.set(m.omie_category_code, m.cash_flow_account_id);
+          }
+        });
+
+      const { data: compData, error } = await supabase
+        .from("case_shows_custody_competencia")
+        .select("period_year, period_month, category_code, amount")
+        .eq("company_id", caseShowsCompanyId)
+        .gte("period_year", COMPETENCIA_FLOOR_YEAR)
+        .lte("period_year", lastVisible.year);
       if (error) {
         throw new Error(`Falha ao carregar Custódia (Análise Competência): ${error.message}`);
       }
-      registrationRows = ((data as Array<{
+      registrationRows = ((compData as Array<{
         period_year: number | string;
         period_month: number | string;
-        cash_flow_account_id: string;
+        category_code: string;
         amount: number | string | null;
-      }> | null) ?? []).map((r) => ({
-        period_year: Number(r.period_year),
-        period_month: Number(r.period_month),
-        cash_flow_account_id: r.cash_flow_account_id,
-        amount: Number(r.amount ?? 0),
-      }));
+      }> | null) ?? [])
+        .map((r) => {
+          const accountId = accountByCode.get(r.category_code);
+          if (!accountId) return null;
+          return {
+            period_year: Number(r.period_year),
+            period_month: Number(r.period_month),
+            cash_flow_account_id: accountId,
+            amount: Number(r.amount ?? 0),
+          } as CompetenciaRegistrationRow;
+        })
+        .filter((r): r is CompetenciaRegistrationRow => r !== null);
     }
     competenciaSection = buildCompetenciaSection({
       custody,
       rows: registrationRows,
       visibleBuckets: visibleBuckets.map((b) => ({ key: b.key, year: b.year, month: b.month })),
+      // Zera meses futuros (sem cascata), igual ao "Saldo Inicial de Caixa".
+      currentYear: todayYear,
+      currentMonth: todayMonth,
     });
   }
 

@@ -217,15 +217,19 @@ export interface CompetenciaBucket {
 /**
  * Monta a seção a partir das linhas da RPC (por ano/mês/conta) e dos buckets
  * exibidos. Caminha cronologicamente desde Jan/COMPETENCIA_FLOOR_YEAR até o
- * último mês exibido, encadeando o saldo corrido em memória (sem cascata no
- * front). Buckets anteriores ao piso ficam zerados.
+ * último mês COM dados (mês corrente), encadeando o saldo corrido em memória
+ * (sem cascata no front). Buckets anteriores ao piso ficam zerados. Buckets
+ * FUTUROS (posteriores ao mês corrente) também ficam zerados — não repetem o
+ * saldo do último mês, igual ao "Saldo Inicial de Caixa" oficial.
  */
 export function buildCompetenciaSection(params: {
   custody: CustodyAccountIds;
   rows: CompetenciaRegistrationRow[];
   visibleBuckets: CompetenciaBucket[];
+  currentYear: number;
+  currentMonth: number;
 }): CompetenciaSection {
-  const { custody, rows, visibleBuckets } = params;
+  const { custody, rows, visibleBuckets, currentYear, currentMonth } = params;
   if (visibleBuckets.length === 0) return EMPTY_COMPETENCIA_SECTION;
 
   // Indexa os movimentos por "ano-mês" e por linha (entradas/saídas/comissão).
@@ -244,6 +248,15 @@ export function buildCompetenciaSection(params: {
   visibleBuckets.forEach((b) => bucketByMonth.set(`${b.year}-${b.month}`, b));
   const lastBucket = visibleBuckets[visibleBuckets.length - 1];
 
+  // Para de acumular no mês corrente: o saldo corrido não avança para meses
+  // futuros (que ficariam repetindo o último saldo). Buckets exibidos além do
+  // mês corrente simplesmente não são preenchidos → renderizam 0.
+  const lastKey = lastBucket.year * 100 + lastBucket.month;
+  const currentKey = currentYear * 100 + currentMonth;
+  const endKey = Math.min(lastKey, currentKey);
+  const endYear = Math.floor(endKey / 100);
+  const endMonth = endKey % 100;
+
   const saldoAnteriorByBucket: Record<string, number> = {};
   const entradasByBucket: Record<string, number> = {};
   const saidasByBucket: Record<string, number> = {};
@@ -258,11 +271,12 @@ export function buildCompetenciaSection(params: {
   let totalSaidas = 0;
   let totalComissoes = 0;
 
-  // Caminha mês a mês a partir do piso até o último bucket exibido, mesmo nos
-  // meses sem dados (carrega o saldo). Anterior ao piso → nada acumula.
+  // Caminha mês a mês a partir do piso até o mês corrente (ou o último bucket,
+  // o que vier antes), mesmo nos meses sem dados (carrega o saldo). Anterior ao
+  // piso → nada acumula. Não passa do mês corrente → futuro fica zerado.
   let y = COMPETENCIA_FLOOR_YEAR;
   let m = 1;
-  while (y < lastBucket.year || (y === lastBucket.year && m <= lastBucket.month)) {
+  while (y < endYear || (y === endYear && m <= endMonth)) {
     const monthKey = `${y}-${m}`;
     const slot = byMonth.get(monthKey) ?? { ent: 0, sai: 0, com: 0 };
     const saldoAnterior = running;

@@ -7,6 +7,8 @@ import {
   refreshCashFlowAggregatesForSource,
 } from "@/lib/dashboard/aggregate-refresh";
 import { decryptSecret } from "@/lib/security/encryption";
+import { CASE_SHOWS_COMPANY_NAME } from "@/lib/dashboard/case-shows-custody";
+import { runCaseShowsCustodyCompetenciaSync } from "@/lib/omie/case-shows-custody-sync";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
 
@@ -853,10 +855,11 @@ async function runCompanySyncInternal(
 
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .select("id, omie_app_key, omie_app_secret, last_full_sync_at, segment_id")
+    .select("id, name, omie_app_key, omie_app_secret, last_full_sync_at, segment_id")
     .eq("id", companyId)
     .single<{
       id: string;
+      name: string | null;
       omie_app_key: string | null;
       omie_app_secret: string | null;
       last_full_sync_at: string | null;
@@ -944,6 +947,27 @@ async function runCompanySyncInternal(
     } catch {
       // revalidatePath nao esta disponivel fora de contexto Next (ex: testes
       // standalone). Sync ainda foi gravado com sucesso, falha aqui e benigna.
+    }
+
+    // Hook ADITIVO e ISOLADO: só para a Case Shows, alimenta a tabela gerencial
+    // da seção "Custódia de Artistas - Análise Competência" (dados por DATA DE
+    // REGISTRO, via ListarMovimentos dDtRegDe/dDtRegAte). Best-effort: qualquer
+    // falha aqui é logada e ignorada — NÃO afeta o resultado do sync oficial,
+    // nem outras empresas, nem o pipeline regime-de-caixa.
+    if ((company.name ?? "").trim().toLowerCase() === CASE_SHOWS_COMPANY_NAME.toLowerCase()) {
+      try {
+        await runCaseShowsCustodyCompetenciaSync({
+          supabase,
+          companyId,
+          appKey,
+          appSecret,
+        });
+      } catch (custodyError) {
+        console.error(
+          "[case-shows-custody] Falha ao atualizar competência (ignorado, não afeta o sync):",
+          custodyError instanceof Error ? custodyError.message : custodyError,
+        );
+      }
     }
 
     return result;
