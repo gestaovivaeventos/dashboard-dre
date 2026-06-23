@@ -10,6 +10,7 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -134,6 +135,25 @@ const C = {
 } as const;
 
 const DEFAULT_ACCENT = "#1f6fd6";
+
+// Estilo do tooltip dos gráficos (recharts) — coerente com o documento.
+const TOOLTIP_CONTENT_STYLE: CSSProperties = {
+  fontFamily: FONT_SANS,
+  fontSize: 11,
+  borderRadius: 8,
+  border: `1px solid ${C.cardBorder}`,
+  boxShadow: "0 6px 18px rgba(20,25,31,.10)",
+};
+const TOOLTIP_LABEL_STYLE: CSSProperties = { color: "#16191f", fontWeight: 600 };
+const TOOLTIP_ITEM_STYLE: CSSProperties = { fontFamily: FONT_MONO };
+
+// Formata valor do tooltip em "X mil" (ou "—" para ausência).
+function milTooltipFormatter(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+}
 
 // Paleta semântica (badges, chips, KPIs, alertas).
 type SevKey = "critical" | "attention" | "positive" | "neutral";
@@ -894,6 +914,13 @@ function GraficoAcumulado({
                 axisLine={false}
                 tickLine={false}
               />
+              <Tooltip
+                cursor={{ fill: "rgba(31,111,214,0.06)" }}
+                contentStyle={TOOLTIP_CONTENT_STYLE}
+                labelStyle={TOOLTIP_LABEL_STYLE}
+                itemStyle={TOOLTIP_ITEM_STYLE}
+                formatter={(value) => milTooltipFormatter(value)}
+              />
               <Bar dataKey="Previsto" fill={C.previsto} radius={[0, 3, 3, 0]} isAnimationActive={false}>
                 <LabelList dataKey="PrevistoLabel" position="right" style={{ fontSize: 10, fill: C.sub }} />
               </Bar>
@@ -987,10 +1014,23 @@ function GraficoVVR({
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Janeiro do ano selecionado até o mês de análise.</div>
       <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 20, right: 12, bottom: 6, left: -8 }}>
+          <ComposedChart data={data} margin={{ top: 24, right: 16, bottom: 6, left: -6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
-            <XAxis dataKey="mes" tick={{ fontSize: 10, fill: C.sub }} axisLine={{ stroke: C.grid }} tickLine={false} />
+            <XAxis
+              dataKey="mes"
+              tick={{ fontSize: 10, fill: C.sub }}
+              axisLine={{ stroke: C.grid }}
+              tickLine={false}
+              padding={{ left: 12, right: 12 }}
+            />
             <YAxis tick={{ fontSize: 10, fill: C.sub }} width={40} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ fill: "rgba(31,111,214,0.06)" }}
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              formatter={(value) => milTooltipFormatter(value)}
+            />
             <Bar dataKey="realizado" name="Realizado" fill={accent} radius={[3, 3, 0, 0]} barSize={24} isAnimationActive={false}>
               <LabelList dataKey="realizadoLabel" position="top" style={{ fontSize: 9, fill: accent, fontWeight: 700 }} />
             </Bar>
@@ -1116,10 +1156,23 @@ function GraficoResultado({
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Previsto × Realizado — últimos 6 meses.</div>
       <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 20, right: 18, bottom: 6, left: -8 }}>
+          <LineChart data={data} margin={{ top: 26, right: 22, bottom: 6, left: -6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
-            <XAxis dataKey="mes" tick={{ fontSize: 10, fill: C.sub }} axisLine={{ stroke: C.grid }} tickLine={false} />
+            <XAxis
+              dataKey="mes"
+              tick={{ fontSize: 10, fill: C.sub }}
+              axisLine={{ stroke: C.grid }}
+              tickLine={false}
+              padding={{ left: 16, right: 16 }}
+            />
             <YAxis tick={{ fontSize: 10, fill: C.sub }} width={32} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ stroke: C.previsto, strokeDasharray: "3 3" }}
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              formatter={(value) => milTooltipFormatter(value)}
+            />
             <Line type="monotone" dataKey="previsto" name="Previsto" stroke={C.previsto} strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false}>
               <LabelList content={renderPrevisto} />
             </Line>
