@@ -108,6 +108,17 @@ export interface OnePageReportPreviewData {
   semaforo: SemaforoItem[];
   diagnosticoPrincipal: string;
   acoes: AcaoCard[];
+  // ── Extensões por template (Fase 2) ───────────────────────────────────────
+  // Ausência de todas = comportamento Franquias Viva (mostra todos os blocos,
+  // títulos e grade padrão). Preenchidas por templates com `report` (ex.: SGX).
+  /** Allowlist de blocos visíveis. Ausência = TODOS os blocos. */
+  blocks?: string[];
+  /** Título do gráfico de histórico. Ausência = "Resultado do Exercício". */
+  historicoTitle?: string;
+  /** Nº de colunas da grade de KPIs. Ausência = min(qtd de cards, 4). */
+  kpiColumns?: number;
+  /** Título da seção de KPIs. Ausência = "Saúde financeira & caixa". */
+  kpiSectionTitle?: string;
 }
 
 // ─── Sistema visual ─────────────────────────────────────────────────────────
@@ -508,9 +519,11 @@ function Header({
 function ResumoExecutivo({
   data,
   accent,
+  showSemaforo,
 }: {
   data: OnePageReportPreviewData;
   accent: string;
+  showSemaforo: boolean;
 }) {
   const resultadoKpi =
     data.kpis.find((k) => k.label.toLowerCase() === "resultado") ?? null;
@@ -527,45 +540,50 @@ function ResumoExecutivo({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "0.82fr 1.18fr",
+          // Sem KPI operacional "Resultado" (ex.: templates custom como a SGX,
+          // cujo headline são os cards de resultado por frente) o painel do
+          // número grande é omitido e o diagnóstico ocupa a largura toda.
+          gridTemplateColumns: resultadoKpi ? "0.82fr 1.18fr" : "1fr",
           gap: 16,
         }}
         className="opr-resumo-grid"
       >
         {/* Resultado operacional do mês */}
-        <div style={panelStyle}>
-          <div
-            style={{
-              fontSize: 10,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              fontWeight: 600,
-              color: C.sub,
-            }}
-          >
-            Resultado operacional do mês
-          </div>
-          <div
-            style={{
-              fontFamily: FONT_MONO,
-              fontSize: 34,
-              fontWeight: 600,
-              lineHeight: 1.1,
-              color: valueColor,
-              margin: "10px 0 6px",
-            }}
-          >
-            {valor}
-          </div>
-          {variacao ? (
-            <div style={{ fontSize: 12, color: C.sub }}>
-              <span style={{ fontFamily: FONT_MONO, color: valueColor, fontWeight: 600 }}>
-                {variacao}
-              </span>{" "}
-              vs orçado
+        {resultadoKpi ? (
+          <div style={panelStyle}>
+            <div
+              style={{
+                fontSize: 10,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                fontWeight: 600,
+                color: C.sub,
+              }}
+            >
+              Resultado operacional do mês
             </div>
-          ) : null}
-        </div>
+            <div
+              style={{
+                fontFamily: FONT_MONO,
+                fontSize: 34,
+                fontWeight: 600,
+                lineHeight: 1.1,
+                color: valueColor,
+                margin: "10px 0 6px",
+              }}
+            >
+              {valor}
+            </div>
+            {variacao ? (
+              <div style={{ fontSize: 12, color: C.sub }}>
+                <span style={{ fontFamily: FONT_MONO, color: valueColor, fontWeight: 600 }}>
+                  {variacao}
+                </span>{" "}
+                vs orçado
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Diagnóstico + chips de drivers */}
         <div style={panelStyle}>
@@ -591,7 +609,7 @@ function ResumoExecutivo({
           >
             {data.diagnosticoPrincipal || "Sem diagnóstico disponível para o período."}
           </p>
-          {data.semaforo.length > 0 ? (
+          {showSemaforo && data.semaforo.length > 0 ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {data.semaforo.map((item) => {
                 const sev = signToSev(item.classificacao);
@@ -777,16 +795,24 @@ function TabelaDesempenho({
 
 // ─── 4. Saúde financeira & caixa (KPIs) ──────────────────────────────────────
 
-function KpisSaude({ kpis }: { kpis: KpiCard[] }) {
+function KpisSaude({
+  kpis,
+  columns,
+  title,
+}: {
+  kpis: KpiCard[];
+  columns?: number;
+  title?: string;
+}) {
   if (kpis.length === 0) return null;
   return (
     <section style={{ breakInside: "avoid" }}>
-      <SectionTitle>Saúde financeira & caixa</SectionTitle>
+      <SectionTitle>{title ?? "Saúde financeira & caixa"}</SectionTitle>
       <div
         className="opr-kpi-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${Math.min(kpis.length, 4)}, 1fr)`,
+          gridTemplateColumns: `repeat(${columns ?? Math.min(kpis.length, 4)}, 1fr)`,
           gap: 12,
         }}
       >
@@ -1121,9 +1147,11 @@ function AcumBar({
 function GraficoResultado({
   points,
   accent,
+  title,
 }: {
   points: HistoricoPoint[];
   accent: string;
+  title?: string;
 }) {
   const data = points.map((p) => {
     const previstoLabel = p.previsto === null ? "" : fmtNum(p.previsto, 0);
@@ -1165,7 +1193,7 @@ function GraficoResultado({
 
   return (
     <div style={panelStyle}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>Resultado do Exercício</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title ?? "Resultado do Exercício"}</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Previsto × Realizado — últimos 6 meses.</div>
       <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -1317,8 +1345,18 @@ export function OnePageReportPreview({
   data = MOCK_DATA,
   accentColor = DEFAULT_ACCENT,
 }: OnePageReportPreviewProps) {
+  // Visibilidade por template: sem `blocks`, mostra TUDO (Franquias Viva
+  // permanece byte-idêntico). Com `blocks` (ex.: SGX), só os listados — VVR,
+  // Acumulado, Composição e Semáforo simplesmente não existem no relatório.
+  const show = (block: string) => !data.blocks || data.blocks.includes(block);
+  const showSemaforo = show("semaforo");
+  const showVvr = show("vvrSerie");
+  const showHistorico = show("historico");
+  const showTendencia = showVvr || showHistorico;
+
   // KPIs de saúde/caixa = todos exceto os 4 operacionais (que alimentam a
-  // tabela e o resumo). Ordem preservada pelo mapper.
+  // tabela e o resumo). Ordem preservada pelo mapper. Em templates custom
+  // (ex.: SGX) nenhum card casa os operacionais → todos entram aqui.
   const operacionais = new Set(["receita", "despesas", "resultado", "margem"]);
   const saudeKpis = data.kpis.filter((k) => !operacionais.has(k.label.toLowerCase()));
 
@@ -1342,21 +1380,56 @@ export function OnePageReportPreview({
         }}
       >
         <Header data={data.cabecalho} />
-        <ResumoExecutivo data={data} accent={accentColor} />
-        <TabelaDesempenho items={data.previstoRealizado} semaforo={data.semaforo} />
-        <KpisSaude kpis={saudeKpis} />
-        <section>
-          <SectionTitle>Tendência & Acumulado</SectionTitle>
-          <div className="opr-charts-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
-            <GraficoResultado points={data.historico} accent={accentColor} />
-          </div>
-          <div style={{ height: 12 }} />
-          <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} />
-        </section>
+        {show("diagnostico") ? (
+          <ResumoExecutivo data={data} accent={accentColor} showSemaforo={showSemaforo} />
+        ) : null}
+        {show("previstoRealizado") ? (
+          <TabelaDesempenho
+            items={data.previstoRealizado}
+            semaforo={showSemaforo ? data.semaforo : []}
+          />
+        ) : null}
+        <KpisSaude kpis={saudeKpis} columns={data.kpiColumns} title={data.kpiSectionTitle} />
 
-        <Alertas items={data.alertas} />
-        <Acoes items={data.acoes} />
+        {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho
+            em linha cheia abaixo (evita o aperto do VVR quando o ano avança).
+            Cada gráfico continua condicionado à allowlist de blocos do template. */}
+        {show("acumuladoAno") || showTendencia ? (
+          <section>
+            <SectionTitle>Tendência & Acumulado</SectionTitle>
+            {show("acumuladoAno") || showHistorico ? (
+              <div
+                className="opr-charts-2"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    show("acumuladoAno") && showHistorico ? "1fr 1fr" : "1fr",
+                  gap: 12,
+                }}
+              >
+                {show("acumuladoAno") ? (
+                  <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
+                ) : null}
+                {showHistorico ? (
+                  <GraficoResultado
+                    points={data.historico}
+                    accent={accentColor}
+                    title={data.historicoTitle}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            {showVvr ? (
+              <>
+                {show("acumuladoAno") || showHistorico ? <div style={{ height: 12 }} /> : null}
+                <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} />
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
+        {show("alertas") ? <Alertas items={data.alertas} /> : null}
+        {show("acoes") ? <Acoes items={data.acoes} /> : null}
 
         <footer
           style={{

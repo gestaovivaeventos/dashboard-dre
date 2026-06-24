@@ -380,10 +380,13 @@ export function renderOnePageEmail({
     </table>`;
 
   // 4. KPIs de saúde & caixa (4 por linha).
+  // FEE disponível, Sobrevivência de caixa e VVR são específicos de Franquias
+  // Viva e podem não vir (templates Real Estate/genérico os omitem). Inclui só
+  // quando presentes — senão o card renderizaria vazio (e o tipo é opcional).
   const saudeKpis: Array<{ kpi: KpiCardPayload; comparison: string | null }> = [
-    { kpi: kpis.fee_disponivel, comparison: null },
-    { kpi: kpis.sobrevivencia_caixa, comparison: null },
-    { kpi: kpis.vvr, comparison: "meta" },
+    ...(kpis.fee_disponivel ? [{ kpi: kpis.fee_disponivel, comparison: null }] : []),
+    ...(kpis.sobrevivencia_caixa ? [{ kpi: kpis.sobrevivencia_caixa, comparison: null }] : []),
+    ...(kpis.vvr ? [{ kpi: kpis.vvr, comparison: "meta" as string | null }] : []),
     ...(kpis.margem_media_eventos ? [{ kpi: kpis.margem_media_eventos, comparison: null }] : []),
   ];
   const saudeRows: string[] = [];

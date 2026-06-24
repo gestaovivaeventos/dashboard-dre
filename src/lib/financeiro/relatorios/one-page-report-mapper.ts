@@ -34,6 +34,9 @@ interface ApiKpiCard {
   variationValue: number | null;
   variationLabel: string | null;
   status: ApiKpiStatus;
+  // Card sem comparação com orçado (ex.: Margem Líquida) — não concatena
+  // " vs orçamento".
+  omitComparisonSuffix?: boolean;
 }
 
 interface ApiKpis {
@@ -41,15 +44,12 @@ interface ApiKpis {
   despesas: ApiKpiCard;
   resultado: ApiKpiCard;
   margem: ApiKpiCard;
-  fee_disponivel: ApiKpiCard;
-  vvr: ApiKpiCard;
-  // Indicador derivado: FEE Disponivel / media das despesas operacionais
-  // dos meses fechados do ano corrente. value = quantidade arredondada de
-  // meses; null quando faltar FEE, faltar mes fechado ou media zerada.
-  sobrevivencia_caixa: ApiKpiCard;
-  // Presente apenas para empresas do segmento Franquias Viva (preenchido
-  // manualmente em Configuracoes > Empresas > FEE / VVR). Em outros
-  // segmentos a chave nao vem da API e o card nao e renderizado.
+  // Blocos específicos de Franquias Viva — OPCIONAIS. Só chegam quando o
+  // template da empresa os suporta; templates Real Estate/genérico não os
+  // enviam e o card correspondente não é renderizado.
+  fee_disponivel?: ApiKpiCard;
+  vvr?: ApiKpiCard;
+  sobrevivencia_caixa?: ApiKpiCard;
   margem_media_eventos?: ApiKpiCard;
 }
 
@@ -85,7 +85,18 @@ export interface OnePageApiResponse {
     periodo?: { label?: string; date_from?: string; date_to?: string };
   };
   generatedAt?: string;
+  // Template de relatório resolvido (rótulo discreto de debug/admin).
+  template?: { id?: string; name?: string };
   kpis?: ApiKpis;
+  // KPIs CUSTOM por conta DRE (templates com report.kpiCards — ex.: SGX).
+  // Quando presente, substitui o conjunto fixo `kpis` na renderização.
+  kpisList?: ApiKpiCard[];
+  // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).
+  enabledBlocks?: string[];
+  // Título do gráfico de histórico (undefined = título atual no componente).
+  historicoTitle?: string;
+  // Nº de colunas da grade de KPIs (undefined = 4).
+  kpiColumns?: number;
   previstoRealizado?: ApiPrevistoRealizado[];
   composicaoResultado?: ApiComposicao[];
   historicoResultado?: ApiHistorico[];
@@ -176,19 +187,28 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
     mapKpiCard(api?.despesas, "Despesas"),
     mapKpiCard(api?.resultado, "Resultado"),
     mapKpiCard(api?.margem, "Margem"),
-    mapKpiCard(api?.fee_disponivel, "FEE disponível", {
-      omitComparisonSuffix: true,
-    }),
+  ];
+
+  // Blocos específicos de Franquias Viva — só entram quando a rota os envia
+  // (templates Real Estate/genérico não enviam, então os cards não aparecem).
+  if (api?.fee_disponivel) {
+    cards.push(
+      mapKpiCard(api.fee_disponivel, "FEE disponível", { omitComparisonSuffix: true }),
+    );
+  }
+  if (api?.sobrevivencia_caixa) {
     // Sobrevivencia de caixa: indicador derivado em meses (sem comparativo
     // contra orcamento — omitComparisonSuffix=true preserva o rotulo
     // "Cobertura do FEE" sem concatenar " vs orçamento").
-    mapKpiCard(api?.sobrevivencia_caixa, "Sobrevivência de caixa", {
-      omitComparisonSuffix: true,
-    }),
+    cards.push(
+      mapKpiCard(api.sobrevivencia_caixa, "Sobrevivência de caixa", { omitComparisonSuffix: true }),
+    );
+  }
+  if (api?.vvr) {
     // VVR usa "meta" no lugar de "orçamento" — VVR e comparado contra
     // VVR META, nao contra orcamento contabil.
-    mapKpiCard(api?.vvr, "VVR", { comparisonLabel: "meta" }),
-  ];
+    cards.push(mapKpiCard(api.vvr, "VVR", { comparisonLabel: "meta" }));
+  }
 
   // "Margem média dos eventos" so chega quando a empresa pertence ao
   // segmento Franquias Viva. Sem comparativo (e um valor informado), entao
@@ -396,23 +416,48 @@ function mapSemaforo(
       searchTerms: ["margem"],
       fallbackKpi: kpis?.margem,
     },
-    {
+  ];
+
+  // FEE disponível e VVR no semáforo só quando o template os fornece (Franquias
+  // Viva). Templates Real Estate/genérico não enviam esses KPIs.
+  if (kpis?.fee_disponivel) {
+    config.push({
       indicador: "FEE disponível",
       searchTerms: ["fee disponível", "fee disponivel"],
-      fallbackKpi: kpis?.fee_disponivel,
-    },
-    {
+      fallbackKpi: kpis.fee_disponivel,
+    });
+  }
+  if (kpis?.vvr) {
+    config.push({
       indicador: "VVR",
       searchTerms: ["vvr"],
-      fallbackKpi: kpis?.vvr,
-    },
-  ];
+      fallbackKpi: kpis.vvr,
+    });
+  }
 
   return config.map(({ indicador, searchTerms, fallbackKpi }) => {
     const fromIa = findLeituraClassificacao(analysis?.leituraPorIndicador, searchTerms);
     if (fromIa) return { indicador, classificacao: fromIa };
     // Fallback: derivar do KPI; se nao houver KPI, fica "Neutro" — nunca quebra.
     return { indicador, classificacao: statusToSign(fallbackKpi?.status) };
+  });
+}
+
+// Semáforo para templates CUSTOM (kpisList — ex.: SGX): um item por KPI,
+// classificado pela leitura da IA (quando casar pelo rótulo) ou, no fallback,
+// pelo próprio status do KPI. Não usa os indicadores fixos da Viva.
+function mapSemaforoFromList(
+  analysis: OnePageReport | undefined,
+  list: ApiKpiCard[],
+): SemaforoItem[] {
+  return list.map((card) => {
+    const fromIa = findLeituraClassificacao(analysis?.leituraPorIndicador, [
+      card.label.toLowerCase(),
+    ]);
+    return {
+      indicador: card.label,
+      classificacao: fromIa ?? statusToSign(card.status),
+    };
   });
 }
 
@@ -463,17 +508,39 @@ function mapCabecalho(
 export function mapOnePageApiResponseToPreviewData(
   response: OnePageApiResponse,
 ): OnePageReportPreviewData {
+  // Templates com KPIs custom (ex.: SGX) trazem `kpisList`; nesse caso a UI usa
+  // essa lista (e o semáforo derivado dela) no lugar do conjunto fixo da Viva.
+  const customKpis =
+    Array.isArray(response.kpisList) && response.kpisList.length > 0
+      ? response.kpisList
+      : null;
   return {
     cabecalho: mapCabecalho(response),
-    kpis: mapKpis(response.kpis),
+    kpis: customKpis
+      ? customKpis.map((c) =>
+          mapKpiCard(c, c.label, { omitComparisonSuffix: c.omitComparisonSuffix }),
+        )
+      : mapKpis(response.kpis),
     previstoRealizado: mapPrevistoRealizado(response.previstoRealizado),
     composicao: mapComposicao(response.composicaoResultado),
     historico: mapHistorico(response.historicoResultado),
     acumuladoAno: mapAcumuladoAno(response.acumuladoAno),
     vvrSerieAnual: mapVvrSerieAnual(response.vvrSerieAnual),
     alertas: mapAlertas(response.analysis),
-    semaforo: mapSemaforo(response.analysis, response.kpis),
+    semaforo: customKpis
+      ? mapSemaforoFromList(response.analysis, customKpis)
+      : mapSemaforo(response.analysis, response.kpis),
     diagnosticoPrincipal: mapDiagnostico(response.analysis),
     acoes: mapAcoes(response.analysis),
+    // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).
+    blocks: response.enabledBlocks,
+    // Título do gráfico de histórico (undefined = título atual no componente).
+    historicoTitle: response.historicoTitle,
+    // Nº de colunas da grade de KPIs (undefined = 4).
+    kpiColumns: response.kpiColumns,
+    // Título da seção de KPIs. Templates com KPIs custom (ex.: SGX) trazem
+    // cards de resultado/indicador próprios — não os de "Saúde financeira &
+    // caixa" da Viva; um título neutro evita rótulo enganoso.
+    kpiSectionTitle: customKpis ? "Indicadores do mês" : undefined,
   };
 }

@@ -140,6 +140,9 @@ export function BusinessIntelligenceClient({
   const [data, setData] = useState<OnePageReportPreviewData | undefined>(
     undefined,
   );
+  // Rótulo discreto (apenas em dev) do template de relatório resolvido para a
+  // empresa — ajuda a validar qual modelo foi aplicado (ex.: "Real Estate — SGX").
+  const [templateLabel, setTemplateLabel] = useState<string | null>(null);
 
   // Ref para o container do relatorio (capturado pelo html2canvas na
   // exportacao PDF). NAO inclui o card de filtros nem o alerta de erro —
@@ -238,6 +241,7 @@ export function BusinessIntelligenceClient({
       // Mapeia para o shape do componente visual e seta como dado ativo.
       const mapped = mapOnePageApiResponseToPreviewData(payload);
       setData(mapped);
+      setTemplateLabel(payload.template?.name ?? null);
 
       // Persiste o relatorio + filtros para sobreviver troca de menu /
       // refresh dentro da mesma sessao. Falhas (quota cheia, modo privado
@@ -359,6 +363,7 @@ export function BusinessIntelligenceClient({
       const json = (await r.json()) as OnePageApiResponse;
       const mapped = mapOnePageApiResponseToPreviewData(json);
       setData(mapped);
+      setTemplateLabel(json.template?.name ?? null);
       setHistoryOpen(false);
       // pendingDownload aciona o useEffect acima que dispara handleExportPdf.
       setPendingDownload(true);
@@ -728,6 +733,13 @@ export function BusinessIntelligenceClient({
             <div className="text-xs">{error}</div>
           </div>
         </div>
+      ) : null}
+
+      {/* Rótulo discreto do template aplicado — só em dev (debug/admin). */}
+      {isDev && templateLabel ? (
+        <p className="px-1 text-[10px] text-muted-foreground">
+          Template: {templateLabel}
+        </p>
       ) : null}
 
       {/* Relatorio (envolvido em div com ref para o export PDF). Só

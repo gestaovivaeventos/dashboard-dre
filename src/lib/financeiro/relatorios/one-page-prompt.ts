@@ -1,5 +1,7 @@
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
+import { resolveReportTemplate } from "./templates/report-template-registry";
+
 // ============================================================================
 // Prompts do motor One Page Report (menu Financeiro > Relatorios).
 //
@@ -399,13 +401,29 @@ export const GENERIC_SYSTEM_PROMPT = [
 // base). Novos callers devem usar `resolveOnePageSystemPrompt(input)`.
 export const ONE_PAGE_REPORT_SYSTEM_PROMPT = FRANQUIAS_VIVA_SYSTEM_PROMPT;
 
-// Seleciona o system prompt conforme o segmento da empresa analisada. Regras
-// de negocio das Franquias Viva so se aplicam ao segmento "franquias-viva";
-// qualquer outro segmento (ou ausencia de segmento) recebe o prompt generico.
+// Seleciona o system prompt conforme o TEMPLATE da empresa analisada (camada
+// de templates por empresa/segmento). Regras:
+//  - template "franquias-viva"  → FRANQUIAS_VIVA_SYSTEM_PROMPT (INTOCADO).
+//  - template "custom" (Real Estate etc.) → ROLE_INTRO + contexto do template +
+//    SHARED_TAIL (mesmas regras invioláveis; NUNCA a linguagem da Viva).
+//  - "generic"/fallback → GENERIC_SYSTEM_PROMPT.
+// O template de Franquias Viva tem prioridade máxima, então empresas desse
+// segmento sempre recaem no prompt da Viva — comportamento atual preservado.
 export function resolveOnePageSystemPrompt(input: OnePageInput): string {
-  return input.segmento?.slug === "franquias-viva"
-    ? FRANQUIAS_VIVA_SYSTEM_PROMPT
-    : GENERIC_SYSTEM_PROMPT;
+  const template = resolveReportTemplate({
+    companyId: input.empresa.id,
+    companyName: input.empresa.nome,
+    segmentSlug: input.segmento?.slug ?? null,
+  });
+  switch (template.prompt.kind) {
+    case "franquias-viva":
+      return FRANQUIAS_VIVA_SYSTEM_PROMPT;
+    case "custom":
+      return [ROLE_INTRO, template.prompt.systemContext, SHARED_TAIL].join("\n\n");
+    case "generic":
+    default:
+      return GENERIC_SYSTEM_PROMPT;
+  }
 }
 
 // ============================================================================
