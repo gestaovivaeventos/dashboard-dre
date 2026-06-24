@@ -68,6 +68,10 @@ export interface PrevistoRealizadoPayload {
   realizado: number | null;
   previsto: number | null;
   unidade: "currency" | "percent" | "number";
+  // Agrupamento opcional da tabela (subtítulo) + nota de rodapé. Só templates
+  // com `report.previstoRealizado` os definem; demais ficam undefined.
+  group?: string;
+  footnote?: string;
 }
 
 export interface ComposicaoPayload {
@@ -719,9 +723,19 @@ export async function buildOnePagePayload(
           omitComparisonSuffix: margemVarPp === null,
         };
       }
-      const codes = spec.codes ?? (spec.code ? [spec.code] : []);
-      const realized = sumRealized(codes);
-      const budgeted = sumBudgeted(codes);
+      // Suporta resultado DERIVADO em card via `minus` (ex.: Gap de Reembolso
+      // = Reembolsos − Custos; Resultado Ajustado = Res. Op. + Custos −
+      // Reembolsos). Orçado: combina os orçados de plus/minus, null só quando
+      // nenhuma das contas tem orçamento.
+      const plusCodes = spec.codes ?? (spec.code ? [spec.code] : []);
+      const minusCodes = spec.minus ?? [];
+      const realized = sumRealized(plusCodes) - sumRealized(minusCodes);
+      const prevPlus = sumBudgeted(plusCodes);
+      const prevMinus = sumBudgeted(minusCodes);
+      const budgeted =
+        prevPlus === null && prevMinus === null
+          ? null
+          : (prevPlus ?? 0) - (prevMinus ?? 0);
       const varp = variacaoPct(realized, budgeted);
       const isDespesa = spec.kind === "despesa";
       return {
@@ -801,10 +815,23 @@ export async function buildOnePagePayload(
     "Jul", "Ago", "Set", "Out", "Nov", "Dez",
   ];
 
-  const histAccount = accounts.find((a) => a.code === historicoCode);
+  // Histórico: conta única (historicoCode) ou DERIVADO por soma/subtração de
+  // contas (historicoCodes − historicoMinus, ex.: Gap de Reembolso da Village
+  // = Reembolsos − Custos Reembolsáveis). Por mês, valor = Σ(plus) − Σ(minus).
+  // Gate: existe se ALGUMA conta "plus" estiver no plano em escopo.
+  const histPlusCodes = template.report?.historicoCodes ?? [historicoCode];
+  const histMinusCodes = template.report?.historicoMinus ?? [];
+  const histExists = histPlusCodes.some((c) => accounts.some((a) => a.code === c));
+  const histValue = (
+    rows: ReturnType<typeof buildDashboardRows>["rows"],
+  ): number => {
+    const sumCodes = (codes: string[]) =>
+      codes.reduce((acc, c) => acc + (rows.find((r) => r.code === c)?.value ?? 0), 0);
+    return sumCodes(histPlusCodes) - sumCodes(histMinusCodes);
+  };
   let historicoResultado: HistoricoPayload[] = [];
 
-  if (histAccount) {
+  if (histExists) {
     const months: Array<{ year: number; month: number }> = [];
     for (let i = 5; i >= 0; i--) {
       let y = toYear;
@@ -889,17 +916,21 @@ export async function buildOnePagePayload(
       const realizado =
         entry.map === null
           ? null
-          : (buildDashboardRows(accounts, entry.map, {
-              negateChildCodesInSummary: custosNegation,
-            }).rows.find((r) => r.code === historicoCode)?.value ?? null);
+          : histValue(
+              buildDashboardRows(accounts, entry.map, {
+                negateChildCodesInSummary: custosNegation,
+              }).rows,
+            );
 
       const bMap = budgetMaps.get(monthKey(entry.year, entry.month));
       const previsto =
         !bMap || bMap.size === 0
           ? null
-          : (buildDashboardRows(accounts, bMap, {
-              negateChildCodesInSummary: custosNegation,
-            }).rows.find((r) => r.code === historicoCode)?.value ?? null);
+          : histValue(
+              buildDashboardRows(accounts, bMap, {
+                negateChildCodesInSummary: custosNegation,
+              }).rows,
+            );
 
       return { mes, previsto, realizado };
     });
@@ -1088,6 +1119,28 @@ export async function buildOnePagePayload(
   const previstoRealizadoFinal: PrevistoRealizadoPayload[] =
     template.report?.previstoRealizado
       ? template.report.previstoRealizado.map((s) => {
+          // Margem (%) como linha da tabela: razão Σnum / Σden — realizado e
+          // orçado pelo MESMO cálculo (ex.: Margem Líquida = Resultado Final ÷
+          // Receita Líquida). Orçado null quando faltam dados orçados.
+          if (s.ratio) {
+            const num = sumRealized(s.ratio.numerator);
+            const den = sumRealized(s.ratio.denominator);
+            const realizado = den !== 0 ? (num / den) * 100 : 0;
+            const numB = sumBudgeted(s.ratio.numerator);
+            const denB = sumBudgeted(s.ratio.denominator);
+            const previsto =
+              numB !== null && denB !== null && denB !== 0
+                ? (numB / denB) * 100
+                : null;
+            return {
+              label: s.label,
+              realizado,
+              previsto,
+              unidade: s.unidade,
+              group: s.group,
+              footnote: s.footnote,
+            };
+          }
           // Valor = soma(plus) − soma(minus). `minus` permite resultados
           // derivados (ex.: Resultado Operacional = Receitas Op − Despesas Op).
           const plusCodes = s.codes ?? (s.code ? [s.code] : []);
@@ -1104,6 +1157,8 @@ export async function buildOnePagePayload(
             realizado,
             previsto,
             unidade: s.unidade,
+            group: s.group,
+            footnote: s.footnote,
           };
         })
       : previstoRealizado;

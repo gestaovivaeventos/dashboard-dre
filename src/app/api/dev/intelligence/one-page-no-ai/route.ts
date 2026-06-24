@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { saveOnePageHistory } from "@/lib/financeiro/relatorios/one-page-history";
-import { MOCK_ANALYSIS } from "@/lib/financeiro/relatorios/one-page-mock-analysis";
+import {
+  MOCK_ANALYSIS,
+  MOCK_ANALYSIS_VILLAGE,
+} from "@/lib/financeiro/relatorios/one-page-mock-analysis";
 import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
 
 // ============================================================================
@@ -76,7 +79,13 @@ export async function POST(request: Request) {
   }
 
   // ── Devolve payload + analysis mockada (sem chamar IA) ──────────────────
-  const responseBody = { analysis: MOCK_ANALYSIS, ...result.payload };
+  // Mock por template: a Village tem análise mockada própria (gap de reembolso,
+  // resultado ajustado) sem termos de Viva/SGX; demais usam o mock genérico.
+  const analysis =
+    result.payload.template?.id === "real-estate-village"
+      ? MOCK_ANALYSIS_VILLAGE
+      : MOCK_ANALYSIS;
+  const responseBody = { analysis, ...result.payload };
   // Tambem salvamos no historico (best-effort). Em prod a rota nem existe
   // (404 acima), entao essa entrada so aparece em dev.
   await saveOnePageHistory({

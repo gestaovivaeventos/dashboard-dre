@@ -120,6 +120,13 @@ export interface TemplateKpiCardSpec {
   kind: "receita" | "despesa" | "resultado" | "margem";
   code?: string;
   codes?: string[];
+  /**
+   * Contas a SUBTRAIR — resultado derivado em card. Valor =
+   * soma(code/codes) − soma(minus). Ex.: Gap de Reembolso (Village) =
+   * Reembolsos − Custos Reembolsáveis; Resultado Ajustado = Resultado
+   * Operacional + Custos − Reembolsos.
+   */
+  minus?: string[];
   ratio?: { numerator: string[]; denominator: string[] };
 }
 
@@ -135,6 +142,21 @@ export interface TemplatePrevistoRealizadoSpec {
   codes?: string[];
   /** Contas a SUBTRAIR (ex.: despesas) para linhas de resultado derivado. */
   minus?: string[];
+  /**
+   * Razão em % (ex.: Margem Líquida = Resultado Final / Receita Líquida).
+   * Quando presente, IGNORA code/codes/minus e calcula (Σnum / Σden) * 100,
+   * tanto no realizado quanto no orçado. Use com `unidade: "percent"`.
+   */
+  ratio?: { numerator: string[]; denominator: string[] };
+  /**
+   * Subtítulo do subgrupo na tabela. Linhas com o mesmo `group` consecutivo
+   * ficam sob um subtítulo; a troca de group desenha um divisor. Ex.: Village
+   * usa "Resultado do mês" e "Leitura gerencial". Ausência = sem agrupamento
+   * (Franquias Viva / SGX permanecem com a tabela plana atual).
+   */
+  group?: string;
+  /** Nota de rodapé: marca a linha com "*" e exibe o texto abaixo da tabela. */
+  footnote?: string;
 }
 
 /** Etapa da Composição do Resultado ligada a uma conta DRE. */
@@ -166,6 +188,14 @@ export interface TemplateReportConfig {
   composicao?: TemplateComposicaoSpec[];
   /** Code do histórico principal (default "11" quando ausente). */
   historicoAccountCode?: string;
+  /**
+   * Histórico DERIVADO (6 meses) por soma/subtração de contas — ex.: Gap de
+   * Reembolso (Village) = Reembolsos (Σ historicoCodes) − Custos (Σ
+   * historicoMinus). Quando `historicoCodes` está presente, substitui
+   * `historicoAccountCode`: por mês, valor = Σ(historicoCodes) − Σ(historicoMinus).
+   */
+  historicoCodes?: string[];
+  historicoMinus?: string[];
   /**
    * Título do gráfico de histórico. Ausência = título atual
    * ("Previsto x Realizado — Resultado do Exercício"). Apenas cosmético.
