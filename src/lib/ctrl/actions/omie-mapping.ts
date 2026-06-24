@@ -121,6 +121,8 @@ export interface OmieMappingData {
   // Empresa cuja conta no Omie não emite remessa de pagamento: o lançamento
   // cria o título sem o bloco CNAB (pagamento manual no Omie).
   skipCnabRemessa: boolean;
+  /** Dia do mês (1-31) em que vence a fatura do cartão da empresa. */
+  cartaoDiaVencimento: number | null;
   lastSyncedAt: string | null;
 }
 
@@ -192,7 +194,7 @@ export async function getOmieMappingData(
   const { data: ccConfig, error: ccErr } = await db
     .from("ctrl_company_omie_config")
     .select(
-      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa",
+      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa, cartao_dia_vencimento",
     )
     .eq("company_id", companyId)
     .maybeSingle();
@@ -226,6 +228,7 @@ export async function getOmieMappingData(
     contaCorrenteCartao: ccConfig?.codigo_conta_corrente_cartao ?? null,
     contaCorrenteCartaoPrepago: ccConfig?.codigo_conta_corrente_cartao_prepago ?? null,
     skipCnabRemessa: ccConfig?.skip_cnab_remessa ?? false,
+    cartaoDiaVencimento: ccConfig?.cartao_dia_vencimento ?? null,
     lastSyncedAt,
   };
 }
@@ -355,6 +358,36 @@ export async function saveContaCorrente(
       {
         company_id: companyId,
         [coluna]: codigo ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "company_id" },
+    );
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/ctrl/admin/omie-mapeamento");
+  return { ok: true };
+}
+
+// ─── saveCartaoDiaVencimento ──────────────────────────────────────────────────
+
+export async function saveCartaoDiaVencimento(
+  companyId: string,
+  dia: number | null,
+): Promise<{ ok: true } | { error: string }> {
+  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+
+  if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 31)) {
+    return { error: "Dia de vencimento deve ser um número entre 1 e 31." };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("ctrl_company_omie_config")
+    .upsert(
+      {
+        company_id: companyId,
+        cartao_dia_vencimento: dia,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "company_id" },
