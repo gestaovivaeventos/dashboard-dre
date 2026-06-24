@@ -133,6 +133,12 @@ export interface TemplateKpiCardSpec {
    */
   minus?: string[];
   ratio?: { numerator: string[]; denominator: string[] };
+  /**
+   * Inverte o farol da margem/razão: por padrão "maior = melhor" (verde acima
+   * do orçado). Com `invertStatus: true`, "maior = pior" — ex.: Freelancers /
+   * Receita (Salvaterra Estacionamento), onde subir a razão é ruim.
+   */
+  invertStatus?: boolean;
 }
 
 /**
@@ -209,10 +215,53 @@ export interface TemplateReportConfig {
    * ("Previsto x Realizado — Resultado do Exercício"). Apenas cosmético.
    */
   historicoTitle?: string;
+  /**
+   * Rótulos do gráfico de histórico no formato "Xk" (milhar) — ex.: "133,6k".
+   * Ausência/false = número cheio (Franquias Viva fica inalterada). SGX usa true.
+   */
+  historicoKLabels?: boolean;
   /** Allowlist de blocos visíveis. Ausência = TODOS (comportamento atual). */
   enabledBlocks?: ReportBlockKey[];
   /** Nº de colunas da grade de KPIs (default 4). Ex.: SGX usa 3 (3 + margem). */
   kpiColumns?: number;
+  /**
+   * Gráfico de COLUNAS verticais — acumulado do ano (janeiro do ano de análise
+   * → mês de análise), só valores REALIZADOS. Valor por mês = Σ(codes) −
+   * Σ(minus). Ex.: Village — Gap de Reembolso (1.2 − 5.1).
+   */
+  barsChart?: { title: string; codes: string[]; minus?: string[] };
+  /**
+   * Gráfico de LINHAS — últimos 6 meses (relativo ao mês de análise), com N
+   * séries. Cada série = Σ(codes) − Σ(minus) sobre o realizado (`source:
+   * "realized"`, default) ou o orçado (`source: "budget"`). Ex.: Village —
+   * Resultado Final realizado (11), Resultado Ajustado (11+5.1−1.2), Resultado
+   * Final orçado (11/budget). Renderizado ao lado do `barsChart`.
+   */
+  linesChart?: {
+    title: string;
+    series: Array<{
+      label: string;
+      codes: string[];
+      minus?: string[];
+      source?: "realized" | "budget";
+    }>;
+  };
+  /**
+   * Gráficos de COLUNAS Previsto × Realizado mensais — acumulado do ano (jan do
+   * ano de análise → mês de análise). Cada gráfico tem 2 barras por mês
+   * (previsto/realizado), valor = Σ(codes) − Σ(minus) sobre orçado/realizado, e
+   * abaixo o previsto/realizado ACUMULADO do ano + variação. Lista (renderizados
+   * empilhados). Ex.: SGX — Locações (1−2) e Projetos (12−13).
+   */
+  prevRealCharts?: Array<{ title: string; codes: string[]; minus?: string[] }>;
+  /**
+   * Bloco CONSOLIDADO entre as empresas de um grupo (ex.: família Salvaterra).
+   * Mostra Previsto × Realizado do `resultCode` (ex.: "11" = Resultado do
+   * Exercício) de CADA empresa cujo nome casa com `matchName` (ILIKE) + a soma
+   * consolidada. É um bloco COMPLEMENTAR — não autoriza misturar o restante da
+   * análise individual. Usa apenas dados do dashboard DRE de cada empresa.
+   */
+  consolidatedGroup?: { title: string; matchName: string; resultCode: string };
 }
 
 export interface ReportTemplate {

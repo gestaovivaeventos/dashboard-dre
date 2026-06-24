@@ -5,6 +5,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ComposedChart,
   LabelList,
   Line,
@@ -144,12 +145,67 @@ export interface OnePageReportPreviewData {
   blocks?: string[];
   /** Título do gráfico de histórico. Ausência = "Resultado do Exercício". */
   historicoTitle?: string;
+  /** Rótulos do histórico em "Xk" (milhar). Ausência = número cheio (Viva). */
+  historicoKLabels?: boolean;
   /** Nº de colunas da grade de KPIs. Ausência = min(qtd de cards, 4). */
   kpiColumns?: number;
   /** Título da seção de KPIs. Ausência = "Saúde financeira & caixa". */
   kpiSectionTitle?: string;
   /** Quadro de eventos exclusivo da Feat Produções. Ausência = não renderiza. */
   featEventos?: FeatEventosBlock;
+  // ── Gráficos extras por template (ex.: Village) ────────────────────────────
+  /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
+  barsSerie?: BarPoint[];
+  barsTitle?: string;
+  /** Acumulado do ano do gráfico de colunas (ex.: Gap total Jan→análise). */
+  barsAcum?: number | null;
+  /** Linhas (6 meses) com N séries (ex.: Resultado Final realizado/ajustado/orçado). */
+  linesSerie?: MultiLinePoint[];
+  linesSeriesLabels?: string[];
+  linesTitle?: string;
+  /** Acumulado do ano por série (3 barras horizontais sob as linhas). */
+  linesAcum?: (number | null)[];
+  /** Índice da série orçada — baseline da variação % das demais barras. */
+  linesAcumBaseIndex?: number;
+  /** Gráficos de colunas Previsto × Realizado mensais (ex.: SGX Locações/Projetos). */
+  prevRealCharts?: PrevRealChart[];
+  /** Bloco consolidado do grupo (ex.: Salvaterra) — Previsto × Realizado. */
+  consolidated?: Consolidated;
+}
+
+export interface ConsolidatedRow {
+  label: string;
+  previsto: number | null;
+  realizado: number | null;
+  emphasis?: boolean;
+}
+export interface Consolidated {
+  title: string;
+  rows: ConsolidatedRow[];
+}
+
+export interface PrevRealPoint {
+  mes: string;
+  previsto: number | null;
+  realizado: number | null;
+}
+
+export interface PrevRealChart {
+  title: string;
+  serie: PrevRealPoint[];
+  previstoAcum: number | null;
+  realizadoAcum: number | null;
+}
+
+export interface BarPoint {
+  mes: string;
+  valor: number | null;
+}
+
+export interface MultiLinePoint {
+  mes: string;
+  /** Alinha por índice com `linesSeriesLabels`. */
+  values: (number | null)[];
 }
 
 // ─── Sistema visual ─────────────────────────────────────────────────────────
@@ -1245,14 +1301,18 @@ function GraficoResultado({
   points,
   accent,
   title,
+  kLabels,
 }: {
   points: HistoricoPoint[];
   accent: string;
   title?: string;
+  kLabels?: boolean;
 }) {
+  // kLabels: rótulos "133,6k" (ex.: SGX). Sem ele, número cheio (Viva inalterada).
+  const fmtL = (v: number) => (kLabels ? `${fmtNum(v, 1)}k` : fmtNum(v, 0));
   const data = points.map((p) => {
-    const previstoLabel = p.previsto === null ? "" : fmtNum(p.previsto, 0);
-    const realizadoLabel = p.realizado === null ? "" : fmtNum(p.realizado, 0);
+    const previstoLabel = p.previsto === null ? "" : fmtL(p.previsto);
+    const realizadoLabel = p.realizado === null ? "" : fmtL(p.realizado);
     const realizadoAcima =
       p.realizado !== null && p.previsto !== null ? p.realizado >= p.previsto : true;
     return { mes: p.mes, previsto: p.previsto, realizado: p.realizado, previstoLabel, realizadoLabel, realizadoAcima };
@@ -1322,6 +1382,496 @@ function GraficoResultado({
       </div>
       <ChartLegend items={[{ color: C.previsto, label: "Previsto" }, { color: accent, label: "Realizado" }]} />
     </div>
+  );
+}
+
+// ─── 5d. Gráfico de COLUNAS (acumulado do ano, só realizado) ──────────────────
+// Ex.: Village — Gap de Reembolso por mês (Jan→análise). Cor por sinal
+// (negativo = vermelho, positivo = verde).
+function GraficoBarras({
+  points,
+  title,
+  acum,
+}: {
+  points: BarPoint[];
+  title: string;
+  acum?: number | null;
+}) {
+  const data = points.map((p) => ({
+    mes: p.mes,
+    valor: p.valor,
+    label: p.valor === null ? "" : `${fmtNum(p.valor, 1)}k`,
+  }));
+  return (
+    <div style={panelStyle}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title}</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
+        Janeiro do ano de análise até o mês selecionado.
+      </div>
+      <div style={{ height: 188, width: "100%" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 22, right: 12, bottom: 6, left: -6 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+            <XAxis
+              dataKey="mes"
+              tick={{ fontSize: 10, fill: C.sub }}
+              axisLine={{ stroke: C.grid }}
+              tickLine={false}
+              padding={{ left: 8, right: 8 }}
+            />
+            <YAxis tick={{ fontSize: 10, fill: C.sub }} width={40} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ fill: "rgba(31,111,214,0.06)" }}
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              formatter={(value) => milTooltipFormatter(value)}
+            />
+            <Bar dataKey="valor" name="Realizado" radius={[3, 3, 0, 0]} maxBarSize={34} isAnimationActive={false}>
+              <LabelList dataKey="label" position="top" style={{ fontSize: 9, fontWeight: 700, fill: C.sub }} />
+              {data.map((d, i) => (
+                <Cell key={i} fill={(d.valor ?? 0) < 0 ? SEV.critical.text : SEV.positive.text} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      {/* Acumulado do ano (soma dos valores Jan→análise). */}
+      {acum !== undefined ? (
+        <div
+          style={{
+            marginTop: 8,
+            borderTop: `1px solid ${C.grid}`,
+            paddingTop: 10,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, color: C.sub }}>
+            Acumulado no ano
+          </span>
+          <span
+            style={{
+              fontSize: 15,
+              fontFamily: FONT_MONO,
+              fontWeight: 700,
+              color: acum === null ? C.tertiary : acum < 0 ? SEV.critical.text : SEV.positive.text,
+            }}
+          >
+            {acum === null ? "—" : `${fmtNum(acum, 1)}k`}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Barra horizontal com valor assinalado (aceita negativo: largura = |v|/max,
+// número colorido por sinal). Usada no acumulado do ano sob as linhas.
+function HBarSigned({
+  label,
+  value,
+  max,
+  color,
+  variation,
+  variationColor,
+  kLabel,
+}: {
+  label: string;
+  value: number | null;
+  max: number;
+  color: string;
+  variation?: string;
+  variationColor?: string;
+  /** Rótulo do valor em "Xk" (milhar) em vez de "X mil". Ex.: Village. */
+  kLabel?: boolean;
+}) {
+  const v = value ?? 0;
+  const w = max > 0 ? (Math.abs(v) / max) * 100 : 0;
+  const valColor = value === null ? C.tertiary : v < 0 ? SEV.critical.text : C.ink;
+  const valText =
+    value === null ? "—" : kLabel ? `${fmtNum(value, 1)}k` : `${fmtNum(value, 0)} mil`;
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+        <span style={{ fontSize: 10, color: C.sub }}>{label}</span>
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: 11, fontFamily: FONT_MONO, fontWeight: 600, color: valColor }}>
+            {valText}
+          </span>
+          {variation ? (
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: variationColor ?? C.sub }}>{variation}</span>
+          ) : null}
+        </span>
+      </div>
+      <div style={{ height: 7, width: "100%", borderRadius: 20, background: C.grid, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${w}%`, background: color, borderRadius: 20 }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 5e. Gráfico de LINHAS multi-série (últimos 6 meses) ──────────────────────
+// Ex.: Village — Resultado Final realizado / Resultado Ajustado / Final orçado.
+function GraficoLinhasMulti({
+  points,
+  seriesLabels,
+  title,
+  accent,
+  acum,
+  acumBaseIndex,
+}: {
+  points: MultiLinePoint[];
+  seriesLabels: string[];
+  title: string;
+  accent: string;
+  acum?: (number | null)[];
+  acumBaseIndex?: number;
+}) {
+  // Cores por série (na ordem do template): realizado, ajustado, orçado.
+  const COLORS = [accent, C.metaAmber, C.previsto];
+  const color = (i: number) => COLORS[i % COLORS.length];
+  const data = points.map((p) => {
+    const row: Record<string, string | number | null> = { mes: p.mes };
+    p.values.forEach((v, i) => {
+      row[`s${i}`] = v;
+    });
+    return row;
+  });
+  // Rótulos "Xk" só na linha de Realizado (s0) e na de Orçado (base), em lados
+  // OPOSTOS (cima/baixo) conforme qual está acima no ponto — garante que NUNCA
+  // se sobreponham (mesma técnica do histórico). A do meio (Ajustado) fica sem
+  // rótulo de ponto; seu valor segue no tooltip e no acumulado do ano.
+  const baseIdx = acumBaseIndex;
+  // realizadoAcima(index): realizado (s0) está acima do orçado (base) no ponto?
+  const realizadoAcima = (index: number): boolean => {
+    const vals = points[index]?.values ?? [];
+    const r = vals[0];
+    const o = baseIdx !== undefined ? vals[baseIdx] : null;
+    return r != null && o != null ? r >= o : true;
+  };
+  const renderRealizadoLabel = (props: LineLabelRenderProps) => {
+    const nx = toNum(props.x);
+    const ny = toNum(props.y);
+    const { index } = props;
+    if (nx === null || ny === null || index === undefined) return null;
+    const v = points[index]?.values[0];
+    if (v === null || v === undefined) return null;
+    return (
+      <text
+        x={nx}
+        y={ny + (realizadoAcima(index) ? -10 : 16)}
+        textAnchor="middle"
+        style={{ fontSize: 8, fontWeight: 600, fill: color(0) }}
+      >
+        {`${fmtNum(v, 1)}k`}
+      </text>
+    );
+  };
+  const renderOrcadoLabel = (props: LineLabelRenderProps) => {
+    const nx = toNum(props.x);
+    const ny = toNum(props.y);
+    const { index } = props;
+    if (nx === null || ny === null || index === undefined || baseIdx === undefined) return null;
+    const v = points[index]?.values[baseIdx];
+    if (v === null || v === undefined) return null;
+    // Lado oposto ao realizado: se realizado está acima, o orçado vai para baixo.
+    return (
+      <text
+        x={nx}
+        y={ny + (realizadoAcima(index) ? 16 : -10)}
+        textAnchor="middle"
+        style={{ fontSize: 8, fontWeight: 600, fill: color(baseIdx) }}
+      >
+        {`${fmtNum(v, 1)}k`}
+      </text>
+    );
+  };
+  return (
+    <div style={panelStyle}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title}</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Últimos 6 meses.</div>
+      <div style={{ height: 188, width: "100%" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 16, right: 18, bottom: 6, left: -6 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+            <XAxis
+              dataKey="mes"
+              tick={{ fontSize: 10, fill: C.sub }}
+              axisLine={{ stroke: C.grid }}
+              tickLine={false}
+              padding={{ left: 16, right: 16 }}
+            />
+            <YAxis tick={{ fontSize: 10, fill: C.sub }} width={36} axisLine={false} tickLine={false} />
+            <Tooltip
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              formatter={(value) => milTooltipFormatter(value)}
+            />
+            {seriesLabels.map((label, i) => (
+              <Line
+                key={i}
+                type="monotone"
+                dataKey={`s${i}`}
+                name={label}
+                stroke={color(i)}
+                strokeWidth={2}
+                dot={{ r: 2.5 }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                {/* Rótulo só em Realizado (s0) e Orçado (base), em lados opostos. */}
+                {i === 0 ? <LabelList content={renderRealizadoLabel} /> : null}
+                {baseIdx !== undefined && i === baseIdx ? (
+                  <LabelList content={renderOrcadoLabel} />
+                ) : null}
+              </Line>
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <ChartLegend items={seriesLabels.map((label, i) => ({ color: color(i), label }))} />
+      {/* Acumulado do ano (Jan→análise) — 3 barras horizontais. */}
+      {acum && acum.length > 0 ? (
+        <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+          <div
+            style={{
+              fontSize: 9,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              color: C.sub,
+              marginBottom: 8,
+            }}
+          >
+            Acumulado no ano
+          </div>
+          {(() => {
+            const accMax = Math.max(1, ...acum.map((v) => Math.abs(v ?? 0)));
+            const base = acumBaseIndex !== undefined ? acum[acumBaseIndex] : null;
+            return acum.map((v, i) => {
+              // Variação % vs orçado (série base), só nas linhas que não são a base.
+              let variation: string | undefined;
+              let variationColor: string | undefined;
+              if (
+                acumBaseIndex !== undefined &&
+                i !== acumBaseIndex &&
+                v !== null &&
+                base !== null &&
+                base !== undefined &&
+                base !== 0
+              ) {
+                const pct = ((v - base) / Math.abs(base)) * 100;
+                variation = `${pct >= 0 ? "+" : ""}${fmtNum(pct, 1)}% vs orçado`;
+                variationColor = pct >= 0 ? SEV.positive.text : SEV.critical.text;
+              }
+              return (
+                <HBarSigned
+                  key={i}
+                  label={seriesLabels[i] ?? ""}
+                  value={v}
+                  max={accMax}
+                  color={color(i)}
+                  variation={variation}
+                  variationColor={variationColor}
+                  kLabel
+                />
+              );
+            });
+          })()}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── 5f. Gráfico de COLUNAS Previsto × Realizado mensal + acumulado ───────────
+// Ex.: SGX — Locações (1−2) e Projetos (12−13), Jan→análise. Duas barras por
+// mês (previsto/realizado) e, abaixo, previsto/realizado acumulados do ano +
+// variação (realizado vs previsto).
+function GraficoBarrasPrevReal({
+  title,
+  serie,
+  previstoAcum,
+  realizadoAcum,
+  accent,
+}: {
+  title: string;
+  serie: PrevRealPoint[];
+  previstoAcum: number | null;
+  realizadoAcum: number | null;
+  accent: string;
+}) {
+  const data = serie.map((p) => ({
+    mes: p.mes,
+    Previsto: p.previsto,
+    Realizado: p.realizado,
+    // Rótulos pré-formatados "133,6k" (mesmo padrão do GraficoVVR).
+    previstoLabel: p.previsto === null ? "" : `${fmtNum(p.previsto, 1)}k`,
+    realizadoLabel: p.realizado === null ? "" : `${fmtNum(p.realizado, 1)}k`,
+  }));
+  const variation =
+    previstoAcum !== null && previstoAcum !== 0 && realizadoAcum !== null
+      ? ((realizadoAcum - previstoAcum) / Math.abs(previstoAcum)) * 100
+      : null;
+  const accMax = Math.max(1, Math.abs(previstoAcum ?? 0), Math.abs(realizadoAcum ?? 0));
+  return (
+    <div style={panelStyle}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title}</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
+        Janeiro do ano de análise até o mês selecionado.
+      </div>
+      <div style={{ height: 188, width: "100%" }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 16, right: 12, bottom: 6, left: -6 }} barGap={2}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+            <XAxis
+              dataKey="mes"
+              tick={{ fontSize: 10, fill: C.sub }}
+              axisLine={{ stroke: C.grid }}
+              tickLine={false}
+              padding={{ left: 8, right: 8 }}
+            />
+            <YAxis tick={{ fontSize: 10, fill: C.sub }} width={40} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ fill: "rgba(31,111,214,0.06)" }}
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              formatter={(value) => milTooltipFormatter(value)}
+            />
+            <Bar dataKey="Previsto" fill={C.previsto} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false}>
+              <LabelList dataKey="previstoLabel" position="top" style={{ fontSize: 8, fill: C.sub, fontWeight: 600 }} />
+            </Bar>
+            <Bar dataKey="Realizado" fill={accent} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false}>
+              <LabelList dataKey="realizadoLabel" position="top" style={{ fontSize: 8, fill: accent, fontWeight: 700 }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <ChartLegend items={[{ color: C.previsto, label: "Previsto" }, { color: accent, label: "Realizado" }]} />
+      {/* Acumulado do ano: realizado (c/ variação vs previsto) e previsto. */}
+      <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+        <div
+          style={{
+            fontSize: 9,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            color: C.sub,
+            marginBottom: 8,
+          }}
+        >
+          Acumulado no ano
+        </div>
+        <HBarSigned
+          label="Realizado"
+          value={realizadoAcum}
+          max={accMax}
+          color={accent}
+          variation={
+            variation !== null
+              ? `${variation >= 0 ? "+" : ""}${fmtNum(variation, 1)}% vs previsto`
+              : undefined
+          }
+          variationColor={
+            variation !== null ? (variation >= 0 ? SEV.positive.text : SEV.critical.text) : undefined
+          }
+        />
+        <HBarSigned label="Previsto" value={previstoAcum} max={accMax} color={C.previsto} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 5g. Bloco CONSOLIDADO do grupo (ex.: Salvaterra) ─────────────────────────
+// Tabela Previsto × Realizado do Resultado de cada empresa do grupo + a soma
+// consolidada (linha em destaque). Bloco COMPLEMENTAR (não mistura o resto).
+function ConsolidadoBlock({ data }: { data: Consolidated }) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    color: C.sub,
+    padding: "0 10px 8px",
+    borderBottom: `1px solid ${C.rule}`,
+  };
+  const tdNum: CSSProperties = {
+    fontFamily: FONT_MONO,
+    fontSize: 12.5,
+    padding: "9px 10px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  };
+  const fmtV = (v: number | null) => (v === null ? "—" : `${fmtNum(v, 1)} mil`);
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ ...panelStyle, padding: "14px 16px 12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>Indicador</th>
+              <th style={{ ...th, textAlign: "right" }}>Orçado</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado</th>
+              <th style={{ ...th, textAlign: "right" }}>Variação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => {
+              const emph = !!r.emphasis;
+              let varLabel = "—";
+              let varSev: SevKey = "neutral";
+              if (r.previsto !== null && r.previsto !== 0 && r.realizado !== null) {
+                const pct = ((r.realizado - r.previsto) / Math.abs(r.previsto)) * 100;
+                varLabel = `${pct >= 0 ? "+" : ""}${fmtNum(pct, 1)}%`;
+                varSev = pct >= 0 ? "positive" : pct < -10 ? "critical" : "attention";
+              }
+              const realNeg = r.realizado !== null && r.realizado < 0;
+              return (
+                <tr key={r.label} style={{ background: emph ? "#f7f8fa" : "transparent", breakInside: "avoid" }}>
+                  <td
+                    style={{
+                      fontSize: 13,
+                      fontWeight: emph ? 700 : 500,
+                      color: emph ? C.ink : C.body,
+                      padding: "9px 10px",
+                      borderBottom: `1px solid ${C.grid}`,
+                    }}
+                  >
+                    {r.label}
+                  </td>
+                  <td style={{ ...tdNum, borderBottom: `1px solid ${C.grid}`, color: C.sub }}>
+                    {fmtV(r.previsto)}
+                  </td>
+                  <td
+                    style={{
+                      ...tdNum,
+                      borderBottom: `1px solid ${C.grid}`,
+                      fontWeight: emph ? 700 : 600,
+                      color: realNeg ? SEV.critical.text : emph ? C.ink : C.body,
+                    }}
+                  >
+                    {fmtV(r.realizado)}
+                  </td>
+                  <td style={{ padding: "9px 10px", textAlign: "right", borderBottom: `1px solid ${C.grid}` }}>
+                    <SevBadge sev={varSev} style={{ fontFamily: FONT_MONO }}>
+                      {varLabel}
+                    </SevBadge>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
+          Valores em milhares de R$ (mil). Bloco complementar — soma apenas as empresas do grupo.
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1868,6 +2418,7 @@ export function OnePageReportPreview({
                     points={data.historico}
                     accent={accentColor}
                     title={data.historicoTitle}
+                    kLabels={data.historicoKLabels}
                   />
                 ) : null}
               </div>
@@ -1880,6 +2431,65 @@ export function OnePageReportPreview({
             ) : null}
           </section>
         ) : null}
+
+        {/* Gráficos extras por template (ex.: Village): colunas (acum. do ano)
+            + linhas (6 meses) EMPILHADOS (um abaixo do outro — lado a lado
+            ficava pequeno). Cada card traz seu acumulado do ano embaixo. Só
+            existem quando o template os configura (Viva/SGX inalterados). */}
+        {data.barsSerie || data.linesSerie ? (
+          <section>
+            <SectionTitle>Evolução</SectionTitle>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {data.barsSerie ? (
+                <GraficoBarras
+                  points={data.barsSerie}
+                  title={data.barsTitle ?? "Histórico"}
+                  acum={data.barsAcum}
+                />
+              ) : null}
+              {data.linesSerie ? (
+                <GraficoLinhasMulti
+                  points={data.linesSerie}
+                  seriesLabels={data.linesSeriesLabels ?? []}
+                  title={data.linesTitle ?? "Resultado"}
+                  accent={accentColor}
+                  acum={data.linesAcum}
+                  acumBaseIndex={data.linesAcumBaseIndex}
+                />
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        {/* Gráficos Previsto × Realizado por frente (ex.: SGX Locações/Projetos):
+            colunas mensais (Jan→análise) + acumulado do ano. Empilhados. Só
+            existem quando o template os configura (Viva/Village inalterados). */}
+        {data.prevRealCharts && data.prevRealCharts.length > 0 ? (
+          <section>
+            <SectionTitle>Previsto × Realizado por frente</SectionTitle>
+            {/* Lado a lado, cada um com metade da largura (colapsa p/ 1 col no
+                mobile via .opr-charts-2). */}
+            <div
+              className="opr-charts-2"
+              style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+            >
+              {data.prevRealCharts.map((c, i) => (
+                <GraficoBarrasPrevReal
+                  key={i}
+                  title={c.title}
+                  serie={c.serie}
+                  previstoAcum={c.previstoAcum}
+                  realizadoAcum={c.realizadoAcum}
+                  accent={accentColor}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {/* Bloco CONSOLIDADO do grupo (ex.: Salvaterra) — complementar. Só
+            existe quando o template define consolidatedGroup (demais inalterados). */}
+        {data.consolidated ? <ConsolidadoBlock data={data.consolidated} /> : null}
 
         {show("alertas") ? <Alertas items={data.alertas} /> : null}
         {show("acoes") ? <Acoes items={data.acoes} /> : null}

@@ -99,6 +99,8 @@ export interface OnePageApiResponse {
   enabledBlocks?: string[];
   // Título do gráfico de histórico (undefined = título atual no componente).
   historicoTitle?: string;
+  // Rótulos do histórico em "Xk" (milhar) — ex.: SGX.
+  historicoKLabels?: boolean;
   // Nº de colunas da grade de KPIs (undefined = 4).
   kpiColumns?: number;
   previstoRealizado?: ApiPrevistoRealizado[];
@@ -109,6 +111,26 @@ export interface OnePageApiResponse {
   // Quadro de eventos exclusivo da Feat Produções (mesmo shape do componente).
   // Presente só quando a empresa analisada é a Feat Produções.
   featEventos?: FeatEventosBlock;
+  // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
+  // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
+  barsSerie?: { mes: string; valor: number | null }[];
+  barsTitle?: string;
+  barsAcum?: number | null;
+  linesSerie?: { mes: string; values: (number | null)[] }[];
+  linesSeriesLabels?: string[];
+  linesTitle?: string;
+  linesAcum?: (number | null)[];
+  linesAcumBaseIndex?: number;
+  prevRealCharts?: {
+    title: string;
+    serie: { mes: string; previsto: number | null; realizado: number | null }[];
+    previstoAcum: number | null;
+    realizadoAcum: number | null;
+  }[];
+  consolidated?: {
+    title: string;
+    rows: { label: string; previsto: number | null; realizado: number | null; emphasis?: boolean }[];
+  };
   error?: string;
 }
 
@@ -545,6 +567,7 @@ export function mapOnePageApiResponseToPreviewData(
     blocks: response.enabledBlocks,
     // Título do gráfico de histórico (undefined = título atual no componente).
     historicoTitle: response.historicoTitle,
+    historicoKLabels: response.historicoKLabels,
     // Nº de colunas da grade de KPIs (undefined = 4).
     kpiColumns: response.kpiColumns,
     // Título da seção de KPIs. Templates com KPIs custom (ex.: SGX) trazem
@@ -554,5 +577,44 @@ export function mapOnePageApiResponseToPreviewData(
     // Quadro de eventos da Feat Produções — passa direto (já vem no shape do
     // componente); undefined para todas as demais empresas.
     featEventos: response.featEventos,
+    // Gráficos extras por template (Village): R$ → "mil" (÷1000).
+    barsSerie: response.barsSerie?.map((p) => ({
+      mes: p.mes,
+      valor: p.valor === null ? null : p.valor / 1000,
+    })),
+    barsTitle: response.barsTitle,
+    barsAcum:
+      response.barsAcum === null || response.barsAcum === undefined
+        ? response.barsAcum
+        : response.barsAcum / 1000,
+    linesSerie: response.linesSerie?.map((p) => ({
+      mes: p.mes,
+      values: p.values.map((v) => (v === null ? null : v / 1000)),
+    })),
+    linesSeriesLabels: response.linesSeriesLabels,
+    linesTitle: response.linesTitle,
+    linesAcum: response.linesAcum?.map((v) => (v === null ? null : v / 1000)),
+    linesAcumBaseIndex: response.linesAcumBaseIndex,
+    prevRealCharts: response.prevRealCharts?.map((c) => ({
+      title: c.title,
+      serie: c.serie.map((p) => ({
+        mes: p.mes,
+        previsto: p.previsto === null ? null : p.previsto / 1000,
+        realizado: p.realizado === null ? null : p.realizado / 1000,
+      })),
+      previstoAcum: c.previstoAcum === null ? null : c.previstoAcum / 1000,
+      realizadoAcum: c.realizadoAcum === null ? null : c.realizadoAcum / 1000,
+    })),
+    consolidated: response.consolidated
+      ? {
+          title: response.consolidated.title,
+          rows: response.consolidated.rows.map((r) => ({
+            label: r.label,
+            previsto: r.previsto === null ? null : r.previsto / 1000,
+            realizado: r.realizado === null ? null : r.realizado / 1000,
+            emphasis: r.emphasis,
+          })),
+        }
+      : undefined,
   };
 }
