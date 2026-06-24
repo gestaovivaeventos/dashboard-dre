@@ -10,7 +10,20 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/toaster";
 import { SettingsFeeVvrTable } from "@/components/app/settings-fee-vvr-table";
+import { SettingsFeatProjetosTable } from "@/components/app/settings-feat-projetos-table";
 import { cn } from "@/lib/utils";
+
+// Identifica a empresa Feat Produções por nome normalizado (sem acento/caixa).
+// O Controle de Projetos é EXCLUSIVO desta empresa — não vale para o restante
+// do segmento "feat" (Case Shows, Sirena, Terrazzo) nem para qualquer outra.
+function isFeatProducoes(name: string): boolean {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim() === "feat producoes";
+}
 
 interface SyncSelection {
   rolling: boolean;
@@ -123,6 +136,9 @@ export function SettingsCompanies({
 
   // FEE/VVR panel state (somente para segmento franquias-viva)
   const [feeVvrOpen, setFeeVvrOpen] = useState<string | null>(null);
+
+  // Controle de Projetos — painel exclusivo da empresa Feat Produções.
+  const [featProjetosOpen, setFeatProjetosOpen] = useState<string | null>(null);
 
   // Budget upload state
   const [budgetOpen, setBudgetOpen] = useState<string | null>(null);
@@ -580,6 +596,7 @@ export function SettingsCompanies({
             const isEditingCred = editingCredentials === company.id;
             const isEditingThisName = editingName === company.id;
             const isConfirmingDel = confirmingDelete === company.id;
+            const showFeatProjetos = isFeatProducoes(company.name);
 
             return (
               <div key={company.id} className="rounded-lg border p-4">
@@ -683,10 +700,31 @@ export function SettingsCompanies({
                           setEditingCredentials(null);
                           setConfirmingDelete(null);
                           setBudgetOpen(null);
+                          setFeatProjetosOpen(null);
                         }}
                       >
                         <Table2 className="mr-2 h-4 w-4" />
                         FEE / VVR
+                      </Button>
+                    ) : null}
+                    {showFeatProjetos ? (
+                      <Button
+                        type="button"
+                        variant={featProjetosOpen === company.id ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setFeatProjetosOpen(
+                            featProjetosOpen === company.id ? null : company.id,
+                          );
+                          setEditingName(null);
+                          setEditingCredentials(null);
+                          setConfirmingDelete(null);
+                          setBudgetOpen(null);
+                          setFeeVvrOpen(null);
+                        }}
+                      >
+                        <Table2 className="mr-2 h-4 w-4" />
+                        Projetos Feat
                       </Button>
                     ) : null}
                     <Button
@@ -700,6 +738,7 @@ export function SettingsCompanies({
                         setEditingCredentials(null);
                         setBudgetOpen(null);
                         setFeeVvrOpen(null);
+                        setFeatProjetosOpen(null);
                       }}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
@@ -925,6 +964,32 @@ export function SettingsCompanies({
                       </Button>
                     </div>
                     <SettingsFeeVvrTable companyId={company.id} />
+                  </div>
+                )}
+
+                {/* Controle de Projetos — exclusivo da empresa Feat Produções */}
+                {showFeatProjetos && featProjetosOpen === company.id && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">
+                          Controle de Projetos Feat Produções
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Cadastro gerencial de projetos/eventos (base de contexto
+                          para a tela Business Intelligence).
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setFeatProjetosOpen(null)}
+                      >
+                        Fechar
+                      </Button>
+                    </div>
+                    <SettingsFeatProjetosTable companyId={company.id} />
                   </div>
                 )}
               </div>
