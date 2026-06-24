@@ -126,7 +126,9 @@ export interface OnePageApiResponse {
   consolidated?: {
     title: string;
     rows: { label: string; previsto: number | null; realizado: number | null; emphasis?: boolean }[];
+    acum?: { previsto: number | null; realizado: number | null };
   };
+  historicoAcum?: { previsto: number | null; realizado: number | null };
   error?: string;
 }
 
@@ -607,6 +609,30 @@ export function mapOnePageApiResponseToPreviewData(
             realizado: r.realizado === null ? null : r.realizado / 1000,
             emphasis: r.emphasis,
           })),
+          acum: response.consolidated.acum
+            ? {
+                previsto:
+                  response.consolidated.acum.previsto === null
+                    ? null
+                    : response.consolidated.acum.previsto / 1000,
+                realizado:
+                  response.consolidated.acum.realizado === null
+                    ? null
+                    : response.consolidated.acum.realizado / 1000,
+              }
+            : undefined,
+        }
+      : undefined,
+    historicoAcum: response.historicoAcum
+      ? {
+          previsto:
+            response.historicoAcum.previsto === null
+              ? null
+              : response.historicoAcum.previsto / 1000,
+          realizado:
+            response.historicoAcum.realizado === null
+              ? null
+              : response.historicoAcum.realizado / 1000,
         }
       : undefined,
   };

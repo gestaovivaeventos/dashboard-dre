@@ -217,6 +217,12 @@ export interface TemplateReportConfig {
    * Ausência/false = número cheio (Franquias Viva fica inalterada). SGX usa true.
    */
   historicoKLabels?: boolean;
+  /**
+   * Mostra o rodapé "Acumulado no ano" (Jan→análise, Previsto × Realizado) sob
+   * o gráfico de histórico. Opt-in (ex.: Salvaterra) — Franquias Viva / SGX /
+   * Village ficam inalterados quando ausente/false.
+   */
+  historicoShowAcum?: boolean;
   /** Allowlist de blocos visíveis. Ausência = TODOS (comportamento atual). */
   enabledBlocks?: ReportBlockKey[];
   /** Nº de colunas da grade de KPIs (default 4). Ex.: SGX usa 3 (3 + margem). */

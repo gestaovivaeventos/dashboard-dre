@@ -117,6 +117,8 @@ export interface ConsolidatedRowPayload {
 export interface ConsolidatedPayload {
   title: string;
   rows: ConsolidatedRowPayload[];
+  // Acumulado do ano (Jan→análise) do consolidado: previsto + realizado.
+  acum?: { previsto: number | null; realizado: number | null };
 }
 
 // Serie temporal do VVR de Jan/ano(dateTo) ate o mes(dateTo). Realizado vira
@@ -172,6 +174,9 @@ export interface OnePagePayload {
   prevRealCharts?: PrevRealChartPayload[];
   // Bloco consolidado do grupo (ex.: Salvaterra). undefined p/ os demais.
   consolidated?: ConsolidatedPayload;
+  // Acumulado do ano (Jan→análise) do métrico do gráfico de histórico
+  // (previsto + realizado) — rodapé do gráfico. undefined quando sem histórico.
+  historicoAcum?: { previsto: number | null; realizado: number | null };
 }
 
 export type BuildOnePagePayloadResult =
@@ -1178,31 +1183,34 @@ export async function buildOnePagePayload(
       .ilike("name", `%${cg.matchName}%`)
       .eq("active", true)
       .order("name");
+    const groupList = (groupComps ?? []) as Array<{ id: string; name: string }>;
+    const groupIds = groupList.map((c) => c.id);
+    // IMPORTANTE: escopa no GRUPO INTEIRO → plano CONSOLIDADO (global), o MESMO
+    // que o DRE consolidado do sistema usa para multi-empresa. Escopar por
+    // empresa única usaria o plano CUSTOM, onde o "Resultado do Exercício"
+    // (code 11) tem fórmula diferente (8−9−10, com 9=IRPJ/10=CS) — divergia do
+    // sistema, cujo plano global faz 11 = 8+9−10 (9=Rec. Não Op / 10=Desp. Não Op).
+    const { coreAccounts: ga, translateToScopedId: gt } = scopeDreAccounts(allAccounts, groupIds);
+    const buildMap = (rows: AggRow[] | null) => {
+      const m = new Map<string, number>();
+      (rows ?? []).forEach((r) => {
+        const sid = gt(r.dre_account_id);
+        if (sid) m.set(sid, (m.get(sid) ?? 0) + Number(r.amount ?? 0));
+      });
+      return m;
+    };
+    const valueOf = (m: Map<string, number>) =>
+      buildDashboardRows(ga, m).rows.find((r) => r.code === cg.resultCode)?.value ?? 0;
+    // Resultado (resultCode) das empresas `cids` num intervalo [df, dt], pelo
+    // plano consolidado (ga). Por empresa (cids=[id]) ou somando (cids=todas).
     const resultFor = async (
-      gid: string,
+      cids: string[],
+      df: string,
+      dt: string,
     ): Promise<{ realizado: number; previsto: number | null }> => {
-      const { coreAccounts: ga, translateToScopedId: gt } = scopeDreAccounts(allAccounts, [gid]);
-      const buildMap = (rows: AggRow[] | null) => {
-        const m = new Map<string, number>();
-        (rows ?? []).forEach((r) => {
-          const sid = gt(r.dre_account_id);
-          if (sid) m.set(sid, (m.get(sid) ?? 0) + Number(r.amount ?? 0));
-        });
-        return m;
-      };
-      const valueOf = (m: Map<string, number>) =>
-        buildDashboardRows(ga, m).rows.find((r) => r.code === cg.resultCode)?.value ?? 0;
       const [{ data: realData }, { data: budData }] = await Promise.all([
-        supabase.rpc("dashboard_dre_aggregate", {
-          p_company_ids: [gid],
-          p_date_from: dateFrom,
-          p_date_to: dateTo,
-        }),
-        supabase.rpc("budget_aggregate", {
-          p_company_ids: [gid],
-          p_date_from: dateFrom,
-          p_date_to: dateTo,
-        }),
+        supabase.rpc("dashboard_dre_aggregate", { p_company_ids: cids, p_date_from: df, p_date_to: dt }),
+        supabase.rpc("budget_aggregate", { p_company_ids: cids, p_date_from: df, p_date_to: dt }),
       ]);
       const budRows = (budData as AggRow[] | null) ?? [];
       return {
@@ -1210,28 +1218,33 @@ export async function buildOnePagePayload(
         previsto: budRows.length > 0 ? valueOf(buildMap(budRows)) : null,
       };
     };
+    const consDateFrom = `${toYear}-01-01`; // acumulado do ano (Jan→análise)
     const rows: ConsolidatedRowPayload[] = [];
-    let realSum = 0;
-    let prevSum = 0;
-    let anyPrev = false;
-    for (const gc of ((groupComps ?? []) as Array<{ id: string; name: string }>)) {
-      const { realizado, previsto } = await resultFor(gc.id);
-      rows.push({ label: `Resultado ${gc.name}`, previsto, realizado });
-      realSum += realizado;
-      if (previsto !== null) {
-        prevSum += previsto;
-        anyPrev = true;
-      }
+    // Linha por empresa (cada uma pelo plano consolidado).
+    for (const gc of groupList) {
+      const period = await resultFor([gc.id], dateFrom, dateTo);
+      rows.push({ label: `Resultado ${gc.name}`, previsto: period.previsto, realizado: period.realizado });
     }
     if (rows.length > 0) {
       const groupName = cg.matchName.charAt(0).toUpperCase() + cg.matchName.slice(1);
+      // Total e acumulado = AGREGADO das empresas juntas (igual ao DRE
+      // consolidado do sistema), não a soma das linhas individuais.
+      const [totalPeriod, totalYtd] = await Promise.all([
+        resultFor(groupIds, dateFrom, dateTo),
+        resultFor(groupIds, consDateFrom, dateTo),
+      ]);
       rows.push({
         label: `Resultado Consolidado ${groupName}`,
-        previsto: anyPrev ? prevSum : null,
-        realizado: realSum,
+        previsto: totalPeriod.previsto,
+        realizado: totalPeriod.realizado,
         emphasis: true,
       });
-      consolidated = { title: cg.title, rows };
+      consolidated = {
+        title: cg.title,
+        rows,
+        // Acumulado do ano (Jan→análise) do consolidado: agregado das empresas.
+        acum: { previsto: totalYtd.previsto, realizado: totalYtd.realizado },
+      };
     }
   }
 
@@ -1332,6 +1345,32 @@ export async function buildOnePagePayload(
       unidade: "percent",
     },
   ];
+
+  // Acumulado do ano (Jan→análise) do MÉTRICO do gráfico de histórico (mesmo
+  // code/derivação do gráfico) — alimenta o rodapé "Acumulado no ano".
+  let historicoAcum:
+    | { previsto: number | null; realizado: number | null }
+    | undefined;
+  if (histExists && wantHistorico && template.report?.historicoShowAcum) {
+    const sumYtdR = (codes: string[]) => codes.reduce((s, c) => s + ytdGetR(c), 0);
+    const sumYtdB = (codes: string[]) => {
+      let any = false;
+      let total = 0;
+      codes.forEach((c) => {
+        const b = ytdGetB(c);
+        if (b !== null) {
+          any = true;
+          total += b;
+        }
+      });
+      return any ? total : null;
+    };
+    const realizado = sumYtdR(histPlusCodes) - sumYtdR(histMinusCodes);
+    const pP = sumYtdB(histPlusCodes);
+    const pM = sumYtdB(histMinusCodes);
+    const previsto = pP === null && pM === null ? null : (pP ?? 0) - (pM ?? 0);
+    historicoAcum = { previsto, realizado };
+  }
 
   // -------------------------------------------------------------------------
   // 11. VVR serie anual: Jan/ano(dateTo) ate mes(dateTo). Realizado e meta
@@ -1517,6 +1556,7 @@ export async function buildOnePagePayload(
       linesAcumBaseIndex,
       prevRealCharts,
       consolidated,
+      historicoAcum,
     },
   };
 }

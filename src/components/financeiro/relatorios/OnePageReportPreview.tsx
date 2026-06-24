@@ -144,6 +144,8 @@ export interface OnePageReportPreviewData {
   prevRealCharts?: PrevRealChart[];
   /** Bloco consolidado do grupo (ex.: Salvaterra) — Previsto × Realizado. */
   consolidated?: Consolidated;
+  /** Acumulado do ano (Jan→análise) do gráfico de histórico — rodapé. */
+  historicoAcum?: { previsto: number | null; realizado: number | null };
 }
 
 export interface ConsolidatedRow {
@@ -155,6 +157,8 @@ export interface ConsolidatedRow {
 export interface Consolidated {
   title: string;
   rows: ConsolidatedRow[];
+  /** Acumulado do ano (Jan→análise) do consolidado — rodapé. */
+  acum?: { previsto: number | null; realizado: number | null };
 }
 
 export interface PrevRealPoint {
@@ -1268,6 +1272,59 @@ function AcumBar({
   );
 }
 
+// Rodapé "Acumulado no ano" (Jan→análise): 2 barras horizontais — Realizado
+// (com variação vs previsto) e Previsto. Reutilizado pelo histórico e pelo
+// bloco consolidado.
+function AcumPrevRealFooter({
+  previsto,
+  realizado,
+  accent,
+  kLabel,
+}: {
+  previsto: number | null;
+  realizado: number | null;
+  accent: string;
+  kLabel?: boolean;
+}) {
+  const accMax = Math.max(1, Math.abs(previsto ?? 0), Math.abs(realizado ?? 0));
+  const variation =
+    previsto !== null && previsto !== 0 && realizado !== null
+      ? ((realizado - previsto) / Math.abs(previsto)) * 100
+      : null;
+  return (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          fontWeight: 700,
+          color: C.sub,
+          marginBottom: 8,
+        }}
+      >
+        Acumulado no ano
+      </div>
+      <HBarSigned
+        label="Realizado"
+        value={realizado}
+        max={accMax}
+        color={accent}
+        variation={
+          variation !== null
+            ? `${variation >= 0 ? "+" : ""}${fmtNum(variation, 1)}% vs previsto`
+            : undefined
+        }
+        variationColor={
+          variation !== null ? (variation >= 0 ? SEV.positive.text : SEV.critical.text) : undefined
+        }
+        kLabel={kLabel}
+      />
+      <HBarSigned label="Previsto" value={previsto} max={accMax} color={C.previsto} kLabel={kLabel} />
+    </div>
+  );
+}
+
 // ─── 5c. Resultado do Exercício (linha) ───────────────────────────────────────
 
 function GraficoResultado({
@@ -1275,11 +1332,13 @@ function GraficoResultado({
   accent,
   title,
   kLabels,
+  acum,
 }: {
   points: HistoricoPoint[];
   accent: string;
   title?: string;
   kLabels?: boolean;
+  acum?: { previsto: number | null; realizado: number | null };
 }) {
   // kLabels: rótulos "133,6k" (ex.: SGX). Sem ele, número cheio (Viva inalterada).
   const fmtL = (v: number) => (kLabels ? `${fmtNum(v, 1)}k` : fmtNum(v, 0));
@@ -1354,6 +1413,15 @@ function GraficoResultado({
         </ResponsiveContainer>
       </div>
       <ChartLegend items={[{ color: C.previsto, label: "Previsto" }, { color: accent, label: "Realizado" }]} />
+      {/* Acumulado do ano (Jan→análise) — Previsto × Realizado do mesmo métrico. */}
+      {acum ? (
+        <AcumPrevRealFooter
+          previsto={acum.previsto}
+          realizado={acum.realizado}
+          accent={accent}
+          kLabel={kLabels}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1840,6 +1908,14 @@ function ConsolidadoBlock({ data }: { data: Consolidated }) {
             })}
           </tbody>
         </table>
+        {/* Acumulado do ano (Jan→análise) do consolidado — Previsto × Realizado. */}
+        {data.acum ? (
+          <AcumPrevRealFooter
+            previsto={data.acum.previsto}
+            realizado={data.acum.realizado}
+            accent={DEFAULT_ACCENT}
+          />
+        ) : null}
         <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
           Valores em milhares de R$ (mil). Bloco complementar — soma apenas as empresas do grupo.
         </div>
@@ -2036,6 +2112,7 @@ export function OnePageReportPreview({
                     accent={accentColor}
                     title={data.historicoTitle}
                     kLabels={data.historicoKLabels}
+                    acum={data.historicoAcum}
                   />
                 ) : null}
               </div>
