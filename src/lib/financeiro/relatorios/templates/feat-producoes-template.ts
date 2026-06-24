@@ -36,6 +36,31 @@ O relatório deve responder principalmente:
 
 Ações recomendadas devem girar em torno de: acompanhar eventos realizados no período; verificar o status de fechamento dos projetos; identificar eventos com margem ainda não apurada; avaliar o impacto de fechamentos pendentes no resultado do mês; comparar eventos realizados com a margem reconhecida no DRE; monitorar custos, impostos e despesas operacionais; avaliar a qualidade da margem apurada por evento; reforçar o processo de fechamento financeiro dos eventos.
 
+QUADRO DE EVENTOS (campo "feat_eventos" do input — quando presente):
+Este bloco é um cadastro GERENCIAL de projetos/eventos da Feat (orçamento de eventos), acumulado ATÉ a data de referência do relatório. NÃO é o DRE — é um complemento que ajuda a explicar o resultado. Campos:
+- total_previsto_ate_referencia: soma do RESULTADO PREVISTO (margem orçada) de todos os eventos até a referência.
+- total_realizado_ate_referencia: soma do RESULTADO REALIZADO (margem apurada no fechamento) até a referência. Eventos sem fechamento entram como zero.
+- resultado_por_tipo: previsto e realizado agrupados por tipo (Corporativo, Show, Licitação).
+- eventos_realizados_por_tipo: quantidade de eventos com fechamento "Realizado" por tipo.
+- eventos_em_aberto: eventos que ocorreram mas AINDA NÃO tiveram o fechamento/apuração de margem feito — resultado POTENCIAL ainda não consolidado.
+- eventos_previstos_nao_realizados: eventos que estavam no orçamento mas NÃO ocorreram — explicam parte do desvio entre previsto e realizado.
+- eventos_realizados: total de eventos já fechados.
+- eventos_em_aberto_detalhe: lista dos eventos com fechamento em aberto (nome do projeto + resultado_previsto orçado de cada um).
+- previsto_em_aberto_total: soma do resultado previsto dos eventos em aberto.
+- resultado_acumulado_atual: Resultado do Exercício ACUMULADO do DRE até a referência (o mesmo número do "Acumulado do Ano > Resultado"). Base já consolidada.
+- resultado_acumulado_projetado: PROJEÇÃO GERENCIAL = resultado_acumulado_atual (DRE acumulado) + previsto_em_aberto_total. NÃO é resultado realizado — é uma estimativa que só se confirma após a conclusão dos fechamentos e a apuração das margens.
+- resultado_acumulado_previsto_orcamento: Resultado do Exercício acumulado ORÇADO do DRE (Acumulado do Ano > Resultado previsto).
+- percentual_atingimento_projecao: quanto a projeção (resultado_acumulado_projetado) representa do orçado acumulado, em % (ex.: 92,2% do orçamento). Pode ser citado para mostrar quão perto a projeção fica da meta orçamentária — sempre lembrando que é projeção, não realizado.
+
+COMO INTERPRETAR (anti-alarmismo, tom executivo e equilibrado):
+1. Se total_realizado < total_previsto, NÃO trate a diferença como perda definitiva. Parte dela pode ser margem de "eventos_em_aberto" ainda não consolidada e/ou "eventos_previstos_nao_realizados".
+2. Quando "eventos_em_aberto" > 0, sinalize que há eventos com fechamento pendente — parte do resultado ainda pode ser consolidada — e recomende priorizar a tabulação/apuração das margens pendentes. Quando útil, CITE os eventos de "eventos_em_aberto_detalhe" pelo nome e o resultado_previsto de cada um (ex.: "o FESTIVAL DE VERÃO tem resultado previsto de R$ 300.000,00, ainda dependente do fechamento para virar resultado realizado").
+3. Ao mencionar a projeção, use "resultado_acumulado_projetado" deixando EXPLÍCITO que é projeção gerencial baseada no orçamento dos eventos em aberto, NÃO resultado consolidado/garantido (ex.: "considerando o previsto dos eventos em aberto, o acumulado poderia alcançar R$ X — leitura gerencial, não resultado realizado").
+4. Quando "eventos_previstos_nao_realizados" > 0, explique que esses eventos geram desvio direto entre orçado e realizado, e sugira revisar se houve cancelamento, postergação ou mudança no planejamento comercial.
+5. Diferencie SEMPRE resultado previsto de resultado realizado; nunca trate previsto/projeção como receita já realizada. Reforce a importância de concluir os fechamentos para consolidar o resultado.
+6. Analise a distribuição por tipo (volume e resultado): destaque quais tipos de evento mais contribuem para o resultado.
+7. Use SOMENTE os números do bloco; não invente eventos nem margens. Ao citar valores, copie-os literalmente.
+
 REGRAS DE NEGÓCIO (Feat Produções):
 - Use SOMENTE os dados do DRE enviados no input. NÃO invente números, eventos ou margens.
 - Tom executivo, claro, objetivo e equilibrado. Mesmo em cenário negativo, sem alarmismo — aponte pontos de atenção com foco em análise e ação.
@@ -100,6 +125,8 @@ export const featProducoesTemplate: ReportTemplate = {
       "diagnostico",
       "previstoRealizado",
       "semaforo",
+      // Quadro exclusivo de eventos da Feat Produções (2 indicadores + 2 gráficos).
+      "featEventos",
       "acumuladoAno",
       "historico",
       "alertas",

@@ -2,6 +2,7 @@ import type {
   AcaoCard,
   AlertaCard,
   ComposicaoStep,
+  FeatEventosBlock,
   HistoricoPoint,
   KpiCard,
   OnePageReportPreviewData,
@@ -107,6 +108,9 @@ export interface OnePageApiResponse {
   historicoResultado?: ApiHistorico[];
   acumuladoAno?: ApiPrevistoRealizado[];
   vvrSerieAnual?: ApiVvrSerieAnual[];
+  // Quadro de eventos exclusivo da Feat Produções (mesmo shape do componente).
+  // Presente só quando a empresa analisada é a Feat Produções.
+  featEventos?: FeatEventosBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -572,6 +576,9 @@ export function mapOnePageApiResponseToPreviewData(
     // cards de resultado/indicador próprios — não os de "Saúde financeira &
     // caixa" da Viva; um título neutro evita rótulo enganoso.
     kpiSectionTitle: customKpis ? "Indicadores do mês" : undefined,
+    // Quadro de eventos da Feat Produções — passa direto (já vem no shape do
+    // componente); undefined para todas as demais empresas.
+    featEventos: response.featEventos,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

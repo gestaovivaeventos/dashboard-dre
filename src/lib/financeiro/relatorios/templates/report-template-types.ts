@@ -188,7 +188,10 @@ export type ReportBlockKey =
   | "historico"
   | "semaforo"
   | "alertas"
-  | "acoes";
+  | "acoes"
+  // Quadro de eventos EXCLUSIVO da Feat Produções (alimentado por
+  // company_feat_projetos). Só o template feat-producoes o habilita.
+  | "featEventos";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */

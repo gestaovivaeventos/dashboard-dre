@@ -9,6 +9,7 @@ import {
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
+import { buildFeatEventos, type FeatEventosPayload } from "./feat-eventos";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
 
@@ -27,6 +28,13 @@ import type { ReportTemplateId } from "./templates/report-template-types";
 // Errors sao retornados como `{ ok: false, status, error }`. O caller
 // transforma em `NextResponse.json(...)` com o status apropriado.
 // ============================================================================
+
+// Nomes longos de mês (pt-BR) — usado só como fallback do rótulo de referência
+// do quadro Feat quando `periodLabel` não é informado pelo caller.
+const MONTH_NAMES_LONG = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 // ─── Tipos da resposta (espelho do que sai do helper) ─────────────────────
 
@@ -156,6 +164,10 @@ export interface OnePagePayload {
   // somados de Jan/ano(dateTo) ate o mes(dateTo).
   acumuladoAno: PrevistoRealizadoPayload[];
   vvrSerieAnual: VvrSerieAnualPayload[];
+  // Quadro gerencial de eventos — EXCLUSIVO da Feat Produções. Ausente
+  // (undefined) para todas as demais empresas. Alimenta o quadro próprio no
+  // One Page Report (2 indicadores + 2 gráficos por tipo de evento).
+  featEventos?: FeatEventosPayload;
   // Gráficos extras por template (ex.: Village). Ausência = não renderiza.
   // `barsChart`: colunas do acumulado do ano (Jan→mês de análise, realizado).
   // `linesChart`: linhas dos últimos 6 meses (N séries; labels separados).
@@ -448,6 +460,12 @@ export async function buildOnePagePayload(
       ? null
       : Number(company.fee_disponivel);
 
+  // Rótulo de referência do quadro de eventos da Feat (fallback do periodLabel).
+  // O bloco em si (6b) é montado mais abaixo, após o cálculo do Resultado do
+  // Exercício acumulado do DRE — que é a base da projeção gerencial.
+  const referenciaLabel =
+    periodLabel ?? `${MONTH_NAMES_LONG[toMonth - 1]}/${toYear}`;
+
   const input: OnePageInput = {
     empresa: { id: company.id, nome: company.name },
     periodo: {
@@ -461,6 +479,8 @@ export async function buildOnePagePayload(
     // Segmento da empresa — usado pelo motor de IA para escolher o contexto
     // de negocio correto (regras Franquias Viva vs. prompt generico).
     segmento: { slug: segmentSlug, nome: segmentNome },
+    // `feat_eventos` é injetado no retorno final (depende do Resultado do
+    // Exercício acumulado do DRE, calculado mais abaixo).
   };
 
   // -------------------------------------------------------------------------
@@ -1312,6 +1332,28 @@ export async function buildOnePagePayload(
   const ytdReceitaLiqB = ytdGetB("4");
   const ytdResultadoB = ytdGetB("11");
 
+  // -------------------------------------------------------------------------
+  // Quadro de eventos da FEAT PRODUÇÕES (exclusivo). Montado AQUI porque a
+  // projeção de "Fechamentos em aberto" usa o Resultado do Exercício acumulado
+  // do DRE (`ytdResultadoR`, code "11", Jan→dateTo) como base — o MESMO número
+  // do bloco "Acumulado do Ano > Resultado" e do Resultado acumulado do
+  // Dashboard DRE. Gate por template (`feat-producoes`): nenhuma outra empresa
+  // carrega ou exibe este bloco. Complemento gerencial: não altera DRE, Fluxo,
+  // KPIs nem demais blocos.
+  // -------------------------------------------------------------------------
+  const featEventosResult =
+    template.id === "feat-producoes"
+      ? await buildFeatEventos(
+          supabase,
+          companyId,
+          toYear,
+          toMonth,
+          referenciaLabel,
+          ytdResultadoR,
+          ytdResultadoB,
+        )
+      : null;
+
   const ytdMargemR =
     ytdReceitaLiqR > 0 ? (ytdResultadoR / ytdReceitaLiqR) * 100 : null;
   const ytdMargemB =
@@ -1526,6 +1568,8 @@ export async function buildOnePagePayload(
         sobrevivencia_caixa_meses: template.capabilities.sobrevivenciaCaixa
           ? sobrevivenciaCaixaMeses
           : null,
+        // Resumo gerencial de eventos — só presente para a Feat Produções.
+        feat_eventos: featEventosResult?.resumoIA ?? null,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -1545,6 +1589,8 @@ export async function buildOnePagePayload(
       acumuladoAno,
       // Série anual de VVR só faz sentido para quem tem VVR (Franquias Viva).
       vvrSerieAnual: template.capabilities.vvrFee ? vvrSerieAnual : [],
+      // Quadro de eventos — só presente para a Feat Produções (undefined nos demais).
+      featEventos: featEventosResult?.payload,
       // Gráficos extras por template (ex.: Village). undefined p/ os demais.
       barsSerie,
       barsTitle,

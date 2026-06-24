@@ -111,6 +111,54 @@ export const VvrYtdResumoSchema = z.object({
   abaixo_meta_ultimos_2_meses: z.boolean(),
 });
 
+// Resumo gerencial EXCLUSIVO da Feat Produções (produtora de eventos). Vem da
+// tabela company_feat_projetos, acumulado até a data de referência do relatório.
+// Só é enviado quando a empresa analisada é a Feat Produções; null/ausente nos
+// demais casos. Complementa o DRE — NUNCA substitui os números financeiros.
+export const FeatEventosResumoSchema = z.object({
+  referencia: z.string().min(1).max(80),
+  total_previsto_ate_referencia: z.number(),
+  total_realizado_ate_referencia: z.number(),
+  resultado_por_tipo: z
+    .array(
+      z.object({
+        tipo: z.string().min(1).max(40),
+        previsto: z.number(),
+        realizado: z.number(),
+      }),
+    )
+    .max(10),
+  eventos_realizados_por_tipo: z
+    .array(
+      z.object({
+        tipo: z.string().min(1).max(40),
+        quantidade: z.number(),
+      }),
+    )
+    .max(10),
+  eventos_em_aberto: z.number(),
+  eventos_previstos_nao_realizados: z.number(),
+  eventos_realizados: z.number(),
+  // Detalhe dos eventos em aberto (nome + resultado previsto) + projeção
+  // gerencial: resultado_acumulado_atual (= realizado) + previsto_em_aberto_total.
+  // A projeção NÃO é resultado realizado — depende da conclusão dos fechamentos.
+  eventos_em_aberto_detalhe: z
+    .array(
+      z.object({
+        projeto: z.string().min(1).max(200),
+        resultado_previsto: z.number(),
+      }),
+    )
+    .max(30),
+  previsto_em_aberto_total: z.number(),
+  resultado_acumulado_atual: z.number(),
+  resultado_acumulado_projetado: z.number(),
+  // Resultado acumulado orçado (Acumulado do Ano > Resultado previsto) e o % de
+  // atingimento da projeção sobre ele. Null quando não há orçamento acumulado.
+  resultado_acumulado_previsto_orcamento: z.number().nullable(),
+  percentual_atingimento_projecao: z.number().nullable(),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -148,8 +196,12 @@ export const OnePageInputSchema = z.object({
     })
     .nullable()
     .optional(),
+  // Bloco gerencial de eventos da Feat Produções (ver FeatEventosResumoSchema).
+  // Presente APENAS para a Feat Produções; null/ausente para todas as demais.
+  feat_eventos: FeatEventosResumoSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
 export type FeeVvrInput = z.infer<typeof FeeVvrInputSchema>;
+export type FeatEventosResumo = z.infer<typeof FeatEventosResumoSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

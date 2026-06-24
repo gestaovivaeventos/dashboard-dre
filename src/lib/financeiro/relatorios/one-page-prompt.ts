@@ -451,7 +451,12 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
     input.vvr_ytd_resumo
       ? `VVR YTD: realizado=${input.vvr_ytd_resumo.realizado_acumulado}, meta=${input.vvr_ytd_resumo.meta_acumulada}, acima_da_meta=${input.vvr_ytd_resumo.acima_da_meta}, abaixo_meta_ultimos_2_meses=${input.vvr_ytd_resumo.abaixo_meta_ultimos_2_meses}`
       : "VVR YTD: nao informado",
-  ].join("\n");
+    input.feat_eventos
+      ? `Eventos Feat (acumulado ate ${input.feat_eventos.referencia}): previsto=${input.feat_eventos.total_previsto_ate_referencia}, realizado=${input.feat_eventos.total_realizado_ate_referencia}, realizados=${input.feat_eventos.eventos_realizados}, em_aberto=${input.feat_eventos.eventos_em_aberto}, previstos_nao_realizados=${input.feat_eventos.eventos_previstos_nao_realizados}; projecao gerencial (realizado + previsto em aberto, NAO realizada): ${input.feat_eventos.resultado_acumulado_projetado} (detalhe por tipo e lista de eventos em aberto no JSON, campo feat_eventos)`
+      : null,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 
   return [
     header,

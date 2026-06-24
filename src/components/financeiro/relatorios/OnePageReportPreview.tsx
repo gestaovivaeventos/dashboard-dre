@@ -95,6 +95,31 @@ export interface AcaoCard {
   area: string;
 }
 
+// Quadro de eventos EXCLUSIVO da Feat Produções (alimentado por
+// company_feat_projetos). Valores em R$ cheios (não em "mil"). Só presente
+// quando a empresa analisada é a Feat Produções.
+export interface FeatEventosBlock {
+  referenciaLabel: string;
+  totalPrevisto: number;
+  totalRealizado: number;
+  resultadoPorTipo: Array<{ tipo: string; previsto: number; realizado: number }>;
+  numeroEventosRealizadosPorTipo: Array<{ tipo: string; quantidade: number }>;
+  eventosEmAberto: number;
+  eventosNaoRealizados: number;
+  eventosRealizados: number;
+  // Bloco "Fechamentos em aberto": lista (nome + resultado previsto), soma do
+  // previsto em aberto e projeção gerencial. A base é o Resultado do Exercício
+  // acumulado do DRE (resultadoAcumuladoAtual), não a soma do realizado dos
+  // eventos — projeção = resultadoAcumuladoAtual + previstoEmAbertoTotal.
+  eventosEmAbertoDetalhe: Array<{ projeto: string; resultadoPrevisto: number }>;
+  previstoEmAbertoTotal: number;
+  resultadoAcumuladoAtual: number;
+  resultadoAcumuladoProjetado: number;
+  // Resultado acumulado orçado (Acumulado do Ano) + % de atingimento da projeção.
+  resultadoAcumuladoPrevistoOrcamento: number | null;
+  percentualAtingimentoProjecao: number | null;
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -126,6 +151,8 @@ export interface OnePageReportPreviewData {
   kpiColumns?: number;
   /** Título da seção de KPIs. Ausência = "Saúde financeira & caixa". */
   kpiSectionTitle?: string;
+  /** Quadro de eventos exclusivo da Feat Produções. Ausência = não renderiza. */
+  featEventos?: FeatEventosBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -2029,6 +2056,355 @@ function Acoes({ items }: { items: AcaoCard[] }) {
   );
 }
 
+// ─── Quadro de eventos — EXCLUSIVO da Feat Produções ─────────────────────────
+//
+// Dois indicadores acumulados (Resultado previsto/realizado até a referência) +
+// dois gráficos de barras por tipo de evento: "Resultado dos Eventos" (somente
+// realizado, conforme decisão de produto) e "Número de Eventos" (apenas eventos
+// com fechamento Realizado). Valores em R$ cheios (este quadro não usa "mil").
+
+function fmtMoneyInt(value: number): string {
+  return `R$ ${Math.round(value).toLocaleString("pt-BR", {
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+function fmtMoneyFull(value: number): string {
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function moneyTooltipFormatter(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? fmtMoneyFull(n) : "—";
+}
+
+function fmtPctPtBr(value: number): string {
+  return `${value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%`;
+}
+
+function FeatIndicador({
+  label,
+  valueLabel,
+  hint,
+}: {
+  label: string;
+  valueLabel: string;
+  hint?: string;
+}) {
+  return (
+    <div style={{ ...panelStyle, padding: 14 }}>
+      <div
+        style={{
+          fontSize: 10,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          fontWeight: 600,
+          color: C.sub,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_MONO,
+          fontSize: 22,
+          fontWeight: 600,
+          color: C.ink,
+          margin: "10px 0 4px",
+        }}
+      >
+        {valueLabel}
+      </div>
+      {hint ? (
+        <div style={{ fontSize: 11, color: C.tertiary }}>{hint}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function QuadroEventosFeat({
+  data,
+  accent,
+}: {
+  data: FeatEventosBlock;
+  accent: string;
+}) {
+  const resultadoData = data.resultadoPorTipo.map((r) => ({
+    tipo: r.tipo,
+    Realizado: r.realizado,
+    label: fmtMoneyInt(r.realizado),
+  }));
+  const numeroData = data.numeroEventosRealizadosPorTipo.map((n) => ({
+    tipo: n.tipo,
+    Eventos: n.quantidade,
+  }));
+
+  // Linha-resumo do status dos fechamentos até a referência.
+  const statusHint = `${data.eventosRealizados} realizado(s) · ${data.eventosEmAberto} em aberto · ${data.eventosNaoRealizados} previsto(s) e não realizado(s)`;
+
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>Eventos — Feat Produções</SectionTitle>
+
+      {/* Indicadores acumulados até a referência */}
+      <div
+        className="opr-cards-2"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 12,
+          marginBottom: 12,
+        }}
+      >
+        <FeatIndicador
+          label="Resultado total previsto"
+          valueLabel={fmtMoneyFull(data.totalPrevisto)}
+          hint={`Acumulado até ${data.referenciaLabel}`}
+        />
+        <FeatIndicador
+          label="Resultado total realizado"
+          valueLabel={fmtMoneyFull(data.totalRealizado)}
+          hint={statusHint}
+        />
+      </div>
+
+      {/* Gráficos por tipo de evento */}
+      <div
+        className="opr-charts-2"
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+      >
+        {/* Gráfico 1: Resultado dos Eventos (somente realizado) por tipo */}
+        <div style={panelStyle}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>
+            Resultado dos Eventos
+          </div>
+          <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
+            Resultado realizado acumulado por tipo de evento.
+          </div>
+          <div style={{ height: 220, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={resultadoData} margin={{ top: 22, right: 12, bottom: 6, left: -6 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+                <XAxis
+                  dataKey="tipo"
+                  tick={{ fontSize: 10, fill: C.sub }}
+                  axisLine={{ stroke: C.grid }}
+                  tickLine={false}
+                />
+                <YAxis tick={{ fontSize: 10, fill: C.sub }} width={44} axisLine={false} tickLine={false} />
+                <Tooltip
+                  cursor={{ fill: "rgba(31,111,214,0.06)" }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
+                  formatter={(value) => moneyTooltipFormatter(value)}
+                />
+                <Bar dataKey="Realizado" fill={accent} radius={[3, 3, 0, 0]} barSize={46} isAnimationActive={false}>
+                  <LabelList dataKey="label" position="top" style={{ fontSize: 9, fill: accent, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Gráfico 2: Número de Eventos realizados por tipo */}
+        <div style={panelStyle}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>
+            Número de Eventos
+          </div>
+          <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
+            Eventos com fechamento realizado, por tipo.
+          </div>
+          <div style={{ height: 220, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={numeroData} margin={{ top: 22, right: 12, bottom: 6, left: -16 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
+                <XAxis
+                  dataKey="tipo"
+                  tick={{ fontSize: 10, fill: C.sub }}
+                  axisLine={{ stroke: C.grid }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: C.sub }}
+                  width={28}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  cursor={{ fill: "rgba(31,111,214,0.06)" }}
+                  contentStyle={TOOLTIP_CONTENT_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
+                />
+                <Bar dataKey="Eventos" fill={accent} radius={[3, 3, 0, 0]} barSize={46} isAnimationActive={false}>
+                  <LabelList dataKey="Eventos" position="top" style={{ fontSize: 10, fill: accent, fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Fechamentos em aberto — lista + projeção gerencial */}
+      <FechamentosEmAberto data={data} />
+    </section>
+  );
+}
+
+function FechamentosEmAberto({ data }: { data: FeatEventosBlock }) {
+  const temAberto = data.eventosEmAbertoDetalhe.length > 0;
+
+  return (
+    <div style={{ ...panelStyle, marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>
+        Fechamentos em aberto
+      </div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: temAberto ? 10 : 0 }}>
+        Eventos realizados sem fechamento concluído até {data.referenciaLabel}.
+      </div>
+
+      {!temAberto ? (
+        <div style={{ fontSize: 12, color: C.body, marginTop: 6 }}>
+          Não há eventos com fechamento em aberto até o período selecionado.
+        </div>
+      ) : (
+        <>
+          {/* Lista de eventos em aberto */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {data.eventosEmAbertoDetalhe.map((ev, i) => (
+              <div
+                key={`${ev.projeto}-${i}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 12,
+                  padding: "7px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${C.grid}`,
+                  background: "#fafafa",
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink }}>
+                  {ev.projeto}
+                </span>
+                <span style={{ fontSize: 11, color: C.sub, whiteSpace: "nowrap" }}>
+                  Resultado previsto:{" "}
+                  <span style={{ fontFamily: FONT_MONO, color: C.body, fontWeight: 600 }}>
+                    {fmtMoneyFull(ev.resultadoPrevisto)}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Projeção gerencial */}
+          <div
+            style={{
+              border: `1px solid ${SEV.attention.border}`,
+              background: SEV.attention.bg,
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
+            <ProjecaoLinha
+              label="Resultado acumulado atual"
+              valueLabel={fmtMoneyFull(data.resultadoAcumuladoAtual)}
+            />
+            <ProjecaoLinha
+              label="Resultado previsto em fechamentos em aberto"
+              valueLabel={`+ ${fmtMoneyFull(data.previstoEmAbertoTotal)}`}
+            />
+            <div style={{ height: 1, background: SEV.attention.border, margin: "8px 0" }} aria-hidden />
+            <ProjecaoLinha
+              label="Resultado acumulado projetado"
+              valueLabel={fmtMoneyFull(data.resultadoAcumuladoProjetado)}
+              strong
+            />
+            {data.percentualAtingimentoProjecao !== null ? (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  gap: 12,
+                  marginTop: 4,
+                }}
+              >
+                <span style={{ fontSize: 10.5, color: C.sub }}>
+                  {data.resultadoAcumuladoPrevistoOrcamento !== null
+                    ? `Orçado acumulado: ${fmtMoneyFull(data.resultadoAcumuladoPrevistoOrcamento)}`
+                    : ""}
+                </span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: SEV.attention.text, whiteSpace: "nowrap" }}>
+                  {fmtPctPtBr(data.percentualAtingimentoProjecao)} do orçamento
+                </span>
+              </div>
+            ) : null}
+            <p style={{ margin: "10px 0 0", fontSize: 10.5, lineHeight: 1.5, color: C.body }}>
+              Projeção baseada no resultado previsto dos eventos com fechamento em
+              aberto. O valor não representa resultado realizado e depende da
+              apuração da margem e da conclusão do fechamento para ser confirmado.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProjecaoLinha({
+  label,
+  valueLabel,
+  strong,
+}: {
+  label: string;
+  valueLabel: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 12,
+        padding: "2px 0",
+      }}
+    >
+      <span
+        style={{
+          fontSize: strong ? 12.5 : 11.5,
+          fontWeight: strong ? 700 : 500,
+          color: strong ? C.ink : C.body,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: FONT_MONO,
+          fontSize: strong ? 14 : 12,
+          fontWeight: strong ? 700 : 600,
+          color: strong ? SEV.attention.text : C.body,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {valueLabel}
+      </span>
+    </div>
+  );
+}
+
 // ─── Componente raiz ──────────────────────────────────────────────────────────
 
 interface OnePageReportPreviewProps {
@@ -2086,6 +2462,13 @@ export function OnePageReportPreview({
           />
         ) : null}
         <KpisSaude kpis={saudeKpis} columns={data.kpiColumns} title={data.kpiSectionTitle} />
+
+        {/* Quadro de eventos — exclusivo da Feat Produções (gated por bloco +
+            presença de dados). Eventos são a principal fonte de receita da Feat,
+            por isso aparece em destaque, logo após os indicadores do mês. */}
+        {show("featEventos") && data.featEventos ? (
+          <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
+        ) : null}
 
         {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho
             em linha cheia abaixo (evita o aperto do VVR quando o ano avança).
