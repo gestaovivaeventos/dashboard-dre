@@ -98,6 +98,27 @@ export interface MultiLineSeriePayload {
   values: (number | null)[];
 }
 
+// Gráfico de colunas Previsto × Realizado mensal (acum. do ano) + acumulado.
+export interface PrevRealChartPayload {
+  title: string;
+  serie: { mes: string; previsto: number | null; realizado: number | null }[];
+  previstoAcum: number | null;
+  realizadoAcum: number | null;
+}
+
+// Bloco consolidado de um grupo de empresas (ex.: Salvaterra). Cada linha =
+// Resultado de uma empresa; a última (emphasis) = soma consolidada.
+export interface ConsolidatedRowPayload {
+  label: string;
+  previsto: number | null;
+  realizado: number | null;
+  emphasis?: boolean;
+}
+export interface ConsolidatedPayload {
+  title: string;
+  rows: ConsolidatedRowPayload[];
+}
+
 // Serie temporal do VVR de Jan/ano(dateTo) ate o mes(dateTo). Realizado vira
 // barras no chart; meta vira linha sobreposta.
 export interface VvrSerieAnualPayload {
@@ -121,6 +142,8 @@ export interface OnePagePayload {
   // Título do gráfico de histórico (templates com `report.historicoTitle`).
   // Ausência = título atual no componente (Franquias Viva inalterado).
   historicoTitle?: string;
+  // Rótulos do histórico em "Xk" (milhar) — só templates que pedem (ex.: SGX).
+  historicoKLabels?: boolean;
   // Nº de colunas da grade de KPIs (templates com `report.kpiColumns`).
   // Ausência = 4 (comportamento atual).
   kpiColumns?: number;
@@ -145,6 +168,10 @@ export interface OnePagePayload {
   linesAcum?: (number | null)[];
   // Índice da série orçada — baseline da variação % das demais barras.
   linesAcumBaseIndex?: number;
+  // Gráficos de colunas Previsto × Realizado mensais (ex.: SGX Locações/Projetos).
+  prevRealCharts?: PrevRealChartPayload[];
+  // Bloco consolidado do grupo (ex.: Salvaterra). undefined p/ os demais.
+  consolidated?: ConsolidatedPayload;
 }
 
 export type BuildOnePagePayloadResult =
@@ -738,13 +765,17 @@ export async function buildOnePagePayload(
           margem !== null && margemPrevista !== null
             ? margem - margemPrevista
             : null;
+        // Farol: por padrão acima do orçado = melhor; com `invertStatus`,
+        // acima = pior (ex.: Freelancers / Receita — subir a razão é ruim).
+        const statusVarPp =
+          spec.invertStatus && margemVarPp !== null ? -margemVarPp : margemVarPp;
         return {
           label: spec.label,
           value: margem,
           formattedValue: margem !== null ? formatPctFn(margem) : null,
           variationValue: margemVarPp,
           variationLabel: margemVarPp !== null ? formatPp(margemVarPp) : null,
-          status: statusMargemPp(margemVarPp),
+          status: statusMargemPp(statusVarPp),
           // Sem orçamento comparável → não exibe " vs orçamento" vazio.
           omitComparisonSuffix: margemVarPp === null,
         };
@@ -976,6 +1007,7 @@ export async function buildOnePagePayload(
   // -------------------------------------------------------------------------
   const barsCfg = template.report?.barsChart;
   const linesCfg = template.report?.linesChart;
+  const prevRealCfg = template.report?.prevRealCharts;
   let barsSerie: BarSeriePayload[] | undefined;
   let barsTitle: string | undefined;
   let barsAcum: number | null | undefined; // gap acumulado do ano (Jan→análise)
@@ -984,10 +1016,13 @@ export async function buildOnePagePayload(
   let linesTitle: string | undefined;
   let linesAcum: (number | null)[] | undefined; // acum. do ano por série
   let linesAcumBaseIndex: number | undefined; // índice da série orçada (baseline da variação)
+  let prevRealCharts: PrevRealChartPayload[] | undefined; // ex.: SGX Locações/Projetos
 
-  if (barsCfg || linesCfg) {
+  if (barsCfg || linesCfg || prevRealCfg) {
     const analysisIdx = toYear * 12 + (toMonth - 1);
-    const startIdx = Math.min(toYear * 12, analysisIdx - 5); // Jan(ano) ou −5 meses
+    // Só recua 6 meses (antes de Jan) quando há linesChart; senão começa em Jan
+    // (barsChart/prevRealCharts são acumulado do ano — não precisam do recuo).
+    const startIdx = linesCfg ? Math.min(toYear * 12, analysisIdx - 5) : toYear * 12;
     const unionMonths: Array<{ year: number; month: number }> = [];
     for (let i = startIdx; i <= analysisIdx; i++) {
       unionMonths.push({ year: Math.floor(i / 12), month: (i % 12) + 1 });
@@ -1104,6 +1139,99 @@ export async function buildOnePagePayload(
       // Série orçada (source "budget") = baseline da variação das demais.
       const baseIdx = linesCfg.series.findIndex((s) => s.source === "budget");
       linesAcumBaseIndex = baseIdx >= 0 ? baseIdx : undefined;
+    }
+
+    if (prevRealCfg) {
+      // Cada gráfico: barras mensais Previsto × Realizado (Jan→análise) +
+      // previsto/realizado acumulados do ano. previsto = orçado, realizado =
+      // realizado; ambos = Σ(codes) − Σ(minus) do mês.
+      prevRealCharts = prevRealCfg.map((cfg) => {
+        const serie = ytdMonths.map((m) => {
+          const built = builtByKey.get(mKey(m.year, m.month)) ?? { realized: null, budget: null };
+          return {
+            mes: mLabel(m.year, m.month),
+            previsto: deriveVal(built.budget, cfg.codes, cfg.minus),
+            realizado: deriveVal(built.realized, cfg.codes, cfg.minus),
+          };
+        });
+        const previstoAcum = serie.reduce((acc, p) => acc + (p.previsto ?? 0), 0);
+        const realizadoAcum = serie.reduce((acc, p) => acc + (p.realizado ?? 0), 0);
+        return { title: cfg.title, serie, previstoAcum, realizadoAcum };
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 9c. Bloco CONSOLIDADO do grupo (ex.: Salvaterra). Para CADA empresa cujo
+  //     nome casa com matchName (ILIKE), busca o `resultCode` (ex.: "11" =
+  //     Resultado do Exercício) realizado (dashboard_dre_aggregate) e orçado
+  //     (budget_aggregate) no período, e soma. Bloco COMPLEMENTAR — não mistura
+  //     o restante da análise individual (cards/tabela usam só a empresa atual).
+  // -------------------------------------------------------------------------
+  let consolidated: ConsolidatedPayload | undefined;
+  const cg = template.report?.consolidatedGroup;
+  if (cg) {
+    type AggRow = { dre_account_id: string; amount: number | string | null };
+    const { data: groupComps } = await supabase
+      .from("companies")
+      .select("id,name")
+      .ilike("name", `%${cg.matchName}%`)
+      .eq("active", true)
+      .order("name");
+    const resultFor = async (
+      gid: string,
+    ): Promise<{ realizado: number; previsto: number | null }> => {
+      const { coreAccounts: ga, translateToScopedId: gt } = scopeDreAccounts(allAccounts, [gid]);
+      const buildMap = (rows: AggRow[] | null) => {
+        const m = new Map<string, number>();
+        (rows ?? []).forEach((r) => {
+          const sid = gt(r.dre_account_id);
+          if (sid) m.set(sid, (m.get(sid) ?? 0) + Number(r.amount ?? 0));
+        });
+        return m;
+      };
+      const valueOf = (m: Map<string, number>) =>
+        buildDashboardRows(ga, m).rows.find((r) => r.code === cg.resultCode)?.value ?? 0;
+      const [{ data: realData }, { data: budData }] = await Promise.all([
+        supabase.rpc("dashboard_dre_aggregate", {
+          p_company_ids: [gid],
+          p_date_from: dateFrom,
+          p_date_to: dateTo,
+        }),
+        supabase.rpc("budget_aggregate", {
+          p_company_ids: [gid],
+          p_date_from: dateFrom,
+          p_date_to: dateTo,
+        }),
+      ]);
+      const budRows = (budData as AggRow[] | null) ?? [];
+      return {
+        realizado: valueOf(buildMap(realData as AggRow[] | null)),
+        previsto: budRows.length > 0 ? valueOf(buildMap(budRows)) : null,
+      };
+    };
+    const rows: ConsolidatedRowPayload[] = [];
+    let realSum = 0;
+    let prevSum = 0;
+    let anyPrev = false;
+    for (const gc of ((groupComps ?? []) as Array<{ id: string; name: string }>)) {
+      const { realizado, previsto } = await resultFor(gc.id);
+      rows.push({ label: `Resultado ${gc.name}`, previsto, realizado });
+      realSum += realizado;
+      if (previsto !== null) {
+        prevSum += previsto;
+        anyPrev = true;
+      }
+    }
+    if (rows.length > 0) {
+      const groupName = cg.matchName.charAt(0).toUpperCase() + cg.matchName.slice(1);
+      rows.push({
+        label: `Resultado Consolidado ${groupName}`,
+        previsto: anyPrev ? prevSum : null,
+        realizado: realSum,
+        emphasis: true,
+      });
+      consolidated = { title: cg.title, rows };
     }
   }
 
@@ -1369,6 +1497,7 @@ export async function buildOnePagePayload(
       enabledBlocks: template.report?.enabledBlocks,
       // Título do histórico (undefined = título atual no componente).
       historicoTitle: template.report?.historicoTitle,
+      historicoKLabels: template.report?.historicoKLabels,
       // Colunas da grade de KPIs (undefined = 4).
       kpiColumns: template.report?.kpiColumns,
       previstoRealizado: previstoRealizadoFinal,
@@ -1386,6 +1515,8 @@ export async function buildOnePagePayload(
       linesTitle,
       linesAcum,
       linesAcumBaseIndex,
+      prevRealCharts,
+      consolidated,
     },
   };
 }

@@ -133,6 +133,12 @@ export interface TemplateKpiCardSpec {
    */
   minus?: string[];
   ratio?: { numerator: string[]; denominator: string[] };
+  /**
+   * Inverte o farol da margem/razão: por padrão "maior = melhor" (verde acima
+   * do orçado). Com `invertStatus: true`, "maior = pior" — ex.: Freelancers /
+   * Receita (Salvaterra Estacionamento), onde subir a razão é ruim.
+   */
+  invertStatus?: boolean;
 }
 
 /**
@@ -206,6 +212,11 @@ export interface TemplateReportConfig {
    * ("Previsto x Realizado — Resultado do Exercício"). Apenas cosmético.
    */
   historicoTitle?: string;
+  /**
+   * Rótulos do gráfico de histórico no formato "Xk" (milhar) — ex.: "133,6k".
+   * Ausência/false = número cheio (Franquias Viva fica inalterada). SGX usa true.
+   */
+  historicoKLabels?: boolean;
   /** Allowlist de blocos visíveis. Ausência = TODOS (comportamento atual). */
   enabledBlocks?: ReportBlockKey[];
   /** Nº de colunas da grade de KPIs (default 4). Ex.: SGX usa 3 (3 + margem). */
@@ -232,6 +243,22 @@ export interface TemplateReportConfig {
       source?: "realized" | "budget";
     }>;
   };
+  /**
+   * Gráficos de COLUNAS Previsto × Realizado mensais — acumulado do ano (jan do
+   * ano de análise → mês de análise). Cada gráfico tem 2 barras por mês
+   * (previsto/realizado), valor = Σ(codes) − Σ(minus) sobre orçado/realizado, e
+   * abaixo o previsto/realizado ACUMULADO do ano + variação. Lista (renderizados
+   * empilhados). Ex.: SGX — Locações (1−2) e Projetos (12−13).
+   */
+  prevRealCharts?: Array<{ title: string; codes: string[]; minus?: string[] }>;
+  /**
+   * Bloco CONSOLIDADO entre as empresas de um grupo (ex.: família Salvaterra).
+   * Mostra Previsto × Realizado do `resultCode` (ex.: "11" = Resultado do
+   * Exercício) de CADA empresa cujo nome casa com `matchName` (ILIKE) + a soma
+   * consolidada. É um bloco COMPLEMENTAR — não autoriza misturar o restante da
+   * análise individual. Usa apenas dados do dashboard DRE de cada empresa.
+   */
+  consolidatedGroup?: { title: string; matchName: string; resultCode: string };
 }
 
 export interface ReportTemplate {

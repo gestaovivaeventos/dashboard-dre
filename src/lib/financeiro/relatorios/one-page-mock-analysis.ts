@@ -415,6 +415,55 @@ const TERRAZZO_MOCK = buildCoreMock({
   ],
 });
 
+// ── Mocks da família Salvaterra (condomínio / estacionamento) ────────────────
+// SEM VVR/FEE/SGX/Village/Feat — só a leitura financeira-gerencial de cada
+// empresa. Não misturam dados entre as duas (o consolidado é bloco à parte).
+const SALVATERRA_CONDOMINIO_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Salvaterra Condomínio. Operação condominial com receitas de locação, taxas condominiais e reembolsos, e despesas de manutenção e vigias (freelancers). O período mostra o resultado do condomínio frente ao orçamento e sua contribuição ao consolidado Salvaterra.",
+  diagnostico:
+    "O resultado do condomínio depende do equilíbrio entre as receitas (locação, taxas condominiais e reembolsos) e as despesas totais. Vale acompanhar a aderência das despesas ao orçamento, a evolução das receitas condominiais e o impacto do resultado individual no consolidado Salvaterra (bloco complementar).",
+  acoes: [
+    {
+      acao: "Acompanhar receitas de locação e receitas condominiais vs orçamento",
+      justificativa: "As receitas recorrentes sustentam a cobertura das despesas do condomínio.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+    {
+      acao: "Monitorar despesas totais e custos de manutenção",
+      justificativa: "Manter as despesas controladas em relação ao orçamento preserva o resultado.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Financeiro",
+    },
+  ],
+});
+
+const SALVATERRA_ESTACIONAMENTO_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Salvaterra Estacionamento. Operação ligada aos eventos no Terrazzo: receita variável, custo com freelancers e despesas operacionais. O período mostra o resultado do estacionamento frente ao orçamento e sua contribuição ao consolidado Salvaterra.",
+  diagnostico:
+    "A receita do estacionamento depende dos eventos do período; o custo com freelancers deve acompanhar proporcionalmente a receita. Vale monitorar a margem operacional, as despesas e o impacto do resultado individual no consolidado Salvaterra (bloco complementar).",
+  acoes: [
+    {
+      acao: "Revisar a escala de freelancers conforme o volume de eventos",
+      justificativa: "Manter o custo com freelancers proporcional à receita gerada nos eventos.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Operação",
+    },
+    {
+      acao: "Acompanhar a receita do estacionamento e a margem operacional por período",
+      justificativa: "A receita é variável e concentrada em eventos; acompanhar a margem evita surpresas.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+  ],
+});
+
 // Validacao na carga do modulo. Se algum mock divergir do schema, lanca aqui.
 const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "franquias-viva": OnePageReportSchema.parse(RAW_MOCK),
@@ -422,8 +471,8 @@ const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "real-estate-sgx": OnePageReportSchema.parse(GENERIC_MOCK),
   // Village tem mock próprio (gap de reembolso / resultado ajustado).
   "real-estate-village": OnePageReportSchema.parse(RAW_MOCK_VILLAGE),
-  "real-estate-salvaterra-condominio": OnePageReportSchema.parse(GENERIC_MOCK),
-  "real-estate-salvaterra-estacionamento": OnePageReportSchema.parse(GENERIC_MOCK),
+  "real-estate-salvaterra-condominio": OnePageReportSchema.parse(SALVATERRA_CONDOMINIO_MOCK),
+  "real-estate-salvaterra-estacionamento": OnePageReportSchema.parse(SALVATERRA_ESTACIONAMENTO_MOCK),
   "feat-producoes": OnePageReportSchema.parse(FEAT_PRODUCOES_MOCK),
   "case-shows": OnePageReportSchema.parse(CASE_SHOWS_MOCK),
   sirena: OnePageReportSchema.parse(SIRENA_MOCK),

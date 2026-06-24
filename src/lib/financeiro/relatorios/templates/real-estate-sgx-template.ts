@@ -108,6 +108,16 @@ export const realEstateSgxTemplate: ReportTemplate = {
     // Histórico acompanha o Resultado Final (code 15).
     historicoAccountCode: "15",
     historicoTitle: "Histórico do Resultado Final",
+    historicoKLabels: true,
     enabledBlocks: ["diagnostico", "previstoRealizado", "historico", "alertas", "acoes"],
+    // Abaixo do histórico: dois gráficos de colunas Previsto × Realizado mensais
+    // (acumulado do ano: Jan→mês de análise), por frente. Receitas − Despesas:
+    //   Locações = Receita locação (1) − Despesas imóveis locados (2);
+    //   Projetos = Receitas Projetos (12) − Despesas Projetos (13).
+    // Cada um traz o previsto/realizado acumulado do ano + variação.
+    prevRealCharts: [
+      { title: "Previsto × Realizado — Locações", codes: ["1"], minus: ["2"] },
+      { title: "Previsto × Realizado — Projetos", codes: ["12"], minus: ["13"] },
+    ],
   },
 };

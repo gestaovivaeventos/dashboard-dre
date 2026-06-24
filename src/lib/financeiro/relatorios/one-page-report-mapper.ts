@@ -98,6 +98,8 @@ export interface OnePageApiResponse {
   enabledBlocks?: string[];
   // Título do gráfico de histórico (undefined = título atual no componente).
   historicoTitle?: string;
+  // Rótulos do histórico em "Xk" (milhar) — ex.: SGX.
+  historicoKLabels?: boolean;
   // Nº de colunas da grade de KPIs (undefined = 4).
   kpiColumns?: number;
   previstoRealizado?: ApiPrevistoRealizado[];
@@ -115,6 +117,16 @@ export interface OnePageApiResponse {
   linesTitle?: string;
   linesAcum?: (number | null)[];
   linesAcumBaseIndex?: number;
+  prevRealCharts?: {
+    title: string;
+    serie: { mes: string; previsto: number | null; realizado: number | null }[];
+    previstoAcum: number | null;
+    realizadoAcum: number | null;
+  }[];
+  consolidated?: {
+    title: string;
+    rows: { label: string; previsto: number | null; realizado: number | null; emphasis?: boolean }[];
+  };
   error?: string;
 }
 
@@ -551,6 +563,7 @@ export function mapOnePageApiResponseToPreviewData(
     blocks: response.enabledBlocks,
     // Título do gráfico de histórico (undefined = título atual no componente).
     historicoTitle: response.historicoTitle,
+    historicoKLabels: response.historicoKLabels,
     // Nº de colunas da grade de KPIs (undefined = 4).
     kpiColumns: response.kpiColumns,
     // Título da seção de KPIs. Templates com KPIs custom (ex.: SGX) trazem
@@ -575,5 +588,26 @@ export function mapOnePageApiResponseToPreviewData(
     linesTitle: response.linesTitle,
     linesAcum: response.linesAcum?.map((v) => (v === null ? null : v / 1000)),
     linesAcumBaseIndex: response.linesAcumBaseIndex,
+    prevRealCharts: response.prevRealCharts?.map((c) => ({
+      title: c.title,
+      serie: c.serie.map((p) => ({
+        mes: p.mes,
+        previsto: p.previsto === null ? null : p.previsto / 1000,
+        realizado: p.realizado === null ? null : p.realizado / 1000,
+      })),
+      previstoAcum: c.previstoAcum === null ? null : c.previstoAcum / 1000,
+      realizadoAcum: c.realizadoAcum === null ? null : c.realizadoAcum / 1000,
+    })),
+    consolidated: response.consolidated
+      ? {
+          title: response.consolidated.title,
+          rows: response.consolidated.rows.map((r) => ({
+            label: r.label,
+            previsto: r.previsto === null ? null : r.previsto / 1000,
+            realizado: r.realizado === null ? null : r.realizado / 1000,
+            emphasis: r.emphasis,
+          })),
+        }
+      : undefined,
   };
 }
