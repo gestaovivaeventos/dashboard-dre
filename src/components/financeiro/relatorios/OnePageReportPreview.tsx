@@ -52,6 +52,10 @@ export interface PrevistoRealizadoItem {
   realizado: number;
   previsto: number;
   unidade: "mil" | "%";
+  /** Subtítulo do subgrupo (tabela agrupada, ex.: Village). Ausência = sem grupo. */
+  group?: string;
+  /** Nota de rodapé da linha (marca com "*" e exibe o texto sob a tabela). */
+  footnote?: string;
 }
 
 export interface ComposicaoStep {
@@ -696,6 +700,15 @@ function TabelaDesempenho({
     semaforoMap.set(s.indicador.toLowerCase(), signToSev(s.classificacao));
   }
 
+  // Tabela AGRUPADA (templates com `group`, ex.: Village): subtítulos por grupo,
+  // divisor entre grupos, realizado negativo em vermelho e notas de rodapé.
+  // Sem `group` (Franquias Viva / SGX) nada disso é aplicado — tabela plana.
+  const hasGroups = items.some((i) => i.group);
+  const hasPercent = items.some((i) => i.unidade === "%");
+  const footnotes = items
+    .map((i) => i.footnote)
+    .filter((f): f is string => !!f);
+
   const th: CSSProperties = {
     fontSize: 9,
     letterSpacing: "0.12em",
@@ -728,13 +741,43 @@ function TabelaDesempenho({
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => {
+            {items.flatMap((item, idx) => {
               const isResultado = item.indicador.toLowerCase().includes("resultado");
               const v = variationCell(item);
               const sev =
                 semaforoMap.get(item.indicador.toLowerCase()) ?? v.sev;
-              const sufMargem = item.unidade === "%" ? "*" : "";
-              return (
+              const hasFootnote = !!item.footnote;
+              const suf = item.unidade === "%" || hasFootnote ? "*" : "";
+              // Realizado negativo em vermelho (só na tabela agrupada).
+              const realNeg = hasGroups && item.unidade !== "%" && item.realizado < 0;
+              const realColor = realNeg
+                ? SEV.critical.text
+                : isResultado
+                  ? C.ink
+                  : C.body;
+              const rows = [];
+              // Subtítulo do grupo quando ele muda (divisor a partir do 2º).
+              if (item.group && item.group !== items[idx - 1]?.group) {
+                rows.push(
+                  <tr key={`grp-${item.group}`}>
+                    <td
+                      colSpan={4}
+                      style={{
+                        fontSize: 9,
+                        letterSpacing: "0.12em",
+                        textTransform: "uppercase",
+                        fontWeight: 700,
+                        color: C.tertiary,
+                        padding: idx === 0 ? "2px 10px 6px" : "16px 10px 6px",
+                        ...(idx === 0 ? {} : { borderTop: `1px solid ${C.rule}` }),
+                      }}
+                    >
+                      {item.group}
+                    </td>
+                  </tr>,
+                );
+              }
+              rows.push(
                 <tr
                   key={item.indicador}
                   style={{
@@ -752,9 +795,7 @@ function TabelaDesempenho({
                     }}
                   >
                     {item.indicador}
-                    {sufMargem ? (
-                      <span style={{ color: C.tertiary }}>{sufMargem}</span>
-                    ) : null}
+                    {suf ? <span style={{ color: C.tertiary }}>{suf}</span> : null}
                   </td>
                   <td style={{ ...tdNum, borderBottom: `1px solid ${C.grid}`, color: C.sub }}>
                     {fmtValueWithUnit(item.previsto, item.unidade)}
@@ -764,7 +805,7 @@ function TabelaDesempenho({
                       ...tdNum,
                       borderBottom: `1px solid ${C.grid}`,
                       fontWeight: isResultado ? 700 : 600,
-                      color: isResultado ? C.ink : C.body,
+                      color: realColor,
                     }}
                   >
                     {fmtValueWithUnit(item.realizado, item.unidade)}
@@ -780,13 +821,16 @@ function TabelaDesempenho({
                       {v.label}
                     </SevBadge>
                   </td>
-                </tr>
+                </tr>,
               );
+              return rows;
             })}
           </tbody>
         </table>
         <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
-          Valores monetários em milhares de R$ (mil). *Margem expressa em % da receita bruta.
+          Valores monetários em milhares de R$ (mil).
+          {hasPercent ? " *Margem expressa em % da receita bruta." : ""}
+          {footnotes.map((t) => ` *${t}`).join("")}
         </div>
       </div>
     </section>

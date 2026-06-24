@@ -58,6 +58,9 @@ interface ApiPrevistoRealizado {
   realizado: number | null;
   previsto: number | null;
   unidade: "currency" | "percent" | "number";
+  // Agrupamento/nota opcionais (templates com tabela agrupada, ex.: Village).
+  group?: string;
+  footnote?: string;
 }
 
 interface ApiComposicao {
@@ -245,6 +248,8 @@ function mapPrevistoRealizadoItem(
     realizado: (item.realizado ?? 0) / scale,
     previsto: (item.previsto ?? 0) / scale,
     unidade: isPercent ? "%" : "mil",
+    group: item.group,
+    footnote: item.footnote,
   };
 }
 
