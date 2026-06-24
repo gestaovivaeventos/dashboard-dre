@@ -2,18 +2,26 @@ import {
   OnePageReportSchema,
   type OnePageReport,
 } from "@/lib/financeiro/relatorios/one-page-schema";
+import type { ReportTemplateId } from "@/lib/financeiro/relatorios/templates/report-template-types";
 
 // ============================================================================
-// Mock de analysis usado SOMENTE pela rota dev-only
-// `/api/dev/intelligence/one-page-no-ai`. Permite validar o fluxo visual com
+// Mocks de analysis usados SOMENTE pela rota dev-only
+// `/api/dev/intelligence/one-page-no-ai`. Permitem validar o fluxo visual com
 // dados financeiros reais e analise mockada — sem consumir creditos da
 // OpenAI.
 //
-// O objeto e validado contra `OnePageReportSchema` na carga deste modulo
+// IMPORTANTE: o mock RESPEITA o template da empresa. O mock de Franquias Viva
+// (com VVR/FEE) NUNCA aparece para empresas do grupo Feat/Eventos — cada uma
+// tem um mock proprio, com texto conectado ao seu modelo de negocio e SEM
+// qualquer mencao a VVR, FEE, fundos, sobrevivencia de caixa ou franquias.
+// Use `resolveMockAnalysis(templateId)` para obter o mock correto.
+//
+// Cada objeto e validado contra `OnePageReportSchema` na carga deste modulo
 // (lanca em build/import time se algum campo divergir do schema). Garante
 // que o componente sempre receba algo compatível com a IA real.
 // ============================================================================
 
+// ── Mock Franquias Viva (INTOCADO) — com VVR/FEE, so para o segmento Viva ────
 const RAW_MOCK: OnePageReport = {
   statusGeral: "Boa",
   notaGeral: 78,
@@ -112,5 +120,230 @@ const RAW_MOCK: OnePageReport = {
   ],
 };
 
-// Validacao na carga do modulo. Se o mock divergir do schema, lanca aqui.
-export const MOCK_ANALYSIS: OnePageReport = OnePageReportSchema.parse(RAW_MOCK);
+// ── Leitura por indicador comum aos mocks NÃO-Viva (núcleo DRE puro) ─────────
+// Apenas os 4 indicadores estruturais — SEM FEE/VVR. Reutilizada pelos mocks
+// genérico e das empresas do grupo Feat/Eventos.
+const CORE_LEITURA: OnePageReport["leituraPorIndicador"] = [
+  {
+    indicador: "Receita Operacional Bruta",
+    analise: "Receita comparada ao orçamento do período (dado mockado de teste visual).",
+    classificacao: "Positivo",
+  },
+  {
+    indicador: "Despesas Operacionais",
+    analise: "Despesas comparadas ao orçamento do período (dado mockado de teste visual).",
+    classificacao: "Atenção",
+  },
+  {
+    indicador: "Resultado do Exercicio",
+    analise: "Resultado do período (dado mockado de teste visual).",
+    classificacao: "Positivo",
+  },
+  {
+    indicador: "Margem",
+    analise: "Margem do período (dado mockado de teste visual).",
+    classificacao: "Atenção",
+  },
+];
+
+// Construtor de mock genérico/individual NÃO-Viva. Recebe textos próprios da
+// empresa, mantendo a estrutura validada pelo schema. NUNCA referencia
+// VVR/FEE/fundos/franquias.
+function buildCoreMock(args: {
+  resumo: string;
+  diagnostico: string;
+  acoes: OnePageReport["acoesRecomendadas"];
+}): OnePageReport {
+  return {
+    statusGeral: "Boa",
+    notaGeral: 75,
+    resumoExecutivo: args.resumo,
+    diagnosticoPrincipal: args.diagnostico,
+    destaques: [
+      {
+        titulo: "Receita dentro do esperado",
+        descricao:
+          "Receita do período comparada ao orçamento (dado mockado de teste visual).",
+        impacto: "Médio",
+      },
+      {
+        titulo: "Resultado positivo no período",
+        descricao:
+          "Resultado fechou no positivo (dado mockado de teste visual).",
+        impacto: "Médio",
+      },
+    ],
+    pontosAtencao: [
+      {
+        titulo: "Despesas operacionais",
+        descricao:
+          "Monitorar despesas operacionais frente à receita do período.",
+        risco: "Médio",
+      },
+      {
+        titulo: "Margem do período",
+        descricao:
+          "Acompanhar a margem nos próximos meses para evitar deterioração.",
+        risco: "Baixo",
+      },
+    ],
+    acoesRecomendadas: args.acoes,
+    leituraPorIndicador: CORE_LEITURA,
+  };
+}
+
+// ── Mock genérico (Real Estate / fallback) — núcleo DRE puro, sem Viva ───────
+const GENERIC_MOCK = buildCoreMock({
+  resumo:
+    "Relatório de teste gerado sem IA, usando dados financeiros reais e análise mockada para validação visual.",
+  diagnostico:
+    "Relatório de teste gerado sem IA, usando dados financeiros reais e análise mockada para validação visual.",
+  acoes: [
+    {
+      acao: "Revisar despesas operacionais com maior desvio",
+      justificativa: "Despesas comparadas ao orçamento do período.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+    {
+      acao: "Monitorar a margem nos próximos períodos",
+      justificativa: "Margem do período exige acompanhamento mensal.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Financeiro",
+    },
+  ],
+});
+
+// ── Mock Case Shows (agenciamento / BV) ──────────────────────────────────────
+const CASE_SHOWS_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Case Shows. A geração de receita depende do volume de contratos intermediados e do BV apurado no fechamento dos contratos.",
+  diagnostico:
+    "A receita da Case Shows está ligada ao BV apurado nos fechamentos. Vale acompanhar a evolução dos contratos fechados e a previsibilidade das entradas dos contratos em negociação.",
+  acoes: [
+    {
+      acao: "Acompanhar o volume de contratos fechados e os BVs a receber",
+      justificativa: "A receita do período depende do BV apurado nos fechamentos.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Comercial",
+    },
+    {
+      acao: "Monitorar despesas operacionais frente à receita de BV",
+      justificativa: "Manter as despesas proporcionais ao volume de receita gerado.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+  ],
+});
+
+// ── Mock Feat Produções (margem por fechamento de eventos) ───────────────────
+const FEAT_PRODUCOES_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Feat Produções. O resultado deve ser lido considerando o estágio de fechamento dos eventos: projetos realizados ainda sem margem apurada podem deixar o resultado do mês incompleto.",
+  diagnostico:
+    "O resultado do período pode não refletir integralmente os eventos realizados caso existam fechamentos pendentes de apuração de margem. Vale acompanhar o status de fechamento dos projetos.",
+  acoes: [
+    {
+      acao: "Verificar o status de fechamento dos projetos/eventos",
+      justificativa:
+        "Fechamentos pendentes podem deixar a margem do mês ainda não reconhecida no DRE.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Operação",
+    },
+    {
+      acao: "Monitorar custos, impostos e despesas operacionais",
+      justificativa: "Avaliar a pressão das despesas sobre o resultado do período.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+  ],
+});
+
+// ── Mock Sirena (salão de eventos — locação) ─────────────────────────────────
+const SIRENA_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Sirena. O desempenho do salão está ligado à locação do espaço e à ocupação da agenda. A evolução das datas vendidas ajuda a explicar a variação da receita.",
+  diagnostico:
+    "A análise da Sirena deve considerar a ocupação da agenda e a receita de locação do espaço. Vale acompanhar as datas vendidas para explicar a variação da receita ao longo dos meses.",
+  acoes: [
+    {
+      acao: "Acompanhar a ocupação da agenda e as datas vendidas",
+      justificativa:
+        "A receita de locação está diretamente ligada à ocupação da agenda.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Comercial",
+    },
+    {
+      acao: "Controlar custos operacionais e de manutenção do salão",
+      justificativa: "Manter os custos fixos proporcionais à receita gerada.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Operação",
+    },
+  ],
+});
+
+// ── Mock Terrazzo (salão de eventos — locação) ───────────────────────────────
+const TERRAZZO_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Terrazzo. O desempenho do salão está ligado à locação do espaço e à ocupação da agenda. O controle dos custos operacionais ajuda a explicar a variação do resultado.",
+  diagnostico:
+    "A análise do Terrazzo deve considerar a ocupação da agenda e a receita de locação do espaço. Vale acompanhar as datas vendidas e os custos operacionais ao longo dos meses.",
+  acoes: [
+    {
+      acao: "Acompanhar a ocupação da agenda e as datas vendidas",
+      justificativa:
+        "A receita de locação está diretamente ligada à ocupação da agenda.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Comercial",
+    },
+    {
+      acao: "Controlar custos operacionais e de manutenção do salão",
+      justificativa: "Manter os custos fixos compatíveis com o nível de receita.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Operação",
+    },
+  ],
+});
+
+// Validacao na carga do modulo. Se algum mock divergir do schema, lanca aqui.
+const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
+  "franquias-viva": OnePageReportSchema.parse(RAW_MOCK),
+  generic: OnePageReportSchema.parse(GENERIC_MOCK),
+  "real-estate-sgx": OnePageReportSchema.parse(GENERIC_MOCK),
+  "real-estate-village": OnePageReportSchema.parse(GENERIC_MOCK),
+  "real-estate-salvaterra-condominio": OnePageReportSchema.parse(GENERIC_MOCK),
+  "real-estate-salvaterra-estacionamento": OnePageReportSchema.parse(GENERIC_MOCK),
+  "feat-producoes": OnePageReportSchema.parse(FEAT_PRODUCOES_MOCK),
+  "case-shows": OnePageReportSchema.parse(CASE_SHOWS_MOCK),
+  sirena: OnePageReportSchema.parse(SIRENA_MOCK),
+  terrazzo: OnePageReportSchema.parse(TERRAZZO_MOCK),
+};
+
+/**
+ * Mock de analysis APROPRIADO ao template da empresa. Franquias Viva mantém o
+ * mock historico (com VVR/FEE); os demais usam mocks de núcleo DRE puro, e as
+ * empresas do grupo Feat/Eventos têm texto conectado ao próprio negócio — sem
+ * qualquer menção a VVR/FEE/fundos/franquias.
+ */
+export function resolveMockAnalysis(
+  templateId: ReportTemplateId | string | undefined,
+): OnePageReport {
+  if (templateId && templateId in MOCKS_BY_TEMPLATE) {
+    return MOCKS_BY_TEMPLATE[templateId as ReportTemplateId];
+  }
+  return MOCKS_BY_TEMPLATE.generic;
+}
+
+// Compatibilidade: callers antigos que importavam o mock unico continuam
+// funcionando — o default e o mock Franquias Viva (segmento historico da base).
+export const MOCK_ANALYSIS: OnePageReport = MOCKS_BY_TEMPLATE["franquias-viva"];

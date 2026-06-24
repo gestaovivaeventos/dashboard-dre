@@ -1,9 +1,13 @@
+import { caseShowsTemplate } from "./case-shows-template";
+import { featProducoesTemplate } from "./feat-producoes-template";
 import { franquiasVivaTemplate } from "./franquias-viva-template";
 import { genericTemplate } from "./generic-template";
 import { realEstateSalvaterraCondominioTemplate } from "./real-estate-salvaterra-condominio-template";
 import { realEstateSalvaterraEstacionamentoTemplate } from "./real-estate-salvaterra-estacionamento-template";
 import { realEstateSgxTemplate } from "./real-estate-sgx-template";
 import { realEstateVillageTemplate } from "./real-estate-village-template";
+import { sirenaTemplate } from "./sirena-template";
+import { terrazzoTemplate } from "./terrazzo-template";
 import type { ReportTemplate, TemplateMatchContext } from "./report-template-types";
 
 // ============================================================================
@@ -18,6 +22,11 @@ export const REPORT_TEMPLATES: readonly ReportTemplate[] = [
   realEstateVillageTemplate,
   realEstateSalvaterraEstacionamentoTemplate,
   realEstateSalvaterraCondominioTemplate,
+  // Grupo Feat / Eventos — cada empresa com contexto de negócio próprio.
+  featProducoesTemplate,
+  caseShowsTemplate,
+  sirenaTemplate,
+  terrazzoTemplate,
   franquiasVivaTemplate,
   genericTemplate,
 ];

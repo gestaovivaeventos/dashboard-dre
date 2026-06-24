@@ -24,7 +24,12 @@ export type ReportTemplateId =
   | "real-estate-sgx"
   | "real-estate-village"
   | "real-estate-salvaterra-condominio"
-  | "real-estate-salvaterra-estacionamento";
+  | "real-estate-salvaterra-estacionamento"
+  // ── Grupo Feat / Eventos (cada empresa com contexto de negócio próprio) ────
+  | "feat-producoes"
+  | "case-shows"
+  | "sirena"
+  | "terrazzo";
 
 /** Contexto usado para casar uma empresa a um template. */
 export interface TemplateMatchContext {

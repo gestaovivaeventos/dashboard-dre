@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { saveOnePageHistory } from "@/lib/financeiro/relatorios/one-page-history";
-import { MOCK_ANALYSIS } from "@/lib/financeiro/relatorios/one-page-mock-analysis";
+import { resolveMockAnalysis } from "@/lib/financeiro/relatorios/one-page-mock-analysis";
 import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
 
 // ============================================================================
@@ -76,7 +76,11 @@ export async function POST(request: Request) {
   }
 
   // ── Devolve payload + analysis mockada (sem chamar IA) ──────────────────
-  const responseBody = { analysis: MOCK_ANALYSIS, ...result.payload };
+  // O mock RESPEITA o template resolvido pela empresa: Franquias Viva mantém o
+  // mock historico (VVR/FEE); empresas do grupo Feat/Eventos recebem um mock
+  // proprio do seu negocio, SEM texto de VVR/FEE/fundos/franquias.
+  const analysis = resolveMockAnalysis(result.payload.template.id);
+  const responseBody = { analysis, ...result.payload };
   // Tambem salvamos no historico (best-effort). Em prod a rota nem existe
   // (404 acima), entao essa entrada so aparece em dev.
   await saveOnePageHistory({

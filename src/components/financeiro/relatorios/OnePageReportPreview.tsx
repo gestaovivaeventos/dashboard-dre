@@ -884,6 +884,32 @@ function KpisSaude({
 
 // ─── 5a. Acumulado do ano (barras horizontais) ───────────────────────────────
 
+// Tick custom do eixo Y (categorias): ancora o rótulo — Receita / Despesas /
+// Resultado — à ESQUERDA, no limite da área do gráfico, para não se sobrepor
+// aos números das barras. Sem isso, em valores negativos (ex.: Resultado) os
+// rótulos numéricos ficam por cima do texto da categoria.
+interface CategoryTickProps {
+  x?: number | string;
+  y?: number | string;
+  payload?: { value?: string | number };
+}
+function renderAcumuladoYTick(props: CategoryTickProps) {
+  const ny = toNum(props.y);
+  if (ny === null) return null;
+  const value = props.payload?.value ?? "";
+  return (
+    <text
+      x={0}
+      y={ny}
+      dy={4}
+      textAnchor="start"
+      style={{ fontSize: 12, fill: C.body, fontFamily: FONT_SANS }}
+    >
+      {String(value)}
+    </text>
+  );
+}
+
 function GraficoAcumulado({
   items,
   accent,
@@ -932,7 +958,7 @@ function GraficoAcumulado({
               <YAxis
                 type="category"
                 dataKey="indicador"
-                tick={{ fontSize: 12, fill: C.body }}
+                tick={renderAcumuladoYTick}
                 width={84}
                 axisLine={false}
                 tickLine={false}
