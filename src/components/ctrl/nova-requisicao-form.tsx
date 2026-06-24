@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
 import { isValidBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
+import { earliestDueDateBRT, formatBR } from "@/lib/ctrl/business-days";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
@@ -272,18 +273,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     return isNaN(n) ? 0 : n;
   }, [amountStr]);
 
-  // Minimum allowed due date. If now > 12:00, the earliest acceptable
-  // date is tomorrow (operations team can't process same-day requests
-  // submitted after lunch).
-  const minDueDate = useMemo(() => {
-    const base = new Date(now);
-    if (base.getHours() >= 12) base.setDate(base.getDate() + 1);
-    const yyyy = base.getFullYear();
-    const mm = String(base.getMonth() + 1).padStart(2, "0");
-    const dd = String(base.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Vencimento mínimo permitido (horário de Brasília): até o meio-dia pode ser
+  // o mesmo dia; após o meio-dia, só a partir do próximo dia útil. Dia útil
+  // ignora fim de semana e feriados bancários nacionais.
+  const minDueDate = useMemo(() => earliestDueDateBRT(), []);
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) ?? null,
@@ -412,13 +405,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     }
 
     // Defensive due-date check: HTML `min` is enforced by most browsers but
-    // some mobile webviews ignore it. Belt + suspenders.
+    // some mobile webviews ignore it. Belt + suspenders. A data mínima já
+    // embute a regra do cutoff de meio-dia (Brasília) + próximo dia útil.
     if (dueDate && dueDate < minDueDate) {
-      const isAfterNoon = new Date(now).getHours() >= 12;
       setError(
-        isAfterNoon
-          ? "Como o horário já passou das 12:00, a data de vencimento deve ser a partir de amanhã."
-          : "A data de vencimento não pode ser anterior a hoje.",
+        `A data de vencimento deve ser a partir de ${formatBR(minDueDate)}. ` +
+          "Solicitações feitas após o meio-dia (horário de Brasília) só podem vencer a partir do próximo dia útil.",
       );
       return;
     }

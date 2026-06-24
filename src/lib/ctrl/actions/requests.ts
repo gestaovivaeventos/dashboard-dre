@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { earliestDueDateBRT, formatBR } from "@/lib/ctrl/business-days";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import type { CtrlRequestStatus } from "@/lib/supabase/types";
 
@@ -255,6 +256,17 @@ export async function createRequest(data: CreateRequestInput) {
   }
   if (data.reference_month < 1 || data.reference_month > 12) {
     return { error: "Mês de referência inválido." };
+  }
+
+  // Cutoff de meio-dia (Brasília): até o meio-dia pode vencer no mesmo dia;
+  // após o meio-dia, só a partir do próximo dia útil. Regra dura no servidor.
+  if (data.due_date) {
+    const earliest = earliestDueDateBRT();
+    if (data.due_date < earliest) {
+      return {
+        error: `A data de vencimento não pode ser anterior a ${formatBR(earliest)}. Solicitações feitas após o meio-dia (horário de Brasília) só podem vencer a partir do próximo dia útil.`,
+      };
+    }
   }
 
   // If supplier is pending, create request in waiting state
