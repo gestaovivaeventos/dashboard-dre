@@ -149,12 +149,27 @@ export const realEstateVillageTemplate: ReportTemplate = {
         footnote: "Resultado Ajustado: resultado desconsiderando os reembolsos.",
       },
     ],
-    // Histórico = Gap de Reembolso derivado (Reembolsos 1.2 − Custos 5.1), 6 meses.
-    historicoCodes: ["1.2"],
-    historicoMinus: ["5.1"],
-    historicoTitle: "Histórico do Gap de Reembolso",
+    // Gráficos lado a lado (substituem o histórico em linha):
+    //  - COLUNAS verticais: Gap de Reembolso ACUMULADO DO ANO (Jan→mês de
+    //    análise), só realizado. Valor/mês = Reembolsos (1.2) − Custos (5.1).
+    //  - LINHAS: Resultado Final dos últimos 6 meses, 3 séries — Final
+    //    realizado (11), Resultado Ajustado (11+5.1−1.2) e Final orçado (11).
+    barsChart: {
+      title: "Gap de Reembolso (acumulado do ano)",
+      codes: ["1.2"],
+      minus: ["5.1"],
+    },
+    linesChart: {
+      title: "Resultado Final — últimos 6 meses",
+      series: [
+        { label: "Resultado Final realizado", codes: ["11"] },
+        { label: "Resultado Ajustado", codes: ["11", "5.1"], minus: ["1.2"] },
+        { label: "Resultado Final orçado", codes: ["11"], source: "budget" },
+      ],
+    },
     // Mantém semáforo (Village o usa, ao contrário da SGX). Oculta VVR,
-    // Acumulado do Ano e Composição.
-    enabledBlocks: ["diagnostico", "previstoRealizado", "semaforo", "historico", "alertas", "acoes"],
+    // Acumulado do Ano, Composição e o histórico padrão (substituído pelos
+    // dois gráficos acima).
+    enabledBlocks: ["diagnostico", "previstoRealizado", "semaforo", "alertas", "acoes"],
   },
 };

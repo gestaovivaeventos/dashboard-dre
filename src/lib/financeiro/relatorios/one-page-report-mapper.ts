@@ -105,6 +105,16 @@ export interface OnePageApiResponse {
   historicoResultado?: ApiHistorico[];
   acumuladoAno?: ApiPrevistoRealizado[];
   vvrSerieAnual?: ApiVvrSerieAnual[];
+  // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
+  // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
+  barsSerie?: { mes: string; valor: number | null }[];
+  barsTitle?: string;
+  barsAcum?: number | null;
+  linesSerie?: { mes: string; values: (number | null)[] }[];
+  linesSeriesLabels?: string[];
+  linesTitle?: string;
+  linesAcum?: (number | null)[];
+  linesAcumBaseIndex?: number;
   error?: string;
 }
 
@@ -547,5 +557,23 @@ export function mapOnePageApiResponseToPreviewData(
     // cards de resultado/indicador próprios — não os de "Saúde financeira &
     // caixa" da Viva; um título neutro evita rótulo enganoso.
     kpiSectionTitle: customKpis ? "Indicadores do mês" : undefined,
+    // Gráficos extras por template (Village): R$ → "mil" (÷1000).
+    barsSerie: response.barsSerie?.map((p) => ({
+      mes: p.mes,
+      valor: p.valor === null ? null : p.valor / 1000,
+    })),
+    barsTitle: response.barsTitle,
+    barsAcum:
+      response.barsAcum === null || response.barsAcum === undefined
+        ? response.barsAcum
+        : response.barsAcum / 1000,
+    linesSerie: response.linesSerie?.map((p) => ({
+      mes: p.mes,
+      values: p.values.map((v) => (v === null ? null : v / 1000)),
+    })),
+    linesSeriesLabels: response.linesSeriesLabels,
+    linesTitle: response.linesTitle,
+    linesAcum: response.linesAcum?.map((v) => (v === null ? null : v / 1000)),
+    linesAcumBaseIndex: response.linesAcumBaseIndex,
   };
 }

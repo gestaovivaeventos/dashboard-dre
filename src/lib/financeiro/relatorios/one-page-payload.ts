@@ -86,6 +86,18 @@ export interface HistoricoPayload {
   realizado: number | null;
 }
 
+// Gráfico de colunas (acumulado do ano, só realizado). Ex.: Village — Gap.
+export interface BarSeriePayload {
+  mes: string;
+  valor: number | null;
+}
+
+// Gráfico de linhas multi-série (6 meses). `values` alinha com `linesSeriesLabels`.
+export interface MultiLineSeriePayload {
+  mes: string;
+  values: (number | null)[];
+}
+
 // Serie temporal do VVR de Jan/ano(dateTo) ate o mes(dateTo). Realizado vira
 // barras no chart; meta vira linha sobreposta.
 export interface VvrSerieAnualPayload {
@@ -119,6 +131,20 @@ export interface OnePagePayload {
   // somados de Jan/ano(dateTo) ate o mes(dateTo).
   acumuladoAno: PrevistoRealizadoPayload[];
   vvrSerieAnual: VvrSerieAnualPayload[];
+  // Gráficos extras por template (ex.: Village). Ausência = não renderiza.
+  // `barsChart`: colunas do acumulado do ano (Jan→mês de análise, realizado).
+  // `linesChart`: linhas dos últimos 6 meses (N séries; labels separados).
+  barsSerie?: BarSeriePayload[];
+  barsTitle?: string;
+  // Acumulado do ano (Jan→análise) do gráfico de colunas (ex.: Gap total).
+  barsAcum?: number | null;
+  linesSerie?: MultiLineSeriePayload[];
+  linesSeriesLabels?: string[];
+  linesTitle?: string;
+  // Acumulado do ano por série do gráfico de linhas (3 barras horizontais).
+  linesAcum?: (number | null)[];
+  // Índice da série orçada — baseline da variação % das demais barras.
+  linesAcumBaseIndex?: number;
 }
 
 export type BuildOnePagePayloadResult =
@@ -822,6 +848,11 @@ export async function buildOnePagePayload(
   const histPlusCodes = template.report?.historicoCodes ?? [historicoCode];
   const histMinusCodes = template.report?.historicoMinus ?? [];
   const histExists = histPlusCodes.some((c) => accounts.some((a) => a.code === c));
+  // Templates que ocultam o bloco "historico" (ex.: Village, que usa
+  // barsChart/linesChart no lugar) não precisam computá-lo — economiza RPCs.
+  const wantHistorico =
+    !template.report?.enabledBlocks ||
+    template.report.enabledBlocks.includes("historico");
   const histValue = (
     rows: ReturnType<typeof buildDashboardRows>["rows"],
   ): number => {
@@ -831,7 +862,7 @@ export async function buildOnePagePayload(
   };
   let historicoResultado: HistoricoPayload[] = [];
 
-  if (histExists) {
+  if (histExists && wantHistorico) {
     const months: Array<{ year: number; month: number }> = [];
     for (let i = 5; i >= 0; i--) {
       let y = toYear;
@@ -934,6 +965,146 @@ export async function buildOnePagePayload(
 
       return { mes, previsto, realizado };
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // 9b. Gráficos extras por template (ex.: Village): COLUNAS do acumulado do
+  //     ano (barsChart — só realizado, Jan→mês de análise) + LINHAS dos últimos
+  //     6 meses (linesChart — N séries realizado/orçado/derivado). Reaproveita
+  //     o padrão do histórico: 1 RPC por mês + buildDashboardRows; calcula o
+  //     union dos dois ranges para não buscar o mês duas vezes.
+  // -------------------------------------------------------------------------
+  const barsCfg = template.report?.barsChart;
+  const linesCfg = template.report?.linesChart;
+  let barsSerie: BarSeriePayload[] | undefined;
+  let barsTitle: string | undefined;
+  let barsAcum: number | null | undefined; // gap acumulado do ano (Jan→análise)
+  let linesSerie: MultiLineSeriePayload[] | undefined;
+  let linesSeriesLabels: string[] | undefined;
+  let linesTitle: string | undefined;
+  let linesAcum: (number | null)[] | undefined; // acum. do ano por série
+  let linesAcumBaseIndex: number | undefined; // índice da série orçada (baseline da variação)
+
+  if (barsCfg || linesCfg) {
+    const analysisIdx = toYear * 12 + (toMonth - 1);
+    const startIdx = Math.min(toYear * 12, analysisIdx - 5); // Jan(ano) ou −5 meses
+    const unionMonths: Array<{ year: number; month: number }> = [];
+    for (let i = startIdx; i <= analysisIdx; i++) {
+      unionMonths.push({ year: Math.floor(i / 12), month: (i % 12) + 1 });
+    }
+    const mKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
+    const mLabel = (y: number, m: number) =>
+      `${MONTH_NAMES_SHORT[m - 1]}/${String(y).slice(-2)}`;
+
+    const uMinYear = unionMonths[0].year;
+    const uMaxYear = unionMonths[unionMonths.length - 1].year;
+    const { data: uBudgetRows } = await supabase
+      .from("budget_entries")
+      .select("dre_account_id, amount, year, month")
+      .eq("company_id", companyId)
+      .gte("year", uMinYear)
+      .lte("year", uMaxYear);
+    const uValid = new Set(unionMonths.map((m) => mKey(m.year, m.month)));
+    const uBudgetMaps = new Map<string, Map<string, number>>();
+    ((uBudgetRows ?? []) as BudgetRow[]).forEach((b) => {
+      const key = mKey(b.year, b.month);
+      if (!uValid.has(key)) return;
+      let mm = uBudgetMaps.get(key);
+      if (!mm) {
+        mm = new Map();
+        uBudgetMaps.set(key, mm);
+      }
+      const sid = translateToScopedId(b.dre_account_id);
+      if (!sid) return;
+      mm.set(sid, (mm.get(sid) ?? 0) + Number(b.amount));
+    });
+
+    const uRealized = await Promise.all(
+      unionMonths.map(async (m) => {
+        const lastDay = new Date(Date.UTC(m.year, m.month, 0)).getUTCDate();
+        const mm = String(m.month).padStart(2, "0");
+        const { data, error } = await supabase.rpc("dashboard_dre_aggregate", {
+          p_company_ids: [companyId],
+          p_date_from: `${m.year}-${mm}-01`,
+          p_date_to: `${m.year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+        });
+        const key = mKey(m.year, m.month);
+        if (error || !data || (data as AggregateRow[]).length === 0) {
+          return { key, map: null as Map<string, number> | null };
+        }
+        const map = new Map<string, number>();
+        (data as AggregateRow[]).forEach((r) => {
+          const sid = translateToScopedId(r.dre_account_id);
+          if (sid) map.set(sid, (map.get(sid) ?? 0) + Number(r.amount));
+        });
+        return { key, map };
+      }),
+    );
+
+    type Rows = ReturnType<typeof buildDashboardRows>["rows"];
+    const builtByKey = new Map<string, { realized: Rows | null; budget: Rows | null }>();
+    for (const entry of uRealized) {
+      const realized =
+        entry.map === null
+          ? null
+          : buildDashboardRows(accounts, entry.map, {
+              negateChildCodesInSummary: custosNegation,
+            }).rows;
+      const bMap = uBudgetMaps.get(entry.key);
+      const budget =
+        !bMap || bMap.size === 0
+          ? null
+          : buildDashboardRows(accounts, bMap, {
+              negateChildCodesInSummary: custosNegation,
+            }).rows;
+      builtByKey.set(entry.key, { realized, budget });
+    }
+    const sumRows = (rows: Rows, codes: string[]) =>
+      codes.reduce((a, c) => a + (rows.find((r) => r.code === c)?.value ?? 0), 0);
+    const deriveVal = (rows: Rows | null, codes: string[], minus?: string[]): number | null =>
+      rows ? sumRows(rows, codes) - sumRows(rows, minus ?? []) : null;
+
+    // Meses do acumulado do ano (Jan do ano de análise → mês de análise).
+    const ytdMonths = unionMonths.filter((m) => m.year === toYear);
+
+    if (barsCfg) {
+      barsSerie = ytdMonths.map((m) => {
+        const { realized } = builtByKey.get(mKey(m.year, m.month)) ?? { realized: null };
+        return {
+          mes: mLabel(m.year, m.month),
+          valor: deriveVal(realized, barsCfg.codes, barsCfg.minus),
+        };
+      });
+      barsTitle = barsCfg.title;
+      // Acumulado do ano = soma de todos os gaps mensais (Jan→análise).
+      barsAcum = ytdMonths.reduce((acc, m) => {
+        const { realized } = builtByKey.get(mKey(m.year, m.month)) ?? { realized: null };
+        return acc + (deriveVal(realized, barsCfg.codes, barsCfg.minus) ?? 0);
+      }, 0);
+    }
+
+    if (linesCfg) {
+      const lineMonths = unionMonths.slice(-6);
+      linesSerie = lineMonths.map((m) => {
+        const built = builtByKey.get(mKey(m.year, m.month)) ?? { realized: null, budget: null };
+        const values = linesCfg.series.map((s) =>
+          deriveVal(s.source === "budget" ? built.budget : built.realized, s.codes, s.minus),
+        );
+        return { mes: mLabel(m.year, m.month), values };
+      });
+      linesSeriesLabels = linesCfg.series.map((s) => s.label);
+      linesTitle = linesCfg.title;
+      // Acumulado do ano por série (Jan→análise) — alimenta as 3 barras horizontais.
+      linesAcum = linesCfg.series.map((s) =>
+        ytdMonths.reduce((acc, m) => {
+          const built = builtByKey.get(mKey(m.year, m.month)) ?? { realized: null, budget: null };
+          return acc + (deriveVal(s.source === "budget" ? built.budget : built.realized, s.codes, s.minus) ?? 0);
+        }, 0),
+      );
+      // Série orçada (source "budget") = baseline da variação das demais.
+      const baseIdx = linesCfg.series.findIndex((s) => s.source === "budget");
+      linesAcumBaseIndex = baseIdx >= 0 ? baseIdx : undefined;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1206,6 +1377,15 @@ export async function buildOnePagePayload(
       acumuladoAno,
       // Série anual de VVR só faz sentido para quem tem VVR (Franquias Viva).
       vvrSerieAnual: template.capabilities.vvrFee ? vvrSerieAnual : [],
+      // Gráficos extras por template (ex.: Village). undefined p/ os demais.
+      barsSerie,
+      barsTitle,
+      barsAcum,
+      linesSerie,
+      linesSeriesLabels,
+      linesTitle,
+      linesAcum,
+      linesAcumBaseIndex,
     },
   };
 }

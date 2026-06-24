@@ -205,6 +205,28 @@ export interface TemplateReportConfig {
   enabledBlocks?: ReportBlockKey[];
   /** Nº de colunas da grade de KPIs (default 4). Ex.: SGX usa 3 (3 + margem). */
   kpiColumns?: number;
+  /**
+   * Gráfico de COLUNAS verticais — acumulado do ano (janeiro do ano de análise
+   * → mês de análise), só valores REALIZADOS. Valor por mês = Σ(codes) −
+   * Σ(minus). Ex.: Village — Gap de Reembolso (1.2 − 5.1).
+   */
+  barsChart?: { title: string; codes: string[]; minus?: string[] };
+  /**
+   * Gráfico de LINHAS — últimos 6 meses (relativo ao mês de análise), com N
+   * séries. Cada série = Σ(codes) − Σ(minus) sobre o realizado (`source:
+   * "realized"`, default) ou o orçado (`source: "budget"`). Ex.: Village —
+   * Resultado Final realizado (11), Resultado Ajustado (11+5.1−1.2), Resultado
+   * Final orçado (11/budget). Renderizado ao lado do `barsChart`.
+   */
+  linesChart?: {
+    title: string;
+    series: Array<{
+      label: string;
+      codes: string[];
+      minus?: string[];
+      source?: "realized" | "budget";
+    }>;
+  };
 }
 
 export interface ReportTemplate {
