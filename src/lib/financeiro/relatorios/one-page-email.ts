@@ -423,13 +423,13 @@ export function renderOnePageEmail({
         acumMargem.realizado,
       )} · orçado ${fmtItemValue(acumMargem, acumMargem.previsto)}</div>`
     : "";
-  const acumulado = `
-    ${sectionTitle("Acumulado do Ano")}
-    <div style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:16px;">
-      <div style="font-family:${FF};font-size:11px;color:${C.sub};margin-bottom:10px;">Janeiro do ano selecionado até o mês de análise — Previsto × Realizado</div>
+  const acumPanel = `
+    <td width="50%" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px;vertical-align:top;">
+      <div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">Acumulado do Ano</div>
+      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o mês de análise — Previsto × Realizado</div>
       ${acumNota}
       ${acumBlocks || `<div style="font-family:${FF};font-size:12px;color:${C.tertiary};">Sem dados acumulados disponíveis.</div>`}
-    </div>`;
+    </td>`;
 
   // 5b. VVR (tabela mensal + acumulado) e 5c. Resultado do exercício (tabela).
   const vvrMonthRows = payload.vvrSerieAnual
@@ -450,30 +450,36 @@ export function renderOnePageEmail({
   const acumReal = payload.vvrSerieAnual.reduce((s, p) => s + (p.realizado ?? 0), 0);
   const acumVvrMax = Math.max(acumMeta, acumReal, 1);
   const acumVvrAcima = acumReal >= acumMeta;
-  const vvrPanel = `
-    <td width="50%" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px;vertical-align:top;">
+  const vvrFull = `
+    <div style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px;">
       <div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">VVR — Realizado × Meta</div>
-      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Jan até o mês de análise.</div>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:left;">Mês</td>
-          <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:right;">Realizado</td>
-          <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:right;">Meta</td>
-        </tr>
-        ${vvrMonthRows}
-      </table>
-      <div style="border-top:1px solid ${C.grid};margin-top:10px;padding-top:10px;">
-        <div style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:${C.sub};margin-bottom:8px;">VVR Acumulado</div>
-        ${barRow("Meta", fmtMil(acumMeta) + " mil", (acumMeta / acumVvrMax) * 100, C.metaAmber, C.body)}
-        ${barRow(
-          "Realizado",
-          fmtMil(acumReal) + " mil",
-          (acumReal / acumVvrMax) * 100,
-          acumVvrAcima ? SEV.positive.text : SEV.critical.text,
-          acumVvrAcima ? SEV.positive.text : SEV.critical.text,
-        )}
-      </div>
-    </td>`;
+      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o mês de análise.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="vertical-align:top;padding-right:14px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:left;">Mês</td>
+              <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:right;">Realizado</td>
+              <td style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.08em;color:${C.sub};padding:0 6px 4px;text-align:right;">Meta</td>
+            </tr>
+            ${vvrMonthRows}
+          </table>
+        </td>
+        <td width="232" style="width:232px;vertical-align:top;">
+          <div style="border:1px solid ${C.grid};border-radius:8px;padding:12px;background:#fafafa;">
+            <div style="font-family:${FF};font-size:9px;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:${C.sub};margin-bottom:8px;">VVR Acumulado</div>
+            ${barRow("Meta", fmtMil(acumMeta) + " mil", (acumMeta / acumVvrMax) * 100, C.metaAmber, C.body)}
+            ${barRow(
+              "Realizado",
+              fmtMil(acumReal) + " mil",
+              (acumReal / acumVvrMax) * 100,
+              acumVvrAcima ? SEV.positive.text : SEV.critical.text,
+              acumVvrAcima ? SEV.positive.text : SEV.critical.text,
+            )}
+          </div>
+        </td>
+      </tr></table>
+    </div>`;
 
   const resultadoMonthRows = payload.historicoResultado
     .map(
@@ -504,7 +510,9 @@ export function renderOnePageEmail({
     </td>`;
   const tendencia = `
     ${sectionTitle("Tendência & Acumulado")}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${vvrPanel}<td style="width:12px;"></td>${resultadoPanel}</tr></table>`;
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${acumPanel}<td style="width:12px;"></td>${resultadoPanel}</tr></table>
+    <div style="height:12px;line-height:12px;font-size:0;">&nbsp;</div>
+    ${vvrFull}`;
 
   // 6. Alertas (pontosAtencao prioritários, depois destaques — máx. 3).
   interface AlertaView {
@@ -617,7 +625,6 @@ export function renderOnePageEmail({
           ${resumo}
           ${desempenho}
           ${saude}
-          ${acumulado}
           ${tendencia}
           ${alertasBlock}
           ${acoesBlock}

@@ -884,18 +884,15 @@ function GraficoAcumulado({
     : null;
 
   return (
-    <section style={{ breakInside: "avoid" }}>
-      <SectionTitle>Acumulado do Ano</SectionTitle>
-      <div style={panelStyle}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ fontSize: 11, color: C.sub }}>
-            Janeiro do ano selecionado até o mês de análise — Previsto × Realizado
-          </span>
-          {margemNota ? (
-            <span style={{ fontSize: 11, color: C.body, fontFamily: FONT_MONO }}>{margemNota}</span>
-          ) : null}
-        </div>
-        <div style={{ height: Math.max(150, data.length * 56), width: "100%" }}>
+    <div style={panelStyle}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>Acumulado do Ano</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: margemNota ? 2 : 6 }}>
+        Janeiro do ano selecionado até o mês de análise — Previsto × Realizado
+      </div>
+      {margemNota ? (
+        <div style={{ fontSize: 10, color: C.body, fontFamily: FONT_MONO, marginBottom: 6 }}>{margemNota}</div>
+      ) : null}
+      <div style={{ height: Math.max(150, data.length * 56), width: "100%" }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data}
@@ -940,8 +937,7 @@ function GraficoAcumulado({
             { color: accent, label: "Realizado" },
           ]}
         />
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -1012,7 +1008,12 @@ function GraficoVVR({
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>VVR — Realizado × Meta</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Janeiro do ano selecionado até o mês de análise.</div>
-      <div style={{ height: 188, width: "100%" }}>
+      <div
+        className="opr-vvr-grid"
+        style={{ display: "grid", gridTemplateColumns: "1fr 232px", gap: 16, alignItems: "stretch" }}
+      >
+        <div>
+          <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 24, right: 16, bottom: 6, left: -6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
@@ -1048,10 +1049,21 @@ function GraficoVVR({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <ChartLegend items={[{ color: accent, label: "Realizado" }, { color: C.metaAmber, label: "Meta" }]} />
+          <ChartLegend items={[{ color: accent, label: "Realizado" }, { color: C.metaAmber, label: "Meta" }]} />
+        </div>
 
-      {/* VVR acumulado */}
-      <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+        {/* VVR acumulado — à direita do gráfico (grade interna 1fr 232px) */}
+        <div
+          style={{
+            border: `1px solid ${C.grid}`,
+            borderRadius: 8,
+            padding: 12,
+            background: "#fafafa",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+          }}
+        >
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <span style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, color: C.sub }}>
             VVR Acumulado
@@ -1068,6 +1080,7 @@ function GraficoVVR({
           valueColor={acumAcima ? SEV.positive.text : SEV.critical.text}
           extra={acumMeta > 0 ? `${fmtNum(pct, 0)}%` : undefined}
         />
+        </div>
       </div>
     </div>
   );
@@ -1332,14 +1345,14 @@ export function OnePageReportPreview({
         <ResumoExecutivo data={data} accent={accentColor} />
         <TabelaDesempenho items={data.previstoRealizado} semaforo={data.semaforo} />
         <KpisSaude kpis={saudeKpis} />
-        <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
-
-        <section style={{ breakInside: "avoid" }}>
+        <section>
           <SectionTitle>Tendência & Acumulado</SectionTitle>
           <div className="opr-charts-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} />
+            <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
             <GraficoResultado points={data.historico} accent={accentColor} />
           </div>
+          <div style={{ height: 12 }} />
+          <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} />
         </section>
 
         <Alertas items={data.alertas} />
