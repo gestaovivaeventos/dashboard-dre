@@ -55,6 +55,26 @@ async function anexarNoOmie(
   }
 }
 
+// Vencimento de um pagamento no cartao de credito (datas ISO YYYY-MM-DD).
+// Fixa o DIA no dia de vencimento da fatura, com clamp para o ultimo dia do mes
+// (ex.: dia 31 em fevereiro -> 28/29). Quando applyOffset=true (pagamento a
+// vista, 1x) aplica a regra de fechamento ja existente: compra a partir do dia
+// 23 -> primeira fatura +2 meses; senao +1. Para parcelas (applyOffset=false) o
+// mes/ano ja vem correto de calculateInstallmentDates na criacao da requisicao.
+function cardDueDateIso(baseIso: string, cardDay: number, applyOffset: boolean): string {
+  const base = new Date(baseIso + "T00:00:00");
+  let month = base.getMonth(); // 0-based
+  let year = base.getFullYear();
+  if (applyOffset) {
+    const total = month + (base.getDate() >= 23 ? 2 : 1);
+    month = total % 12;
+    year += Math.floor(total / 12);
+  }
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const day = Math.min(cardDay, lastDay);
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export async function launchRequestToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>,
@@ -66,7 +86,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, installment_total, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -120,7 +140,7 @@ export async function launchRequestToOmie(
 
   const { data: ccRow } = await supabase
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao")
+    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, cartao_dia_vencimento")
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -219,10 +239,20 @@ export async function launchRequestToOmie(
   let omieCode: number;
 
   // Vencimento: fallback para competência se due_date for nulo
-  const dueDateIso: string =
+  let dueDateIso: string =
     request.due_date ??
     `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
   const emissaoIso = `${request.reference_year}-${String(request.reference_month).padStart(2, "0")}-01`;
+
+  // Cartão de crédito: o vencimento cai no dia da fatura da empresa pagadora.
+  // À vista (1x) aplica a regra de fechamento agora; parcelas já têm o mês
+  // correto da criação e só recebem o dia. Sem dia configurado, mantém a data
+  // original (parcelas no dia 5, 1x na data digitada pelo solicitante).
+  const cartaoDia = ccRow?.cartao_dia_vencimento as number | null | undefined;
+  if (request.payment_method === "cartao_credito" && cartaoDia) {
+    const applyOffset = (Number(request.installment_total) || 1) <= 1;
+    dueDateIso = cardDueDateIso(dueDateIso, Number(cartaoDia), applyOffset);
+  }
 
   // Nº do pedido (Omie) = número da requisição do ControlHub.
   const numeroPedido = String(request.request_number ?? "");

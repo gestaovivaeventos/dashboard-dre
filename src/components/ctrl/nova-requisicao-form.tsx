@@ -1119,7 +1119,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             </div>
             {installments > 1 && (
               <p className="text-xs text-muted-foreground mt-1">
-                Serão criadas {installments} requisições, vencimentos no dia 5 de cada mês.
+                Serão criadas {installments} requisições. Os vencimentos seguem o dia de vencimento do cartão da empresa pagadora (definido no envio para pagamento); o dia 5 é usado quando o cartão não tem dia configurado.
               </p>
             )}
           </div>
