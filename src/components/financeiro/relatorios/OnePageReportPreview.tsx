@@ -954,18 +954,15 @@ function GraficoAcumulado({
     : null;
 
   return (
-    <section style={{ breakInside: "avoid" }}>
-      <SectionTitle>Acumulado do Ano</SectionTitle>
-      <div style={panelStyle}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ fontSize: 11, color: C.sub }}>
-            Janeiro do ano selecionado até o mês de análise — Previsto × Realizado
-          </span>
-          {margemNota ? (
-            <span style={{ fontSize: 11, color: C.body, fontFamily: FONT_MONO }}>{margemNota}</span>
-          ) : null}
-        </div>
-        <div style={{ height: Math.max(150, data.length * 56), width: "100%" }}>
+    <div style={panelStyle}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>Acumulado do Ano</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: margemNota ? 2 : 6 }}>
+        Janeiro do ano selecionado até o mês de análise — Previsto × Realizado
+      </div>
+      {margemNota ? (
+        <div style={{ fontSize: 10, color: C.body, fontFamily: FONT_MONO, marginBottom: 6 }}>{margemNota}</div>
+      ) : null}
+      <div style={{ height: Math.max(150, data.length * 56), width: "100%" }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data}
@@ -1010,8 +1007,7 @@ function GraficoAcumulado({
             { color: accent, label: "Realizado" },
           ]}
         />
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -1082,7 +1078,12 @@ function GraficoVVR({
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>VVR — Realizado × Meta</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Janeiro do ano selecionado até o mês de análise.</div>
-      <div style={{ height: 188, width: "100%" }}>
+      <div
+        className="opr-vvr-grid"
+        style={{ display: "grid", gridTemplateColumns: "1fr 232px", gap: 16, alignItems: "stretch" }}
+      >
+        <div>
+          <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 24, right: 16, bottom: 6, left: -6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.grid} vertical={false} />
@@ -1118,10 +1119,21 @@ function GraficoVVR({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <ChartLegend items={[{ color: accent, label: "Realizado" }, { color: C.metaAmber, label: "Meta" }]} />
+          <ChartLegend items={[{ color: accent, label: "Realizado" }, { color: C.metaAmber, label: "Meta" }]} />
+        </div>
 
-      {/* VVR acumulado */}
-      <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+        {/* VVR acumulado — à direita do gráfico (grade interna 1fr 232px) */}
+        <div
+          style={{
+            border: `1px solid ${C.grid}`,
+            borderRadius: 8,
+            padding: 12,
+            background: "#fafafa",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+          }}
+        >
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
           <span style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, color: C.sub }}>
             VVR Acumulado
@@ -1138,6 +1150,7 @@ function GraficoVVR({
           valueColor={acumAcima ? SEV.positive.text : SEV.critical.text}
           extra={acumMeta > 0 ? `${fmtNum(pct, 0)}%` : undefined}
         />
+        </div>
       </div>
     </div>
   );
@@ -1421,32 +1434,41 @@ export function OnePageReportPreview({
           />
         ) : null}
         <KpisSaude kpis={saudeKpis} columns={data.kpiColumns} title={data.kpiSectionTitle} />
-        {show("acumuladoAno") ? (
-          <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
-        ) : null}
 
-        {showTendencia ? (
-          <section style={{ breakInside: "avoid" }}>
-            {showVvr && showHistorico ? (
-              <SectionTitle>Tendência & Acumulado</SectionTitle>
+        {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho
+            em linha cheia abaixo (evita o aperto do VVR quando o ano avança).
+            Cada gráfico continua condicionado à allowlist de blocos do template. */}
+        {show("acumuladoAno") || showTendencia ? (
+          <section>
+            <SectionTitle>Tendência & Acumulado</SectionTitle>
+            {show("acumuladoAno") || showHistorico ? (
+              <div
+                className="opr-charts-2"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    show("acumuladoAno") && showHistorico ? "1fr 1fr" : "1fr",
+                  gap: 12,
+                }}
+              >
+                {show("acumuladoAno") ? (
+                  <GraficoAcumulado items={data.acumuladoAno} accent={accentColor} />
+                ) : null}
+                {showHistorico ? (
+                  <GraficoResultado
+                    points={data.historico}
+                    accent={accentColor}
+                    title={data.historicoTitle}
+                  />
+                ) : null}
+              </div>
             ) : null}
-            <div
-              className="opr-charts-2"
-              style={{
-                display: "grid",
-                gridTemplateColumns: showVvr && showHistorico ? "1fr 1fr" : "1fr",
-                gap: 12,
-              }}
-            >
-              {showVvr ? <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} /> : null}
-              {showHistorico ? (
-                <GraficoResultado
-                  points={data.historico}
-                  accent={accentColor}
-                  title={data.historicoTitle}
-                />
-              ) : null}
-            </div>
+            {showVvr ? (
+              <>
+                {show("acumuladoAno") || showHistorico ? <div style={{ height: 12 }} /> : null}
+                <GraficoVVR points={data.vvrSerieAnual} accent={accentColor} />
+              </>
+            ) : null}
           </section>
         ) : null}
 

@@ -106,6 +106,7 @@
 @media (max-width: 760px) {
   .opr-page .opr-resumo-grid,
   .opr-page .opr-charts-2,
+  .opr-page .opr-vvr-grid,
   .opr-page .opr-cards-2 {
     grid-template-columns: 1fr !important;
   }
