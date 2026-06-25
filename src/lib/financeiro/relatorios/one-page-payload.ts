@@ -70,6 +70,15 @@ export interface PartnerPerformancePayload {
   totalAcum: number;
 }
 
+// Bloco de BREAKDOWN (ex.: Spot — Composição da Receita, Frete). Cada linha tem
+// valor realizado (em R$; o mapper divide por 1000) e % opcional sobre o total
+// das linhas sem `emphasis`. `key` = ReportBlockKey p/ gating no preview.
+export interface BreakdownBlockPayload {
+  key: string;
+  title: string;
+  rows: Array<{ label: string; value: number; pct: number | null; emphasis: boolean }>;
+}
+
 export interface KpisPayload {
   receita: KpiCardPayload;
   despesas: KpiCardPayload;
@@ -209,6 +218,8 @@ export interface OnePagePayload {
   historicoAcum?: { previsto: number | null; realizado: number | null };
   // Bloco Performance por Parceiro (ex.: Young Med). undefined p/ os demais.
   partnerPerformance?: PartnerPerformancePayload;
+  // Blocos de breakdown (ex.: Spot — composição/frete). undefined p/ os demais.
+  breakdownBlocks?: BreakdownBlockPayload[];
 }
 
 export type BuildOnePagePayloadResult =
@@ -887,6 +898,28 @@ export async function buildOnePagePayload(
           omitComparisonSuffix: true,
         };
       }
+      // Card de FONTE (ex.: Spot "Principal Fonte de Receita"): a fonte de MAIOR
+      // valor realizado entre `fonteSources` + seu % sobre o total das fontes.
+      // Cálculo direto das contas (sem drill-down); estado seguro se sem dados.
+      if (spec.kind === "fonte") {
+        const sources = (spec.fonteSources ?? []).map((s) => ({
+          label: s.label,
+          val: sumRealized(s.codes) - sumRealized(s.minus ?? []),
+        }));
+        const total = sources.reduce((a, s) => a + Math.max(0, s.val), 0);
+        const top = sources.slice().sort((a, b) => b.val - a.val)[0];
+        const pct = top && total > 0 ? (top.val / total) * 100 : null;
+        return {
+          label: spec.label,
+          value: null,
+          formattedValue: top && top.val > 0 ? top.label : "—",
+          variationValue: pct,
+          variationLabel:
+            pct !== null ? `${formatPctFn(pct)} da receita` : "sem dados no período",
+          status: "neutro" as const,
+          omitComparisonSuffix: true,
+        };
+      }
       // Margem (%): razão soma(numerador) / soma(denominador). É um indicador
       // sem comparação com orçado — verde se positiva, vermelho se negativa.
       if (spec.kind === "margem" && spec.ratio) {
@@ -965,6 +998,35 @@ export async function buildOnePagePayload(
       };
     },
   );
+
+  // Blocos de BREAKDOWN (ex.: Spot — Composição da Receita, Frete: Receita ×
+  // Custo Logístico). Cada linha = Σ(codes) − Σ(minus) sobre o realizado; % (se
+  // showPctOfTotal) sobre o total das linhas SEM `emphasis`. Só roda quando o
+  // template define `breakdownBlocks`; ausente p/ os demais (fallback intacto).
+  const breakdownBlocks: BreakdownBlockPayload[] | undefined =
+    template.report?.breakdownBlocks?.map((blk) => {
+      const raw = blk.rows.map((r) => ({
+        label: r.label,
+        value: sumRealized(r.codes) - sumRealized(r.minus ?? []),
+        emphasis: r.emphasis ?? false,
+      }));
+      const total = raw
+        .filter((r) => !r.emphasis)
+        .reduce((acc, r) => acc + Math.max(0, r.value), 0);
+      return {
+        key: blk.key,
+        title: blk.title,
+        rows: raw.map((r) => ({
+          label: r.label,
+          value: r.value,
+          pct:
+            blk.showPctOfTotal && total > 0 && !r.emphasis
+              ? (r.value / total) * 100
+              : null,
+          emphasis: r.emphasis,
+        })),
+      };
+    });
 
   const previstoRealizado: PrevistoRealizadoPayload[] = [
     {
@@ -1330,32 +1392,37 @@ export async function buildOnePagePayload(
   const cg = template.report?.consolidatedGroup;
   if (cg) {
     type AggRow = { dre_account_id: string; amount: number | string | null };
-    const { data: groupComps } = await supabase
-      .from("companies")
-      .select("id,name")
-      .ilike("name", `%${cg.matchName}%`)
-      .eq("active", true)
-      .order("name");
-    const groupList = (groupComps ?? []) as Array<{ id: string; name: string }>;
+    // Empresas do grupo: por NOMES EXATOS ordenados (matchNames, ex.: Spot+
+    // Express) ou por ILIKE de um único nome (matchName, ex.: família Salvaterra).
+    let groupList: Array<{ id: string; name: string }>;
+    if (cg.matchNames && cg.matchNames.length > 0) {
+      const { data } = await supabase
+        .from("companies")
+        .select("id,name")
+        .in("name", cg.matchNames)
+        .eq("active", true);
+      const byName = new Map(
+        ((data ?? []) as Array<{ id: string; name: string }>).map((c) => [c.name, c]),
+      );
+      groupList = cg.matchNames
+        .map((n) => byName.get(n))
+        .filter((c): c is { id: string; name: string } => Boolean(c));
+    } else {
+      const { data } = await supabase
+        .from("companies")
+        .select("id,name")
+        .ilike("name", `%${cg.matchName}%`)
+        .eq("active", true)
+        .order("name");
+      groupList = (data ?? []) as Array<{ id: string; name: string }>;
+    }
     const groupIds = groupList.map((c) => c.id);
-    // IMPORTANTE: escopa no GRUPO INTEIRO → plano CONSOLIDADO (global), o MESMO
-    // que o DRE consolidado do sistema usa para multi-empresa. Escopar por
-    // empresa única usaria o plano CUSTOM, onde o "Resultado do Exercício"
-    // (code 11) tem fórmula diferente (8−9−10, com 9=IRPJ/10=CS) — divergia do
-    // sistema, cujo plano global faz 11 = 8+9−10 (9=Rec. Não Op / 10=Desp. Não Op).
-    const { coreAccounts: ga, translateToScopedId: gt } = scopeDreAccounts(allAccounts, groupIds);
-    const buildMap = (rows: AggRow[] | null) => {
-      const m = new Map<string, number>();
-      (rows ?? []).forEach((r) => {
-        const sid = gt(r.dre_account_id);
-        if (sid) m.set(sid, (m.get(sid) ?? 0) + Number(r.amount ?? 0));
-      });
-      return m;
-    };
-    const valueOf = (m: Map<string, number>) =>
-      buildDashboardRows(ga, m).rows.find((r) => r.code === cg.resultCode)?.value ?? 0;
-    // Resultado (resultCode) das empresas `cids` num intervalo [df, dt], pelo
-    // plano consolidado (ga). Por empresa (cids=[id]) ou somando (cids=todas).
+    // Resultado (resultCode) das empresas `cids` num intervalo [df, dt].
+    //  - perCompanyPlan: escopa CADA chamada no plano CUSTOM das próprias `cids`
+    //    (ex.: Spot+Express somam o code 15 custom de cada uma).
+    //  - default: escopa no GRUPO INTEIRO → plano CONSOLIDADO (global), igual ao
+    //    DRE consolidado do sistema multi-empresa (ex.: Salvaterra, code 11 =
+    //    8+9−10). NÃO mudar o default — Salvaterra depende dele.
     const resultFor = async (
       cids: string[],
       df: string,
@@ -1365,6 +1432,20 @@ export async function buildOnePagePayload(
         supabase.rpc("dashboard_dre_aggregate", { p_company_ids: cids, p_date_from: df, p_date_to: dt }),
         supabase.rpc("budget_aggregate", { p_company_ids: cids, p_date_from: df, p_date_to: dt }),
       ]);
+      const { coreAccounts: ga, translateToScopedId: gt } = scopeDreAccounts(
+        allAccounts,
+        cg.perCompanyPlan ? cids : groupIds,
+      );
+      const buildMap = (rows: AggRow[] | null) => {
+        const m = new Map<string, number>();
+        (rows ?? []).forEach((r) => {
+          const sid = gt(r.dre_account_id);
+          if (sid) m.set(sid, (m.get(sid) ?? 0) + Number(r.amount ?? 0));
+        });
+        return m;
+      };
+      const valueOf = (m: Map<string, number>) =>
+        buildDashboardRows(ga, m).rows.find((r) => r.code === cg.resultCode)?.value ?? 0;
       const budRows = (budData as AggRow[] | null) ?? [];
       return {
         realizado: valueOf(buildMap(realData as AggRow[] | null)),
@@ -1373,21 +1454,39 @@ export async function buildOnePagePayload(
     };
     const consDateFrom = `${toYear}-01-01`; // acumulado do ano (Jan→análise)
     const rows: ConsolidatedRowPayload[] = [];
-    // Linha por empresa (cada uma pelo plano consolidado).
+    type Res = { realizado: number; previsto: number | null };
+    const periodResults: Res[] = [];
+    const ytdResults: Res[] = [];
     for (const gc of groupList) {
       const period = await resultFor([gc.id], dateFrom, dateTo);
       rows.push({ label: `Resultado ${gc.name}`, previsto: period.previsto, realizado: period.realizado });
+      periodResults.push(period);
+      // Só o modo per-company precisa do acumulado por empresa (a soma vira o
+      // acumulado consolidado). No default, o total/acumulado vêm do agregado.
+      if (cg.perCompanyPlan) ytdResults.push(await resultFor([gc.id], consDateFrom, dateTo));
     }
     if (rows.length > 0) {
       const groupName = cg.matchName.charAt(0).toUpperCase() + cg.matchName.slice(1);
-      // Total e acumulado = AGREGADO das empresas juntas (igual ao DRE
-      // consolidado do sistema), não a soma das linhas individuais.
-      const [totalPeriod, totalYtd] = await Promise.all([
-        resultFor(groupIds, dateFrom, dateTo),
-        resultFor(groupIds, consDateFrom, dateTo),
-      ]);
+      const label = cg.consolidatedLabel ?? `Resultado Consolidado ${groupName}`;
+      let totalPeriod: Res;
+      let totalYtd: Res;
+      if (cg.perCompanyPlan) {
+        // SOMA dos resultados individuais. Previsto só quando TODAS as empresas
+        // têm orçamento (ex.: Express sem budget → previsto null, sem inventar 0).
+        const sumR = (xs: Res[]) => xs.reduce((a, x) => a + x.realizado, 0);
+        const sumP = (xs: Res[]) =>
+          xs.every((x) => x.previsto !== null) ? xs.reduce((a, x) => a + (x.previsto ?? 0), 0) : null;
+        totalPeriod = { realizado: sumR(periodResults), previsto: sumP(periodResults) };
+        totalYtd = { realizado: sumR(ytdResults), previsto: sumP(ytdResults) };
+      } else {
+        // AGREGADO das empresas juntas (plano global do grupo) — igual ao DRE.
+        [totalPeriod, totalYtd] = await Promise.all([
+          resultFor(groupIds, dateFrom, dateTo),
+          resultFor(groupIds, consDateFrom, dateTo),
+        ]);
+      }
       rows.push({
-        label: `Resultado Consolidado ${groupName}`,
+        label,
         previsto: totalPeriod.previsto,
         realizado: totalPeriod.realizado,
         emphasis: true,
@@ -1395,7 +1494,6 @@ export async function buildOnePagePayload(
       consolidated = {
         title: cg.title,
         rows,
-        // Acumulado do ano (Jan→análise) do consolidado: agregado das empresas.
         acum: { previsto: totalYtd.previsto, realizado: totalYtd.realizado },
       };
     }
@@ -1738,6 +1836,8 @@ export async function buildOnePagePayload(
       historicoAcum,
       // Bloco Performance por Parceiro (ex.: Young Med). undefined nos demais.
       partnerPerformance,
+      // Blocos de breakdown (ex.: Spot — composição/frete). undefined nos demais.
+      breakdownBlocks,
     },
   };
 }

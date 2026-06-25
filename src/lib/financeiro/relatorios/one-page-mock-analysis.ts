@@ -491,6 +491,32 @@ const YOUNG_MED_MOCK = buildCoreMock({
   ],
 });
 
+// ── Mock da Spot ─────────────────────────────────────────────────────────────
+// Cenografia/produção/locação de mobiliário + frete. A Express (logística) só na
+// visão gerencial. SEM VVR/FEE/eventos/franquias/Real Estate/Young Med.
+const SPOT_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Spot. Empresa de cenografia que produz mobiliários e cenários sob demanda (venda e locação), com acervo para locação e operação de frete faturada via Spot. O período mostra a receita total, a principal fonte de receita, as despesas operacionais e o resultado frente ao orçamento. A Express (braço logístico, DRE separado) aparece só na visão gerencial consolidada.",
+  diagnostico:
+    "O resultado da Spot depende do mix entre produção/venda, locação de acervo e frete, e da eficiência da oficina e do galpão. Vale acompanhar a composição da receita, a relação entre receita de frete e custo logístico, a aderência das despesas ao orçamento e o impacto da Express no consolidado Spot + Express (bloco complementar).",
+  acoes: [
+    {
+      acao: "Acompanhar o mix de receita entre produção/venda, locação e frete",
+      justificativa: "A concentração da receita em uma única fonte aumenta o risco; o mix sustenta o resultado.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Comercial",
+    },
+    {
+      acao: "Monitorar a receita de frete frente ao custo logístico",
+      justificativa: "O frete é faturado via Spot; o custo logístico (fretes e veículos) não pode pressionar o resultado.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Operação",
+    },
+  ],
+});
+
 // Validacao na carga do modulo. Se algum mock divergir do schema, lanca aqui.
 const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "franquias-viva": OnePageReportSchema.parse(RAW_MOCK),
@@ -505,6 +531,7 @@ const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   sirena: OnePageReportSchema.parse(SIRENA_MOCK),
   terrazzo: OnePageReportSchema.parse(TERRAZZO_MOCK),
   "young-med": OnePageReportSchema.parse(YOUNG_MED_MOCK),
+  spot: OnePageReportSchema.parse(SPOT_MOCK),
 };
 
 /**

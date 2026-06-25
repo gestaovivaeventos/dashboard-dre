@@ -147,6 +147,12 @@ export interface OnePageApiResponse {
     totalMes: number;
     totalAcum: number;
   };
+  // Blocos de breakdown (ex.: Spot — composição/frete). Valores R$ (÷1000 no map).
+  breakdownBlocks?: Array<{
+    key: string;
+    title: string;
+    rows: Array<{ label: string; value: number; pct: number | null; emphasis: boolean }>;
+  }>;
   error?: string;
 }
 
@@ -672,5 +678,16 @@ export function mapOnePageApiResponseToPreviewData(
           totalAcum: response.partnerPerformance.totalAcum / 1000,
         }
       : undefined,
+    // Blocos de breakdown (ex.: Spot): valores R$ → "mil"; % já vem pronto.
+    breakdownBlocks: response.breakdownBlocks?.map((b) => ({
+      key: b.key,
+      title: b.title,
+      rows: b.rows.map((r) => ({
+        label: r.label,
+        value: r.value / 1000,
+        pct: r.pct,
+        emphasis: r.emphasis,
+      })),
+    })),
   };
 }

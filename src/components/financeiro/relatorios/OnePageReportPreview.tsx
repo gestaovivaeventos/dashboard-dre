@@ -175,6 +175,15 @@ export interface OnePageReportPreviewData {
   historicoAcum?: { previsto: number | null; realizado: number | null };
   /** Bloco "Performance por Parceiro — Mês e Acumulado" (ex.: Young Med). */
   partnerPerformance?: PartnerPerformance;
+  /** Blocos de breakdown em barras (ex.: Spot — composição da receita, frete). */
+  breakdownBlocks?: BreakdownBlock[];
+}
+
+export interface BreakdownBlock {
+  /** ReportBlockKey p/ gating (ex.: "composicaoReceita", "freteLogistica"). */
+  key: string;
+  title: string;
+  rows: Array<{ label: string; value: number; pct: number | null; emphasis: boolean }>;
 }
 
 export interface PartnerPerformance {
@@ -2037,6 +2046,58 @@ function PartnerPerformanceBlock({ data }: { data: PartnerPerformance }) {
   );
 }
 
+// ─── 5i. Bloco BREAKDOWN em barras (ex.: Spot — composição da receita; frete) ──
+// Linhas (label + valor) em barras horizontais com sinal (verde/+, vermelho/−);
+// `pct` opcional (composição); `emphasis` destaca a linha-resultado. Só dados da
+// própria empresa. Largura proporcional ao maior |valor| do bloco.
+function BreakdownBars({ data }: { data: BreakdownBlock }) {
+  const max = Math.max(
+    1,
+    data.rows.reduce((m, r) => Math.max(m, Math.abs(r.value)), 0),
+  );
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div
+        style={{
+          ...panelStyle,
+          padding: "14px 16px 12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 11,
+        }}
+      >
+        {data.rows.map((r) => {
+          const w = (Math.abs(r.value) / max) * 100;
+          const color = r.emphasis
+            ? DEFAULT_ACCENT
+            : r.value >= 0
+              ? SEV.positive.text
+              : SEV.critical.text;
+          return (
+            <div key={r.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 12.5, fontWeight: r.emphasis ? 700 : 500, color: r.emphasis ? C.ink : C.body }}>
+                  {r.label}
+                </span>
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, fontWeight: r.emphasis ? 700 : 600, color: r.emphasis ? C.ink : C.body }}>
+                  {`${fmtNum(r.value, 1)} mil`}
+                  {r.pct !== null ? (
+                    <span style={{ color: C.sub, fontWeight: 500 }}>{`   ${fmtNum(r.pct, 1)}%`}</span>
+                  ) : null}
+                </span>
+              </div>
+              <div style={{ height: 8, background: C.grid, borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ width: `${w}%`, height: "100%", background: color, borderRadius: 4 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ─── 6. Alertas ───────────────────────────────────────────────────────────────
 
 function Alertas({ items }: { items: AlertaCard[] }) {
@@ -2562,6 +2623,15 @@ export function OnePageReportPreview({
         {show("performancePorParceiro") && data.partnerPerformance ? (
           <PartnerPerformanceBlock data={data.partnerPerformance} />
         ) : null}
+
+        {/* Blocos de breakdown em barras (ex.: Spot — composição da receita,
+            frete). Cada bloco é gated por sua `key` na allowlist + presença de
+            dados. undefined/[] nos demais templates → nada renderiza. */}
+        {(data.breakdownBlocks ?? [])
+          .filter((b) => show(b.key))
+          .map((b) => (
+            <BreakdownBars key={b.key} data={b} />
+          ))}
 
         {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho
             em linha cheia abaixo (evita o aperto do VVR quando o ano avança).

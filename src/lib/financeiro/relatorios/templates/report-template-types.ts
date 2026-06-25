@@ -31,7 +31,9 @@ export type ReportTemplateId =
   | "sirena"
   | "terrazzo"
   // ── Young Med (serviços para médicos recém-formados; receita por parceiros) ──
-  | "young-med";
+  | "young-med"
+  // ── Spot (cenografia/produção/locação + braço logístico Express) ────────────
+  | "spot";
 
 /** Contexto usado para casar uma empresa a um template. */
 export interface TemplateMatchContext {
@@ -124,7 +126,7 @@ export type TemplateDreMapping = Record<string, TemplateDreMappingEntry>;
  */
 export interface TemplateKpiCardSpec {
   label: string;
-  kind: "receita" | "despesa" | "resultado" | "margem" | "parceiro";
+  kind: "receita" | "despesa" | "resultado" | "margem" | "parceiro" | "fonte";
   code?: string;
   codes?: string[];
   /**
@@ -134,6 +136,13 @@ export interface TemplateKpiCardSpec {
    * conta. Apenas dados financeiros da própria empresa; nada inventado.
    */
   partnerAccountCode?: string;
+  /**
+   * Para `kind: "fonte"` (ex.: Spot "Principal Fonte de Receita"): lista de
+   * fontes de receita (cada uma = label + contas DRE). O card mostra a fonte de
+   * MAIOR valor realizado no período + seu % sobre o total das fontes. Calculado
+   * direto das contas (sem drill-down); nada inventado.
+   */
+  fonteSources?: Array<{ label: string; codes: string[]; minus?: string[] }>;
   /**
    * Subtítulo "% da receita" — valor do card sobre a soma destas contas (ex.:
    * Comissões / Receita Total = subtitlePctOf ["1"]). Quando presente, substitui
@@ -209,7 +218,12 @@ export type ReportBlockKey =
   | "featEventos"
   // Bloco "Performance por Parceiro — Mês e Acumulado" EXCLUSIVO da Young Med
   // (realizado por fornecedor da conta de BVs). Só o template young-med o habilita.
-  | "performancePorParceiro";
+  | "performancePorParceiro"
+  // Blocos de BREAKDOWN da Spot (barras horizontais por conta). Só o template
+  // spot os habilita. "composicaoReceita" = fontes de receita; "freteLogistica"
+  // = Receita de Frete × Custo Logístico × Resultado.
+  | "composicaoReceita"
+  | "freteLogistica";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -285,7 +299,42 @@ export interface TemplateReportConfig {
    * consolidada. É um bloco COMPLEMENTAR — não autoriza misturar o restante da
    * análise individual. Usa apenas dados do dashboard DRE de cada empresa.
    */
-  consolidatedGroup?: { title: string; matchName: string; resultCode: string };
+  consolidatedGroup?: {
+    title: string;
+    /** Nome único (ILIKE) — ex.: família Salvaterra. */
+    matchName: string;
+    resultCode: string;
+    /**
+     * Lista ORDENADA de nomes EXATOS de empresas do grupo (ex.: Spot + Express),
+     * quando o grupo não casa por um único `matchName`. Quando presente, usa
+     * estes nomes (na ordem dada) em vez do ILIKE de `matchName`.
+     */
+    matchNames?: string[];
+    /**
+     * Quando true, escopa CADA empresa no SEU plano custom (soma dos resultCode
+     * individuais — ex.: Spot+Express, "Resultado Final Spot + Express"). Quando
+     * false/ausente (default), escopa o GRUPO no plano global, igual ao DRE
+     * consolidado do sistema (ex.: Salvaterra). NÃO mudar o default — Salvaterra
+     * depende dele.
+     */
+    perCompanyPlan?: boolean;
+    /** Rótulo da linha consolidada (default "Resultado Consolidado <grupo>"). */
+    consolidatedLabel?: string;
+  };
+  /**
+   * Blocos de BREAKDOWN por contas DRE, em barras horizontais (ex.: Spot —
+   * "Composição da Receita" e "Frete: Receita × Custo Logístico"). Cada linha =
+   * Σ(codes) − Σ(minus) sobre o REALIZADO. `showPctOfTotal` exibe o % de cada
+   * linha sobre o total das linhas SEM `emphasis` (ex.: composição). `emphasis`
+   * destaca uma linha-resultado (ex.: Resultado Logístico). Gated por `key`
+   * (allowlist enabledBlocks). Só dados da própria empresa.
+   */
+  breakdownBlocks?: Array<{
+    key: ReportBlockKey;
+    title: string;
+    showPctOfTotal?: boolean;
+    rows: Array<{ label: string; codes: string[]; minus?: string[]; emphasis?: boolean }>;
+  }>;
   /**
    * Bloco "Performance por Parceiro" (ex.: Young Med). Quebra os FORNECEDORES
    * (supplier_customer) da conta `accountCode` (ex.: "1.1" = BVs Young Med) via
