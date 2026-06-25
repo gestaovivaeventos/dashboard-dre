@@ -52,6 +52,24 @@ export interface KpiCardPayload {
   omitComparisonSuffix?: boolean;
 }
 
+// Bloco "Performance por Parceiro" (ex.: Young Med): realizado por fornecedor
+// (supplier_customer) da conta de parceiros, no mês e no acumulado do ano.
+// Valores em R$ (o mapper divide por 1000 p/ escala "mil"); percentuais já
+// vêm prontos. Orçamento por fornecedor não existe → realizado-only.
+export interface PartnerPerformancePayload {
+  title: string;
+  categoria: string | null;
+  partners: Array<{
+    nome: string;
+    realizadoMes: number;
+    pctMes: number | null;
+    realizadoAcum: number;
+    pctAcum: number | null;
+  }>;
+  totalMes: number;
+  totalAcum: number;
+}
+
 export interface KpisPayload {
   receita: KpiCardPayload;
   despesas: KpiCardPayload;
@@ -189,6 +207,8 @@ export interface OnePagePayload {
   // Acumulado do ano (Jan→análise) do métrico do gráfico de histórico
   // (previsto + realizado) — rodapé do gráfico. undefined quando sem histórico.
   historicoAcum?: { previsto: number | null; realizado: number | null };
+  // Bloco Performance por Parceiro (ex.: Young Med). undefined p/ os demais.
+  partnerPerformance?: PartnerPerformancePayload;
 }
 
 export type BuildOnePagePayloadResult =
@@ -765,12 +785,108 @@ export async function buildOnePagePayload(
     delete kpis.sobrevivencia_caixa;
   }
 
+  // -------------------------------------------------------------------------
+  // 8b. Performance por PARCEIRO (ex.: Young Med). Quebra os FORNECEDORES
+  //     (supplier_customer) da conta `partnerAccountCode` (ex.: 1.1 = BVs) via
+  //     drill-down (RPC dashboard_dre_drilldown — casa por code, estável). Mês
+  //     [dateFrom..dateTo] + acumulado do ano (Jan→análise). Orçamento existe
+  //     por CONTA, não por fornecedor → bloco realizado-only. "Turmas Heppi"
+  //     (outra conta) fica naturalmente fora. Só roda quando o template
+  //     configura `partnerPerformance` ou um card `kind: "parceiro"`.
+  // -------------------------------------------------------------------------
+  const partnerCfg = template.report?.partnerPerformance;
+  const parceiroCardSpec = template.report?.kpiCards?.find((c) => c.kind === "parceiro");
+  const partnerAccountCode = partnerCfg?.accountCode ?? parceiroCardSpec?.partnerAccountCode;
+  let partnerPerformance: PartnerPerformancePayload | undefined;
+  let principalPartner: { nome: string; pct: number | null } | null = null;
+  if (partnerAccountCode) {
+    const partnerAccId = accounts.find((a) => a.code === partnerAccountCode)?.id;
+    if (partnerAccId) {
+      const firstName = (s: string) => s.trim().split(/\s+/)[0] || s.trim();
+      const drillBySupplier = async (df: string, dt: string) => {
+        const { data } = await supabase.rpc("dashboard_dre_drilldown", {
+          p_dre_account_id: partnerAccId,
+          p_company_ids: [companyId],
+          p_date_from: df,
+          p_date_to: dt,
+          p_search: "",
+          p_limit: 1000,
+          p_offset: 0,
+        });
+        const m = new Map<string, number>();
+        ((data ?? []) as Array<{ supplier_customer: string | null; value: number | string | null }>).forEach(
+          (r) => {
+            const nome = (r.supplier_customer ?? "").trim() || "Não identificado";
+            m.set(nome, (m.get(nome) ?? 0) + Number(r.value ?? 0));
+          },
+        );
+        return m;
+      };
+      const consDateFromP = `${toYear}-01-01`;
+      const [mesMap, ytdMap] = await Promise.all([
+        drillBySupplier(dateFrom, dateTo),
+        drillBySupplier(consDateFromP, dateTo),
+      ]);
+      const totMes = Array.from(mesMap.values()).reduce((a, b) => a + b, 0);
+      const totYtd = Array.from(ytdMap.values()).reduce((a, b) => a + b, 0);
+      // Principal Parceiro = maior fornecedor no PERÍODO (mês de análise).
+      if (mesMap.size > 0) {
+        const [topRaw, topVal] = Array.from(mesMap.entries()).sort((a, b) => b[1] - a[1])[0];
+        principalPartner = {
+          nome: firstName(topRaw),
+          pct: totMes !== 0 ? (topVal / totMes) * 100 : null,
+        };
+      }
+      // Linhas do bloco: ordenadas pelo realizado ACUMULADO (desc).
+      const allNames = Array.from(mesMap.keys()).concat(Array.from(ytdMap.keys()));
+      const partners = Array.from(new Set(allNames))
+        .map((raw) => {
+          const rMes = mesMap.get(raw) ?? 0;
+          const rYtd = ytdMap.get(raw) ?? 0;
+          return {
+            nome: firstName(raw),
+            realizadoMes: rMes,
+            pctMes: totMes !== 0 ? (rMes / totMes) * 100 : null,
+            realizadoAcum: rYtd,
+            pctAcum: totYtd !== 0 ? (rYtd / totYtd) * 100 : null,
+          };
+        })
+        .sort((a, b) => b.realizadoAcum - a.realizadoAcum);
+      if (partners.length > 0) {
+        partnerPerformance = {
+          title: partnerCfg?.title ?? "Performance por Parceiro — Mês e Acumulado",
+          categoria: partnerCfg?.categoryLabel ?? null,
+          partners,
+          totalMes: totMes,
+          totalAcum: totYtd,
+        };
+      }
+    }
+  }
+
   // KPIs CUSTOM por conta DRE (templates com report.kpiCards — ex.: SGX).
   // Reutiliza os helpers acima: despesa exibe magnitude (Math.abs) e usa o
   // farol invertido (gastar menos que o previsto = melhor). Receita/Resultado
   // seguem o farol normal (maior = melhor). NÃO inverte sinal armazenado.
   const kpisList: KpiCardPayload[] | undefined = template.report?.kpiCards?.map(
     (spec) => {
+      // Card de PARCEIRO (ex.: Young Med "Principal Parceiro"): valor = 1º nome
+      // do maior fornecedor da conta no período; subtítulo = % da receita de
+      // BVs. Sem comparação com orçado (omitComparisonSuffix). Estado seguro
+      // ("—" / "sem dados no período") quando não há fornecedor no período.
+      if (spec.kind === "parceiro") {
+        const pct = principalPartner?.pct ?? null;
+        return {
+          label: spec.label,
+          value: null,
+          formattedValue: principalPartner?.nome ?? "—",
+          variationValue: pct,
+          variationLabel:
+            pct !== null ? `${formatPctFn(pct)} da receita de BVs` : "sem dados no período",
+          status: "neutro" as const,
+          omitComparisonSuffix: true,
+        };
+      }
       // Margem (%): razão soma(numerador) / soma(denominador). É um indicador
       // sem comparação com orçado — verde se positiva, vermelho se negativa.
       if (spec.kind === "margem" && spec.ratio) {
@@ -820,15 +936,32 @@ export async function buildOnePagePayload(
           : (prevPlus ?? 0) - (prevMinus ?? 0);
       const varp = variacaoPct(realized, budgeted);
       const isDespesa = spec.kind === "despesa";
+      const status = isDespesa
+        ? statusDespesasFromVariacao(varp)
+        : statusFromVariacaoPercent(varp);
+      // Subtítulo "% da receita" (ex.: Comissões / Receita Total): troca a
+      // variação "vs orçamento" pelo percentual sobre a base. O farol continua
+      // refletindo a comparação com o orçado (status acima).
+      if (spec.subtitlePctOf) {
+        const base = sumRealized(spec.subtitlePctOf);
+        const pctReceita = base !== 0 ? (Math.abs(realized) / base) * 100 : null;
+        return {
+          label: spec.label,
+          value: realized,
+          formattedValue: formatBRL(isDespesa ? Math.abs(realized) : realized),
+          variationValue: pctReceita,
+          variationLabel: pctReceita !== null ? `${formatPctFn(pctReceita)} da receita` : null,
+          status,
+          omitComparisonSuffix: true,
+        };
+      }
       return {
         label: spec.label,
         value: realized,
         formattedValue: formatBRL(isDespesa ? Math.abs(realized) : realized),
         variationValue: varp,
         variationLabel: formatVarPct(varp),
-        status: isDespesa
-          ? statusDespesasFromVariacao(varp)
-          : statusFromVariacaoPercent(varp),
+        status,
       };
     },
   );
@@ -1603,6 +1736,8 @@ export async function buildOnePagePayload(
       prevRealCharts,
       consolidated,
       historicoAcum,
+      // Bloco Performance por Parceiro (ex.: Young Med). undefined nos demais.
+      partnerPerformance,
     },
   };
 }

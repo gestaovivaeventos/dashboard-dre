@@ -173,6 +173,22 @@ export interface OnePageReportPreviewData {
   consolidated?: Consolidated;
   /** Acumulado do ano (Jan→análise) do gráfico de histórico — rodapé. */
   historicoAcum?: { previsto: number | null; realizado: number | null };
+  /** Bloco "Performance por Parceiro — Mês e Acumulado" (ex.: Young Med). */
+  partnerPerformance?: PartnerPerformance;
+}
+
+export interface PartnerPerformance {
+  title: string;
+  categoria: string | null;
+  partners: Array<{
+    nome: string;
+    realizadoMes: number;
+    pctMes: number | null;
+    realizadoAcum: number;
+    pctAcum: number | null;
+  }>;
+  totalMes: number;
+  totalAcum: number;
 }
 
 export interface ConsolidatedRow {
@@ -1951,6 +1967,76 @@ function ConsolidadoBlock({ data }: { data: Consolidated }) {
   );
 }
 
+// ─── 5h. Bloco PERFORMANCE POR PARCEIRO (ex.: Young Med) ──────────────────────
+// Realizado por fornecedor (supplier_customer) da conta de BVs, no mês e no
+// acumulado do ano, com o % de cada parceiro. Orçamento existe por CONTA, não
+// por fornecedor → bloco realizado-only (limitação no rodapé). Só dados da
+// própria empresa; "Turmas Heppi" (outra conta) não entra.
+function PartnerPerformanceBlock({ data }: { data: PartnerPerformance }) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    color: C.sub,
+    padding: "0 10px 8px",
+    borderBottom: `1px solid ${C.rule}`,
+  };
+  const tdNum: CSSProperties = {
+    fontFamily: FONT_MONO,
+    fontSize: 12.5,
+    padding: "9px 10px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  };
+  const tdBorder = `1px solid ${C.grid}`;
+  const fmtV = (v: number | null) => (v === null ? "—" : `${fmtNum(v, 1)} mil`);
+  const fmtP = (v: number | null) => (v === null ? "—" : `${fmtNum(v, 1)}%`);
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ ...panelStyle, padding: "14px 16px 12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>Parceiro</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado mês</th>
+              <th style={{ ...th, textAlign: "right" }}>% mês</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado acum.</th>
+              <th style={{ ...th, textAlign: "right" }}>% acum.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.partners.map((p) => (
+              <tr key={p.nome} style={{ breakInside: "avoid" }}>
+                <td style={{ fontSize: 13, fontWeight: 500, color: C.body, padding: "9px 10px", borderBottom: tdBorder }}>
+                  {p.nome}
+                </td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.body, fontWeight: 600 }}>{fmtV(p.realizadoMes)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{fmtP(p.pctMes)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.body, fontWeight: 600 }}>{fmtV(p.realizadoAcum)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{fmtP(p.pctAcum)}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#f7f8fa", breakInside: "avoid" }}>
+              <td style={{ fontSize: 13, fontWeight: 700, color: C.ink, padding: "9px 10px", borderBottom: tdBorder }}>
+                {data.categoria ? `Total (${data.categoria})` : "Total"}
+              </td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, fontWeight: 700, color: C.ink }}>{fmtV(data.totalMes)}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{data.totalMes !== 0 ? "100,0%" : "—"}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, fontWeight: 700, color: C.ink }}>{fmtV(data.totalAcum)}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{data.totalAcum !== 0 ? "100,0%" : "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
+          Valores em milhares de R$ (mil). Acumulado = janeiro do ano de análise até o mês filtrado.
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── 6. Alertas ───────────────────────────────────────────────────────────────
 
 function Alertas({ items }: { items: AlertaCard[] }) {
@@ -2468,6 +2554,13 @@ export function OnePageReportPreview({
             por isso aparece em destaque, logo após os indicadores do mês. */}
         {show("featEventos") && data.featEventos ? (
           <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
+        ) : null}
+
+        {/* Performance por Parceiro — exclusivo da Young Med (gated por bloco +
+            presença de dados). Realizado por fornecedor da conta de BVs, mês +
+            acumulado. Logo após os indicadores, antes da tendência. */}
+        {show("performancePorParceiro") && data.partnerPerformance ? (
+          <PartnerPerformanceBlock data={data.partnerPerformance} />
         ) : null}
 
         {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho

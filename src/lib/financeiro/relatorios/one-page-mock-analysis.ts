@@ -464,6 +464,33 @@ const SALVATERRA_ESTACIONAMENTO_MOCK = buildCoreMock({
   ],
 });
 
+// ── Mock da Young Med ────────────────────────────────────────────────────────
+// Serviços para médicos recém-formados; receita por PARCEIROS (BVs) + comissões.
+// SEM VVR/FEE/eventos/franquias/Real Estate — só a leitura financeira da própria
+// Young Med, com foco em parceiros, concentração e eficiência após comissões.
+const YOUNG_MED_MOCK = buildCoreMock({
+  resumo:
+    "Teste sem IA — Young Med. Empresa jovem de serviços para médicos recém-formados, com receita vinda das vendas/intermediações com parceiros (BVs) e um esquema relevante de comissões. O período mostra a receita total, o principal parceiro, o peso das comissões e o resultado frente ao orçamento.",
+  diagnostico:
+    "O resultado da Young Med depende do crescimento da receita por parceiros, da diversificação além do parceiro principal e da eficiência após comissões. Vale acompanhar a concentração da receita de BVs, o peso das comissões sobre a receita e a aderência do resultado do exercício ao orçamento no mês e no acumulado.",
+  acoes: [
+    {
+      acao: "Monitorar a concentração da receita no principal parceiro e acelerar a diversificação",
+      justificativa: "Reduzir a dependência de um único parceiro fortalece a previsibilidade da receita.",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Comercial",
+    },
+    {
+      acao: "Avaliar a política de comissões como percentual da receita",
+      justificativa: "As comissões consomem parte relevante da receita; acompanhar o percentual preserva a margem.",
+      impacto: "Médio",
+      urgencia: "Média",
+      areaResponsavel: "Controladoria",
+    },
+  ],
+});
+
 // Validacao na carga do modulo. Se algum mock divergir do schema, lanca aqui.
 const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "franquias-viva": OnePageReportSchema.parse(RAW_MOCK),
@@ -477,6 +504,7 @@ const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "case-shows": OnePageReportSchema.parse(CASE_SHOWS_MOCK),
   sirena: OnePageReportSchema.parse(SIRENA_MOCK),
   terrazzo: OnePageReportSchema.parse(TERRAZZO_MOCK),
+  "young-med": OnePageReportSchema.parse(YOUNG_MED_MOCK),
 };
 
 /**

@@ -133,6 +133,20 @@ export interface OnePageApiResponse {
     acum?: { previsto: number | null; realizado: number | null };
   };
   historicoAcum?: { previsto: number | null; realizado: number | null };
+  // Bloco Performance por Parceiro (ex.: Young Med). Valores em R$ (÷1000 no map).
+  partnerPerformance?: {
+    title: string;
+    categoria: string | null;
+    partners: Array<{
+      nome: string;
+      realizadoMes: number;
+      pctMes: number | null;
+      realizadoAcum: number;
+      pctAcum: number | null;
+    }>;
+    totalMes: number;
+    totalAcum: number;
+  };
   error?: string;
 }
 
@@ -640,6 +654,22 @@ export function mapOnePageApiResponseToPreviewData(
             response.historicoAcum.realizado === null
               ? null
               : response.historicoAcum.realizado / 1000,
+        }
+      : undefined,
+    // Bloco Performance por Parceiro (ex.: Young Med): valores R$ → "mil".
+    partnerPerformance: response.partnerPerformance
+      ? {
+          title: response.partnerPerformance.title,
+          categoria: response.partnerPerformance.categoria,
+          partners: response.partnerPerformance.partners.map((p) => ({
+            nome: p.nome,
+            realizadoMes: p.realizadoMes / 1000,
+            pctMes: p.pctMes,
+            realizadoAcum: p.realizadoAcum / 1000,
+            pctAcum: p.pctAcum,
+          })),
+          totalMes: response.partnerPerformance.totalMes / 1000,
+          totalAcum: response.partnerPerformance.totalAcum / 1000,
         }
       : undefined,
   };
