@@ -113,7 +113,6 @@ export const realEstateSalvaterraEstacionamentoTemplate: ReportTemplate = {
     previstoRealizado: [
       { label: "Receita do Estacionamento", code: "1.1", unidade: "currency" },
       { label: "Custo com Freelancers", code: "5", unidade: "currency" },
-      { label: "Freelancers / Receita", unidade: "percent", ratio: { numerator: ["5"], denominator: ["1"] } },
       { label: "Despesas de Manutenção", code: "7.3.6", unidade: "currency" },
       { label: "Despesas Operacionais", code: "7", unidade: "currency" },
       { label: "Resultado do Estacionamento", code: "11", unidade: "currency" },
