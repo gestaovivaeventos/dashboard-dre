@@ -59,6 +59,38 @@ necessario revisar algumas frentes".
 
 Seja realista, mas nunca infle negativamente a leitura dos dados.
 
+# LEITURA CONTABIL DAS LINHAS DA DRE (entendimento geral — vale para TODAS as empresas)
+
+Antes de classificar qualquer indicador, identifique se ele e uma linha de
+RECEITA (quanto MAIOR, melhor) ou uma linha REDUTORA — deducao, custo ou
+despesa (quanto MENOR, melhor). O sentido "favoravel/desfavoravel" de uma
+variacao depende disso.
+
+## Linhas de deducao de receita
+"Deducoes de Receita" (e variacoes do nome: "Deducoes sobre a Receita",
+"Impostos sobre Vendas", "Impostos sobre Servicos") NAO sao receita: sao uma
+linha REDUTORA da receita bruta, composta por impostos (ISS, Simples
+Nacional, PIS, COFINS, ICMS) e por devolucoes/cancelamentos de vendas. Para
+fins de leitura, comportam-se como DESPESA.
+- Deducao de receita ABAIXO do orcamento (variacao_percentual negativa) e
+  FAVORAVEL — sobra mais receita liquida. Classifique como "Positivo" e, se
+  for citada, trate como ponto POSITIVO. NUNCA a coloque em "pontosAtencao"
+  nem a descreva como problema so porque a variacao e negativa.
+- Deducao de receita ACIMA do orcamento (variacao_percentual positiva) e
+  DESFAVORAVEL: classifique como "Atenção"/"Crítico" conforme a materialidade.
+
+## Direcao da variacao (nao inverta o sentido)
+Para QUALQUER indicador, a direcao vem do SINAL de variacao_percentual do
+input: valor NEGATIVO = realizado ABAIXO do orcado; valor POSITIVO =
+realizado ACIMA do orcado. NUNCA descreva como "acima do orcamento" uma linha
+cujo realizado e menor que o orcado (e vice-versa).
+
+## Regra geral para linhas redutoras (deducoes, custos, despesas)
+Realizado ABAIXO do orcado = favoravel (economia) → tende a "Positivo".
+Realizado ACIMA do orcado = desfavoravel → "Atenção"/"Crítico" conforme a
+materialidade. Isso e o INVERSO das linhas de receita/resultado, onde estar
+acima do orcado e que e favoravel.
+
 # CAMPOS DA RESPOSTA
 
 ## "statusGeral" (Excelente | Boa | Atenção | Crítica)
@@ -107,7 +139,7 @@ Comente os indicadores estruturais presentes no input. Use o "nome" EXATO do ind
 - "indicador": o "name" do indicador (copiado do input).
 - "analise": 1 a 3 frases sobre o desempenho desse indicador no periodo.
 - "classificacao": uma das opcoes:
-  - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em despesa/custo, caso favoravel).
+  - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em deducao de receita, despesa ou custo — caso favoravel).
   - "Neutro": variacao dentro de +/- 5% versus orcamento, OU sem orcamento informado.
   - "Atenção": variacao desfavoravel mas controlavel.
   - "Crítico": variacao significativa que ameaca o resultado consolidado.`;

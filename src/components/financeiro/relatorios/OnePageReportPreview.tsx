@@ -309,20 +309,6 @@ function signToSev(sign: ImpactSign): SevKey {
   }
 }
 
-function statusToSev(status: StatusGeral): SevKey {
-  switch (status) {
-    case "Excelente":
-    case "Boa":
-      return "positive";
-    case "Atenção":
-      return "attention";
-    case "Crítica":
-      return "critical";
-    default:
-      return "neutral";
-  }
-}
-
 // Seta direcional do KPI a partir do sinal + texto da variação.
 function arrowFor(sign: ImpactSign, variation: string): "↑" | "↗" | "→" | "↓" {
   if (sign === "Positivo") return "↑";
@@ -495,8 +481,6 @@ function Header({
 }: {
   data: OnePageReportPreviewData["cabecalho"];
 }) {
-  const statusSev = statusToSev(data.statusGeral);
-  const statusS = SEV[statusSev];
   return (
     <header
       style={{
@@ -559,70 +543,6 @@ function Header({
           </div>
           <div style={{ color: "#ffffff", fontSize: 18, fontWeight: 700, marginTop: 4 }}>
             {data.periodo}
-          </div>
-        </div>
-
-        {/* Status geral */}
-        <div
-          style={{
-            background: statusS.bg,
-            border: `1px solid ${statusS.border}`,
-            borderRadius: 8,
-            padding: "12px 16px",
-            minWidth: 110,
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              color: statusS.text,
-              fontSize: 9,
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              fontWeight: 600,
-              opacity: 0.85,
-            }}
-          >
-            Status Geral
-          </div>
-          <div style={{ color: statusS.text, fontSize: 18, fontWeight: 700, marginTop: 4 }}>
-            {data.statusGeral}
-          </div>
-        </div>
-
-        {/* Nota geral */}
-        <div
-          style={{
-            background: C.cardBg,
-            border: `1px solid ${C.cardBorder}`,
-            borderRadius: 8,
-            padding: "12px 16px",
-            minWidth: 90,
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              color: C.sub,
-              fontSize: 9,
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              fontWeight: 600,
-            }}
-          >
-            Nota Geral
-          </div>
-          <div
-            style={{
-              fontFamily: FONT_MONO,
-              color: C.ink,
-              fontSize: 24,
-              fontWeight: 600,
-              marginTop: 2,
-            }}
-          >
-            {data.notaGeral}
-            <span style={{ fontSize: 14, color: C.tertiary2, fontWeight: 500 }}>/100</span>
           </div>
         </div>
       </div>
