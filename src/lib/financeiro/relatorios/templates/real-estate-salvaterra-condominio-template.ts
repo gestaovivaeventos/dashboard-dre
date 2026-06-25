@@ -25,7 +25,16 @@ REGRAS RÍGIDAS:
 - Use APENAS os dados enviados no payload (do Condomínio). NÃO invente números.
 - NÃO sugira: VVR, FEE disponível, sobrevivência de caixa, margem média de eventos da Franquias Viva, carteira de fundos, fundos de formatura, gap de reembolso da Village, locações/projetos da SGX, fechamento de eventos da Feat Produções, BV da Case Shows.
 - NÃO sugira cobrança de aluguel ou condomínio AO estacionamento — o estacionamento NÃO paga aluguel nem condomínio ao Salvaterra Mall.
-- Diagnóstico executivo, claro e financeiro, sem tom alarmista. Ações práticas e aderentes ao modelo condominial.`;
+- Diagnóstico executivo, claro e financeiro, sem tom alarmista. Ações práticas e aderentes ao modelo condominial.
+
+BASE DE CONHECIMENTO COMPLEMENTAR — Salvaterra Condomínio (apenas ADICIONA contexto; não substitui nada acima):
+- Responda também: o desempenho do período foi mais influenciado por receita, despesa ou margem?
+- CUIDADOS: não analise o Condomínio como salão de eventos nem como estacionamento; não sugira ações operacionais que dependam de dados que não vieram no payload; NÃO afirme queda de ocupação, inadimplência, vacância, número de eventos ou volume de lojas se esses dados não estiverem no payload.
+- PODE recomendar, quando fizer sentido: acompanhar a evolução das receitas de locação; revisar receitas condominiais e reembolsos; monitorar as despesas totais do condomínio; avaliar despesas de manutenção e serviços; acompanhar o custo com vigias freelancers; melhorar a previsibilidade orçamentária das despesas; analisar o impacto do condomínio no consolidado Salvaterra (quando o relatório trouxer essa visão).
+- NÃO sugira ainda: resultado ajustado da Village; ações de agenda comercial de Sirena ou Terrazzo. (Terrazzo só aparece aqui como PAGADOR de taxa de condomínio ao Mall — nunca como objeto de ação comercial.)
+- VISÃO CONSOLIDADA: o consolidado Salvaterra é a soma de Resultado Condomínio + Resultado Estacionamento + Resultado Consolidado, e é um bloco COMPLEMENTAR. Nunca inclua Terrazzo, SGX, Sirena, Feat Produções, Case Shows, Franquias Viva ou qualquer outra empresa nesse consolidado. Fora do bloco consolidado, analise SOMENTE o Condomínio; deixe explícito quando fala da empresa individual e quando fala da visão consolidada.
+- DADOS AUSENTES: quando uma informação operacional não estiver no payload, você pode recomendar acompanhamento futuro, mas NÃO pode afirmar que o fato ocorreu. Ex.: pode dizer "vale acompanhar futuramente a ocupação das lojas"; não pode dizer "a receita caiu porque houve menos lojas/ocupação" se isso não veio no payload.
+- EXEMPLO DE LEITURA ADEQUADA: "O resultado do Salvaterra Condomínio deve ser analisado a partir da combinação entre receitas de locação, receitas condominiais, reembolsos e despesas totais. A leitura principal deve indicar se a operação do condomínio gerou resultado positivo e se a margem líquida ficou coerente com o orçamento do período."`;
 
 export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
   id: "real-estate-salvaterra-condominio",
@@ -87,7 +96,7 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
     kpiCards: [
       { label: "Receita com Locação", code: "1.1", kind: "receita" },
       { label: "Receitas Condominiais", code: "2.3", kind: "receita" },
-      { label: "Despesas Totais", code: "7", kind: "despesa" },
+      { label: "Despesas Operacionais", code: "7", kind: "despesa" },
       { label: "Resultado do Condomínio", code: "11", kind: "resultado" },
       // Margem Líquida = Resultado do Exercício (11) ÷ Receita Líquida (4).
       { label: "Margem Líquida", kind: "margem", ratio: { numerator: ["11"], denominator: ["4"] } },
@@ -98,13 +107,13 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
       { label: "Receitas Condominiais", code: "2.3", unidade: "currency" },
       { label: "Reembolsos", code: "2.6", unidade: "currency" },
       { label: "Receita Total", codes: ["1", "2"], unidade: "currency" },
-      { label: "Despesas Totais", code: "7", unidade: "currency" },
+      { label: "Despesas Operacionais", code: "7", unidade: "currency" },
       { label: "Resultado do Condomínio", code: "11", unidade: "currency" },
-      { label: "Margem Líquida", unidade: "percent", ratio: { numerator: ["11"], denominator: ["4"] } },
     ],
     historicoAccountCode: "11",
     historicoTitle: "Histórico do Resultado do Condomínio",
     historicoKLabels: true,
+    historicoShowAcum: true,
     consolidatedGroup: {
       title: "Resultado Consolidado Salvaterra — Previsto × Realizado",
       matchName: "salvaterra",

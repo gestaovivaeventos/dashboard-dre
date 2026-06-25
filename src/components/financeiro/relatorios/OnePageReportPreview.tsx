@@ -171,6 +171,33 @@ export interface OnePageReportPreviewData {
   prevRealCharts?: PrevRealChart[];
   /** Bloco consolidado do grupo (ex.: Salvaterra) — Previsto × Realizado. */
   consolidated?: Consolidated;
+  /** Acumulado do ano (Jan→análise) do gráfico de histórico — rodapé. */
+  historicoAcum?: { previsto: number | null; realizado: number | null };
+  /** Bloco "Performance por Parceiro — Mês e Acumulado" (ex.: Young Med). */
+  partnerPerformance?: PartnerPerformance;
+  /** Blocos de breakdown em barras (ex.: Spot — composição da receita, frete). */
+  breakdownBlocks?: BreakdownBlock[];
+}
+
+export interface BreakdownBlock {
+  /** ReportBlockKey p/ gating (ex.: "composicaoReceita", "freteLogistica"). */
+  key: string;
+  title: string;
+  rows: Array<{ label: string; value: number; pct: number | null; emphasis: boolean }>;
+}
+
+export interface PartnerPerformance {
+  title: string;
+  categoria: string | null;
+  partners: Array<{
+    nome: string;
+    realizadoMes: number;
+    pctMes: number | null;
+    realizadoAcum: number;
+    pctAcum: number | null;
+  }>;
+  totalMes: number;
+  totalAcum: number;
 }
 
 export interface ConsolidatedRow {
@@ -182,6 +209,8 @@ export interface ConsolidatedRow {
 export interface Consolidated {
   title: string;
   rows: ConsolidatedRow[];
+  /** Acumulado do ano (Jan→análise) do consolidado — rodapé. */
+  acum?: { previsto: number | null; realizado: number | null };
 }
 
 export interface PrevRealPoint {
@@ -1295,6 +1324,59 @@ function AcumBar({
   );
 }
 
+// Rodapé "Acumulado no ano" (Jan→análise): 2 barras horizontais — Realizado
+// (com variação vs previsto) e Previsto. Reutilizado pelo histórico e pelo
+// bloco consolidado.
+function AcumPrevRealFooter({
+  previsto,
+  realizado,
+  accent,
+  kLabel,
+}: {
+  previsto: number | null;
+  realizado: number | null;
+  accent: string;
+  kLabel?: boolean;
+}) {
+  const accMax = Math.max(1, Math.abs(previsto ?? 0), Math.abs(realizado ?? 0));
+  const variation =
+    previsto !== null && previsto !== 0 && realizado !== null
+      ? ((realizado - previsto) / Math.abs(previsto)) * 100
+      : null;
+  return (
+    <div style={{ marginTop: 10, borderTop: `1px solid ${C.grid}`, paddingTop: 10 }}>
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          fontWeight: 700,
+          color: C.sub,
+          marginBottom: 8,
+        }}
+      >
+        Acumulado no ano
+      </div>
+      <HBarSigned
+        label="Realizado"
+        value={realizado}
+        max={accMax}
+        color={accent}
+        variation={
+          variation !== null
+            ? `${variation >= 0 ? "+" : ""}${fmtNum(variation, 1)}% vs previsto`
+            : undefined
+        }
+        variationColor={
+          variation !== null ? (variation >= 0 ? SEV.positive.text : SEV.critical.text) : undefined
+        }
+        kLabel={kLabel}
+      />
+      <HBarSigned label="Previsto" value={previsto} max={accMax} color={C.previsto} kLabel={kLabel} />
+    </div>
+  );
+}
+
 // ─── 5c. Resultado do Exercício (linha) ───────────────────────────────────────
 
 function GraficoResultado({
@@ -1302,11 +1384,13 @@ function GraficoResultado({
   accent,
   title,
   kLabels,
+  acum,
 }: {
   points: HistoricoPoint[];
   accent: string;
   title?: string;
   kLabels?: boolean;
+  acum?: { previsto: number | null; realizado: number | null };
 }) {
   // kLabels: rótulos "133,6k" (ex.: SGX). Sem ele, número cheio (Viva inalterada).
   const fmtL = (v: number) => (kLabels ? `${fmtNum(v, 1)}k` : fmtNum(v, 0));
@@ -1381,6 +1465,15 @@ function GraficoResultado({
         </ResponsiveContainer>
       </div>
       <ChartLegend items={[{ color: C.previsto, label: "Previsto" }, { color: accent, label: "Realizado" }]} />
+      {/* Acumulado do ano (Jan→análise) — Previsto × Realizado do mesmo métrico. */}
+      {acum ? (
+        <AcumPrevRealFooter
+          previsto={acum.previsto}
+          realizado={acum.realizado}
+          accent={accent}
+          kLabel={kLabels}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1867,9 +1960,139 @@ function ConsolidadoBlock({ data }: { data: Consolidated }) {
             })}
           </tbody>
         </table>
+        {/* Acumulado do ano (Jan→análise) do consolidado — Previsto × Realizado. */}
+        {data.acum ? (
+          <AcumPrevRealFooter
+            previsto={data.acum.previsto}
+            realizado={data.acum.realizado}
+            accent={DEFAULT_ACCENT}
+          />
+        ) : null}
         <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
           Valores em milhares de R$ (mil). Bloco complementar — soma apenas as empresas do grupo.
         </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── 5h. Bloco PERFORMANCE POR PARCEIRO (ex.: Young Med) ──────────────────────
+// Realizado por fornecedor (supplier_customer) da conta de BVs, no mês e no
+// acumulado do ano, com o % de cada parceiro. Orçamento existe por CONTA, não
+// por fornecedor → bloco realizado-only (limitação no rodapé). Só dados da
+// própria empresa; "Turmas Heppi" (outra conta) não entra.
+function PartnerPerformanceBlock({ data }: { data: PartnerPerformance }) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    color: C.sub,
+    padding: "0 10px 8px",
+    borderBottom: `1px solid ${C.rule}`,
+  };
+  const tdNum: CSSProperties = {
+    fontFamily: FONT_MONO,
+    fontSize: 12.5,
+    padding: "9px 10px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  };
+  const tdBorder = `1px solid ${C.grid}`;
+  const fmtV = (v: number | null) => (v === null ? "—" : `${fmtNum(v, 1)} mil`);
+  const fmtP = (v: number | null) => (v === null ? "—" : `${fmtNum(v, 1)}%`);
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ ...panelStyle, padding: "14px 16px 12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>Parceiro</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado mês</th>
+              <th style={{ ...th, textAlign: "right" }}>% mês</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado acum.</th>
+              <th style={{ ...th, textAlign: "right" }}>% acum.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.partners.map((p) => (
+              <tr key={p.nome} style={{ breakInside: "avoid" }}>
+                <td style={{ fontSize: 13, fontWeight: 500, color: C.body, padding: "9px 10px", borderBottom: tdBorder }}>
+                  {p.nome}
+                </td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.body, fontWeight: 600 }}>{fmtV(p.realizadoMes)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{fmtP(p.pctMes)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.body, fontWeight: 600 }}>{fmtV(p.realizadoAcum)}</td>
+                <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{fmtP(p.pctAcum)}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#f7f8fa", breakInside: "avoid" }}>
+              <td style={{ fontSize: 13, fontWeight: 700, color: C.ink, padding: "9px 10px", borderBottom: tdBorder }}>
+                {data.categoria ? `Total (${data.categoria})` : "Total"}
+              </td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, fontWeight: 700, color: C.ink }}>{fmtV(data.totalMes)}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{data.totalMes !== 0 ? "100,0%" : "—"}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, fontWeight: 700, color: C.ink }}>{fmtV(data.totalAcum)}</td>
+              <td style={{ ...tdNum, borderBottom: tdBorder, color: C.sub }}>{data.totalAcum !== 0 ? "100,0%" : "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
+          Valores em milhares de R$ (mil). Acumulado = janeiro do ano de análise até o mês filtrado.
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── 5i. Bloco BREAKDOWN em barras (ex.: Spot — composição da receita; frete) ──
+// Linhas (label + valor) em barras horizontais com sinal (verde/+, vermelho/−);
+// `pct` opcional (composição); `emphasis` destaca a linha-resultado. Só dados da
+// própria empresa. Largura proporcional ao maior |valor| do bloco.
+function BreakdownBars({ data }: { data: BreakdownBlock }) {
+  const max = Math.max(
+    1,
+    data.rows.reduce((m, r) => Math.max(m, Math.abs(r.value)), 0),
+  );
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div
+        style={{
+          ...panelStyle,
+          padding: "14px 16px 12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 11,
+        }}
+      >
+        {data.rows.map((r) => {
+          const w = (Math.abs(r.value) / max) * 100;
+          const color = r.emphasis
+            ? DEFAULT_ACCENT
+            : r.value >= 0
+              ? SEV.positive.text
+              : SEV.critical.text;
+          return (
+            <div key={r.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 12.5, fontWeight: r.emphasis ? 700 : 500, color: r.emphasis ? C.ink : C.body }}>
+                  {r.label}
+                </span>
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, fontWeight: r.emphasis ? 700 : 600, color: r.emphasis ? C.ink : C.body }}>
+                  {`${fmtNum(r.value, 1)} mil`}
+                  {r.pct !== null ? (
+                    <span style={{ color: C.sub, fontWeight: 500 }}>{`   ${fmtNum(r.pct, 1)}%`}</span>
+                  ) : null}
+                </span>
+              </div>
+              <div style={{ height: 8, background: C.grid, borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ width: `${w}%`, height: "100%", background: color, borderRadius: 4 }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -2394,6 +2617,22 @@ export function OnePageReportPreview({
           <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
         ) : null}
 
+        {/* Performance por Parceiro — exclusivo da Young Med (gated por bloco +
+            presença de dados). Realizado por fornecedor da conta de BVs, mês +
+            acumulado. Logo após os indicadores, antes da tendência. */}
+        {show("performancePorParceiro") && data.partnerPerformance ? (
+          <PartnerPerformanceBlock data={data.partnerPerformance} />
+        ) : null}
+
+        {/* Blocos de breakdown em barras (ex.: Spot — composição da receita,
+            frete). Cada bloco é gated por sua `key` na allowlist + presença de
+            dados. undefined/[] nos demais templates → nada renderiza. */}
+        {(data.breakdownBlocks ?? [])
+          .filter((b) => show(b.key))
+          .map((b) => (
+            <BreakdownBars key={b.key} data={b} />
+          ))}
+
         {/* Tendência & Acumulado: Acumulado + Resultado lado a lado; VVR sozinho
             em linha cheia abaixo (evita o aperto do VVR quando o ano avança).
             Cada gráfico continua condicionado à allowlist de blocos do template. */}
@@ -2419,6 +2658,7 @@ export function OnePageReportPreview({
                     accent={accentColor}
                     title={data.historicoTitle}
                     kLabels={data.historicoKLabels}
+                    acum={data.historicoAcum}
                   />
                 ) : null}
               </div>

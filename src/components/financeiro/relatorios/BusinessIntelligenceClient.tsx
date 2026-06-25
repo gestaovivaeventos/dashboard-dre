@@ -233,8 +233,19 @@ export function BusinessIntelligenceClient({
           description: msg,
           variant: "destructive",
         });
-        // NAO sobrescreve `data`: mantemos o estado anterior (mock ou ultimo
-        // sucesso). Regra explicita: nao misturar mock com dados parciais.
+        // Falha SÓ no motor de IA (textos): a rota oficial retorna
+        // `{ error, ...payload }` com TODOS os blocos NUMÉRICOS já calculados.
+        // Renderizamos o relatório no MESMO formato do template (cards, tabela,
+        // blocos do payload) — apenas sem os textos da IA — em vez de cair no
+        // MOCK_DATA interno (genérico, de outra empresa). Sem isso, "com IA" que
+        // falha exibe um formato diferente do "sem IA". Só dispara quando há
+        // payload numérico; erros de validação/permissão (corpo só com `error`,
+        // sem `kpis`) seguem sem render, preservando o estado anterior.
+        if (payload && (payload.kpis || payload.kpisList || payload.previstoRealizado)) {
+          const mapped = mapOnePageApiResponseToPreviewData(payload);
+          setData(mapped);
+          setTemplateLabel(payload.template?.name ?? null);
+        }
         return;
       }
 

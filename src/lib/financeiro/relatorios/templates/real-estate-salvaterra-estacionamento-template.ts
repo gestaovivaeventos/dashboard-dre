@@ -27,7 +27,16 @@ REGRAS RÍGIDAS:
 - Use APENAS os dados enviados no payload (do Estacionamento). NÃO invente números.
 - NÃO sugira: VVR, FEE disponível, sobrevivência de caixa, margem média de eventos da Franquias Viva, carteira de fundos, fundos de formatura, gap de reembolso da Village, locações/projetos da SGX, fechamento de eventos da Feat Produções, BV da Case Shows.
 - NÃO sugira cobrança de aluguel ou condomínio DO estacionamento ao Salvaterra Mall — não há.
-- Diagnóstico executivo, claro e financeiro, sem tom alarmista. Ações práticas e aderentes ao modelo do estacionamento.`;
+- Diagnóstico executivo, claro e financeiro, sem tom alarmista. Ações práticas e aderentes ao modelo do estacionamento.
+
+BASE DE CONHECIMENTO COMPLEMENTAR — Salvaterra Estacionamento (apenas ADICIONA contexto; não substitui nada acima):
+- Responda também: o desempenho do período foi mais impactado por receita, freelancers, despesas ou margem?
+- CUIDADOS: não analise o Estacionamento como condomínio; não sugira que ele paga aluguel ou condomínio ao Salvaterra Mall; não trate a receita do estacionamento como receita de locação de espaço; NÃO afirme número de eventos, número de veículos, ticket médio ou receita por evento se esses dados não estiverem no payload; não misture dados do Condomínio fora de um bloco consolidado explicitamente identificado.
+- PODE recomendar, quando fizer sentido: acompanhar a receita do estacionamento por período; revisar a escala de freelancers conforme o volume de eventos; monitorar despesas totais e manutenções; avaliar a margem operacional da operação; acompanhar o impacto do estacionamento no consolidado Salvaterra (quando o relatório trouxer essa visão); criar controle futuro de eventos, veículos e ticket médio caso ainda não existam; acompanhar receita por evento futuramente, se houver fonte de dados.
+- NÃO sugira ainda: resultado ajustado da Village; ações de condomínio aplicáveis ao Salvaterra Condomínio; ações de agenda comercial de Sirena ou Terrazzo.
+- VISÃO CONSOLIDADA: o consolidado Salvaterra é a soma de Resultado Condomínio + Resultado Estacionamento + Resultado Consolidado, e é um bloco COMPLEMENTAR. Nunca inclua Terrazzo, SGX, Sirena, Feat Produções, Case Shows, Franquias Viva ou qualquer outra empresa nesse consolidado. Fora do bloco consolidado, analise SOMENTE o Estacionamento; deixe explícito quando fala da empresa individual e quando fala da visão consolidada.
+- DADOS AUSENTES: quando uma informação operacional não estiver no payload, você pode recomendar acompanhamento futuro, mas NÃO pode afirmar que o fato ocorreu. Ex.: pode dizer "vale acompanhar futuramente a receita por evento e o número de veículos"; não pode dizer "a receita caiu porque houve menos eventos" se o número de eventos não foi enviado.
+- EXEMPLO DE LEITURA ADEQUADA: "O resultado do Salvaterra Estacionamento deve ser analisado considerando a receita gerada pela operação, o peso dos freelancers e das despesas totais sobre essa receita e a margem operacional do período. Caso os dados operacionais de eventos ainda não estejam no payload, a análise deve se limitar aos dados financeiros disponíveis."`;
 
 export const realEstateSalvaterraEstacionamentoTemplate: ReportTemplate = {
   id: "real-estate-salvaterra-estacionamento",
@@ -95,7 +104,7 @@ export const realEstateSalvaterraEstacionamentoTemplate: ReportTemplate = {
         ratio: { numerator: ["5"], denominator: ["1"] },
         invertStatus: true,
       },
-      { label: "Despesas Totais", code: "7", kind: "despesa" },
+      { label: "Despesas Operacionais", code: "7", kind: "despesa" },
       { label: "Resultado do Estacionamento", code: "11", kind: "resultado" },
       // Margem Operacional = Resultado (11) ÷ Receita Líquida (4).
       { label: "Margem Operacional", kind: "margem", ratio: { numerator: ["11"], denominator: ["4"] } },
@@ -104,15 +113,14 @@ export const realEstateSalvaterraEstacionamentoTemplate: ReportTemplate = {
     previstoRealizado: [
       { label: "Receita do Estacionamento", code: "1.1", unidade: "currency" },
       { label: "Custo com Freelancers", code: "5", unidade: "currency" },
-      { label: "Freelancers / Receita", unidade: "percent", ratio: { numerator: ["5"], denominator: ["1"] } },
       { label: "Despesas de Manutenção", code: "7.3.6", unidade: "currency" },
-      { label: "Despesas Totais", code: "7", unidade: "currency" },
+      { label: "Despesas Operacionais", code: "7", unidade: "currency" },
       { label: "Resultado do Estacionamento", code: "11", unidade: "currency" },
-      { label: "Margem Operacional", unidade: "percent", ratio: { numerator: ["11"], denominator: ["4"] } },
     ],
     historicoAccountCode: "11",
     historicoTitle: "Histórico do Resultado do Estacionamento",
     historicoKLabels: true,
+    historicoShowAcum: true,
     consolidatedGroup: {
       title: "Resultado Consolidado Salvaterra — Previsto × Realizado",
       matchName: "salvaterra",

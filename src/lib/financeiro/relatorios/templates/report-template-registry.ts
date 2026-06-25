@@ -7,7 +7,9 @@ import { realEstateSalvaterraEstacionamentoTemplate } from "./real-estate-salvat
 import { realEstateSgxTemplate } from "./real-estate-sgx-template";
 import { realEstateVillageTemplate } from "./real-estate-village-template";
 import { sirenaTemplate } from "./sirena-template";
+import { spotTemplate } from "./spot-template";
 import { terrazzoTemplate } from "./terrazzo-template";
+import { youngMedTemplate } from "./young-med-template";
 import type { ReportTemplate, TemplateMatchContext } from "./report-template-types";
 
 // ============================================================================
@@ -27,6 +29,10 @@ export const REPORT_TEMPLATES: readonly ReportTemplate[] = [
   caseShowsTemplate,
   sirenaTemplate,
   terrazzoTemplate,
+  // Young Med — empresa própria (serviços p/ médicos recém-formados).
+  youngMedTemplate,
+  // Spot — cenografia/produção/locação + Express (logística) na visão gerencial.
+  spotTemplate,
   franquiasVivaTemplate,
   genericTemplate,
 ];
