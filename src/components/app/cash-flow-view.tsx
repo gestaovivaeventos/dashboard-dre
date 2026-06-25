@@ -30,6 +30,7 @@ import type {
   CashFlowRange,
   PeriodMode,
 } from "@/lib/dashboard/cash-flow";
+import { CASE_SHOWS_CUSTODY_SOURCE } from "@/lib/dashboard/case-shows-custody";
 import type { CompetenciaLine, CompetenciaSection } from "@/lib/dashboard/case-shows-custody";
 import {
   saveSharedCompanyFilter,
@@ -754,8 +755,11 @@ export function CashFlowView({
           // "caixa branca" que aparecia quando a celula forcava bg-card.
           const stickyBgClass = "bg-inherit";
           const accentClass = row.custodyAccent ? "border-l-4 border-l-amber-400" : "";
+          // Linhas de saldo da Custódia (6.1 Saldo Anterior / 6.5 Saldo Final)
+          // recebem negrito — destaque puramente estético, sem mexer em cálculo.
+          const boldClass = row.source === CASE_SHOWS_CUSTODY_SOURCE ? "font-bold" : "";
           return (
-            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${accentClass}`} style={{ gridTemplateColumns: gridTemplate }}>
+            <div key={row.id} className={`grid px-4 py-2 text-sm ${rowClass} ${accentClass} ${boldClass}`} style={{ gridTemplateColumns: gridTemplate }}>
               <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
                 {row.hasChildren && !isHighlight ? (
                   <button type="button" onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))} className="rounded p-0.5 text-muted-foreground hover:bg-muted">
@@ -853,10 +857,14 @@ export function CashFlowView({
               const accentClass = row.custodyAccent
                 ? "border-l-4 border-l-amber-400"
                 : "";
+              // Linhas de saldo da Custódia (6.1 Saldo Anterior / 6.5 Saldo
+              // Final) recebem negrito — destaque estético, sem tocar cálculo.
+              const boldClass =
+                row.source === CASE_SHOWS_CUSTODY_SOURCE ? "font-bold" : "";
               return (
                 <div
                   key={row.id}
-                  className={`grid ${borderClass} ${accentClass} px-4 py-2 text-sm ${rowClass}`}
+                  className={`grid ${borderClass} ${accentClass} ${boldClass} px-4 py-2 text-sm ${rowClass}`}
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
                   <div className={`sticky left-0 z-[2] flex items-center gap-2 ${stickyBgClass}`} style={{ paddingLeft: `${(row.level - 1) * 14}px` }}>
