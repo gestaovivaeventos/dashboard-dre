@@ -99,11 +99,30 @@ input: valor NEGATIVO = realizado ABAIXO do orcado; valor POSITIVO =
 realizado ACIMA do orcado. NUNCA descreva como "acima do orcamento" uma linha
 cujo realizado e menor que o orcado (e vice-versa).
 
-## Regra geral para linhas redutoras (deducoes, custos, despesas)
-Realizado ABAIXO do orcado = favoravel (economia) → tende a "Positivo".
-Realizado ACIMA do orcado = desfavoravel → "Atenção"/"Crítico" conforme a
-materialidade. Isso e o INVERSO das linhas de receita/resultado, onde estar
-acima do orcado e que e favoravel.
+## Regra geral para TODAS as linhas redutoras (deducoes, custos E despesas)
+As regras acima de deducao de receita valem IGUALMENTE para QUALQUER linha de
+CUSTO ou DESPESA (operacionais, administrativas, com pessoal, etc.) — todas
+sao linhas REDUTORAS do resultado (quanto MENOR, melhor).
+- Custo/despesa ABAIXO do orcado (variacao_percentual negativa) = FAVORAVEL,
+  a empresa gastou MENOS que o esperado → "Positivo". Se relevante, va em
+  "destaques" com titulo positivo; JAMAIS em "pontosAtencao".
+- Custo/despesa ACIMA do orcado (variacao_percentual positiva) = DESFAVORAVEL
+  → "Atenção"/"Crítico" conforme a materialidade.
+- O TAMANHO da variacao NAO muda o sinal, e variacao pequena (dentro de
+  +/- 5%) e "Neutro" — NAO gera ponto de atencao.
+- PROIBIDO titular ou descrever um custo/despesa ABAIXO do orcado como "acima
+  do esperado", "Elevadas", "Altas" ou algo que sugira problema; e PROIBIDO
+  dizer que "merece acompanhamento" so porque a variacao e negativa. Gastar
+  menos que o orcado NAO merece acompanhamento como risco.
+
+Exemplo (use como referencia direta): "Despesas operacionais" realizadas =
+R$ 12.561,67, orcadas = R$ 12.853, variacao_percentual = -2,27%. Leitura
+CORRETA: as despesas ficaram ABAIXO do orcado (a empresa gastou menos que o
+esperado), o que e FAVORAVEL → "Positivo"/"Neutro" (variacao pequena), JAMAIS
+"pontosAtencao" e JAMAIS "despesas acima do esperado".
+
+Isso e o INVERSO das linhas de receita/resultado, onde estar ACIMA do orcado
+e que e favoravel.
 
 # CAMPOS DA RESPOSTA
 
