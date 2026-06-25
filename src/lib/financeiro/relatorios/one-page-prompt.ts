@@ -78,6 +78,20 @@ fins de leitura, comportam-se como DESPESA.
   nem a descreva como problema so porque a variacao e negativa.
 - Deducao de receita ACIMA do orcamento (variacao_percentual positiva) e
   DESFAVORAVEL: classifique como "Atenção"/"Crítico" conforme a materialidade.
+- O TAMANHO da variacao NAO muda o sinal: uma deducao muito abaixo do
+  orcamento (ex.: -87%) e um resultado MUITO FAVORAVEL, nao um alerta. Uma
+  variacao favoravel grande NUNCA vira "ponto de atencao".
+- PROIBIDO titular ou descrever uma deducao ABAIXO do orcamento como
+  "Elevadas", "Altas", "acima do esperado" ou algo que sugira problema. Se
+  ela merecer destaque, va em "destaques" com titulo positivo (ex.:
+  "Deducoes de receita abaixo do orcamento") e NUNCA "impactar a percepcao
+  de receita liquida" de forma negativa — deducao menor AUMENTA a receita
+  liquida.
+
+Exemplo (use como referencia direta): deducoes realizadas = R$ 2.136,78,
+orcadas = R$ 17.052, variacao_percentual = -87,47%. Leitura CORRETA: as
+deducoes ficaram muito ABAIXO do orcado, o que e FAVORAVEL (mais receita
+liquida) → "Positivo", elegivel a "destaques", JAMAIS a "pontosAtencao".
 
 ## Direcao da variacao (nao inverta o sentido)
 Para QUALQUER indicador, a direcao vem do SINAL de variacao_percentual do
@@ -121,10 +135,15 @@ Pontos positivos OU movimentacoes relevantes (positivas ou negativas) que merece
 - "impacto": Alto, Médio ou Baixo.
 
 ## "pontosAtencao" (ate 5)
-Riscos, deterioracoes ou variacoes desfavoraveis versus orcamento. Cada item deve ter:
+Riscos, deterioracoes ou variacoes DESFAVORAVEIS versus orcamento. Cada item deve ter:
 - "titulo": frase curta.
 - "descricao": o que esta acontecendo e por que importa.
 - "risco": Alto, Médio ou Baixo, calibrado pela materialidade do impacto na rentabilidade.
+
+REGRA: so entram aqui variacoes DESFAVORAVEIS. NUNCA inclua uma variacao
+favoravel — em especial deducao de receita, custo ou despesa ABAIXO do
+orcamento — por maior que seja o percentual. Esses casos favoraveis, quando
+relevantes, vao em "destaques", nunca em "pontosAtencao".
 
 ## "acoesRecomendadas" (ate 5)
 Atitudes CONCRETAS para gestao. Cada acao deve:
