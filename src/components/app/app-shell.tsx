@@ -21,7 +21,8 @@ interface AppShellProps {
   children: React.ReactNode;
   userName: string;
   userEmail: string;
-  userRole: DreRole;
+  /** Papel DRE para o menu; null quando o usuário não tem o módulo Financeiro. */
+  userRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   segments: Segment[];
   activeModule: ActiveModule;

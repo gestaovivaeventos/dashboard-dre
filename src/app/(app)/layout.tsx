@@ -18,6 +18,12 @@ export default async function ProtectedLayout({
   const userName = profile?.name || user.email || "Usuario";
   const userEmail = profile?.email || user.email || "";
   const userRole = modules?.dre?.role ?? profile?.role ?? "gestor_unidade";
+  // Papel DRE para o MENU: só quem realmente tem o módulo Financeiro. Sem isso,
+  // perfis só-Compras (ex.: solicitante) herdariam o dreRole de compatibilidade
+  // 'gestor_unidade' e veriam telas financeiras globais (ex.: "Documentos
+  // anexos") no menu lateral. O `userRole` acima continua servindo o restante
+  // do layout (resolveLayoutContext, query de segmentos).
+  const navDreRole = modules?.dre?.role ?? null;
   const ctrlRoles = modules?.ctrl?.roles ?? [];
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
@@ -94,7 +100,7 @@ export default async function ProtectedLayout({
     <AppShell
       userName={userName}
       userEmail={userEmail}
-      userRole={userRole}
+      userRole={navDreRole}
       ctrlRoles={ctrlRoles}
       segments={segments}
       activeModule={activeModule}
