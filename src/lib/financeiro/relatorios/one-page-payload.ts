@@ -1471,11 +1471,12 @@ export async function buildOnePagePayload(
       let totalPeriod: Res;
       let totalYtd: Res;
       if (cg.perCompanyPlan) {
-        // SOMA dos resultados individuais. Previsto só quando TODAS as empresas
-        // têm orçamento (ex.: Express sem budget → previsto null, sem inventar 0).
+        // SOMA dos resultados individuais. Previsto = soma dos orçamentos que
+        // EXISTEM (empresa sem budget contribui 0; ex.: Express sem orçamento →
+        // consolidado mostra só o da Spot). null apenas se NENHUMA tem orçamento.
         const sumR = (xs: Res[]) => xs.reduce((a, x) => a + x.realizado, 0);
         const sumP = (xs: Res[]) =>
-          xs.every((x) => x.previsto !== null) ? xs.reduce((a, x) => a + (x.previsto ?? 0), 0) : null;
+          xs.some((x) => x.previsto !== null) ? xs.reduce((a, x) => a + (x.previsto ?? 0), 0) : null;
         totalPeriod = { realizado: sumR(periodResults), previsto: sumP(periodResults) };
         totalYtd = { realizado: sumR(ytdResults), previsto: sumP(ytdResults) };
       } else {
