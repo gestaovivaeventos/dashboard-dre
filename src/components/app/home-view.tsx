@@ -36,6 +36,8 @@ interface HomeViewProps {
   caps: HomeCtrlCaps;
   ctrlData: HomeCtrlData;
   canFinanceiro: boolean;
+  /** Mostra Indicadores + Notícias econômicas (financeiro e também Solicitante). */
+  showEconomic: boolean;
 }
 
 function getGreeting(): string {
@@ -55,7 +57,7 @@ function alertDotColor(type: string): string {
   return "bg-blue-400";
 }
 
-export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewProps) {
+export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -64,20 +66,22 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
   const [loadingNews, setLoadingNews] = useState(true);
 
   useEffect(() => {
-    if (!canFinanceiro) return;
+    if (!showEconomic) return;
     void fetch("/api/home/indicators")
       .then((r) => r.json())
       .then((d: { indicators: Indicator[] }) => setIndicators(d.indicators ?? []))
       .finally(() => setLoadingIndicators(false));
-    void fetch("/api/home/stats")
-      .then((r) => r.json())
-      .then((d: { alerts: Alert[] }) => setAlerts(d.alerts ?? []))
-      .finally(() => setLoadingAlerts(false));
     void fetch("/api/home/news")
       .then((r) => r.json())
       .then((d: { news: NewsItem[] }) => setNews(d.news ?? []))
       .finally(() => setLoadingNews(false));
-  }, [canFinanceiro]);
+    // Alertas do Sistema é exclusivo do módulo financeiro.
+    if (!canFinanceiro) return;
+    void fetch("/api/home/stats")
+      .then((r) => r.json())
+      .then((d: { alerts: Alert[] }) => setAlerts(d.alerts ?? []))
+      .finally(() => setLoadingAlerts(false));
+  }, [showEconomic, canFinanceiro]);
 
   const greeting = getGreeting();
   const currentDate = new Date().toLocaleDateString("pt-BR", {
@@ -125,8 +129,8 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
         </div>
       )}
 
-      {/* Rodapé financeiro (gestão/financeiro) — Plano 2 expande com KPIs e Caixa */}
-      {canFinanceiro && (
+      {/* Rodapé econômico — financeiro vê tudo; Solicitante vê Indicadores + Notícias */}
+      {showEconomic && (
         <>
           <section>
             <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
@@ -166,7 +170,10 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
             </div>
           </section>
 
-          <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <section
+            className={`grid grid-cols-1 gap-6 ${canFinanceiro ? "lg:grid-cols-2" : ""}`}
+          >
+            {canFinanceiro && (
             <Card className="rounded-lg border bg-background">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold">Alertas do Sistema</CardTitle>
@@ -199,6 +206,7 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro }: HomeViewPr
                 )}
               </CardContent>
             </Card>
+            )}
 
             <Card className="rounded-lg border bg-background">
               <CardHeader className="pb-3">

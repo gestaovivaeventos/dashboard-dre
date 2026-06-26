@@ -18,6 +18,9 @@ export default async function HomePage() {
   const ctrlRoles = modules?.ctrl?.roles ?? [];
   const sectorIds = profile?.sector_ids ?? [];
   const canFinanceiro = Boolean(modules?.dre);
+  // Solicitante também vê Indicadores + Notícias econômicas na home (abaixo de
+  // "Minhas Requisições"), embora não tenha acesso ao módulo financeiro.
+  const showEconomic = canFinanceiro || profile?.profile === "solicitante";
 
   const caps = deriveCtrlCaps(ctrlRoles, sectorIds);
 
@@ -42,6 +45,7 @@ export default async function HomePage() {
       caps={caps}
       ctrlData={ctrlData}
       canFinanceiro={canFinanceiro}
+      showEconomic={showEconomic}
     />
   );
 }

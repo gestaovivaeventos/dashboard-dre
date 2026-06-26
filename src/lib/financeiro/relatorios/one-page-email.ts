@@ -1,7 +1,6 @@
 import type {
   ClassificacaoIndicador,
   OnePageReport,
-  StatusGeral,
 } from "./one-page-schema";
 import type {
   KpiCardPayload,
@@ -80,20 +79,6 @@ function classificacaoToSev(c: ClassificacaoIndicador): SevKey {
     case "Atenção":
       return "attention";
     case "Crítico":
-      return "critical";
-    default:
-      return "neutral";
-  }
-}
-
-function statusGeralToSev(s: StatusGeral): SevKey {
-  switch (s) {
-    case "Excelente":
-    case "Boa":
-      return "positive";
-    case "Atenção":
-      return "attention";
-    case "Crítica":
       return "critical";
     default:
       return "neutral";
@@ -267,10 +252,8 @@ export function renderOnePageEmail({
   appUrl,
 }: OnePageEmailArgs): string {
   const { kpis } = payload;
-  const statusSev = statusGeralToSev(analysis.statusGeral);
-  const statusS = SEV[statusSev];
 
-  // 1. Header (eyebrow + empresa + geradoEm; período escuro + status + nota).
+  // 1. Header (eyebrow + empresa + geradoEm; período escuro).
   const header = `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px solid ${C.rule};padding-bottom:18px;">
       <tr>
@@ -284,20 +267,6 @@ export function renderOnePageEmail({
             <td style="background:${C.darkCard};border-radius:8px;padding:12px 16px;vertical-align:top;">
               <div style="font-family:${FF};font-size:9px;letter-spacing:0.16em;text-transform:uppercase;font-weight:600;color:${C.darkLabel};">Período</div>
               <div style="font-family:${FF};font-size:16px;font-weight:700;color:#ffffff;margin-top:4px;white-space:nowrap;">${esc(periodLabel)}</div>
-            </td>
-            <td style="width:8px;"></td>
-            <td style="background:${statusS.bg};border:1px solid ${statusS.border};border-radius:8px;padding:12px 16px;text-align:center;vertical-align:top;">
-              <div style="font-family:${FF};font-size:9px;letter-spacing:0.16em;text-transform:uppercase;font-weight:600;color:${statusS.text};">Status</div>
-              <div style="font-family:${FF};font-size:16px;font-weight:700;color:${statusS.text};margin-top:4px;white-space:nowrap;">${esc(
-                analysis.statusGeral,
-              )}</div>
-            </td>
-            <td style="width:8px;"></td>
-            <td style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:8px;padding:12px 16px;text-align:center;vertical-align:top;">
-              <div style="font-family:${FF};font-size:9px;letter-spacing:0.16em;text-transform:uppercase;font-weight:600;color:${C.sub};">Nota</div>
-              <div style="font-family:${FM};font-size:22px;font-weight:600;color:${C.ink};margin-top:2px;">${Math.round(
-                analysis.notaGeral,
-              )}<span style="font-size:13px;color:${C.tertiary};font-weight:500;">/100</span></div>
             </td>
           </tr></table>
         </td>

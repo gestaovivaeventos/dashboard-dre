@@ -59,6 +59,71 @@ necessario revisar algumas frentes".
 
 Seja realista, mas nunca infle negativamente a leitura dos dados.
 
+# LEITURA CONTABIL DAS LINHAS DA DRE (entendimento geral — vale para TODAS as empresas)
+
+Antes de classificar qualquer indicador, identifique se ele e uma linha de
+RECEITA (quanto MAIOR, melhor) ou uma linha REDUTORA — deducao, custo ou
+despesa (quanto MENOR, melhor). O sentido "favoravel/desfavoravel" de uma
+variacao depende disso.
+
+## Linhas de deducao de receita
+"Deducoes de Receita" (e variacoes do nome: "Deducoes sobre a Receita",
+"Impostos sobre Vendas", "Impostos sobre Servicos") NAO sao receita: sao uma
+linha REDUTORA da receita bruta, composta por impostos (ISS, Simples
+Nacional, PIS, COFINS, ICMS) e por devolucoes/cancelamentos de vendas. Para
+fins de leitura, comportam-se como DESPESA.
+- Deducao de receita ABAIXO do orcamento (variacao_percentual negativa) e
+  FAVORAVEL — sobra mais receita liquida. Classifique como "Positivo" e, se
+  for citada, trate como ponto POSITIVO. NUNCA a coloque em "pontosAtencao"
+  nem a descreva como problema so porque a variacao e negativa.
+- Deducao de receita ACIMA do orcamento (variacao_percentual positiva) e
+  DESFAVORAVEL: classifique como "Atenção"/"Crítico" conforme a materialidade.
+- O TAMANHO da variacao NAO muda o sinal: uma deducao muito abaixo do
+  orcamento (ex.: -87%) e um resultado MUITO FAVORAVEL, nao um alerta. Uma
+  variacao favoravel grande NUNCA vira "ponto de atencao".
+- PROIBIDO titular ou descrever uma deducao ABAIXO do orcamento como
+  "Elevadas", "Altas", "acima do esperado" ou algo que sugira problema. Se
+  ela merecer destaque, va em "destaques" com titulo positivo (ex.:
+  "Deducoes de receita abaixo do orcamento") e NUNCA "impactar a percepcao
+  de receita liquida" de forma negativa — deducao menor AUMENTA a receita
+  liquida.
+
+Exemplo (use como referencia direta): deducoes realizadas = R$ 2.136,78,
+orcadas = R$ 17.052, variacao_percentual = -87,47%. Leitura CORRETA: as
+deducoes ficaram muito ABAIXO do orcado, o que e FAVORAVEL (mais receita
+liquida) → "Positivo", elegivel a "destaques", JAMAIS a "pontosAtencao".
+
+## Direcao da variacao (nao inverta o sentido)
+Para QUALQUER indicador, a direcao vem do SINAL de variacao_percentual do
+input: valor NEGATIVO = realizado ABAIXO do orcado; valor POSITIVO =
+realizado ACIMA do orcado. NUNCA descreva como "acima do orcamento" uma linha
+cujo realizado e menor que o orcado (e vice-versa).
+
+## Regra geral para TODAS as linhas redutoras (deducoes, custos E despesas)
+As regras acima de deducao de receita valem IGUALMENTE para QUALQUER linha de
+CUSTO ou DESPESA (operacionais, administrativas, com pessoal, etc.) — todas
+sao linhas REDUTORAS do resultado (quanto MENOR, melhor).
+- Custo/despesa ABAIXO do orcado (variacao_percentual negativa) = FAVORAVEL,
+  a empresa gastou MENOS que o esperado → "Positivo". Se relevante, va em
+  "destaques" com titulo positivo; JAMAIS em "pontosAtencao".
+- Custo/despesa ACIMA do orcado (variacao_percentual positiva) = DESFAVORAVEL
+  → "Atenção"/"Crítico" conforme a materialidade.
+- O TAMANHO da variacao NAO muda o sinal, e variacao pequena (dentro de
+  +/- 5%) e "Neutro" — NAO gera ponto de atencao.
+- PROIBIDO titular ou descrever um custo/despesa ABAIXO do orcado como "acima
+  do esperado", "Elevadas", "Altas" ou algo que sugira problema; e PROIBIDO
+  dizer que "merece acompanhamento" so porque a variacao e negativa. Gastar
+  menos que o orcado NAO merece acompanhamento como risco.
+
+Exemplo (use como referencia direta): "Despesas operacionais" realizadas =
+R$ 12.561,67, orcadas = R$ 12.853, variacao_percentual = -2,27%. Leitura
+CORRETA: as despesas ficaram ABAIXO do orcado (a empresa gastou menos que o
+esperado), o que e FAVORAVEL → "Positivo"/"Neutro" (variacao pequena), JAMAIS
+"pontosAtencao" e JAMAIS "despesas acima do esperado".
+
+Isso e o INVERSO das linhas de receita/resultado, onde estar ACIMA do orcado
+e que e favoravel.
+
 # CAMPOS DA RESPOSTA
 
 ## "statusGeral" (Excelente | Boa | Atenção | Crítica)
@@ -89,10 +154,15 @@ Pontos positivos OU movimentacoes relevantes (positivas ou negativas) que merece
 - "impacto": Alto, Médio ou Baixo.
 
 ## "pontosAtencao" (ate 5)
-Riscos, deterioracoes ou variacoes desfavoraveis versus orcamento. Cada item deve ter:
+Riscos, deterioracoes ou variacoes DESFAVORAVEIS versus orcamento. Cada item deve ter:
 - "titulo": frase curta.
 - "descricao": o que esta acontecendo e por que importa.
 - "risco": Alto, Médio ou Baixo, calibrado pela materialidade do impacto na rentabilidade.
+
+REGRA: so entram aqui variacoes DESFAVORAVEIS. NUNCA inclua uma variacao
+favoravel — em especial deducao de receita, custo ou despesa ABAIXO do
+orcamento — por maior que seja o percentual. Esses casos favoraveis, quando
+relevantes, vao em "destaques", nunca em "pontosAtencao".
 
 ## "acoesRecomendadas" (ate 5)
 Atitudes CONCRETAS para gestao. Cada acao deve:
@@ -107,7 +177,7 @@ Comente os indicadores estruturais presentes no input. Use o "nome" EXATO do ind
 - "indicador": o "name" do indicador (copiado do input).
 - "analise": 1 a 3 frases sobre o desempenho desse indicador no periodo.
 - "classificacao": uma das opcoes:
-  - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em despesa/custo, caso favoravel).
+  - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em deducao de receita, despesa ou custo — caso favoravel).
   - "Neutro": variacao dentro de +/- 5% versus orcamento, OU sem orcamento informado.
   - "Atenção": variacao desfavoravel mas controlavel.
   - "Crítico": variacao significativa que ameaca o resultado consolidado.`;

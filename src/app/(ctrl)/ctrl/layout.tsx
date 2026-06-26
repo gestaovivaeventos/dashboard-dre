@@ -19,6 +19,11 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   // (can_financeiro=false). Fallback pro role legado derivado em
   // session.ts → garante que o AppShell receba um valor válido.
   const dreRole   = modules.dre?.role ?? profile?.role ?? "gestor_unidade";
+  // Papel DRE para o MENU: só quem realmente tem o módulo Financeiro. Sem isso,
+  // perfis só-Compras (ex.: solicitante) herdariam o fallback 'gestor_unidade'
+  // e veriam telas financeiras globais (ex.: "Documentos anexos") no menu — o
+  // mesmo tratamento do layout (app). `dreRole` acima segue servindo o resto.
+  const navDreRole = modules.dre?.role ?? null;
   const ctrlRoles = modules.ctrl?.roles ?? [];
 
   // Segmentos para o shell DRE (mesmo do (app) layout)
@@ -57,7 +62,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     <AppShell
       userName={userName}
       userEmail={userEmail}
-      userRole={dreRole}
+      userRole={navDreRole}
       ctrlRoles={ctrlRoles}
       segments={segments}
       activeModule={activeModule}

@@ -131,6 +131,7 @@ export function canAccessPathByProfile(
     pathname.startsWith("/home") ||
     pathname.startsWith("/s/") ||
     pathname.startsWith("/conexoes") ||
+    pathname.startsWith("/financeiro") ||
     pathname.startsWith("/mapeamento") ||
     pathname.startsWith("/configuracoes")
   ) {
