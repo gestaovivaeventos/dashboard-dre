@@ -440,45 +440,91 @@ export async function fetchAllDreAccountRows<T>(
  * (já buscada pelo chamador, possivelmente em paralelo com outras queries)
  * e produz o plano escopado + tradutor de ids.
  *
- * Regra de escopo: quando UMA única empresa está selecionada E ela possui
- * plano custom (alguma linha em dre_accounts com company_id === essa
- * empresa), usa só o plano dela; caso contrário (consolidado multi-empresa
- * OU empresa sem plano custom), cai no plano global (company_id IS NULL).
+ * Regra de escopo:
+ *  - UMA única empresa COM plano custom → usa só o plano dela.
+ *  - UMA empresa sem custom (ou nenhuma) → plano global (company_id IS NULL).
+ *  - MULTI-empresa (consolidado) → UNIÃO dos planos custom das empresas
+ *    selecionadas ("empilha os planos"): para cada código, prefere a conta
+ *    custom de uma empresa selecionada; o global só preenche códigos que
+ *    NENHUMA selecionada possui. Antes o multi-empresa caía no plano global,
+ *    o que DESCARTAVA códigos custom-only (ex.: Spot/Express codes 12-15 e as
+ *    receitas 1.4-1.7) e aplicava a fórmula global onde o code colide com o
+ *    custom (ex.: Salvaterra code 9 = IRPJ vs global = Receitas Não Op) — somas
+ *    e Resultado saíam errados. A união casa por código (`translateToScopedId`),
+ *    então cada empresa contribui para a conta de MESMO código e nada é
+ *    descartado. `parent_id` é REMAPEADO por código para a hierarquia mesclada,
+ *    senão os grupos `is_summary` (que somam filhos por parent_id) não fechariam.
+ *    Ressalva: quando empresas reaproveitam o MESMO número de código para
+ *    sub-contas diferentes (folhas), a linha mesclada herda o rótulo de uma e
+ *    SOMA as duas — os totais ficam corretos; só o rótulo da folha fica de uma
+ *    empresa. Dedup por código também evita duplicidade de linhas.
  *
- * Esta é a regra ÚNICA que evita duplicidade de linhas e garante que o
- * "Resultado do Exercício" seja idêntico no Dashboard DRE e no Fluxo de Caixa.
+ * Garante que o "Resultado do Exercício" seja idêntico no Dashboard DRE, no
+ * Fluxo de Caixa e no Budget — single e multi-empresa.
  */
 export function scopeDreAccounts(
   rawAccounts: RawDreAccount[],
   selectedCompanyIds: string[],
 ): ScopedDreAccounts {
-  const scopedCompanyId =
-    selectedCompanyIds.length === 1 ? selectedCompanyIds[0] : null;
-  const companyHasCustomPlan = scopedCompanyId
-    ? rawAccounts.some((a) => a.company_id === scopedCompanyId)
-    : false;
-
-  const scopedAccounts: DreAccountBase[] = rawAccounts
-    .filter((a) =>
-      companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
-    )
-    .map((a) => ({
-      id: a.id,
-      code: a.code,
-      name: a.name,
-      parent_id: a.parent_id,
-      level: a.level,
-      type: a.type,
-      is_summary: a.is_summary,
-      formula: a.formula,
-      sort_order: a.sort_order,
-      active: a.active,
-    }));
-
   const codeByRawId = new Map<string, string>();
   rawAccounts.forEach((account) => {
     codeByRawId.set(account.id, account.code);
   });
+
+  const toBase = (a: RawDreAccount): DreAccountBase => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    parent_id: a.parent_id,
+    level: a.level,
+    type: a.type,
+    is_summary: a.is_summary,
+    formula: a.formula,
+    sort_order: a.sort_order,
+    active: a.active,
+  });
+
+  let scopedAccounts: DreAccountBase[];
+
+  if (selectedCompanyIds.length <= 1) {
+    // Single (ou nenhuma): plano custom da empresa se existir, senão global.
+    // Comportamento INALTERADO.
+    const scopedCompanyId =
+      selectedCompanyIds.length === 1 ? selectedCompanyIds[0] : null;
+    const companyHasCustomPlan = scopedCompanyId
+      ? rawAccounts.some((a) => a.company_id === scopedCompanyId)
+      : false;
+    scopedAccounts = rawAccounts
+      .filter((a) =>
+        companyHasCustomPlan ? a.company_id === scopedCompanyId : a.company_id === null,
+      )
+      .map(toBase);
+  } else {
+    // Multi-empresa: UNIÃO dos planos custom selecionados (1 conta por código),
+    // preferindo custom (na ordem de seleção) sobre global; global preenche só
+    // códigos que nenhuma selecionada tem.
+    const pickByCode = new Map<string, RawDreAccount>();
+    for (const cid of selectedCompanyIds) {
+      for (const a of rawAccounts) {
+        if (a.company_id === cid && !pickByCode.has(a.code)) pickByCode.set(a.code, a);
+      }
+    }
+    for (const a of rawAccounts) {
+      if (a.company_id === null && !pickByCode.has(a.code)) pickByCode.set(a.code, a);
+    }
+    // id da conta mesclada por código (alvo do remapeamento de parent_id).
+    const mergedIdByCode = new Map<string, string>();
+    pickByCode.forEach((a, code) => mergedIdByCode.set(code, a.id));
+    scopedAccounts = Array.from(pickByCode.values()).map((a) => {
+      const base = toBase(a);
+      // Remapeia o pai para a conta mesclada de MESMO código do pai original —
+      // garante hierarquia consistente no plano unificado.
+      const parentCode = a.parent_id ? codeByRawId.get(a.parent_id) ?? null : null;
+      base.parent_id = parentCode ? mergedIdByCode.get(parentCode) ?? null : null;
+      return base;
+    });
+  }
+
   const scopedIdByCode = new Map<string, string>();
   scopedAccounts.forEach((account) => {
     scopedIdByCode.set(account.code, account.id);
