@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
+import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
 import type {
   CashFlowAccountBase,
   CashFlowAccumulatedSection,
@@ -259,6 +260,7 @@ export function CashFlowView({
   const [drillSearch, setDrillSearch] = useState("");
   const [drillPage, setDrillPage] = useState(1);
   const [drillPageSize, setDrillPageSize] = useState(20);
+  const [exportingDrill, setExportingDrill] = useState(false);
   const [drillTotal, setDrillTotal] = useState(0);
   const [drillTotalValue, setDrillTotalValue] = useState(0);
 
@@ -385,6 +387,56 @@ export function CashFlowView({
   // modos sem precisar reencontrar a linha de origem.
   const reDrilldown = (page: number, search: string) => {
     void fetchDrilldown(drilldown, page, search);
+  };
+
+  // Exporta TODO o drilldown atual (todas as páginas) para Excel (.xlsx).
+  // Cobre os 2 modos: "cash" (rota /api/cash-flow/drilldown) e "competencia"
+  // (rota custody-competencia, single-company).
+  const handleExportDrilldown = async () => {
+    setExportingDrill(true);
+    try {
+      const isComp = drilldown.mode === "competencia";
+      const endpoint = isComp
+        ? "/api/cash-flow/custody-competencia-drilldown"
+        : "/api/cash-flow/drilldown";
+      const baseParams: Record<string, string> = isComp
+        ? {
+            companyId: selectedCompanyIds[0] ?? "",
+            codes: drilldown.codes.join(","),
+            dateFrom: drilldown.bucket.dateFrom,
+            dateTo: drilldown.bucket.dateTo,
+            search: drillSearch,
+          }
+        : {
+            accountId: drilldown.accountId,
+            dateFrom: drilldown.bucket.dateFrom,
+            dateTo: drilldown.bucket.dateTo,
+            companyIds: selectedCompanyIds.join(","),
+            search: drillSearch,
+          };
+      const allRows = await fetchAllDrilldownRows(endpoint, baseParams);
+      if (allRows.length === 0) {
+        showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
+        return;
+      }
+      downloadDrilldownXlsx(allRows, {
+        origem: "Fluxo de Caixa",
+        accountName: drilldown.accountName,
+        periodLabel: drilldown.bucket.label,
+        // Competência é sempre single-company; cash mostra "Empresa" se multi.
+        multiCompany: !isComp && selectedCompanyIds.length > 1,
+        dateLabel: isComp ? "Data Reg." : "Data Pgto",
+      });
+      showToast({ title: "Exportacao concluida", description: `${allRows.length} lancamento(s) exportado(s).`, variant: "success" });
+    } catch (error) {
+      showToast({
+        title: "Falha ao exportar",
+        description: error instanceof Error ? error.message : "Erro ao gerar Excel.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingDrill(false);
+    }
   };
 
   const handleApply = () => {
@@ -1166,6 +1218,20 @@ export function CashFlowView({
               >
                 <Search className="mr-2 h-4 w-4" />
                 Buscar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleExportDrilldown()}
+                disabled={exportingDrill || drillLoading || drillRows.length === 0}
+                title="Exportar todos os lancamentos deste drilldown para Excel"
+              >
+                {exportingDrill ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                )}
+                Exportar Excel
               </Button>
             </div>
 

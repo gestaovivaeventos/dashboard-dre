@@ -31,6 +31,11 @@ export async function updateSession(request: NextRequest) {
     pathname === "/login" ||
     pathname === "/signup" ||
     pathname === "/pendente" ||
+    // Recuperação de senha: "/recuperar-senha" é público (deslogado pede o link);
+    // "/redefinir-senha" recebe a sessão de recovery (via /auth/callback) e define
+    // a nova senha — fica fora do guard de perfil pra não ser redirecionada.
+    pathname === "/recuperar-senha" ||
+    pathname === "/redefinir-senha" ||
     pathname.startsWith("/auth/callback");
   const isApiRoute  = pathname.startsWith("/api/");
   const isPublicRoot = pathname === "/";
