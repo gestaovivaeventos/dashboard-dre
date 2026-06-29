@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
+import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import type {
   DashboardFilterState,
@@ -278,6 +279,7 @@ export function DashboardDreView({
   const [drillSearch, setDrillSearch] = useState("");
   const [drillPage, setDrillPage] = useState(1);
   const [drillPageSize, setDrillPageSize] = useState(20);
+  const [exportingDrill, setExportingDrill] = useState(false);
   const [drillTotal, setDrillTotal] = useState(0);
   const [drillTotalValue, setDrillTotalValue] = useState(0);
   // Valor que estava na celula da DRE clicada e total agregado canonico
@@ -378,6 +380,39 @@ export function DashboardDreView({
     setDrillAggregateTotal(payload.aggregateTotal ?? 0);
     setDrillPage(page);
     setDrillLoading(false);
+  };
+
+  // Exporta TODO o drilldown atual (todas as páginas) para Excel (.xlsx).
+  const handleExportDrilldown = async () => {
+    setExportingDrill(true);
+    try {
+      const allRows = await fetchAllDrilldownRows("/api/dashboard/drilldown", {
+        accountId: drilldown.accountId,
+        dateFrom: drilldown.bucket.dateFrom,
+        dateTo: drilldown.bucket.dateTo,
+        companyIds: selectedCompanyIds.join(","),
+        search: drillSearch,
+      });
+      if (allRows.length === 0) {
+        showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
+        return;
+      }
+      downloadDrilldownXlsx(allRows, {
+        origem: "DRE",
+        accountName: drilldown.accountName,
+        periodLabel: drilldown.bucket.label,
+        multiCompany: selectedCompanyIds.length > 1,
+      });
+      showToast({ title: "Exportacao concluida", description: `${allRows.length} lancamento(s) exportado(s).`, variant: "success" });
+    } catch (error) {
+      showToast({
+        title: "Falha ao exportar",
+        description: error instanceof Error ? error.message : "Erro ao gerar Excel.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingDrill(false);
+    }
   };
 
   const handleApply = () => {
@@ -980,6 +1015,20 @@ export function DashboardDreView({
               >
                 <Search className="mr-2 h-4 w-4" />
                 Buscar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleExportDrilldown()}
+                disabled={exportingDrill || drillLoading || drillRows.length === 0}
+                title="Exportar todos os lancamentos deste drilldown para Excel"
+              >
+                {exportingDrill ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                )}
+                Exportar Excel
               </Button>
             </div>
 

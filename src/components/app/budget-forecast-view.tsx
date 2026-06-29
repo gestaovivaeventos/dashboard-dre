@@ -9,6 +9,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronsUpDown,
+  FileSpreadsheet,
   Inbox,
   Loader2,
   Search,
@@ -29,7 +30,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toaster";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
+import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
 import type {
   DashboardFilterState,
   DashboardRange,
@@ -240,6 +243,8 @@ export function BudgetForecastView({
   });
   const [drillRows, setDrillRows] = useState<DrilldownRow[]>([]);
   const [drillLoading, setDrillLoading] = useState(false);
+  const { showToast } = useToast();
+  const [exportingDrill, setExportingDrill] = useState(false);
   const [drillSearch, setDrillSearch] = useState("");
   const [drillPage, setDrillPage] = useState(1);
   const [drillPageSize, setDrillPageSize] = useState(20);
@@ -338,6 +343,39 @@ export function BudgetForecastView({
     companyId: string,
   ) => {
     return openDrilldown(account, bucket, 1, "", [companyId]);
+  };
+
+  // Exporta TODO o drilldown atual (todas as páginas) para Excel (.xlsx).
+  const handleExportDrilldown = async () => {
+    setExportingDrill(true);
+    try {
+      const allRows = await fetchAllDrilldownRows("/api/dashboard/drilldown", {
+        accountId: drilldown.accountId,
+        dateFrom: drilldown.bucket.dateFrom,
+        dateTo: drilldown.bucket.dateTo,
+        companyIds: selectedCompanyIds.join(","),
+        search: drillSearch,
+      });
+      if (allRows.length === 0) {
+        showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
+        return;
+      }
+      downloadDrilldownXlsx(allRows, {
+        origem: "Budget e Forecast",
+        accountName: drilldown.accountName,
+        periodLabel: drilldown.bucket.label,
+        multiCompany: selectedCompanyIds.length > 1,
+      });
+      showToast({ title: "Exportacao concluida", description: `${allRows.length} lancamento(s) exportado(s).`, variant: "success" });
+    } catch (error) {
+      showToast({
+        title: "Falha ao exportar",
+        description: error instanceof Error ? error.message : "Erro ao gerar Excel.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingDrill(false);
+    }
   };
 
   const buildQuery = (overrides: Record<string, string | undefined>) => {
@@ -752,6 +790,20 @@ export function BudgetForecastView({
               >
                 <Search className="mr-2 h-4 w-4" />
                 Buscar
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleExportDrilldown()}
+                disabled={exportingDrill || drillLoading || drillRows.length === 0}
+                title="Exportar todos os lancamentos deste drilldown para Excel"
+              >
+                {exportingDrill ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                )}
+                Exportar Excel
               </Button>
             </div>
 
