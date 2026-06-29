@@ -227,7 +227,11 @@ export type ReportBlockKey =
   // spot os habilita. "composicaoReceita" = fontes de receita; "freteLogistica"
   // = Receita de Frete × Custo Logístico × Resultado.
   | "composicaoReceita"
-  | "freteLogistica";
+  | "freteLogistica"
+  // Quadro "Locação de Espaço" EXCLUSIVO do Terrazzo (realizado das contas
+  // 1.1 Formaturas e 1.2 Shows/Palestras no mês de referência). Só o template
+  // terrazzo o habilita.
+  | "locacaoEspaco";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -349,6 +353,18 @@ export interface TemplateReportConfig {
    * fica naturalmente fora. `categoryLabel` é só rótulo exibido.
    */
   partnerPerformance?: { title: string; accountCode: string; categoryLabel?: string };
+  /**
+   * Quadro de INDICADORES por conta DRE (ex.: Terrazzo — "Locação de Espaço":
+   * 1.1 Formaturas, 1.2 Shows/Palestras). Cada indicador = Σ(codes) − Σ(minus)
+   * sobre o REALIZADO no período de referência (mês selecionado pelo usuário) —
+   * o MESMO valor exibido na célula do mês no DRE gerencial. Gated por `key`
+   * (allowlist enabledBlocks). Só dados da própria empresa.
+   */
+  indicadoresDre?: {
+    key: ReportBlockKey;
+    title: string;
+    items: Array<{ label: string; codes: string[]; minus?: string[] }>;
+  };
 }
 
 export interface ReportTemplate {

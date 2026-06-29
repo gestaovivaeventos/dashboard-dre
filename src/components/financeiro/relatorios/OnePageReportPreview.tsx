@@ -129,6 +129,17 @@ export interface CustodyClosingBlock {
   saldoFinalCompetencia: number | null;
 }
 
+// Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço":
+// Formaturas / Shows-Palestras), no mês de referência. Valores em R$ cheios.
+// Só presente quando o template da empresa configura `report.indicadoresDre`.
+export interface DreIndicatorsBlock {
+  /** ReportBlockKey p/ gating (ex.: "locacaoEspaco"). */
+  key: string;
+  title: string;
+  referenciaLabel: string;
+  items: Array<{ label: string; value: number }>;
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -164,6 +175,8 @@ export interface OnePageReportPreviewData {
   featEventos?: FeatEventosBlock;
   /** Saldo final da Custódia de Artistas (Case Shows). Ausência = não renderiza. */
   custodyClosing?: CustodyClosingBlock;
+  /** Indicadores por conta DRE (Terrazzo — "Locação de Espaço"). Ausência = não renderiza. */
+  indicadoresDre?: DreIndicatorsBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -2373,6 +2386,34 @@ function QuadroCustodiaCaseShows({ data }: { data: CustodyClosingBlock }) {
   );
 }
 
+// Quadro de indicadores por conta DRE (EXCLUSIVO de templates que o configuram,
+// ex.: Terrazzo — "Locação de Espaço": Formaturas / Shows-Palestras). Mostra o
+// realizado de cada conta no mês de referência. Valores em R$ cheios.
+function QuadroIndicadoresDre({ data }: { data: DreIndicatorsBlock }) {
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div
+        className="opr-cards-2"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${Math.min(data.items.length, 2)}, 1fr)`,
+          gap: 12,
+        }}
+      >
+        {data.items.map((item) => (
+          <FeatIndicador
+            key={item.label}
+            label={item.label}
+            valueLabel={fmtMoneyFull(item.value)}
+            hint={`Realizado · ${data.referenciaLabel}`}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function FechamentosEmAberto({ data }: { data: FeatEventosBlock }) {
   const temAberto = data.eventosEmAbertoDetalhe.length > 0;
 
@@ -2588,6 +2629,13 @@ export function OnePageReportPreview({
             (caixa e competência) já calculados na tela de Fluxo de Caixa. */}
         {show("custodyClosing") && data.custodyClosing ? (
           <QuadroCustodiaCaseShows data={data.custodyClosing} />
+        ) : null}
+
+        {/* Indicadores por conta DRE — exclusivo de templates que o configuram
+            (ex.: Terrazzo — "Locação de Espaço": Formaturas / Shows-Palestras).
+            Gated pela `key` do bloco na allowlist + presença de dados. */}
+        {data.indicadoresDre && show(data.indicadoresDre.key) ? (
+          <QuadroIndicadoresDre data={data.indicadoresDre} />
         ) : null}
 
         {/* Performance por Parceiro — exclusivo da Young Med (gated por bloco +
