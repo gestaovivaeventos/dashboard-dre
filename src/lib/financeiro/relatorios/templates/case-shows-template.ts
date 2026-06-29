@@ -102,6 +102,9 @@ export const caseShowsTemplate: ReportTemplate = {
       "diagnostico",
       "previstoRealizado",
       "semaforo",
+      // Saldo final da Custódia de Artistas (caixa + competência) — quadro
+      // exclusivo da Case Shows, logo após a tabela de desempenho/semáforo.
+      "custodyClosing",
       "acumuladoAno",
       "historico",
       "alertas",

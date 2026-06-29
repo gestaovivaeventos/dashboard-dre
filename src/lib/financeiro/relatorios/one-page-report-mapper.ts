@@ -2,6 +2,7 @@ import type {
   AcaoCard,
   AlertaCard,
   ComposicaoStep,
+  CustodyClosingBlock,
   FeatEventosBlock,
   HistoricoPoint,
   KpiCard,
@@ -111,6 +112,9 @@ export interface OnePageApiResponse {
   // Quadro de eventos exclusivo da Feat Produções (mesmo shape do componente).
   // Presente só quando a empresa analisada é a Feat Produções.
   featEventos?: FeatEventosBlock;
+  // Saldo final da Custódia de Artistas (Case Shows). Mesmo shape do componente
+  // (R$ cheios). Presente só quando a empresa analisada é a Case Shows.
+  custodyClosing?: CustodyClosingBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -599,6 +603,9 @@ export function mapOnePageApiResponseToPreviewData(
     // Quadro de eventos da Feat Produções — passa direto (já vem no shape do
     // componente); undefined para todas as demais empresas.
     featEventos: response.featEventos,
+    // Saldo final da Custódia de Artistas (Case Shows) — passa direto (já vem
+    // em R$ cheios, mesmo shape do componente). undefined nas demais empresas.
+    custodyClosing: response.custodyClosing,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

@@ -216,6 +216,10 @@ export type ReportBlockKey =
   // Quadro de eventos EXCLUSIVO da Feat Produções (alimentado por
   // company_feat_projetos). Só o template feat-producoes o habilita.
   | "featEventos"
+  // Quadro "Custódia de Artistas — Saldo Final" EXCLUSIVO da Case Shows (saldo
+  // de fechamento por regime de caixa + competência). Só o template case-shows
+  // o habilita.
+  | "custodyClosing"
   // Bloco "Performance por Parceiro — Mês e Acumulado" EXCLUSIVO da Young Med
   // (realizado por fornecedor da conta de BVs). Só o template young-med o habilita.
   | "performancePorParceiro"

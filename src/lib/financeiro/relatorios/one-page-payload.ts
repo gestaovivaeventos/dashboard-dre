@@ -9,6 +9,10 @@ import {
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
+import {
+  buildCaseShowsCustodyClosing,
+  type CaseShowsCustodyClosingPayload,
+} from "./case-shows-custody-closing";
 import { buildFeatEventos, type FeatEventosPayload } from "./feat-eventos";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
@@ -195,6 +199,9 @@ export interface OnePagePayload {
   // (undefined) para todas as demais empresas. Alimenta o quadro próprio no
   // One Page Report (2 indicadores + 2 gráficos por tipo de evento).
   featEventos?: FeatEventosPayload;
+  // Saldo final da "Custódia de Artistas" (regime de caixa + competência) —
+  // EXCLUSIVO da Case Shows. Ausente (undefined) para todas as demais empresas.
+  custodyClosing?: CaseShowsCustodyClosingPayload;
   // Gráficos extras por template (ex.: Village). Ausência = não renderiza.
   // `barsChart`: colunas do acumulado do ano (Jan→mês de análise, realizado).
   // `linesChart`: linhas dos últimos 6 meses (N séries; labels separados).
@@ -1586,6 +1593,17 @@ export async function buildOnePagePayload(
         )
       : null;
 
+  // Saldo final da Custódia de Artistas (regime de caixa + competência) —
+  // EXCLUSIVO da Case Shows. Reproduz, no mês de referência (dateTo), os dois
+  // saldos de fechamento já calculados na tela de Fluxo de Caixa. Gate por NOME
+  // dentro do helper: qualquer outra empresa devolve null (quadro não aparece).
+  const custodyClosing = await buildCaseShowsCustodyClosing(supabase, {
+    companyId,
+    companyName: company.name,
+    dateTo,
+    referenciaLabel,
+  });
+
   const ytdMargemR =
     ytdReceitaLiqR > 0 ? (ytdResultadoR / ytdReceitaLiqR) * 100 : null;
   const ytdMargemB =
@@ -1823,6 +1841,8 @@ export async function buildOnePagePayload(
       vvrSerieAnual: template.capabilities.vvrFee ? vvrSerieAnual : [],
       // Quadro de eventos — só presente para a Feat Produções (undefined nos demais).
       featEventos: featEventosResult?.payload,
+      // Saldo final da Custódia de Artistas — só presente para a Case Shows.
+      custodyClosing: custodyClosing ?? undefined,
       // Gráficos extras por template (ex.: Village). undefined p/ os demais.
       barsSerie,
       barsTitle,

@@ -120,6 +120,15 @@ export interface FeatEventosBlock {
   percentualAtingimentoProjecao: number | null;
 }
 
+// Saldo final da "Custódia de Artistas" da Case Shows (regime de caixa +
+// competência), no mês de referência do relatório. Valores em R$ cheios. Só
+// presente quando a empresa analisada é a Case Shows.
+export interface CustodyClosingBlock {
+  referenciaLabel: string;
+  saldoFinalCaixa: number;
+  saldoFinalCompetencia: number | null;
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -153,6 +162,8 @@ export interface OnePageReportPreviewData {
   kpiSectionTitle?: string;
   /** Quadro de eventos exclusivo da Feat Produções. Ausência = não renderiza. */
   featEventos?: FeatEventosBlock;
+  /** Saldo final da Custódia de Artistas (Case Shows). Ausência = não renderiza. */
+  custodyClosing?: CustodyClosingBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -2327,6 +2338,41 @@ function QuadroEventosFeat({
   );
 }
 
+// Quadro "Custódia de Artistas — Saldo Final" (EXCLUSIVO Case Shows). Mostra os
+// dois saldos de fechamento já calculados na tela de Fluxo de Caixa, no mês de
+// referência: regime de caixa (por data de pagamento) e regime de competência
+// (por data de registro). Valores em R$ cheios.
+function QuadroCustodiaCaseShows({ data }: { data: CustodyClosingBlock }) {
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>Custódia de Artistas — Saldo Final</SectionTitle>
+      <div
+        className="opr-cards-2"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 12,
+        }}
+      >
+        <FeatIndicador
+          label="Saldo final — regime de caixa"
+          valueLabel={fmtMoneyFull(data.saldoFinalCaixa)}
+          hint={`Por data de pagamento · ${data.referenciaLabel}`}
+        />
+        <FeatIndicador
+          label="Saldo final — regime de competência"
+          valueLabel={
+            data.saldoFinalCompetencia === null
+              ? "—"
+              : fmtMoneyFull(data.saldoFinalCompetencia)
+          }
+          hint={`Por data de registro · ${data.referenciaLabel}`}
+        />
+      </div>
+    </section>
+  );
+}
+
 function FechamentosEmAberto({ data }: { data: FeatEventosBlock }) {
   const temAberto = data.eventosEmAbertoDetalhe.length > 0;
 
@@ -2535,6 +2581,13 @@ export function OnePageReportPreview({
             por isso aparece em destaque, logo após os indicadores do mês. */}
         {show("featEventos") && data.featEventos ? (
           <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
+        ) : null}
+
+        {/* Saldo final da Custódia de Artistas — exclusivo da Case Shows (gated
+            por bloco + presença de dados). Mostra os dois saldos de fechamento
+            (caixa e competência) já calculados na tela de Fluxo de Caixa. */}
+        {show("custodyClosing") && data.custodyClosing ? (
+          <QuadroCustodiaCaseShows data={data.custodyClosing} />
         ) : null}
 
         {/* Performance por Parceiro — exclusivo da Young Med (gated por bloco +
