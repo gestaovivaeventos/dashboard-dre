@@ -112,7 +112,7 @@ const PROFILES: Array<{
   },
   {
     value: "franqueado",
-    label: "Franqueado",
+    label: "Visão Financeira",
     description:
       "Visão restrita ao Financeiro (Dashboard, Fluxo de Caixa, Budget, KPIs, BI) das unidades atribuídas.",
   },
@@ -782,7 +782,7 @@ function UserForm({
       )}
       {form.profile === "franqueado" && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-          Franqueado vê <strong>apenas</strong> o Financeiro das unidades selecionadas:
+          O perfil Visão Financeira vê <strong>apenas</strong> o Financeiro das unidades selecionadas:
           Dashboard, Fluxo de Caixa, Budget e Forecast, KPIs e Business Intelligence.
           Sem acesso a Compras, Conexões, Mapeamento, Configurações ou Plataforma.
         </p>
