@@ -17,6 +17,9 @@ type Req = {
   title: string;
   amount: number;
   status: string;
+  // Etapa de origem guardada quando entra em complementação (gerente/diretor),
+  // usada para decidir a aprovação de dentro da própria aba de Complementação.
+  complement_return_status?: string | null;
   approval_tier: string | null;
   description: string | null;
   justification: string | null;
@@ -70,9 +73,12 @@ type SortDir = "asc" | "desc";
 interface Props {
   requests: Req[];
   ctrlRoles: string[];
+  // Ids de requisições em complementação aguardando análise do aprovador
+  // (último turno foi resposta do solicitante). Alimenta o alerta da aba.
+  awaitingApproverIds?: string[];
 }
 
-export function AprovacoesClient({ requests, ctrlRoles }: Props) {
+export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
   const [sortField, setSortField] = useState<SortField>("data");
@@ -89,16 +95,25 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const canApprove = hasRole("gerente", "diretor", "csc", "admin");
   const canReverse = hasRole("diretor", "admin");
 
+  const awaitingSet = new Set(awaitingApproverIds);
+
   // Etapa atual da requisição e se o usuário pode agir nela.
   // pendente → etapa do gerente (gerente/diretor/csc/admin podem aprovar);
   // pendente_diretor → etapa do diretor (só diretor/csc/admin).
+  // aguardando_complementacao → o aprovador decide aqui mesmo, usando a etapa de
+  // origem (complement_return_status) para saber quem pode aprovar.
   const isPendingStatus = (s: string) => s === "pendente" || s === "pendente_diretor";
-  const canActOn = (r: Req) =>
-    r.status === "pendente_diretor"
+  const canActOn = (r: Req) => {
+    const stage =
+      r.status === "aguardando_complementacao"
+        ? r.complement_return_status ?? "pendente"
+        : r.status;
+    return stage === "pendente_diretor"
       ? hasRole("diretor", "csc", "admin")
-      : r.status === "pendente"
+      : stage === "pendente"
       ? canApprove
       : false;
+  };
 
   // Aba "Pendentes" agrupa as duas etapas de pendência.
   const filteredRequests =
@@ -193,11 +208,20 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
             }`}
           >
             {TAB_LABELS[tab]}
-            {counts[tab] > 0 && (
+            {tab === "aguardando_complementacao" && awaitingApproverIds.length > 0 ? (
+              // Alerta: há resposta(s) do solicitante aguardando análise.
+              <span
+                className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                title="Há novas respostas aguardando sua análise"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                {awaitingApproverIds.length}
+              </span>
+            ) : counts[tab] > 0 ? (
               <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${activeTab === tab ? "bg-violet-100 text-violet-700" : "bg-muted text-muted-foreground"}`}>
                 {counts[tab]}
               </span>
-            )}
+            ) : null}
           </button>
         ))}
       </div>
@@ -286,6 +310,12 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                             Fora do orçamento
                           </span>
                         )}
+                        {awaitingSet.has(req.id) && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                            Nova resposta
+                          </span>
+                        )}
                       </div>
                       {supplier && (
                         <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
@@ -332,8 +362,9 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                           </>
                         )}
 
-                        {/* Conversa de complementação (ver histórico + responder) */}
-                        {req.status === "aguardando_complementacao" && (
+                        {/* Não-aprovador (ex.: o próprio solicitante) responde aqui;
+                            o aprovador decide via Aprovar/Rejeitar/Pedir Info acima. */}
+                        {req.status === "aguardando_complementacao" && !actionable && (
                           <button
                             onClick={() => setThreadModal({ req, mode: "answer" })}
                             className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"

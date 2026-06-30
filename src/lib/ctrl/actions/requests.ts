@@ -979,16 +979,34 @@ export async function approveRequest(requestId: string, comment?: string) {
 
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
-    .select("id, status, approval_tier, sector_id, amount, created_by, request_number")
+    .select("id, status, complement_return_status, approval_tier, sector_id, amount, created_by, request_number")
     .eq("id", requestId)
     .single();
 
   if (fetchErr || !req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente" && req.status !== "pendente_diretor")
+
+  // Permite aprovar diretamente de dentro da Complementação: a decisão usa a
+  // etapa de origem guardada em complement_return_status (gerente/diretor).
+  const isComplement = req.status === "aguardando_complementacao";
+  if (req.status !== "pendente" && req.status !== "pendente_diretor" && !isComplement)
     return { error: `Status atual: ${req.status}. Só é possível aprovar requisições pendentes.` };
 
-  const result = await applyApprovalStep(supabase, ctx, req as ApprovableReq, comment);
+  const effectiveStatus = isComplement
+    ? ((req.complement_return_status as string | null) ?? "pendente")
+    : req.status;
+  const effectiveReq = { ...req, status: effectiveStatus } as ApprovableReq;
+
+  const result = await applyApprovalStep(supabase, ctx, effectiveReq, comment);
   if ("error" in result) return result;
+
+  // Saiu da complementação ao decidir — limpa a etapa de origem guardada.
+  if (isComplement) {
+    await supabase
+      .from("ctrl_requests")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ complement_return_status: null } as any)
+      .eq("id", requestId);
+  }
 
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
@@ -1065,18 +1083,28 @@ export async function requestInfo(requestId: string, question: string) {
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente" && req.status !== "pendente_diretor")
-    return { error: "Só é possível pedir informação de requisições pendentes." };
+  if (
+    req.status !== "pendente" &&
+    req.status !== "pendente_diretor" &&
+    req.status !== "aguardando_complementacao"
+  )
+    return { error: "Só é possível pedir informação de requisições pendentes ou em complementação." };
 
-  // Guarda a etapa de origem para retornar a ela quando o solicitante responder.
+  // Guarda a etapa de origem para a aprovação saber em que etapa decidir. Só
+  // grava na PRIMEIRA pergunta (quando ainda está pendente); perguntas de
+  // acompanhamento (já em complementação) preservam o complement_return_status.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const update: Record<string, any> = {
+    status: "aguardando_complementacao",
+    updated_at: new Date().toISOString(),
+  };
+  if (req.status === "pendente" || req.status === "pendente_diretor") {
+    update.complement_return_status = req.status;
+  }
   await supabase
     .from("ctrl_requests")
-    .update({
-      status: "aguardando_complementacao",
-      complement_return_status: req.status,
-      updated_at: new Date().toISOString(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+    .update(update as any)
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -1115,28 +1143,23 @@ export async function answerComplement(requestId: string, answer: string) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
-  // Volta para a etapa de onde saiu (gerente ou diretor). Fallback: deriva do
-  // solicitante (especial → diretor; demais → gerente).
-  const { data: cur } = await supabase
+  const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("created_by, complement_return_status")
+    .select("id, status, request_number")
     .eq("id", requestId)
-    .maybeSingle<{ created_by: string; complement_return_status: string | null }>();
+    .maybeSingle<{ id: string; status: string; request_number: number }>();
 
-  const returnStatus: CtrlRequestStatus =
-    (cur?.complement_return_status as CtrlRequestStatus | null) ??
-    (cur?.created_by === APPROVAL_ROUTING.directorOnly.requesterId
-      ? "pendente_diretor"
-      : "pendente");
+  if (!req) return { error: "Requisição não encontrada." };
+  if (req.status !== "aguardando_complementacao")
+    return { error: "Esta requisição não está aguardando complementação." };
 
+  // Responder NÃO tira da complementação: a requisição PERMANECE em
+  // `aguardando_complementacao` (preservando `complement_return_status`) e o
+  // aprovador decide — aprovar/rejeitar/perguntar de novo — de dentro da própria
+  // aba de Complementação. Só registra a resposta e marca atividade.
   await supabase
     .from("ctrl_requests")
-    .update({
-      status: returnStatus,
-      complement_return_status: null,
-      updated_at: new Date().toISOString(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+    .update({ updated_at: new Date().toISOString() })
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -1145,6 +1168,27 @@ export async function answerComplement(requestId: string, answer: string) {
     action: "complementado",
     comment: answer.trim(),
   });
+
+  // Avisa quem fez a última pergunta (aprovador) que há nova resposta a analisar.
+  const { data: lastAsk } = await supabase
+    .from("ctrl_history")
+    .select("user_id")
+    .eq("request_id", requestId)
+    .eq("action", "complementacao_solicitada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ user_id: string }>();
+
+  if (lastAsk?.user_id && lastAsk.user_id !== ctx.id) {
+    await notifyRequester({
+      userId: lastAsk.user_id,
+      requestId,
+      requestNumber: req.request_number,
+      title: "Nova resposta na complementação",
+      message: `Há uma nova resposta na requisição #${req.request_number} aguardando sua análise.`,
+      type: "info_solicitada",
+    });
+  }
 
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
@@ -1287,6 +1331,41 @@ export async function getComplementThread(
   });
 
   return { messages };
+}
+
+// Dentre as requisições em `aguardando_complementacao`, quais têm o ÚLTIMO turno
+// da conversa como resposta do solicitante (`complementado`) — ou seja, estão
+// aguardando a análise do aprovador. Usado para o alerta da aba Complementação.
+// Admin client (RLS de ctrl_history); autorização por papel de aprovação.
+export async function getComplementsAwaitingApprover(
+  requestIds: string[],
+): Promise<{ ids?: string[]; error?: string }> {
+  await requireCtrlRole("gerente", "diretor", "csc", "admin", "contas_a_pagar");
+  if (requestIds.length === 0) return { ids: [] };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select("request_id, action, created_at")
+    .in("request_id", requestIds)
+    .in("action", ["complementacao_solicitada", "complementado"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  // Última ação de complementação por requisição.
+  const lastAction = new Map<string, string>();
+  for (const row of (data ?? []) as Array<{ request_id: string; action: string }>) {
+    lastAction.set(row.request_id, row.action);
+  }
+  const ids: string[] = [];
+  lastAction.forEach((action, id) => {
+    if (action === "complementado") ids.push(id);
+  });
+
+  return { ids };
 }
 
 // ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────

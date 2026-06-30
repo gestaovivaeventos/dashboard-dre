@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AprovacoesClient } from "@/components/ctrl/aprovacoes-client";
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
-import { getRequests } from "@/lib/ctrl/actions/requests";
+import { getRequests, getComplementsAwaitingApprover } from "@/lib/ctrl/actions/requests";
 
 export default async function AprovacoesPage() {
   const ctx = await getCtrlUser();
@@ -15,6 +15,15 @@ export default async function AprovacoesPage() {
   const { requests = [], error } = await getRequests({
     statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],
   });
+
+  // Requisições em complementação cujo último turno é resposta do solicitante
+  // (aguardando análise do aprovador) — alimenta o alerta da aba Complementação.
+  const complementIds = (requests as Array<{ id: string; status: string }>)
+    .filter((r) => r.status === "aguardando_complementacao")
+    .map((r) => r.id);
+  const awaitingApproverIds = complementIds.length
+    ? (await getComplementsAwaitingApprover(complementIds)).ids ?? []
+    : [];
 
   return (
     <div className="space-y-6">
@@ -32,6 +41,7 @@ export default async function AprovacoesPage() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           requests={requests as any}
           ctrlRoles={ctx.ctrlRoles}
+          awaitingApproverIds={awaitingApproverIds}
         />
       )}
     </div>
