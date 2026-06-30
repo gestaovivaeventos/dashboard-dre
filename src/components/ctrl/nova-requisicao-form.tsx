@@ -403,7 +403,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       setBankAccount(""); setBankAccountDigit("");
     }
     setPixKey(sup.chave_pix ?? "");
-    setPixKeyType("");
+    setPixKeyType(sup.pix_key_type ?? "");
 
     const newAvail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
     if (sup.chave_pix) newAvail.add("pix");
@@ -824,7 +824,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           )}
           <div className="space-y-1.5">
             <label htmlFor="pix_key_type" className={LABEL_CLS}>Tipo de Chave PIX</label>
-            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier} className={INPUT_CLS}>
+            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier?.pix_key_type} className={INPUT_CLS}>
               <option value="">Selecione</option>
               <option value="cpf">CPF</option>
               <option value="cnpj">CNPJ</option>
