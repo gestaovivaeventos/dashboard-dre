@@ -25,6 +25,39 @@ const LABEL_CLS = "text-sm font-medium";
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Data/hora "agora" no fuso de Brasília (America/Sao_Paulo), independente do
+// fuso do navegador do usuário — a regra de vencimento é definida pelo horário
+// de Brasília, não pelo relógio local de quem preenche.
+function brasiliaNowParts(): { ymd: string; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return { ymd: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) % 24 };
+}
+
+function addOneDayISO(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+// Já passou das 12:00 no horário de Brasília? (cutoff para vencimento no mesmo dia)
+function isAfterNoonBRT(): boolean {
+  return brasiliaNowParts().hour >= 12;
+}
+
+// Vencimento mínimo permitido: o MESMO dia quando a requisição é cadastrada até
+// 12:00 (horário de Brasília); após as 12:00, só a partir do dia seguinte.
+function earliestDueDateBRT(): string {
+  const { ymd } = brasiliaNowParts();
+  return isAfterNoonBRT() ? addOneDayISO(ymd) : ymd;
+}
+
 interface Props {
   sectors: CtrlSector[];
   expenseTypes: CtrlExpenseType[];
@@ -272,18 +305,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     return isNaN(n) ? 0 : n;
   }, [amountStr]);
 
-  // Minimum allowed due date. If now > 12:00, the earliest acceptable
-  // date is tomorrow (operations team can't process same-day requests
-  // submitted after lunch).
-  const minDueDate = useMemo(() => {
-    const base = new Date(now);
-    if (base.getHours() >= 12) base.setDate(base.getDate() + 1);
-    const yyyy = base.getFullYear();
-    const mm = String(base.getMonth() + 1).padStart(2, "0");
-    const dd = String(base.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Vencimento mínimo (horário de Brasília): mesmo dia até 12:00; após 12:00,
+  // só a partir do dia seguinte. Calculado no fuso America/Sao_Paulo, então não
+  // depende do relógio/fuso do navegador de quem preenche.
+  const minDueDate = useMemo(() => earliestDueDateBRT(), []);
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) ?? null,
@@ -430,10 +455,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     // Defensive due-date check: HTML `min` is enforced by most browsers but
     // some mobile webviews ignore it. Belt + suspenders.
     if (dueDate && dueDate < minDueDate) {
-      const isAfterNoon = new Date(now).getHours() >= 12;
       setError(
-        isAfterNoon
-          ? "Como o horário já passou das 12:00, a data de vencimento deve ser a partir de amanhã."
+        isAfterNoonBRT()
+          ? "Como já passou das 12:00 (horário de Brasília), a data de vencimento deve ser a partir de amanhã."
           : "A data de vencimento não pode ser anterior a hoje.",
       );
       return;
