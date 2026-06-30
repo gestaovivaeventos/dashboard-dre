@@ -65,6 +65,9 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
+type SortField = "setor" | "data";
+type SortDir = "asc" | "desc";
+
 interface Props {
   requests: Req[];
   ctrlRoles: string[];
@@ -73,6 +76,8 @@ interface Props {
 export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
+  const [sortField, setSortField] = useState<SortField>("data");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ req: Req; mode: "reject" | "info" | "reverse" | "detail" | "answer" } | null>(null);
   const [textInput, setTextInput] = useState("");
@@ -95,10 +100,29 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
       : false;
 
   // Aba "Pendentes" agrupa as duas etapas de pendência.
-  const tabRequests =
+  const filteredRequests =
     activeTab === "pendente"
       ? requests.filter((r) => isPendingStatus(r.status))
       : requests.filter((r) => r.status === activeTab);
+
+  const sectorName = (r: Req) => resolve(r.ctrl_sectors)?.name ?? "";
+  const tabRequests = [...filteredRequests].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortField === "setor") {
+      const cmp = sectorName(a).localeCompare(sectorName(b), "pt-BR", { sensitivity: "base" });
+      return cmp !== 0 ? cmp * dir : 0;
+    }
+    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
+  });
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
   const actionablePendentes = pendentes.filter(canActOn);
@@ -201,6 +225,33 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {/* Sort controls */}
+      {tabRequests.length > 0 && (
+        <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+          <span>Ordenar por:</span>
+          {([
+            { field: "setor" as SortField, label: "Setor" },
+            { field: "data" as SortField, label: "Data" },
+          ]).map(({ field, label }) => {
+            const active = sortField === field;
+            return (
+              <button
+                key={field}
+                onClick={() => toggleSort(field)}
+                className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 font-medium transition-colors ${
+                  active
+                    ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+                    : "hover:bg-muted"
+                }`}
+              >
+                {label}
+                {active && <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
 
