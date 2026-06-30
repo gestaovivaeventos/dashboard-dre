@@ -707,7 +707,39 @@ export async function getRequests(filters?: {
 
   const { data, error } = await query;
   if (error) return { error: error.message };
-  return { requests: data ?? [] };
+
+  // A RLS de `users` só deixa cada um ler o próprio registro (ou admin lê todos),
+  // então o join `creator`/`approver` volta null para aprovadores não-admin —
+  // e o nome do solicitante somia na tela de aprovações. Resolve os nomes via
+  // admin client (service role), sem afrouxar a RLS da tabela users.
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const adminClient = createAdminClientIfAvailable();
+  if (adminClient && rows.length) {
+    const userIds = new Set<string>();
+    for (const r of rows) {
+      if (typeof r.created_by === "string") userIds.add(r.created_by);
+      if (typeof r.approved_by === "string") userIds.add(r.approved_by);
+    }
+    if (userIds.size) {
+      const { data: users } = await adminClient
+        .from("users")
+        .select("id, name, email")
+        .in("id", Array.from(userIds));
+      const byId = new Map(
+        (users ?? []).map((u) => [u.id, { name: u.name, email: u.email }]),
+      );
+      for (const r of rows) {
+        if (typeof r.created_by === "string" && byId.has(r.created_by)) {
+          r.creator = byId.get(r.created_by);
+        }
+        if (typeof r.approved_by === "string" && byId.has(r.approved_by)) {
+          r.approver = byId.get(r.approved_by);
+        }
+      }
+    }
+  }
+
+  return { requests: rows };
 }
 
 // ─── Approve ──────────────────────────────────────────────────────────────────
