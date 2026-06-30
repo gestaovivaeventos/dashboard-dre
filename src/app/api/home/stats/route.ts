@@ -14,7 +14,7 @@ export async function GET() {
     { count: segmentsCount },
     { count: entriesCount },
     { data: syncErrors },
-    { data: unmappedData },
+    { data: unmappedCategoriesCount },
     { data: companiesData },
     { data: latestSyncs },
   ] = await Promise.all([
@@ -24,8 +24,8 @@ export async function GET() {
     supabase.from("financial_entries").select("id", { count: "exact", head: true }),
     // Companies with sync errors (latest sync per company)
     supabase.from("sync_log").select("company_id,status,error_message").eq("status", "error").order("started_at", { ascending: false }).limit(20),
-    // Unmapped categories count
-    supabase.from("financial_entries").select("omie_category_code").is("dre_account_id", null).limit(500),
+    // Categorias Omie com lançamentos mas sem mapeamento DRE (contagem global)
+    supabase.rpc("count_unmapped_categories"),
     // All active companies for "no data" check
     supabase.from("companies").select("id,name").eq("active", true),
     // Latest sync per company
@@ -57,11 +57,11 @@ export async function GET() {
   }
 
   // Alert: unmapped categories
-  const unmappedCount = (unmappedData ?? []).length;
+  const unmappedCount = typeof unmappedCategoriesCount === "number" ? unmappedCategoriesCount : 0;
   if (unmappedCount > 0) {
     alerts.push({
       type: "warning",
-      title: `${unmappedCount} lancamento(s) sem mapeamento DRE`,
+      title: `${unmappedCount} categoria(s) Omie sem mapeamento DRE`,
       detail: "Categorias Omie precisam ser mapeadas",
     });
   }

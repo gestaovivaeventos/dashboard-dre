@@ -65,6 +65,9 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
+type SortField = "setor" | "data";
+type SortDir = "asc" | "desc";
+
 interface Props {
   requests: Req[];
   ctrlRoles: string[];
@@ -73,6 +76,8 @@ interface Props {
 export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
+  const [sortField, setSortField] = useState<SortField>("data");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ req: Req; mode: "reject" | "info" | "reverse" | "detail" | "answer" } | null>(null);
   const [textInput, setTextInput] = useState("");
@@ -95,10 +100,29 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
       : false;
 
   // Aba "Pendentes" agrupa as duas etapas de pendência.
-  const tabRequests =
+  const filteredRequests =
     activeTab === "pendente"
       ? requests.filter((r) => isPendingStatus(r.status))
       : requests.filter((r) => r.status === activeTab);
+
+  const sectorName = (r: Req) => resolve(r.ctrl_sectors)?.name ?? "";
+  const tabRequests = [...filteredRequests].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortField === "setor") {
+      const cmp = sectorName(a).localeCompare(sectorName(b), "pt-BR", { sensitivity: "base" });
+      return cmp !== 0 ? cmp * dir : 0;
+    }
+    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
+  });
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
   const actionablePendentes = pendentes.filter(canActOn);
@@ -204,41 +228,57 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
         </div>
       )}
 
-      {/* Request list */}
+      {/* Request table */}
       {tabRequests.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
           Nenhuma requisição nesta categoria.
         </div>
       ) : (
-        <div className="rounded-lg border divide-y">
-          {tabRequests.map((req) => {
-            const sector = resolve(req.ctrl_sectors);
-            const expType = resolve(req.ctrl_expense_types);
-            const supplier = resolve(req.ctrl_suppliers);
-            const actionable = canActOn(req);
-            const canSelectThis = activeTab === "pendente" && actionable;
-            const isNivel3 = req.approval_tier === "nivel_3";
+        <div className="rounded-lg border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                {activeTab === "pendente" && canApprove && <th className="w-10 px-3 py-2" />}
+                <th className="px-3 py-2 font-medium">#</th>
+                <th className="px-3 py-2 font-medium">Requisição</th>
+                <SortHeader field="setor" label="Setor" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 font-medium text-right">Valor</th>
+                <th className="px-3 py-2 font-medium">Vencimento</th>
+                <SortHeader field="data" label="Criado em" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 font-medium">Solicitante</th>
+                <th className="px-3 py-2 font-medium text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {tabRequests.map((req) => {
+                const sector = resolve(req.ctrl_sectors);
+                const supplier = resolve(req.ctrl_suppliers);
+                const actionable = canActOn(req);
+                const canSelectThis = activeTab === "pendente" && actionable;
+                const isNivel3 = req.approval_tier === "nivel_3";
+                const isSelected = canSelectThis && selected.has(req.id);
 
-            return (
-              <div
-                key={req.id}
-                className={`p-4 space-y-2 transition-colors ${canSelectThis && selected.has(req.id) ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
-              >
-                {/* Header row */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    {canSelectThis && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(req.id)}
-                        onChange={() => toggleSelect(req.id)}
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 shrink-0"
-                      />
+                return (
+                  <tr
+                    key={req.id}
+                    className={`align-top transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
+                  >
+                    {activeTab === "pendente" && canApprove && (
+                      <td className="px-3 py-3">
+                        {canSelectThis && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(req.id)}
+                            onChange={() => toggleSelect(req.id)}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                        )}
+                      </td>
                     )}
-                    <div className="min-w-0">
+                    <td className="px-3 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">#{req.request_number}</td>
+                    <td className="px-3 py-3 min-w-[200px]">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-muted-foreground">#{req.request_number}</span>
-                        <span className="font-medium truncate">{req.title}</span>
+                        <span className="font-medium">{req.title}</span>
                         {(() => { const b = STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
                         {isNivel3 && (
                           <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
@@ -247,80 +287,76 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                         )}
                       </div>
                       {supplier && (
-                        <p className="mt-0.5 text-xs font-medium text-foreground/80">
-                          {supplier.name}
-                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
                       )}
-                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                        <span>{fmt.format(req.amount)}</span>
-                        {sector && <span>{sector.name}</span>}
-                        {expType && <span>{expType.name}</span>}
-                        {req.payment_method && <span>{PAYMENT_LABELS[req.payment_method] ?? req.payment_method}</span>}
-                        {req.due_date && <span>Vence {new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))}</span>}
-                        <span>{new Date(req.created_at).toLocaleDateString("pt-BR")}</span>
-                        {req.creator && <span>por {req.creator.name ?? req.creator.email}</span>}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">{sector?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
+                      {req.due_date ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00")) : "—"}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{new Date(req.created_at).toLocaleDateString("pt-BR")}</td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{req.creator ? (req.creator.name ?? req.creator.email) : "—"}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        <button
+                          onClick={() => openModal(req, "detail")}
+                          className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+                        >
+                          Detalhes
+                        </button>
+
+                        {/* Approver actions on pendente / pendente_diretor */}
+                        {actionable && (
+                          <>
+                            <button
+                              onClick={() => handleAction(() => approveRequest(req.id))}
+                              disabled={isPending}
+                              className="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            >
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => openModal(req, "info")}
+                              className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                            >
+                              Pedir Info
+                            </button>
+                            <button
+                              onClick={() => openModal(req, "reject")}
+                              className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                            >
+                              Rejeitar
+                            </button>
+                          </>
+                        )}
+
+                        {/* Requester answers complement */}
+                        {req.status === "aguardando_complementacao" && (
+                          <button
+                            onClick={() => openModal(req, "answer")}
+                            className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                          >
+                            Responder
+                          </button>
+                        )}
+
+                        {/* Director/admin reversal */}
+                        {canReverse && req.status === "aprovado" && (
+                          <button
+                            onClick={() => openModal(req, "reverse")}
+                            className="rounded-md border border-amber-500 text-amber-600 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
+                          >
+                            Estornar
+                          </button>
+                        )}
                       </div>
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <button
-                      onClick={() => openModal(req, "detail")}
-                      className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
-                    >
-                      Detalhes
-                    </button>
-
-                    {/* Approver actions on pendente / pendente_diretor */}
-                    {actionable && (
-                      <>
-                        <button
-                          onClick={() => handleAction(() => approveRequest(req.id))}
-                          disabled={isPending}
-                          className="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                        >
-                          Aprovar
-                        </button>
-                        <button
-                          onClick={() => openModal(req, "info")}
-                          className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                        >
-                          Pedir Info
-                        </button>
-                        <button
-                          onClick={() => openModal(req, "reject")}
-                          className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
-                        >
-                          Rejeitar
-                        </button>
-                      </>
-                    )}
-
-                    {/* Requester answers complement */}
-                    {req.status === "aguardando_complementacao" && (
-                      <button
-                        onClick={() => openModal(req, "answer")}
-                        className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                      >
-                        Responder
-                      </button>
-                    )}
-
-                    {/* Director/admin reversal */}
-                    {canReverse && req.status === "aprovado" && (
-                      <button
-                        onClick={() => openModal(req, "reverse")}
-                        className="rounded-md border border-amber-500 text-amber-600 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
-                      >
-                        Estornar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -435,6 +471,33 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function SortHeader({
+  field,
+  label,
+  sortField,
+  sortDir,
+  onSort,
+}: {
+  field: SortField;
+  label: string;
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (field: SortField) => void;
+}) {
+  const active = sortField === field;
+  return (
+    <th className="px-3 py-2 font-medium">
+      <button
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        <span aria-hidden className={active ? "" : "opacity-30"}>{active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span>
+      </button>
+    </th>
   );
 }
 

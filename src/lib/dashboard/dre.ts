@@ -649,6 +649,58 @@ export async function aggregateDreRows(params: {
 }
 
 /**
+ * Busca os agregados DRE de TODOS os meses do intervalo em UMA chamada
+ * (`dashboard_dre_aggregate_monthly`) e devolve, por mês (`"${year}-${month}"`,
+ * month 1-based sem zero à esquerda), o mapa `scopedId -> amount` — os raw ids
+ * do RPC já traduzidos para o escopo ativo via `scope.translateToScopedId`.
+ *
+ * Substitui o antigo fan-out de uma chamada de `dashboard_dre_aggregate` por
+ * mês visível (+ acumulado): 13 round-trips concorrentes por load no "ano
+ * atual" pressionavam o pooler de conexões. Com isto o Dashboard faz UMA
+ * chamada e monta os buckets mensais e o acumulado a partir do resultado
+ * (somar meses == intervalo inteiro, pois as fórmulas do DRE são lineares —
+ * verificado: mesmos valores de `dashboard_dre_aggregate` no range completo).
+ * O postProcess (impostos Sirena) e a negação de custos continuam aplicados
+ * por bucket no chamador, exatamente como antes.
+ */
+export async function aggregateDreMonthlyScopedAmounts(params: {
+  supabase: SupabaseClient;
+  scope: ScopedDreAccounts;
+  companyIds: string[];
+  dateFrom: string;
+  dateTo: string;
+}): Promise<Map<string, Map<string, number>>> {
+  const { data, error } = await params.supabase.rpc("dashboard_dre_aggregate_monthly", {
+    p_company_ids: params.companyIds,
+    p_date_from: params.dateFrom,
+    p_date_to: params.dateTo,
+  });
+  if (error) {
+    throw new Error(`Falha ao carregar agregados DRE mensais: ${error.message}`);
+  }
+  const byMonth = new Map<string, Map<string, number>>();
+  (
+    data as Array<{
+      year: number;
+      month: number;
+      dre_account_id: string;
+      amount: number | string | null;
+    }> | null ?? []
+  ).forEach((item) => {
+    const scopedId = params.scope.translateToScopedId(item.dre_account_id);
+    if (!scopedId) return;
+    const key = `${item.year}-${item.month}`;
+    let map = byMonth.get(key);
+    if (!map) {
+      map = new Map();
+      byMonth.set(key, map);
+    }
+    map.set(scopedId, (map.get(scopedId) ?? 0) + Number(item.amount ?? 0));
+  });
+  return byMonth;
+}
+
+/**
  * Versão por empresa: roda `dashboard_dre_aggregate_by_company` UMA VEZ e
  * devolve um mapa companyId -> rows. Garante uma entrada (mesmo que zerada)
  * para cada companyId solicitado, de modo que o consumidor pode chamar
