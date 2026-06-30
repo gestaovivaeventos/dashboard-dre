@@ -316,7 +316,26 @@ export async function updateSupplier(
     if (!trimmed) return { error: "O nome do fornecedor não pode ficar vazio." };
     payload.name = trimmed;
   }
-  if (data.cnpj_cpf !== undefined) payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
+  if (data.cnpj_cpf !== undefined) {
+    payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
+    // Impede editar o documento para um que já pertence a outro fornecedor.
+    const normalizedDoc = (payload.cnpj_cpf as string | null)?.replace(/\D/g, "") ?? "";
+    if (normalizedDoc) {
+      const { data: existing, error: dupErr } = await supabase.rpc(
+        "ctrl_find_supplier_by_doc",
+        { p_doc: payload.cnpj_cpf as string },
+      );
+      if (dupErr) return { error: dupErr.message };
+      const match = ((existing ?? []) as Array<{ id: string; name: string; status: string }>)
+        .find((s) => s.id !== supplierId);
+      if (match) {
+        const statusLabel = match.status === "aprovado" ? "aprovado" : "em aprovação";
+        return {
+          error: `Já existe um fornecedor ${statusLabel} com este CNPJ/CPF: ${match.name}.`,
+        };
+      }
+    }
+  }
   if (data.email !== undefined) payload.email = data.email?.trim() || null;
   if (data.phone !== undefined) payload.phone = data.phone?.trim() || null;
   if (data.chave_pix !== undefined) {
@@ -338,7 +357,12 @@ export async function updateSupplier(
     .update(payload)
     .eq("id", supplierId);
 
-  if (error) return { error: error.message };
+  if (error) {
+    if ((error as { code?: string }).code === "23505") {
+      return { error: "Já existe um fornecedor com este CNPJ/CPF." };
+    }
+    return { error: error.message };
+  }
 
   // Calcula diff campo a campo (so loga campos do payload — descarta os
   // internos como status/approved_by que sao consequencia da edicao).
@@ -414,17 +438,19 @@ export async function createSupplier(data: {
 
   // Dedupe por CNPJ/CPF normalizado (só dígitos) — bloqueia mesmo se o
   // existente ainda estiver pendente, pra evitar fila de duplicatas em
-  // aprovação.
+  // aprovação. A comparação roda no banco (ctrl_find_supplier_by_doc): o scan
+  // antigo no JS era cortado em 1000 linhas pelo PostgREST e, com >1000
+  // fornecedores, documentos além desse limite escapavam e permitiam recadastro.
   const normalizedDoc = data.cnpj_cpf.replace(/\D/g, "");
   if (normalizedDoc) {
-    const { data: existing, error: dupErr } = await supabase
-      .from("ctrl_suppliers")
-      .select("id, name, status, cnpj_cpf")
-      .neq("status", "rejeitado");
-    if (dupErr) return { error: dupErr.message };
-    const match = (existing ?? []).find(
-      (s) => (s.cnpj_cpf ?? "").replace(/\D/g, "") === normalizedDoc,
+    const { data: existing, error: dupErr } = await supabase.rpc(
+      "ctrl_find_supplier_by_doc",
+      { p_doc: data.cnpj_cpf },
     );
+    if (dupErr) return { error: dupErr.message };
+    const match = (existing ?? [])[0] as
+      | { id: string; name: string; status: string; cnpj_cpf: string | null }
+      | undefined;
     if (match) {
       const statusLabel = match.status === "aprovado" ? "aprovado" : "em aprovação";
       return {
@@ -459,7 +485,14 @@ export async function createSupplier(data: {
     .select("id")
     .single();
 
-  if (error) return { error: error.message };
+  if (error) {
+    // Índice único parcial (ctrl_suppliers_doc_norm_unique) — fallback caso o
+    // dedupe acima perca uma corrida entre dois cadastros simultâneos.
+    if ((error as { code?: string }).code === "23505") {
+      return { error: "Já existe um fornecedor com este CNPJ/CPF." };
+    }
+    return { error: error.message };
+  }
 
   await logSupplierHistory(supabase, {
     supplierId: inserted.id,
