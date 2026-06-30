@@ -55,10 +55,10 @@ export async function sendNewUserPendingApprovalEmail(params: {
   try {
     await sendEmail({
       to: adminEmail,
-      subject: `[Controll Hub] Novo usuário aguardando aprovação — ${params.userEmail}`,
+      subject: `[Control Hub] Novo usuário aguardando aprovação — ${params.userEmail}`,
       html: `
         <h2>Novo cadastro aguardando aprovação</h2>
-        <p>Um usuário criou conta no Controll Hub e está aguardando a sua autorização para acessar o sistema:</p>
+        <p>Um usuário criou conta no Control Hub e está aguardando a sua autorização para acessar o sistema:</p>
         <ul>
           <li><strong>Nome:</strong> ${safeName}</li>
           <li><strong>E-mail:</strong> ${params.userEmail}</li>
@@ -90,7 +90,7 @@ export async function sendSyncFailureEmail(failures: SyncFailureItem[]) {
 
   await sendEmail({
     to: adminEmail,
-    subject: `[Controll Hub] Falha na sincronizacao — ${failures.length} empresa(s)`,
+    subject: `[Control Hub] Falha na sincronizacao — ${failures.length} empresa(s)`,
     html: `
       <h2>Falha na Sincronizacao</h2>
       <p>${failures.length} empresa(s) apresentaram erro durante a sincronizacao com o Omie:</p>
@@ -129,7 +129,7 @@ export async function sendUnmappedCategoriesEmail(items: UnmappedCategoryItem[])
 
   await sendEmail({
     to: adminEmail,
-    subject: `[Controll Hub] ${items.length} categoria(s) sem mapeamento DRE`,
+    subject: `[Control Hub] ${items.length} categoria(s) sem mapeamento DRE`,
     html: body,
   });
 }
@@ -190,7 +190,7 @@ export async function sendUnmappedEntriesAlertEmail(items: UnmappedEntryItem[]) 
 
   await sendEmail({
     to: adminEmail,
-    subject: `[Controll Hub] ${items.length} grupo(s) de lancamentos invisiveis no Dashboard`,
+    subject: `[Control Hub] ${items.length} grupo(s) de lancamentos invisiveis no Dashboard`,
     html: body,
   });
 }

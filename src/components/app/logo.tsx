@@ -29,7 +29,7 @@ export function LogoFull({ className }: { className?: string }) {
       <Logo size={36} />
       <div className="leading-tight flex items-center gap-1.5">
         <div>
-          <span className="text-lg font-bold tracking-tight">Controll</span>
+          <span className="text-lg font-bold tracking-tight">Control</span>
           <span className="text-lg font-light tracking-tight text-primary"> Hub</span>
         </div>
         <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">

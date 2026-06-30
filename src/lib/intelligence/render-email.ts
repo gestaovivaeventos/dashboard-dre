@@ -455,7 +455,7 @@ export function renderNarrativeEmail(companyName: string, periodLabel: string, n
   const content = `
     <tr>
       <td style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:28px 32px;border-radius:12px 12px 0 0;">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.7);">Controll Hub — Relatorio Inteligente</div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.7);">Control Hub — Relatorio Inteligente</div>
         <div style="font-size:22px;font-weight:700;color:#ffffff;margin-top:4px;">${companyName}</div>
         <div style="font-size:14px;color:rgba(255,255,255,0.85);margin-top:2px;">${periodLabel}</div>
       </td>
@@ -467,7 +467,7 @@ export function renderNarrativeEmail(companyName: string, periodLabel: string, n
         </div>
         <div style="height:1px;background-color:#e2e8f0;margin:24px 0 16px;"></div>
         <div style="font-size:11px;color:#94a3b8;text-align:center;">
-          Gerado por IA — Controll Hub · Dados sincronizados do Omie ERP
+          Gerado por IA — Control Hub · Dados sincronizados do Omie ERP
         </div>
       </td>
     </tr>`;

@@ -474,7 +474,7 @@ export function DashboardDreView({
       XLSX.utils.book_append_sheet(workbook, worksheet, "DRE");
       XLSX.writeFile(
         workbook,
-        `DRE_ControllHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
+        `DRE_ControlHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
       );
       showToast({ title: "Exportacao concluida", description: "Excel do DRE gerado.", variant: "success" });
     } catch (error) {
@@ -510,7 +510,7 @@ export function DashboardDreView({
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `DRE_ControllHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.pdf`;
+      anchor.download = `DRE_ControlHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.pdf`;
       anchor.click();
       URL.revokeObjectURL(url);
       showToast({ title: "Exportacao concluida", description: "PDF do DRE gerado.", variant: "success" });
