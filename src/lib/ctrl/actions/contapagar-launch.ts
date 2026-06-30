@@ -90,11 +90,36 @@ function buildIntegracaoBancaria(
     return barcode ? { codigo_forma_pagamento: "BOL", codigo_barras_boleto: barcode } : null;
   }
 
-  // PIX copia-e-cola: o código EMV fica em pix_key. PIX por chave: usa a chave
-  // da requisição (ou a do fornecedor). Em ambos vai no campo pix_qrcode.
-  if (pm === "pix_copia_cola" || pm === "pix") {
-    const qr = (request.pix_key ?? supplier.chave_pix ?? "").trim();
+  // PIX copia-e-cola: o código EMV (copia-e-cola) vai em pix_qrcode com a forma
+  // "PIX". É o ÚNICO caso que usa forma "PIX".
+  if (pm === "pix_copia_cola") {
+    const qr = (request.pix_key ?? "").trim();
     return qr ? { codigo_forma_pagamento: "PIX", pix_qrcode: qr } : null;
+  }
+
+  // PIX por CHAVE: no Omie é uma transferência (TRA) com finalidade "01.3"
+  // (Transferência por Chave PIX) e a chave no campo pix_qrcode. Mandar a chave
+  // como forma "PIX" faria o Omie tratá-la como copia-e-cola (era o bug).
+  if (pm === "pix") {
+    const chave = (request.pix_key ?? supplier.chave_pix ?? "").trim();
+    if (!chave) return null;
+    const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+    const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
+    const banco = parseBanco(supplier.banco)?.codigo ?? "";
+    const agencia = onlyDigits(supplier.agencia);
+    const conta = (supplier.conta_corrente ?? "").trim();
+    return {
+      codigo_forma_pagamento: "TRA",
+      finalidade_transferencia: "01.3", // Transferência por Chave PIX
+      pix_qrcode: chave,
+      ...(doc ? { cpf_cnpj_transferencia: doc } : {}),
+      ...(nome ? { nome_transferencia: nome } : {}),
+      // PIX por chave dispensa banco/agência/conta (a chave resolve o destino);
+      // só enviamos quando o fornecedor os tem cadastrados.
+      ...(banco ? { banco_transferencia: banco } : {}),
+      ...(agencia ? { agencia_transferencia: agencia } : {}),
+      ...(conta ? { conta_corrente_transferencia: conta } : {}),
+    };
   }
 
   if (pm === "transferencia") {
@@ -111,7 +136,7 @@ function buildIntegracaoBancaria(
         banco_transferencia: banco,
         agencia_transferencia: agencia,
         conta_corrente_transferencia: conta,
-        finalidade_transferencia: "00005", // Fornecedores
+        finalidade_transferencia: "07", // Pagamento a Fornecedor
         cpf_cnpj_transferencia: doc,
         nome_transferencia: nome,
       };
