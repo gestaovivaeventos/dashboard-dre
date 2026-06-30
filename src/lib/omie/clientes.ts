@@ -1,4 +1,5 @@
 import { omieCall, OMIE_CLIENTES_URL } from "@/lib/omie/client";
+import { parseBanco } from "@/lib/ctrl/bancos";
 
 export interface OmieSupplierData {
   id: string;
@@ -40,7 +41,10 @@ function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown
   const chavePix = (supplier.chave_pix ?? "").trim();
   if (supplier.banco || supplier.agencia || supplier.conta_corrente || chavePix) {
     payload.dadosBancarios = {
-      codigo_banco: onlyDigits(supplier.banco),
+      // O banco é gravado como "código - nome" (ex.: "336 - C6 Bank"). onlyDigits
+      // grudava os dígitos do NOME no código ("3366"); parseBanco extrai só o
+      // código numérico real e ainda cobre cadastros legados pelo nome.
+      codigo_banco: parseBanco(supplier.banco)?.codigo ?? "",
       agencia: supplier.agencia ?? "",
       // Conta crua (preserva o traço/dígito verificador). onlyDigits grudava o
       // dígito no número (ex.: "20377589-9" → "203775899"), parecendo incompleto

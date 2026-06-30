@@ -314,6 +314,9 @@ export async function updateSupplier(
   if (data.name !== undefined) {
     const trimmed = data.name.trim();
     if (!trimmed) return { error: "O nome do fornecedor não pode ficar vazio." };
+    if (trimmed.length > 60) {
+      return { error: "O nome do fornecedor deve ter no máximo 60 caracteres (limite do Omie)." };
+    }
     payload.name = trimmed;
   }
   if (data.cnpj_cpf !== undefined) {
@@ -435,6 +438,10 @@ export async function createSupplier(data: {
 
   const trimmedName = data.name.trim();
   if (!trimmedName) return { error: "O nome do fornecedor é obrigatório." };
+  // 60 é o limite do campo no Omie (razao_social/nome_fantasia).
+  if (trimmedName.length > 60) {
+    return { error: "O nome do fornecedor deve ter no máximo 60 caracteres (limite do Omie)." };
+  }
 
   // Dedupe por CNPJ/CPF normalizado (só dígitos) — bloqueia mesmo se o
   // existente ainda estiver pendente, pra evitar fila de duplicatas em
