@@ -109,3 +109,47 @@ export function barcodeToLinhaDigitavel(input: string): string | null {
 
   return campo1 + campo2 + campo3 + dvGeral + fatorValor; // 10+11+11+1+14 = 47
 }
+
+export interface BoletoParsed {
+  // Valor em reais embutido na linha digitável; null quando o boleto é "sem
+  // valor" (campo zerado — comum em boletos de cobrança em aberto).
+  amount: number | null;
+  // Vencimento (ISO YYYY-MM-DD) decodificado do fator de vencimento; null
+  // quando não há fator (0000) ou para arrecadação (não tratada aqui).
+  dueDate: string | null;
+}
+
+// Fator de vencimento → data. Base Febraban 07/10/1997 + fator dias. Em
+// 21/02/2025 o fator estourou 9999 e reiniciou em 1000; datas calculadas que
+// caem ANTES de 22/02/2025 pertencem ao novo ciclo e recebem +9000 dias (regra
+// publicada pela Febraban). Para requisições o vencimento é sempre futuro
+// (>= hoje), então esse ajuste resolve o ciclo corretamente.
+function fatorVencimentoToISO(fator: number): string | null {
+  if (!fator || fator <= 0) return null;
+  const DAY = 86_400_000;
+  const base = Date.UTC(1997, 9, 7); // 07/10/1997 (mês 9 = outubro)
+  let ms = base + fator * DAY;
+  const rolloverFloor = Date.UTC(2025, 1, 22); // 22/02/2025
+  if (ms < rolloverFloor) ms += 9000 * DAY;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Extrai valor e vencimento de uma linha digitável de boleto BANCÁRIO (47
+ * dígitos) com DVs válidos. Layout: os dígitos 33..46 da linha são o fator de
+ * vencimento (4) + valor em centavos (10). Arrecadação/concessionária (48
+ * dígitos) tem layout de valor/data variável e não é decodificada aqui —
+ * retorna ambos null para o usuário preencher manualmente.
+ */
+export function parseBoletoLinhaDigitavel(input: string): BoletoParsed {
+  const d = onlyDigits(input);
+  if (d.length === 47 && validarBancario(d)) {
+    const fator = Number(d.slice(33, 37));
+    const valorCent = Number(d.slice(37, 47));
+    return {
+      amount: valorCent > 0 ? valorCent / 100 : null,
+      dueDate: fatorVencimentoToISO(fator),
+    };
+  }
+  return { amount: null, dueDate: null };
+}
