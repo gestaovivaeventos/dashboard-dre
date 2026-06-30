@@ -131,7 +131,7 @@ export function RequisicoesTable({ requests }: Props) {
                 <th className="px-4 py-3">Valor</th>
                 <th className="px-4 py-3">Vencimento</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Comprovante</th>
+                <th className="px-4 py-3">Anexos</th>
                 <th className="px-4 py-3">Criado em</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
@@ -167,10 +167,10 @@ export function RequisicoesTable({ requests }: Props) {
                             })
                           }
                           className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                          title="Ver comprovantes do Omie"
+                          title="Ver anexos do Omie"
                         >
                           <Receipt className="h-3.5 w-3.5" />
-                          Comprovantes
+                          Anexos
                         </button>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
@@ -327,7 +327,7 @@ function ComprovantesModal({
       <div className="w-full max-w-lg rounded-xl border bg-background shadow-lg">
         <div className="border-b px-6 py-4 flex items-center justify-between">
           <div>
-            <h3 className="font-semibold">Comprovantes — Requisição #{requestNumber}</h3>
+            <h3 className="font-semibold">Anexos — Requisição #{requestNumber}</h3>
             <p className="text-sm text-muted-foreground">{requestTitle}</p>
           </div>
           <button
@@ -342,7 +342,7 @@ function ComprovantesModal({
         <div className="px-6 py-4">
           {loading ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Buscando comprovantes no Omie...
+              <Loader2 className="h-4 w-4 animate-spin" /> Buscando anexos no Omie...
             </p>
           ) : error ? (
             <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -350,7 +350,7 @@ function ComprovantesModal({
             </div>
           ) : comprovantes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nenhum comprovante anexado a este título no Omie.
+              Nenhum anexo neste título no Omie.
             </p>
           ) : (
             <ul className="divide-y rounded-md border">
