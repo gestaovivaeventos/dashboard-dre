@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
+import { decryptSecret } from "@/lib/security/encryption";
+import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
 import type { CtrlRequestStatus } from "@/lib/supabase/types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -676,6 +678,81 @@ export async function getRequestAttachmentUrl(requestId: string) {
 
   if (signErr) return { error: signErr.message };
   return { url: signed.signedUrl };
+}
+
+export interface RequestComprovante {
+  id: number;
+  nome: string;
+  tipo: string;
+  url: string | null;
+}
+
+// Busca os comprovantes (anexos) da conta a pagar do Omie ligada à requisição.
+// Resolve a URL temporária de download de cada anexo (ObterAnexo). Retorna lista
+// vazia quando a requisição ainda não foi lançada no Omie.
+export async function getRequestComprovantes(
+  requestId: string,
+): Promise<{ comprovantes: RequestComprovante[] } | { error: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { data: req, error } = await supabase
+    .from("ctrl_requests")
+    .select("id, created_by, omie_contapagar_codigo, paying_company_id")
+    .eq("id", requestId)
+    .maybeSingle<{
+      id: string;
+      created_by: string;
+      omie_contapagar_codigo: number | null;
+      paying_company_id: string | null;
+    }>();
+
+  if (error) return { error: error.message };
+  if (!req) return { error: "Requisição não encontrada." };
+
+  // Solicitante sem visibilidade ampla só acessa os próprios comprovantes.
+  const hasBroad = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroad && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  if (!req.omie_contapagar_codigo) return { comprovantes: [] };
+  if (!req.paying_company_id) return { error: "Requisição sem empresa pagadora." };
+
+  const { data: company } = await supabase
+    .from("companies")
+    .select("omie_app_key, omie_app_secret")
+    .eq("id", req.paying_company_id)
+    .maybeSingle<{ omie_app_key: string | null; omie_app_secret: string | null }>();
+
+  if (!company?.omie_app_key || !company?.omie_app_secret) {
+    return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
+  try {
+    const appKey = decryptSecret(company.omie_app_key);
+    const appSecret = decryptSecret(company.omie_app_secret);
+    const codigo = Number(req.omie_contapagar_codigo);
+    const anexos = await listarAnexosContaPagar(appKey, appSecret, codigo);
+    const comprovantes: RequestComprovante[] = [];
+    for (const a of anexos) {
+      const url = await obterAnexoLinkContaPagar(appKey, appSecret, codigo, a.nIdAnexo);
+      comprovantes.push({ id: a.nIdAnexo, nome: a.nome, tipo: a.tipo, url });
+    }
+    return { comprovantes };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro ao buscar comprovantes no Omie.";
+    return { error: msg };
+  }
 }
 
 export async function getRequests(filters?: {

@@ -66,6 +66,7 @@ export default async function RequisicoesPage() {
       supplier_issues_invoice: (r.supplier_issues_invoice as string | null) ?? null,
       attachment_path: (r.attachment_path as string | null) ?? null,
       paying_company: (r.paying_company as string | null) ?? null,
+      omie_contapagar_codigo: (r.omie_contapagar_codigo as number | null) ?? null,
       sent_to_payment_at: (r.sent_to_payment_at as string | null) ?? null,
       inactivated_at: (r.inactivated_at as string | null) ?? null,
       inactivation_reason: (r.inactivation_reason as string | null) ?? null,
