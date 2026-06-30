@@ -1032,7 +1032,8 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
         <div className="space-y-1.5">
           <label htmlFor="due_date" className={LABEL_CLS}>
-            Data de Vencimento <span className="text-destructive">*</span>
+            {paymentMethod === "cartao_credito" ? "Data da Compra" : "Data de Vencimento"}{" "}
+            <span className="text-destructive">*</span>
           </label>
           <input
             id="due_date"
@@ -1056,6 +1057,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             }}
             className={`${INPUT_CLS} cursor-pointer`}
           />
+          {paymentMethod === "cartao_credito" && (
+            <p className="text-xs text-muted-foreground">
+              O vencimento é calculado pela fatura: vence dia 05. Compra até o dia 23
+              entra na fatura do mês seguinte; a partir do dia 24, na fatura subsequente.
+            </p>
+          )}
         </div>
       </div>
 

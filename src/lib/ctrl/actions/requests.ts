@@ -204,8 +204,13 @@ function calculateInstallmentDates(
   purchaseDate: string,
   total: number
 ): { installment: number; dueDate: string; month: number; year: number }[] {
+  // Ciclo da fatura do cartão: fecha no dia 23 e vence no dia 05.
+  //   • compra até o dia 23 (inclusive) → entra na fatura que vence dia 05 do
+  //     mês seguinte (offset 1);
+  //   • compra a partir do dia 24 → só entra na fatura do mês subsequente
+  //     (offset 2).
   const purchase = new Date(purchaseDate + "T00:00:00");
-  const monthOffset = purchase.getDate() >= 23 ? 2 : 1;
+  const monthOffset = purchase.getDate() > 23 ? 2 : 1;
   const results = [];
   for (let i = 0; i < total; i++) {
     const totalOffset = purchase.getMonth() + monthOffset + i;
@@ -354,11 +359,13 @@ export async function createRequest(data: CreateRequestInput) {
   const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
   // Installments
-  const isInstallment =
-    data.payment_method === "cartao_credito" &&
-    (data.installments ?? 1) > 1;
-  const installmentDates = isInstallment && data.due_date
-    ? calculateInstallmentDates(data.due_date, data.installments!)
+  const isCreditCard = data.payment_method === "cartao_credito";
+  const isInstallment = isCreditCard && (data.installments ?? 1) > 1;
+  // Para cartão (à vista ou parcelado), o vencimento segue o ciclo da fatura
+  // (vence dia 05, conforme o dia da compra) — não a data crua digitada. Em 1x
+  // gera só uma data; em Nx, uma por parcela.
+  const installmentDates = isCreditCard && data.due_date
+    ? calculateInstallmentDates(data.due_date, data.installments ?? 1)
     : [];
   const installmentGroupId = isInstallment ? crypto.randomUUID() : null;
   const unitAmount = isInstallment
@@ -413,9 +420,12 @@ export async function createRequest(data: CreateRequestInput) {
     approved_at: null,
   };
 
-  // First (or only) request
+  // First (or only) request.
+  // Vencimento: cartão (à vista ou parcelado) usa a data da fatura computada
+  // (dia 05). Competência (reference_month/year): mantém o mês da compra no à
+  // vista; no parcelado, cada parcela já cai na competência da sua fatura.
   const firstDueDate =
-    isInstallment && installmentDates.length > 0
+    isCreditCard && installmentDates.length > 0
       ? installmentDates[0].dueDate
       : data.due_date;
   const firstMonth =
