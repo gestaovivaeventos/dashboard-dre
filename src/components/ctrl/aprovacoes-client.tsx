@@ -6,11 +6,10 @@ import { useRouter } from "next/navigation";
 import {
   approveRequest,
   rejectRequest,
-  requestInfo,
   reverseRequest,
   batchApproveRequests,
-  answerComplement,
 } from "@/lib/ctrl/actions/requests";
+import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 
 type Req = {
   id: string;
@@ -79,7 +78,9 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const [sortField, setSortField] = useState<SortField>("data");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "info" | "reverse" | "detail" | "answer" } | null>(null);
+  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "reverse" | "detail" } | null>(null);
+  // Conversa de complementação (pedir info / responder) — thread completa.
+  const [threadModal, setThreadModal] = useState<{ req: Req; mode: "ask" | "answer" } | null>(null);
   const [textInput, setTextInput] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -148,7 +149,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
     setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  function openModal(req: Req, mode: "reject" | "info" | "reverse" | "detail" | "answer") {
+  function openModal(req: Req, mode: "reject" | "reverse" | "detail") {
     setTextInput("");
     setModal({ req, mode });
   }
@@ -317,7 +318,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                               Aprovar
                             </button>
                             <button
-                              onClick={() => openModal(req, "info")}
+                              onClick={() => setThreadModal({ req, mode: "ask" })}
                               className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
                             >
                               Pedir Info
@@ -331,10 +332,10 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                           </>
                         )}
 
-                        {/* Requester answers complement */}
+                        {/* Conversa de complementação (ver histórico + responder) */}
                         {req.status === "aguardando_complementacao" && (
                           <button
-                            onClick={() => openModal(req, "answer")}
+                            onClick={() => setThreadModal({ req, mode: "answer" })}
                             className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
                           >
                             Responder
@@ -370,9 +371,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                 <h3 className="font-semibold">
                   {modal.mode === "detail" && `Requisição #${modal.req.request_number}`}
                   {modal.mode === "reject" && "Rejeitar Requisição"}
-                  {modal.mode === "info" && "Pedir Informação"}
                   {modal.mode === "reverse" && "Estornar Requisição"}
-                  {modal.mode === "answer" && "Responder Complementação"}
                 </h3>
                 <p className="text-sm text-muted-foreground">{modal.req.title}</p>
               </div>
@@ -400,24 +399,21 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                 </div>
               )}
 
-              {/* Reject / Info / Reverse / Answer */}
+              {/* Reject / Reverse */}
               {modal.mode !== "detail" && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     {modal.mode === "reject" && "Informe o motivo da rejeição (obrigatório):"}
-                    {modal.mode === "info" && "Qual informação você precisa do solicitante?"}
                     {modal.mode === "reverse" && "Informe o motivo do estorno (obrigatório):"}
-                    {modal.mode === "answer" && "Informe a resposta para o aprovador:"}
                   </p>
                   <textarea
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     rows={4}
                     placeholder={
-                      modal.mode === "reject" ? "Ex: Despesa não autorizada no orçamento..."
-                      : modal.mode === "info" ? "Ex: Qual o CNPJ do fornecedor?"
-                      : modal.mode === "reverse" ? "Ex: Pagamento duplicado..."
-                      : "Ex: O fornecedor emite NF..."
+                      modal.mode === "reject"
+                        ? "Ex: Despesa não autorizada no orçamento..."
+                        : "Ex: Pagamento duplicado..."
                     }
                     className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 resize-none"
                   />
@@ -439,15 +435,6 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                   {isPending ? "Rejeitando..." : "Confirmar Rejeição"}
                 </button>
               )}
-              {modal.mode === "info" && (
-                <button
-                  onClick={() => handleAction(() => requestInfo(modal.req.id, textInput))}
-                  disabled={isPending || !textInput.trim()}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? "Enviando..." : "Enviar Pergunta"}
-                </button>
-              )}
               {modal.mode === "reverse" && (
                 <button
                   onClick={() => handleAction(() => reverseRequest(modal.req.id, textInput))}
@@ -457,18 +444,28 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                   {isPending ? "Estornando..." : "Confirmar Estorno"}
                 </button>
               )}
-              {modal.mode === "answer" && (
-                <button
-                  onClick={() => handleAction(() => answerComplement(modal.req.id, textInput))}
-                  disabled={isPending || !textInput.trim()}
-                  className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? "Enviando..." : "Enviar Resposta"}
-                </button>
-              )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Conversa de complementação — histórico completo + pedir/responder */}
+      {threadModal && (
+        <InfoThreadModal
+          variant="complement"
+          mode={threadModal.mode}
+          requestId={threadModal.req.id}
+          requestNumber={threadModal.req.request_number}
+          requestTitle={threadModal.req.title}
+          onClose={() => setThreadModal(null)}
+          onSubmitted={() => {
+            const wasAsk = threadModal.mode === "ask";
+            setThreadModal(null);
+            notify(wasAsk ? "Pergunta enviada ao solicitante." : "Resposta enviada.");
+            setSelected(new Set());
+            router.refresh();
+          }}
+        />
       )}
     </div>
   );

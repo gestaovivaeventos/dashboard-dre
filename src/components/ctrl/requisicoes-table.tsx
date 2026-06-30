@@ -2,17 +2,15 @@
 
 import { Eye, FileText, Loader2, MessageCircle, Receipt, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import {
   RequestDetailModal,
   fmt,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import {
-  answerComplement,
-  getComplementQuestion,
   getRequestAttachmentUrl,
   getRequestComprovantes,
   type RequestComprovante,
@@ -254,7 +252,7 @@ export function RequisicoesTable({ requests }: Props) {
       )}
 
       {infoModal && (
-        <PaymentInfoThreadModal
+        <InfoThreadModal
           requestId={infoModal.id}
           requestNumber={infoModal.number}
           requestTitle={infoModal.title}
@@ -265,7 +263,9 @@ export function RequisicoesTable({ requests }: Props) {
       )}
 
       {complementModal && (
-        <ComplementModal
+        <InfoThreadModal
+          variant="complement"
+          mode="answer"
           requestId={complementModal.id}
           requestNumber={complementModal.number}
           requestTitle={complementModal.title}
@@ -384,130 +384,6 @@ function ComprovantesModal({
             className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
           >
             Fechar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Responder complementação (pergunta do aprovador) ──────────────────────────
-
-function ComplementModal({
-  requestId,
-  requestNumber,
-  requestTitle,
-  onClose,
-  onSubmitted,
-}: {
-  requestId: string;
-  requestNumber: number;
-  requestTitle: string;
-  onClose: () => void;
-  onSubmitted: () => void;
-}) {
-  const [question, setQuestion] = useState<string | null>(null);
-  const [askedBy, setAskedBy] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [answer, setAnswer] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    let active = true;
-    getComplementQuestion(requestId).then((res) => {
-      if (!active) return;
-      if ("error" in res) {
-        setError(res.error);
-      } else {
-        setQuestion(res.question);
-        setAskedBy(res.askedBy);
-      }
-      setLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [requestId]);
-
-  function handleSubmit() {
-    if (!answer.trim()) return;
-    startTransition(async () => {
-      const res = await answerComplement(requestId, answer);
-      if (res && "error" in res && res.error) {
-        setError(res.error);
-        return;
-      }
-      onSubmitted();
-    });
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-xl border bg-background shadow-lg">
-        <div className="border-b px-6 py-4 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold">Responder — Requisição #{requestNumber}</h3>
-            <p className="text-sm text-muted-foreground">{requestTitle}</p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Fechar"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="px-6 py-4 space-y-4">
-          {error && (
-            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-
-          {/* Pergunta do aprovador */}
-          <div className="rounded-lg border bg-muted/30 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Pergunta do aprovador{askedBy ? ` · ${askedBy}` : ""}
-            </p>
-            {loading ? (
-              <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando...
-              </p>
-            ) : (
-              <p className="mt-1 whitespace-pre-wrap text-sm">
-                {question ?? "Sem pergunta registrada."}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Sua resposta</label>
-            <textarea
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              rows={4}
-              placeholder="Digite a resposta para o aprovador..."
-              className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-        </div>
-
-        <div className="border-t px-6 py-4 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            disabled={isPending}
-            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isPending || !answer.trim()}
-            className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-          >
-            {isPending ? "Enviando..." : "Enviar Resposta"}
           </button>
         </div>
       </div>

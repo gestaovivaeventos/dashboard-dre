@@ -1206,6 +1206,89 @@ export async function getComplementQuestion(
   };
 }
 
+export interface ComplementMessage {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  authorEmail: string | null;
+  authorKind: "solicitante" | "aprovador";
+  message: string;
+  createdAt: string;
+}
+
+// Conversa COMPLETA da solicitação de complementação (pergunta do aprovador +
+// respostas do solicitante, e novas perguntas), em ordem cronológica — cada
+// turno é uma linha em ctrl_history (complementacao_solicitada = aprovador;
+// complementado = solicitante). Admin client porque a RLS de ctrl_history não
+// cruza as linhas entre aprovador e solicitante; a autorização é por papel +
+// dono (mesma regra de getComplementQuestion).
+export async function getComplementThread(
+  requestId: string,
+): Promise<{ messages?: ComplementMessage[]; error?: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("created_by")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string }>();
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select(
+      `id, user_id, action, comment, created_at,
+       user:users!ctrl_history_user_id_fkey(name, email)`,
+    )
+    .eq("request_id", requestId)
+    .in("action", ["complementacao_solicitada", "complementado"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  type Row = {
+    id: string;
+    user_id: string;
+    action: "complementacao_solicitada" | "complementado";
+    comment: string | null;
+    created_at: string;
+    user:
+      | { name: string | null; email: string | null }
+      | Array<{ name: string | null; email: string | null }>
+      | null;
+  };
+  const messages: ComplementMessage[] = ((data ?? []) as Row[]).map((row) => {
+    const u = Array.isArray(row.user) ? row.user[0] ?? null : row.user;
+    return {
+      id: row.id,
+      authorId: row.user_id,
+      authorName: u?.name ?? null,
+      authorEmail: u?.email ?? null,
+      authorKind: row.action === "complementacao_solicitada" ? "aprovador" : "solicitante",
+      message: row.comment ?? "",
+      createdAt: row.created_at,
+    };
+  });
+
+  return { messages };
+}
+
 // ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────
 //
 // Diferente do fluxo de aprovacao (requestInfo/answerComplement), este e' usado
