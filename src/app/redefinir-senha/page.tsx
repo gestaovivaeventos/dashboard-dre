@@ -19,17 +19,33 @@ export default function RedefinirSenhaPage() {
   const [hasSession, setHasSession] = useState(false);
   const [done, setDone] = useState(false);
 
-  // Ao chegar do link do e-mail, o /auth/callback já trocou o code por uma
-  // sessão de recovery (cookies). Aqui só conferimos que ela existe — sem ela,
-  // não há como redefinir (link inválido/expirado).
+  // O link do e-mail entrega a sessão de recovery NA URL desta página (via
+  // ?code= do PKCE ou #access_token do fluxo implícito). O browser client
+  // (@supabase/ssr, detectSessionInUrl ligado) processa isso automaticamente ao
+  // carregar e dispara onAuthStateChange ("PASSWORD_RECOVERY"/"SIGNED_IN").
+  // Escutamos esse evento + checamos a sessão atual; se em ~3s nada chegar,
+  // tratamos como link inválido/expirado.
   useEffect(() => {
-    const check = async () => {
-      const supabase = createClient();
-      const { data } = await supabase.auth.getUser();
-      setHasSession(Boolean(data.user));
-      setChecking(false);
+    const supabase = createClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        setHasSession(true);
+        setChecking(false);
+      }
+    });
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        setHasSession(true);
+        setChecking(false);
+      }
+    });
+    const timeout = setTimeout(() => setChecking(false), 3000);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
     };
-    void check();
   }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {

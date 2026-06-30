@@ -20,11 +20,13 @@ export default function RecuperarSenhaPage() {
     setStatus(null);
 
     const supabase = createClient();
-    // Envia o e-mail de recuperação. O link volta para /auth/callback (mesmo
-    // code-exchange do cadastro), que estabelece a sessão de recovery e
-    // redireciona para /redefinir-senha, onde o usuário escolhe a nova senha.
+    // Envia o e-mail de recuperação. O link volta DIRETO para a página cliente
+    // /redefinir-senha — o browser client (detectSessionInUrl) estabelece a
+    // sessão de recovery a partir da URL (seja ?code= do PKCE ou #access_token).
+    // Mandar para uma rota de SERVIDOR (/auth/callback) quebraria o caso do
+    // fragmento #, que nunca chega ao servidor.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/redefinir-senha`,
+      redirectTo: `${window.location.origin}/redefinir-senha`,
     });
 
     if (error) {
