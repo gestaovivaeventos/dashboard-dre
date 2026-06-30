@@ -15,7 +15,7 @@ import { resolveUserSegments } from "@/lib/context/user-segments";
 export const dynamic = "force-dynamic";
 import {
   SCOPED_DRE_ACCOUNTS_SELECT,
-  aggregateDreRows,
+  aggregateDreMonthlyScopedAmounts,
   aggregateDreRowsByCompany,
   buildAccumulatedBucket,
   buildDashboardRows,
@@ -209,48 +209,90 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
         c.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase(),
     );
 
-  const aggregateBucket = (bucket: { dateFrom: string; dateTo: string }) =>
-    aggregateDreRows({
-      supabase,
-      scope,
-      companyIds: filter.selectedCompanyIds,
-      dateFrom: bucket.dateFrom,
-      dateTo: bucket.dateTo,
-      // Ajustes gerenciais pontuais (ex.: VJF linha 12 "Margens Ensino Médio").
-      // Só tem efeito quando a empresa selecionada tem config; demais empresas
-      // e o consolidado recebem mapa vazio (ver managerial-adjustments.ts).
-      extraAmountsByCode: getManagerialAmountsByCode(
-        filter.selectedCompanyIds,
-        bucket.dateFrom,
-        bucket.dateTo,
-      ),
-      postProcessAmounts: isSingleSirena ? applySirenaCalculatedTaxes : undefined,
-      negateChildCodesInSummary: custosNegation,
-    });
+  // UMA chamada traz os agregados de TODOS os meses do intervalo (antes era uma
+  // chamada de dashboard_dre_aggregate por mês + acumulado = até 13 round-trips
+  // concorrentes por load, que pressionavam o pooler de conexões e derrubavam a
+  // página sob carga). Os buckets mensais e o acumulado são montados a partir
+  // deste resultado.
+  const monthlyScoped = await aggregateDreMonthlyScopedAmounts({
+    supabase,
+    scope,
+    companyIds: filter.selectedCompanyIds,
+    dateFrom: accumulatedBucket.dateFrom,
+    dateTo: accumulatedBucket.dateTo,
+  });
 
-  const [bucketRows, accumulatedRows, zeroRows] = await Promise.all([
-    Promise.all(visibleBuckets.map((bucket) => aggregateBucket(bucket))),
-    aggregateBucket(accumulatedBucket),
-    Promise.resolve(
-      buildDashboardRows(accounts, new Map(), {
-        negateChildCodesInSummary: custosNegation,
-      }).rows,
-    ),
-  ]);
+  const scopedIdByCode = new Map(
+    scope.scopedAccounts.map((account) => [account.code, account.id]),
+  );
+
+  // Monta as linhas do DRE de um bucket a partir do mapa base (scopedId ->
+  // amount) reproduzindo EXATAMENTE o pipeline de aggregateDreRows: soma os
+  // ajustes gerenciais do período, aplica o postProcess (impostos Sirena) e
+  // chama buildDashboardRows com a negação de custos (franquias-viva). Só muda a
+  // ORIGEM do mapa base — mês pré-carregado em vez de um RPC por mês.
+  const buildBucketRows = (
+    baseAmounts: Map<string, number>,
+    dateFrom: string,
+    dateTo: string,
+  ) => {
+    const amounts = new Map(baseAmounts);
+    const extra = getManagerialAmountsByCode(
+      filter.selectedCompanyIds,
+      dateFrom,
+      dateTo,
+    );
+    extra.forEach((amount, code) => {
+      const scopedId = scopedIdByCode.get(code);
+      if (!scopedId) return;
+      amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + amount);
+    });
+    if (isSingleSirena) {
+      applySirenaCalculatedTaxes(scope.scopedAccounts, amounts);
+    }
+    return buildDashboardRows(accounts, amounts, {
+      negateChildCodesInSummary: custosNegation,
+    }).rows;
+  };
 
   const valuesPerBucket = new Map<string, Record<string, number>>();
-  visibleBuckets.forEach((bucket, index) => {
+  visibleBuckets.forEach((bucket) => {
+    // year-month derivado do dateFrom (YYYY-MM-01) para casar a chave do RPC
+    // ("${year}-${month}", month 1-based sem zero à esquerda).
+    const [y, m] = bucket.dateFrom.split("-");
+    const monthMap =
+      monthlyScoped.get(`${Number(y)}-${Number(m)}`) ?? new Map<string, number>();
     const byRowId: Record<string, number> = {};
-    bucketRows[index].forEach((row) => {
+    buildBucketRows(monthMap, bucket.dateFrom, bucket.dateTo).forEach((row) => {
       byRowId[row.id] = row.value;
     });
     valuesPerBucket.set(bucket.key, byRowId);
   });
 
+  // Acumulado = soma de todos os meses do intervalo (fórmulas lineares ⇒
+  // idêntico a agregar o range inteiro; o postProcess roda UMA vez sobre a soma,
+  // exatamente como o aggregateBucket(accumulatedBucket) anterior).
+  const accumulatedBaseAmounts = new Map<string, number>();
+  monthlyScoped.forEach((monthMap) => {
+    monthMap.forEach((value, scopedId) => {
+      accumulatedBaseAmounts.set(
+        scopedId,
+        (accumulatedBaseAmounts.get(scopedId) ?? 0) + value,
+      );
+    });
+  });
   const accumulatedMap: Record<string, number> = {};
-  accumulatedRows.forEach((row) => {
+  buildBucketRows(
+    accumulatedBaseAmounts,
+    accumulatedBucket.dateFrom,
+    accumulatedBucket.dateTo,
+  ).forEach((row) => {
     accumulatedMap[row.id] = row.value;
   });
+
+  const zeroRows = buildDashboardRows(accounts, new Map(), {
+    negateChildCodesInSummary: custosNegation,
+  }).rows;
 
   // Fetch per-company data for comparative mode. Reaproveita o helper
   // centralizado para garantir que as linhas (incluindo Resultado do
