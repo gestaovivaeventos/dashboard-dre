@@ -3,6 +3,7 @@ import type {
   AlertaCard,
   ComposicaoStep,
   CustodyClosingBlock,
+  DreIndicatorsBlock,
   FeatEventosBlock,
   HistoricoPoint,
   KpiCard,
@@ -115,6 +116,9 @@ export interface OnePageApiResponse {
   // Saldo final da Custódia de Artistas (Case Shows). Mesmo shape do componente
   // (R$ cheios). Presente só quando a empresa analisada é a Case Shows.
   custodyClosing?: CustodyClosingBlock;
+  // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
+  // Mesmo shape do componente (R$ cheios). Presente só p/ templates que o configuram.
+  indicadoresDre?: DreIndicatorsBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -606,6 +610,9 @@ export function mapOnePageApiResponseToPreviewData(
     // Saldo final da Custódia de Artistas (Case Shows) — passa direto (já vem
     // em R$ cheios, mesmo shape do componente). undefined nas demais empresas.
     custodyClosing: response.custodyClosing,
+    // Quadro de indicadores por conta DRE (Terrazzo — "Locação de Espaço") —
+    // passa direto (R$ cheios). undefined p/ templates que não o configuram.
+    indicadoresDre: response.indicadoresDre,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

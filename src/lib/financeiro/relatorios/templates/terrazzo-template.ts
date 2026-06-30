@@ -96,10 +96,25 @@ export const terrazzoTemplate: ReportTemplate = {
       "diagnostico",
       "previstoRealizado",
       "semaforo",
+      // Quadro "Locação de Espaço" — exclusivo do Terrazzo, logo após a tabela
+      // de desempenho/semáforo.
+      "locacaoEspaco",
       "acumuladoAno",
       "historico",
       "alertas",
       "acoes",
     ],
+    // Indicadores de locação por tipo (mesmas contas da planilha/DRE gerencial):
+    //   1.1 = Locação de Espaço para Formaturas
+    //   1.2 = Locação de Espaço para Shows/Palestras
+    // Realizado no mês de referência selecionado pelo usuário.
+    indicadoresDre: {
+      key: "locacaoEspaco",
+      title: "Locação de Espaço",
+      items: [
+        { label: "Locação de Espaço para Formaturas", codes: ["1.1"] },
+        { label: "Locação de Espaço para Shows/Palestras", codes: ["1.2"] },
+      ],
+    },
   },
 };

@@ -83,6 +83,16 @@ export interface BreakdownBlockPayload {
   rows: Array<{ label: string; value: number; pct: number | null; emphasis: boolean }>;
 }
 
+// Quadro de INDICADORES por conta DRE (ex.: Terrazzo — "Locação de Espaço").
+// Cada item = realizado no período de referência (mês selecionado). Valores em
+// R$ cheios (o componente formata). `key` = ReportBlockKey p/ gating.
+export interface DreIndicatorsPayload {
+  key: string;
+  title: string;
+  referenciaLabel: string;
+  items: Array<{ label: string; value: number }>;
+}
+
 export interface KpisPayload {
   receita: KpiCardPayload;
   despesas: KpiCardPayload;
@@ -202,6 +212,9 @@ export interface OnePagePayload {
   // Saldo final da "Custódia de Artistas" (regime de caixa + competência) —
   // EXCLUSIVO da Case Shows. Ausente (undefined) para todas as demais empresas.
   custodyClosing?: CaseShowsCustodyClosingPayload;
+  // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
+  // Ausência = não renderiza (só templates com `report.indicadoresDre`).
+  indicadoresDre?: DreIndicatorsPayload;
   // Gráficos extras por template (ex.: Village). Ausência = não renderiza.
   // `barsChart`: colunas do acumulado do ano (Jan→mês de análise, realizado).
   // `linesChart`: linhas dos últimos 6 meses (N séries; labels separados).
@@ -1035,6 +1048,23 @@ export async function buildOnePagePayload(
       };
     });
 
+  // Quadro de INDICADORES por conta DRE (ex.: Terrazzo — "Locação de Espaço":
+  // 1.1 Formaturas, 1.2 Shows/Palestras). Cada item = Σ(codes) − Σ(minus) sobre
+  // o REALIZADO no período de referência (mês selecionado) — o mesmo valor da
+  // célula do mês no DRE gerencial. Só roda quando o template o configura.
+  const indicadoresDreCfg = template.report?.indicadoresDre;
+  const indicadoresDre: DreIndicatorsPayload | undefined = indicadoresDreCfg
+    ? {
+        key: indicadoresDreCfg.key,
+        title: indicadoresDreCfg.title,
+        referenciaLabel,
+        items: indicadoresDreCfg.items.map((it) => ({
+          label: it.label,
+          value: sumRealized(it.codes) - sumRealized(it.minus ?? []),
+        })),
+      }
+    : undefined;
+
   const previstoRealizado: PrevistoRealizadoPayload[] = [
     {
       label: "Receita",
@@ -1843,6 +1873,9 @@ export async function buildOnePagePayload(
       featEventos: featEventosResult?.payload,
       // Saldo final da Custódia de Artistas — só presente para a Case Shows.
       custodyClosing: custodyClosing ?? undefined,
+      // Quadro de indicadores por conta DRE — só presente p/ templates que o
+      // configuram (ex.: Terrazzo — "Locação de Espaço").
+      indicadoresDre,
       // Gráficos extras por template (ex.: Village). undefined p/ os demais.
       barsSerie,
       barsTitle,
