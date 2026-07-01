@@ -436,7 +436,10 @@ export async function createSupplier(data: {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
-  const trimmedName = data.name.trim();
+  // Padroniza o nome do fornecedor sempre em CAIXA ALTA — vale tanto para
+  // razão social (PJ) quanto para nome completo (PF). Mantém o cadastro
+  // consistente no sistema e no Omie.
+  const trimmedName = data.name.trim().toUpperCase();
   if (!trimmedName) return { error: "O nome do fornecedor é obrigatório." };
   // 60 é o limite do campo no Omie (razao_social/nome_fantasia).
   if (trimmedName.length > 60) {

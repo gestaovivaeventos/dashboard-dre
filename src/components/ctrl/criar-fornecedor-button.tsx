@@ -259,8 +259,8 @@ export function CriarFornecedorButton() {
                         autoFocus
                         maxLength={60}
                         value={form.name}
-                        onChange={(e) => update("name", e.target.value.slice(0, 60))}
-                        placeholder={form.personType === "pj" ? "Ex: Acme Serviços LTDA" : "Ex: João da Silva"}
+                        onChange={(e) => update("name", e.target.value.toUpperCase().slice(0, 60))}
+                        placeholder={form.personType === "pj" ? "Ex: ACME SERVIÇOS LTDA" : "Ex: JOÃO DA SILVA"}
                         className={INPUT_CLS}
                       />
                       <p className="text-right text-xs text-muted-foreground">
