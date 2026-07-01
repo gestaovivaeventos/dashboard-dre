@@ -187,6 +187,15 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Filtros de conferência de permissões (client-side, sobre a lista carregada).
+  const [filterName, setFilterName] = useState<string>("");
+  const [filterContact, setFilterContact] = useState<string>("");
+  const [filterProfile, setFilterProfile] = useState<string>("all");
+  const [filterModule, setFilterModule] = useState<string>("all");
+  const [filterSector, setFilterSector] = useState<string>("all");
+  const [filterCompany, setFilterCompany] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+
   const companyById = useMemo(
     () => new Map(companies.map((c) => [c.id, c.name])),
     [companies],
@@ -204,6 +213,66 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       ),
     [users],
   );
+
+  // Aplica os filtros de conferência. Admin implica acesso universal a módulos e
+  // unidades, então casa com qualquer filtro de módulo/unidade. Setor é vínculo
+  // explícito (só gerente/solicitante), então não considera admin.
+  const filteredUsers = useMemo(
+    () => {
+      const nameQuery = filterName.trim().toLowerCase();
+      const contactQuery = filterContact.trim().toLowerCase();
+      return sortedUsers.filter((u) => {
+        if (nameQuery && !`${u.name} ${u.position}`.toLowerCase().includes(nameQuery))
+          return false;
+        if (contactQuery && !`${u.email} ${u.phone}`.toLowerCase().includes(contactQuery))
+          return false;
+        if (filterProfile !== "all" && u.profile !== filterProfile) return false;
+        if (filterStatus !== "all" && u.active !== (filterStatus === "active")) return false;
+        if (filterModule !== "all") {
+          const isAdmin = u.profile === "admin";
+          if (filterModule === "financeiro" && !(isAdmin || u.can_financeiro)) return false;
+          if (filterModule === "compras" && !(isAdmin || u.can_compras)) return false;
+        }
+        if (filterSector !== "all" && !u.sector_ids.includes(filterSector)) return false;
+        if (
+          filterCompany !== "all" &&
+          u.profile !== "admin" &&
+          !u.company_ids.includes(filterCompany)
+        )
+          return false;
+        return true;
+      });
+    },
+    [
+      sortedUsers,
+      filterName,
+      filterContact,
+      filterProfile,
+      filterModule,
+      filterSector,
+      filterCompany,
+      filterStatus,
+    ],
+  );
+
+  const hasActiveFilters =
+    filterName.trim() !== "" ||
+    filterContact.trim() !== "" ||
+    filterProfile !== "all" ||
+    filterModule !== "all" ||
+    filterSector !== "all" ||
+    filterCompany !== "all" ||
+    filterStatus !== "all";
+
+  function clearFilters() {
+    setFilterName("");
+    setFilterContact("");
+    setFilterProfile("all");
+    setFilterModule("all");
+    setFilterSector("all");
+    setFilterCompany("all");
+    setFilterStatus("all");
+  }
 
   function openInvite() {
     setForm(emptyForm);
@@ -418,27 +487,111 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
             Gerencie perfis, módulos visíveis, setores e unidades.
           </p>
         </div>
-        <Button onClick={openInvite}>
-          <MailPlus className="mr-2 h-4 w-4" />
-          Convidar usuário
-        </Button>
+        <div className="flex items-center gap-3">
+          <span className="whitespace-nowrap text-sm text-muted-foreground">
+            {filteredUsers.length} de {users.length}{" "}
+            {users.length === 1 ? "usuário" : "usuários"}
+          </span>
+          <Button onClick={openInvite}>
+            <MailPlus className="mr-2 h-4 w-4" />
+            Convidar usuário
+          </Button>
+        </div>
       </div>
 
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Nome / Cargo</TableHead>
-            <TableHead>Contato</TableHead>
-            <TableHead>Perfil</TableHead>
-            <TableHead>Módulos</TableHead>
-            <TableHead>Setores</TableHead>
-            <TableHead>Unidades</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Ações</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="min-w-[180px]">
+              <Input
+                value={filterName}
+                onChange={(e) => setFilterName(e.target.value)}
+                placeholder="Nome / Cargo"
+                className="h-8"
+              />
+            </TableHead>
+            <TableHead className="min-w-[180px]">
+              <Input
+                value={filterContact}
+                onChange={(e) => setFilterContact(e.target.value)}
+                placeholder="Contato"
+                className="h-8"
+              />
+            </TableHead>
+            <TableHead>
+              <HeaderFilter
+                value={filterProfile}
+                onChange={setFilterProfile}
+                title="Perfil"
+                options={[
+                  { value: "all", label: "Todos os perfis" },
+                  ...PROFILES.map((p) => ({ value: p.value, label: p.label })),
+                ]}
+              />
+            </TableHead>
+            <TableHead>
+              <HeaderFilter
+                value={filterModule}
+                onChange={setFilterModule}
+                title="Módulo"
+                options={[
+                  { value: "all", label: "Todos os módulos" },
+                  { value: "financeiro", label: "Financeiro" },
+                  { value: "compras", label: "Compras" },
+                ]}
+              />
+            </TableHead>
+            <TableHead>
+              <HeaderFilter
+                value={filterSector}
+                onChange={setFilterSector}
+                title="Setor"
+                options={[
+                  { value: "all", label: "Todos os setores" },
+                  ...sectors.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+              />
+            </TableHead>
+            <TableHead>
+              <HeaderFilter
+                value={filterCompany}
+                onChange={setFilterCompany}
+                title="Unidade"
+                options={[
+                  { value: "all", label: "Todas as unidades" },
+                  ...companies.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
+            </TableHead>
+            <TableHead>
+              <HeaderFilter
+                value={filterStatus}
+                onChange={setFilterStatus}
+                title="Status"
+                options={[
+                  { value: "all", label: "Todos os status" },
+                  { value: "active", label: "Ativo" },
+                  { value: "inactive", label: "Inativo" },
+                ]}
+              />
+            </TableHead>
+            <TableHead className="text-right">
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Limpar
+                </Button>
+              )}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedUsers.map((u) => (
+          {filteredUsers.map((u) => (
             <TableRow key={u.id}>
               <TableCell>
                 <div className="font-medium">{u.name || "—"}</div>
@@ -502,10 +655,12 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
               </TableCell>
             </TableRow>
           ))}
-          {users.length === 0 && (
+          {filteredUsers.length === 0 && (
             <TableRow>
               <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                Nenhum usuário cadastrado.
+                {users.length === 0
+                  ? "Nenhum usuário cadastrado."
+                  : "Nenhum usuário encontrado com os filtros aplicados."}
               </TableCell>
             </TableRow>
           )}
@@ -788,6 +943,40 @@ function UserForm({
         </p>
       )}
     </form>
+  );
+}
+
+// Filtro compacto embutido no cabeçalho da tabela. Quando nada está
+// selecionado ("all"), o gatilho mostra apenas o título da coluna; ao escolher
+// um valor, mostra o rótulo selecionado.
+function HeaderFilter({
+  value,
+  onChange,
+  title,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  title: string;
+  options: Array<{ value: string; label: string }>;
+}) {
+  const selectedLabel =
+    value === "all" ? null : options.find((o) => o.value === value)?.label ?? null;
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-full text-xs font-normal">
+        <span className={selectedLabel ? "truncate" : "truncate text-muted-foreground"}>
+          {selectedLabel ?? title}
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

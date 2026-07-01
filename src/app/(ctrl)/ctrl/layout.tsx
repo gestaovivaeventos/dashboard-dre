@@ -26,7 +26,15 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const navDreRole = modules.dre?.role ?? null;
   const ctrlRoles = modules.ctrl?.roles ?? [];
 
-  // Segmentos para o shell DRE (mesmo do (app) layout)
+  // Segmentos para o shell DRE (mesmo do (app) layout).
+  // 1) Admin: vê todos os segmentos ativos.
+  // 2) Outros: primeiro tenta user_segment_access; se vazio, deriva dos
+  //    companies em user_company_access (cada company carrega segment_id).
+  //    Sem esse fallback, um perfil que só recebeu acesso por unidade (ex.:
+  //    diretor com Compras + Financeiro) fica com segments vazio ao navegar
+  //    numa tela CTRL → activeSegmentSlug null → itens scope:"segment" do
+  //    menu Financeiro (DRE Gerencial, Fluxo de Caixa, Budget) somem do
+  //    sidebar. O (app) layout já faz esse fallback; espelhamos aqui.
   let segments: Segment[] = [];
   if (dreRole === "admin") {
     const { data } = await supabase
@@ -44,6 +52,36 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       .map((row) => row.segments)
       .filter((s) => s && s.active)
       .sort((a, b) => a.display_order - b.display_order);
+
+    if (segments.length === 0 && profile.company_ids.length > 0) {
+      // Duas queries simples em vez de PostgREST embed (mais robusto contra
+      // ambiguidade de relations):
+      // 1) pega segment_ids distintos das companies do usuário
+      // 2) carrega segments por esses IDs
+      const { data: companiesData } = await supabase
+        .from("companies")
+        .select("segment_id")
+        .in("id", profile.company_ids)
+        .eq("active", true);
+
+      const segmentIds = Array.from(
+        new Set(
+          ((companiesData ?? []) as Array<{ segment_id: string | null }>)
+            .map((c) => c.segment_id)
+            .filter((s): s is string => !!s),
+        ),
+      );
+
+      if (segmentIds.length > 0) {
+        const { data: segData } = await supabase
+          .from("segments")
+          .select("id,name,slug,display_order,active")
+          .in("id", segmentIds)
+          .eq("active", true)
+          .order("display_order");
+        segments = (segData as Segment[]) ?? [];
+      }
+    }
   }
 
   // Resolve module/segment context — ctrl layout always lands in ctrl module.
