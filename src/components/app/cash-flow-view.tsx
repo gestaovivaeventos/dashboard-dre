@@ -1000,7 +1000,7 @@ export function CashFlowView({
             {(accumulatedSection.showAportes || accumulatedSection.showDividends) && (
               <>
                 <div
-                  className="grid border-t-4 border-indigo-500 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-indigo-700"
+                  className="grid border-t-4 border-indigo-500 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
                   <span className="sticky left-0 z-[2] bg-transparent">Acumulados</span>
@@ -1012,7 +1012,7 @@ export function CashFlowView({
                 {accumulatedSection.showAportes && (
                   <>
                     <div
-                      className="grid border-t border-indigo-500/40 bg-indigo-50 px-4 py-2 text-sm font-bold uppercase"
+                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
                       <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
@@ -1065,7 +1065,7 @@ export function CashFlowView({
                 {accumulatedSection.showDividends && (
                   <>
                     <div
-                      className="grid border-t border-indigo-500/40 bg-indigo-50 px-4 py-2 text-sm font-bold uppercase"
+                      className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
                       <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
