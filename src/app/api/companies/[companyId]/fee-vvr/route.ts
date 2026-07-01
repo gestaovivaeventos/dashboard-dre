@@ -47,12 +47,15 @@ interface BalanceRow {
   fee_disponivel: number | null;
   fee_a_receber: number | null;
   margem_media_eventos: number | null;
+  // Inadimplencia atual (snapshot manual) — exclusivo do segmento Franquias Viva.
+  inadimplencia_atual: number | null;
 }
 
 function normalizeBalance(row: {
   fee_disponivel: number | string | null;
   fee_a_receber: number | string | null;
   margem_media_eventos: number | string | null;
+  inadimplencia_atual: number | string | null;
 }): BalanceRow {
   return {
     fee_disponivel:
@@ -61,8 +64,14 @@ function normalizeBalance(row: {
       row.fee_a_receber === null ? null : Number(row.fee_a_receber),
     margem_media_eventos:
       row.margem_media_eventos === null ? null : Number(row.margem_media_eventos),
+    inadimplencia_atual:
+      row.inadimplencia_atual === null ? null : Number(row.inadimplencia_atual),
   };
 }
+
+// Colunas de balanco por empresa lidas/escritas pelo painel FEE/VVR.
+const BALANCE_SELECT =
+  "fee_disponivel, fee_a_receber, margem_media_eventos, inadimplencia_atual";
 
 function parseNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -99,12 +108,13 @@ export async function GET(_request: Request, { params }: Params) {
       .order("month", { ascending: true }),
     db
       .from("companies")
-      .select("fee_disponivel, fee_a_receber, margem_media_eventos")
+      .select(BALANCE_SELECT)
       .eq("id", params.companyId)
       .maybeSingle<{
         fee_disponivel: number | string | null;
         fee_a_receber: number | string | null;
         margem_media_eventos: number | string | null;
+        inadimplencia_atual: number | string | null;
       }>(),
   ]);
 
@@ -118,7 +128,12 @@ export async function GET(_request: Request, { params }: Params) {
   const rows = (monthlyResult.data as RawRow[] | null ?? []).map(normalize);
   const balance: BalanceRow = companyResult.data
     ? normalizeBalance(companyResult.data)
-    : { fee_disponivel: null, fee_a_receber: null, margem_media_eventos: null };
+    : {
+        fee_disponivel: null,
+        fee_a_receber: null,
+        margem_media_eventos: null,
+        inadimplencia_atual: null,
+      };
 
   return NextResponse.json({ rows, balance });
 }
@@ -202,6 +217,7 @@ export async function PATCH(request: Request, { params }: Params) {
     fee_disponivel?: number | null;
     fee_a_receber?: number | null;
     margem_media_eventos?: number | null;
+    inadimplencia_atual?: number | null;
   };
 
   const update: Record<string, number | null> = {};
@@ -213,6 +229,9 @@ export async function PATCH(request: Request, { params }: Params) {
   }
   if ("margem_media_eventos" in body) {
     update.margem_media_eventos = parseNullableNumber(body.margem_media_eventos);
+  }
+  if ("inadimplencia_atual" in body) {
+    update.inadimplencia_atual = parseNullableNumber(body.inadimplencia_atual);
   }
   if (Object.keys(update).length === 0) {
     return NextResponse.json(
@@ -226,7 +245,7 @@ export async function PATCH(request: Request, { params }: Params) {
     .from("companies")
     .update(update)
     .eq("id", params.companyId)
-    .select("fee_disponivel, fee_a_receber, margem_media_eventos")
+    .select(BALANCE_SELECT)
     .single();
 
   if (error || !data) {

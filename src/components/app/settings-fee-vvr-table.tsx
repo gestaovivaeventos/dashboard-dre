@@ -24,6 +24,8 @@ interface ServerBalance {
   fee_disponivel: number | null;
   fee_a_receber: number | null;
   margem_media_eventos: number | null;
+  // Inadimplencia atual (snapshot manual) — exclusivo do segmento Franquias Viva.
+  inadimplencia_atual: number | null;
 }
 
 interface ClientRow {
@@ -119,11 +121,17 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
   const [feeDisponivelText, setFeeDisponivelText] = useState("");
   const [feeAReceberText, setFeeAReceberText] = useState("");
   const [margemMediaText, setMargemMediaText] = useState("");
+  const [inadimplenciaText, setInadimplenciaText] = useState("");
   const [feeDisponivelPersisted, setFeeDisponivelPersisted] = useState("");
   const [feeAReceberPersisted, setFeeAReceberPersisted] = useState("");
   const [margemMediaPersisted, setMargemMediaPersisted] = useState("");
+  const [inadimplenciaPersisted, setInadimplenciaPersisted] = useState("");
   const [savingBalance, setSavingBalance] = useState<
-    "fee_disponivel" | "fee_a_receber" | "margem_media_eventos" | null
+    | "fee_disponivel"
+    | "fee_a_receber"
+    | "margem_media_eventos"
+    | "inadimplencia_atual"
+    | null
   >(null);
 
   // Carrega valores persistidos e mescla com os defaults.
@@ -147,6 +155,7 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
             fee_disponivel: null,
             fee_a_receber: null,
             margem_media_eventos: null,
+            inadimplencia_atual: null,
           };
         const fdText = balance.fee_disponivel !== null ? formatNumberPtBr(balance.fee_disponivel) : "";
         const farText = balance.fee_a_receber !== null ? formatNumberPtBr(balance.fee_a_receber) : "";
@@ -154,12 +163,18 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
           balance.margem_media_eventos !== null
             ? formatNumberPtBr(balance.margem_media_eventos)
             : "";
+        const inadText =
+          balance.inadimplencia_atual !== null
+            ? formatNumberPtBr(balance.inadimplencia_atual)
+            : "";
         setFeeDisponivelText(fdText);
         setFeeDisponivelPersisted(fdText);
         setFeeAReceberText(farText);
         setFeeAReceberPersisted(farText);
         setMargemMediaText(mmText);
         setMargemMediaPersisted(mmText);
+        setInadimplenciaText(inadText);
+        setInadimplenciaPersisted(inadText);
       } catch (err) {
         if (!active) return;
         showToast({
@@ -291,20 +306,26 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
   // Persiste um campo de balanco (FEE Disponivel, FEE A Receber ou Margem
   // Media dos Eventos) no blur.
   const persistBalance = async (
-    field: "fee_disponivel" | "fee_a_receber" | "margem_media_eventos",
+    field:
+      | "fee_disponivel"
+      | "fee_a_receber"
+      | "margem_media_eventos"
+      | "inadimplencia_atual",
   ) => {
-    const currentText =
-      field === "fee_disponivel"
-        ? feeDisponivelText
-        : field === "fee_a_receber"
-          ? feeAReceberText
-          : margemMediaText;
-    const persistedText =
-      field === "fee_disponivel"
-        ? feeDisponivelPersisted
-        : field === "fee_a_receber"
-          ? feeAReceberPersisted
-          : margemMediaPersisted;
+    const currentByField: Record<typeof field, string> = {
+      fee_disponivel: feeDisponivelText,
+      fee_a_receber: feeAReceberText,
+      margem_media_eventos: margemMediaText,
+      inadimplencia_atual: inadimplenciaText,
+    };
+    const persistedByField: Record<typeof field, string> = {
+      fee_disponivel: feeDisponivelPersisted,
+      fee_a_receber: feeAReceberPersisted,
+      margem_media_eventos: margemMediaPersisted,
+      inadimplencia_atual: inadimplenciaPersisted,
+    };
+    const currentText = currentByField[field];
+    const persistedText = persistedByField[field];
     if (currentText === persistedText) return;
 
     const value = parseNumberPtBr(currentText);
@@ -336,15 +357,22 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
           saved.margem_media_eventos !== null
             ? formatNumberPtBr(saved.margem_media_eventos)
             : "";
+        const inadText =
+          saved.inadimplencia_atual !== null
+            ? formatNumberPtBr(saved.inadimplencia_atual)
+            : "";
         if (field === "fee_disponivel") {
           setFeeDisponivelText(fdText);
           setFeeDisponivelPersisted(fdText);
         } else if (field === "fee_a_receber") {
           setFeeAReceberText(farText);
           setFeeAReceberPersisted(farText);
-        } else {
+        } else if (field === "margem_media_eventos") {
           setMargemMediaText(mmText);
           setMargemMediaPersisted(mmText);
+        } else {
+          setInadimplenciaText(inadText);
+          setInadimplenciaPersisted(inadText);
         }
       }
     } catch (err) {
@@ -430,6 +458,22 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
               %
             </span>
           </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Inadimplência Atual
+            {savingBalance === "inadimplencia_atual" ? (
+              <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
+            ) : null}
+          </label>
+          <Input
+            inputMode="decimal"
+            placeholder="0,00"
+            value={inadimplenciaText}
+            onChange={(e) => setInadimplenciaText(e.target.value)}
+            onBlur={() => void persistBalance("inadimplencia_atual")}
+            disabled={loading}
+          />
         </div>
       </div>
 

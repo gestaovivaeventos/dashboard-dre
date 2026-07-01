@@ -697,12 +697,28 @@ export async function getRequests(filters?: {
   if (filters?.statuses?.length) query = query.in("status", filters.statuses);
   if (filters?.sector_id) query = query.eq("sector_id", filters.sector_id);
 
-  // Visibilidade: quem so tem solicitante (e/ou aprovacao_fornecedor) ve apenas as proprias requisicoes.
-  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
-    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  // Visibilidade em tres niveis:
+  //  - Global (admin, csc, contas_a_pagar): ve todas as requisicoes.
+  //  - Por setor (gerente, diretor): ve apenas as requisicoes dos setores aos
+  //    quais esta vinculado em user_sectors. Sem vinculo => fallback ve tudo,
+  //    pra nao quebrar o fluxo enquanto os cadastros estao incompletos (mesma
+  //    regra usada em notifyPendingApproval).
+  //  - Solicitante (nenhum dos anteriores): apenas as proprias requisicoes.
+  const hasGlobalVisibility = ctx.ctrlRoles.some((r) =>
+    ["csc", "admin", "contas_a_pagar"].includes(r),
   );
-  if (!hasBroadVisibility) {
-    query = query.eq("created_by", ctx.id);
+  const hasSectorVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor"].includes(r),
+  );
+  if (!hasGlobalVisibility) {
+    if (hasSectorVisibility) {
+      if (ctx.sectorIds.length > 0) {
+        query = query.in("sector_id", ctx.sectorIds);
+      }
+      // sem vinculo de setor => sem restricao (fallback ve tudo)
+    } else {
+      query = query.eq("created_by", ctx.id);
+    }
   }
 
   const { data, error } = await query;

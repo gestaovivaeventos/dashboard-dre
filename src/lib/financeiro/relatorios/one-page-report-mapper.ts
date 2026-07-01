@@ -54,6 +54,8 @@ interface ApiKpis {
   vvr?: ApiKpiCard;
   sobrevivencia_caixa?: ApiKpiCard;
   margem_media_eventos?: ApiKpiCard;
+  // Inadimplencia atual (R$) — só chega para empresas do segmento Franquias Viva.
+  inadimplencia_atual?: ApiKpiCard;
 }
 
 interface ApiPrevistoRealizado {
@@ -275,6 +277,16 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
   if (api?.margem_media_eventos) {
     cards.push(
       mapKpiCard(api.margem_media_eventos, "Margem média dos eventos", {
+        omitComparisonSuffix: true,
+      }),
+    );
+  }
+
+  // "Inadimplência Atual" (R$) so chega para empresas do segmento Franquias
+  // Viva. Valor informado manualmente — sem comparativo com orcamento.
+  if (api?.inadimplencia_atual) {
+    cards.push(
+      mapKpiCard(api.inadimplencia_atual, "Inadimplência Atual", {
         omitComparisonSuffix: true,
       }),
     );

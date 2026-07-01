@@ -389,18 +389,31 @@ Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
   area "Controladoria" ou "Diretoria", impacto "Alto", urgencia "Média".
   Pode combinar com fortalecimento da geracao de receita. Quando a cobertura
   for confortavel (>= 6 meses), NAO sugira cortes de despesa por esse motivo.
-- Regra do VVR para acoes comerciais: use \`vvr_ytd_resumo\` (acumulado do ano):
-  - Se \`acima_da_meta\` === true: a franquia esta a frente da meta comercial.
-    NAO sugira "aumentar VVR", "fortalecer comercial", "prospectar mais" nem
-    "intensificar vendas" — a operacao comercial esta funcionando. Pode
-    reconhecer o bom desempenho em "destaques".
+- Regra do VVR para acoes comerciais: use \`vvr_ytd_resumo\` (acumulado do ano).
+  Define-se ACAO COMERCIAL como QUALQUER recomendacao cujo objetivo seja
+  aumentar vendas/VVR, ampliar a carteira de fundos ou intensificar a operacao
+  comercial. Isso INCLUI, entre outras formulacoes equivalentes: "aumentar
+  VVR", "fortalecer/intensificar o comercial", "prospectar/captar mais",
+  "intensificar vendas", "revisar/aquecer o pipeline", "ampliar marketing",
+  "vender/captar NOVOS FUNDOS", "fortalecer a estrategia de vendas para novos
+  fundos", "ampliar a carteira de fundos" e qualquer variacao com o mesmo
+  sentido. Trate todas como uma unica categoria.
+  - Se \`acima_da_meta\` === true: a franquia BATEU a meta comercial (VVR
+    realizado >= meta). NAO inclua NENHUMA acao comercial (de NENHUMA das
+    formulacoes acima, inclusive "fortalecer a estrategia de vendas para novos
+    fundos") em \`acoesRecomendadas\` — sugerir "vender mais" para quem ja
+    atingiu a meta nao faz sentido e soa contraditorio. A operacao comercial
+    esta funcionando: reconheca o bom desempenho em "destaques" e direcione as
+    \`acoesRecomendadas\` para OUTRAS alavancas (conversao de VVR em FEE,
+    disponibilidade de FEE, saude dos fundos, despesas, margem, caixa).
   - EXCECAO: se \`acima_da_meta\` === true mas \`abaixo_meta_ultimos_2_meses\`
-    === true, houve QUEDA RECENTE apesar do acumulado positivo. Inclua UMA
-    acao de ATENCAO ao comercial para reverter o ritmo dos ultimos 2 meses.
-    Tom: alerta tatico, nao alarmismo. Urgencia "Média", impacto "Alto".
-  - Quando \`acima_da_meta\` === false: pode sugerir acoes comerciais de
-    aumento (revisao de pipeline, prospeccao, marketing local), calibrando a
-    intensidade pela materialidade do gap.
+    === true, houve QUEDA RECENTE apesar do acumulado positivo. So nesse caso
+    inclua UMA acao de ATENCAO ao comercial para reverter o ritmo dos ultimos 2
+    meses. Tom: alerta tatico, nao alarmismo. Urgencia "Média", impacto "Alto".
+  - Quando \`acima_da_meta\` === false (VVR realizado ABAIXO da meta): ai sim
+    cabe acao comercial de aumento ("fortalecer a estrategia de vendas para
+    novos fundos", revisao de pipeline, prospeccao, marketing local),
+    calibrando a intensidade pela materialidade do gap.
 - Quando o resultado for negativo MAS o FEE Disponivel for confortavel (>= 2
   meses de despesas), inclua o saque de FEE como acao de impacto Alto e
   urgencia Média — sem dramatizacao.

@@ -8,6 +8,8 @@ export interface CtrlUserContext {
   dreRole: "admin" | "gestor_hero" | "gestor_unidade";
   /** Conjunto de permissoes no modulo Controladoria. Nunca vazio quando o contexto existe. */
   ctrlRoles: CtrlRole[];
+  /** Setores aos quais o usuario esta vinculado (user_sectors). Vazio = sem vinculo. */
+  sectorIds: string[];
 }
 
 /** Retorna o contexto do usuário na Controladoria, ou null se sem acesso. */
@@ -23,6 +25,7 @@ export async function getCtrlUser(): Promise<CtrlUserContext | null> {
     email: ctx.profile.email,
     dreRole: ctx.profile.role,
     ctrlRoles: ctx.modules.ctrl.roles,
+    sectorIds: ctx.profile.sector_ids ?? [],
   };
 }
 

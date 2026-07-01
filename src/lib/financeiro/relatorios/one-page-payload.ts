@@ -110,6 +110,9 @@ export interface KpisPayload {
   // manual preenchido em Configuracoes > Empresas > FEE / VVR. Em demais
   // segmentos a chave nao e enviada (mapper ignora ausencia).
   margem_media_eventos?: KpiCardPayload;
+  // Inadimplencia atual (R$) — indicador manual por empresa, preenchido no
+  // painel FEE / VVR. So enviado para empresas do segmento Franquias Viva.
+  inadimplencia_atual?: KpiCardPayload;
 }
 
 export interface PrevistoRealizadoPayload {
@@ -286,7 +289,7 @@ export async function buildOnePagePayload(
   // -------------------------------------------------------------------------
   const { data: company } = await supabase
     .from("companies")
-    .select("id,name,fee_disponivel,fee_a_receber,margem_media_eventos,segment_id")
+    .select("id,name,fee_disponivel,fee_a_receber,margem_media_eventos,inadimplencia_atual,segment_id")
     .eq("id", companyId)
     .maybeSingle<{
       id: string;
@@ -294,6 +297,7 @@ export async function buildOnePagePayload(
       fee_disponivel: number | string | null;
       fee_a_receber: number | string | null;
       margem_media_eventos: number | string | null;
+      inadimplencia_atual: number | string | null;
       segment_id: string | null;
     }>();
   if (!company) {
@@ -802,6 +806,24 @@ export async function buildOnePagePayload(
       variationValue: null,
       variationLabel: "Valor informado",
       status: statusMargemMediaEventos(margemMediaEventos),
+    };
+
+    // Inadimplencia atual (R$): valor manual por empresa (painel FEE/VVR),
+    // exibido em moeda. Sem comparativo com orcamento (e um snapshot). Farol
+    // neutro — e um dado informativo; NULL vira "—" no formattedValue.
+    const inadimplenciaAtual =
+      company.inadimplencia_atual === null ||
+      company.inadimplencia_atual === undefined
+        ? null
+        : Number(company.inadimplencia_atual);
+    kpis.inadimplencia_atual = {
+      label: "Inadimplência Atual",
+      value: inadimplenciaAtual,
+      formattedValue:
+        inadimplenciaAtual !== null ? formatBRL(inadimplenciaAtual) : null,
+      variationValue: null,
+      variationLabel: "Valor informado",
+      status: "neutro",
     };
   }
 
