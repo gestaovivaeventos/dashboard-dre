@@ -564,7 +564,7 @@ export function renderOnePageEmail({
   const ctaUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/financeiro/business-intelligence` : null;
   const cta = ctaUrl
     ? `<div style="text-align:center;margin:24px 0 4px;">
-        <a href="${ctaUrl}" style="display:inline-block;background:${C.darkCard};color:#ffffff;font-family:${FF};font-size:13px;font-weight:600;padding:11px 26px;border-radius:8px;text-decoration:none;">Ver relatório completo no Controll Hub</a>
+        <a href="${ctaUrl}" style="display:inline-block;background:${C.darkCard};color:#ffffff;font-family:${FF};font-size:13px;font-weight:600;padding:11px 26px;border-radius:8px;text-decoration:none;">Ver relatório completo no Control Hub</a>
       </div>`
     : "";
 
@@ -576,7 +576,7 @@ export function renderOnePageEmail({
       </tr>
     </table>
     <div style="font-family:${FF};font-size:10px;color:${C.tertiary};margin-top:12px;line-height:1.5;">
-      Relatório gerado automaticamente pelo Controll Hub com apoio de IA. Os números vêm do DRE realizado e orçado da unidade; a leitura textual é gerada por IA e deve ser validada pelo gestor.
+      Relatório gerado automaticamente pelo Control Hub com apoio de IA. Os números vêm do DRE realizado e orçado da unidade; a leitura textual é gerada por IA e deve ser validada pelo gestor.
     </div>`;
 
   return `<!DOCTYPE html>

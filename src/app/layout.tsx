@@ -27,7 +27,7 @@ const body = Inter({
 // var(--font-plex-sans)/(--font-plex-mono) com fallback para o nome da familia.
 
 export const metadata: Metadata = {
-  title: "Controll Hub",
+  title: "Control Hub",
   description: "Painel DRE com autenticação Supabase",
 };
 

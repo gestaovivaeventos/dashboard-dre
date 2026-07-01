@@ -576,7 +576,7 @@ export function CashFlowView({
 
       XLSX.writeFile(
         workbook,
-        `FluxoDeCaixa_ControllHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
+        `FluxoDeCaixa_ControlHub_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
       );
       showToast({
         title: "Exportacao concluida",

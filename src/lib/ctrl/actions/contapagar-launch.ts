@@ -15,6 +15,7 @@ import {
   toOmieDate,
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
+import { parseBanco } from "@/lib/ctrl/bancos";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" | "previsao_editada" }
@@ -55,6 +56,97 @@ async function anexarNoOmie(
   }
 }
 
+function onlyDigits(s: string | null | undefined): string {
+  return (s ?? "").replace(/\D/g, "");
+}
+
+interface IntegracaoRequest {
+  payment_method: string | null;
+  barcode: string | null;
+  pix_key: string | null;
+}
+interface IntegracaoSupplier {
+  name: string;
+  cnpj_cpf: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta_corrente: string | null;
+  titular_banco: string | null;
+  doc_titular: string | null;
+  chave_pix: string | null;
+}
+
+// Monta o bloco cnab_integracao_bancaria conforme o método de pagamento. Antes
+// só boleto era enviado; PIX, PIX copia-e-cola e transferência ficavam sem
+// instrução de pagamento no Omie. Retorna null quando não há dados suficientes.
+function buildIntegracaoBancaria(
+  request: IntegracaoRequest,
+  supplier: IntegracaoSupplier,
+): Record<string, unknown> | null {
+  const pm = request.payment_method;
+
+  if (pm === "boleto") {
+    const barcode = (request.barcode ?? "").trim();
+    return barcode ? { codigo_forma_pagamento: "BOL", codigo_barras_boleto: barcode } : null;
+  }
+
+  // PIX copia-e-cola: o código EMV (copia-e-cola) vai em pix_qrcode com a forma
+  // "PIX". É o ÚNICO caso que usa forma "PIX".
+  if (pm === "pix_copia_cola") {
+    const qr = (request.pix_key ?? "").trim();
+    return qr ? { codigo_forma_pagamento: "PIX", pix_qrcode: qr } : null;
+  }
+
+  // PIX por CHAVE: no Omie é uma transferência (TRA) com finalidade "01.3"
+  // (Transferência por Chave PIX) e a chave no campo pix_qrcode. Mandar a chave
+  // como forma "PIX" faria o Omie tratá-la como copia-e-cola (era o bug).
+  if (pm === "pix") {
+    const chave = (request.pix_key ?? supplier.chave_pix ?? "").trim();
+    if (!chave) return null;
+    const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+    const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
+    const banco = parseBanco(supplier.banco)?.codigo ?? "";
+    const agencia = onlyDigits(supplier.agencia);
+    const conta = (supplier.conta_corrente ?? "").trim();
+    return {
+      codigo_forma_pagamento: "TRA",
+      finalidade_transferencia: "01.3", // Transferência por Chave PIX
+      pix_qrcode: chave,
+      ...(doc ? { cpf_cnpj_transferencia: doc } : {}),
+      ...(nome ? { nome_transferencia: nome } : {}),
+      // PIX por chave dispensa banco/agência/conta (a chave resolve o destino);
+      // só enviamos quando o fornecedor os tem cadastrados.
+      ...(banco ? { banco_transferencia: banco } : {}),
+      ...(agencia ? { agencia_transferencia: agencia } : {}),
+      ...(conta ? { conta_corrente_transferencia: conta } : {}),
+    };
+  }
+
+  if (pm === "transferencia") {
+    // No fluxo de lançamento sempre há fornecedor; os dados bancários
+    // autoritativos são os dele (validados na aprovação).
+    const banco = parseBanco(supplier.banco)?.codigo ?? "";
+    const agencia = onlyDigits(supplier.agencia);
+    const conta = (supplier.conta_corrente ?? "").trim();
+    const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+    const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
+    if (banco && agencia && conta && doc && nome) {
+      return {
+        codigo_forma_pagamento: "TRA",
+        banco_transferencia: banco,
+        agencia_transferencia: agencia,
+        conta_corrente_transferencia: conta,
+        finalidade_transferencia: "07", // Pagamento a Fornecedor
+        cpf_cnpj_transferencia: doc,
+        nome_transferencia: nome,
+      };
+    }
+    return null;
+  }
+
+  return null;
+}
+
 export async function launchRequestToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>,
@@ -66,7 +158,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, attachment_path, invoice_attachment_path",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -236,6 +328,10 @@ export async function launchRequestToOmie(
       ? "APÓS PAGAMENTO"
       : ((request.invoice_number as string | null) ?? "");
 
+  // Integração bancária (CNAB) conforme o método: boleto, PIX, PIX copia-e-cola
+  // ou transferência.
+  const integracaoBancaria = buildIntegracaoBancaria(request, supplier);
+
   // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
   // codigo_lancamento_omie e remove codigo_lancamento_integracao).
   const basePayload = {
@@ -249,23 +345,30 @@ export async function launchRequestToOmie(
     id_conta_corrente: Number(codigoContaCorrente),
     ...(numeroPedido ? { numero_pedido: numeroPedido } : {}),
     ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
-    ...(request.payment_method === "boleto" && request.barcode
-      ? {
-          cnab_integracao_bancaria: {
-            codigo_forma_pagamento: "BOL",
-            codigo_barras_boleto: request.barcode,
-          },
-        }
-      : {}),
+    ...(integracaoBancaria ? { cnab_integracao_bancaria: integracaoBancaria } : {}),
   };
 
-  // Retry sem o bloco de boleto quando o código de barras é rejeitado pelo Omie.
-  const isBarcodeError = (e: unknown) => {
+  // Retry sem o bloco de integração bancária quando o Omie o rejeita (código de
+  // barras inválido, PIX/QR code, dados de transferência etc.). O título ainda é
+  // criado — a integração é best-effort e não pode derrubar o lançamento.
+  const isCnabError = (e: unknown) => {
     const msg = e instanceof Error ? e.message.toLowerCase() : "";
     return (
       msg.includes("código de barras") ||
       msg.includes("codigo de barras") ||
-      msg.includes("codigo_barras")
+      msg.includes("codigo_barras") ||
+      msg.includes("cnab") ||
+      msg.includes("integração banc") ||
+      msg.includes("integracao banc") ||
+      msg.includes("pix") ||
+      msg.includes("qrcode") ||
+      msg.includes("qr code") ||
+      msg.includes("transfer") ||
+      msg.includes("agência") ||
+      msg.includes("agencia") ||
+      msg.includes("finalidade") ||
+      msg.includes("forma_pagamento") ||
+      msg.includes("forma de pagamento")
     );
   };
 
@@ -286,7 +389,7 @@ export async function launchRequestToOmie(
       try {
         ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, payload));
       } catch (e) {
-        if (isBarcodeError(e) && "cnab_integracao_bancaria" in payload) {
+        if (isCnabError(e) && "cnab_integracao_bancaria" in payload) {
           const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
           void _drop;
           ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, noCnab));
@@ -331,7 +434,7 @@ export async function launchRequestToOmie(
         try {
           ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
         } catch (e) {
-          if (isBarcodeError(e) && "cnab_integracao_bancaria" in payload) {
+          if (isCnabError(e) && "cnab_integracao_bancaria" in payload) {
             const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
             void _drop;
             ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));

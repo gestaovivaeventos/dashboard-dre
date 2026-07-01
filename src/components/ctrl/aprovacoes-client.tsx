@@ -6,11 +6,10 @@ import { useRouter } from "next/navigation";
 import {
   approveRequest,
   rejectRequest,
-  requestInfo,
   reverseRequest,
   batchApproveRequests,
-  answerComplement,
 } from "@/lib/ctrl/actions/requests";
+import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 
 type Req = {
   id: string;
@@ -18,6 +17,9 @@ type Req = {
   title: string;
   amount: number;
   status: string;
+  // Etapa de origem guardada quando entra em complementação (gerente/diretor),
+  // usada para decidir a aprovação de dentro da própria aba de Complementação.
+  complement_return_status?: string | null;
   approval_tier: string | null;
   description: string | null;
   justification: string | null;
@@ -65,16 +67,26 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
+type SortField = "setor" | "data";
+type SortDir = "asc" | "desc";
+
 interface Props {
   requests: Req[];
   ctrlRoles: string[];
+  // Ids de requisições em complementação aguardando análise do aprovador
+  // (último turno foi resposta do solicitante). Alimenta o alerta da aba.
+  awaitingApproverIds?: string[];
 }
 
-export function AprovacoesClient({ requests, ctrlRoles }: Props) {
+export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
+  const [sortField, setSortField] = useState<SortField>("data");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "info" | "reverse" | "detail" | "answer" } | null>(null);
+  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "reverse" | "detail" } | null>(null);
+  // Conversa de complementação (pedir info / responder) — thread completa.
+  const [threadModal, setThreadModal] = useState<{ req: Req; mode: "ask" | "answer" } | null>(null);
   const [textInput, setTextInput] = useState("");
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -83,22 +95,50 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
   const canApprove = hasRole("gerente", "diretor", "csc", "admin");
   const canReverse = hasRole("diretor", "admin");
 
+  const awaitingSet = new Set(awaitingApproverIds);
+
   // Etapa atual da requisição e se o usuário pode agir nela.
   // pendente → etapa do gerente (gerente/diretor/csc/admin podem aprovar);
   // pendente_diretor → etapa do diretor (só diretor/csc/admin).
+  // aguardando_complementacao → o aprovador decide aqui mesmo, usando a etapa de
+  // origem (complement_return_status) para saber quem pode aprovar.
   const isPendingStatus = (s: string) => s === "pendente" || s === "pendente_diretor";
-  const canActOn = (r: Req) =>
-    r.status === "pendente_diretor"
+  const canActOn = (r: Req) => {
+    const stage =
+      r.status === "aguardando_complementacao"
+        ? r.complement_return_status ?? "pendente"
+        : r.status;
+    return stage === "pendente_diretor"
       ? hasRole("diretor", "csc", "admin")
-      : r.status === "pendente"
+      : stage === "pendente"
       ? canApprove
       : false;
+  };
 
   // Aba "Pendentes" agrupa as duas etapas de pendência.
-  const tabRequests =
+  const filteredRequests =
     activeTab === "pendente"
       ? requests.filter((r) => isPendingStatus(r.status))
       : requests.filter((r) => r.status === activeTab);
+
+  const sectorName = (r: Req) => resolve(r.ctrl_sectors)?.name ?? "";
+  const tabRequests = [...filteredRequests].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortField === "setor") {
+      const cmp = sectorName(a).localeCompare(sectorName(b), "pt-BR", { sensitivity: "base" });
+      return cmp !== 0 ? cmp * dir : 0;
+    }
+    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
+  });
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
   const actionablePendentes = pendentes.filter(canActOn);
@@ -124,7 +164,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
     setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  function openModal(req: Req, mode: "reject" | "info" | "reverse" | "detail" | "answer") {
+  function openModal(req: Req, mode: "reject" | "reverse" | "detail") {
     setTextInput("");
     setModal({ req, mode });
   }
@@ -168,11 +208,20 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
             }`}
           >
             {TAB_LABELS[tab]}
-            {counts[tab] > 0 && (
+            {tab === "aguardando_complementacao" && awaitingApproverIds.length > 0 ? (
+              // Alerta: há resposta(s) do solicitante aguardando análise.
+              <span
+                className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                title="Há novas respostas aguardando sua análise"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                {awaitingApproverIds.length}
+              </span>
+            ) : counts[tab] > 0 ? (
               <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${activeTab === tab ? "bg-violet-100 text-violet-700" : "bg-muted text-muted-foreground"}`}>
                 {counts[tab]}
               </span>
-            )}
+            ) : null}
           </button>
         ))}
       </div>
@@ -204,123 +253,142 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
         </div>
       )}
 
-      {/* Request list */}
+      {/* Request table */}
       {tabRequests.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
           Nenhuma requisição nesta categoria.
         </div>
       ) : (
-        <div className="rounded-lg border divide-y">
-          {tabRequests.map((req) => {
-            const sector = resolve(req.ctrl_sectors);
-            const expType = resolve(req.ctrl_expense_types);
-            const supplier = resolve(req.ctrl_suppliers);
-            const actionable = canActOn(req);
-            const canSelectThis = activeTab === "pendente" && actionable;
-            const isNivel3 = req.approval_tier === "nivel_3";
+        <div className="rounded-lg border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                {activeTab === "pendente" && canApprove && <th className="w-10 px-3 py-2" />}
+                <th className="px-3 py-2 font-medium">#</th>
+                <th className="px-3 py-2 font-medium">Requisição</th>
+                <SortHeader field="setor" label="Setor" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 font-medium text-right">Valor</th>
+                <th className="px-3 py-2 font-medium">Vencimento</th>
+                <SortHeader field="data" label="Criado em" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 font-medium">Solicitante</th>
+                <th className="px-3 py-2 font-medium text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {tabRequests.map((req) => {
+                const sector = resolve(req.ctrl_sectors);
+                const supplier = resolve(req.ctrl_suppliers);
+                const actionable = canActOn(req);
+                const canSelectThis = activeTab === "pendente" && actionable;
+                const isNivel3 = req.approval_tier === "nivel_3";
+                const isSelected = canSelectThis && selected.has(req.id);
 
-            return (
-              <div
-                key={req.id}
-                className={`p-4 space-y-2 transition-colors ${canSelectThis && selected.has(req.id) ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
-              >
-                {/* Header row */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    {canSelectThis && (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(req.id)}
-                        onChange={() => toggleSelect(req.id)}
-                        className="mt-0.5 h-4 w-4 rounded border-gray-300 shrink-0"
-                      />
+                return (
+                  <tr
+                    key={req.id}
+                    className={`align-top transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
+                  >
+                    {activeTab === "pendente" && canApprove && (
+                      <td className="px-3 py-3">
+                        {canSelectThis && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(req.id)}
+                            onChange={() => toggleSelect(req.id)}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                        )}
+                      </td>
                     )}
-                    <div className="min-w-0">
+                    <td className="px-3 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">#{req.request_number}</td>
+                    <td className="px-3 py-3 min-w-[200px]">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-muted-foreground">#{req.request_number}</span>
-                        <span className="font-medium truncate">{req.title}</span>
+                        <span className="font-medium">{req.title}</span>
                         {(() => { const b = STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
                         {isNivel3 && (
                           <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
                             Fora do orçamento
                           </span>
                         )}
+                        {awaitingSet.has(req.id) && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                            Nova resposta
+                          </span>
+                        )}
                       </div>
                       {supplier && (
-                        <p className="mt-0.5 text-xs font-medium text-foreground/80">
-                          {supplier.name}
-                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
                       )}
-                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                        <span>{fmt.format(req.amount)}</span>
-                        {sector && <span>{sector.name}</span>}
-                        {expType && <span>{expType.name}</span>}
-                        {req.payment_method && <span>{PAYMENT_LABELS[req.payment_method] ?? req.payment_method}</span>}
-                        {req.due_date && <span>Vence {new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))}</span>}
-                        <span>{new Date(req.created_at).toLocaleDateString("pt-BR")}</span>
-                        {req.creator && <span>por {req.creator.name ?? req.creator.email}</span>}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">{sector?.name ?? "—"}</td>
+                    <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
+                      {req.due_date ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00")) : "—"}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{new Date(req.created_at).toLocaleDateString("pt-BR")}</td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{req.creator ? (req.creator.name ?? req.creator.email) : "—"}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        <button
+                          onClick={() => openModal(req, "detail")}
+                          className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+                        >
+                          Detalhes
+                        </button>
+
+                        {/* Approver actions on pendente / pendente_diretor */}
+                        {actionable && (
+                          <>
+                            <button
+                              onClick={() => handleAction(() => approveRequest(req.id))}
+                              disabled={isPending}
+                              className="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            >
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => setThreadModal({ req, mode: "ask" })}
+                              className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                            >
+                              Pedir Info
+                            </button>
+                            <button
+                              onClick={() => openModal(req, "reject")}
+                              className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                            >
+                              Rejeitar
+                            </button>
+                          </>
+                        )}
+
+                        {/* Não-aprovador (ex.: o próprio solicitante) responde aqui;
+                            o aprovador decide via Aprovar/Rejeitar/Pedir Info acima. */}
+                        {req.status === "aguardando_complementacao" && !actionable && (
+                          <button
+                            onClick={() => setThreadModal({ req, mode: "answer" })}
+                            className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                          >
+                            Responder
+                          </button>
+                        )}
+
+                        {/* Director/admin reversal */}
+                        {canReverse && req.status === "aprovado" && (
+                          <button
+                            onClick={() => openModal(req, "reverse")}
+                            className="rounded-md border border-amber-500 text-amber-600 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
+                          >
+                            Estornar
+                          </button>
+                        )}
                       </div>
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <button
-                      onClick={() => openModal(req, "detail")}
-                      className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
-                    >
-                      Detalhes
-                    </button>
-
-                    {/* Approver actions on pendente / pendente_diretor */}
-                    {actionable && (
-                      <>
-                        <button
-                          onClick={() => handleAction(() => approveRequest(req.id))}
-                          disabled={isPending}
-                          className="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                        >
-                          Aprovar
-                        </button>
-                        <button
-                          onClick={() => openModal(req, "info")}
-                          className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                        >
-                          Pedir Info
-                        </button>
-                        <button
-                          onClick={() => openModal(req, "reject")}
-                          className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
-                        >
-                          Rejeitar
-                        </button>
-                      </>
-                    )}
-
-                    {/* Requester answers complement */}
-                    {req.status === "aguardando_complementacao" && (
-                      <button
-                        onClick={() => openModal(req, "answer")}
-                        className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
-                      >
-                        Responder
-                      </button>
-                    )}
-
-                    {/* Director/admin reversal */}
-                    {canReverse && req.status === "aprovado" && (
-                      <button
-                        onClick={() => openModal(req, "reverse")}
-                        className="rounded-md border border-amber-500 text-amber-600 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
-                      >
-                        Estornar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -334,9 +402,7 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                 <h3 className="font-semibold">
                   {modal.mode === "detail" && `Requisição #${modal.req.request_number}`}
                   {modal.mode === "reject" && "Rejeitar Requisição"}
-                  {modal.mode === "info" && "Pedir Informação"}
                   {modal.mode === "reverse" && "Estornar Requisição"}
-                  {modal.mode === "answer" && "Responder Complementação"}
                 </h3>
                 <p className="text-sm text-muted-foreground">{modal.req.title}</p>
               </div>
@@ -364,24 +430,21 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                 </div>
               )}
 
-              {/* Reject / Info / Reverse / Answer */}
+              {/* Reject / Reverse */}
               {modal.mode !== "detail" && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     {modal.mode === "reject" && "Informe o motivo da rejeição (obrigatório):"}
-                    {modal.mode === "info" && "Qual informação você precisa do solicitante?"}
                     {modal.mode === "reverse" && "Informe o motivo do estorno (obrigatório):"}
-                    {modal.mode === "answer" && "Informe a resposta para o aprovador:"}
                   </p>
                   <textarea
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     rows={4}
                     placeholder={
-                      modal.mode === "reject" ? "Ex: Despesa não autorizada no orçamento..."
-                      : modal.mode === "info" ? "Ex: Qual o CNPJ do fornecedor?"
-                      : modal.mode === "reverse" ? "Ex: Pagamento duplicado..."
-                      : "Ex: O fornecedor emite NF..."
+                      modal.mode === "reject"
+                        ? "Ex: Despesa não autorizada no orçamento..."
+                        : "Ex: Pagamento duplicado..."
                     }
                     className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 resize-none"
                   />
@@ -403,15 +466,6 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                   {isPending ? "Rejeitando..." : "Confirmar Rejeição"}
                 </button>
               )}
-              {modal.mode === "info" && (
-                <button
-                  onClick={() => handleAction(() => requestInfo(modal.req.id, textInput))}
-                  disabled={isPending || !textInput.trim()}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? "Enviando..." : "Enviar Pergunta"}
-                </button>
-              )}
               {modal.mode === "reverse" && (
                 <button
                   onClick={() => handleAction(() => reverseRequest(modal.req.id, textInput))}
@@ -421,20 +475,57 @@ export function AprovacoesClient({ requests, ctrlRoles }: Props) {
                   {isPending ? "Estornando..." : "Confirmar Estorno"}
                 </button>
               )}
-              {modal.mode === "answer" && (
-                <button
-                  onClick={() => handleAction(() => answerComplement(modal.req.id, textInput))}
-                  disabled={isPending || !textInput.trim()}
-                  className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? "Enviando..." : "Enviar Resposta"}
-                </button>
-              )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Conversa de complementação — histórico completo + pedir/responder */}
+      {threadModal && (
+        <InfoThreadModal
+          variant="complement"
+          mode={threadModal.mode}
+          requestId={threadModal.req.id}
+          requestNumber={threadModal.req.request_number}
+          requestTitle={threadModal.req.title}
+          onClose={() => setThreadModal(null)}
+          onSubmitted={() => {
+            const wasAsk = threadModal.mode === "ask";
+            setThreadModal(null);
+            notify(wasAsk ? "Pergunta enviada ao solicitante." : "Resposta enviada.");
+            setSelected(new Set());
+            router.refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function SortHeader({
+  field,
+  label,
+  sortField,
+  sortDir,
+  onSort,
+}: {
+  field: SortField;
+  label: string;
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (field: SortField) => void;
+}) {
+  const active = sortField === field;
+  return (
+    <th className="px-3 py-2 font-medium">
+      <button
+        onClick={() => onSort(field)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        <span aria-hidden className={active ? "" : "opacity-30"}>{active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span>
+      </button>
+    </th>
   );
 }
 

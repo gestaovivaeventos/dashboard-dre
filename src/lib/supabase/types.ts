@@ -156,6 +156,7 @@ export interface CtrlSupplier {
   created_at: string;
   updated_at: string;
   chave_pix: string | null;
+  pix_key_type: string | null;
   banco: string | null;
   agencia: string | null;
   conta_corrente: string | null;

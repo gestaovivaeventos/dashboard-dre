@@ -39,7 +39,7 @@ export async function sendEmail({
 
   // O Gmail so permite enviar com o proprio endereco autenticado no envelope;
   // usamos um display name amigavel mas mantemos o remetente real.
-  const fromName = process.env.EMAIL_FROM_NAME || "Controll Hub";
+  const fromName = process.env.EMAIL_FROM_NAME || "Control Hub";
   const from = `${fromName} <${process.env.GMAIL_USER}>`;
   const recipients = Array.isArray(to) ? to : [to];
 

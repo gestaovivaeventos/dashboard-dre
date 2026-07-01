@@ -257,11 +257,15 @@ export function CriarFornecedorButton() {
                         type="text"
                         required
                         autoFocus
+                        maxLength={60}
                         value={form.name}
-                        onChange={(e) => update("name", e.target.value)}
+                        onChange={(e) => update("name", e.target.value.slice(0, 60))}
                         placeholder={form.personType === "pj" ? "Ex: Acme Serviços LTDA" : "Ex: João da Silva"}
                         className={INPUT_CLS}
                       />
+                      <p className="text-right text-xs text-muted-foreground">
+                        {form.name.length}/60 — limite do Omie
+                      </p>
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="new-supplier-cnpj" className={LABEL_CLS}>

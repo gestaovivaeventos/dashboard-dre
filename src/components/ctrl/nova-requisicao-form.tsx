@@ -6,7 +6,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
-import { isValidBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
+import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
@@ -24,6 +24,39 @@ const INPUT_CLS =
 const LABEL_CLS = "text-sm font-medium";
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Data/hora "agora" no fuso de Brasília (America/Sao_Paulo), independente do
+// fuso do navegador do usuário — a regra de vencimento é definida pelo horário
+// de Brasília, não pelo relógio local de quem preenche.
+function brasiliaNowParts(): { ymd: string; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return { ymd: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) % 24 };
+}
+
+function addOneDayISO(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+// Já passou das 12:00 no horário de Brasília? (cutoff para vencimento no mesmo dia)
+function isAfterNoonBRT(): boolean {
+  return brasiliaNowParts().hour >= 12;
+}
+
+// Vencimento mínimo permitido: o MESMO dia quando a requisição é cadastrada até
+// 12:00 (horário de Brasília); após as 12:00, só a partir do dia seguinte.
+function earliestDueDateBRT(): string {
+  const { ymd } = brasiliaNowParts();
+  return isAfterNoonBRT() ? addOneDayISO(ymd) : ymd;
+}
 
 interface Props {
   sectors: CtrlSector[];
@@ -272,18 +305,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     return isNaN(n) ? 0 : n;
   }, [amountStr]);
 
-  // Minimum allowed due date. If now > 12:00, the earliest acceptable
-  // date is tomorrow (operations team can't process same-day requests
-  // submitted after lunch).
-  const minDueDate = useMemo(() => {
-    const base = new Date(now);
-    if (base.getHours() >= 12) base.setDate(base.getDate() + 1);
-    const yyyy = base.getFullYear();
-    const mm = String(base.getMonth() + 1).padStart(2, "0");
-    const dd = String(base.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Vencimento mínimo (horário de Brasília): mesmo dia até 12:00; após 12:00,
+  // só a partir do dia seguinte. Calculado no fuso America/Sao_Paulo, então não
+  // depende do relógio/fuso do navegador de quem preenche.
+  const minDueDate = useMemo(() => earliestDueDateBRT(), []);
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) ?? null,
@@ -340,6 +365,22 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     }
   }, [dueDateMonth]);
 
+  // Boleto: ao ter uma linha digitável bancária válida (lida do anexo ou colada
+  // manualmente), preenche Valor e Vencimento a partir dela — só quando os
+  // campos estão vazios, para não sobrescrever edições do usuário. O parser só
+  // decodifica boleto bancário (47 dígitos); arrecadação fica manual.
+  useEffect(() => {
+    if (paymentMethod !== "boleto") return;
+    if (!barcode || !isValidBoletoLinhaDigitavel(barcode)) return;
+    const { amount, dueDate: due } = parseBoletoLinhaDigitavel(barcode);
+    if (amount && amount > 0) {
+      setAmountStr((prev) => (prev ? prev : formatBRL(String(Math.round(amount * 100)))));
+    }
+    if (due) setDueDate((prev) => (prev ? prev : due));
+    // formatBRL é puro e estável; amountStr/dueDate são lidos via updater.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcode, paymentMethod]);
+
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
   function handleSupplierChange(suppId: string) {
@@ -362,7 +403,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       setBankAccount(""); setBankAccountDigit("");
     }
     setPixKey(sup.chave_pix ?? "");
-    setPixKeyType("");
+    setPixKeyType(sup.pix_key_type ?? "");
 
     const newAvail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
     if (sup.chave_pix) newAvail.add("pix");
@@ -414,10 +455,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     // Defensive due-date check: HTML `min` is enforced by most browsers but
     // some mobile webviews ignore it. Belt + suspenders.
     if (dueDate && dueDate < minDueDate) {
-      const isAfterNoon = new Date(now).getHours() >= 12;
       setError(
-        isAfterNoon
-          ? "Como o horário já passou das 12:00, a data de vencimento deve ser a partir de amanhã."
+        isAfterNoonBRT()
+          ? "Como já passou das 12:00 (horário de Brasília), a data de vencimento deve ser a partir de amanhã."
           : "A data de vencimento não pode ser anterior a hoje.",
       );
       return;
@@ -728,6 +768,247 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
       )}
 
+      {/* Método de pagamento */}
+      <div className="space-y-1.5">
+        <label className={LABEL_CLS}>Método de Pagamento <span className="text-destructive">*</span></label>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: "boleto", label: "Boleto" },
+            { value: "pix", label: "PIX" },
+            { value: "transferencia", label: "Transferência" },
+            { value: "cartao_credito", label: "Cartão de Crédito" },
+            { value: "dinheiro", label: "Dinheiro" },
+            { value: "pix_copia_cola", label: "PIX Copia e Cola" },
+          ].map((opt) => {
+            const unavailable = selectedSupplier && !availableMethods.has(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { if (!unavailable) { setPaymentMethod(opt.value); setInstallments(1); } }}
+                disabled={!!unavailable}
+                title={unavailable ? "Fornecedor não possui dados para este método" : undefined}
+                className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                  paymentMethod === opt.value
+                    ? "bg-violet-600 text-white border-violet-600"
+                    : unavailable
+                    ? "opacity-40 cursor-not-allowed bg-background text-muted-foreground"
+                    : "bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {selectedSupplier && (
+          <p className="text-xs text-muted-foreground">
+            {selectedSupplier.chave_pix && selectedSupplier.banco
+              ? "Fornecedor possui PIX e dados bancários."
+              : selectedSupplier.chave_pix
+              ? "Fornecedor possui apenas PIX."
+              : selectedSupplier.banco
+              ? "Fornecedor possui apenas dados bancários."
+              : "Fornecedor sem dados de pagamento cadastrados."}
+          </p>
+        )}
+      </div>
+
+      {/* PIX */}
+      {paymentMethod === "pix" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
+          <div className="space-y-1.5">
+            <label htmlFor="pix_key_type" className={LABEL_CLS}>Tipo de Chave PIX</label>
+            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier?.pix_key_type} className={INPUT_CLS}>
+              <option value="">Selecione</option>
+              <option value="cpf">CPF</option>
+              <option value="cnpj">CNPJ</option>
+              <option value="email">E-mail</option>
+              <option value="telefone">Telefone</option>
+              <option value="aleatoria">Chave Aleatória</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="pix_key" className={LABEL_CLS}>Chave PIX</label>
+            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
+          </div>
+        </div>
+      )}
+
+      {/* PIX Copia e Cola — pagamento avulso; campo editável mesmo com fornecedor */}
+      {paymentMethod === "pix_copia_cola" && (
+        <div className="space-y-1.5 rounded-lg border bg-muted/20 p-4">
+          <label htmlFor="pix_copia_cola" className={LABEL_CLS}>
+            Código PIX (copia e cola) <span className="text-destructive">*</span>
+          </label>
+          <textarea
+            id="pix_copia_cola"
+            name="pix_copia_cola"
+            rows={3}
+            value={pixKey}
+            onChange={(e) => setPixKey(e.target.value)}
+            placeholder="Cole aqui o código PIX copia e cola"
+            className={`${INPUT_CLS} resize-none font-mono text-xs`}
+          />
+        </div>
+      )}
+
+      {/* Transferência */}
+      {paymentMethod === "transferencia" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          {selectedSupplier && (
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Dados do fornecedor cadastrado — não editáveis aqui.
+            </p>
+          )}
+          <div className="space-y-1.5 sm:col-span-2">
+            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="bank_name" className={LABEL_CLS}>Banco</label>
+            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={!!selectedSupplier} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="bank_agency" className={LABEL_CLS}>Agência</label>
+            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} disabled={!!selectedSupplier} placeholder="0000" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <div className="grid grid-cols-[1fr_88px] gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
+                <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
+                <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Boleto — anexo primeiro; os dados abaixo são preenchidos pela leitura */}
+      {paymentMethod === "boleto" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
+          <div className="sm:col-span-2">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Anexe o boleto primeiro — o sistema tenta ler o código de barras, o
+              favorecido e o CPF/CNPJ, e preenche o valor e o vencimento
+              automaticamente a partir da linha digitável.
+            </p>
+            {attachmentBlock}
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
+            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
+            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <label htmlFor="barcode" className={LABEL_CLS}>
+              Linha Digitável / Código de Barras <span className="text-destructive">*</span>
+            </label>
+            <input
+              id="barcode"
+              name="barcode"
+              type="text"
+              required
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              placeholder="000000000000000000000000000000000000"
+              className={`${INPUT_CLS} ${barcode && !isValidBoletoLinhaDigitavel(barcode) ? "border-destructive focus:ring-destructive" : ""}`}
+            />
+            {barcode && !isValidBoletoLinhaDigitavel(barcode) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-destructive">
+                  Código de barras inválido. Confira/corrija manualmente
+                  {attachmentPath ? " ou leia o boleto novamente." : "."}
+                </p>
+                {attachmentPath && (
+                  <button
+                    type="button"
+                    onClick={rereadBoleto}
+                    disabled={attachmentReading}
+                    className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                  >
+                    {attachmentReading ? "Lendo…" : "Ler novamente"}
+                  </button>
+                )}
+              </div>
+            )}
+            {barcode && isValidBoletoLinhaDigitavel(barcode) && (
+              <p className="text-xs text-green-600 dark:text-green-400">Código de barras válido.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cartão de Crédito */}
+      {paymentMethod === "cartao_credito" && (
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+          <div className="space-y-1.5">
+            <label className={LABEL_CLS}>Número de Parcelas</label>
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setInstallments(n)}
+                  className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                    installments === n ? "bg-violet-600 text-white border-violet-600" : "bg-background text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {n}x
+                </button>
+              ))}
+            </div>
+            {installments > 1 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Serão criadas {installments} requisições, vencimentos no dia 5 de cada mês.
+              </p>
+            )}
+          </div>
+
+          {/* Precisa do cartão de crédito físico? */}
+          <div className="space-y-1.5">
+            <label htmlFor="needs_credit_card" className={LABEL_CLS}>
+              Precisa do cartão de crédito? <span className="text-destructive">*</span>
+            </label>
+            <select
+              id="needs_credit_card"
+              name="needs_credit_card"
+              required
+              value={needsCreditCard}
+              onChange={(e) => setNeedsCreditCard(e.target.value as "" | "sim" | "nao")}
+              className={INPUT_CLS}
+            >
+              <option value="">Selecione</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Selecione &quot;Sim&quot; se o solicitante precisar receber fisicamente o cartão para realizar a compra.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Valor + Vencimento */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
@@ -751,7 +1032,8 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </div>
         <div className="space-y-1.5">
           <label htmlFor="due_date" className={LABEL_CLS}>
-            Data de Vencimento <span className="text-destructive">*</span>
+            {paymentMethod === "cartao_credito" ? "Data da Compra" : "Data de Vencimento"}{" "}
+            <span className="text-destructive">*</span>
           </label>
           <input
             id="due_date"
@@ -775,6 +1057,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             }}
             className={`${INPUT_CLS} cursor-pointer`}
           />
+          {paymentMethod === "cartao_credito" && (
+            <p className="text-xs text-muted-foreground">
+              O vencimento é calculado pela fatura: vence dia 05. Compra até o dia 23
+              entra na fatura do mês seguinte; a partir do dia 24, na fatura subsequente.
+            </p>
+          )}
         </div>
       </div>
 
@@ -905,246 +1193,6 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
               Preencha setor, tipo de despesa e valor para habilitar a verificação.
             </p>
           )}
-        </div>
-      )}
-
-      {/* Método de pagamento */}
-      <div className="space-y-1.5">
-        <label className={LABEL_CLS}>Método de Pagamento <span className="text-destructive">*</span></label>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { value: "boleto", label: "Boleto" },
-            { value: "pix", label: "PIX" },
-            { value: "transferencia", label: "Transferência" },
-            { value: "cartao_credito", label: "Cartão de Crédito" },
-            { value: "dinheiro", label: "Dinheiro" },
-            { value: "pix_copia_cola", label: "PIX Copia e Cola" },
-          ].map((opt) => {
-            const unavailable = selectedSupplier && !availableMethods.has(opt.value);
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => { if (!unavailable) { setPaymentMethod(opt.value); setInstallments(1); } }}
-                disabled={!!unavailable}
-                title={unavailable ? "Fornecedor não possui dados para este método" : undefined}
-                className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
-                  paymentMethod === opt.value
-                    ? "bg-violet-600 text-white border-violet-600"
-                    : unavailable
-                    ? "opacity-40 cursor-not-allowed bg-background text-muted-foreground"
-                    : "bg-background text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-        {selectedSupplier && (
-          <p className="text-xs text-muted-foreground">
-            {selectedSupplier.chave_pix && selectedSupplier.banco
-              ? "Fornecedor possui PIX e dados bancários."
-              : selectedSupplier.chave_pix
-              ? "Fornecedor possui apenas PIX."
-              : selectedSupplier.banco
-              ? "Fornecedor possui apenas dados bancários."
-              : "Fornecedor sem dados de pagamento cadastrados."}
-          </p>
-        )}
-      </div>
-
-      {/* PIX */}
-      {paymentMethod === "pix" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
-          {selectedSupplier && (
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              Dados do fornecedor cadastrado — não editáveis aqui.
-            </p>
-          )}
-          <div className="space-y-1.5">
-            <label htmlFor="pix_key_type" className={LABEL_CLS}>Tipo de Chave PIX</label>
-            <select id="pix_key_type" name="pix_key_type" value={pixKeyType} onChange={(e) => setPixKeyType(e.target.value)} disabled={!!selectedSupplier} className={INPUT_CLS}>
-              <option value="">Selecione</option>
-              <option value="cpf">CPF</option>
-              <option value="cnpj">CNPJ</option>
-              <option value="email">E-mail</option>
-              <option value="telefone">Telefone</option>
-              <option value="aleatoria">Chave Aleatória</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="pix_key" className={LABEL_CLS}>Chave PIX</label>
-            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
-          </div>
-        </div>
-      )}
-
-      {/* PIX Copia e Cola — pagamento avulso; campo editável mesmo com fornecedor */}
-      {paymentMethod === "pix_copia_cola" && (
-        <div className="space-y-1.5 rounded-lg border bg-muted/20 p-4">
-          <label htmlFor="pix_copia_cola" className={LABEL_CLS}>
-            Código PIX (copia e cola) <span className="text-destructive">*</span>
-          </label>
-          <textarea
-            id="pix_copia_cola"
-            name="pix_copia_cola"
-            rows={3}
-            value={pixKey}
-            onChange={(e) => setPixKey(e.target.value)}
-            placeholder="Cole aqui o código PIX copia e cola"
-            className={`${INPUT_CLS} resize-none font-mono text-xs`}
-          />
-        </div>
-      )}
-
-      {/* Transferência */}
-      {paymentMethod === "transferencia" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
-          {selectedSupplier && (
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              Dados do fornecedor cadastrado — não editáveis aqui.
-            </p>
-          )}
-          <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_name" className={LABEL_CLS}>Banco</label>
-            <input id="bank_name" name="bank_name" type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={!!selectedSupplier} placeholder="Ex: Banco do Brasil" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_agency" className={LABEL_CLS}>Agência</label>
-            <input id="bank_agency" name="bank_agency" type="text" value={bankAgency} onChange={(e) => setBankAgency(e.target.value)} disabled={!!selectedSupplier} placeholder="0000" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <div className="grid grid-cols-[1fr_88px] gap-3">
-              <div className="space-y-1.5">
-                <label htmlFor="bank_account" className={LABEL_CLS}>Conta</label>
-                <input id="bank_account" name="bank_account" type="text" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} disabled={!!selectedSupplier} placeholder="00000" className={INPUT_CLS} />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="bank_account_digit" className={LABEL_CLS}>Dígito</label>
-                <input id="bank_account_digit" name="bank_account_digit" type="text" value={bankAccountDigit} onChange={(e) => setBankAccountDigit(e.target.value)} disabled={!!selectedSupplier} placeholder="0" className={INPUT_CLS} />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Boleto — anexo primeiro; os dados abaixo são preenchidos pela leitura */}
-      {paymentMethod === "boleto" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 rounded-lg border bg-muted/20 p-4">
-          <div className="sm:col-span-2">
-            <p className="mb-2 text-xs text-muted-foreground">
-              Anexe o boleto primeiro — o sistema tenta ler o código de barras, o
-              favorecido e o CPF/CNPJ e preencher os campos abaixo.
-            </p>
-            {attachmentBlock}
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>
-            <input id="favorecido" name="favorecido" type="text" value={favorecido} onChange={(e) => setFavorecido(e.target.value)} disabled={!!selectedSupplier} placeholder="Nome do favorecido" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="bank_cpf_cnpj" className={LABEL_CLS}>CPF/CNPJ</label>
-            <input id="bank_cpf_cnpj" name="bank_cpf_cnpj" type="text" value={bankCpfCnpj} onChange={(e) => setBankCpfCnpj(e.target.value)} disabled={!!selectedSupplier} placeholder="000.000.000-00" className={INPUT_CLS} />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="barcode" className={LABEL_CLS}>
-              Linha Digitável / Código de Barras <span className="text-destructive">*</span>
-            </label>
-            <input
-              id="barcode"
-              name="barcode"
-              type="text"
-              required
-              value={barcode}
-              onChange={(e) => setBarcode(e.target.value)}
-              placeholder="000000000000000000000000000000000000"
-              className={`${INPUT_CLS} ${barcode && !isValidBoletoLinhaDigitavel(barcode) ? "border-destructive focus:ring-destructive" : ""}`}
-            />
-            {barcode && !isValidBoletoLinhaDigitavel(barcode) && (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs text-destructive">
-                  Código de barras inválido. Confira/corrija manualmente
-                  {attachmentPath ? " ou leia o boleto novamente." : "."}
-                </p>
-                {attachmentPath && (
-                  <button
-                    type="button"
-                    onClick={rereadBoleto}
-                    disabled={attachmentReading}
-                    className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
-                  >
-                    {attachmentReading ? "Lendo…" : "Ler novamente"}
-                  </button>
-                )}
-              </div>
-            )}
-            {barcode && isValidBoletoLinhaDigitavel(barcode) && (
-              <p className="text-xs text-green-600 dark:text-green-400">Código de barras válido.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Cartão de Crédito */}
-      {paymentMethod === "cartao_credito" && (
-        <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
-          <div className="space-y-1.5">
-            <label className={LABEL_CLS}>Número de Parcelas</label>
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setInstallments(n)}
-                  className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
-                    installments === n ? "bg-violet-600 text-white border-violet-600" : "bg-background text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {n}x
-                </button>
-              ))}
-            </div>
-            {installments > 1 && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Serão criadas {installments} requisições, vencimentos no dia 5 de cada mês.
-              </p>
-            )}
-          </div>
-
-          {/* Precisa do cartão de crédito físico? */}
-          <div className="space-y-1.5">
-            <label htmlFor="needs_credit_card" className={LABEL_CLS}>
-              Precisa do cartão de crédito? <span className="text-destructive">*</span>
-            </label>
-            <select
-              id="needs_credit_card"
-              name="needs_credit_card"
-              required
-              value={needsCreditCard}
-              onChange={(e) => setNeedsCreditCard(e.target.value as "" | "sim" | "nao")}
-              className={INPUT_CLS}
-            >
-              <option value="">Selecione</option>
-              <option value="sim">Sim</option>
-              <option value="nao">Não</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Selecione &quot;Sim&quot; se o solicitante precisar receber fisicamente o cartão para realizar a compra.
-            </p>
-          </div>
         </div>
       )}
 

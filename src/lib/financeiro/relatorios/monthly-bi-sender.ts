@@ -81,7 +81,7 @@ export async function sendOnePageForCompany({
 
     const sendResult = await sendEmail({
       to: emails,
-      subject: `[Controll Hub] Relatório BI — ${companyName} — ${periodLabel}`,
+      subject: `[Control Hub] Relatório BI — ${companyName} — ${periodLabel}`,
       html,
     });
     if (!sendResult.ok) throw new Error(sendResult.error ?? "Falha no envio do email.");

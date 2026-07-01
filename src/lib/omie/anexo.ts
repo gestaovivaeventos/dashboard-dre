@@ -50,6 +50,63 @@ function storedZip(name: string, data: Buffer): Buffer {
   return Buffer.concat([local, central, eocd]);
 }
 
+export interface OmieAnexo {
+  nIdAnexo: number;
+  nome: string;
+  tipo: string;
+}
+
+// Lista os anexos (comprovantes) de uma conta a pagar do Omie. Pagina até o fim.
+// Retorna [] quando o título não tem anexos (a Omie devolve notFound).
+export async function listarAnexosContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+): Promise<OmieAnexo[]> {
+  const anexos: OmieAnexo[] = [];
+  let pagina = 1;
+  let total = 1;
+  do {
+    const { data, notFound } = await omieCall(ANEXO_URL, "ListarAnexo", appKey, appSecret, {
+      nPagina: pagina,
+      nRegPorPagina: 50,
+      cTabela: "conta-pagar",
+      nId: codigoLancamentoOmie,
+    });
+    if (notFound) break;
+    const lista =
+      (data.listaAnexos as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const a of lista) {
+      anexos.push({
+        nIdAnexo: Number(a.nIdAnexo),
+        nome: String(a.cNomeArquivo ?? "anexo"),
+        tipo: String(a.cTipoArquivo ?? ""),
+      });
+    }
+    total = Number(data.nTotPaginas ?? 1);
+    pagina += 1;
+  } while (pagina <= total);
+  return anexos;
+}
+
+// Obtém a URL temporária de download de um anexo específico (ObterAnexo →
+// cLinkDownload). A URL expira (dDtExpiracao), então é resolvida sob demanda.
+export async function obterAnexoLinkContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  nIdAnexo: number,
+): Promise<string | null> {
+  const { data, notFound } = await omieCall(ANEXO_URL, "ObterAnexo", appKey, appSecret, {
+    cTabela: "conta-pagar",
+    nId: codigoLancamentoOmie,
+    nIdAnexo,
+  });
+  if (notFound) return null;
+  const link = data.cLinkDownload;
+  return typeof link === "string" && link ? link : null;
+}
+
 // Anexa um arquivo a uma conta a pagar do Omie. Lança em caso de erro do Omie.
 export async function incluirAnexoContaPagar(
   appKey: string,

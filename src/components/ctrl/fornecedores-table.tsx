@@ -621,7 +621,7 @@ export function FornecedoresTable({
                 </header>
                 {editMode ? (
                   <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
-                    <EditField label="Nome *" value={editForm.name} onChange={(v) => setEditForm({ ...editForm, name: v })} />
+                    <EditField label="Nome *" value={editForm.name} maxLength={60} onChange={(v) => setEditForm({ ...editForm, name: v })} />
                     <EditField label="CNPJ/CPF" value={editForm.cnpj_cpf} onChange={(v) => setEditForm({ ...editForm, cnpj_cpf: v })} mono />
                     <EditField label="E-mail" value={editForm.email} onChange={(v) => setEditForm({ ...editForm, email: v })} />
                     <EditField label="Telefone" value={editForm.phone} onChange={(v) => setEditForm({ ...editForm, phone: v })} />
@@ -1098,12 +1098,14 @@ function EditField({
   onChange,
   mono,
   fullWidth,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   mono?: boolean;
   fullWidth?: boolean;
+  maxLength?: number;
 }) {
   return (
     <div className={`space-y-1 ${fullWidth ? "sm:col-span-2" : ""}`}>
@@ -1113,11 +1115,17 @@ function EditField({
       <input
         type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        maxLength={maxLength}
+        onChange={(e) => onChange(maxLength ? e.target.value.slice(0, maxLength) : e.target.value)}
         className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${
           mono ? "font-mono" : ""
         }`}
       />
+      {maxLength && (
+        <p className="text-right text-xs text-muted-foreground">
+          {value.length}/{maxLength} — limite do Omie
+        </p>
+      )}
     </div>
   );
 }

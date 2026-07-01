@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
+import { decryptSecret } from "@/lib/security/encryption";
+import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
 import type { CtrlRequestStatus } from "@/lib/supabase/types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -204,8 +206,13 @@ function calculateInstallmentDates(
   purchaseDate: string,
   total: number
 ): { installment: number; dueDate: string; month: number; year: number }[] {
+  // Ciclo da fatura do cartão: fecha no dia 23 e vence no dia 05.
+  //   • compra até o dia 23 (inclusive) → entra na fatura que vence dia 05 do
+  //     mês seguinte (offset 1);
+  //   • compra a partir do dia 24 → só entra na fatura do mês subsequente
+  //     (offset 2).
   const purchase = new Date(purchaseDate + "T00:00:00");
-  const monthOffset = purchase.getDate() >= 23 ? 2 : 1;
+  const monthOffset = purchase.getDate() > 23 ? 2 : 1;
   const results = [];
   for (let i = 0; i < total; i++) {
     const totalOffset = purchase.getMonth() + monthOffset + i;
@@ -354,11 +361,13 @@ export async function createRequest(data: CreateRequestInput) {
   const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
   // Installments
-  const isInstallment =
-    data.payment_method === "cartao_credito" &&
-    (data.installments ?? 1) > 1;
-  const installmentDates = isInstallment && data.due_date
-    ? calculateInstallmentDates(data.due_date, data.installments!)
+  const isCreditCard = data.payment_method === "cartao_credito";
+  const isInstallment = isCreditCard && (data.installments ?? 1) > 1;
+  // Para cartão (à vista ou parcelado), o vencimento segue o ciclo da fatura
+  // (vence dia 05, conforme o dia da compra) — não a data crua digitada. Em 1x
+  // gera só uma data; em Nx, uma por parcela.
+  const installmentDates = isCreditCard && data.due_date
+    ? calculateInstallmentDates(data.due_date, data.installments ?? 1)
     : [];
   const installmentGroupId = isInstallment ? crypto.randomUUID() : null;
   const unitAmount = isInstallment
@@ -413,9 +422,12 @@ export async function createRequest(data: CreateRequestInput) {
     approved_at: null,
   };
 
-  // First (or only) request
+  // First (or only) request.
+  // Vencimento: cartão (à vista ou parcelado) usa a data da fatura computada
+  // (dia 05). Competência (reference_month/year): mantém o mês da compra no à
+  // vista; no parcelado, cada parcela já cai na competência da sua fatura.
   const firstDueDate =
-    isInstallment && installmentDates.length > 0
+    isCreditCard && installmentDates.length > 0
       ? installmentDates[0].dueDate
       : data.due_date;
   const firstMonth =
@@ -668,6 +680,81 @@ export async function getRequestAttachmentUrl(requestId: string) {
   return { url: signed.signedUrl };
 }
 
+export interface RequestComprovante {
+  id: number;
+  nome: string;
+  tipo: string;
+  url: string | null;
+}
+
+// Busca os comprovantes (anexos) da conta a pagar do Omie ligada à requisição.
+// Resolve a URL temporária de download de cada anexo (ObterAnexo). Retorna lista
+// vazia quando a requisição ainda não foi lançada no Omie.
+export async function getRequestComprovantes(
+  requestId: string,
+): Promise<{ comprovantes: RequestComprovante[] } | { error: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { data: req, error } = await supabase
+    .from("ctrl_requests")
+    .select("id, created_by, omie_contapagar_codigo, paying_company_id")
+    .eq("id", requestId)
+    .maybeSingle<{
+      id: string;
+      created_by: string;
+      omie_contapagar_codigo: number | null;
+      paying_company_id: string | null;
+    }>();
+
+  if (error) return { error: error.message };
+  if (!req) return { error: "Requisição não encontrada." };
+
+  // Solicitante sem visibilidade ampla só acessa os próprios comprovantes.
+  const hasBroad = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroad && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  if (!req.omie_contapagar_codigo) return { comprovantes: [] };
+  if (!req.paying_company_id) return { error: "Requisição sem empresa pagadora." };
+
+  const { data: company } = await supabase
+    .from("companies")
+    .select("omie_app_key, omie_app_secret")
+    .eq("id", req.paying_company_id)
+    .maybeSingle<{ omie_app_key: string | null; omie_app_secret: string | null }>();
+
+  if (!company?.omie_app_key || !company?.omie_app_secret) {
+    return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
+  try {
+    const appKey = decryptSecret(company.omie_app_key);
+    const appSecret = decryptSecret(company.omie_app_secret);
+    const codigo = Number(req.omie_contapagar_codigo);
+    const anexos = await listarAnexosContaPagar(appKey, appSecret, codigo);
+    const comprovantes: RequestComprovante[] = [];
+    for (const a of anexos) {
+      const url = await obterAnexoLinkContaPagar(appKey, appSecret, codigo, a.nIdAnexo);
+      comprovantes.push({ id: a.nIdAnexo, nome: a.nome, tipo: a.tipo, url });
+    }
+    return { comprovantes };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro ao buscar comprovantes no Omie.";
+    return { error: msg };
+  }
+}
+
 export async function getRequests(filters?: {
   status?: CtrlRequestStatus;
   sector_id?: string;
@@ -723,7 +810,39 @@ export async function getRequests(filters?: {
 
   const { data, error } = await query;
   if (error) return { error: error.message };
-  return { requests: data ?? [] };
+
+  // A RLS de `users` só deixa cada um ler o próprio registro (ou admin lê todos),
+  // então o join `creator`/`approver` volta null para aprovadores não-admin —
+  // e o nome do solicitante somia na tela de aprovações. Resolve os nomes via
+  // admin client (service role), sem afrouxar a RLS da tabela users.
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const adminClient = createAdminClientIfAvailable();
+  if (adminClient && rows.length) {
+    const userIds = new Set<string>();
+    for (const r of rows) {
+      if (typeof r.created_by === "string") userIds.add(r.created_by);
+      if (typeof r.approved_by === "string") userIds.add(r.approved_by);
+    }
+    if (userIds.size) {
+      const { data: users } = await adminClient
+        .from("users")
+        .select("id, name, email")
+        .in("id", Array.from(userIds));
+      const byId = new Map(
+        (users ?? []).map((u) => [u.id, { name: u.name, email: u.email }]),
+      );
+      for (const r of rows) {
+        if (typeof r.created_by === "string" && byId.has(r.created_by)) {
+          r.creator = byId.get(r.created_by);
+        }
+        if (typeof r.approved_by === "string" && byId.has(r.approved_by)) {
+          r.approver = byId.get(r.approved_by);
+        }
+      }
+    }
+  }
+
+  return { requests: rows };
 }
 
 // ─── Approve ──────────────────────────────────────────────────────────────────
@@ -876,16 +995,34 @@ export async function approveRequest(requestId: string, comment?: string) {
 
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
-    .select("id, status, approval_tier, sector_id, amount, created_by, request_number")
+    .select("id, status, complement_return_status, approval_tier, sector_id, amount, created_by, request_number")
     .eq("id", requestId)
     .single();
 
   if (fetchErr || !req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente" && req.status !== "pendente_diretor")
+
+  // Permite aprovar diretamente de dentro da Complementação: a decisão usa a
+  // etapa de origem guardada em complement_return_status (gerente/diretor).
+  const isComplement = req.status === "aguardando_complementacao";
+  if (req.status !== "pendente" && req.status !== "pendente_diretor" && !isComplement)
     return { error: `Status atual: ${req.status}. Só é possível aprovar requisições pendentes.` };
 
-  const result = await applyApprovalStep(supabase, ctx, req as ApprovableReq, comment);
+  const effectiveStatus = isComplement
+    ? ((req.complement_return_status as string | null) ?? "pendente")
+    : req.status;
+  const effectiveReq = { ...req, status: effectiveStatus } as ApprovableReq;
+
+  const result = await applyApprovalStep(supabase, ctx, effectiveReq, comment);
   if ("error" in result) return result;
+
+  // Saiu da complementação ao decidir — limpa a etapa de origem guardada.
+  if (isComplement) {
+    await supabase
+      .from("ctrl_requests")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ complement_return_status: null } as any)
+      .eq("id", requestId);
+  }
 
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
@@ -962,18 +1099,28 @@ export async function requestInfo(requestId: string, question: string) {
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
-  if (req.status !== "pendente" && req.status !== "pendente_diretor")
-    return { error: "Só é possível pedir informação de requisições pendentes." };
+  if (
+    req.status !== "pendente" &&
+    req.status !== "pendente_diretor" &&
+    req.status !== "aguardando_complementacao"
+  )
+    return { error: "Só é possível pedir informação de requisições pendentes ou em complementação." };
 
-  // Guarda a etapa de origem para retornar a ela quando o solicitante responder.
+  // Guarda a etapa de origem para a aprovação saber em que etapa decidir. Só
+  // grava na PRIMEIRA pergunta (quando ainda está pendente); perguntas de
+  // acompanhamento (já em complementação) preservam o complement_return_status.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const update: Record<string, any> = {
+    status: "aguardando_complementacao",
+    updated_at: new Date().toISOString(),
+  };
+  if (req.status === "pendente" || req.status === "pendente_diretor") {
+    update.complement_return_status = req.status;
+  }
   await supabase
     .from("ctrl_requests")
-    .update({
-      status: "aguardando_complementacao",
-      complement_return_status: req.status,
-      updated_at: new Date().toISOString(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+    .update(update as any)
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -1012,28 +1159,23 @@ export async function answerComplement(requestId: string, answer: string) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
-  // Volta para a etapa de onde saiu (gerente ou diretor). Fallback: deriva do
-  // solicitante (especial → diretor; demais → gerente).
-  const { data: cur } = await supabase
+  const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("created_by, complement_return_status")
+    .select("id, status, request_number")
     .eq("id", requestId)
-    .maybeSingle<{ created_by: string; complement_return_status: string | null }>();
+    .maybeSingle<{ id: string; status: string; request_number: number }>();
 
-  const returnStatus: CtrlRequestStatus =
-    (cur?.complement_return_status as CtrlRequestStatus | null) ??
-    (cur?.created_by === APPROVAL_ROUTING.directorOnly.requesterId
-      ? "pendente_diretor"
-      : "pendente");
+  if (!req) return { error: "Requisição não encontrada." };
+  if (req.status !== "aguardando_complementacao")
+    return { error: "Esta requisição não está aguardando complementação." };
 
+  // Responder NÃO tira da complementação: a requisição PERMANECE em
+  // `aguardando_complementacao` (preservando `complement_return_status`) e o
+  // aprovador decide — aprovar/rejeitar/perguntar de novo — de dentro da própria
+  // aba de Complementação. Só registra a resposta e marca atividade.
   await supabase
     .from("ctrl_requests")
-    .update({
-      status: returnStatus,
-      complement_return_status: null,
-      updated_at: new Date().toISOString(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+    .update({ updated_at: new Date().toISOString() })
     .eq("id", requestId);
 
   await supabase.from("ctrl_history").insert({
@@ -1042,6 +1184,27 @@ export async function answerComplement(requestId: string, answer: string) {
     action: "complementado",
     comment: answer.trim(),
   });
+
+  // Avisa quem fez a última pergunta (aprovador) que há nova resposta a analisar.
+  const { data: lastAsk } = await supabase
+    .from("ctrl_history")
+    .select("user_id")
+    .eq("request_id", requestId)
+    .eq("action", "complementacao_solicitada")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ user_id: string }>();
+
+  if (lastAsk?.user_id && lastAsk.user_id !== ctx.id) {
+    await notifyRequester({
+      userId: lastAsk.user_id,
+      requestId,
+      requestNumber: req.request_number,
+      title: "Nova resposta na complementação",
+      message: `Há uma nova resposta na requisição #${req.request_number} aguardando sua análise.`,
+      type: "info_solicitada",
+    });
+  }
 
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
@@ -1101,6 +1264,124 @@ export async function getComplementQuestion(
     question: hist.comment,
     askedBy: asker?.name ?? asker?.email ?? null,
   };
+}
+
+export interface ComplementMessage {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  authorEmail: string | null;
+  authorKind: "solicitante" | "aprovador";
+  message: string;
+  createdAt: string;
+}
+
+// Conversa COMPLETA da solicitação de complementação (pergunta do aprovador +
+// respostas do solicitante, e novas perguntas), em ordem cronológica — cada
+// turno é uma linha em ctrl_history (complementacao_solicitada = aprovador;
+// complementado = solicitante). Admin client porque a RLS de ctrl_history não
+// cruza as linhas entre aprovador e solicitante; a autorização é por papel +
+// dono (mesma regra de getComplementQuestion).
+export async function getComplementThread(
+  requestId: string,
+): Promise<{ messages?: ComplementMessage[]; error?: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("created_by")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string }>();
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select(
+      `id, user_id, action, comment, created_at,
+       user:users!ctrl_history_user_id_fkey(name, email)`,
+    )
+    .eq("request_id", requestId)
+    .in("action", ["complementacao_solicitada", "complementado"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  type Row = {
+    id: string;
+    user_id: string;
+    action: "complementacao_solicitada" | "complementado";
+    comment: string | null;
+    created_at: string;
+    user:
+      | { name: string | null; email: string | null }
+      | Array<{ name: string | null; email: string | null }>
+      | null;
+  };
+  const messages: ComplementMessage[] = ((data ?? []) as Row[]).map((row) => {
+    const u = Array.isArray(row.user) ? row.user[0] ?? null : row.user;
+    return {
+      id: row.id,
+      authorId: row.user_id,
+      authorName: u?.name ?? null,
+      authorEmail: u?.email ?? null,
+      authorKind: row.action === "complementacao_solicitada" ? "aprovador" : "solicitante",
+      message: row.comment ?? "",
+      createdAt: row.created_at,
+    };
+  });
+
+  return { messages };
+}
+
+// Dentre as requisições em `aguardando_complementacao`, quais têm o ÚLTIMO turno
+// da conversa como resposta do solicitante (`complementado`) — ou seja, estão
+// aguardando a análise do aprovador. Usado para o alerta da aba Complementação.
+// Admin client (RLS de ctrl_history); autorização por papel de aprovação.
+export async function getComplementsAwaitingApprover(
+  requestIds: string[],
+): Promise<{ ids?: string[]; error?: string }> {
+  await requireCtrlRole("gerente", "diretor", "csc", "admin", "contas_a_pagar");
+  if (requestIds.length === 0) return { ids: [] };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select("request_id, action, created_at")
+    .in("request_id", requestIds)
+    .in("action", ["complementacao_solicitada", "complementado"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  // Última ação de complementação por requisição.
+  const lastAction = new Map<string, string>();
+  for (const row of (data ?? []) as Array<{ request_id: string; action: string }>) {
+    lastAction.set(row.request_id, row.action);
+  }
+  const ids: string[] = [];
+  lastAction.forEach((action, id) => {
+    if (action === "complementado") ids.push(id);
+  });
+
+  return { ids };
 }
 
 // ─── Payment info (pedir info ao solicitante na fase de pagamento) ───────────

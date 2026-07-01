@@ -84,7 +84,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-xs text-primary-foreground/50">
-          Controll Hub &copy; {new Date().getFullYear()}
+          Control Hub &copy; {new Date().getFullYear()}
         </p>
       </div>
 
