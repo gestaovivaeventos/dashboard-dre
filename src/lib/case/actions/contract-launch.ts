@@ -27,6 +27,7 @@ type LaunchResult = { ok: true; status: "lancado" | "parcial" | "erro" } | { err
 interface TitleRow {
   id: string;
   leg: CaseLegKind;
+  title_item: string | null;
   parcela_numero: number;
   parcela_total: number;
   vencimento: string;
@@ -34,6 +35,13 @@ interface TitleRow {
   codigo_integracao: string;
   status: string;
 }
+
+const SERVICO_LABEL: Record<string, string> = {
+  margem: "Comissão/BV",
+  rider: "Rider",
+  camarim: "Camarim",
+  extras: "Extras",
+};
 
 async function markContractError(db: DB, contractId: string, message: string): Promise<LaunchResult> {
   await db.from("case_contracts").update({ status: "erro", updated_at: new Date().toISOString() }).eq("id", contractId);
@@ -166,7 +174,7 @@ export async function launchContractToOmie(db: DB, contractId: string): Promise<
   // ── Lança os títulos pendentes/erro ────────────────────────────────────
   const { data: titles } = await db
     .from("case_titles")
-    .select("id, leg, parcela_numero, parcela_total, vencimento, valor, codigo_integracao, status")
+    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, codigo_integracao, status")
     .eq("contract_id", contractId)
     .in("status", ["pendente", "erro"])
     .order("leg")
@@ -184,7 +192,8 @@ export async function launchContractToOmie(db: DB, contractId: string): Promise<
         : String(config.codigo_categoria_custodia);
     const codigoParceiro = isPagar ? bandCodigo! : clientCodigo!;
     const venc = toOmieDate(t.vencimento);
-    const observacao = `Contrato Case ${band.name} x ${client.name} (parcela ${t.parcela_numero}/${t.parcela_total})`;
+    const itemLabel = t.title_item ? ` - ${SERVICO_LABEL[t.title_item] ?? t.title_item}` : "";
+    const observacao = `Contrato Case ${band.name} x ${client.name}${itemLabel} (parcela ${t.parcela_numero}/${t.parcela_total})`;
 
     try {
       let omieCodigo: number;

@@ -295,24 +295,77 @@ export async function createContract(
     return { error: `Falha ao criar contrato: ${contractErr?.message ?? "?"}` };
   }
 
-  // ── Títulos (uma linha por parcela de cada leg) ────────────────────────
+  // ── Títulos ────────────────────────────────────────────────────────────
+  // Custódia (a pagar e a receber): 1 título por parcela.
+  // Serviços: cada item (margem/rider/camarim/extras) vira título separado no
+  // Omie, rateado pela MESMA agenda de parcelas (proporção por vencimento).
   const titleRows: Array<Record<string, unknown>> = [];
-  for (const leg of legs) {
-    if (cents(leg.total) === 0) continue;
-    const total = leg.parcelas.length;
-    leg.parcelas.forEach((p, idx) => {
+
+  const addSimpleLeg = (kind: CaseLegKind, parcelas: CaseParcelaInput[]) => {
+    const total = parcelas.length;
+    parcelas.forEach((p, idx) => {
       const n = idx + 1;
       titleRows.push({
         contract_id: contract.id,
-        leg: leg.kind,
+        leg: kind,
         parcela_numero: n,
         parcela_total: total,
         vencimento: p.vencimento,
         valor: p.valor,
-        codigo_integracao: `case-${contract.id}-${leg.kind}-${n}`,
+        codigo_integracao: `case-${contract.id}-${kind}-${n}`,
         status: "pendente",
       });
     });
+  };
+
+  if (cents(valorCustodia) > 0) {
+    addSimpleLeg("pagar_custodia", input.parcelas_pagar_custodia ?? []);
+    addSimpleLeg("receber_custodia", input.parcelas_receber_custodia ?? []);
+  }
+
+  // Serviços itemizados sobre a agenda única de parcelas a receber.
+  const servicosParcelas = (input.parcelas_receber_servicos ?? []).filter(
+    (p) => p.vencimento && cents(p.valor) > 0,
+  );
+  const servicosTotalCents = sumCents(servicosParcelas);
+  const servicoItens: Array<{ item: string; valor: number }> = [
+    { item: "margem", valor: valorMargem },
+    { item: "rider", valor: valorRider },
+    { item: "camarim", valor: valorCamarim },
+    { item: "extras", valor: valorExtras },
+  ];
+
+  if (servicosTotalCents > 0) {
+    for (const s of servicoItens) {
+      const itemCents = cents(s.valor);
+      if (itemCents <= 0) continue;
+      // Rateia o valor do item pelas parcelas na mesma proporção; ajusta a
+      // última para fechar exatamente o total do item (evita sobra de centavos).
+      const valoresCents = servicosParcelas.map((p, idx) =>
+        idx === servicosParcelas.length - 1
+          ? 0
+          : Math.round((itemCents * cents(p.valor)) / servicosTotalCents),
+      );
+      const somaMenosUltima = valoresCents.slice(0, -1).reduce((a, b) => a + b, 0);
+      valoresCents[valoresCents.length - 1] = itemCents - somaMenosUltima;
+
+      servicosParcelas.forEach((p, idx) => {
+        const vc = valoresCents[idx];
+        if (vc <= 0) return;
+        const n = idx + 1;
+        titleRows.push({
+          contract_id: contract.id,
+          leg: "receber_servicos",
+          title_item: s.item,
+          parcela_numero: n,
+          parcela_total: servicosParcelas.length,
+          vencimento: p.vencimento,
+          valor: vc / 100,
+          codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`,
+          status: "pendente",
+        });
+      });
+    }
   }
 
   if (titleRows.length > 0) {
