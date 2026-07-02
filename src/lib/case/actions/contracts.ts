@@ -129,7 +129,15 @@ async function resolveClient(db: DB, input: CaseClientInput, userId: string): Pr
     })
     .select("id")
     .single();
-  if (error || !data) throw new Error(`Falha ao cadastrar cliente: ${error?.message ?? "?"}`);
+  if (error || !data) {
+    // Corrida no doc único → recupera o já inserido.
+    if (doc && error?.code === "23505") {
+      const { data: rows } = await db.from("case_clients").select("id, cnpj_cpf");
+      const m = (rows ?? []).find((c: { id: string; cnpj_cpf: string | null }) => onlyDigits(c.cnpj_cpf) === doc);
+      if (m) return m.id as string;
+    }
+    throw new Error(`Falha ao cadastrar cliente: ${error?.message ?? "?"}`);
+  }
   return data.id as string;
 }
 
@@ -184,7 +192,14 @@ async function resolveBand(db: DB, input: CaseBandInput, userId: string): Promis
     })
     .select("id")
     .single();
-  if (error || !data) throw new Error(`Falha ao cadastrar banda: ${error?.message ?? "?"}`);
+  if (error || !data) {
+    if (doc && error?.code === "23505") {
+      const { data: rows } = await db.from("case_bands").select("id, cnpj_cpf");
+      const m = (rows ?? []).find((b: { id: string; cnpj_cpf: string | null }) => onlyDigits(b.cnpj_cpf) === doc);
+      if (m) return m.id as string;
+    }
+    throw new Error(`Falha ao cadastrar banda: ${error?.message ?? "?"}`);
+  }
   return data.id as string;
 }
 
@@ -248,6 +263,25 @@ export async function createContract(
   if (!input.client?.name?.trim()) return { error: "Informe o cliente." };
   if (!input.band?.name?.trim()) return { error: "Informe a banda/artista." };
 
+  // ── Idempotência: cliques repetidos no mesmo form não duplicam o contrato ─
+  const idemKey = input.idempotency_key?.trim() || null;
+  if (idemKey) {
+    const { data: existing } = await db
+      .from("case_contracts")
+      .select("id, contract_number, status, sign_url")
+      .eq("idempotency_key", idemKey)
+      .maybeSingle();
+    if (existing) {
+      return {
+        ok: true,
+        contractId: existing.id as string,
+        contractNumber: existing.contract_number as number,
+        status: existing.status as string,
+        signUrl: (existing.sign_url as string | null) ?? undefined,
+      };
+    }
+  }
+
   // ── Cadastros ──────────────────────────────────────────────────────────
   let clientId: string;
   let bandId: string;
@@ -286,12 +320,31 @@ export async function createContract(
       attachment_path: input.attachment_path,
       observacao: input.observacao,
       status: "rascunho",
+      idempotency_key: idemKey,
       created_by: ctx.id,
     })
     .select("id, contract_number")
     .single();
 
   if (contractErr || !contract) {
+    // Corrida: outra submissão idêntica inseriu primeiro (viola o índice único
+    // de idempotência). Recupera e devolve o contrato existente, sem duplicar.
+    if (idemKey && contractErr?.code === "23505") {
+      const { data: existing } = await db
+        .from("case_contracts")
+        .select("id, contract_number, status, sign_url")
+        .eq("idempotency_key", idemKey)
+        .maybeSingle();
+      if (existing) {
+        return {
+          ok: true,
+          contractId: existing.id as string,
+          contractNumber: existing.contract_number as number,
+          status: existing.status as string,
+          signUrl: (existing.sign_url as string | null) ?? undefined,
+        };
+      }
+    }
     return { error: `Falha ao criar contrato: ${contractErr?.message ?? "?"}` };
   }
 

@@ -49,6 +49,8 @@ export interface CaseParcelaInput {
 }
 
 export interface CreateContractInput {
+  /** Nonce por submissão do form — evita contrato duplicado em cliques repetidos. */
+  idempotency_key?: string | null;
   client: CaseClientInput;
   band: CaseBandInput;
   event_name: string | null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Loader2, Copy, ScanLine } from "lucide-react";
 
@@ -192,6 +192,11 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Trava síncrona anti-duplo-clique + nonce de idempotência por submissão.
+  const submittingRef = useRef(false);
+  const [idempotencyKey] = useState(() =>
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+  );
 
   const valArtista = parseBRL(vArtista);
   const valAtracao = parseBRL(vAtracao);
@@ -271,6 +276,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return; // ignora cliques repetidos enquanto processa
     setError(null);
     setNotice(null);
 
@@ -287,6 +293,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     const selectedBand = bandsList.find((b) => b.id === bandId);
 
     const input = {
+      idempotency_key: idempotencyKey,
       client:
         clientMode === "existing" && selectedClient
           ? {
@@ -365,15 +372,27 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       parcelas_receber_servicos: toParcelas(receberServicos),
     };
 
+    submittingRef.current = true;
     setSubmitting(true);
-    const res = await createContract(input);
-    setSubmitting(false);
-
-    if ("error" in res) return setError(res.error);
-    if (res.warning) {
-      setNotice(res.warning);
-      return;
+    let res;
+    try {
+      res = await createContract(input);
+    } catch (err) {
+      submittingRef.current = false;
+      setSubmitting(false);
+      return setError(err instanceof Error ? err.message : "Falha ao gerar o contrato.");
     }
+
+    if ("error" in res) {
+      submittingRef.current = false;
+      setSubmitting(false);
+      return setError(res.error);
+    }
+
+    // Sucesso (contrato criado). Mesmo com aviso (ex.: cliente sem e-mail), o
+    // contrato já existe — sai da tela para não recriar em novo clique. A
+    // idempotência (idempotency_key) é a rede de segurança no servidor.
+    if (res.warning) alert(res.warning);
     router.push("/case/contratos");
     router.refresh();
   }

@@ -95,6 +95,15 @@ export async function createSignatureRequest(
   });
   const requestKey = String((listRes.list as Record<string, unknown> | undefined)?.request_signature_key ?? "");
 
+  // 4) Dispara o e-mail de solicitação de assinatura. Criar a lista apenas
+  // vincula o signatário ao documento; o e-mail só é enviado por este endpoint.
+  if (requestKey) {
+    await csFetch("/api/v1/notifications", {
+      request_signature_key: requestKey,
+      message,
+    });
+  }
+
   return {
     documentKey,
     signerKey,
