@@ -9,6 +9,7 @@ export function defaultLandingFor(
   profile: UserProfileType,
   canFinanceiro: boolean,
   canCompras: boolean,
+  canCase: boolean = false,
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
@@ -16,6 +17,8 @@ export function defaultLandingFor(
   if (profile === "franqueado") return "/dashboard";
   // Demais perfis com algum módulo → cockpit /home.
   if (canFinanceiro || canCompras || profile === "admin") return "/home";
+  // Usuário só-Case cai direto nos contratos da Case.
+  if (canCase) return "/case/contratos";
   return "/pendente";
 }
 
@@ -54,10 +57,16 @@ export function canAccessPathByProfile(
   profile: UserProfileType,
   canFinanceiro: boolean,
   canCompras: boolean,
+  canCase: boolean = false,
 ): boolean {
   // Validador de contrato: ilha. Só /contratos.
   if (profile === "validador_contrato") {
     return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
+  // Módulo Case (Case Shows) — acesso binário via can_case (admin sempre pode).
+  if (pathname === "/case" || pathname.startsWith("/case/")) {
+    return canCase || profile === "admin";
   }
 
   // Franqueado: whitelist explícita de telas do Financeiro.

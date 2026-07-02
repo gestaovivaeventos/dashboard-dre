@@ -24,22 +24,31 @@ export const MODULES: Record<ActiveModule, ModuleDefinition> = {
     usesSegments: false,
     defaultPath: "/ctrl/requisicoes",
   },
+  case: {
+    id: "case",
+    label: "Case",
+    usesSegments: false,
+    defaultPath: "/case/contratos",
+  },
 };
 
-export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl"] as const;
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case"] as const;
 
 /**
  * Returns the modules the user has any access to.
  * - DRE access if dreRole is set (always true for an authenticated app user).
  * - Ctrl access if at least one ctrlRole is non-null/non-empty.
+ * - Case access if canCase is set (visibilidade do módulo, boolean).
  */
 export function resolveAvailableModules(
   dreRole: DreRole | null | undefined,
   ctrlRoles: CtrlRole[] | null | undefined,
+  canCase?: boolean | null,
 ): ModuleDefinition[] {
   const result: ModuleDefinition[] = [];
   if (dreRole) result.push(MODULES.dre);
   if (ctrlRoles && ctrlRoles.length > 0) result.push(MODULES.ctrl);
+  if (canCase) result.push(MODULES.case);
   return result;
 }
 
@@ -78,8 +87,9 @@ export async function resolveLayoutContext(
   ctrlRoles: CtrlRole[] | null | undefined,
   segments: Segment[],
   fallbackModule: ActiveModule,
+  canCase?: boolean | null,
 ): Promise<ResolvedLayoutContext> {
-  const availableModules = resolveAvailableModules(dreRole, ctrlRoles);
+  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase);
   const moduleCookie = await readActiveModule();
   const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
   const activeModule: ActiveModule = activeModuleDef?.id ?? fallbackModule;

@@ -26,6 +26,10 @@ export function hasCtrlAccess(ctx: SessionContext, roles?: CtrlRole[]): boolean 
   return ctx.modules.ctrl.roles.some((r) => roles.includes(r));
 }
 
+export function hasCaseAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.case);
+}
+
 // ─── Função principal ─────────────────────────────────────────────────────────
 
 export async function getSessionContext(): Promise<SessionContext> {
@@ -41,7 +45,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     .from("users")
     .select(`
       id, email, name, role, company_id, active, created_at, contracts_only,
-      profile, can_financeiro, can_compras,
+      profile, can_financeiro, can_compras, can_case,
       user_module_roles!user_module_roles_user_id_fkey(role, module),
       user_sectors(sector_id),
       user_company_access(company_id)
@@ -107,6 +111,11 @@ export async function getSessionContext(): Promise<SessionContext> {
     | null;
   const canFinanceiro = Boolean(profileRow.can_financeiro);
   const canCompras = Boolean(profileRow.can_compras);
+  // Admin sempre enxerga o Case (espelha has_case_access() no banco).
+  const canCase =
+    Boolean(profileRow.can_case) ||
+    userProfile === "admin" ||
+    profileRow.role === "admin";
 
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
@@ -130,6 +139,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     profile: userProfile ?? "solicitante", // fallback never expected post-backfill
     can_financeiro: canFinanceiro,
     can_compras: canCompras,
+    can_case: canCase,
     sector_ids: sectorIds,
     company_ids: companyIds,
     active: profileRow.active,
@@ -144,6 +154,7 @@ export async function getSessionContext(): Promise<SessionContext> {
   const modules: ModuleAccess = {
     dre: canFinanceiro ? { role: dreRole, companyId: profile.company_id } : null,
     ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
+    case: canCase ? {} : null,
   };
 
   return { supabase, user, profile, modules };

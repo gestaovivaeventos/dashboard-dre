@@ -107,10 +107,12 @@ export async function obterAnexoLinkContaPagar(
   return typeof link === "string" && link ? link : null;
 }
 
-// Anexa um arquivo a uma conta a pagar do Omie. Lança em caso de erro do Omie.
-export async function incluirAnexoContaPagar(
+// Anexa um arquivo a um título do Omie (conta-pagar ou conta-receber). Lança em
+// caso de erro do Omie.
+async function incluirAnexo(
   appKey: string,
   appSecret: string,
+  cTabela: "conta-pagar" | "conta-receber",
   codigoLancamentoOmie: number,
   fileName: string,
   fileBytes: Buffer,
@@ -121,11 +123,31 @@ export async function incluirAnexoContaPagar(
   const ext = (fileName.split(".").pop() ?? "").toLowerCase().slice(0, 10);
 
   await omieCall(ANEXO_URL, "IncluirAnexo", appKey, appSecret, {
-    cTabela: "conta-pagar",
+    cTabela,
     nId: codigoLancamentoOmie,
     cNomeArquivo: fileName,
     cTipoArquivo: ext,
     cArquivo,
     cMd5,
   });
+}
+
+export function incluirAnexoContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  fileName: string,
+  fileBytes: Buffer,
+): Promise<void> {
+  return incluirAnexo(appKey, appSecret, "conta-pagar", codigoLancamentoOmie, fileName, fileBytes);
+}
+
+export function incluirAnexoContaReceber(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  fileName: string,
+  fileBytes: Buffer,
+): Promise<void> {
+  return incluirAnexo(appKey, appSecret, "conta-receber", codigoLancamentoOmie, fileName, fileBytes);
 }

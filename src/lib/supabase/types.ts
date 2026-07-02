@@ -27,6 +27,8 @@ export interface ModuleAccess {
     /** Conjunto de permissoes no modulo. Vazio = sem acesso (equivale a null). */
     roles: CtrlRole[];
   } | null;
+  /** Módulo Case (Case Shows). Acesso binário via can_case. */
+  case: Record<string, never> | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -53,6 +55,8 @@ export interface UnifiedProfile {
   can_financeiro: boolean;
   /** Visibilidade do módulo Compras (CTRL). */
   can_compras: boolean;
+  /** Visibilidade do módulo Case (Case Shows). */
+  can_case: boolean;
   /** Setores aos quais este usuário está vinculado (relevante pra Gerente/Solicitante). */
   sector_ids: string[];
   /** Empresas (unidades) que o usuário enxerga. Ignorado para admin (vê tudo). */
