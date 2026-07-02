@@ -620,7 +620,17 @@ export function DreStructureManager({
       accounts
         .filter((a) => {
           const hasChildren = !isLeaf(a.id);
-          if (a.type === "calculado") return hasChildren;
+          if (a.type === "calculado") {
+            if (hasChildren) return true;
+            // Calculada AGRUPADORA: a fórmula referencia SUB-CÓDIGOS dela própria
+            // (ex.: "12" = "12.1+12.2") → serve de conta pai mesmo antes de os
+            // filhos existirem, resolvendo o ovo-e-galinha de criar o 1º filho.
+            // Calculada-folha (ex.: "4" = "1+2-3", que soma OUTRAS contas) segue
+            // excluída: virá-la em pai mudaria seu papel.
+            return (a.formula ?? "")
+              .split(/[+-]/)
+              .some((token) => token.trim().startsWith(`${a.code}.`));
+          }
           return hasChildren || a.is_summary;
         })
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
