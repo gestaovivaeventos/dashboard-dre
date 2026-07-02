@@ -24,6 +24,8 @@ export interface ContractListRow {
   status: CaseContractStatus;
   created_at: string;
   attachment_path: string | null;
+  sale_contract_path: string | null;
+  sign_url: string | null;
   titles: Array<{ leg: CaseLegKind; status: string }>;
 }
 
@@ -34,6 +36,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
     .select(
       `id, contract_number, event_name, event_date, valor_atracao_cliente, valor_rider,
        valor_camarim, valor_extras, valor_custodia, valor_servicos, status, created_at, attachment_path,
+       sale_contract_path, sign_url,
        case_clients(name), case_bands(name), case_titles(leg, status)`,
     )
     .order("created_at", { ascending: false });
@@ -54,6 +57,8 @@ export async function getContracts(): Promise<ContractListRow[]> {
     status: c.status,
     created_at: c.created_at,
     attachment_path: c.attachment_path,
+    sale_contract_path: c.sale_contract_path,
+    sign_url: c.sign_url,
     titles: (c.case_titles ?? []).map((t: { leg: CaseLegKind; status: string }) => ({ leg: t.leg, status: t.status })),
   }));
 }
@@ -62,7 +67,7 @@ export async function getClients(): Promise<CaseClientRow[]> {
   const db = await getDb();
   const { data } = await db
     .from("case_clients")
-    .select("id, name, cnpj_cpf, pessoa_fisica, email, phone")
+    .select("id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep")
     .order("name");
   return (data ?? []) as CaseClientRow[];
 }

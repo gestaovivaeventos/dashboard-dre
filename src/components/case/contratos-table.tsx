@@ -2,16 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Paperclip, RefreshCw, Search } from "lucide-react";
+import { Paperclip, FileSignature, PenLine, RefreshCw, Search } from "lucide-react";
 
 import type { ContractListRow } from "@/lib/case/queries";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
-import { getContractAttachmentUrl } from "@/lib/case/actions/contracts";
+import { getContractAttachmentUrl, getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 
 const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const STATUS_STYLE: Record<string, string> = {
   lancado: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  assinado: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  aguardando_assinatura: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
   parcial: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   erro: "bg-red-500/15 text-red-700 dark:text-red-300",
   rascunho: "bg-slate-500/15 text-slate-600 dark:text-slate-300",
@@ -20,6 +22,8 @@ const STATUS_STYLE: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   lancado: "Lançado",
+  assinado: "Assinado",
+  aguardando_assinatura: "Aguardando assinatura",
   parcial: "Parcial",
   erro: "Erro",
   rascunho: "Rascunho",
@@ -61,6 +65,22 @@ export function ContratosTable({ contracts }: { contracts: ContractListRow[] }) 
       return;
     }
     window.open(res.url, "_blank");
+  }
+
+  async function handleOpenSale(id: string) {
+    const res = await getSaleContractUrl(id);
+    if ("error" in res) {
+      alert(res.error);
+      return;
+    }
+    window.open(res.url, "_blank");
+  }
+
+  async function handleResend(id: string) {
+    setBusyId(id);
+    const res = await resendSignature(id);
+    setBusyId(null);
+    alert("error" in res ? res.error : "Assinatura reenviada ao cliente.");
   }
 
   return (
@@ -125,16 +145,21 @@ export function ContratosTable({ contracts }: { contracts: ContractListRow[] }) 
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
                     {c.attachment_path && (
-                      <button
-                        type="button"
-                        title="Abrir contrato"
-                        onClick={() => handleOpenAttachment(c.id)}
-                        className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary"
-                      >
+                      <button type="button" title="Contrato do artista" onClick={() => handleOpenAttachment(c.id)} className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary">
                         <Paperclip className="h-4 w-4" />
                       </button>
                     )}
-                    {(c.status === "erro" || c.status === "parcial" || c.status === "rascunho") && (
+                    {c.sale_contract_path && (
+                      <button type="button" title="Contrato de venda (PDF)" onClick={() => handleOpenSale(c.id)} className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary">
+                        <FileSignature className="h-4 w-4" />
+                      </button>
+                    )}
+                    {c.status === "aguardando_assinatura" && (
+                      <button type="button" title="Reenviar assinatura ao cliente" disabled={busyId === c.id} onClick={() => handleResend(c.id)} className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary disabled:opacity-50">
+                        <PenLine className="h-4 w-4" />
+                      </button>
+                    )}
+                    {(c.status === "erro" || c.status === "parcial" || c.status === "assinado") && (
                       <button
                         type="button"
                         title="Reenviar ao Omie"
