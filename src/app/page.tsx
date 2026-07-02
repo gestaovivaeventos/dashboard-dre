@@ -28,13 +28,14 @@ export default async function RootRouter() {
   // pra decidir entre /pendente vs landing.
   const { data: profileRow } = await supabase
     .from("users")
-    .select("profile, active, can_financeiro, can_compras")
+    .select("profile, active, can_financeiro, can_compras, can_case")
     .eq("id", user.id)
     .maybeSingle<{
       profile: UserProfileType | null;
       active: boolean | null;
       can_financeiro: boolean | null;
       can_compras: boolean | null;
+      can_case: boolean | null;
     }>();
 
   // Sem profile (signup ainda não materializado) ou inativo → /pendente.
@@ -47,6 +48,7 @@ export default async function RootRouter() {
       profileRow.profile ?? "solicitante",
       Boolean(profileRow.can_financeiro),
       Boolean(profileRow.can_compras),
+      Boolean(profileRow.can_case),
     ),
   );
 }

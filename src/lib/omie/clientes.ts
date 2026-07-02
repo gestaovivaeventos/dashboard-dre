@@ -19,7 +19,10 @@ function onlyDigits(s: string | null | undefined): string {
   return (s ?? "").replace(/\D/g, "");
 }
 
-function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown> {
+function buildClientePayload(
+  supplier: OmieSupplierData,
+  tag: string = "Fornecedor",
+): Record<string, unknown> {
   const doc = onlyDigits(supplier.cnpj_cpf);
   const phone = onlyDigits(supplier.phone);
   const payload: Record<string, unknown> = {
@@ -29,7 +32,7 @@ function buildClientePayload(supplier: OmieSupplierData): Record<string, unknown
     cnpj_cpf: doc,
     pessoa_fisica: doc.length === 11 ? "S" : "N",
     email: supplier.email ?? "",
-    tags: [{ tag: "Fornecedor" }],
+    tags: [{ tag }],
   };
   if (phone.length >= 10) {
     payload.telefone1_ddd = phone.slice(0, 2);
@@ -66,9 +69,10 @@ export async function syncSupplierToOmieUnit(
   appKey: string,
   appSecret: string,
   supplier: OmieSupplierData,
+  tag: string = "Fornecedor",
 ): Promise<{ codigoCliente: number }> {
   const doc = onlyDigits(supplier.cnpj_cpf);
-  if (!doc) throw new Error("Fornecedor sem CNPJ/CPF — não é possível cadastrar no Omie.");
+  if (!doc) throw new Error("Cadastro sem CNPJ/CPF — não é possível cadastrar no Omie.");
 
   const list = await omieCall(OMIE_CLIENTES_URL, "ListarClientes", appKey, appSecret, {
     pagina: 1,
@@ -84,7 +88,7 @@ export async function syncSupplierToOmieUnit(
     if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
   }
 
-  const fields = buildClientePayload(supplier);
+  const fields = buildClientePayload(supplier, tag);
 
   if (existingCode) {
     // Identifica só por codigo_cliente_omie. NÃO enviar codigo_cliente_integracao:
@@ -103,4 +107,14 @@ export async function syncSupplierToOmieUnit(
   const code = Number(res.data.codigo_cliente_omie as number);
   if (!code) throw new Error("Omie não retornou codigo_cliente_omie ao incluir.");
   return { codigoCliente: code };
+}
+
+// Cadastra/atualiza o CLIENTE (contratante) numa unidade Omie — mesma mecânica
+// idempotente do fornecedor, mas com a tag "Cliente".
+export async function syncClienteToOmieUnit(
+  appKey: string,
+  appSecret: string,
+  cliente: OmieSupplierData,
+): Promise<{ codigoCliente: number }> {
+  return syncSupplierToOmieUnit(appKey, appSecret, cliente, "Cliente");
 }

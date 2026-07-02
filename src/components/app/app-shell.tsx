@@ -24,6 +24,7 @@ interface AppShellProps {
   /** Papel DRE para o menu; null quando o usuário não tem o módulo Financeiro. */
   userRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
+  canCase?: boolean;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -39,6 +40,7 @@ export function AppShell({
   userEmail,
   userRole,
   ctrlRoles,
+  canCase,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -59,6 +61,7 @@ export function AppShell({
     <NavLinks
       dreRole={userRole}
       ctrlRoles={ctrlRoles}
+      canCase={canCase}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

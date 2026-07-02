@@ -10,7 +10,7 @@ import {
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
 interface ContextUpdateBody {
-  module?: "dre" | "ctrl";
+  module?: "dre" | "ctrl" | "case";
   segmentSlug?: string;
 }
 
