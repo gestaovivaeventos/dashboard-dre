@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Download, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +102,10 @@ function serverToClient(s: ServerRow): ClientRow {
     fechamento: s.fechamento ?? "",
     dirty: false,
   };
+}
+
+function monthLabel(month: number): string {
+  return MESES.find((m) => m.value === month)?.label ?? String(month);
 }
 
 function emptyDraft(): ClientRow {
@@ -262,6 +267,46 @@ export function SettingsFeatProjetosTable({
     } finally {
       setDeletingId((current) => (current === row.id ? null : current));
     }
+  };
+
+  // Exporta as linhas atualmente carregadas para um arquivo .xlsx.
+  const exportExcel = () => {
+    if (rows.length === 0) {
+      showToast({
+        title: "Nada para exportar",
+        description: "Cadastre ao menos um projeto/evento.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const sheetRows = rows.map((row) => ({
+      Ano: Number(row.yearText) || row.yearText,
+      "Mês": monthLabel(row.month),
+      Projeto: row.projeto,
+      "Tipo de evento": row.tipoEvento,
+      "Result. previsto": parseNumberPtBr(row.resultadoPrevistoText) ?? "",
+      "Result. realizado": parseNumberPtBr(row.resultadoRealizadoText) ?? "",
+      Fechamento: row.fechamento,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+    // Formata as colunas de resultado como moeda BRL — mesmo padrão dos demais
+    // exports (DRE / Fluxo de Caixa).
+    const rangeRef = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
+    for (let rowIndex = 1; rowIndex <= rangeRef.e.r; rowIndex += 1) {
+      for (const colIndex of [4, 5]) {
+        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+        const cell = worksheet[cellAddress];
+        if (!cell || typeof cell.v !== "number") continue;
+        cell.z = "R$ #,##0.00";
+      }
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Projetos Feat");
+    XLSX.writeFile(workbook, "Projetos_Feat_Producoes.xlsx");
+    showToast({ title: "Exportação concluída", variant: "success" });
   };
 
   return (
@@ -429,16 +474,28 @@ export function SettingsFeatProjetosTable({
           Cadastro gerencial de projetos/eventos. Não afeta DRE, Fluxo de Caixa,
           KPIs nem integrações.
         </p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={addRow}
-          disabled={loading}
-        >
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          Adicionar projeto
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={exportExcel}
+            disabled={loading || rows.length === 0}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Exportar Excel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={addRow}
+            disabled={loading}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Adicionar projeto
+          </Button>
+        </div>
       </div>
     </div>
   );
