@@ -216,6 +216,13 @@ export const OnePageInputSchema = z.object({
   // IA para calibrar acoes de revisao de despesas quando a cobertura e baixa.
   // Null quando nao foi possivel calcular (sem despesas/FEE de referencia).
   sobrevivencia_caixa_meses: z.number().nullable().optional(),
+  // Margem media dos eventos (%) da propria empresa — mesmo valor do card. So
+  // enviado para o segmento Franquias Viva; null nos demais.
+  margem_media_eventos: z.number().nullable().optional(),
+  // Inadimplencia atual (R$) da propria empresa — PASSIVO EM ATRASO da franquia
+  // (o que ELA deve e nao pagou), NAO conta a receber de clientes. Mesmo valor
+  // do card. So enviado para o segmento Franquias Viva; null nos demais.
+  inadimplencia_atual: z.number().nullable().optional(),
   // Segmento/grupo ao qual a empresa pertence. Define QUAL contexto de
   // negocio a IA aplica: quando `slug` === "franquias-viva", o motor usa o
   // system prompt com as regras especificas das Franquias Viva; qualquer

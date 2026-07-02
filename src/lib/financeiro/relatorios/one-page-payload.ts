@@ -542,6 +542,22 @@ export async function buildOnePagePayload(
       ? Number((((feeDisponivel ?? 0) / feeAReceber) * 100).toFixed(2))
       : null;
 
+  // Margem média dos eventos (%) e Inadimplência atual (R$) — valores manuais
+  // por empresa (painel FEE/VVR). Resolvidos aqui (uma vez) para alimentar tanto
+  // os cards de "Saúde financeira & caixa" quanto o input da IA. A inadimplência
+  // é o PASSIVO EM ATRASO da própria franquia (o que ela deve e não pagou), não
+  // conta a receber de clientes — o contexto da IA deixa isso explícito.
+  const margemMediaEventos =
+    company.margem_media_eventos === null ||
+    company.margem_media_eventos === undefined
+      ? null
+      : Number(company.margem_media_eventos);
+  const inadimplenciaAtual =
+    company.inadimplencia_atual === null ||
+    company.inadimplencia_atual === undefined
+      ? null
+      : Number(company.inadimplencia_atual);
+
   // Rótulo de referência do quadro de eventos da Feat (fallback do periodLabel).
   // O bloco em si (6b) é montado mais abaixo, após o cálculo do Resultado do
   // Exercício acumulado do DRE — que é a base da projeção gerencial.
@@ -838,11 +854,6 @@ export async function buildOnePagePayload(
   // desligada) NAO exibe esses indicadores individuais, enquanto as demais
   // Franquias Viva (capacidade ligada) seguem inalteradas.
   if (isFranquiasViva && template.capabilities.margemMediaEventos) {
-    const margemMediaEventos =
-      company.margem_media_eventos === null ||
-      company.margem_media_eventos === undefined
-        ? null
-        : Number(company.margem_media_eventos);
     kpis.margem_media_eventos = {
       label: "Margem média dos eventos",
       value: margemMediaEventos,
@@ -856,11 +867,6 @@ export async function buildOnePagePayload(
     // Inadimplencia atual (R$): valor manual por empresa (painel FEE/VVR),
     // exibido em moeda. Sem comparativo com orcamento (e um snapshot). Farol
     // neutro — e um dado informativo; NULL vira "—" no formattedValue.
-    const inadimplenciaAtual =
-      company.inadimplencia_atual === null ||
-      company.inadimplencia_atual === undefined
-        ? null
-        : Number(company.inadimplencia_atual);
     kpis.inadimplencia_atual = {
       label: "Inadimplência Atual",
       value: inadimplenciaAtual,
@@ -1951,6 +1957,18 @@ export async function buildOnePagePayload(
         fee_vvr: template.capabilities.vvrFee ? input.fee_vvr : null,
         fee_disponivel: template.capabilities.vvrFee ? input.fee_disponivel : null,
         fee_disponivel_pct: template.capabilities.vvrFee ? feeDisponivelPct : null,
+        // Margem média dos eventos e Inadimplência atual — mesmos valores dos
+        // cards de "Saúde financeira & caixa", agora TAMBÉM enviados à IA (gate
+        // idêntico ao dos cards: segmento Franquias Viva + capacidade). Assim a
+        // IA analisa todos os campos que aparecem no relatório individual.
+        margem_media_eventos:
+          isFranquiasViva && template.capabilities.margemMediaEventos
+            ? margemMediaEventos
+            : null,
+        inadimplencia_atual:
+          isFranquiasViva && template.capabilities.margemMediaEventos
+            ? inadimplenciaAtual
+            : null,
         vvr_ytd_resumo: template.capabilities.vvrFee ? vvrYtdResumo : null,
         sobrevivencia_caixa_meses: template.capabilities.sobrevivenciaCaixa
           ? sobrevivenciaCaixaMeses

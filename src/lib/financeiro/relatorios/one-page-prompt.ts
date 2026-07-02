@@ -341,6 +341,23 @@ Margem = R$ 5.000,00, Assessoria = R$ 0,00 → receita total da franquia = R$
 - E um percentual de rentabilidade final, distinto da linha gerencial
   "Margem de Contribuicao de Eventos" da DRE.
 
+### Inadimplencia atual
+A "Inadimplencia atual" da franquia e o total de OBRIGACOES DA PROPRIA EMPRESA
+QUE ELA TEM A PAGAR e estao EM ATRASO — ou seja, contas/compromissos vencidos
+que a franquia deve a seus fornecedores/credores. NAO e, em hipotese nenhuma,
+inadimplencia de CLIENTES/FUNDOS com a franquia (nao e conta a receber em
+atraso).
+- Leia sempre como PASSIVO EM ATRASO / gestao de PAGAMENTOS da unidade. Quanto
+  MENOR, melhor.
+- Se for citada em \`pontosAtencao\` ou \`acoesRecomendadas\`, trate como
+  regularizacao dos PAGAMENTOS da franquia (ex.: priorizar/renegociar a quitacao
+  de contas em atraso, organizar o fluxo de pagamentos, avaliar impacto no caixa).
+- NUNCA gere acoes de COBRANCA A CLIENTES por causa deste indicador: e PROIBIDO
+  sugerir "cobrar clientes", "reforcar a regua/politica de cobranca", "renegociar
+  com clientes inadimplentes", "revisar a concessao de credito a clientes" ou
+  qualquer variacao — nada disso se aplica, porque a inadimplencia aqui e da
+  EMPRESA com o que ELA deve, nao dos clientes com a empresa.
+
 ## Classificacao de saude financeira
 
 Use o input \`fee_disponivel\` (saldo atual da franquia, em R$) combinado com
@@ -488,8 +505,11 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
   disponivel (quanto MAIOR, melhor).
 - \`margem_media_eventos\`: percentual medio final de monetizacao dos eventos
   fechados (quanto MAIOR, melhor).
-- \`inadimplencia_atual\`: inadimplencia atual da empresa, em R$ (quanto MENOR,
-  melhor; e um ponto de atencao quando elevado).
+- \`inadimplencia_atual\`: inadimplencia DA PROPRIA EMPRESA com as OBRIGACOES
+  QUE ELA TEM A PAGAR (contas/compromissos em atraso da franquia com seus
+  fornecedores/credores), em R$ — NAO e inadimplencia de clientes/fundos com a
+  franquia. Quanto MENOR, melhor. Interprete como GESTAO DE PAGAMENTOS/passivo em
+  atraso da unidade, nunca como cobranca a receber. Veja a regra de acoes abaixo.
 
 ## Como analisar (visao de holding)
 
@@ -516,6 +536,13 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
 - A comparacao comercial principal e por % de atingimento da META, nao por VVR
   absoluto. Interprete o VVR como indicador comercial FUTURO (nunca receita ja
   recebida) e a sobrevivencia de caixa/FEE como leitura de LIQUIDEZ do grupo.
+- Inadimplencia = passivo EM ATRASO da propria unidade (o que ELA deve e nao
+  pagou), NUNCA valores a receber de clientes/fundos. Ao cita-la em
+  \`pontosAtencao\` ou \`acoesRecomendadas\`, trate como regularizacao de
+  PAGAMENTOS/obrigacoes da franquia (ex.: renegociar/priorizar quitacao de contas
+  em atraso, organizar o fluxo de pagamentos). NUNCA sugira "cobrar clientes",
+  "reforcar a regua/politica de cobranca", "renegociar com inadimplentes",
+  "revisar credito a clientes" ou variacoes — isso NAO se aplica a este indicador.
 
 ## Sobre o DRE consolidado da holding
 
@@ -646,6 +673,12 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
     input.sobrevivencia_caixa_meses !== undefined
       ? `Sobrevivencia de caixa (meses de despesas operacionais cobertos pelo FEE Disponivel): ${input.sobrevivencia_caixa_meses}`
       : "Sobrevivencia de caixa: nao informada",
+    input.margem_media_eventos !== null && input.margem_media_eventos !== undefined
+      ? `Margem media dos eventos (%): ${input.margem_media_eventos}`
+      : null,
+    input.inadimplencia_atual !== null && input.inadimplencia_atual !== undefined
+      ? `Inadimplencia atual (R$) — PASSIVO EM ATRASO da propria franquia (o que ELA deve e nao pagou; NAO e conta a receber de clientes): ${input.inadimplencia_atual}`
+      : null,
     input.vvr_ytd_resumo
       ? `VVR YTD: realizado=${input.vvr_ytd_resumo.realizado_acumulado}, meta=${input.vvr_ytd_resumo.meta_acumulada}, acima_da_meta=${input.vvr_ytd_resumo.acima_da_meta}, abaixo_meta_ultimos_2_meses=${input.vvr_ytd_resumo.abaixo_meta_ultimos_2_meses}`
       : "VVR YTD: nao informado",
