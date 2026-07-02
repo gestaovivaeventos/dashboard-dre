@@ -48,7 +48,28 @@ export interface CaseParcelaInput {
   valor: number;
 }
 
-export interface CreateContractInput {
+export type CaseTipoEvento = "aberto" | "fechado" | null;
+
+/** Campos do modelo CASE Shows que não vinham do cadastro (checkboxes/testemunhas). */
+export interface CaseContractExtras {
+  espec_area_interna: boolean;
+  espec_area_externa: boolean;
+  espec_palco: boolean;
+  espec_trio: boolean;
+  extra_transporte_cidade: boolean;
+  extra_translado_local: boolean;
+  extra_diaria_alimentacao: boolean;
+  extra_hospedagem: boolean;
+  tipo_evento: CaseTipoEvento;
+  cortesias: string | null;
+  data_assinatura: string | null; // ISO YYYY-MM-DD
+  testemunha_1_nome: string | null;
+  testemunha_1_cpf: string | null;
+  testemunha_2_nome: string | null;
+  testemunha_2_cpf: string | null;
+}
+
+export interface CreateContractInput extends CaseContractExtras {
   /** Nonce por submissão do form — evita contrato duplicado em cliques repetidos. */
   idempotency_key?: string | null;
   client: CaseClientInput;

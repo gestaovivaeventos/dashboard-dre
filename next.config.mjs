@@ -7,7 +7,7 @@ const nextConfig = {
     },
     // pdfkit le arquivos AFM via fs.readFileSync em runtime — webpack nao deve
     // tentar bundle-lo, senao quebra em producao com "Could not find module".
-    serverComponentsExternalPackages: ["pdfkit"],
+    serverComponentsExternalPackages: ["pdfkit", "@react-pdf/renderer"],
     // Garante que os arquivos de metricas das fontes Helvetica (e .icc) do pdfkit
     // sejam copiados pra dentro da serverless function no Vercel. Sem isso, qualquer
     // rota que use pdfkit explode com ENOENT na primeira chamada.

@@ -176,6 +176,23 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [localCep, setLocalCep] = useState("");
   const [especificacoes, setEspecificacoes] = useState("");
 
+  // Modelo CASE — checkboxes, tipo de evento, cortesias, assinatura, testemunhas
+  const [especAreaInterna, setEspecAreaInterna] = useState(false);
+  const [especAreaExterna, setEspecAreaExterna] = useState(false);
+  const [especPalco, setEspecPalco] = useState(false);
+  const [especTrio, setEspecTrio] = useState(false);
+  const [extraTransporte, setExtraTransporte] = useState(false);
+  const [extraTranslado, setExtraTranslado] = useState(false);
+  const [extraDiaria, setExtraDiaria] = useState(false);
+  const [extraHospedagem, setExtraHospedagem] = useState(false);
+  const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">("");
+  const [cortesias, setCortesias] = useState("");
+  const [dataAssinatura, setDataAssinatura] = useState("");
+  const [test1Nome, setTest1Nome] = useState("");
+  const [test1Cpf, setTest1Cpf] = useState("");
+  const [test2Nome, setTest2Nome] = useState("");
+  const [test2Cpf, setTest2Cpf] = useState("");
+
   // Valores
   const [vArtista, setVArtista] = useState("");
   const [vAtracao, setVAtracao] = useState("");
@@ -360,6 +377,21 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       local_city: localCity.trim() || null,
       local_cep: localCep.trim() || null,
       especificacoes: especificacoes.trim() || null,
+      espec_area_interna: especAreaInterna,
+      espec_area_externa: especAreaExterna,
+      espec_palco: especPalco,
+      espec_trio: especTrio,
+      extra_transporte_cidade: extraTransporte,
+      extra_translado_local: extraTranslado,
+      extra_diaria_alimentacao: extraDiaria,
+      extra_hospedagem: extraHospedagem,
+      tipo_evento: tipoEvento || null,
+      cortesias: cortesias.trim() || null,
+      data_assinatura: dataAssinatura || null,
+      testemunha_1_nome: test1Nome.trim() || null,
+      testemunha_1_cpf: test1Cpf.trim() || null,
+      testemunha_2_nome: test2Nome.trim() || null,
+      testemunha_2_cpf: test2Cpf.trim() || null,
       valor_artista: valArtista,
       valor_atracao_cliente: valAtracao,
       valor_rider: valRider,
@@ -493,7 +525,61 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
           <Field label="Endereço do local" value={localAddress} onChange={setLocalAddress} />
           <Field label="Cidade / Estado" value={localCity} onChange={setLocalCity} />
           <Field label="CEP" value={localCep} onChange={setLocalCep} />
-          <Field label="Especificações (palco/trio/área)" value={especificacoes} onChange={setEspecificacoes} />
+          <Field label="Especificações (texto livre — opcional)" value={especificacoes} onChange={setEspecificacoes} />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Especificações do local</label>
+          <div className="flex flex-wrap gap-4">
+            <CheckField label="Área interna" checked={especAreaInterna} onChange={setEspecAreaInterna} />
+            <CheckField label="Área externa" checked={especAreaExterna} onChange={setEspecAreaExterna} />
+            <CheckField label="Palco" checked={especPalco} onChange={setEspecPalco} />
+            <CheckField label="Trio" checked={especTrio} onChange={setEspecTrio} />
+          </div>
+        </div>
+      </div>
+
+      {/* Modelo CASE — extras, tipo de evento, cortesias, assinatura, testemunhas */}
+      <div className={SECTION_CLS}>
+        <h2 className="text-sm font-semibold text-ink-primary">Contrato (modelo CASE Shows)</h2>
+        <div>
+          <label className={LABEL_CLS}>Extras inclusos (custo da CONTRATADA se marcado)</label>
+          <div className="flex flex-wrap gap-4">
+            <CheckField label="Transporte até a cidade" checked={extraTransporte} onChange={setExtraTransporte} />
+            <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
+            <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
+            <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className={LABEL_CLS}>Tipo de evento</label>
+            <div className="flex gap-4 pt-1">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
+                <input type="radio" name="tipo_evento" checked={tipoEvento === "aberto"} onChange={() => setTipoEvento("aberto")} />
+                Aberto
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
+                <input type="radio" name="tipo_evento" checked={tipoEvento === "fechado"} onChange={() => setTipoEvento("fechado")} />
+                Fechado
+              </label>
+              {tipoEvento && (
+                <button type="button" onClick={() => setTipoEvento("")} className="text-xs text-ink-muted hover:text-red-500">
+                  limpar
+                </button>
+              )}
+            </div>
+          </div>
+          <Field label="Cortesias" value={cortesias} onChange={setCortesias} />
+          <div>
+            <label className={LABEL_CLS}>Data de assinatura</label>
+            <input type="date" value={dataAssinatura} onChange={(e) => setDataAssinatura(e.target.value)} className={INPUT_CLS} />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
+          <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
+          <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
+          <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
         </div>
       </div>
 
@@ -575,6 +661,15 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <label className={LABEL_CLS}>{label}</label>
       <input value={value} onChange={(e) => onChange(e.target.value)} className={INPUT_CLS} />
     </div>
+  );
+}
+
+function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-border" />
+      {label}
+    </label>
   );
 }
 
