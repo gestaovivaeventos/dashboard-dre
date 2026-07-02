@@ -25,6 +25,7 @@ export default async function ProtectedLayout({
   // do layout (resolveLayoutContext, query de segmentos).
   const navDreRole = modules?.dre?.role ?? null;
   const ctrlRoles = modules?.ctrl?.roles ?? [];
+  const canCase = Boolean(modules?.case);
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
 
@@ -90,6 +91,7 @@ export default async function ProtectedLayout({
     ctrlRoles,
     segments,
     "dre",
+    canCase,
   );
 
   const unreadNotifications = profile?.id
@@ -102,6 +104,7 @@ export default async function ProtectedLayout({
       userEmail={userEmail}
       userRole={navDreRole}
       ctrlRoles={ctrlRoles}
+      canCase={canCase}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

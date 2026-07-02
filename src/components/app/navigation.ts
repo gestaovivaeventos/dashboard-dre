@@ -13,9 +13,11 @@ import {
   LayoutDashboard,
   Mail,
   MapPinned,
+  Music2,
   PieChart,
   Plug,
   Receipt,
+  Sliders,
   Sparkles,
   Target,
   Truck,
@@ -193,9 +195,11 @@ export interface NavItem {
   href?: string;
   dreRoles?: readonly DreRole[];
   ctrlRoles?: readonly CtrlRole[];
+  /** Item do módulo Case — visível quando o usuário tem acesso ao Case. */
+  caseAccess?: boolean;
 }
 
-export type NavGroupId = "financeiro" | "compras" | "plataforma";
+export type NavGroupId = "financeiro" | "compras" | "case" | "plataforma";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -235,6 +239,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
       { key: "ct-evt", title: "Eventos", icon: Calendar, scope: "global", href: "/ctrl/admin/eventos", ctrlRoles: ["csc", "admin"] },
       { key: "ct-omie", title: "Mapeamento Omie", icon: GitMerge, scope: "global", href: "/ctrl/admin/omie-mapeamento", ctrlRoles: ["csc", "admin"] },
+    ],
+  },
+  {
+    id: "case",
+    label: "CASE",
+    items: [
+      { key: "case-contratos", title: "Contratos", icon: Music2, scope: "global", href: "/case/contratos", caseAccess: true },
+      { key: "case-dash", title: "Dashboard", icon: LayoutDashboard, scope: "global", href: "/case/dashboard", caseAccess: true },
+      { key: "case-config", title: "Configuracao Omie", icon: Sliders, scope: "global", href: "/case/config", dreRoles: ["admin"] },
     ],
   },
   {

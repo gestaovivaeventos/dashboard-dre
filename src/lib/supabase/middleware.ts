@@ -58,27 +58,29 @@ export async function updateSession(request: NextRequest) {
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase
       .from("users")
-      .select("profile, active, can_financeiro, can_compras")
+      .select("profile, active, can_financeiro, can_compras, can_case")
       .eq("id", user.id)
       .maybeSingle<{
         profile: UserProfileType | null;
         active: boolean;
         can_financeiro: boolean | null;
         can_compras: boolean | null;
+        can_case: boolean | null;
       }>();
 
     const userProfile: UserProfileType = profileData?.profile ?? "solicitante";
     const canFinanceiro = Boolean(profileData?.can_financeiro);
     const canCompras = Boolean(profileData?.can_compras);
+    const canCase = Boolean(profileData?.can_case);
     const isActive = profileData?.active ?? true;
 
     if (!isActive) {
       const url = request.nextUrl.clone();
       url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
-    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras)) {
+    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras, canCase)) {
       const url = request.nextUrl.clone();
-      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras);
+      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras, canCase);
       supabaseResponse = NextResponse.redirect(url);
     }
   }

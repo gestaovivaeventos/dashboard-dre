@@ -9,9 +9,9 @@ export const ACTIVE_SEGMENT_COOKIE = "active_segment_slug";
 // que nao pode importar `next/headers`) — manter os dois em sincronia.
 export const ACTIVE_COMPANY_IDS_COOKIE = "active_company_ids";
 
-export type ActiveModule = "dre" | "ctrl";
+export type ActiveModule = "dre" | "ctrl" | "case";
 
-export const VALID_MODULES: readonly ActiveModule[] = ["dre", "ctrl"] as const;
+export const VALID_MODULES: readonly ActiveModule[] = ["dre", "ctrl", "case"] as const;
 
 /**
  * Read the active module from cookies. Returns null if not set or invalid.
