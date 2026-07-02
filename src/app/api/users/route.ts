@@ -24,7 +24,7 @@ export async function GET() {
     supabase
       .from("users")
       .select(
-        "id,email,name,phone,position,role,profile,can_financeiro,can_compras,company_id,active,contracts_only,created_at",
+        "id,email,name,phone,position,role,profile,can_financeiro,can_compras,can_case,company_id,active,contracts_only,created_at",
       )
       .order("created_at", { ascending: false }),
     adminClient.from("user_company_access").select("user_id,company_id"),
@@ -71,6 +71,7 @@ export async function GET() {
     profile: (item.profile as string | null) ?? "solicitante",
     can_financeiro: Boolean(item.can_financeiro),
     can_compras: Boolean(item.can_compras),
+    can_case: Boolean(item.can_case),
     active: Boolean(item.active),
     created_at: item.created_at as string,
     // Legacy fields for backwards compatibility with the existing UI:

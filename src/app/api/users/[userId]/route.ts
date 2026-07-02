@@ -36,6 +36,7 @@ export async function PATCH(request: Request, { params }: Params) {
     profile?: UserProfileType;
     can_financeiro?: boolean;
     can_compras?: boolean;
+    can_case?: boolean;
     active?: boolean;
     /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
     sector_ids?: string[];
@@ -64,17 +65,20 @@ export async function PATCH(request: Request, { params }: Params) {
   }
   if (body.can_financeiro !== undefined) patch.can_financeiro = body.can_financeiro;
   if (body.can_compras !== undefined) patch.can_compras = body.can_compras;
+  if (body.can_case !== undefined) patch.can_case = body.can_case;
   if (body.active !== undefined) patch.active = body.active;
 
   // Validador de contrato nunca tem módulos marcados (não enxerga nada além)
   if (body.profile === "validador_contrato") {
     patch.can_financeiro = false;
     patch.can_compras = false;
+    patch.can_case = false;
   }
   // Franqueado: forçado a só Financeiro
   if (body.profile === "franqueado") {
     patch.can_financeiro = true;
     patch.can_compras = false;
+    patch.can_case = false;
   }
 
   if (Object.keys(patch).length > 0) {
