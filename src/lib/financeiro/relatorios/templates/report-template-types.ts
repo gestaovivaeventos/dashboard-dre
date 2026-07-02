@@ -20,6 +20,11 @@
 
 export type ReportTemplateId =
   | "franquias-viva"
+  // Hero Holding — holding do segmento Franquias Viva composta por 7 unidades
+  // Viva. NÃO é analisada como franquia individual: o relatório oculta os
+  // indicadores individuais (FEE, VVR, sobrevivência, margem de eventos,
+  // inadimplência) e exibe um comparativo das empresas do grupo.
+  | "hero-holding"
   | "generic"
   | "real-estate-sgx"
   | "real-estate-village"
@@ -69,6 +74,9 @@ export interface TemplateCapabilities {
  */
 export type TemplatePromptConfig =
   | { kind: "franquias-viva" }
+  // "hero-holding": prompt de análise de HOLDING/PORTFÓLIO — a IA compara as
+  // empresas do grupo em vez de analisar uma franquia individual.
+  | { kind: "hero-holding" }
   | { kind: "generic" }
   | { kind: "custom"; systemContext: string };
 
@@ -231,7 +239,12 @@ export type ReportBlockKey =
   // Quadro "Locação de Espaço" EXCLUSIVO do Terrazzo (realizado das contas
   // 1.1 Formaturas e 1.2 Shows/Palestras no mês de referência). Só o template
   // terrazzo o habilita.
-  | "locacaoEspaco";
+  | "locacaoEspaco"
+  // Quadro comparativo das empresas da holding EXCLUSIVO da Hero Holding
+  // (uma linha por unidade Viva vinculada; colunas = VVR acumulado, VVR do mês
+  // de referência, FEE disponível, sobrevivência de caixa, margem média dos
+  // eventos, inadimplência atual). Só o template hero-holding o habilita.
+  | "holdingComparativo";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -364,6 +377,23 @@ export interface TemplateReportConfig {
     key: ReportBlockKey;
     title: string;
     items: Array<{ label: string; codes: string[]; minus?: string[] }>;
+  };
+  /**
+   * Quadro comparativo das empresas de uma HOLDING (ex.: Hero Holding). Para
+   * CADA empresa cujo nome (normalizado — sem acento, minúsculo) casa com um
+   * item de `companyNames`, o payload monta uma linha com os MESMOS indicadores
+   * já validados no relatório individual das Franquias Viva — VVR acumulado
+   * (Jan→mês de referência), VVR do mês de referência, FEE disponível,
+   * sobrevivência de caixa, margem média dos eventos e inadimplência atual —
+   * REUTILIZANDO as mesmas fontes de dados (company_fee_vvr + colunas de balanço
+   * da empresa + despesas operacionais do DRE). NÃO cria cálculo paralelo; só
+   * apresenta os dados das empresas do grupo. Gated por `key` (allowlist
+   * enabledBlocks). `companyNames` define a ORDEM das linhas.
+   */
+  holdingComparativo?: {
+    key: ReportBlockKey;
+    title: string;
+    companyNames: string[];
   };
 }
 

@@ -14,6 +14,10 @@ import {
   type CaseShowsCustodyClosingPayload,
 } from "./case-shows-custody-closing";
 import { buildFeatEventos, type FeatEventosPayload } from "./feat-eventos";
+import {
+  buildHeroHoldingComparativo,
+  type HoldingComparativoResult,
+} from "./hero-holding";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
 
@@ -102,6 +106,11 @@ export interface KpisPayload {
   // template da empresa os suporta (capabilities.vvrFee / .sobrevivenciaCaixa).
   // Templates Real Estate/genérico os omitem, e o mapper não renderiza o card.
   fee_disponivel?: KpiCardPayload;
+  // % de FEE disponível = FEE disponível ÷ FEE a receber. Indicador de saúde
+  // financeira exibido na seção "Saúde financeira & caixa" das franquias Viva
+  // (ao lado do FEE disponível absoluto). Só presente quando o template tem a
+  // capacidade vvrFee (Franquias Viva) — ausente nos demais segmentos.
+  fee_disponivel_pct?: KpiCardPayload;
   vvr?: KpiCardPayload;
   // Sobrevivencia de caixa: por quantos meses o FEE disponivel cobre a
   // media das despesas operacionais dos meses ja fechados do ano corrente.
@@ -215,6 +224,10 @@ export interface OnePagePayload {
   // Saldo final da "Custódia de Artistas" (regime de caixa + competência) —
   // EXCLUSIVO da Case Shows. Ausente (undefined) para todas as demais empresas.
   custodyClosing?: CaseShowsCustodyClosingPayload;
+  // Comparativo das empresas da holding — EXCLUSIVO da Hero Holding. Uma linha
+  // por unidade Viva do grupo com os indicadores já validados no relatório
+  // individual. Ausente (undefined) para todas as demais empresas.
+  holdingComparativo?: HoldingComparativoResult;
   // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
   // Ausência = não renderiza (só templates com `report.indicadoresDre`).
   indicadoresDre?: DreIndicatorsPayload;
@@ -515,6 +528,20 @@ export async function buildOnePagePayload(
       ? null
       : Number(company.fee_disponivel);
 
+  // % de FEE disponível = FEE disponível ÷ FEE a receber. Reusa as MESMAS
+  // colunas do painel FEE/VVR (companies.fee_disponivel / fee_a_receber). FEE a
+  // receber zero/ausente → null (evita divisão por zero; card exibe "—"); FEE
+  // disponível ausente conta como 0. Só é exibido para Franquias Viva (gate por
+  // capacidade vvrFee, mais abaixo).
+  const feeAReceber =
+    company.fee_a_receber === null || company.fee_a_receber === undefined
+      ? null
+      : Number(company.fee_a_receber);
+  const feeDisponivelPct =
+    feeAReceber !== null && feeAReceber > 0
+      ? Number((((feeDisponivel ?? 0) / feeAReceber) * 100).toFixed(2))
+      : null;
+
   // Rótulo de referência do quadro de eventos da Feat (fallback do periodLabel).
   // O bloco em si (6b) é montado mais abaixo, após o cálculo do Resultado do
   // Exercício acumulado do DRE — que é a base da projeção gerencial.
@@ -767,6 +794,22 @@ export async function buildOnePagePayload(
       variationLabel: "Saldo atual",
       status: statusFeeDisponivel(feeDisponivel),
     },
+    // % de FEE disponível (proporção do FEE a receber já disponível para saque).
+    // Indicador informativo (farol neutro) — sem comparativo com orçamento.
+    fee_disponivel_pct: {
+      label: "% de FEE disponível",
+      value: feeDisponivelPct,
+      formattedValue:
+        feeDisponivelPct !== null
+          ? `${feeDisponivelPct.toLocaleString("pt-BR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}%`
+          : null,
+      variationValue: null,
+      variationLabel: "do FEE a receber",
+      status: "neutro",
+    },
     vvr: {
       label: "VVR",
       value: vvrRealizado,
@@ -788,11 +831,13 @@ export async function buildOnePagePayload(
     },
   };
 
-  // KPI extra "Margem media dos eventos": valor manual por empresa,
-  // exibido como percentual. So entra no payload para empresas do segmento
-  // Franquias Viva — para outros segmentos a chave fica ausente e o mapper
-  // nao renderiza o card. NULL e tratado como "—" no formattedValue.
-  if (isFranquiasViva) {
+  // KPI extra "Margem media dos eventos" e "Inadimplencia atual": valores
+  // manuais por empresa, exibidos apenas para empresas do segmento Franquias
+  // Viva. Alem do segmento, exigem a capacidade `margemMediaEventos` do
+  // template — assim a Hero Holding (template hero-holding, capacidade
+  // desligada) NAO exibe esses indicadores individuais, enquanto as demais
+  // Franquias Viva (capacidade ligada) seguem inalteradas.
+  if (isFranquiasViva && template.capabilities.margemMediaEventos) {
     const margemMediaEventos =
       company.margem_media_eventos === null ||
       company.margem_media_eventos === undefined
@@ -832,6 +877,7 @@ export async function buildOnePagePayload(
   // tem todas as capacidades = true, então NADA é removido (saída idêntica).
   if (!template.capabilities.vvrFee) {
     delete kpis.fee_disponivel;
+    delete kpis.fee_disponivel_pct;
     delete kpis.vvr;
   }
   if (!template.capabilities.sobrevivenciaCaixa) {
@@ -1789,6 +1835,44 @@ export async function buildOnePagePayload(
   };
 
   // -------------------------------------------------------------------------
+  // 11c. Comparativo da HOLDING — EXCLUSIVO da Hero Holding.
+  //
+  // Só é montado quando o template da empresa define `report.holdingComparativo`
+  // (hoje apenas hero-holding). Reutiliza as mesmas fontes/fórmulas do relatório
+  // individual das Franquias Viva para trazer, por unidade do grupo, VVR
+  // acumulado/mês, FEE disponível, sobrevivência de caixa, margem média dos
+  // eventos e inadimplência. Inerte (undefined) para todas as demais empresas.
+  // -------------------------------------------------------------------------
+  let holdingComparativo: HoldingComparativoResult | undefined;
+  const holdingCfg = template.report?.holdingComparativo;
+  if (holdingCfg) {
+    holdingComparativo = await buildHeroHoldingComparativo(supabase, {
+      title: holdingCfg.title,
+      companyNames: holdingCfg.companyNames,
+      dateFrom,
+      dateTo,
+      referenciaLabel,
+    });
+  }
+
+  // Resumo do comparativo para a IA (snake_case, alinhado ao schema do input).
+  const holdingComparativoInput =
+    holdingComparativo && holdingComparativo.empresas.length > 0
+      ? {
+          referencia: holdingComparativo.referencia,
+          empresas: holdingComparativo.empresas.map((e) => ({
+            empresa: e.empresa,
+            pct_meta_anual_vvr_acumulada: e.pctMetaAnualVvrAcumulada,
+            pct_meta_vvr_mes: e.pctMetaVvrMes,
+            pct_fee_disponivel: e.pctFeeDisponivel,
+            sobrevivencia_caixa_meses: e.sobrevivenciaCaixaMeses,
+            margem_media_eventos: e.margemMediaEventos,
+            inadimplencia_atual: e.inadimplenciaAtual,
+          })),
+        }
+      : null;
+
+  // -------------------------------------------------------------------------
   // 12. Retorno consolidado
   //
   // `vvr_ytd_resumo` e injetado aqui (e nao na construcao inicial de
@@ -1866,12 +1950,15 @@ export async function buildOnePagePayload(
         ...input,
         fee_vvr: template.capabilities.vvrFee ? input.fee_vvr : null,
         fee_disponivel: template.capabilities.vvrFee ? input.fee_disponivel : null,
+        fee_disponivel_pct: template.capabilities.vvrFee ? feeDisponivelPct : null,
         vvr_ytd_resumo: template.capabilities.vvrFee ? vvrYtdResumo : null,
         sobrevivencia_caixa_meses: template.capabilities.sobrevivenciaCaixa
           ? sobrevivenciaCaixaMeses
           : null,
         // Resumo gerencial de eventos — só presente para a Feat Produções.
         feat_eventos: featEventosResult?.resumoIA ?? null,
+        // Comparativo da holding — só presente para a Hero Holding.
+        holding_comparativo: holdingComparativoInput,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -1895,6 +1982,8 @@ export async function buildOnePagePayload(
       featEventos: featEventosResult?.payload,
       // Saldo final da Custódia de Artistas — só presente para a Case Shows.
       custodyClosing: custodyClosing ?? undefined,
+      // Comparativo das empresas da holding — só presente para a Hero Holding.
+      holdingComparativo,
       // Quadro de indicadores por conta DRE — só presente p/ templates que o
       // configuram (ex.: Terrazzo — "Locação de Espaço").
       indicadoresDre,

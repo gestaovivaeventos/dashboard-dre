@@ -517,9 +517,38 @@ const SPOT_MOCK = buildCoreMock({
   ],
 });
 
+// ── Mock da Hero Holding — visão de portfólio (comparativo do grupo) ─────────
+// Núcleo DRE puro + linguagem de holding. Sem indicadores individuais no topo;
+// o comparativo das empresas vem do payload (não do mock textual).
+const HERO_HOLDING_MOCK = buildCoreMock({
+  resumo:
+    "Relatório de teste da Hero Holding gerado sem IA. A holding é lida como uma visão comparativa das empresas do grupo — dados financeiros reais e análise mockada para validação visual.",
+  diagnostico:
+    "Visão de portfólio: o relatório compara as unidades Viva do grupo nos indicadores de VVR, FEE disponível, sobrevivência de caixa, margem média dos eventos e inadimplência (dado mockado de teste visual).",
+  acoes: [
+    {
+      acao: "Acompanhar de perto as unidades com menor sobrevivência de caixa",
+      justificativa:
+        "Comparativo do grupo evidencia unidades com menor cobertura de caixa (dado mockado de teste visual).",
+      impacto: "Alto",
+      urgencia: "Média",
+      areaResponsavel: "Diretoria",
+    },
+    {
+      acao: "Replicar boas práticas das unidades com melhor margem média de eventos",
+      justificativa:
+        "Diferenças de margem entre as empresas do grupo indicam oportunidade de padronização (dado mockado de teste visual).",
+      impacto: "Médio",
+      urgencia: "Baixa",
+      areaResponsavel: "Operação",
+    },
+  ],
+});
+
 // Validacao na carga do modulo. Se algum mock divergir do schema, lanca aqui.
 const MOCKS_BY_TEMPLATE: Record<ReportTemplateId, OnePageReport> = {
   "franquias-viva": OnePageReportSchema.parse(RAW_MOCK),
+  "hero-holding": OnePageReportSchema.parse(HERO_HOLDING_MOCK),
   generic: OnePageReportSchema.parse(GENERIC_MOCK),
   "real-estate-sgx": OnePageReportSchema.parse(GENERIC_MOCK),
   // Village tem mock próprio (gap de reembolso / resultado ajustado).

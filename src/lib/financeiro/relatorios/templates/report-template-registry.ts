@@ -1,6 +1,7 @@
 import { caseShowsTemplate } from "./case-shows-template";
 import { featProducoesTemplate } from "./feat-producoes-template";
 import { franquiasVivaTemplate } from "./franquias-viva-template";
+import { heroHoldingTemplate } from "./hero-holding-template";
 import { genericTemplate } from "./generic-template";
 import { realEstateSalvaterraCondominioTemplate } from "./real-estate-salvaterra-condominio-template";
 import { realEstateSalvaterraEstacionamentoTemplate } from "./real-estate-salvaterra-estacionamento-template";
@@ -33,6 +34,9 @@ export const REPORT_TEMPLATES: readonly ReportTemplate[] = [
   youngMedTemplate,
   // Spot — cenografia/produção/locação + Express (logística) na visão gerencial.
   spotTemplate,
+  // Hero Holding — holding do segmento Franquias Viva (prioridade acima do
+  // template do segmento para sempre vencer p/ esta empresa específica).
+  heroHoldingTemplate,
   franquiasVivaTemplate,
   genericTemplate,
 ];

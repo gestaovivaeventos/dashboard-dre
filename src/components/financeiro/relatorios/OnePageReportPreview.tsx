@@ -140,6 +140,29 @@ export interface DreIndicatorsBlock {
   items: Array<{ label: string; value: number }>;
 }
 
+// Comparativo das empresas de uma holding (Hero Holding). Uma linha por unidade
+// Viva do grupo; valores null quando o indicador não existe para a empresa.
+// Só presente quando o template configura `report.holdingComparativo`.
+export interface HoldingComparativoRow {
+  empresa: string;
+  /** % de atingimento acumulado da meta de VVR (Jan→mês de referência). */
+  pctMetaAnualVvrAcumulada: number | null;
+  /** % de atingimento da meta de VVR do mês de referência. */
+  pctMetaVvrMes: number | null;
+  /** % de FEE disponível = FEE disponível ÷ FEE a receber. */
+  pctFeeDisponivel: number | null;
+  sobrevivenciaCaixaMeses: number | null;
+  margemMediaEventos: number | null;
+  inadimplenciaAtual: number | null;
+}
+export interface HoldingComparativoBlock {
+  /** ReportBlockKey p/ gating ("holdingComparativo"). */
+  key: string;
+  title: string;
+  referenciaLabel: string;
+  empresas: HoldingComparativoRow[];
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -177,6 +200,8 @@ export interface OnePageReportPreviewData {
   custodyClosing?: CustodyClosingBlock;
   /** Indicadores por conta DRE (Terrazzo — "Locação de Espaço"). Ausência = não renderiza. */
   indicadoresDre?: DreIndicatorsBlock;
+  /** Comparativo das empresas da holding (Hero Holding). Ausência = não renderiza. */
+  holdingComparativo?: HoldingComparativoBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -2386,6 +2411,181 @@ function QuadroCustodiaCaseShows({ data }: { data: CustodyClosingBlock }) {
   );
 }
 
+// Quadro COMPARATIVO das empresas da holding (EXCLUSIVO da Hero Holding). Uma
+// linha por unidade Viva do grupo; colunas = os indicadores individuais que
+// foram removidos do topo do relatório da holding, agora POR EMPRESA. Destaca a
+// melhor empresa de cada coluna (verde) e a maior inadimplência (âmbar), para
+// leitura de portfólio rápida. Não polui: um único highlight por coluna.
+function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
+  type ColKind = "money" | "months" | "pct" | "pctMeta";
+  interface Col {
+    key: keyof HoldingComparativoRow;
+    label: string;
+    kind: ColKind;
+    // Quando true, destaca a MELHOR (verde) e a PIOR (vermelho) franquia da
+    // coluna — todas essas colunas são "quanto maior, melhor". Ausência = coluna
+    // SEM destaque (ex.: inadimplência).
+    destacaMelhorPior?: boolean;
+  }
+
+  // Todas as colunas comparáveis são "quanto maior, melhor". Inadimplência NÃO
+  // recebe destaque.
+  const cols: Col[] = [
+    { key: "pctMetaAnualVvrAcumulada", label: "% meta anual (acum.)", kind: "pctMeta", destacaMelhorPior: true },
+    { key: "pctMetaVvrMes", label: "% meta do mês", kind: "pctMeta", destacaMelhorPior: true },
+    { key: "pctFeeDisponivel", label: "% FEE disp.", kind: "pctMeta", destacaMelhorPior: true },
+    { key: "sobrevivenciaCaixaMeses", label: "Sobrev. caixa", kind: "months", destacaMelhorPior: true },
+    { key: "margemMediaEventos", label: "Margem média", kind: "pct", destacaMelhorPior: true },
+    { key: "inadimplenciaAtual", label: "Inadimplência", kind: "money" },
+  ];
+
+  // Índices da MELHOR (maior valor → verde) e da PIOR (menor valor → vermelho)
+  // franquia por coluna. Só destaca quando há pelo menos 2 empresas com valor e
+  // valores distintos (senão melhor = pior e não faz sentido comparar). Valores
+  // nulos ("—") ficam de fora do cálculo e nunca são destacados.
+  const destaqueByCol = cols.map((col) => {
+    if (!col.destacaMelhorPior) return { best: -1, worst: -1 };
+    let best = -1;
+    let worst = -1;
+    let bestVal = -Infinity;
+    let worstVal = Infinity;
+    let count = 0;
+    data.empresas.forEach((e, i) => {
+      const v = e[col.key] as number | null;
+      if (v === null || v === undefined) return;
+      count += 1;
+      if (v > bestVal) {
+        bestVal = v;
+        best = i;
+      }
+      if (v < worstVal) {
+        worstVal = v;
+        worst = i;
+      }
+    });
+    // Menos de 2 valores, ou todos iguais → não destaca nada.
+    if (count < 2 || bestVal === worstVal) return { best: -1, worst: -1 };
+    return { best, worst };
+  });
+
+  // % de atingimento da meta com 2 casas (ex.: "85,15%") — leitura clara do
+  // gap contra a meta de cada franquia.
+  const fmtPctMeta = (v: number): string =>
+    `${v.toLocaleString("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}%`;
+
+  const fmt = (v: number | null, kind: ColKind): string => {
+    if (v === null || v === undefined) return "—";
+    if (kind === "money") return fmtMoneyInt(v);
+    if (kind === "pctMeta") return fmtPctMeta(v);
+    if (kind === "pct") return fmtPctPtBr(v);
+    return `${v} ${v === 1 ? "mês" : "meses"}`;
+  };
+
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    fontWeight: 600,
+    color: C.sub,
+    padding: "6px 8px",
+    borderBottom: `1px solid ${C.cardBorder}`,
+    whiteSpace: "nowrap",
+  };
+  const td: CSSProperties = {
+    fontSize: 10.5,
+    fontFamily: FONT_MONO,
+    color: C.body,
+    padding: "6px 8px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+    borderBottom: `1px solid ${C.grid}`,
+  };
+
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ fontSize: 10, color: C.sub, marginTop: -4, marginBottom: 8 }}>
+        Referência {data.referenciaLabel} · comparativo das {data.empresas.length}{" "}
+        empresas do grupo · <span style={{ color: SEV.positive.text }}>■</span> melhor
+        · <span style={{ color: SEV.critical.text }}>■</span> pior
+      </div>
+      <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            tableLayout: "fixed",
+          }}
+        >
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left", width: "20%" }}>Empresa</th>
+              {cols.map((c) => (
+                <th key={c.key} style={{ ...th, textAlign: "right" }}>
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.empresas.map((e, rowIdx) => (
+              <tr key={e.empresa}>
+                <td
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: C.ink,
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    borderBottom: `1px solid ${C.grid}`,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {e.empresa}
+                </td>
+                {cols.map((c, colIdx) => {
+                  const v = e[c.key] as number | null;
+                  // Destaca só a MELHOR (verde) e a PIOR (vermelho) franquia da
+                  // coluna. Inadimplência e valores nulos nunca são destacados.
+                  const { best, worst } = destaqueByCol[colIdx];
+                  const tone =
+                    rowIdx === best
+                      ? SEV.positive
+                      : rowIdx === worst
+                        ? SEV.critical
+                        : null;
+                  return (
+                    <td
+                      key={c.key}
+                      style={{
+                        ...td,
+                        ...(tone
+                          ? {
+                              background: tone.bg,
+                              color: tone.text,
+                              fontWeight: 700,
+                            }
+                          : null),
+                      }}
+                    >
+                      {fmt(v, c.kind)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // Quadro de indicadores por conta DRE (EXCLUSIVO de templates que o configuram,
 // ex.: Terrazzo — "Locação de Espaço": Formaturas / Shows-Palestras). Mostra o
 // realizado de cada conta no mês de referência. Valores em R$ cheios.
@@ -2609,6 +2809,15 @@ export function OnePageReportPreview({
         {show("diagnostico") ? (
           <ResumoExecutivo data={data} accent={accentColor} showSemaforo={showSemaforo} />
         ) : null}
+
+        {/* Comparativo das empresas da holding — exclusivo da Hero Holding (gated
+            por bloco + presença de dados). É o CENTRO do relatório da holding:
+            aparece logo após o resumo executivo, substituindo a leitura de
+            franquia individual por uma visão comparativa das unidades do grupo. */}
+        {data.holdingComparativo && show(data.holdingComparativo.key) ? (
+          <QuadroComparativoHolding data={data.holdingComparativo} />
+        ) : null}
+
         {show("previstoRealizado") ? (
           <TabelaDesempenho
             items={data.previstoRealizado}

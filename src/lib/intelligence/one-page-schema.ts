@@ -159,6 +159,33 @@ export const FeatEventosResumoSchema = z.object({
   percentual_atingimento_projecao: z.number().nullable(),
 });
 
+// Comparativo das empresas de uma HOLDING (EXCLUSIVO da Hero Holding). Cada
+// item = uma unidade Viva do grupo. A comparação de VVR é feita por % de
+// ATINGIMENTO DA META (realizado ÷ meta) — não por VVR absoluto — para permitir
+// comparar franquias com metas diferentes de forma justa:
+//   - `pct_meta_anual_vvr_acumulada`: % acumulado Jan→mês de referência.
+//   - `pct_meta_vvr_mes`: % do mês de referência.
+// Os demais indicadores seguem o relatório individual (FEE disponível,
+// sobrevivência de caixa em meses, margem média dos eventos %, inadimplência
+// atual R$). Valores null quando o dado/meta não existe para a empresa. A IA usa
+// este bloco para analisar a Hero Holding como PORTFÓLIO, comparando a
+// performance RELATIVA entre as unidades — nunca como franquia individual.
+export const HoldingEmpresaIndicadoresSchema = z.object({
+  empresa: z.string().min(1).max(120),
+  pct_meta_anual_vvr_acumulada: z.number().nullable(),
+  pct_meta_vvr_mes: z.number().nullable(),
+  // % de FEE disponível = FEE disponível ÷ FEE a receber (não valor absoluto).
+  pct_fee_disponivel: z.number().nullable(),
+  sobrevivencia_caixa_meses: z.number().nullable(),
+  margem_media_eventos: z.number().nullable(),
+  inadimplencia_atual: z.number().nullable(),
+});
+
+export const HoldingComparativoSchema = z.object({
+  referencia: z.string().min(1).max(80),
+  empresas: z.array(HoldingEmpresaIndicadoresSchema).min(1).max(20),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -177,6 +204,11 @@ export const OnePageInputSchema = z.object({
   // mas com FEE Disponivel cobrindo varios meses de despesas nao deve
   // ser tratada como critica. Null quando nao informado.
   fee_disponivel: z.number().nullable().optional(),
+  // % de FEE disponível (FEE disponivel ÷ FEE a receber, em pontos percentuais)
+  // da propria empresa — leitura de quanto do FEE a receber ja esta disponivel
+  // para saque. So enviado para empresas do segmento Franquias Viva; null nos
+  // demais. Complementa `fee_disponivel` (absoluto), nao o substitui no input.
+  fee_disponivel_pct: z.number().nullable().optional(),
   // Resumo do VVR acumulado YTD (ver VvrYtdResumoSchema acima).
   vvr_ytd_resumo: VvrYtdResumoSchema.nullable().optional(),
   // Sobrevivencia de caixa, em MESES — quantos meses de despesas operacionais
@@ -199,9 +231,14 @@ export const OnePageInputSchema = z.object({
   // Bloco gerencial de eventos da Feat Produções (ver FeatEventosResumoSchema).
   // Presente APENAS para a Feat Produções; null/ausente para todas as demais.
   feat_eventos: FeatEventosResumoSchema.nullable().optional(),
+  // Comparativo das empresas da holding (ver HoldingComparativoSchema).
+  // Presente APENAS para a Hero Holding; null/ausente para todas as demais.
+  holding_comparativo: HoldingComparativoSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
 export type FeeVvrInput = z.infer<typeof FeeVvrInputSchema>;
 export type FeatEventosResumo = z.infer<typeof FeatEventosResumoSchema>;
+export type HoldingEmpresaIndicadores = z.infer<typeof HoldingEmpresaIndicadoresSchema>;
+export type HoldingComparativo = z.infer<typeof HoldingComparativoSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

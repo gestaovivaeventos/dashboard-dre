@@ -6,6 +6,7 @@ import type {
   DreIndicatorsBlock,
   FeatEventosBlock,
   HistoricoPoint,
+  HoldingComparativoBlock,
   KpiCard,
   OnePageReportPreviewData,
   PrevistoRealizadoItem,
@@ -51,6 +52,8 @@ interface ApiKpis {
   // template da empresa os suporta; templates Real Estate/genérico não os
   // enviam e o card correspondente não é renderizado.
   fee_disponivel?: ApiKpiCard;
+  // % de FEE disponível (FEE disponível ÷ FEE a receber) — só Franquias Viva.
+  fee_disponivel_pct?: ApiKpiCard;
   vvr?: ApiKpiCard;
   sobrevivencia_caixa?: ApiKpiCard;
   margem_media_eventos?: ApiKpiCard;
@@ -121,6 +124,22 @@ export interface OnePageApiResponse {
   // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
   // Mesmo shape do componente (R$ cheios). Presente só p/ templates que o configuram.
   indicadoresDre?: DreIndicatorsBlock;
+  // Comparativo das empresas da holding (Hero Holding). A rota envia
+  // `{ title, referencia, empresas: [{ empresa, vvr*, fee*, ... }] }` (camelCase,
+  // valores crus). O mapper monta o bloco do componente (o componente formata).
+  holdingComparativo?: {
+    title: string;
+    referencia: string;
+    empresas: Array<{
+      empresa: string;
+      pctMetaAnualVvrAcumulada: number | null;
+      pctMetaVvrMes: number | null;
+      pctFeeDisponivel: number | null;
+      sobrevivenciaCaixaMeses: number | null;
+      margemMediaEventos: number | null;
+      inadimplenciaAtual: number | null;
+    }>;
+  };
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -255,6 +274,15 @@ function mapKpis(api: ApiKpis | undefined): KpiCard[] {
   if (api?.fee_disponivel) {
     cards.push(
       mapKpiCard(api.fee_disponivel, "FEE disponível", { omitComparisonSuffix: true }),
+    );
+  }
+  // % de FEE disponível — logo após o FEE disponível absoluto (mesmo grupo de
+  // saúde financeira). Indicador informativo, sem comparativo com orçamento.
+  if (api?.fee_disponivel_pct) {
+    cards.push(
+      mapKpiCard(api.fee_disponivel_pct, "% de FEE disponível", {
+        omitComparisonSuffix: true,
+      }),
     );
   }
   if (api?.sobrevivencia_caixa) {
@@ -576,6 +604,32 @@ function mapCabecalho(
   };
 }
 
+// ─── Comparativo da holding (Hero Holding) ─────────────────────────────────
+//
+// Passa os valores crus (R$/%/meses) para o componente, que faz a formatação e
+// os destaques por coluna. Só monta o bloco quando há empresas.
+function mapHoldingComparativo(
+  api: OnePageApiResponse["holdingComparativo"],
+): HoldingComparativoBlock | undefined {
+  if (!api || !Array.isArray(api.empresas) || api.empresas.length === 0) {
+    return undefined;
+  }
+  return {
+    key: "holdingComparativo",
+    title: api.title,
+    referenciaLabel: api.referencia,
+    empresas: api.empresas.map((e) => ({
+      empresa: e.empresa,
+      pctMetaAnualVvrAcumulada: e.pctMetaAnualVvrAcumulada,
+      pctMetaVvrMes: e.pctMetaVvrMes,
+      pctFeeDisponivel: e.pctFeeDisponivel,
+      sobrevivenciaCaixaMeses: e.sobrevivenciaCaixaMeses,
+      margemMediaEventos: e.margemMediaEventos,
+      inadimplenciaAtual: e.inadimplenciaAtual,
+    })),
+  };
+}
+
 // ─── Funcao principal ──────────────────────────────────────────────────────
 
 export function mapOnePageApiResponseToPreviewData(
@@ -625,6 +679,8 @@ export function mapOnePageApiResponseToPreviewData(
     // Quadro de indicadores por conta DRE (Terrazzo — "Locação de Espaço") —
     // passa direto (R$ cheios). undefined p/ templates que não o configuram.
     indicadoresDre: response.indicadoresDre,
+    // Comparativo das empresas da holding (Hero Holding) — undefined nas demais.
+    holdingComparativo: mapHoldingComparativo(response.holdingComparativo),
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,
