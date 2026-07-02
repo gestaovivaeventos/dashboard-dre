@@ -37,6 +37,10 @@ const FECHAMENTOS = [
   "Evento previsto e não realizado",
 ] as const;
 
+// Sentinela para "limpar" um Select — Radix não aceita SelectItem com value=""
+// e não oferece deseleção nativa, então mapeamos essa opção de volta para "".
+const SELECT_NONE = "__none__";
+
 interface ServerRow {
   id: string;
   year: number;
@@ -263,7 +267,7 @@ export function SettingsFeatProjetosTable({
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto rounded-md border bg-background">
-        <div className="grid min-w-[920px] grid-cols-[90px_140px_1fr_150px_140px_140px_180px_88px] border-b bg-muted px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
+        <div className="grid min-w-[920px] grid-cols-[90px_140px_1fr_150px_140px_140px_180px_88px] items-center gap-x-2 border-b bg-muted px-3 py-2 text-xs font-semibold uppercase leading-tight text-muted-foreground">
           <span>Ano</span>
           <span>Mês</span>
           <span>Projeto</span>
@@ -360,12 +364,21 @@ export function SettingsFeatProjetosTable({
                 />
                 <Select
                   value={row.fechamento || undefined}
-                  onValueChange={(v) => updateRow(index, { fechamento: v })}
+                  onValueChange={(v) =>
+                    updateRow(index, {
+                      fechamento: v === SELECT_NONE ? "" : v,
+                    })
+                  }
                 >
                   <SelectTrigger className="h-8">
                     <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={SELECT_NONE}>
+                      <span className="text-muted-foreground">
+                        Sem preenchimento
+                      </span>
+                    </SelectItem>
                     {FECHAMENTOS.map((f) => (
                       <SelectItem key={f} value={f}>
                         {f}
