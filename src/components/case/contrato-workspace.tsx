@@ -35,21 +35,6 @@ interface ParcelaRow {
   valorStr: string;
 }
 
-// ── Cabeçalho de etapa (número + título + status) ────────────────────────────
-function StageHeader({ n, title, done, hint }: { n: number; title: string; done: boolean; hint?: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className={`flex h-7 w-7 flex-none items-center justify-center rounded-full text-xs font-bold ${done ? "bg-emerald-500 text-white" : "bg-surface-2 text-ink-muted ring-1 ring-border"}`}>
-        {done ? <CheckCircle2 className="h-4 w-4" /> : n}
-      </div>
-      <div>
-        <h2 className="text-sm font-semibold text-ink-primary">Etapa {n} — {title}</h2>
-        {hint && <p className="text-xs text-ink-muted">{hint}</p>}
-      </div>
-    </div>
-  );
-}
-
 function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ok" | "wait" | "err" | "muted" }) {
   const cls = {
     ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -60,26 +45,46 @@ function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ok" 
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>;
 }
 
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs text-ink-muted">{label}</div>
+      <div className="text-ink-primary">{value}</div>
+    </div>
+  );
+}
+
+function TabButton({ active, done, label, onClick }: { active: boolean; done: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+        active ? "border-amber-600 text-ink-primary" : "border-transparent text-ink-muted hover:text-ink-secondary"
+      }`}
+    >
+      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-ink-muted" />}
+      {label}
+    </button>
+  );
+}
+
 export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
   const etapa2Done = detail.valor_artista > 0;
   const signed = Boolean(detail.signed_at);
+  const refresh = () => startTransition(() => router.refresh());
 
   return (
     <div className="space-y-5">
       {/* Cabeçalho */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => router.push("/case/contratos")} className="text-sm text-ink-muted hover:text-ink-primary">← Contratos</button>
-          </div>
-          <h1 className="mt-1 text-xl font-semibold text-ink-primary">
-            Contrato #{detail.contract_number} — {detail.band.name}
-          </h1>
-          <p className="text-sm text-ink-muted">
-            Cliente: {detail.client.name} · {detail.event_name ?? "evento"} · {dateBR(detail.event_date)}
-          </p>
+          <button onClick={() => router.push("/case/contratos")} className="text-sm text-ink-muted hover:text-ink-primary">← Contratos</button>
+          <h1 className="mt-1 text-xl font-semibold text-ink-primary">Contrato #{detail.contract_number} — {detail.band.name}</h1>
+          <p className="text-sm text-ink-muted">Cliente: {detail.client.name} · {detail.event_name ?? "evento"} · {dateBR(detail.event_date)}</p>
         </div>
         <div className="text-right">
           <div className="text-xs text-ink-muted">Venda</div>
@@ -87,15 +92,25 @@ export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
         </div>
       </div>
 
-      <Etapa1Card detail={detail} signed={signed} />
-      <Etapa2Card detail={detail} done={etapa2Done} onChange={() => startTransition(() => router.refresh())} />
-      <Etapa3Card detail={detail} signed={signed} onChange={() => startTransition(() => router.refresh())} />
+      {/* Abas: Contrato Cliente / Contrato Atração */}
+      <div>
+        <div className="flex gap-1 border-b border-border">
+          <TabButton active={tab === "cliente"} done={signed} label="Contrato Cliente" onClick={() => setTab("cliente")} />
+          <TabButton active={tab === "atracao"} done={etapa2Done} label="Contrato Atração" onClick={() => setTab("atracao")} />
+        </div>
+        <div className="pt-4">
+          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} /> : <AtracaoTab detail={detail} done={etapa2Done} onChange={refresh} />}
+        </div>
+      </div>
+
+      {/* Financeiro (sempre visível) */}
+      <FinanceiroPanel detail={detail} signed={signed} onChange={refresh} />
     </div>
   );
 }
 
-// ── ETAPA 1 — Contrato com o cliente (resumo + assinatura) ───────────────────
-function Etapa1Card({ detail, signed }: { detail: ContractDetail; signed: boolean }) {
+// ── ABA: Contrato Cliente ────────────────────────────────────────────────────
+function ClienteTab({ detail, signed }: { detail: ContractDetail; signed: boolean }) {
   const [busy, setBusy] = useState(false);
   const sent = Boolean(detail.sent_for_signature_at);
 
@@ -114,11 +129,11 @@ function Etapa1Card({ detail, signed }: { detail: ContractDetail; signed: boolea
   return (
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
       <div className="flex items-center justify-between">
-        <StageHeader n={1} title="Contrato com o cliente" done hint="Dados do evento, valores cobrados e assinatura." />
+        <h2 className="text-sm font-semibold text-ink-primary">Contrato com o cliente</h2>
         {signed ? <StatusPill tone="ok">Assinado · {dateBR(detail.signed_at)}</StatusPill> : sent ? <StatusPill tone="wait">Aguardando assinatura</StatusPill> : <StatusPill tone="muted">Rascunho</StatusPill>}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
         <Info label="Atração" value={brl(detail.valor_atracao_cliente)} />
         <Info label="Rider" value={brl(detail.valor_rider)} />
         <Info label="Camarim" value={brl(detail.valor_camarim)} />
@@ -148,17 +163,8 @@ function Etapa1Card({ detail, signed }: { detail: ContractDetail; signed: boolea
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-ink-muted">{label}</div>
-      <div className="text-ink-primary">{value}</div>
-    </div>
-  );
-}
-
-// ── ETAPA 2 — Pagamento ao artista (form + OCR → gera títulos + lança Omie) ───
-function Etapa2Card({ detail, done, onChange }: { detail: ContractDetail; done: boolean; onChange: () => void }) {
+// ── ABA: Contrato Atração (pagamento ao artista) ─────────────────────────────
+function AtracaoTab({ detail, done, onChange }: { detail: ContractDetail; done: boolean; onChange: () => void }) {
   const [attachmentPath, setAttachmentPath] = useState<string | null>(detail.attachment_path);
   const [attachmentName, setAttachmentName] = useState<string>(detail.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
@@ -227,7 +233,7 @@ function Etapa2Card({ detail, done, onChange }: { detail: ContractDetail; done: 
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
-    setMsg("Etapa 2 concluída — títulos gerados e lançados no Omie.");
+    setMsg("Contrato da atração concluído — títulos gerados e lançados no Omie.");
     onChange();
   }
 
@@ -235,10 +241,10 @@ function Etapa2Card({ detail, done, onChange }: { detail: ContractDetail; done: 
     return (
       <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
         <div className="flex items-center justify-between">
-          <StageHeader n={2} title="Pagamento ao artista" done hint="Valor e parcelas do artista lançados." />
-          <StatusPill tone="ok">Concluída</StatusPill>
+          <h2 className="text-sm font-semibold text-ink-primary">Contrato da atração / pagamento ao artista</h2>
+          <StatusPill tone="ok">Concluído</StatusPill>
         </div>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
           <Info label="Pago ao artista" value={brl(detail.valor_artista)} />
           <Info label="Custódia" value={brl(detail.valor_custodia)} />
           <Info label="Margem" value={brl(detail.valor_margem)} />
@@ -255,7 +261,8 @@ function Etapa2Card({ detail, done, onChange }: { detail: ContractDetail; done: 
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
-      <StageHeader n={2} title="Pagamento ao artista" done={false} hint="Suba o contrato do artista, leia com OCR e informe o pagamento. Ao concluir, os títulos vão pro Omie." />
+      <h2 className="text-sm font-semibold text-ink-primary">Contrato da atração / pagamento ao artista</h2>
+      <p className="text-xs text-ink-muted">Suba o contrato do artista, leia com OCR e informe o pagamento. Ao concluir, os títulos vão pro Omie (a pagar do artista + a receber do cliente, já separado).</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
@@ -309,14 +316,14 @@ function Etapa2Card({ detail, done, onChange }: { detail: ContractDetail; done: 
 
       <div className="flex justify-end">
         <button onClick={submit} disabled={submitting || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Concluir Etapa 2 e lançar no Omie
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Concluir e lançar no Omie
         </button>
       </div>
     </section>
   );
 }
 
-// ── ETAPA 3 — Consolidação (quadro de lançamentos + status pago) ─────────────
+// ── FINANCEIRO (consolidação — sempre visível abaixo das abas) ───────────────
 const LEG_LABEL: Record<string, string> = {
   pagar_custodia: "A pagar — Artista (custódia)",
   receber_custodia: "A receber — Custódia",
@@ -324,7 +331,7 @@ const LEG_LABEL: Record<string, string> = {
 };
 const ITEM_LABEL: Record<string, string> = { margem: "Comissão/BV", rider: "Rider", camarim: "Camarim", extras: "Extras" };
 
-function Etapa3Card({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
+function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const titles = detail.titles;
   const receber = titles.filter((t) => t.leg !== "pagar_custodia");
@@ -341,7 +348,7 @@ function Etapa3Card({ detail, signed, onChange }: { detail: ContractDetail; sign
   return (
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
       <div className="flex items-center justify-between">
-        <StageHeader n={3} title="Consolidação dos pagamentos" done={titles.length > 0} hint="Todos os lançamentos, status de assinatura e de pagamento (Omie)." />
+        <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
         <div className="flex items-center gap-2">
           {signed ? <StatusPill tone="ok">Assinado</StatusPill> : <StatusPill tone="muted">Não assinado</StatusPill>}
           {titles.length > 0 && (
@@ -353,7 +360,7 @@ function Etapa3Card({ detail, signed, onChange }: { detail: ContractDetail; sign
       </div>
 
       {titles.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — conclua a Etapa 2 para gerar os títulos.</p>
+        <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — conclua o Contrato Atração para gerar os títulos.</p>
       ) : (
         <div className="space-y-4">
           <TitlesTable title="Contas a receber (cliente)" rows={receber} />
@@ -380,7 +387,8 @@ function TitlesTable({ title, rows }: { title: string; rows: ContractTitleRow[] 
               <th className="px-3 py-1.5 font-medium">Lançamento</th>
               <th className="px-3 py-1.5 font-medium">Vencimento</th>
               <th className="px-3 py-1.5 text-right font-medium">Valor</th>
-              <th className="px-3 py-1.5 font-medium">Omie</th>
+              <th className="px-3 py-1.5 font-medium">Cód. Omie</th>
+              <th className="px-3 py-1.5 font-medium">Status</th>
               <th className="px-3 py-1.5 font-medium">Pagamento</th>
             </tr>
           </thead>
@@ -394,6 +402,7 @@ function TitlesTable({ title, rows }: { title: string; rows: ContractTitleRow[] 
                 </td>
                 <td className="px-3 py-1.5 tabular-nums text-ink-secondary">{dateBR(t.vencimento)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{brl(t.valor)}</td>
+                <td className="px-3 py-1.5 tabular-nums text-ink-secondary">{t.omie_codigo ? `#${t.omie_codigo}` : "—"}</td>
                 <td className="px-3 py-1.5">
                   {t.status === "lancado" ? <StatusPill tone="ok">Lançado</StatusPill> : t.status === "erro" ? <StatusPill tone="err">Erro</StatusPill> : <StatusPill tone="muted">Pendente</StatusPill>}
                 </td>
