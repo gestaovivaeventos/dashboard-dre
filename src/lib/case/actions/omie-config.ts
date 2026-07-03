@@ -10,6 +10,7 @@ import { CASE_COMPANY_ID } from "@/lib/case/constants";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listCategorias, listContasCorrentes } from "@/lib/omie/cadastros";
 import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
+import { syncCasePagamentosFromOmie } from "@/lib/case/sync-pagamentos";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -135,6 +136,21 @@ export async function syncCaseCadastros(): Promise<
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao sincronizar cadastros do Omie." };
+  }
+}
+
+/** Atualiza o status de pagamento (pago/pendente) dos títulos Case a partir do Omie. */
+export async function syncCasePagamentos(): Promise<
+  { ok: true; atualizados: number; pagos: number; skipped?: string } | { error: string }
+> {
+  await requireCaseAdmin();
+  const db = await getDb();
+  try {
+    const r = await syncCasePagamentosFromOmie(db);
+    revalidatePath("/case/contratos");
+    return { ok: true, atualizados: r.atualizados, pagos: r.pagos, skipped: r.skipped };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao atualizar status de pagamentos." };
   }
 }
 

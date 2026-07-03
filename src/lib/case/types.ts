@@ -97,6 +97,39 @@ export interface CreateContractInput extends CaseContractExtras {
   parcelas_receber_servicos: CaseParcelaInput[];
 }
 
+/** Etapa 1 — produção do contrato com o cliente (sem dados de pagamento ao artista). */
+export interface Etapa1Input extends CaseContractExtras {
+  idempotency_key?: string | null;
+  client: CaseClientInput;
+  band: CaseBandInput; // identidade do artista/atração (o pagamento vem na Etapa 2)
+  event_name: string | null;
+  event_date: string | null;
+  show_time: string | null;
+  show_duration: string | null;
+  passagem_som: string | null;
+  local_name: string | null;
+  local_address: string | null;
+  local_city: string | null;
+  local_cep: string | null;
+  especificacoes: string | null;
+  valor_atracao_cliente: number;
+  valor_rider: number;
+  valor_camarim: number;
+  valor_extras: number;
+  observacao: string | null;
+  /** Parcelas a receber do cliente (valor total cobrado). */
+  receber_schedule: CaseParcelaInput[];
+}
+
+/** Etapa 2 — pagamento ao artista (gera todos os títulos e lança no Omie). */
+export interface Etapa2Input {
+  contract_id: string;
+  valor_artista: number;
+  parcelas_pagar: CaseParcelaInput[];
+  /** Contrato do artista (fonte do OCR), já no bucket. */
+  attachment_path: string | null;
+}
+
 export interface CaseClientRow {
   id: string;
   name: string;

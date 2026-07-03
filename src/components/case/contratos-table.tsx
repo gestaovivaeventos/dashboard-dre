@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Paperclip, FileSignature, PenLine, RefreshCw, Search } from "lucide-react";
+import { Paperclip, FileSignature, PenLine, RefreshCw, Search, ArrowUpRight } from "lucide-react";
 
 import type { ContractListRow } from "@/lib/case/queries";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
@@ -144,6 +144,9 @@ export function ContratosTable({ contracts }: { contracts: ContractListRow[] }) 
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
+                    <button type="button" title="Abrir contrato" onClick={() => router.push(`/case/contratos/${c.id}`)} className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary">
+                      <ArrowUpRight className="h-4 w-4" />
+                    </button>
                     {c.attachment_path && (
                       <button type="button" title="Contrato do artista" onClick={() => handleOpenAttachment(c.id)} className="rounded p-1.5 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary">
                         <Paperclip className="h-4 w-4" />
