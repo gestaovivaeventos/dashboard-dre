@@ -9,6 +9,7 @@ import { requireCaseAdmin } from "@/lib/case/auth";
 import { CASE_COMPANY_ID } from "@/lib/case/constants";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listCategorias, listContasCorrentes } from "@/lib/omie/cadastros";
+import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -110,6 +111,31 @@ export async function syncOmieOptions(): Promise<{ ok: true; categorias: number;
 
   revalidatePath("/case/config");
   return { ok: true, categorias: categorias.length, contas: contas.length };
+}
+
+/** Puxa clientes/fornecedores do Omie da Case para o banco local (manual). */
+export async function syncCaseCadastros(): Promise<
+  | { ok: true; fetched: number; clientsInserted: number; clientsUpdated: number; bandsInserted: number; bandsUpdated: number; skipped?: string }
+  | { error: string }
+> {
+  await requireCaseAdmin();
+  const db = await getDb();
+  try {
+    const r = await syncCaseCadastrosFromOmie(db);
+    revalidatePath("/case/config");
+    revalidatePath("/case/contratos/novo");
+    return {
+      ok: true,
+      fetched: r.fetched,
+      clientsInserted: r.clients.inserted,
+      clientsUpdated: r.clients.updated,
+      bandsInserted: r.bands.inserted,
+      bandsUpdated: r.bands.updated,
+      skipped: r.skipped,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao sincronizar cadastros do Omie." };
+  }
 }
 
 /** Salva o mapeamento de categorias + conta corrente. */

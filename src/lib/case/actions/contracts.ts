@@ -9,6 +9,12 @@ import { requireCaseUser } from "@/lib/case/auth";
 import { CASE_COMPANY_ID } from "@/lib/case/constants";
 import { buildContractPdf } from "@/lib/case/contract-pdf";
 import { clicksignEnabled, createSignatureRequest } from "@/lib/case/clicksign";
+import { getCaseOmieCreds } from "@/lib/case/omie-creds";
+import {
+  syncClienteToOmieUnit,
+  syncSupplierToOmieUnit,
+  type OmieSupplierData,
+} from "@/lib/omie/clientes";
 import type {
   CaseBandInput,
   CaseClientInput,
@@ -28,6 +34,44 @@ type DB = SupabaseClient<any>;
 
 async function getDb(): Promise<DB> {
   return (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
+}
+
+/**
+ * Regra "todo cliente já cadastrado na Omie": ao criar um cadastro novo, empurra
+ * pro Omie na hora e grava o omie_codigo. Best-effort — se o Omie falhar, o
+ * launch do contrato é a rede de segurança (ele reexecuta o mesmo cadastro).
+ */
+async function ensureOmieRegistration(db: DB, kind: "client" | "band", id: string): Promise<void> {
+  const table = kind === "client" ? "case_clients" : "case_bands";
+  const { data: row } = await db.from(table).select("*").eq("id", id).single();
+  if (!row || row.omie_codigo || !onlyDigits(row.cnpj_cpf)) return;
+  const creds = await getCaseOmieCreds(db);
+  if (!creds) return;
+  const data: OmieSupplierData = {
+    id: row.id,
+    name: row.name,
+    cnpj_cpf: row.cnpj_cpf,
+    email: row.email,
+    phone: row.phone,
+    banco: kind === "band" ? row.banco : null,
+    agencia: kind === "band" ? row.agencia : null,
+    conta_corrente: kind === "band" ? row.conta_corrente : null,
+    titular_banco: kind === "band" ? row.titular_banco : null,
+    doc_titular: kind === "band" ? row.doc_titular : null,
+    chave_pix: kind === "band" ? row.chave_pix : null,
+  };
+  try {
+    const { codigoCliente } =
+      kind === "client"
+        ? await syncClienteToOmieUnit(creds.appKey, creds.appSecret, data)
+        : await syncSupplierToOmieUnit(creds.appKey, creds.appSecret, data);
+    await db
+      .from(table)
+      .update({ omie_codigo: codigoCliente, omie_synced_at: new Date().toISOString() })
+      .eq("id", id);
+  } catch (e) {
+    console.error(`[case] falha ao cadastrar ${kind} no Omie na criação:`, e);
+  }
 }
 
 /** Gera URL assinada (5 min) de um PDF do contrato (artista ou venda). */
@@ -291,6 +335,10 @@ export async function createContract(
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao cadastrar cliente/banda." };
   }
+
+  // Regra Case: garante o cliente e o artista cadastrados no Omie já na criação.
+  await ensureOmieRegistration(db, "client", clientId);
+  await ensureOmieRegistration(db, "band", bandId);
 
   // ── Contrato ───────────────────────────────────────────────────────────
   const { data: contract, error: contractErr } = await db

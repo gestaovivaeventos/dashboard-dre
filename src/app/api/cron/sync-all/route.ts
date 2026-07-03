@@ -6,6 +6,7 @@ import {
   sendUnmappedEntriesAlertEmail,
 } from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
+import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
 import { syncSirenaSheetsToManualValues } from "@/lib/sheets/sirena-sync";
@@ -261,6 +262,27 @@ export async function GET(request: Request) {
     }
   }
 
+  // Espelha os cadastros (clientes/fornecedores) da unidade Omie da Case Shows
+  // para o banco local do Case (case_clients/case_bands). Mesmo padrao best-effort
+  // das planilhas: falha aqui nao impede o resto. Pula sem credenciais Omie.
+  let caseCadastrosSync: {
+    ok: boolean;
+    fetched?: number;
+    clients?: { inserted: number; updated: number };
+    bands?: { inserted: number; updated: number };
+    skipped?: string;
+    error?: string;
+  } | null = null;
+  try {
+    const r = await syncCaseCadastrosFromOmie(supabase);
+    caseCadastrosSync = { ok: true, fetched: r.fetched, clients: r.clients, bands: r.bands, skipped: r.skipped };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Falha desconhecida no sync de cadastros da Case.";
+    caseCadastrosSync = { ok: false, error: message };
+    failures.push({ companyId: "case-cadastros", companyName: "Case Shows (cadastros Omie)", error: message });
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -277,5 +299,6 @@ export async function GET(request: Request) {
     featSheetsSync,
     terrazzoSheetsSync,
     sirenaSheetsSync,
+    caseCadastrosSync,
   });
 }

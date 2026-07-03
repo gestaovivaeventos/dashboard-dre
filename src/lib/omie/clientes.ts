@@ -1,6 +1,92 @@
 import { omieCall, OMIE_CLIENTES_URL } from "@/lib/omie/client";
 import { parseBanco } from "@/lib/ctrl/bancos";
 
+/** Cadastro do Omie normalizado (usado no pull Omie → banco local do Case). */
+export interface OmiePartner {
+  omie_codigo: number;
+  name: string;
+  cnpj_cpf: string | null;
+  pessoa_fisica: boolean;
+  email: string | null;
+  phone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta_corrente: string | null;
+  titular_banco: string | null;
+  doc_titular: string | null;
+  chave_pix: string | null;
+  endereco: string | null;
+  cidade_estado: string | null;
+  cep: string | null;
+  tags: string[];
+}
+
+function nn(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  return s ? s : null;
+}
+
+/** @internal exportado para teste. */
+export function mapCadastro(c: Record<string, unknown>): OmiePartner {
+  const banc = (c.dadosBancarios as Record<string, unknown> | undefined) ?? {};
+  const ddd = String(c.telefone1_ddd ?? "").trim();
+  const num = String(c.telefone1_numero ?? "").trim();
+  const cidade = nn(c.cidade);
+  const estado = nn(c.estado);
+  const cidadeEstado = cidade && estado ? `${cidade} / ${estado}` : cidade ?? estado;
+  const codBanco = nn(banc.codigo_banco);
+  return {
+    omie_codigo: Number(c.codigo_cliente_omie),
+    name: nn(c.razao_social) ?? nn(c.nome_fantasia) ?? "(sem nome)",
+    cnpj_cpf: nn(c.cnpj_cpf),
+    pessoa_fisica: String(c.pessoa_fisica ?? "").toUpperCase() === "S",
+    email: nn(c.email),
+    phone: ddd || num ? `${ddd}${num}` : null,
+    banco: codBanco,
+    agencia: nn(banc.agencia),
+    conta_corrente: nn(banc.conta_corrente),
+    titular_banco: nn(banc.nome_titular),
+    doc_titular: nn(banc.doc_titular),
+    chave_pix: nn(banc.cChavePix),
+    endereco: nn(c.endereco),
+    cidade_estado: cidadeEstado,
+    cep: nn(c.cep),
+    tags: Array.isArray(c.tags)
+      ? (c.tags as Array<Record<string, unknown>>).map((t) => String(t.tag ?? "")).filter(Boolean)
+      : [],
+  };
+}
+
+/**
+ * Lê TODOS os cadastros de clientes/fornecedores de uma unidade Omie
+ * (ListarClientes paginado). Retorna vazio se a conta não tiver cadastros.
+ */
+export async function listAllClientesFromOmie(
+  appKey: string,
+  appSecret: string,
+  opts: { pageSize?: number; maxPages?: number } = {},
+): Promise<OmiePartner[]> {
+  const pageSize = opts.pageSize ?? 500;
+  const maxPages = opts.maxPages ?? 200; // teto de segurança (~100k cadastros)
+  const out: OmiePartner[] = [];
+
+  for (let pagina = 1; pagina <= maxPages; pagina++) {
+    const res = await omieCall(OMIE_CLIENTES_URL, "ListarClientes", appKey, appSecret, {
+      pagina,
+      registros_por_pagina: pageSize,
+      apenas_importado_api: "N",
+    });
+    if (res.notFound) break;
+    const arr = (res.data.clientes_cadastro as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const c of arr) {
+      if (c?.codigo_cliente_omie) out.push(mapCadastro(c));
+    }
+    const totalPaginas = Number(res.data.total_de_paginas ?? 1);
+    if (pagina >= totalPaginas || arr.length === 0) break;
+  }
+  return out;
+}
+
 export interface OmieSupplierData {
   id: string;
   name: string;

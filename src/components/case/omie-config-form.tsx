@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, RefreshCw, Check } from "lucide-react";
 
-import { syncOmieOptions, saveOmieConfig, type CaseOmieConfigData } from "@/lib/case/actions/omie-config";
+import { syncOmieOptions, syncCaseCadastros, saveOmieConfig, type CaseOmieConfigData } from "@/lib/case/actions/omie-config";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -19,6 +19,7 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
   const [conta, setConta] = useState(initial.config.codigo_conta_corrente ?? "");
 
   const [syncing, setSyncing] = useState(false);
+  const [syncingCad, setSyncingCad] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -34,6 +35,26 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
       return;
     }
     setMsg(`Sincronizado: ${res.categorias} categorias, ${res.contas} contas correntes.`);
+    startTransition(() => router.refresh());
+  }
+
+  async function handleSyncCadastros() {
+    setSyncingCad(true);
+    setErr(null);
+    setMsg(null);
+    const res = await syncCaseCadastros();
+    setSyncingCad(false);
+    if ("error" in res) {
+      setErr(res.error);
+      return;
+    }
+    if (res.skipped) {
+      setErr(res.skipped);
+      return;
+    }
+    setMsg(
+      `Cadastros sincronizados do Omie: ${res.fetched} lidos · clientes +${res.clientsInserted}/~${res.clientsUpdated} · artistas +${res.bandsInserted}/~${res.bandsUpdated}.`,
+    );
     startTransition(() => router.refresh());
   }
 
@@ -76,6 +97,25 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
         >
           {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Sincronizar do Omie
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border border-border bg-surface-1 p-4">
+        <div>
+          <div className="text-sm font-medium text-ink-primary">Clientes e fornecedores</div>
+          <div className="text-xs text-ink-muted">
+            Espelha os cadastros do Omie para o banco do Case (atualiza toda noite; use aqui para
+            forçar agora). A regra é ter todo cliente/artista já cadastrado no Omie.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncCadastros}
+          disabled={syncingCad}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-60"
+        >
+          {syncingCad ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Sincronizar cadastros
         </button>
       </div>
 
