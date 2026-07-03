@@ -65,6 +65,7 @@ export interface CaseContractExtras {
   data_assinatura: string | null; // ISO YYYY-MM-DD
   testemunha_1_nome: string | null;
   testemunha_1_cpf: string | null;
+  testemunha_1_email: string | null; // testemunha assina pelo ClickSign
   testemunha_2_nome: string | null;
   testemunha_2_cpf: string | null;
 }
@@ -100,6 +101,8 @@ export interface CreateContractInput extends CaseContractExtras {
 /** Etapa 1 — produção do contrato com o cliente (sem dados de pagamento ao artista). */
 export interface Etapa1Input extends CaseContractExtras {
   idempotency_key?: string | null;
+  /** Quando presente, atualiza um contrato existente (edição do rascunho). */
+  contract_id?: string | null;
   client: CaseClientInput;
   band: CaseBandInput; // identidade do artista/atração (o pagamento vem na Etapa 2)
   event_name: string | null;

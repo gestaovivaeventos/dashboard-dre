@@ -7,14 +7,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCaseUser } from "@/lib/case/auth";
 import { CASE_COMPANY_ID } from "@/lib/case/constants";
-import { buildContractPdf } from "@/lib/case/contract-pdf";
-import { clicksignEnabled, createSignatureRequest } from "@/lib/case/clicksign";
+import { CONTRATADO_SIGNER } from "@/lib/case/contract-config";
+import { buildContractPdf, type ContractPdfData } from "@/lib/case/contract-pdf";
+import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "@/lib/case/clicksign";
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
-import {
-  resolveClient,
-  resolveBand,
-  ensureOmieRegistration,
-} from "@/lib/case/resolve-cadastros";
+import { resolveClient, resolveBand, ensureOmieRegistration } from "@/lib/case/resolve-cadastros";
 import { cents, validarSchedule, prorateCents } from "@/lib/case/parcelas";
 import type { CaseParcelaInput, Etapa1Input, Etapa2Input } from "@/lib/case/types";
 
@@ -27,49 +24,64 @@ async function getDb(): Promise<DB> {
   return (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ETAPA 1 — Produção do contrato com o cliente
-// ────────────────────────────────────────────────────────────────────────────
-export async function criarEtapa1(
-  input: Etapa1Input,
-): Promise<
-  | { ok: true; contractId: string; contractNumber: number; status: string; signUrl?: string; warning?: string }
-  | { error: string }
-> {
-  const ctx = await requireCaseUser();
-  const db = await getDb();
-
+/** Campos do contrato vindos da aba Cliente (compartilhado por insert/update). */
+function clienteFields(input: Etapa1Input, valorArtista: number) {
   const valorAtracao = Number(input.valor_atracao_cliente) || 0;
   const valorRider = Number(input.valor_rider) || 0;
   const valorCamarim = Number(input.valor_camarim) || 0;
   const valorExtras = Number(input.valor_extras) || 0;
-  const totalCliente = valorAtracao + valorRider + valorCamarim + valorExtras;
+  const margem = valorAtracao - valorArtista;
+  return {
+    event_name: input.event_name,
+    event_date: input.event_date,
+    show_time: input.show_time,
+    show_duration: input.show_duration,
+    passagem_som: input.passagem_som,
+    local_name: input.local_name,
+    local_address: input.local_address,
+    local_city: input.local_city,
+    local_cep: input.local_cep,
+    especificacoes: input.especificacoes,
+    espec_area_interna: !!input.espec_area_interna,
+    espec_area_externa: !!input.espec_area_externa,
+    espec_palco: !!input.espec_palco,
+    espec_trio: !!input.espec_trio,
+    extra_transporte_cidade: !!input.extra_transporte_cidade,
+    extra_translado_local: !!input.extra_translado_local,
+    extra_diaria_alimentacao: !!input.extra_diaria_alimentacao,
+    extra_hospedagem: !!input.extra_hospedagem,
+    tipo_evento: input.tipo_evento ?? null,
+    cortesias: input.cortesias ?? null,
+    data_assinatura: input.data_assinatura ?? null,
+    testemunha_1_nome: input.testemunha_1_nome ?? null,
+    testemunha_1_cpf: input.testemunha_1_cpf ?? null,
+    testemunha_1_email: input.testemunha_1_email ?? null,
+    testemunha_2_nome: input.testemunha_2_nome ?? null,
+    testemunha_2_cpf: input.testemunha_2_cpf ?? null,
+    valor_atracao_cliente: valorAtracao,
+    valor_rider: valorRider,
+    valor_camarim: valorCamarim,
+    valor_extras: valorExtras,
+    valor_margem: margem,
+    valor_servicos: margem + valorRider + valorCamarim + valorExtras,
+    receber_schedule: (input.receber_schedule ?? []).filter((p) => p.vencimento && Number(p.valor) > 0),
+    observacao: input.observacao,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ABA CLIENTE — salvar (rascunho, sem gerar/enviar contrato)
+// ────────────────────────────────────────────────────────────────────────────
+export async function salvarCliente(
+  input: Etapa1Input,
+): Promise<{ ok: true; contractId: string; contractNumber: number; status: string } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
 
   if (!input.client?.name?.trim()) return { error: "Informe o cliente." };
   if (!input.band?.name?.trim()) return { error: "Informe a atração/artista." };
-  if (valorAtracao <= 0) return { error: "Informe o valor da atração cobrado do cliente." };
-
-  const scheduleErr = validarSchedule(input.receber_schedule ?? [], totalCliente, "recebimento do cliente");
-  if (scheduleErr) return { error: scheduleErr };
-
-  // Idempotência (mesmo mecanismo do fluxo antigo).
-  const idemKey = input.idempotency_key?.trim() || null;
-  if (idemKey) {
-    const { data: existing } = await db
-      .from("case_contracts")
-      .select("id, contract_number, status, sign_url")
-      .eq("idempotency_key", idemKey)
-      .maybeSingle();
-    if (existing) {
-      return {
-        ok: true,
-        contractId: existing.id as string,
-        contractNumber: existing.contract_number as number,
-        status: existing.status as string,
-        signUrl: (existing.sign_url as string | null) ?? undefined,
-      };
-    }
-  }
+  if ((Number(input.valor_atracao_cliente) || 0) <= 0) return { error: "Informe o valor da atração cobrado do cliente." };
 
   let clientId: string;
   let bandId: string;
@@ -82,154 +94,138 @@ export async function criarEtapa1(
   await ensureOmieRegistration(db, "client", clientId);
   await ensureOmieRegistration(db, "band", bandId);
 
-  // valor_artista fica 0 (provisório) até a Etapa 2; os títulos NÃO são gerados aqui.
-  const { data: contract, error: contractErr } = await db
+  if (input.contract_id) {
+    // Edição — preserva o valor do artista já informado na aba Atração.
+    const { data: cur } = await db.from("case_contracts").select("valor_artista, status").eq("id", input.contract_id).single();
+    const valorArtista = Number(cur?.valor_artista) || 0;
+    const { error } = await db
+      .from("case_contracts")
+      .update({ client_id: clientId, band_id: bandId, ...clienteFields(input, valorArtista) })
+      .eq("id", input.contract_id);
+    if (error) return { error: `Falha ao salvar: ${error.message}` };
+    const { data: c } = await db.from("case_contracts").select("contract_number, status").eq("id", input.contract_id).single();
+    revalidatePath(`/case/contratos/${input.contract_id}`);
+    return { ok: true, contractId: input.contract_id, contractNumber: Number(c?.contract_number), status: String(c?.status) };
+  }
+
+  const { data: contract, error } = await db
     .from("case_contracts")
     .insert({
       company_id: CASE_COMPANY_ID,
       client_id: clientId,
       band_id: bandId,
-      event_name: input.event_name,
-      event_date: input.event_date,
-      show_time: input.show_time,
-      show_duration: input.show_duration,
-      passagem_som: input.passagem_som,
-      local_name: input.local_name,
-      local_address: input.local_address,
-      local_city: input.local_city,
-      local_cep: input.local_cep,
-      especificacoes: input.especificacoes,
-      espec_area_interna: !!input.espec_area_interna,
-      espec_area_externa: !!input.espec_area_externa,
-      espec_palco: !!input.espec_palco,
-      espec_trio: !!input.espec_trio,
-      extra_transporte_cidade: !!input.extra_transporte_cidade,
-      extra_translado_local: !!input.extra_translado_local,
-      extra_diaria_alimentacao: !!input.extra_diaria_alimentacao,
-      extra_hospedagem: !!input.extra_hospedagem,
-      tipo_evento: input.tipo_evento ?? null,
-      cortesias: input.cortesias ?? null,
-      data_assinatura: input.data_assinatura ?? null,
-      testemunha_1_nome: input.testemunha_1_nome ?? null,
-      testemunha_1_cpf: input.testemunha_1_cpf ?? null,
-      testemunha_2_nome: input.testemunha_2_nome ?? null,
-      testemunha_2_cpf: input.testemunha_2_cpf ?? null,
       valor_artista: 0,
-      valor_atracao_cliente: valorAtracao,
-      valor_rider: valorRider,
-      valor_camarim: valorCamarim,
-      valor_extras: valorExtras,
       valor_custodia: 0,
-      valor_margem: valorAtracao,
-      valor_servicos: totalCliente,
-      receber_schedule: input.receber_schedule,
-      observacao: input.observacao,
       status: "rascunho",
-      idempotency_key: idemKey,
       created_by: ctx.id,
+      ...clienteFields(input, 0),
     })
     .select("id, contract_number")
     .single();
-
-  if (contractErr || !contract) {
-    if (idemKey && contractErr?.code === "23505") {
-      const { data: existing } = await db
-        .from("case_contracts")
-        .select("id, contract_number, status, sign_url")
-        .eq("idempotency_key", idemKey)
-        .maybeSingle();
-      if (existing) {
-        return {
-          ok: true,
-          contractId: existing.id as string,
-          contractNumber: existing.contract_number as number,
-          status: existing.status as string,
-          signUrl: (existing.sign_url as string | null) ?? undefined,
-        };
-      }
-    }
-    return { error: `Falha ao criar contrato: ${contractErr?.message ?? "?"}` };
-  }
+  if (error || !contract) return { error: `Falha ao criar contrato: ${error?.message ?? "?"}` };
 
   await db.from("case_history").insert({
     contract_id: contract.id,
     user_id: ctx.id,
     action: "criado",
-    comment: `Contrato #${contract.contract_number} criado (Etapa 1 — contrato do cliente).`,
+    comment: `Contrato #${contract.contract_number} salvo (rascunho — aba Cliente).`,
   });
+  revalidatePath("/case/contratos");
+  return { ok: true, contractId: contract.id as string, contractNumber: contract.contract_number as number, status: "rascunho" };
+}
 
-  // ── PDF do contrato de venda + envio para assinatura ───────────────────
-  let salePdf: Buffer;
-  try {
-    salePdf = await buildContractPdf({
-      contractNumber: contract.contract_number as number,
-      cliente: {
-        fundo: input.client.name,
-        cnpj: input.client.cnpj_cpf,
-        respLegal: input.client.resp_legal,
-        cpfResp: input.client.cpf_resp_legal,
-        endereco: input.client.endereco,
-        cidadeEstado: input.client.cidade_estado,
-        cep: input.client.cep,
-      },
-      objeto: {
-        artista: input.band.name,
-        dataEvento: input.event_date,
-        horario: input.show_time,
-        passagemSom: input.passagem_som,
-        local: input.local_name,
-        endereco: input.local_address,
-        cidadeEstado: input.local_city,
-        cep: input.local_cep,
-      },
-      especificacoes: {
-        areaInterna: !!input.espec_area_interna,
-        areaExterna: !!input.espec_area_externa,
-        palco: !!input.espec_palco,
-        trio: !!input.espec_trio,
-      },
-      extras: {
-        transporteCidade: !!input.extra_transporte_cidade,
-        transladoLocal: !!input.extra_translado_local,
-        diariaAlimentacao: !!input.extra_diaria_alimentacao,
-        hospedagem: !!input.extra_hospedagem,
-      },
-      tipoEvento: input.tipo_evento ?? null,
-      valorTotal: totalCliente,
-      parcelas: input.receber_schedule,
-      cortesias: input.cortesias ?? null,
-      dataAssinatura: input.data_assinatura ?? null,
-      testemunha1: { nome: input.testemunha_1_nome ?? null, cpf: input.testemunha_1_cpf ?? null },
-      testemunha2: { nome: input.testemunha_2_nome ?? null, cpf: input.testemunha_2_cpf ?? null },
-    });
-  } catch (e) {
-    console.error("[case] falha ao gerar PDF do contrato:", e);
-    return { ok: true, contractId: contract.id as string, contractNumber: contract.contract_number as number, status: "rascunho" };
-  }
+// ────────────────────────────────────────────────────────────────────────────
+// ABA CLIENTE — gerar PDF e enviar para assinatura (cliente + contratado + testemunha)
+// ────────────────────────────────────────────────────────────────────────────
+export async function gerarEnviarContrato(
+  contractId: string,
+): Promise<{ ok: true; status: string; signUrl?: string; warning?: string } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
 
-  const salePath = `${ctx.id}/sale-${contract.id}.pdf`;
-  await db.storage.from(ATTACHMENT_BUCKET).upload(salePath, salePdf, { contentType: "application/pdf", upsert: true });
-  await db.from("case_contracts").update({ sale_contract_path: salePath }).eq("id", contract.id);
+  const { data: c } = await db
+    .from("case_contracts")
+    .select("*, case_clients(name, cnpj_cpf, email, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep), case_bands(name)")
+    .eq("id", contractId)
+    .single();
+  if (!c) return { error: "Contrato não encontrado." };
 
-  const baseOk = {
-    ok: true as const,
-    contractId: contract.id as string,
-    contractNumber: contract.contract_number as number,
+  const client = c.case_clients;
+  const pdfData: ContractPdfData = {
+    contractNumber: c.contract_number,
+    cliente: {
+      fundo: client?.name ?? "",
+      cnpj: client?.cnpj_cpf ?? null,
+      respLegal: client?.resp_legal ?? null,
+      cpfResp: client?.cpf_resp_legal ?? null,
+      endereco: client?.endereco ?? null,
+      cidadeEstado: client?.cidade_estado ?? null,
+      cep: client?.cep ?? null,
+    },
+    objeto: {
+      artista: c.case_bands?.name ?? "",
+      dataEvento: c.event_date,
+      horario: c.show_time,
+      passagemSom: c.passagem_som,
+      local: c.local_name,
+      endereco: c.local_address,
+      cidadeEstado: c.local_city,
+      cep: c.local_cep,
+    },
+    especificacoes: {
+      areaInterna: !!c.espec_area_interna,
+      areaExterna: !!c.espec_area_externa,
+      palco: !!c.espec_palco,
+      trio: !!c.espec_trio,
+    },
+    extras: {
+      transporteCidade: !!c.extra_transporte_cidade,
+      transladoLocal: !!c.extra_translado_local,
+      diariaAlimentacao: !!c.extra_diaria_alimentacao,
+      hospedagem: !!c.extra_hospedagem,
+    },
+    tipoEvento: c.tipo_evento ?? null,
+    valorTotal: Number(c.valor_atracao_cliente) + Number(c.valor_rider) + Number(c.valor_camarim) + Number(c.valor_extras),
+    parcelas: Array.isArray(c.receber_schedule) ? c.receber_schedule : [],
+    cortesias: c.cortesias ?? null,
+    dataAssinatura: c.data_assinatura ?? null,
+    testemunha1: { nome: c.testemunha_1_nome ?? null, cpf: c.testemunha_1_cpf ?? null },
+    testemunha2: { nome: c.testemunha_2_nome ?? null, cpf: c.testemunha_2_cpf ?? null },
   };
 
-  if (!clicksignEnabled()) {
-    return { ...baseOk, status: "rascunho", warning: "Contrato e PDF gerados, mas a assinatura ClickSign não está configurada." };
+  let salePdf: Buffer;
+  try {
+    salePdf = await buildContractPdf(pdfData);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao gerar o PDF do contrato." };
   }
-  if (!input.client.email) {
-    return { ...baseOk, status: "rascunho", warning: "Contrato e PDF gerados, mas o cliente não tem e-mail para envio da assinatura." };
+
+  const salePath = `${ctx.id}/sale-${contractId}.pdf`;
+  await db.storage.from(ATTACHMENT_BUCKET).upload(salePath, salePdf, { contentType: "application/pdf", upsert: true });
+  await db.from("case_contracts").update({ sale_contract_path: salePath }).eq("id", contractId);
+
+  if (!clicksignEnabled()) {
+    return { ok: true, status: c.status as string, warning: "PDF gerado, mas a assinatura ClickSign não está configurada." };
+  }
+  if (!client?.email) {
+    return { ok: true, status: c.status as string, warning: "PDF gerado, mas o cliente não tem e-mail para envio da assinatura." };
+  }
+
+  // Signatários: cliente + contratado (CS Agência) + testemunha 1 (se e-mail).
+  const signers: ClickSignSigner[] = [
+    { name: client.name, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor" },
+    { name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor" },
+  ];
+  if (c.testemunha_1_email?.trim()) {
+    signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness" });
   }
 
   try {
     const sig = await createSignatureRequest(
       salePdf,
-      `Contrato-Case-${contract.contract_number}.pdf`,
-      { name: input.client.name, email: input.client.email, cpf: input.client.cpf_resp_legal ?? input.client.cnpj_cpf },
-      `Contrato de prestação de serviços artísticos — ${input.band.name}. Por favor, assine.`,
+      `Contrato-Case-${c.contract_number}.pdf`,
+      signers,
+      `Contrato de prestação de serviços artísticos — ${c.case_bands?.name ?? ""}. Por favor, assine.`,
     );
     await db
       .from("case_contracts")
@@ -243,22 +239,24 @@ export async function criarEtapa1(
         status: "aguardando_assinatura",
         updated_at: new Date().toISOString(),
       })
-      .eq("id", contract.id);
-    revalidatePath("/case/contratos");
-    return { ...baseOk, status: "aguardando_assinatura", signUrl: sig.signUrl };
+      .eq("id", contractId);
+    await db.from("case_history").insert({
+      contract_id: contractId,
+      user_id: ctx.id,
+      action: "enviado_assinatura",
+      comment: `Enviado para assinatura de ${signers.length} signatário(s).`,
+    });
+    revalidatePath(`/case/contratos/${contractId}`);
+    return { ok: true, status: "aguardando_assinatura", signUrl: sig.signUrl };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao enviar para assinatura.";
-    await db.from("case_history").insert({ contract_id: contract.id, user_id: ctx.id, action: "erro", comment: msg });
-    return { ...baseOk, status: "rascunho", warning: `Contrato salvo, mas houve erro no envio para assinatura: ${msg}` };
+    return { error: e instanceof Error ? e.message : "Falha ao enviar para assinatura." };
   }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// ETAPA 2 — Pagamento ao artista (gera todos os títulos e lança no Omie)
+// ABA ATRAÇÃO — salvar (guarda anexo/valor/parcelas; gera títulos PENDENTES; sem lançar)
 // ────────────────────────────────────────────────────────────────────────────
-export async function concluirEtapa2(
-  input: Etapa2Input,
-): Promise<{ ok: true; status: string } | { error: string }> {
+export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
 
@@ -279,13 +277,19 @@ export async function concluirEtapa2(
   if (cents(valorArtista) > cents(valorAtracao)) {
     return { error: "O valor pago ao artista não pode ser maior que o valor cobrado do cliente pela atração." };
   }
-
   const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (receberSchedule.length === 0) {
-    return { error: "Contrato sem cronograma de recebimento (Etapa 1 incompleta)." };
-  }
+  if (receberSchedule.length === 0) return { error: "Complete o Contrato Cliente (parcelas a receber) antes de salvar a atração." };
+  const totalCliente = valorAtracao + valorRider + valorCamarim + valorExtras;
+  const schedErr = validarSchedule(receberSchedule, totalCliente, "recebimento do cliente");
+  if (schedErr) return { error: schedErr };
   const pagarErr = validarSchedule(input.parcelas_pagar ?? [], valorArtista, "pagamento ao artista");
   if (pagarErr) return { error: pagarErr };
+
+  // Não regenera se algum título já foi lançado no Omie.
+  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contract.id);
+  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
+    return { error: "Já existem títulos lançados no Omie — não é possível reeditar a atração. Use 'Reenviar ao Omie' no Financeiro." };
+  }
 
   const valorMargem = valorAtracao - valorArtista;
   const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
@@ -304,84 +308,79 @@ export async function concluirEtapa2(
 
   await ensureOmieRegistration(db, "band", contract.band_id as string);
 
-  // Gera os títulos só se ainda não existirem (idempotente por contrato).
-  const { data: existing } = await db.from("case_titles").select("id").eq("contract_id", contract.id).limit(1);
-  if (!existing || existing.length === 0) {
-    const titleRows: Array<Record<string, unknown>> = [];
-    const total = (input.parcelas_pagar ?? []).length;
-    (input.parcelas_pagar ?? []).forEach((p, idx) => {
-      const n = idx + 1;
-      titleRows.push({
-        contract_id: contract.id,
-        leg: "pagar_custodia",
-        parcela_numero: n,
-        parcela_total: total,
-        vencimento: p.vencimento,
-        valor: p.valor,
-        codigo_integracao: `case-${contract.id}-pagar_custodia-${n}`,
-        status: "pendente",
-      });
+  // Regenera os títulos como PENDENTES (limpa os antigos, todos pendentes).
+  await db.from("case_titles").delete().eq("contract_id", contract.id);
+  const titleRows: Array<Record<string, unknown>> = [];
+  const totalPagar = (input.parcelas_pagar ?? []).length;
+  (input.parcelas_pagar ?? []).forEach((p, idx) => {
+    const n = idx + 1;
+    titleRows.push({
+      contract_id: contract.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: totalPagar,
+      vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar_custodia-${n}`, status: "pendente",
     });
-
-    const custCents = prorateCents(cents(valorArtista), receberSchedule);
+  });
+  const custCents = prorateCents(cents(valorArtista), receberSchedule);
+  receberSchedule.forEach((p, idx) => {
+    const vc = custCents[idx];
+    if (vc <= 0) return;
+    const n = idx + 1;
+    titleRows.push({
+      contract_id: contract.id, leg: "receber_custodia", parcela_numero: n, parcela_total: receberSchedule.length,
+      vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_custodia-${n}`, status: "pendente",
+    });
+  });
+  const servicoItens = [
+    { item: "margem", valor: valorMargem },
+    { item: "rider", valor: valorRider },
+    { item: "camarim", valor: valorCamarim },
+    { item: "extras", valor: valorExtras },
+  ];
+  for (const s of servicoItens) {
+    const itemCents = cents(s.valor);
+    if (itemCents <= 0) continue;
+    const vals = prorateCents(itemCents, receberSchedule);
     receberSchedule.forEach((p, idx) => {
-      const vc = custCents[idx];
+      const vc = vals[idx];
       if (vc <= 0) return;
       const n = idx + 1;
       titleRows.push({
-        contract_id: contract.id,
-        leg: "receber_custodia",
-        parcela_numero: n,
-        parcela_total: receberSchedule.length,
-        vencimento: p.vencimento,
-        valor: vc / 100,
-        codigo_integracao: `case-${contract.id}-receber_custodia-${n}`,
-        status: "pendente",
+        contract_id: contract.id, leg: "receber_servicos", title_item: s.item, parcela_numero: n, parcela_total: receberSchedule.length,
+        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`, status: "pendente",
       });
     });
-
-    const servicoItens = [
-      { item: "margem", valor: valorMargem },
-      { item: "rider", valor: valorRider },
-      { item: "camarim", valor: valorCamarim },
-      { item: "extras", valor: valorExtras },
-    ];
-    for (const s of servicoItens) {
-      const itemCents = cents(s.valor);
-      if (itemCents <= 0) continue;
-      const vals = prorateCents(itemCents, receberSchedule);
-      receberSchedule.forEach((p, idx) => {
-        const vc = vals[idx];
-        if (vc <= 0) return;
-        const n = idx + 1;
-        titleRows.push({
-          contract_id: contract.id,
-          leg: "receber_servicos",
-          title_item: s.item,
-          parcela_numero: n,
-          parcela_total: receberSchedule.length,
-          vencimento: p.vencimento,
-          valor: vc / 100,
-          codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`,
-          status: "pendente",
-        });
-      });
-    }
-
-    const { error: titlesErr } = await db.from("case_titles").insert(titleRows);
-    if (titlesErr) return { error: `Falha ao gerar os títulos: ${titlesErr.message}` };
+  }
+  if (titleRows.length > 0) {
+    const { error } = await db.from("case_titles").insert(titleRows);
+    if (error) return { error: `Falha ao gerar os títulos: ${error.message}` };
   }
 
   await db.from("case_history").insert({
-    contract_id: contract.id,
-    user_id: ctx.id,
-    action: "etapa2",
-    comment: `Etapa 2 concluída — pagamento ao artista (R$ ${valorArtista.toFixed(2)}). Lançando no Omie.`,
+    contract_id: contract.id, user_id: ctx.id, action: "etapa2",
+    comment: `Atração salva — pagamento ao artista R$ ${valorArtista.toFixed(2)} (títulos pendentes).`,
   });
-
-  const res = await launchContractToOmie(db, contract.id as string);
-  revalidatePath("/case/contratos");
   revalidatePath(`/case/contratos/${contract.id}`);
+  return { ok: true };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// FINANCEIRO — lançar no Omie (gate: atração validada + assinado por todos)
+// ────────────────────────────────────────────────────────────────────────────
+export async function lancarNoOmie(contractId: string): Promise<{ ok: true; status: string } | { error: string }> {
+  await requireCaseUser();
+  const db = await getDb();
+
+  const { data: c } = await db
+    .from("case_contracts")
+    .select("id, valor_artista, signed_at")
+    .eq("id", contractId)
+    .single();
+  if (!c) return { error: "Contrato não encontrado." };
+  if (Number(c.valor_artista) <= 0) return { error: "Conclua a aba Contrato Atração antes de lançar." };
+  if (!c.signed_at) return { error: "O contrato precisa estar assinado por todos (cliente, contratado e testemunha) antes de lançar no Omie." };
+
+  const res = await launchContractToOmie(db, contractId);
+  revalidatePath(`/case/contratos/${contractId}`);
+  revalidatePath("/case/contratos");
   if ("error" in res) return { error: res.error };
   return { ok: true, status: res.status };
 }

@@ -8,10 +8,12 @@ export function clicksignEnabled(): boolean {
   return Boolean(process.env.CLICKSIGN_API_TOKEN);
 }
 
-interface ClickSignSigner {
+export interface ClickSignSigner {
   name: string;
   email: string;
   cpf: string | null;
+  /** Papel no ClickSign: "contractor" (parte), "witness" (testemunha)… */
+  signAs?: string;
 }
 
 export interface SignatureRequest {
@@ -46,15 +48,20 @@ async function csFetch(path: string, body: unknown): Promise<Record<string, unkn
 }
 
 /**
- * Cria o documento no ClickSign, adiciona o signatário (cliente) e dispara o
- * pedido de assinatura por e-mail. Retorna as chaves e a URL de assinatura.
+ * Cria o documento no ClickSign, adiciona TODOS os signatários (o 1º é o
+ * cliente, cujas chaves são retornadas), e dispara os e-mails de assinatura.
+ * Com `auto_close: true`, o documento só fecha (evento no webhook) quando todos
+ * assinam. Retorna as chaves do 1º signatário (cliente) para reenvio/URL.
  */
 export async function createSignatureRequest(
   pdf: Buffer,
   fileName: string,
-  signer: ClickSignSigner,
+  signers: ClickSignSigner[],
   message: string,
 ): Promise<SignatureRequest> {
+  const validSigners = signers.filter((s) => s.email?.trim());
+  if (validSigners.length === 0) throw new Error("Nenhum signatário com e-mail para o contrato.");
+
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 30);
 
@@ -71,44 +78,46 @@ export async function createSignatureRequest(
   const documentKey = String((docRes.document as Record<string, unknown> | undefined)?.key ?? "");
   if (!documentKey) throw new Error("ClickSign não retornou a chave do documento.");
 
-  // 2) Signatário
-  const signerRes = await csFetch("/api/v1/signers", {
-    signer: {
-      email: signer.email,
-      name: signer.name,
-      documentation: (signer.cpf ?? "").replace(/\D/g, "") || undefined,
-      auths: ["email"],
-      delivery: "email",
-    },
-  });
-  const signerKey = String((signerRes.signer as Record<string, unknown> | undefined)?.key ?? "");
-  if (!signerKey) throw new Error("ClickSign não retornou a chave do signatário.");
+  let first: { signerKey: string; requestKey: string } | null = null;
 
-  // 3) Vincula signatário ao documento e dispara o pedido de assinatura
-  const listRes = await csFetch("/api/v1/lists", {
-    list: {
-      document_key: documentKey,
-      signer_key: signerKey,
-      sign_as: "contractor",
-      message,
-    },
-  });
-  const requestKey = String((listRes.list as Record<string, unknown> | undefined)?.request_signature_key ?? "");
-
-  // 4) Dispara o e-mail de solicitação de assinatura. Criar a lista apenas
-  // vincula o signatário ao documento; o e-mail só é enviado por este endpoint.
-  if (requestKey) {
-    await csFetch("/api/v1/notifications", {
-      request_signature_key: requestKey,
-      message,
+  for (const signer of validSigners) {
+    // 2) Signatário
+    const signerRes = await csFetch("/api/v1/signers", {
+      signer: {
+        email: signer.email,
+        name: signer.name,
+        documentation: (signer.cpf ?? "").replace(/\D/g, "") || undefined,
+        auths: ["email"],
+        delivery: "email",
+      },
     });
+    const signerKey = String((signerRes.signer as Record<string, unknown> | undefined)?.key ?? "");
+    if (!signerKey) throw new Error("ClickSign não retornou a chave do signatário.");
+
+    // 3) Vincula signatário ao documento
+    const listRes = await csFetch("/api/v1/lists", {
+      list: {
+        document_key: documentKey,
+        signer_key: signerKey,
+        sign_as: signer.signAs ?? "contractor",
+        message,
+      },
+    });
+    const requestKey = String((listRes.list as Record<string, unknown> | undefined)?.request_signature_key ?? "");
+
+    // 4) Dispara o e-mail de solicitação para este signatário.
+    if (requestKey) {
+      await csFetch("/api/v1/notifications", { request_signature_key: requestKey, message });
+    }
+    if (!first) first = { signerKey, requestKey };
   }
 
+  const f = first!;
   return {
     documentKey,
-    signerKey,
-    requestKey,
-    signUrl: requestKey ? `${BASE_URL}/sign/${requestKey}` : "",
+    signerKey: f.signerKey,
+    requestKey: f.requestKey,
+    signUrl: f.requestKey ? `${BASE_URL}/sign/${f.requestKey}` : "",
   };
 }
 

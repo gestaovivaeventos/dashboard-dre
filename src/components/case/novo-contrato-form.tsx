@@ -4,8 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2 } from "lucide-react";
 
-import { criarEtapa1 } from "@/lib/case/actions/stages";
-import type { CaseBandRow, CaseClientRow, CaseParcelaInput } from "@/lib/case/types";
+import { salvarCliente, gerarEnviarContrato } from "@/lib/case/actions/stages";
+import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -122,6 +122,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [dataAssinatura, setDataAssinatura] = useState("");
   const [test1Nome, setTest1Nome] = useState("");
   const [test1Cpf, setTest1Cpf] = useState("");
+  const [test1Email, setTest1Email] = useState("");
   const [test2Nome, setTest2Nome] = useState("");
   const [test2Cpf, setTest2Cpf] = useState("");
 
@@ -148,17 +149,16 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const valExtras = parseBRL(vExtras);
   const totalCliente = valAtracao + valRider + valCamarim + valExtras;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (submittingRef.current) return;
-    setError(null);
+  function validar(): string | null {
+    if (clientMode === "existing" && !clientId) return "Selecione o cliente.";
+    if (clientMode === "new" && !cName.trim()) return "Informe o nome do cliente.";
+    if (bandMode === "existing" && !bandId) return "Selecione a atração/artista.";
+    if (bandMode === "new" && !bName.trim()) return "Informe o nome da atração/artista.";
+    if (valAtracao <= 0) return "Informe o valor da atração cobrado do cliente.";
+    return null;
+  }
 
-    if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
-    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
-    if (bandMode === "existing" && !bandId) return setError("Selecione a atração/artista.");
-    if (bandMode === "new" && !bName.trim()) return setError("Informe o nome da atração/artista.");
-    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente.");
-
+  function buildInput(): Etapa1Input {
     const receber_schedule: CaseParcelaInput[] = receberCliente
       .filter((r) => r.vencimento && parseBRL(r.valorStr) > 0)
       .map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
@@ -166,7 +166,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     const selectedClient = clients.find((c) => c.id === clientId);
     const selectedBand = bands.find((b) => b.id === bandId);
 
-    const input = {
+    return {
       idempotency_key: idempotencyKey,
       client:
         clientMode === "existing" && selectedClient
@@ -212,6 +212,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       cortesias: cortesias.trim() || null,
       data_assinatura: dataAssinatura || null,
       testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null,
+      testemunha_1_email: test1Email.trim() || null,
       testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
       valor_rider: valRider,
@@ -220,30 +221,43 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       observacao: observacao.trim() || null,
       receber_schedule,
     };
+  }
+
+  async function handleSalvar(enviar: boolean) {
+    if (submittingRef.current) return;
+    setError(null);
+    const v = validar();
+    if (v) return setError(v);
 
     submittingRef.current = true;
     setSubmitting(true);
-    let res;
     try {
-      res = await criarEtapa1(input);
+      const res = await salvarCliente(buildInput());
+      if ("error" in res) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        return setError(res.error);
+      }
+      if (enviar) {
+        const g = await gerarEnviarContrato(res.contractId);
+        if ("error" in g) {
+          // Contrato foi salvo; só o envio falhou.
+          router.push(`/case/contratos/${res.contractId}`);
+          return;
+        }
+        if (g.warning) alert(g.warning);
+      }
+      router.push(`/case/contratos/${res.contractId}`);
+      router.refresh();
     } catch (err) {
       submittingRef.current = false;
       setSubmitting(false);
-      return setError(err instanceof Error ? err.message : "Falha ao criar o contrato.");
+      setError(err instanceof Error ? err.message : "Falha ao salvar o contrato.");
     }
-    if ("error" in res) {
-      submittingRef.current = false;
-      setSubmitting(false);
-      return setError(res.error);
-    }
-    if (res.warning) alert(res.warning);
-    // Segue para o workspace do contrato (Etapa 2 e 3).
-    router.push(`/case/contratos/${res.contractId}`);
-    router.refresh();
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={(e) => { e.preventDefault(); handleSalvar(false); }} className="space-y-5">
       {/* Cliente */}
       <div className={SECTION_CLS}>
         <div className="flex items-center justify-between">
@@ -353,9 +367,11 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
           <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
+          <Field label="Testemunha 1 — e-mail (para assinar)" value={test1Email} onChange={setTest1Email} />
           <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
           <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
         </div>
+        <p className="text-xs text-ink-muted">A assinatura é feita por cliente, contratado (CS Agência) e a testemunha 1 (por isso o e-mail dela).</p>
       </div>
 
       {/* Valores cobrados do cliente */}
@@ -387,10 +403,13 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
       {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-300">{error}</div>}
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <button type="button" onClick={() => router.push("/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
-        <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Gerar contrato e enviar para assinatura
+        <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:text-amber-400 dark:hover:bg-amber-950/30">
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar rascunho
+        </button>
+        <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Gerar e enviar para assinatura
         </button>
       </div>
     </form>

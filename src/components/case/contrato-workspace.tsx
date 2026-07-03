@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckCircle2, Circle, RefreshCw } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
-import { concluirEtapa2 } from "@/lib/case/actions/stages";
+import { salvarAtracao, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { getContractAttachmentUrl, getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
@@ -99,7 +99,7 @@ export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
           <TabButton active={tab === "atracao"} done={etapa2Done} label="Contrato Atração" onClick={() => setTab("atracao")} />
         </div>
         <div className="pt-4">
-          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} /> : <AtracaoTab detail={detail} done={etapa2Done} onChange={refresh} />}
+          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} onChange={refresh} />}
         </div>
       </div>
 
@@ -110,7 +110,7 @@ export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
 }
 
 // ── ABA: Contrato Cliente ────────────────────────────────────────────────────
-function ClienteTab({ detail, signed }: { detail: ContractDetail; signed: boolean }) {
+function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const sent = Boolean(detail.sent_for_signature_at);
 
@@ -124,6 +124,14 @@ function ClienteTab({ detail, signed }: { detail: ContractDetail; signed: boolea
     const res = await resendSignature(detail.id);
     setBusy(false);
     alert("error" in res ? res.error : "Assinatura reenviada ao cliente.");
+  }
+  async function gerarEnviar() {
+    setBusy(true);
+    const res = await gerarEnviarContrato(detail.id);
+    setBusy(false);
+    if ("error" in res) return alert(res.error);
+    if (res.warning) alert(res.warning);
+    onChange();
   }
 
   return (
@@ -145,6 +153,11 @@ function ClienteTab({ detail, signed }: { detail: ContractDetail; signed: boolea
       </div>
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
+        {!signed && (
+          <button onClick={gerarEnviar} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSignature className="h-4 w-4" />} {sent ? "Gerar e reenviar" : "Gerar e enviar para assinatura"}
+          </button>
+        )}
         {detail.sale_contract_path && (
           <button onClick={openSale} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2">
             <FileSignature className="h-4 w-4" /> Ver contrato (PDF)
@@ -164,13 +177,19 @@ function ClienteTab({ detail, signed }: { detail: ContractDetail; signed: boolea
 }
 
 // ── ABA: Contrato Atração (pagamento ao artista) ─────────────────────────────
-function AtracaoTab({ detail, done, onChange }: { detail: ContractDetail; done: boolean; onChange: () => void }) {
+function AtracaoTab({ detail, onChange }: { detail: ContractDetail; onChange: () => void }) {
+  const launched = detail.titles.some((t) => t.status === "lancado");
+  const pagarTitles = detail.titles.filter((t) => t.leg === "pagar_custodia").sort((a, b) => a.parcela_numero - b.parcela_numero);
   const [attachmentPath, setAttachmentPath] = useState<string | null>(detail.attachment_path);
   const [attachmentName, setAttachmentName] = useState<string>(detail.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
-  const [vArtista, setVArtista] = useState(done ? brlFromNumber(detail.valor_artista) : "");
-  const [parcelas, setParcelas] = useState<ParcelaRow[]>([{ vencimento: "", valorStr: "" }]);
+  const [vArtista, setVArtista] = useState(detail.valor_artista > 0 ? brlFromNumber(detail.valor_artista) : "");
+  const [parcelas, setParcelas] = useState<ParcelaRow[]>(
+    pagarTitles.length > 0
+      ? pagarTitles.map((t) => ({ vencimento: t.vencimento, valorStr: brlFromNumber(t.valor) }))
+      : [{ vencimento: "", valorStr: "" }],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -225,7 +244,7 @@ function AtracaoTab({ detail, done, onChange }: { detail: ContractDetail; done: 
     if (valArtista <= 0) return setErr("Informe o valor pago ao artista.");
     if (!somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
     setSubmitting(true);
-    const res = await concluirEtapa2({
+    const res = await salvarAtracao({
       contract_id: detail.id,
       valor_artista: valArtista,
       parcelas_pagar: parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })),
@@ -233,16 +252,16 @@ function AtracaoTab({ detail, done, onChange }: { detail: ContractDetail; done: 
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
-    setMsg("Contrato da atração concluído — títulos gerados e lançados no Omie.");
+    setMsg("Contrato da atração salvo — títulos gerados como pendentes. Lance no Omie pelo Financeiro quando o contrato estiver assinado.");
     onChange();
   }
 
-  if (done) {
+  if (launched) {
     return (
       <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink-primary">Contrato da atração / pagamento ao artista</h2>
-          <StatusPill tone="ok">Concluído</StatusPill>
+          <StatusPill tone="ok">Lançado no Omie</StatusPill>
         </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
           <Info label="Pago ao artista" value={brl(detail.valor_artista)} />
@@ -316,7 +335,7 @@ function AtracaoTab({ detail, done, onChange }: { detail: ContractDetail; done: 
 
       <div className="flex justify-end">
         <button onClick={submit} disabled={submitting || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Concluir e lançar no Omie
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar contrato da atração
         </button>
       </div>
     </section>
@@ -336,7 +355,23 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
   const titles = detail.titles;
   const receber = titles.filter((t) => t.leg !== "pagar_custodia");
   const pagar = titles.filter((t) => t.leg === "pagar_custodia");
+  const atracaoOk = detail.valor_artista > 0;
+  const temPendentes = titles.some((t) => t.status !== "lancado");
+  const temLancados = titles.some((t) => t.status === "lancado" || t.status === "erro");
+  const canLaunch = atracaoOk && signed;
+  const launchHint = !atracaoOk
+    ? "Salve o Contrato Atração primeiro"
+    : !signed
+      ? "Aguardando assinatura de todos (cliente, contratado e testemunha)"
+      : "";
 
+  async function lancar() {
+    setBusy(true);
+    const res = await lancarNoOmie(detail.id);
+    setBusy(false);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
   async function resync() {
     setBusy(true);
     const res = await resyncContract(detail.id);
@@ -347,11 +382,21 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {signed ? <StatusPill tone="ok">Assinado</StatusPill> : <StatusPill tone="muted">Não assinado</StatusPill>}
-          {titles.length > 0 && (
+          {titles.length > 0 && temPendentes && (
+            <button
+              onClick={lancar}
+              disabled={busy || !canLaunch}
+              title={launchHint}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Lançar no Omie
+            </button>
+          )}
+          {temLancados && (
             <button onClick={resync} disabled={busy} className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
               <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} /> Reenviar ao Omie
             </button>
@@ -359,8 +404,12 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
         </div>
       </div>
 
+      {titles.length > 0 && temPendentes && !canLaunch && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">Para lançar no Omie: {launchHint.toLowerCase()}.</p>
+      )}
+
       {titles.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — conclua o Contrato Atração para gerar os títulos.</p>
+        <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — salve o Contrato Atração para gerar os títulos (ficam pendentes até lançar).</p>
       ) : (
         <div className="space-y-4">
           <TitlesTable title="Contas a receber (cliente)" rows={receber} />
