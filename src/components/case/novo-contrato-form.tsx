@@ -244,12 +244,6 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-ink-secondary">
-        <strong className="text-ink-primary">Etapa 1 — Contrato com o cliente.</strong> Preencha os dados do evento e os
-        valores cobrados. Ao salvar, geramos o contrato e enviamos para assinatura. O pagamento ao artista é a Etapa 2,
-        dentro do contrato.
-      </div>
-
       {/* Cliente */}
       <div className={SECTION_CLS}>
         <div className="flex items-center justify-between">
