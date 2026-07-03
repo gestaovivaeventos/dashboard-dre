@@ -2,9 +2,11 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle } from "lucide-react";
 
-import { salvarCliente, gerarEnviarContrato } from "@/lib/case/actions/stages";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
+import { extractArtistContract } from "@/lib/case/actions/ocr";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 
 const INPUT_CLS =
@@ -12,16 +14,16 @@ const INPUT_CLS =
 const LABEL_CLS = "block text-xs font-medium text-ink-secondary mb-1";
 const SECTION_CLS = "rounded-lg border border-border bg-surface-1 p-4 space-y-3";
 
+const ATTACHMENT_BUCKET = "case-attachments";
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function formatBRL(digits: string): string {
   const clean = digits.replace(/\D/g, "");
-  if (!clean) return "";
-  return fmt.format(parseInt(clean, 10) / 100);
+  return clean ? fmt.format(parseInt(clean, 10) / 100) : "";
 }
 function parseBRL(masked: string): number {
-  const clean = masked.replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, "");
-  const n = parseFloat(clean);
+  const n = parseFloat(masked.replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 const brlFromNumber = (n: number) => (n > 0 ? formatBRL(String(Math.round(n * 100))) : "");
@@ -33,7 +35,8 @@ interface ParcelaRow {
 }
 const emptyParcela = (): ParcelaRow => ({ vencimento: "", valorStr: "" });
 
-function ParcelasEditor({ rows, onChange, total, onFillSingle }: {
+function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
+  label: string;
   rows: ParcelaRow[];
   onChange: (rows: ParcelaRow[]) => void;
   total: number;
@@ -42,11 +45,10 @@ function ParcelasEditor({ rows, onChange, total, onFillSingle }: {
   const soma = rows.reduce((acc, r) => acc + parseBRL(r.valorStr), 0);
   const diff = Math.round((soma - total) * 100) / 100;
   const ok = Math.abs(diff) < 0.005 && total > 0;
-
   return (
     <div className="rounded-md border border-border/70 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-ink-secondary">Parcelas a receber do cliente</span>
+        <span className="text-xs font-semibold text-ink-secondary">{label}</span>
         <span className="text-xs text-ink-muted">Total: <span className="tabular-nums">R$ {fmt.format(total)}</span></span>
       </div>
       <div className="space-y-2">
@@ -74,6 +76,8 @@ function ParcelasEditor({ rows, onChange, total, onFillSingle }: {
 
 export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[]; bands: CaseBandRow[] }) {
   const router = useRouter();
+  const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
+  const [bandsList] = useState<CaseBandRow[]>(bands);
 
   // Cliente
   const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
@@ -87,14 +91,6 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [cEndereco, setCEndereco] = useState("");
   const [cCidadeEstado, setCCidadeEstado] = useState("");
   const [cCep, setCCep] = useState("");
-
-  // Atração / artista (identidade — o pagamento vem na Etapa 2)
-  const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
-  const [bandId, setBandId] = useState<string>(bands[0]?.id ?? "");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
 
   // Evento / objeto
   const [eventName, setEventName] = useState("");
@@ -132,42 +128,82 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [vCamarim, setVCamarim] = useState("");
   const [vExtras, setVExtras] = useState("");
   const [observacao, setObservacao] = useState("");
-
-  // Parcelas a receber do cliente (agenda única)
   const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>([emptyParcela()]);
+
+  // Aba Atração — identidade + anexo/OCR + pagamento
+  const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
+  const [bandId, setBandId] = useState<string>(bands[0]?.id ?? "");
+  const [bName, setBName] = useState("");
+  const [bDoc, setBDoc] = useState("");
+  const [bEmail, setBEmail] = useState("");
+  const [bPhone, setBPhone] = useState("");
+  const [bBanco, setBBanco] = useState("");
+  const [bAgencia, setBAgencia] = useState("");
+  const [bConta, setBConta] = useState("");
+  const [bTitular, setBTitular] = useState("");
+  const [bDocTitular, setBDocTitular] = useState("");
+  const [bPix, setBPix] = useState("");
+  const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
+  const [attachmentName, setAttachmentName] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  const [vArtista, setVArtista] = useState("");
+  const [pagarArtista, setPagarArtista] = useState<ParcelaRow[]>([emptyParcela()]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
-  const [idempotencyKey] = useState(() =>
-    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-  );
 
   const valAtracao = parseBRL(vAtracao);
   const valRider = parseBRL(vRider);
   const valCamarim = parseBRL(vCamarim);
   const valExtras = parseBRL(vExtras);
   const totalCliente = valAtracao + valRider + valCamarim + valExtras;
+  const valArtista = parseBRL(vArtista);
+  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!bName.trim());
 
-  function validar(): string | null {
-    if (clientMode === "existing" && !clientId) return "Selecione o cliente.";
-    if (clientMode === "new" && !cName.trim()) return "Informe o nome do cliente.";
-    if (bandMode === "existing" && !bandId) return "Selecione a atração/artista.";
-    if (bandMode === "new" && !bName.trim()) return "Informe o nome da atração/artista.";
-    if (valAtracao <= 0) return "Informe o valor da atração cobrado do cliente.";
-    return null;
+  async function handleUpload(file: File) {
+    setError(null);
+    if (file.size > MAX_ATTACHMENT_SIZE) return setError("Arquivo maior que 10MB.");
+    setUploading(true);
+    try {
+      const supabase = createSupabaseClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return setError("Sessão expirada.");
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+      const objectPath = `${user.id}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(objectPath, file, { contentType: file.type, upsert: false });
+      if (error) return setError(`Falha no upload: ${error.message}`);
+      setAttachmentPath(objectPath);
+      setAttachmentName(file.name);
+    } finally {
+      setUploading(false);
+    }
   }
 
-  function buildInput(): Etapa1Input {
+  async function handleOcr() {
+    if (!attachmentPath) return setError("Suba o contrato do artista primeiro.");
+    setError(null);
+    setOcrMsg(null);
+    setOcrLoading(true);
+    const res = await extractArtistContract(attachmentPath);
+    setOcrLoading(false);
+    if ("error" in res) return setError(res.error);
+    const d = res.data;
+    if (d.bandName && bandMode === "new") { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
+    if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
+    const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
+    if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    setOcrMsg("Contrato lido — revise os dados da atração.");
+  }
+
+  function buildClientInput(): Etapa1Input {
     const receber_schedule: CaseParcelaInput[] = receberCliente
       .filter((r) => r.vencimento && parseBRL(r.valorStr) > 0)
       .map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
-
     const selectedClient = clients.find((c) => c.id === clientId);
-    const selectedBand = bands.find((b) => b.id === bandId);
-
     return {
-      idempotency_key: idempotencyKey,
       client:
         clientMode === "existing" && selectedClient
           ? {
@@ -181,19 +217,6 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
               email: cEmail.trim() || null, phone: cPhone.trim() || null, resp_legal: cRespLegal.trim() || null,
               cpf_resp_legal: cCpfResp.trim() || null, endereco: cEndereco.trim() || null,
               cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
-            },
-      band:
-        bandMode === "existing" && selectedBand
-          ? {
-              id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf,
-              pessoa_fisica: selectedBand.pessoa_fisica, email: selectedBand.email, phone: selectedBand.phone,
-              banco: selectedBand.banco, agencia: selectedBand.agencia, conta_corrente: selectedBand.conta_corrente,
-              titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix,
-            }
-          : {
-              name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: onlyDigits(bDoc).length === 11,
-              email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: null, agencia: null,
-              conta_corrente: null, titular_banco: null, doc_titular: null, chave_pix: null,
             },
       event_name: eventName.trim() || null,
       event_date: eventDate || null,
@@ -211,8 +234,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       tipo_evento: tipoEvento || null,
       cortesias: cortesias.trim() || null,
       data_assinatura: dataAssinatura || null,
-      testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null,
-      testemunha_1_email: test1Email.trim() || null,
+      testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null, testemunha_1_email: test1Email.trim() || null,
       testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
       valor_rider: valRider,
@@ -223,31 +245,48 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     };
   }
 
+  function buildBandInput() {
+    const selectedBand = bandsList.find((b) => b.id === bandId);
+    return bandMode === "existing" && selectedBand
+      ? {
+          id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
+          email: selectedBand.email, phone: selectedBand.phone, banco: selectedBand.banco, agencia: selectedBand.agencia,
+          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix,
+        }
+      : {
+          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: onlyDigits(bDoc).length === 11,
+          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
+          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
+        };
+  }
+
   async function handleSalvar(enviar: boolean) {
     if (submittingRef.current) return;
     setError(null);
-    const v = validar();
-    if (v) return setError(v);
+    if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
+    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
+    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente (aba Contrato Cliente).");
+    if (enviar && !bandFilled) return setError("Selecione a atração/artista (aba Contrato Atração) antes de gerar o contrato.");
 
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      const res = await salvarCliente(buildInput());
-      if ("error" in res) {
-        submittingRef.current = false;
-        setSubmitting(false);
-        return setError(res.error);
+      const res = await salvarCliente(buildClientInput());
+      if ("error" in res) { submittingRef.current = false; setSubmitting(false); return setError(res.error); }
+      const contractId = res.contractId;
+
+      if (bandFilled) {
+        const pagar = pagarArtista.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) }));
+        const atr = await salvarAtracao({ contract_id: contractId, band: buildBandInput(), attachment_path: attachmentPath, valor_artista: valArtista > 0 ? valArtista : undefined, parcelas_pagar: valArtista > 0 ? pagar : undefined });
+        if ("error" in atr) { setError(atr.error); router.push(`/case/contratos/${contractId}`); return; }
       }
+
       if (enviar) {
-        const g = await gerarEnviarContrato(res.contractId);
-        if ("error" in g) {
-          // Contrato foi salvo; só o envio falhou.
-          router.push(`/case/contratos/${res.contractId}`);
-          return;
-        }
+        const g = await gerarEnviarContrato(contractId);
+        if ("error" in g) { router.push(`/case/contratos/${contractId}`); return; }
         if (g.warning) alert(g.warning);
       }
-      router.push(`/case/contratos/${res.contractId}`);
+      router.push(`/case/contratos/${contractId}`);
       router.refresh();
     } catch (err) {
       submittingRef.current = false;
@@ -258,148 +297,171 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); handleSalvar(false); }} className="space-y-5">
-      {/* Cliente */}
-      <div className={SECTION_CLS}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-primary">Cliente (contratante)</h2>
-          <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
-        </div>
-        {clientMode === "existing" ? (
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={INPUT_CLS}>
-            {clients.map((c) => (<option key={c.id} value={c.id}>{c.name} {c.cnpj_cpf ? `— ${c.cnpj_cpf}` : ""}</option>))}
-          </select>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
-            <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
-            <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
-            <Field label="Telefone" value={cPhone} onChange={setCPhone} />
-            <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
-            <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
-            <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
-            <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
-            <Field label="CEP" value={cCep} onChange={setCCep} />
-          </div>
-        )}
+      {/* Abas */}
+      <div className="flex gap-1 border-b border-border">
+        <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
+        <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
       </div>
 
-      {/* Atração / artista (identidade) */}
-      <div className={SECTION_CLS}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-primary">Atração / Artista</h2>
-          <ModeToggle mode={bandMode} setMode={setBandMode} hasExisting={bands.length > 0} />
-        </div>
-        {bandMode === "existing" ? (
-          <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
-            {bands.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
-          </select>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Nome / Razão social" value={bName} onChange={setBName} />
-            <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
-            <Field label="E-mail" value={bEmail} onChange={setBEmail} />
-            <Field label="Telefone" value={bPhone} onChange={setBPhone} />
+      {tab === "cliente" ? (
+        <>
+          <div className={SECTION_CLS}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-ink-primary">Cliente (contratante)</h2>
+              <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
+            </div>
+            {clientMode === "existing" ? (
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={INPUT_CLS}>
+                {clients.map((c) => (<option key={c.id} value={c.id}>{c.name} {c.cnpj_cpf ? `— ${c.cnpj_cpf}` : ""}</option>))}
+              </select>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
+                <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
+                <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
+                <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
+                <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                <Field label="CEP" value={cCep} onChange={setCCep} />
+              </div>
+            )}
           </div>
-        )}
-        <p className="text-xs text-ink-muted">Os dados bancários e o valor do pagamento ao artista são preenchidos na Etapa 2.</p>
-      </div>
 
-      {/* Evento / objeto */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Nome do evento / atração" value={eventName} onChange={setEventName} />
-          <div>
-            <label className={LABEL_CLS}>Data do evento</label>
-            <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} />
-          </div>
-          <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
-          <Field label="Duração" value={showDuration} onChange={setShowDuration} />
-          <Field label="Passagem de som" value={passagemSom} onChange={setPassagemSom} />
-          <Field label="Local" value={localName} onChange={setLocalName} />
-          <Field label="Endereço do local" value={localAddress} onChange={setLocalAddress} />
-          <Field label="Cidade / Estado" value={localCity} onChange={setLocalCity} />
-          <Field label="CEP" value={localCep} onChange={setLocalCep} />
-          <Field label="Especificações (texto livre — opcional)" value={especificacoes} onChange={setEspecificacoes} />
-        </div>
-        <div>
-          <label className={LABEL_CLS}>Especificações do local</label>
-          <div className="flex flex-wrap gap-4">
-            <CheckField label="Área interna" checked={especAreaInterna} onChange={setEspecAreaInterna} />
-            <CheckField label="Área externa" checked={especAreaExterna} onChange={setEspecAreaExterna} />
-            <CheckField label="Palco" checked={especPalco} onChange={setEspecPalco} />
-            <CheckField label="Trio" checked={especTrio} onChange={setEspecTrio} />
-          </div>
-        </div>
-      </div>
-
-      {/* Modelo CASE */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Contrato (modelo CASE Shows)</h2>
-        <div>
-          <label className={LABEL_CLS}>Extras inclusos (custo da CONTRATADA se marcado)</label>
-          <div className="flex flex-wrap gap-4">
-            <CheckField label="Transporte até a cidade" checked={extraTransporte} onChange={setExtraTransporte} />
-            <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
-            <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
-            <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={LABEL_CLS}>Tipo de evento</label>
-            <div className="flex gap-4 pt-1">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
-                <input type="radio" name="tipo_evento" checked={tipoEvento === "aberto"} onChange={() => setTipoEvento("aberto")} /> Aberto
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
-                <input type="radio" name="tipo_evento" checked={tipoEvento === "fechado"} onChange={() => setTipoEvento("fechado")} /> Fechado
-              </label>
-              {tipoEvento && <button type="button" onClick={() => setTipoEvento("")} className="text-xs text-ink-muted hover:text-red-500">limpar</button>}
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Nome do evento / atração" value={eventName} onChange={setEventName} />
+              <div><label className={LABEL_CLS}>Data do evento</label><input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} /></div>
+              <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
+              <Field label="Duração" value={showDuration} onChange={setShowDuration} />
+              <Field label="Passagem de som" value={passagemSom} onChange={setPassagemSom} />
+              <Field label="Local" value={localName} onChange={setLocalName} />
+              <Field label="Endereço do local" value={localAddress} onChange={setLocalAddress} />
+              <Field label="Cidade / Estado" value={localCity} onChange={setLocalCity} />
+              <Field label="CEP" value={localCep} onChange={setLocalCep} />
+              <Field label="Especificações (texto livre — opcional)" value={especificacoes} onChange={setEspecificacoes} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Especificações do local</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Área interna" checked={especAreaInterna} onChange={setEspecAreaInterna} />
+                <CheckField label="Área externa" checked={especAreaExterna} onChange={setEspecAreaExterna} />
+                <CheckField label="Palco" checked={especPalco} onChange={setEspecPalco} />
+                <CheckField label="Trio" checked={especTrio} onChange={setEspecTrio} />
+              </div>
             </div>
           </div>
-          <Field label="Cortesias" value={cortesias} onChange={setCortesias} />
-          <div>
-            <label className={LABEL_CLS}>Data de assinatura</label>
-            <input type="date" value={dataAssinatura} onChange={(e) => setDataAssinatura(e.target.value)} className={INPUT_CLS} />
+
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Contrato (modelo CASE Shows)</h2>
+            <div>
+              <label className={LABEL_CLS}>Extras inclusos (custo da CONTRATADA se marcado)</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Transporte até a cidade" checked={extraTransporte} onChange={setExtraTransporte} />
+                <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
+                <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
+                <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={LABEL_CLS}>Tipo de evento</label>
+                <div className="flex gap-4 pt-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary"><input type="radio" name="tipo_evento" checked={tipoEvento === "aberto"} onChange={() => setTipoEvento("aberto")} /> Aberto</label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary"><input type="radio" name="tipo_evento" checked={tipoEvento === "fechado"} onChange={() => setTipoEvento("fechado")} /> Fechado</label>
+                  {tipoEvento && <button type="button" onClick={() => setTipoEvento("")} className="text-xs text-ink-muted hover:text-red-500">limpar</button>}
+                </div>
+              </div>
+              <Field label="Cortesias" value={cortesias} onChange={setCortesias} />
+              <div><label className={LABEL_CLS}>Data de assinatura</label><input type="date" value={dataAssinatura} onChange={(e) => setDataAssinatura(e.target.value)} className={INPUT_CLS} /></div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
+              <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
+              <Field label="Testemunha 1 — e-mail (para assinar)" value={test1Email} onChange={setTest1Email} />
+              <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
+              <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
+            </div>
+            <p className="text-xs text-ink-muted">Assinam: cliente, contratado (CS Agência) e a testemunha 1 (por isso o e-mail dela).</p>
           </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
-          <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
-          <Field label="Testemunha 1 — e-mail (para assinar)" value={test1Email} onChange={setTest1Email} />
-          <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
-          <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
-        </div>
-        <p className="text-xs text-ink-muted">A assinatura é feita por cliente, contratado (CS Agência) e a testemunha 1 (por isso o e-mail dela).</p>
-      </div>
 
-      {/* Valores cobrados do cliente */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Valores cobrados do cliente</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <MoneyField label="Atração" value={vAtracao} onChange={setVAtracao} />
-          <MoneyField label="Rider" value={vRider} onChange={setVRider} />
-          <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
-          <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
-        </div>
-        <div className="rounded-md bg-surface-2 p-3 text-center text-sm">
-          <div className="text-xs text-ink-muted">Total cobrado do cliente</div>
-          <div className="mt-0.5 text-lg font-semibold tabular-nums text-ink-primary">R$ {fmt.format(totalCliente)}</div>
-        </div>
-      </div>
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Valores cobrados do cliente</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField label="Atração" value={vAtracao} onChange={setVAtracao} />
+              <MoneyField label="Rider" value={vRider} onChange={setVRider} />
+              <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
+              <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
+            </div>
+            <div className="rounded-md bg-surface-2 p-3 text-center text-sm">
+              <div className="text-xs text-ink-muted">Total cobrado do cliente</div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums text-ink-primary">R$ {fmt.format(totalCliente)}</div>
+            </div>
+            <ParcelasEditor label="Parcelas a receber do cliente" rows={receberCliente} onChange={setReceberCliente} total={totalCliente} onFillSingle={() => setReceberCliente([{ vencimento: eventDate, valorStr: brlFromNumber(totalCliente) }])} />
+          </div>
 
-      {/* Parcelas a receber */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Recebimento do cliente</h2>
-        <p className="text-xs text-ink-muted">As parcelas a receber. A separação custódia/serviços é feita na Etapa 2 (quando o valor do artista é informado).</p>
-        <ParcelasEditor rows={receberCliente} onChange={setReceberCliente} total={totalCliente} onFillSingle={() => setReceberCliente([{ vencimento: eventDate, valorStr: brlFromNumber(totalCliente) }])} />
-      </div>
+          <div>
+            <label className={LABEL_CLS}>Observação</label>
+            <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={2} className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40" />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className={SECTION_CLS}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-ink-primary">Atração / Artista</h2>
+              <ModeToggle mode={bandMode} setMode={setBandMode} hasExisting={bandsList.length > 0} />
+            </div>
+            {bandMode === "existing" ? (
+              <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
+                {bandsList.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
+              </select>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Nome / Razão social" value={bName} onChange={setBName} />
+                <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
+                <Field label="E-mail" value={bEmail} onChange={setBEmail} />
+                <Field label="Telefone" value={bPhone} onChange={setBPhone} />
+                <Field label="Banco" value={bBanco} onChange={setBBanco} />
+                <Field label="Agência" value={bAgencia} onChange={setBAgencia} />
+                <Field label="Conta corrente" value={bConta} onChange={setBConta} />
+                <Field label="Titular" value={bTitular} onChange={setBTitular} />
+                <Field label="CPF/CNPJ do titular" value={bDocTitular} onChange={setBDocTitular} />
+                <Field label="Chave PIX" value={bPix} onChange={setBPix} />
+              </div>
+            )}
+          </div>
 
-      <div>
-        <label className={LABEL_CLS}>Observação</label>
-        <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={2} className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40" />
-      </div>
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Contrato do artista + pagamento</h2>
+            <p className="text-xs text-ink-muted">Suba o contrato do artista e leia com OCR para pré-preencher valor e parcelas. Os títulos ficam pendentes até você lançar no Omie (contrato assinado).</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                <span>{attachmentName || "Contrato do artista (PDF/imagem)"}</span>
+                <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+              </label>
+              <button type="button" onClick={handleOcr} disabled={!attachmentPath || ocrLoading || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} Ler contrato (OCR)
+              </button>
+            </div>
+            {ocrMsg && <p className="text-xs text-emerald-600 dark:text-emerald-400">{ocrMsg}</p>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField label="Valor pago ao artista (custódia)" value={vArtista} onChange={setVArtista} />
+            </div>
+            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que a atração cobrada (R$ {fmt.format(valAtracao)}).</p>}
+            <ParcelasEditor label="Parcelas a pagar ao artista" rows={pagarArtista} onChange={setPagarArtista} total={valArtista} onFillSingle={() => setPagarArtista([{ vencimento: eventDate, valorStr: brlFromNumber(valArtista) }])} />
+          </div>
+        </>
+      )}
+
+      {/* Financeiro (placeholder até salvar/gerar títulos) */}
+      <section className="rounded-lg border border-border bg-surface-1 p-4">
+        <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
+        <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
+      </section>
 
       {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-300">{error}</div>}
 
@@ -413,6 +475,15 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
         </button>
       </div>
     </form>
+  );
+}
+
+function TabBtn({ active, done, label, onClick }: { active: boolean; done: boolean; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${active ? "border-amber-600 text-ink-primary" : "border-transparent text-ink-muted hover:text-ink-secondary"}`}>
+      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-ink-muted" />}
+      {label}
+    </button>
   );
 }
 

@@ -80,27 +80,29 @@ export async function salvarCliente(
   const db = await getDb();
 
   if (!input.client?.name?.trim()) return { error: "Informe o cliente." };
-  if (!input.band?.name?.trim()) return { error: "Informe a atração/artista." };
   if ((Number(input.valor_atracao_cliente) || 0) <= 0) return { error: "Informe o valor da atração cobrado do cliente." };
 
   let clientId: string;
-  let bandId: string;
+  let bandId: string | null = null;
   try {
     clientId = await resolveClient(db, input.client, ctx.id);
-    bandId = await resolveBand(db, input.band, ctx.id);
+    // A atração é opcional aqui (fica na aba Atração); resolve só se informada.
+    if (input.band?.name?.trim()) {
+      bandId = await resolveBand(db, input.band, ctx.id);
+    }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao cadastrar cliente/atração." };
   }
   await ensureOmieRegistration(db, "client", clientId);
-  await ensureOmieRegistration(db, "band", bandId);
+  if (bandId) await ensureOmieRegistration(db, "band", bandId);
 
   if (input.contract_id) {
     // Edição — preserva o valor do artista já informado na aba Atração.
-    const { data: cur } = await db.from("case_contracts").select("valor_artista, status").eq("id", input.contract_id).single();
+    const { data: cur } = await db.from("case_contracts").select("valor_artista").eq("id", input.contract_id).single();
     const valorArtista = Number(cur?.valor_artista) || 0;
     const { error } = await db
       .from("case_contracts")
-      .update({ client_id: clientId, band_id: bandId, ...clienteFields(input, valorArtista) })
+      .update({ client_id: clientId, ...(bandId ? { band_id: bandId } : {}), ...clienteFields(input, valorArtista) })
       .eq("id", input.contract_id);
     if (error) return { error: `Falha ao salvar: ${error.message}` };
     const { data: c } = await db.from("case_contracts").select("contract_number, status").eq("id", input.contract_id).single();
@@ -149,6 +151,7 @@ export async function gerarEnviarContrato(
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
+  if (!c.band_id) return { error: "Selecione a atração/artista na aba Contrato Atração antes de gerar o contrato." };
 
   const client = c.case_clients;
   const pdfData: ContractPdfData = {
@@ -260,12 +263,29 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   const ctx = await requireCaseUser();
   const db = await getDb();
 
+  if (!input.band?.name?.trim()) return { error: "Informe a atração/artista." };
+
   const { data: contract } = await db
     .from("case_contracts")
-    .select("id, band_id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, receber_schedule")
+    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, receber_schedule")
     .eq("id", input.contract_id)
     .single();
   if (!contract) return { error: "Contrato não encontrado." };
+
+  // Não permite reeditar se algum título já foi lançado no Omie.
+  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contract.id);
+  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
+    return { error: "Já existem títulos lançados no Omie — não é possível reeditar a atração. Use 'Reenviar ao Omie' no Financeiro." };
+  }
+
+  // Resolve/atualiza a atração e vincula ao contrato.
+  let bandId: string;
+  try {
+    bandId = await resolveBand(db, input.band, ctx.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao cadastrar a atração." };
+  }
+  await ensureOmieRegistration(db, "band", bandId);
 
   const valorArtista = Number(input.valor_artista) || 0;
   const valorAtracao = Number(contract.valor_atracao_cliente) || 0;
@@ -273,23 +293,26 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   const valorCamarim = Number(contract.valor_camarim) || 0;
   const valorExtras = Number(contract.valor_extras) || 0;
 
-  if (valorArtista <= 0) return { error: "Informe o valor pago ao artista." };
+  // Sem valor do artista: guarda só a identidade + anexo (títulos ficam para depois).
+  if (valorArtista <= 0) {
+    await db
+      .from("case_contracts")
+      .update({ band_id: bandId, attachment_path: input.attachment_path ?? undefined, updated_at: new Date().toISOString() })
+      .eq("id", contract.id);
+    revalidatePath(`/case/contratos/${contract.id}`);
+    return { ok: true };
+  }
+
   if (cents(valorArtista) > cents(valorAtracao)) {
     return { error: "O valor pago ao artista não pode ser maior que o valor cobrado do cliente pela atração." };
   }
   const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (receberSchedule.length === 0) return { error: "Complete o Contrato Cliente (parcelas a receber) antes de salvar a atração." };
+  if (receberSchedule.length === 0) return { error: "Complete o Contrato Cliente (parcelas a receber) antes de gerar os títulos da atração." };
   const totalCliente = valorAtracao + valorRider + valorCamarim + valorExtras;
   const schedErr = validarSchedule(receberSchedule, totalCliente, "recebimento do cliente");
   if (schedErr) return { error: schedErr };
   const pagarErr = validarSchedule(input.parcelas_pagar ?? [], valorArtista, "pagamento ao artista");
   if (pagarErr) return { error: pagarErr };
-
-  // Não regenera se algum título já foi lançado no Omie.
-  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contract.id);
-  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
-    return { error: "Já existem títulos lançados no Omie — não é possível reeditar a atração. Use 'Reenviar ao Omie' no Financeiro." };
-  }
 
   const valorMargem = valorAtracao - valorArtista;
   const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
@@ -297,6 +320,7 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   await db
     .from("case_contracts")
     .update({
+      band_id: bandId,
       valor_artista: valorArtista,
       valor_custodia: valorArtista,
       valor_margem: valorMargem,
@@ -305,8 +329,6 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
       updated_at: new Date().toISOString(),
     })
     .eq("id", contract.id);
-
-  await ensureOmieRegistration(db, "band", contract.band_id as string);
 
   // Regenera os títulos como PENDENTES (limpa os antigos, todos pendentes).
   await db.from("case_titles").delete().eq("contract_id", contract.id);

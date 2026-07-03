@@ -4,7 +4,7 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 
 import { getCaseUser } from "@/lib/case/auth";
 import { getClients, getBands, isOmieConfigured } from "@/lib/case/queries";
-import { NovoContratoTabs } from "@/components/case/novo-contrato-tabs";
+import { NovoContratoForm } from "@/components/case/novo-contrato-form";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +48,7 @@ export default async function NovoContratoPage() {
         </div>
       )}
 
-      <NovoContratoTabs clients={clients} bands={bands} />
+      <NovoContratoForm clients={clients} bands={bands} />
     </div>
   );
 }

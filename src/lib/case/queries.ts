@@ -105,6 +105,7 @@ export interface ContractDetail {
   sent_for_signature_at: string | null;
   clicksign_status: string | null;
   client: { name: string; cnpj_cpf: string | null; email: string | null };
+  band_id: string | null;
   band: { name: string; cnpj_cpf: string | null };
   titles: ContractTitleRow[];
 }
@@ -117,7 +118,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       `id, contract_number, status, event_name, event_date, show_time, passagem_som,
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, receber_schedule,
-       attachment_path, sale_contract_path, sign_url, signed_at, sent_for_signature_at, clicksign_status,
+       attachment_path, sale_contract_path, sign_url, signed_at, sent_for_signature_at, clicksign_status, band_id,
        case_clients(name, cnpj_cpf, email), case_bands(name, cnpj_cpf)`,
     )
     .eq("id", id)
@@ -160,6 +161,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     sent_for_signature_at: cc.sent_for_signature_at,
     clicksign_status: cc.clicksign_status,
     client: { name: cc.case_clients?.name ?? "—", cnpj_cpf: cc.case_clients?.cnpj_cpf ?? null, email: cc.case_clients?.email ?? null },
+    band_id: cc.band_id ?? null,
     band: { name: cc.case_bands?.name ?? "—", cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     titles: ((titles ?? []) as any[]).map((t) => ({

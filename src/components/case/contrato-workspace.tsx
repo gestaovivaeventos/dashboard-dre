@@ -10,6 +10,7 @@ import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { getContractAttachmentUrl, getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
+import type { CaseBandRow } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -69,7 +70,7 @@ function TabButton({ active, done, label, onClick }: { active: boolean; done: bo
   );
 }
 
-export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
+export function ContratoWorkspace({ detail, bands }: { detail: ContractDetail; bands: CaseBandRow[] }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
@@ -99,7 +100,7 @@ export function ContratoWorkspace({ detail }: { detail: ContractDetail }) {
           <TabButton active={tab === "atracao"} done={etapa2Done} label="Contrato Atração" onClick={() => setTab("atracao")} />
         </div>
         <div className="pt-4">
-          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} onChange={refresh} />}
+          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} bands={bands} onChange={refresh} />}
         </div>
       </div>
 
@@ -177,9 +178,21 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
 }
 
 // ── ABA: Contrato Atração (pagamento ao artista) ─────────────────────────────
-function AtracaoTab({ detail, onChange }: { detail: ContractDetail; onChange: () => void }) {
+function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; onChange: () => void }) {
   const launched = detail.titles.some((t) => t.status === "lancado");
   const pagarTitles = detail.titles.filter((t) => t.leg === "pagar_custodia").sort((a, b) => a.parcela_numero - b.parcela_numero);
+  const [bandMode, setBandMode] = useState<"existing" | "new">(detail.band_id || bands.length ? "existing" : "new");
+  const [bandId, setBandId] = useState<string>(detail.band_id ?? bands[0]?.id ?? "");
+  const [bName, setBName] = useState("");
+  const [bDoc, setBDoc] = useState("");
+  const [bEmail, setBEmail] = useState("");
+  const [bPhone, setBPhone] = useState("");
+  const [bBanco, setBBanco] = useState("");
+  const [bAgencia, setBAgencia] = useState("");
+  const [bConta, setBConta] = useState("");
+  const [bTitular, setBTitular] = useState("");
+  const [bDocTitular, setBDocTitular] = useState("");
+  const [bPix, setBPix] = useState("");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(detail.attachment_path);
   const [attachmentName, setAttachmentName] = useState<string>(detail.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
@@ -232,27 +245,46 @@ function AtracaoTab({ detail, onChange }: { detail: ContractDetail; onChange: ()
     setOcrLoading(false);
     if ("error" in res) return setErr(res.error);
     const d = res.data;
+    if (bandMode === "new" && d.bandName) { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setParcelas(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
-    setMsg("Contrato lido. Revise o valor e as parcelas antes de concluir.");
+    setMsg("Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
+  }
+
+  function buildBandInput() {
+    const sel = bands.find((b) => b.id === bandId);
+    return bandMode === "existing" && sel
+      ? {
+          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix,
+        }
+      : {
+          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: bDoc.replace(/\D/g, "").length === 11,
+          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
+          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
+        };
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
-    if (valArtista <= 0) return setErr("Informe o valor pago ao artista.");
-    if (!somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
+    if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
+    if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome da atração/artista.");
+    if (valArtista > 0 && !somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
     setSubmitting(true);
     const res = await salvarAtracao({
       contract_id: detail.id,
-      valor_artista: valArtista,
-      parcelas_pagar: parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })),
+      band: buildBandInput(),
+      valor_artista: valArtista > 0 ? valArtista : undefined,
+      parcelas_pagar: valArtista > 0 ? parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })) : undefined,
       attachment_path: attachmentPath,
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
-    setMsg("Contrato da atração salvo — títulos gerados como pendentes. Lance no Omie pelo Financeiro quando o contrato estiver assinado.");
+    setMsg(valArtista > 0
+      ? "Contrato da atração salvo — títulos gerados como pendentes. Lance no Omie pelo Financeiro quando o contrato estiver assinado."
+      : "Atração salva. Informe o valor pago ao artista para gerar os títulos.");
     onChange();
   }
 
@@ -280,8 +312,38 @@ function AtracaoTab({ detail, onChange }: { detail: ContractDetail; onChange: ()
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
-      <h2 className="text-sm font-semibold text-ink-primary">Contrato da atração / pagamento ao artista</h2>
-      <p className="text-xs text-ink-muted">Suba o contrato do artista, leia com OCR e informe o pagamento. Ao concluir, os títulos vão pro Omie (a pagar do artista + a receber do cliente, já separado).</p>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-ink-primary">Atração / Artista</h2>
+        <div className="flex gap-1 text-xs">
+          <button type="button" onClick={() => setBandMode("existing")} disabled={!bands.length} className={`rounded px-2 py-1 ${bandMode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
+          <button type="button" onClick={() => setBandMode("new")} className={`rounded px-2 py-1 ${bandMode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
+        </div>
+      </div>
+      {bandMode === "existing" ? (
+        <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
+          <option value="">— selecione —</option>
+          {bands.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
+        </select>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div><label className={LABEL_CLS}>Nome / Razão social</label><input value={bName} onChange={(e) => setBName(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>CNPJ / CPF</label><input value={bDoc} onChange={(e) => setBDoc(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>E-mail</label><input value={bEmail} onChange={(e) => setBEmail(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Telefone</label><input value={bPhone} onChange={(e) => setBPhone(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Banco</label><input value={bBanco} onChange={(e) => setBBanco(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Agência</label><input value={bAgencia} onChange={(e) => setBAgencia(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Conta corrente</label><input value={bConta} onChange={(e) => setBConta(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Titular</label><input value={bTitular} onChange={(e) => setBTitular(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>CPF/CNPJ do titular</label><input value={bDocTitular} onChange={(e) => setBDocTitular(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Chave PIX</label><input value={bPix} onChange={(e) => setBPix(e.target.value)} className={INPUT_CLS} /></div>
+        </div>
+      )}
+      {detail.band_id && <p className="text-xs text-ink-muted">Atração atual: {detail.band.name}.</p>}
+
+      <div className="mt-1 border-t border-border pt-3">
+        <h3 className="text-sm font-semibold text-ink-primary">Contrato do artista + pagamento</h3>
+      </div>
+      <p className="text-xs text-ink-muted">Suba o contrato do artista, leia com OCR e informe o pagamento. Ao salvar, os títulos ficam pendentes; lance no Omie pelo Financeiro quando estiver assinado.</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">

@@ -104,7 +104,8 @@ export interface Etapa1Input extends CaseContractExtras {
   /** Quando presente, atualiza um contrato existente (edição do rascunho). */
   contract_id?: string | null;
   client: CaseClientInput;
-  band: CaseBandInput; // identidade do artista/atração (o pagamento vem na Etapa 2)
+  /** A atração/artista fica na aba Contrato Atração — opcional no salvamento do cliente. */
+  band?: CaseBandInput | null;
   event_name: string | null;
   event_date: string | null;
   show_time: string | null;
@@ -124,13 +125,16 @@ export interface Etapa1Input extends CaseContractExtras {
   receber_schedule: CaseParcelaInput[];
 }
 
-/** Etapa 2 — pagamento ao artista (gera todos os títulos e lança no Omie). */
+/** Aba Contrato Atração — identidade do artista + anexo + (opcional) pagamento. */
 export interface Etapa2Input {
   contract_id: string;
-  valor_artista: number;
-  parcelas_pagar: CaseParcelaInput[];
+  /** Identidade do artista/atração (seleção ou cadastro na própria aba). */
+  band: CaseBandInput;
   /** Contrato do artista (fonte do OCR), já no bucket. */
-  attachment_path: string | null;
+  attachment_path?: string | null;
+  /** Pagamento — opcional: dá pra salvar só banda+anexo e informar valor depois. */
+  valor_artista?: number;
+  parcelas_pagar?: CaseParcelaInput[];
 }
 
 export interface CaseClientRow {
