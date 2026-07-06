@@ -186,7 +186,15 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     dataVolta: r.data_volta,
     candidatos: (facts.aeroportos_origem ?? []).slice(0, 4).map((a) => ({ iata: a.iata, cidade: a.cidade })),
   });
-  if (web) {
+  // Registra o resultado da pesquisa no histórico — diagnóstico visível na tela.
+  await db.from("viagem_history").insert({
+    request_id: requestId,
+    action: web.ok ? "pesquisa_web_ok" : "pesquisa_web_falhou",
+    comment: web.ok
+      ? `${web.engine}: ${web.data.voos.length} voo(s), ônibus ${web.data.onibus ? "sim" : "não"}, gasolina ${web.data.gasolina_litro ?? "—"}, hotel ${web.data.hotel_diaria ?? "—"}`
+      : web.error.slice(0, 500),
+  });
+  if (web.ok) {
     fontes = web.fontes;
     for (const voo of web.data.voos) {
       const iata = voo.origem_iata.toUpperCase();
