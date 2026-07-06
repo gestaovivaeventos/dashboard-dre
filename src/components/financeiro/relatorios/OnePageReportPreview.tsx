@@ -104,6 +104,8 @@ export interface FeatEventosBlock {
   totalRealizado: number;
   resultadoPorTipo: Array<{ tipo: string; previsto: number; realizado: number }>;
   numeroEventosRealizadosPorTipo: Array<{ tipo: string; quantidade: number }>;
+  eventosPrevistosOrcamento: number;
+  eventosRealizadosPeriodo: number;
   eventosEmAberto: number;
   eventosNaoRealizados: number;
   eventosRealizados: number;
@@ -2174,10 +2176,10 @@ function Acoes({ items }: { items: AcaoCard[] }) {
 
 // ─── Quadro de eventos — EXCLUSIVO da Feat Produções ─────────────────────────
 //
-// Dois indicadores acumulados (Resultado previsto/realizado até a referência) +
-// dois gráficos de barras por tipo de evento: "Resultado dos Eventos" (somente
-// realizado, conforme decisão de produto) e "Número de Eventos" (apenas eventos
-// com fechamento Realizado). Valores em R$ cheios (este quadro não usa "mil").
+// Duas caixas acumuladas consolidam resultado previsto/realizado e volume de
+// eventos, seguidas de dois gráficos de barras por tipo de evento: "Resultado
+// dos Eventos" (somente realizado, conforme decisão de produto) e "Número de
+// Eventos" (apenas eventos com fechamento Realizado). Valores em R$ cheios.
 
 function fmtMoneyInt(value: number): string {
   return `R$ ${Math.round(value).toLocaleString("pt-BR", {
@@ -2208,11 +2210,15 @@ function fmtPctPtBr(value: number): string {
 function FeatIndicador({
   label,
   valueLabel,
+  meta,
   hint,
+  footer,
 }: {
   label: string;
   valueLabel: string;
-  hint?: string;
+  meta?: React.ReactNode;
+  hint?: React.ReactNode;
+  footer?: React.ReactNode;
 }) {
   return (
     <div style={{ ...panelStyle, padding: 14 }}>
@@ -2238,8 +2244,27 @@ function FeatIndicador({
       >
         {valueLabel}
       </div>
+      {meta ? (
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: C.ink,
+            marginBottom: 6,
+          }}
+        >
+          {meta}
+        </div>
+      ) : null}
       {hint ? (
-        <div style={{ fontSize: 11, color: C.tertiary }}>{hint}</div>
+        <div style={{ fontSize: 11, color: C.tertiary, lineHeight: 1.55 }}>
+          {hint}
+        </div>
+      ) : null}
+      {footer ? (
+        <div style={{ fontSize: 11, color: C.tertiary, marginTop: 4 }}>
+          {footer}
+        </div>
       ) : null}
     </div>
   );
@@ -2262,9 +2287,6 @@ function QuadroEventosFeat({
     Eventos: n.quantidade,
   }));
 
-  // Linha-resumo do status dos fechamentos até a referência.
-  const statusHint = `${data.eventosRealizados} realizado(s) · ${data.eventosEmAberto} em aberto · ${data.eventosNaoRealizados} previsto(s) e não realizado(s)`;
-
   return (
     <section style={{ breakInside: "avoid" }}>
       <SectionTitle>Eventos — Feat Produções</SectionTitle>
@@ -2282,12 +2304,22 @@ function QuadroEventosFeat({
         <FeatIndicador
           label="Resultado total previsto"
           valueLabel={fmtMoneyFull(data.totalPrevisto)}
-          hint={`Acumulado até ${data.referenciaLabel}`}
+          meta={`Número de eventos previstos: ${data.eventosPrevistosOrcamento}`}
+          footer={`Acumulado até ${data.referenciaLabel}`}
         />
         <FeatIndicador
           label="Resultado total realizado"
           valueLabel={fmtMoneyFull(data.totalRealizado)}
-          hint={statusHint}
+          meta={`Número de eventos realizados: ${data.eventosRealizadosPeriodo}`}
+          hint={
+            <>
+              {data.eventosRealizados} fechamentos realizado(s) ·{" "}
+              {data.eventosEmAberto} fechamentos em aberto ·{" "}
+              {data.eventosNaoRealizados} eventos previsto(s) e
+              não realizado(s)
+            </>
+          }
+          footer={`Acumulado até ${data.referenciaLabel}`}
         />
       </div>
 

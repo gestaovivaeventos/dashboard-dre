@@ -136,6 +136,8 @@ export const FeatEventosResumoSchema = z.object({
       }),
     )
     .max(10),
+  eventos_previstos_orcamento: z.number(),
+  eventos_realizados_periodo: z.number(),
   eventos_em_aberto: z.number(),
   eventos_previstos_nao_realizados: z.number(),
   eventos_realizados: z.number(),

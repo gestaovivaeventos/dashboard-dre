@@ -58,6 +58,8 @@ export interface FeatEventosPayload {
   resultadoPorTipo: FeatEventoResultadoTipo[];
   // Apenas eventos com fechamento "Realizado".
   numeroEventosRealizadosPorTipo: FeatEventoContagemTipo[];
+  eventosPrevistosOrcamento: number;
+  eventosRealizadosPeriodo: number;
   eventosEmAberto: number;
   eventosNaoRealizados: number;
   eventosRealizados: number;
@@ -91,6 +93,8 @@ export interface FeatEventosResumoIA {
     realizado: number;
   }>;
   eventos_realizados_por_tipo: Array<{ tipo: string; quantidade: number }>;
+  eventos_previstos_orcamento: number;
+  eventos_realizados_periodo: number;
   eventos_em_aberto: number;
   eventos_previstos_nao_realizados: number;
   eventos_realizados: number;
@@ -168,6 +172,8 @@ export async function buildFeatEventos(
   let eventosEmAberto = 0;
   let eventosNaoRealizados = 0;
   let eventosRealizados = 0;
+  let eventosPrevistosOrcamento = 0;
+  let eventosRealizadosPeriodo = 0;
   let previstoEmAbertoTotal = 0;
   const eventosEmAbertoDetalhe: FeatEventoEmAberto[] = [];
 
@@ -185,6 +191,16 @@ export async function buildFeatEventos(
     const realizado = toNumber(r.resultado_realizado);
     totalPrevisto += previsto;
     totalRealizado += realizado;
+
+    if (previsto > 0) {
+      eventosPrevistosOrcamento += 1;
+    }
+    if (
+      r.fechamento === FECHAMENTO_REALIZADO ||
+      r.fechamento === FECHAMENTO_EM_ABERTO
+    ) {
+      eventosRealizadosPeriodo += 1;
+    }
 
     // Só agrupa por tipo quando o tipo é um dos canônicos (ignora nulos/avulsos).
     const tipo = r.tipo_evento;
@@ -257,6 +273,8 @@ export async function buildFeatEventos(
     totalRealizado: totalRealizadoRounded,
     resultadoPorTipo,
     numeroEventosRealizadosPorTipo,
+    eventosPrevistosOrcamento,
+    eventosRealizadosPeriodo,
     eventosEmAberto,
     eventosNaoRealizados,
     eventosRealizados,
@@ -277,6 +295,8 @@ export async function buildFeatEventos(
     total_realizado_ate_referencia: totalRealizadoRounded,
     resultado_por_tipo: resultadoPorTipo,
     eventos_realizados_por_tipo: numeroEventosRealizadosPorTipo,
+    eventos_previstos_orcamento: eventosPrevistosOrcamento,
+    eventos_realizados_periodo: eventosRealizadosPeriodo,
     eventos_em_aberto: eventosEmAberto,
     eventos_previstos_nao_realizados: eventosNaoRealizados,
     eventos_realizados: eventosRealizados,

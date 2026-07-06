@@ -219,7 +219,7 @@ export interface OnePagePayload {
   vvrSerieAnual: VvrSerieAnualPayload[];
   // Quadro gerencial de eventos — EXCLUSIVO da Feat Produções. Ausente
   // (undefined) para todas as demais empresas. Alimenta o quadro próprio no
-  // One Page Report (2 indicadores + 2 gráficos por tipo de evento).
+  // One Page Report (indicadores + gráficos por tipo de evento).
   featEventos?: FeatEventosPayload;
   // Saldo final da "Custódia de Artistas" (regime de caixa + competência) —
   // EXCLUSIVO da Case Shows. Ausente (undefined) para todas as demais empresas.

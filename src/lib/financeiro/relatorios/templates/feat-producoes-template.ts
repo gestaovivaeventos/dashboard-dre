@@ -42,6 +42,8 @@ Este bloco é um cadastro GERENCIAL de projetos/eventos da Feat (orçamento de e
 - total_realizado_ate_referencia: soma do RESULTADO REALIZADO (margem apurada no fechamento) até a referência. Eventos sem fechamento entram como zero.
 - resultado_por_tipo: previsto e realizado agrupados por tipo (Corporativo, Show, Licitação).
 - eventos_realizados_por_tipo: quantidade de eventos com fechamento "Realizado" por tipo.
+- eventos_previstos_orcamento: quantidade de eventos com resultado_previsto maior que zero. Eventos com resultado_previsto igual a zero NÃO estavam previstos em orçamento.
+- eventos_realizados_periodo: quantidade de eventos com fechamento "Realizado" ou "Em aberto". "Em aberto" significa que o evento aconteceu, mas o fechamento ainda não foi concluído.
 - eventos_em_aberto: eventos que ocorreram mas AINDA NÃO tiveram o fechamento/apuração de margem feito — resultado POTENCIAL ainda não consolidado.
 - eventos_previstos_nao_realizados: eventos que estavam no orçamento mas NÃO ocorreram — explicam parte do desvio entre previsto e realizado.
 - eventos_realizados: total de eventos já fechados.
@@ -57,9 +59,10 @@ COMO INTERPRETAR (anti-alarmismo, tom executivo e equilibrado):
 2. Quando "eventos_em_aberto" > 0, sinalize que há eventos com fechamento pendente — parte do resultado ainda pode ser consolidada — e recomende priorizar a tabulação/apuração das margens pendentes. Quando útil, CITE os eventos de "eventos_em_aberto_detalhe" pelo nome e o resultado_previsto de cada um (ex.: "o FESTIVAL DE VERÃO tem resultado previsto de R$ 300.000,00, ainda dependente do fechamento para virar resultado realizado").
 3. Ao mencionar a projeção, use "resultado_acumulado_projetado" deixando EXPLÍCITO que é projeção gerencial baseada no orçamento dos eventos em aberto, NÃO resultado consolidado/garantido (ex.: "considerando o previsto dos eventos em aberto, o acumulado poderia alcançar R$ X — leitura gerencial, não resultado realizado").
 4. Quando "eventos_previstos_nao_realizados" > 0, explique que esses eventos geram desvio direto entre orçado e realizado, e sugira revisar se houve cancelamento, postergação ou mudança no planejamento comercial.
-5. Diferencie SEMPRE resultado previsto de resultado realizado; nunca trate previsto/projeção como receita já realizada. Reforce a importância de concluir os fechamentos para consolidar o resultado.
-6. Analise a distribuição por tipo (volume e resultado): destaque quais tipos de evento mais contribuem para o resultado.
-7. Use SOMENTE os números do bloco; não invente eventos nem margens. Ao citar valores, copie-os literalmente.
+5. Compare "eventos_previstos_orcamento" com "eventos_realizados_periodo" para explicar eventos realizados sem previsão orçamentária e/ou eventos previstos que não aconteceram. Um evento com resultado_previsto = 0 pode ser realizado, mas NÃO deve ser tratado como evento previsto em orçamento.
+6. Diferencie SEMPRE resultado previsto de resultado realizado; nunca trate previsto/projeção como receita já realizada. Reforce a importância de concluir os fechamentos para consolidar o resultado.
+7. Analise a distribuição por tipo (volume e resultado): destaque quais tipos de evento mais contribuem para o resultado.
+8. Use SOMENTE os números do bloco; não invente eventos nem margens. Ao citar valores, copie-os literalmente.
 
 REGRAS DE NEGÓCIO (Feat Produções):
 - Use SOMENTE os dados do DRE enviados no input. NÃO invente números, eventos ou margens.
@@ -125,7 +128,7 @@ export const featProducoesTemplate: ReportTemplate = {
       "diagnostico",
       "previstoRealizado",
       "semaforo",
-      // Quadro exclusivo de eventos da Feat Produções (2 indicadores + 2 gráficos).
+      // Quadro exclusivo de eventos da Feat Produções (indicadores + gráficos).
       "featEventos",
       "acumuladoAno",
       "historico",
