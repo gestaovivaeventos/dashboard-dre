@@ -65,6 +65,7 @@ export interface CaseContractExtras {
   data_assinatura: string | null; // ISO YYYY-MM-DD
   testemunha_1_nome: string | null;
   testemunha_1_cpf: string | null;
+  testemunha_1_email: string | null; // testemunha assina pelo ClickSign
   testemunha_2_nome: string | null;
   testemunha_2_cpf: string | null;
 }
@@ -95,6 +96,45 @@ export interface CreateContractInput extends CaseContractExtras {
   parcelas_pagar_custodia: CaseParcelaInput[];
   parcelas_receber_custodia: CaseParcelaInput[];
   parcelas_receber_servicos: CaseParcelaInput[];
+}
+
+/** Etapa 1 — produção do contrato com o cliente (sem dados de pagamento ao artista). */
+export interface Etapa1Input extends CaseContractExtras {
+  idempotency_key?: string | null;
+  /** Quando presente, atualiza um contrato existente (edição do rascunho). */
+  contract_id?: string | null;
+  client: CaseClientInput;
+  /** A atração/artista fica na aba Contrato Atração — opcional no salvamento do cliente. */
+  band?: CaseBandInput | null;
+  event_name: string | null;
+  event_date: string | null;
+  show_time: string | null;
+  show_duration: string | null;
+  passagem_som: string | null;
+  local_name: string | null;
+  local_address: string | null;
+  local_city: string | null;
+  local_cep: string | null;
+  especificacoes: string | null;
+  valor_atracao_cliente: number;
+  valor_rider: number;
+  valor_camarim: number;
+  valor_extras: number;
+  observacao: string | null;
+  /** Parcelas a receber do cliente (valor total cobrado). */
+  receber_schedule: CaseParcelaInput[];
+}
+
+/** Aba Contrato Atração — identidade do artista + anexo + (opcional) pagamento. */
+export interface Etapa2Input {
+  contract_id: string;
+  /** Identidade do artista/atração (seleção ou cadastro na própria aba). */
+  band: CaseBandInput;
+  /** Contrato do artista (fonte do OCR), já no bucket. */
+  attachment_path?: string | null;
+  /** Pagamento — opcional: dá pra salvar só banda+anexo e informar valor depois. */
+  valor_artista?: number;
+  parcelas_pagar?: CaseParcelaInput[];
 }
 
 export interface CaseClientRow {

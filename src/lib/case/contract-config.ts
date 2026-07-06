@@ -23,3 +23,10 @@ export const DADOS_BANCARIOS = {
 /** Foro de eleição e cidade da assinatura (bate com a cláusula 13). */
 export const FORO = process.env.CASE_FORO ?? "Comarca de Juiz de Fora/MG";
 export const CIDADE_ASSINATURA = process.env.CASE_CIDADE_ASSINATURA ?? "Juiz de Fora";
+
+/** Signatário do CONTRATADO (CS Agência) — assina todo contrato pelo ClickSign. */
+export const CONTRATADO_SIGNER = {
+  name: process.env.CASE_CONTRATADO_SIGNER_NAME ?? "Pedro Guimarães Leo",
+  email: process.env.CASE_CONTRATADO_SIGNER_EMAIL ?? "pedro@caseshows.com.br",
+  cpf: process.env.CASE_CONTRATADO_SIGNER_CPF ?? "084.243.096-26",
+} as const;

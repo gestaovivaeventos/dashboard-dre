@@ -63,6 +63,124 @@ export async function getContracts(): Promise<ContractListRow[]> {
   }));
 }
 
+export interface ContractTitleRow {
+  id: string;
+  leg: CaseLegKind;
+  title_item: string | null;
+  parcela_numero: number;
+  parcela_total: number;
+  vencimento: string;
+  valor: number;
+  status: string;
+  omie_codigo: number | null;
+  pago: boolean;
+  omie_status: string | null;
+  pago_em: string | null;
+}
+
+export interface ContractDetail {
+  id: string;
+  contract_number: number;
+  status: CaseContractStatus;
+  event_name: string | null;
+  event_date: string | null;
+  show_time: string | null;
+  passagem_som: string | null;
+  local_name: string | null;
+  local_city: string | null;
+  valor_atracao_cliente: number;
+  valor_rider: number;
+  valor_camarim: number;
+  valor_extras: number;
+  valor_artista: number;
+  valor_custodia: number;
+  valor_margem: number;
+  valor_servicos: number;
+  total_venda: number;
+  receber_schedule: Array<{ vencimento: string; valor: number }>;
+  attachment_path: string | null;
+  sale_contract_path: string | null;
+  sign_url: string | null;
+  signed_at: string | null;
+  sent_for_signature_at: string | null;
+  clicksign_status: string | null;
+  client: { name: string; cnpj_cpf: string | null; email: string | null };
+  band_id: string | null;
+  band: { name: string; cnpj_cpf: string | null };
+  titles: ContractTitleRow[];
+}
+
+export async function getContractDetail(id: string): Promise<ContractDetail | null> {
+  const db = await getDb();
+  const { data: c } = await db
+    .from("case_contracts")
+    .select(
+      `id, contract_number, status, event_name, event_date, show_time, passagem_som,
+       local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
+       valor_artista, valor_custodia, valor_margem, valor_servicos, receber_schedule,
+       attachment_path, sale_contract_path, sign_url, signed_at, sent_for_signature_at, clicksign_status, band_id,
+       case_clients(name, cnpj_cpf, email), case_bands(name, cnpj_cpf)`,
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (!c) return null;
+
+  const { data: titles } = await db
+    .from("case_titles")
+    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em")
+    .eq("contract_id", id)
+    .order("leg")
+    .order("parcela_numero");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cc = c as any;
+  return {
+    id: cc.id,
+    contract_number: cc.contract_number,
+    status: cc.status,
+    event_name: cc.event_name,
+    event_date: cc.event_date,
+    show_time: cc.show_time,
+    passagem_som: cc.passagem_som,
+    local_name: cc.local_name,
+    local_city: cc.local_city,
+    valor_atracao_cliente: Number(cc.valor_atracao_cliente),
+    valor_rider: Number(cc.valor_rider),
+    valor_camarim: Number(cc.valor_camarim),
+    valor_extras: Number(cc.valor_extras),
+    valor_artista: Number(cc.valor_artista),
+    valor_custodia: Number(cc.valor_custodia),
+    valor_margem: Number(cc.valor_margem),
+    valor_servicos: Number(cc.valor_servicos),
+    total_venda: Number(cc.valor_atracao_cliente) + Number(cc.valor_rider) + Number(cc.valor_camarim) + Number(cc.valor_extras),
+    receber_schedule: Array.isArray(cc.receber_schedule) ? cc.receber_schedule : [],
+    attachment_path: cc.attachment_path,
+    sale_contract_path: cc.sale_contract_path,
+    sign_url: cc.sign_url,
+    signed_at: cc.signed_at,
+    sent_for_signature_at: cc.sent_for_signature_at,
+    clicksign_status: cc.clicksign_status,
+    client: { name: cc.case_clients?.name ?? "—", cnpj_cpf: cc.case_clients?.cnpj_cpf ?? null, email: cc.case_clients?.email ?? null },
+    band_id: cc.band_id ?? null,
+    band: { name: cc.case_bands?.name ?? "—", cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    titles: ((titles ?? []) as any[]).map((t) => ({
+      id: t.id,
+      leg: t.leg,
+      title_item: t.title_item,
+      parcela_numero: t.parcela_numero,
+      parcela_total: t.parcela_total,
+      vencimento: t.vencimento,
+      valor: Number(t.valor),
+      status: t.status,
+      omie_codigo: t.omie_codigo ? Number(t.omie_codigo) : null,
+      pago: Boolean(t.pago),
+      omie_status: t.omie_status,
+      pago_em: t.pago_em,
+    })),
+  };
+}
+
 export async function getClients(): Promise<CaseClientRow[]> {
   const db = await getDb();
   const { data } = await db

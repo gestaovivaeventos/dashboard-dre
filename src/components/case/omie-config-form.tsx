@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, RefreshCw, Check } from "lucide-react";
 
-import { syncOmieOptions, syncCaseCadastros, saveOmieConfig, type CaseOmieConfigData } from "@/lib/case/actions/omie-config";
+import { syncOmieOptions, syncCaseCadastros, syncCasePagamentos, saveOmieConfig, type CaseOmieConfigData } from "@/lib/case/actions/omie-config";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -20,6 +20,7 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
 
   const [syncing, setSyncing] = useState(false);
   const [syncingCad, setSyncingCad] = useState(false);
+  const [syncingPag, setSyncingPag] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -55,6 +56,24 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
     setMsg(
       `Cadastros sincronizados do Omie: ${res.fetched} lidos · clientes +${res.clientsInserted}/~${res.clientsUpdated} · artistas +${res.bandsInserted}/~${res.bandsUpdated}.`,
     );
+    startTransition(() => router.refresh());
+  }
+
+  async function handleSyncPagamentos() {
+    setSyncingPag(true);
+    setErr(null);
+    setMsg(null);
+    const res = await syncCasePagamentos();
+    setSyncingPag(false);
+    if ("error" in res) {
+      setErr(res.error);
+      return;
+    }
+    if (res.skipped) {
+      setErr(res.skipped);
+      return;
+    }
+    setMsg(`Status de pagamento atualizado: ${res.atualizados} título(s) alterado(s), ${res.pagos} marcado(s) como pago.`);
     startTransition(() => router.refresh());
   }
 
@@ -116,6 +135,25 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
         >
           {syncingCad ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Sincronizar cadastros
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border border-border bg-surface-1 p-4">
+        <div>
+          <div className="text-sm font-medium text-ink-primary">Status de pagamentos</div>
+          <div className="text-xs text-ink-muted">
+            Atualiza pago/pendente dos títulos lançados no Omie (a receber do cliente e a pagar dos
+            artistas). Roda toda noite; use aqui para forçar agora.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncPagamentos}
+          disabled={syncingPag}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-60"
+        >
+          {syncingPag ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Atualizar pagamentos
         </button>
       </div>
 

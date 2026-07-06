@@ -86,7 +86,16 @@ async function anexar(
  *   • agrega o status do contrato
  * Idempotente: só processa títulos ainda não lançados.
  */
-export async function launchContractToOmie(db: DB, contractId: string): Promise<LaunchResult> {
+export async function launchContractToOmie(
+  db: DB,
+  contractId: string,
+  legs?: CaseLegKind[],
+): Promise<LaunchResult> {
+  // legs undefined = todos (comportamento atual). Passar legs restringe o
+  // lançamento a essas pernas — Etapa 2 lança pagar_custodia + a-receber;
+  // permite disparos independentes por etapa.
+  const needsBand = !legs || legs.includes("pagar_custodia");
+  const needsClient = !legs || legs.some((l) => l !== "pagar_custodia");
   const { data: contract, error: cErr } = await db
     .from("case_contracts")
     .select(
@@ -131,7 +140,7 @@ export async function launchContractToOmie(db: DB, contractId: string): Promise<
   let clientCodigo = client.omie_codigo ? Number(client.omie_codigo) : null;
 
   try {
-    if (!bandCodigo) {
+    if (needsBand && !bandCodigo) {
       const bandData: OmieSupplierData = {
         id: band.id,
         name: band.name,
@@ -149,7 +158,7 @@ export async function launchContractToOmie(db: DB, contractId: string): Promise<
       bandCodigo = codigoCliente;
       await db.from("case_bands").update({ omie_codigo: bandCodigo, omie_synced_at: new Date().toISOString() }).eq("id", band.id);
     }
-    if (!clientCodigo) {
+    if (needsClient && !clientCodigo) {
       const clientData: OmieSupplierData = {
         id: client.id,
         name: client.name,
@@ -172,13 +181,13 @@ export async function launchContractToOmie(db: DB, contractId: string): Promise<
   }
 
   // ── Lança os títulos pendentes/erro ────────────────────────────────────
-  const { data: titles } = await db
+  let titlesQuery = db
     .from("case_titles")
     .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, codigo_integracao, status")
     .eq("contract_id", contractId)
-    .in("status", ["pendente", "erro"])
-    .order("leg")
-    .order("parcela_numero");
+    .in("status", ["pendente", "erro"]);
+  if (legs) titlesQuery = titlesQuery.in("leg", legs);
+  const { data: titles } = await titlesQuery.order("leg").order("parcela_numero");
 
   const rows = (titles ?? []) as TitleRow[];
   const anexadoPorLeg = new Set<CaseLegKind>();

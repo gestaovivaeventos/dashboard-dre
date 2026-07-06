@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Upload, Loader2, Copy, ScanLine } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
-import { createContract } from "@/lib/case/actions/contracts";
+import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
-import type { CaseBandRow, CaseClientRow, CaseParcelaInput } from "@/lib/case/types";
+import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -16,17 +16,14 @@ const SECTION_CLS = "rounded-lg border border-border bg-surface-1 p-4 space-y-3"
 
 const ATTACHMENT_BUCKET = "case-attachments";
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-
 const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function formatBRL(digits: string): string {
   const clean = digits.replace(/\D/g, "");
-  if (!clean) return "";
-  return fmt.format(parseInt(clean, 10) / 100);
+  return clean ? fmt.format(parseInt(clean, 10) / 100) : "";
 }
 function parseBRL(masked: string): number {
-  const clean = masked.replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, "");
-  const n = parseFloat(clean);
+  const n = parseFloat(masked.replace(/\./g, "").replace(",", ".").replace(/[^\d.]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 const brlFromNumber = (n: number) => (n > 0 ? formatBRL(String(Math.round(n * 100))) : "");
@@ -38,87 +35,39 @@ interface ParcelaRow {
 }
 const emptyParcela = (): ParcelaRow => ({ vencimento: "", valorStr: "" });
 
-function ParcelasEditor({
-  title,
-  rows,
-  onChange,
-  total,
-  onFillSingle,
-  onMirror,
-}: {
-  title: string;
+function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
+  label: string;
   rows: ParcelaRow[];
   onChange: (rows: ParcelaRow[]) => void;
   total: number;
   onFillSingle: () => void;
-  onMirror?: () => void;
 }) {
   const soma = rows.reduce((acc, r) => acc + parseBRL(r.valorStr), 0);
   const diff = Math.round((soma - total) * 100) / 100;
   const ok = Math.abs(diff) < 0.005 && total > 0;
-
   return (
     <div className="rounded-md border border-border/70 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-ink-secondary">{title}</span>
-        <span className="text-xs text-ink-muted">
-          Total: <span className="tabular-nums">R$ {fmt.format(total)}</span>
-        </span>
+        <span className="text-xs font-semibold text-ink-secondary">{label}</span>
+        <span className="text-xs text-ink-muted">Total: <span className="tabular-nums">R$ {fmt.format(total)}</span></span>
       </div>
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input
-              type="date"
-              value={r.vencimento}
-              onChange={(e) => {
-                const next = [...rows];
-                next[i] = { ...next[i], vencimento: e.target.value };
-                onChange(next);
-              }}
-              className={INPUT_CLS + " max-w-[170px]"}
-            />
+            <input type="date" value={r.vencimento} onChange={(e) => { const n = [...rows]; n[i] = { ...n[i], vencimento: e.target.value }; onChange(n); }} className={INPUT_CLS + " max-w-[170px]"} />
             <div className="relative flex-1">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
-              <input
-                inputMode="numeric"
-                value={r.valorStr}
-                onChange={(e) => {
-                  const next = [...rows];
-                  next[i] = { ...next[i], valorStr: formatBRL(e.target.value) };
-                  onChange(next);
-                }}
-                placeholder="0,00"
-                className={INPUT_CLS + " pl-8 text-right"}
-              />
+              <input inputMode="numeric" value={r.valorStr} onChange={(e) => { const n = [...rows]; n[i] = { ...n[i], valorStr: formatBRL(e.target.value) }; onChange(n); }} placeholder="0,00" className={INPUT_CLS + " pl-8 text-right"} />
             </div>
-            <button
-              type="button"
-              onClick={() => onChange(rows.filter((_, idx) => idx !== i))}
-              disabled={rows.length <= 1}
-              className="rounded p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-500 disabled:opacity-40"
-              title="Remover parcela"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <button type="button" onClick={() => onChange(rows.filter((_, idx) => idx !== i))} disabled={rows.length <= 1} className="rounded p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-500 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
           </div>
         ))}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onChange([...rows, emptyParcela()])} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-          <Plus className="h-3.5 w-3.5" /> Parcela
-        </button>
-        <button type="button" onClick={onFillSingle} className="rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-          Preencher 1 parcela
-        </button>
-        {onMirror && (
-          <button type="button" onClick={onMirror} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-            <Copy className="h-3.5 w-3.5" /> Espelhar do artista
-          </button>
-        )}
+        <button type="button" onClick={() => onChange([...rows, emptyParcela()])} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"><Plus className="h-3.5 w-3.5" /> Parcela</button>
+        <button type="button" onClick={onFillSingle} className="rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">Preencher 1 parcela</button>
         <span className={`ml-auto text-xs tabular-nums ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted"}`}>
-          Soma: R$ {fmt.format(soma)}
-          {total > 0 && !ok ? ` (dif. ${diff > 0 ? "+" : ""}${fmt.format(diff)})` : ""}
+          Soma: R$ {fmt.format(soma)}{total > 0 && !ok ? ` (dif. ${diff > 0 ? "+" : ""}${fmt.format(diff)})` : ""}
         </span>
       </div>
     </div>
@@ -127,15 +76,8 @@ function ParcelasEditor({
 
 export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[]; bands: CaseBandRow[] }) {
   const router = useRouter();
-
-  const [bandsList, setBandsList] = useState<CaseBandRow[]>(bands);
-
-  // Artista/contrato + OCR
-  const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
-  const [attachmentName, setAttachmentName] = useState<string>("");
-  const [uploading, setUploading] = useState(false);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
+  const [bandsList] = useState<CaseBandRow[]>(bands);
 
   // Cliente
   const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
@@ -150,20 +92,6 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [cCidadeEstado, setCCidadeEstado] = useState("");
   const [cCep, setCCep] = useState("");
 
-  // Banda
-  const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
-  const [bandId, setBandId] = useState<string>(bands[0]?.id ?? "");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
-  const [bBanco, setBBanco] = useState("");
-  const [bAgencia, setBAgencia] = useState("");
-  const [bConta, setBConta] = useState("");
-  const [bTitular, setBTitular] = useState("");
-  const [bDocTitular, setBDocTitular] = useState("");
-  const [bPix, setBPix] = useState("");
-
   // Evento / objeto
   const [eventName, setEventName] = useState("");
   const [eventDate, setEventDate] = useState("");
@@ -176,7 +104,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [localCep, setLocalCep] = useState("");
   const [especificacoes, setEspecificacoes] = useState("");
 
-  // Modelo CASE — checkboxes, tipo de evento, cortesias, assinatura, testemunhas
+  // Modelo CASE
   const [especAreaInterna, setEspecAreaInterna] = useState(false);
   const [especAreaExterna, setEspecAreaExterna] = useState(false);
   const [especPalco, setEspecPalco] = useState(false);
@@ -190,39 +118,50 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [dataAssinatura, setDataAssinatura] = useState("");
   const [test1Nome, setTest1Nome] = useState("");
   const [test1Cpf, setTest1Cpf] = useState("");
+  const [test1Email, setTest1Email] = useState("");
   const [test2Nome, setTest2Nome] = useState("");
   const [test2Cpf, setTest2Cpf] = useState("");
 
-  // Valores
-  const [vArtista, setVArtista] = useState("");
+  // Valores cobrados do cliente
   const [vAtracao, setVAtracao] = useState("");
   const [vRider, setVRider] = useState("");
   const [vCamarim, setVCamarim] = useState("");
   const [vExtras, setVExtras] = useState("");
   const [observacao, setObservacao] = useState("");
+  const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>([emptyParcela()]);
 
-  // Parcelas
-  const [pagarCustodia, setPagarCustodia] = useState<ParcelaRow[]>([emptyParcela()]);
-  const [receberCustodia, setReceberCustodia] = useState<ParcelaRow[]>([emptyParcela()]);
-  const [receberServicos, setReceberServicos] = useState<ParcelaRow[]>([emptyParcela()]);
+  // Aba Atração — identidade + anexo/OCR + pagamento
+  const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
+  const [bandId, setBandId] = useState<string>(bands[0]?.id ?? "");
+  const [bName, setBName] = useState("");
+  const [bDoc, setBDoc] = useState("");
+  const [bEmail, setBEmail] = useState("");
+  const [bPhone, setBPhone] = useState("");
+  const [bBanco, setBBanco] = useState("");
+  const [bAgencia, setBAgencia] = useState("");
+  const [bConta, setBConta] = useState("");
+  const [bTitular, setBTitular] = useState("");
+  const [bDocTitular, setBDocTitular] = useState("");
+  const [bPix, setBPix] = useState("");
+  const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
+  const [attachmentName, setAttachmentName] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  const [vArtista, setVArtista] = useState("");
+  const [pagarArtista, setPagarArtista] = useState<ParcelaRow[]>([emptyParcela()]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Trava síncrona anti-duplo-clique + nonce de idempotência por submissão.
   const submittingRef = useRef(false);
-  const [idempotencyKey] = useState(() =>
-    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-  );
 
-  const valArtista = parseBRL(vArtista);
   const valAtracao = parseBRL(vAtracao);
   const valRider = parseBRL(vRider);
   const valCamarim = parseBRL(vCamarim);
   const valExtras = parseBRL(vExtras);
-  const custodia = valArtista;
-  const margem = Math.max(0, valAtracao - valArtista);
-  const servicos = useMemo(() => margem + valRider + valCamarim + valExtras, [margem, valRider, valCamarim, valExtras]);
+  const totalCliente = valAtracao + valRider + valCamarim + valExtras;
+  const valArtista = parseBRL(vArtista);
+  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!bName.trim());
 
   async function handleUpload(file: File) {
     setError(null);
@@ -234,8 +173,8 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       if (!user) return setError("Sessão expirada.");
       const safeName = file.name.replace(/[^\w.\-]+/g, "_");
       const objectPath = `${user.id}/${Date.now()}-${safeName}`;
-      const { error: upErr } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(objectPath, file, { contentType: file.type, upsert: false });
-      if (upErr) return setError(`Falha no upload: ${upErr.message}`);
+      const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(objectPath, file, { contentType: file.type, upsert: false });
+      if (error) return setError(`Falha no upload: ${error.message}`);
       setAttachmentPath(objectPath);
       setAttachmentName(file.name);
     } finally {
@@ -252,120 +191,32 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     setOcrLoading(false);
     if ("error" in res) return setError(res.error);
     const d = res.data;
-
-    if (d.bandId) {
-      if (!bandsList.find((b) => b.id === d.bandId)) {
-        setBandsList((prev) => [
-          ...prev,
-          {
-            id: d.bandId!,
-            name: d.bandName ?? "Artista",
-            cnpj_cpf: d.bandDoc,
-            pessoa_fisica: onlyDigits(d.bandDoc).length === 11,
-            email: null, phone: null, banco: null, agencia: null,
-            conta_corrente: null, titular_banco: null, doc_titular: null, chave_pix: null,
-          },
-        ]);
-      }
-      setBandMode("existing");
-      setBandId(d.bandId);
-    } else if (d.bandName) {
-      setBandMode("new");
-      setBName(d.bandName);
-      setBDoc(d.bandDoc ?? "");
-    }
-
+    if (d.bandName && bandMode === "new") { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
-    const parcelas = (d.parcelas ?? []).filter((p) => p.data && p.valor);
-    if (parcelas.length) setPagarCustodia(parcelas.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
-    if (d.dataShow) setEventDate(d.dataShow);
-    if (d.horario) setShowTime(d.horario);
-    if (d.duracao) setShowDuration(d.duracao);
-    if (d.local) setLocalName(d.local);
-    if (d.endereco) setLocalAddress(d.endereco);
-    if (d.cidade) setLocalCity(d.cidade);
-    setOcrMsg(`Contrato lido${d.bandCreated ? " — artista cadastrado automaticamente" : ""}. Revise os campos antes de enviar.`);
+    const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
+    if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    setOcrMsg("Contrato lido — revise os dados da atração.");
   }
 
-  function fillSingle(setter: (r: ParcelaRow[]) => void, total: number) {
-    setter([{ vencimento: eventDate, valorStr: brlFromNumber(total) }]);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (submittingRef.current) return; // ignora cliques repetidos enquanto processa
-    setError(null);
-    setNotice(null);
-
-    if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
-    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
-    if (bandMode === "existing" && !bandId) return setError("Selecione a banda/artista.");
-    if (bandMode === "new" && !bName.trim()) return setError("Informe o nome da banda/artista.");
-    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente.");
-
-    const toParcelas = (rows: ParcelaRow[]): CaseParcelaInput[] =>
-      rows.filter((r) => r.vencimento && parseBRL(r.valorStr) > 0).map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
-
+  function buildClientInput(): Etapa1Input {
+    const receber_schedule: CaseParcelaInput[] = receberCliente
+      .filter((r) => r.vencimento && parseBRL(r.valorStr) > 0)
+      .map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
     const selectedClient = clients.find((c) => c.id === clientId);
-    const selectedBand = bandsList.find((b) => b.id === bandId);
-
-    const input = {
-      idempotency_key: idempotencyKey,
+    return {
       client:
         clientMode === "existing" && selectedClient
           ? {
-              id: selectedClient.id,
-              name: selectedClient.name,
-              cnpj_cpf: selectedClient.cnpj_cpf,
-              pessoa_fisica: selectedClient.pessoa_fisica,
-              email: selectedClient.email,
-              phone: selectedClient.phone,
-              resp_legal: selectedClient.resp_legal,
-              cpf_resp_legal: selectedClient.cpf_resp_legal,
-              endereco: selectedClient.endereco,
-              cidade_estado: selectedClient.cidade_estado,
-              cep: selectedClient.cep,
+              id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
+              pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
+              resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
+              endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
             }
           : {
-              name: cName.trim(),
-              cnpj_cpf: cDoc.trim() || null,
-              pessoa_fisica: onlyDigits(cDoc).length === 11,
-              email: cEmail.trim() || null,
-              phone: cPhone.trim() || null,
-              resp_legal: cRespLegal.trim() || null,
-              cpf_resp_legal: cCpfResp.trim() || null,
-              endereco: cEndereco.trim() || null,
-              cidade_estado: cCidadeEstado.trim() || null,
-              cep: cCep.trim() || null,
-            },
-      band:
-        bandMode === "existing" && selectedBand
-          ? {
-              id: selectedBand.id,
-              name: selectedBand.name,
-              cnpj_cpf: selectedBand.cnpj_cpf,
-              pessoa_fisica: selectedBand.pessoa_fisica,
-              email: selectedBand.email,
-              phone: selectedBand.phone,
-              banco: selectedBand.banco,
-              agencia: selectedBand.agencia,
-              conta_corrente: selectedBand.conta_corrente,
-              titular_banco: selectedBand.titular_banco,
-              doc_titular: selectedBand.doc_titular,
-              chave_pix: selectedBand.chave_pix,
-            }
-          : {
-              name: bName.trim(),
-              cnpj_cpf: bDoc.trim() || null,
-              pessoa_fisica: onlyDigits(bDoc).length === 11,
-              email: bEmail.trim() || null,
-              phone: bPhone.trim() || null,
-              banco: bBanco.trim() || null,
-              agencia: bAgencia.trim() || null,
-              conta_corrente: bConta.trim() || null,
-              titular_banco: bTitular.trim() || null,
-              doc_titular: bDocTitular.trim() || null,
-              chave_pix: bPix.trim() || null,
+              name: cName.trim(), cnpj_cpf: cDoc.trim() || null, pessoa_fisica: onlyDigits(cDoc).length === 11,
+              email: cEmail.trim() || null, phone: cPhone.trim() || null, resp_legal: cRespLegal.trim() || null,
+              cpf_resp_legal: cCpfResp.trim() || null, endereco: cEndereco.trim() || null,
+              cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
             },
       event_name: eventName.trim() || null,
       event_date: eventDate || null,
@@ -377,280 +228,270 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       local_city: localCity.trim() || null,
       local_cep: localCep.trim() || null,
       especificacoes: especificacoes.trim() || null,
-      espec_area_interna: especAreaInterna,
-      espec_area_externa: especAreaExterna,
-      espec_palco: especPalco,
-      espec_trio: especTrio,
-      extra_transporte_cidade: extraTransporte,
-      extra_translado_local: extraTranslado,
-      extra_diaria_alimentacao: extraDiaria,
-      extra_hospedagem: extraHospedagem,
+      espec_area_interna: especAreaInterna, espec_area_externa: especAreaExterna, espec_palco: especPalco, espec_trio: especTrio,
+      extra_transporte_cidade: extraTransporte, extra_translado_local: extraTranslado,
+      extra_diaria_alimentacao: extraDiaria, extra_hospedagem: extraHospedagem,
       tipo_evento: tipoEvento || null,
       cortesias: cortesias.trim() || null,
       data_assinatura: dataAssinatura || null,
-      testemunha_1_nome: test1Nome.trim() || null,
-      testemunha_1_cpf: test1Cpf.trim() || null,
-      testemunha_2_nome: test2Nome.trim() || null,
-      testemunha_2_cpf: test2Cpf.trim() || null,
-      valor_artista: valArtista,
+      testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null, testemunha_1_email: test1Email.trim() || null,
+      testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
       valor_rider: valRider,
       valor_camarim: valCamarim,
       valor_extras: valExtras,
       observacao: observacao.trim() || null,
-      attachment_path: attachmentPath,
-      parcelas_pagar_custodia: toParcelas(pagarCustodia),
-      parcelas_receber_custodia: toParcelas(receberCustodia),
-      parcelas_receber_servicos: toParcelas(receberServicos),
+      receber_schedule,
     };
+  }
+
+  function buildBandInput() {
+    const selectedBand = bandsList.find((b) => b.id === bandId);
+    return bandMode === "existing" && selectedBand
+      ? {
+          id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
+          email: selectedBand.email, phone: selectedBand.phone, banco: selectedBand.banco, agencia: selectedBand.agencia,
+          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix,
+        }
+      : {
+          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: onlyDigits(bDoc).length === 11,
+          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
+          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
+        };
+  }
+
+  async function handleSalvar(enviar: boolean) {
+    if (submittingRef.current) return;
+    setError(null);
+    if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
+    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
+    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente (aba Contrato Cliente).");
+    if (enviar && !bandFilled) return setError("Selecione a atração/artista (aba Contrato Atração) antes de gerar o contrato.");
 
     submittingRef.current = true;
     setSubmitting(true);
-    let res;
     try {
-      res = await createContract(input);
+      const res = await salvarCliente(buildClientInput());
+      if ("error" in res) { submittingRef.current = false; setSubmitting(false); return setError(res.error); }
+      const contractId = res.contractId;
+
+      if (bandFilled) {
+        const pagar = pagarArtista.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) }));
+        const atr = await salvarAtracao({ contract_id: contractId, band: buildBandInput(), attachment_path: attachmentPath, valor_artista: valArtista > 0 ? valArtista : undefined, parcelas_pagar: valArtista > 0 ? pagar : undefined });
+        if ("error" in atr) { setError(atr.error); router.push(`/case/contratos/${contractId}`); return; }
+      }
+
+      if (enviar) {
+        const g = await gerarEnviarContrato(contractId);
+        if ("error" in g) { router.push(`/case/contratos/${contractId}`); return; }
+        if (g.warning) alert(g.warning);
+      }
+      router.push(`/case/contratos/${contractId}`);
+      router.refresh();
     } catch (err) {
       submittingRef.current = false;
       setSubmitting(false);
-      return setError(err instanceof Error ? err.message : "Falha ao gerar o contrato.");
+      setError(err instanceof Error ? err.message : "Falha ao salvar o contrato.");
     }
-
-    if ("error" in res) {
-      submittingRef.current = false;
-      setSubmitting(false);
-      return setError(res.error);
-    }
-
-    // Sucesso (contrato criado). Mesmo com aviso (ex.: cliente sem e-mail), o
-    // contrato já existe — sai da tela para não recriar em novo clique. A
-    // idempotência (idempotency_key) é a rede de segurança no servidor.
-    if (res.warning) alert(res.warning);
-    router.push("/case/contratos");
-    router.refresh();
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* 1. Contrato do artista + OCR */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">1. Contrato do artista</h2>
-        <p className="text-xs text-ink-muted">Suba o contrato do artista e leia com OCR para pré-preencher artista, valores, datas e dados do show.</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            <span>{attachmentName || "Selecionar PDF/imagem (até 10MB)"}</span>
-            <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
-          </label>
-          <button
-            type="button"
-            onClick={handleOcr}
-            disabled={!attachmentPath || ocrLoading || uploading}
-            className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-          >
-            {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
-            Ler contrato (OCR)
-          </button>
-        </div>
-        {ocrMsg && <p className="text-xs text-emerald-600 dark:text-emerald-400">{ocrMsg}</p>}
+    <form onSubmit={(e) => { e.preventDefault(); handleSalvar(false); }} className="space-y-5">
+      {/* Abas */}
+      <div className="flex gap-1 border-b border-border">
+        <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
+        <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
       </div>
 
-      {/* Cliente */}
-      <div className={SECTION_CLS}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-primary">Cliente (contratante)</h2>
-          <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
-        </div>
-        {clientMode === "existing" ? (
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={INPUT_CLS}>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.name} {c.cnpj_cpf ? `— ${c.cnpj_cpf}` : ""}</option>
-            ))}
-          </select>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
-            <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
-            <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
-            <Field label="Telefone" value={cPhone} onChange={setCPhone} />
-            <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
-            <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
-            <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
-            <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
-            <Field label="CEP" value={cCep} onChange={setCCep} />
+      {tab === "cliente" ? (
+        <>
+          <div className={SECTION_CLS}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-ink-primary">Cliente (contratante)</h2>
+              <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
+            </div>
+            {clientMode === "existing" ? (
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={INPUT_CLS}>
+                {clients.map((c) => (<option key={c.id} value={c.id}>{c.name} {c.cnpj_cpf ? `— ${c.cnpj_cpf}` : ""}</option>))}
+              </select>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
+                <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
+                <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
+                <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
+                <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                <Field label="CEP" value={cCep} onChange={setCCep} />
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Banda */}
-      <div className={SECTION_CLS}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-primary">Banda / Artista (fornecedor)</h2>
-          <ModeToggle mode={bandMode} setMode={setBandMode} hasExisting={bandsList.length > 0} />
-        </div>
-        {bandMode === "existing" ? (
-          <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
-            {bandsList.map((b) => (
-              <option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>
-            ))}
-          </select>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Nome / Razão social" value={bName} onChange={setBName} />
-            <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
-            <Field label="E-mail" value={bEmail} onChange={setBEmail} />
-            <Field label="Telefone" value={bPhone} onChange={setBPhone} />
-            <Field label="Banco" value={bBanco} onChange={setBBanco} />
-            <Field label="Agência" value={bAgencia} onChange={setBAgencia} />
-            <Field label="Conta corrente" value={bConta} onChange={setBConta} />
-            <Field label="Titular" value={bTitular} onChange={setBTitular} />
-            <Field label="CPF/CNPJ do titular" value={bDocTitular} onChange={setBDocTitular} />
-            <Field label="Chave PIX" value={bPix} onChange={setBPix} />
-          </div>
-        )}
-      </div>
-
-      {/* Evento / objeto */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Nome do evento / atração" value={eventName} onChange={setEventName} />
-          <div>
-            <label className={LABEL_CLS}>Data do evento</label>
-            <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} />
-          </div>
-          <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
-          <Field label="Duração" value={showDuration} onChange={setShowDuration} />
-          <Field label="Passagem de som" value={passagemSom} onChange={setPassagemSom} />
-          <Field label="Local" value={localName} onChange={setLocalName} />
-          <Field label="Endereço do local" value={localAddress} onChange={setLocalAddress} />
-          <Field label="Cidade / Estado" value={localCity} onChange={setLocalCity} />
-          <Field label="CEP" value={localCep} onChange={setLocalCep} />
-          <Field label="Especificações (texto livre — opcional)" value={especificacoes} onChange={setEspecificacoes} />
-        </div>
-        <div>
-          <label className={LABEL_CLS}>Especificações do local</label>
-          <div className="flex flex-wrap gap-4">
-            <CheckField label="Área interna" checked={especAreaInterna} onChange={setEspecAreaInterna} />
-            <CheckField label="Área externa" checked={especAreaExterna} onChange={setEspecAreaExterna} />
-            <CheckField label="Palco" checked={especPalco} onChange={setEspecPalco} />
-            <CheckField label="Trio" checked={especTrio} onChange={setEspecTrio} />
-          </div>
-        </div>
-      </div>
-
-      {/* Modelo CASE — extras, tipo de evento, cortesias, assinatura, testemunhas */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Contrato (modelo CASE Shows)</h2>
-        <div>
-          <label className={LABEL_CLS}>Extras inclusos (custo da CONTRATADA se marcado)</label>
-          <div className="flex flex-wrap gap-4">
-            <CheckField label="Transporte até a cidade" checked={extraTransporte} onChange={setExtraTransporte} />
-            <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
-            <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
-            <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={LABEL_CLS}>Tipo de evento</label>
-            <div className="flex gap-4 pt-1">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
-                <input type="radio" name="tipo_evento" checked={tipoEvento === "aberto"} onChange={() => setTipoEvento("aberto")} />
-                Aberto
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
-                <input type="radio" name="tipo_evento" checked={tipoEvento === "fechado"} onChange={() => setTipoEvento("fechado")} />
-                Fechado
-              </label>
-              {tipoEvento && (
-                <button type="button" onClick={() => setTipoEvento("")} className="text-xs text-ink-muted hover:text-red-500">
-                  limpar
-                </button>
-              )}
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Nome do evento / atração" value={eventName} onChange={setEventName} />
+              <div><label className={LABEL_CLS}>Data do evento</label><input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} /></div>
+              <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
+              <Field label="Duração" value={showDuration} onChange={setShowDuration} />
+              <Field label="Passagem de som" value={passagemSom} onChange={setPassagemSom} />
+              <Field label="Local" value={localName} onChange={setLocalName} />
+              <Field label="Endereço do local" value={localAddress} onChange={setLocalAddress} />
+              <Field label="Cidade / Estado" value={localCity} onChange={setLocalCity} />
+              <Field label="CEP" value={localCep} onChange={setLocalCep} />
+              <Field label="Especificações (texto livre — opcional)" value={especificacoes} onChange={setEspecificacoes} />
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Especificações do local</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Área interna" checked={especAreaInterna} onChange={setEspecAreaInterna} />
+                <CheckField label="Área externa" checked={especAreaExterna} onChange={setEspecAreaExterna} />
+                <CheckField label="Palco" checked={especPalco} onChange={setEspecPalco} />
+                <CheckField label="Trio" checked={especTrio} onChange={setEspecTrio} />
+              </div>
             </div>
           </div>
-          <Field label="Cortesias" value={cortesias} onChange={setCortesias} />
-          <div>
-            <label className={LABEL_CLS}>Data de assinatura</label>
-            <input type="date" value={dataAssinatura} onChange={(e) => setDataAssinatura(e.target.value)} className={INPUT_CLS} />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
-          <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
-          <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
-          <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
-        </div>
-      </div>
 
-      {/* Valores */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Valores</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <MoneyField label="Valor pago ao artista (custódia)" value={vArtista} onChange={setVArtista} />
-          <MoneyField label="Valor da atração cobrado do cliente" value={vAtracao} onChange={setVAtracao} />
-          <MoneyField label="Rider" value={vRider} onChange={setVRider} />
-          <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
-          <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
-        </div>
-        <div className="grid grid-cols-3 gap-2 rounded-md bg-surface-2 p-3 text-center text-xs">
-          <div>
-            <div className="text-ink-muted">Custódia (repasse)</div>
-            <div className="mt-0.5 font-semibold tabular-nums text-ink-primary">R$ {fmt.format(custodia)}</div>
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Contrato (modelo CASE Shows)</h2>
+            <div>
+              <label className={LABEL_CLS}>Extras inclusos (custo da CONTRATADA se marcado)</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Transporte até a cidade" checked={extraTransporte} onChange={setExtraTransporte} />
+                <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
+                <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
+                <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={LABEL_CLS}>Tipo de evento</label>
+                <div className="flex gap-4 pt-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary"><input type="radio" name="tipo_evento" checked={tipoEvento === "aberto"} onChange={() => setTipoEvento("aberto")} /> Aberto</label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary"><input type="radio" name="tipo_evento" checked={tipoEvento === "fechado"} onChange={() => setTipoEvento("fechado")} /> Fechado</label>
+                  {tipoEvento && <button type="button" onClick={() => setTipoEvento("")} className="text-xs text-ink-muted hover:text-red-500">limpar</button>}
+                </div>
+              </div>
+              <Field label="Cortesias" value={cortesias} onChange={setCortesias} />
+              <div><label className={LABEL_CLS}>Data de assinatura</label><input type="date" value={dataAssinatura} onChange={(e) => setDataAssinatura(e.target.value)} className={INPUT_CLS} /></div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Testemunha 1 — nome" value={test1Nome} onChange={setTest1Nome} />
+              <Field label="Testemunha 1 — CPF" value={test1Cpf} onChange={setTest1Cpf} />
+              <Field label="Testemunha 1 — e-mail (para assinar)" value={test1Email} onChange={setTest1Email} />
+              <Field label="Testemunha 2 — nome" value={test2Nome} onChange={setTest2Nome} />
+              <Field label="Testemunha 2 — CPF" value={test2Cpf} onChange={setTest2Cpf} />
+            </div>
+            <p className="text-xs text-ink-muted">Assinam: cliente, contratado (CS Agência) e a testemunha 1 (por isso o e-mail dela).</p>
           </div>
-          <div>
-            <div className="text-ink-muted">Margem</div>
-            <div className="mt-0.5 font-semibold tabular-nums text-ink-primary">R$ {fmt.format(margem)}</div>
-          </div>
-          <div>
-            <div className="text-ink-muted">Serviços (receita)</div>
-            <div className="mt-0.5 font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">R$ {fmt.format(servicos)}</div>
-          </div>
-        </div>
-        {valArtista > valAtracao && valAtracao > 0 && (
-          <p className="text-xs text-red-500">O valor pago ao artista não pode ser maior que o valor cobrado do cliente pela atração.</p>
-        )}
-      </div>
 
-      {/* Parcelas */}
-      <div className={SECTION_CLS}>
-        <h2 className="text-sm font-semibold text-ink-primary">Parcelas</h2>
-        <p className="text-xs text-ink-muted">Cada parcela vira um título no Omie ao assinar. Custódia usa a categoria de custódia; serviços usam a de serviços prestados.</p>
-        <ParcelasEditor title="A pagar ao artista — Custódia" rows={pagarCustodia} onChange={setPagarCustodia} total={custodia} onFillSingle={() => fillSingle(setPagarCustodia, custodia)} />
-        <ParcelasEditor title="A receber do cliente — Custódia" rows={receberCustodia} onChange={setReceberCustodia} total={custodia} onFillSingle={() => fillSingle(setReceberCustodia, custodia)} onMirror={() => setReceberCustodia(pagarCustodia.map((r) => ({ ...r })))} />
-        <ParcelasEditor title="A receber do cliente — Serviços (margem + rider + camarim + extras)" rows={receberServicos} onChange={setReceberServicos} total={servicos} onFillSingle={() => fillSingle(setReceberServicos, servicos)} />
-      </div>
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Valores cobrados do cliente</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField label="Atração" value={vAtracao} onChange={setVAtracao} />
+              <MoneyField label="Rider" value={vRider} onChange={setVRider} />
+              <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
+              <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
+            </div>
+            <div className="rounded-md bg-surface-2 p-3 text-center text-sm">
+              <div className="text-xs text-ink-muted">Total cobrado do cliente</div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums text-ink-primary">R$ {fmt.format(totalCliente)}</div>
+            </div>
+            <ParcelasEditor label="Parcelas a receber do cliente" rows={receberCliente} onChange={setReceberCliente} total={totalCliente} onFillSingle={() => setReceberCliente([{ vencimento: eventDate, valorStr: brlFromNumber(totalCliente) }])} />
+          </div>
 
-      <div>
-        <label className={LABEL_CLS}>Observação</label>
-        <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={2} className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40" />
-      </div>
+          <div>
+            <label className={LABEL_CLS}>Observação</label>
+            <textarea value={observacao} onChange={(e) => setObservacao(e.target.value)} rows={2} className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40" />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className={SECTION_CLS}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-ink-primary">Atração / Artista</h2>
+              <ModeToggle mode={bandMode} setMode={setBandMode} hasExisting={bandsList.length > 0} />
+            </div>
+            {bandMode === "existing" ? (
+              <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
+                {bandsList.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
+              </select>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Nome / Razão social" value={bName} onChange={setBName} />
+                <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
+                <Field label="E-mail" value={bEmail} onChange={setBEmail} />
+                <Field label="Telefone" value={bPhone} onChange={setBPhone} />
+                <Field label="Banco" value={bBanco} onChange={setBBanco} />
+                <Field label="Agência" value={bAgencia} onChange={setBAgencia} />
+                <Field label="Conta corrente" value={bConta} onChange={setBConta} />
+                <Field label="Titular" value={bTitular} onChange={setBTitular} />
+                <Field label="CPF/CNPJ do titular" value={bDocTitular} onChange={setBDocTitular} />
+                <Field label="Chave PIX" value={bPix} onChange={setBPix} />
+              </div>
+            )}
+          </div>
+
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Contrato do artista + pagamento</h2>
+            <p className="text-xs text-ink-muted">Suba o contrato do artista e leia com OCR para pré-preencher valor e parcelas. Os títulos ficam pendentes até você lançar no Omie (contrato assinado).</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                <span>{attachmentName || "Contrato do artista (PDF/imagem)"}</span>
+                <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+              </label>
+              <button type="button" onClick={handleOcr} disabled={!attachmentPath || ocrLoading || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} Ler contrato (OCR)
+              </button>
+            </div>
+            {ocrMsg && <p className="text-xs text-emerald-600 dark:text-emerald-400">{ocrMsg}</p>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField label="Valor pago ao artista (custódia)" value={vArtista} onChange={setVArtista} />
+            </div>
+            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que a atração cobrada (R$ {fmt.format(valAtracao)}).</p>}
+            <ParcelasEditor label="Parcelas a pagar ao artista" rows={pagarArtista} onChange={setPagarArtista} total={valArtista} onFillSingle={() => setPagarArtista([{ vencimento: eventDate, valorStr: brlFromNumber(valArtista) }])} />
+          </div>
+        </>
+      )}
+
+      {/* Financeiro (placeholder até salvar/gerar títulos) */}
+      <section className="rounded-lg border border-border bg-surface-1 p-4">
+        <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
+        <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
+      </section>
 
       {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-300">{error}</div>}
-      {notice && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">{notice}</div>}
 
-      <div className="flex items-center justify-end gap-2">
-        <button type="button" onClick={() => router.push("/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">
-          Cancelar
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button type="button" onClick={() => router.push("/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
+        <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:text-amber-400 dark:hover:bg-amber-950/30">
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar rascunho
         </button>
-        <button type="submit" disabled={submitting || uploading || ocrLoading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          Gerar contrato e enviar para assinatura
+        <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Gerar e enviar para assinatura
         </button>
       </div>
     </form>
   );
 }
 
+function TabBtn({ active, done, label, onClick }: { active: boolean; done: boolean; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${active ? "border-amber-600 text-ink-primary" : "border-transparent text-ink-muted hover:text-ink-secondary"}`}>
+      {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-ink-muted" />}
+      {label}
+    </button>
+  );
+}
+
 function ModeToggle({ mode, setMode, hasExisting }: { mode: "existing" | "new"; setMode: (m: "existing" | "new") => void; hasExisting: boolean }) {
   return (
     <div className="flex gap-1 text-xs">
-      <button type="button" onClick={() => setMode("existing")} disabled={!hasExisting} className={`rounded px-2 py-1 ${mode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>
-        Selecionar
-      </button>
-      <button type="button" onClick={() => setMode("new")} className={`rounded px-2 py-1 ${mode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>
-        + Novo
-      </button>
+      <button type="button" onClick={() => setMode("existing")} disabled={!hasExisting} className={`rounded px-2 py-1 ${mode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
+      <button type="button" onClick={() => setMode("new")} className={`rounded px-2 py-1 ${mode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
     </div>
   );
 }

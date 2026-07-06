@@ -7,6 +7,7 @@ import {
 } from "@/lib/notifications/resend";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
+import { syncCasePagamentosFromOmie } from "@/lib/case/sync-pagamentos";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
 import { syncSirenaSheetsToManualValues } from "@/lib/sheets/sirena-sync";
@@ -283,6 +284,25 @@ export async function GET(request: Request) {
     failures.push({ companyId: "case-cadastros", companyName: "Case Shows (cadastros Omie)", error: message });
   }
 
+  // Espelha o status de pagamento (pago/pendente) dos títulos Case já lançados
+  // no Omie. Roda após o sync de cadastros; best-effort.
+  let casePagamentosSync: {
+    ok: boolean;
+    atualizados?: number;
+    pagos?: number;
+    skipped?: string;
+    error?: string;
+  } | null = null;
+  try {
+    const r = await syncCasePagamentosFromOmie(supabase);
+    casePagamentosSync = { ok: true, atualizados: r.atualizados, pagos: r.pagos, skipped: r.skipped };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Falha desconhecida no sync de pagamentos da Case.";
+    casePagamentosSync = { ok: false, error: message };
+    failures.push({ companyId: "case-pagamentos", companyName: "Case Shows (status pagamentos Omie)", error: message });
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -300,5 +320,6 @@ export async function GET(request: Request) {
     terrazzoSheetsSync,
     sirenaSheetsSync,
     caseCadastrosSync,
+    casePagamentosSync,
   });
 }
