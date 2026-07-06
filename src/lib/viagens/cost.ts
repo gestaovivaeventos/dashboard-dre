@@ -34,9 +34,23 @@ export interface QuoteBreakdown {
   viavel: boolean;
 }
 
-/** Preço real (Amadeus) por aeroporto de partida — chave = IATA. */
+/** Preço real (Amadeus ou pesquisa web) por aeroporto de partida — chave = IATA. */
 export interface RealFlightByAirport {
-  [iata: string]: { totalGrupo: number; dataIda: string; dataVolta: string; companhia: string | null };
+  [iata: string]: {
+    totalGrupo: number;
+    dataIda: string;
+    dataVolta: string;
+    companhia: string | null;
+    source: "amadeus" | "web";
+    fonte?: string | null;
+  };
+}
+
+/** Preço de ônibus encontrado na pesquisa web. */
+export interface WebBusPrice {
+  preco_pp_ida_volta: number;
+  empresa: string | null;
+  fonte: string | null;
 }
 
 export interface BuildQuotesInput {
@@ -50,8 +64,11 @@ export interface BuildQuotesInput {
   config: ViagemConfigRow;
   facts: RouteFacts;
   realFlights?: RealFlightByAirport;
+  webOnibus?: WebBusPrice | null;
   hotelRealDiaria?: number | null;
   hotelRealNome?: string | null;
+  /** URLs consultadas na pesquisa web (transparência nas cotações). */
+  fontes?: string[];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -138,7 +155,7 @@ function buildCarro(
 
   return {
     modal: "carro",
-    provider: "estimativa",
+    provider: "calculado",
     titulo: `Carro (${modelo === "reembolso_km" ? "reembolso por km" : "aluguel"}) — ${Math.round(facts.distancia_km)} km/trecho, ~${facts.duracao_carro_horas.toFixed(1)}h`,
     detalhes: {
       modelo,
@@ -171,26 +188,35 @@ function buildOnibus(
   linhasComuns: QuoteLine[],
 ): QuoteBreakdown {
   const { config, facts } = input;
-  const passagemPp = facts.preco_onibus_pp_ida_volta ?? round2(facts.distancia_km * 2 * config.tarifa_onibus_km);
+  const web = input.webOnibus ?? null;
+  const passagemPp =
+    web?.preco_pp_ida_volta ??
+    facts.preco_onibus_pp_ida_volta ??
+    round2(facts.distancia_km * 2 * config.tarifa_onibus_km);
   const transporte = round2(passagemPp * input.passageiros);
   // 4 trechos de uber: casa→rodoviária, rodoviária→hotel (ida) e o inverso (volta).
   const transferTrecho = Math.max(0, facts.rodoviaria_transfer_trecho_brl);
   const traslados = round2(transferTrecho * 4);
 
   const linhas: QuoteLine[] = [
-    { label: `Passagem: ${fmtBRL(passagemPp)} ida+volta × ${input.passageiros} pax`, valor: transporte },
+    {
+      label: `Passagem${web?.empresa ? ` ${web.empresa}` : ""}: ${fmtBRL(passagemPp)} ida+volta × ${input.passageiros} pax${web ? "" : " — estimado"}`,
+      valor: transporte,
+    },
     { label: `Uber casa↔rodoviária e rodoviária↔hotel (4 trechos × ${fmtBRL(transferTrecho)})`, valor: traslados },
     ...linhasComuns,
   ];
 
   return {
     modal: "onibus",
-    provider: "estimativa",
-    titulo: `Ônibus — ${facts.duracao_onibus_horas ? `~${Math.round(facts.duracao_onibus_horas)}h/trecho` : "rodoviário"}`,
+    provider: web ? "web" : "estimativa",
+    titulo: `Ônibus${web?.empresa ? ` ${web.empresa}` : ""} — ${facts.duracao_onibus_horas ? `~${Math.round(facts.duracao_onibus_horas)}h/trecho` : "rodoviário"}`,
     detalhes: {
       preco_pp_ida_volta: passagemPp,
       duracao_horas_trecho: facts.duracao_onibus_horas,
       transfer_trecho: transferTrecho,
+      fonte: web?.fonte ?? null,
+      fontes: input.fontes ?? [],
       linhas,
     },
     custo_transporte: transporte,
@@ -243,6 +269,7 @@ function buildAviao(
     transferOrigem: number;
     total: number;
     real: boolean;
+    source: "amadeus" | "web" | "estimativa";
     realInfo?: { dataIda: string; dataVolta: string; companhia: string | null };
   }
 
@@ -259,6 +286,7 @@ function buildAviao(
       transferOrigem,
       total: round2(vooTotal + transferOrigem),
       real: Boolean(real),
+      source: real?.source ?? "estimativa",
       realInfo: real ? { dataIda: real.dataIda, dataVolta: real.dataVolta, companhia: real.companhia } : undefined,
     };
   });
@@ -275,8 +303,9 @@ function buildAviao(
       ? `Ônibus executivo ${input.origem.split("/")[0]}↔${a.iata} (${Math.round(a.distancia_km)} km, ida+volta${a.transfer_por_pessoa ? ` × ${input.passageiros} pax` : ""})`
       : `Uber/táxi até ${a.iata} (${Math.round(a.distancia_km)} km, ida+volta)`;
 
+  const vooTag = best.source === "amadeus" ? "" : best.source === "web" ? " — pesquisado na web" : " — estimado";
   const linhas: QuoteLine[] = [
-    { label: `Voo ${a.iata}→${destino.iata} (${input.passageiros} pax, ida+volta)${best.real ? "" : " — estimado"}`, valor: transporte },
+    { label: `Voo ${a.iata}→${destino.iata} (${input.passageiros} pax, ida+volta)${vooTag}`, valor: transporte },
     { label: transferLabel, valor: best.transferOrigem },
     { label: `Uber ${destino.iata}↔centro no destino (ida+volta)`, valor: transferDestino },
     ...linhasComuns,
@@ -314,7 +343,7 @@ function buildAviao(
 
   return {
     modal: "aviao",
-    provider: best.real ? "amadeus" : "estimativa",
+    provider: best.source,
     titulo: `Avião ${a.iata}→${destino.iata}${best.realInfo?.companhia ? ` (${best.realInfo.companhia})` : ""}${a.frequencia_voos ? ` · voos ${a.frequencia_voos}` : ""}`,
     detalhes: {
       rota: `${a.iata}→${destino.iata}`,
@@ -323,6 +352,7 @@ function buildAviao(
       alternativas,
       recomendacao,
       hotel: input.hotelRealNome ?? null,
+      fontes: input.fontes ?? [],
       linhas,
     },
     custo_transporte: transporte,

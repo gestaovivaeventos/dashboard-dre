@@ -362,6 +362,7 @@ function QuoteCard({
     (quote.detalhes?.alternativas as
       | Array<{ iata: string; voo_total: number; transfer_total: number; total_porta_a_porta: number; preco_real: boolean; escolhida: boolean }>
       | undefined) ?? null;
+  const fontes = (quote.detalhes?.fontes as string[] | undefined) ?? [];
 
   return (
     <div
@@ -387,14 +388,7 @@ function QuoteCard({
           <Icon className="h-5 w-5 text-teal-600 dark:text-teal-400" />
           <span className="text-sm font-semibold text-ink-primary">{label}</span>
         </div>
-        <span
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-            quote.provider === "estimativa" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-          }`}
-          title={quote.provider === "estimativa" ? "Preço estimado pela IA — confirme no fechamento" : "Preço real do provedor"}
-        >
-          {quote.provider === "estimativa" ? "estimativa" : quote.provider}
-        </span>
+        <ProviderBadge provider={quote.provider} />
       </div>
       {quote.titulo && <p className="mt-1 text-xs text-ink-muted">{quote.titulo}</p>}
 
@@ -444,6 +438,23 @@ function QuoteCard({
         <div className="text-xl font-bold tabular-nums text-ink-primary">{fmtBRL(quote.total)}</div>
       </div>
 
+      {fontes.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[11px] text-ink-muted hover:text-ink-secondary">
+            Fontes consultadas ({fontes.length})
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {fontes.slice(0, 6).map((f) => (
+              <li key={f} className="truncate">
+                <a href={f} target="_blank" rel="noreferrer" className="text-[11px] text-teal-600 hover:underline dark:text-teal-400">
+                  {f.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       <div className="mt-3 flex flex-col gap-2">
         {quote.booking_link && (
           <a
@@ -468,5 +479,37 @@ function QuoteCard({
         )}
       </div>
     </div>
+  );
+}
+
+const PROVIDER_BADGE: Record<string, { label: string; cls: string; title: string }> = {
+  estimativa: {
+    label: "estimativa",
+    cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    title: "Preço estimado pela IA — confirme no fechamento",
+  },
+  calculado: {
+    label: "calculado",
+    cls: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
+    title: "Custo calculado (distância, consumo, preço atual da gasolina e pedágios)",
+  },
+  web: {
+    label: "pesquisado",
+    cls: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    title: "Preço pesquisado na web agora (Google Flights, companhias, ClickBus)",
+  },
+  amadeus: {
+    label: "amadeus",
+    cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    title: "Preço real do provedor Amadeus",
+  },
+};
+
+function ProviderBadge({ provider }: { provider: string }) {
+  const meta = PROVIDER_BADGE[provider] ?? PROVIDER_BADGE.estimativa;
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${meta.cls}`} title={meta.title}>
+      {meta.label}
+    </span>
   );
 }

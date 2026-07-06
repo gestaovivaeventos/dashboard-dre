@@ -6,7 +6,8 @@ import {
   searchCheapestFlight,
   searchHotelRate,
 } from "@/lib/viagens/providers/amadeus";
-import { buildQuotes, type RealFlightByAirport } from "@/lib/viagens/cost";
+import { buildQuotes, type RealFlightByAirport, type WebBusPrice } from "@/lib/viagens/cost";
+import { searchWebPrices } from "@/lib/viagens/providers/web-search";
 import { getViagemConfig } from "@/lib/viagens/queries";
 import { notifyViagemAprovadores, notifyViagemUser } from "@/lib/viagens/notifications";
 import type { ViagemModoCarro } from "@/lib/viagens/types";
@@ -132,11 +133,15 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     dataVolta: r.data_volta,
   });
 
-  // 2) Preços reais quando o Amadeus estiver configurado — cota CADA aeroporto
-  //    de partida candidato (ex.: JF → IZA, GIG e CNF) até o destino.
+  // 2) Preços REAIS. Duas fontes, nesta ordem de prioridade:
+  //    a) Amadeus (quando configurado) — cota cada aeroporto de partida candidato;
+  //    b) Pesquisa na web (Google Flights/LATAM/GOL/Azul/ClickBus) via OpenAI
+  //       web search — cobre voos, ônibus, gasolina e hotel sem chave extra.
   const realFlights: RealFlightByAirport = {};
+  let webOnibus: WebBusPrice | null = null;
   let hotelRealDiaria: number | null = null;
   let hotelRealNome: string | null = null;
+  let fontes: string[] = [];
 
   if (amadeusConfigured() && facts.aeroporto_destino) {
     const destinoIata = facts.aeroporto_destino.iata;
@@ -155,6 +160,7 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
           dataIda: flight.dataIda,
           dataVolta: flight.dataVolta,
           companhia: flight.companhia,
+          source: "amadeus",
         };
       }
     }
@@ -172,6 +178,40 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     }
   }
 
+  const web = await searchWebPrices({
+    origem: r.origem,
+    destino: r.destino,
+    destinoIata: facts.aeroporto_destino?.iata ?? null,
+    dataIda: r.data_ida,
+    dataVolta: r.data_volta,
+    candidatos: (facts.aeroportos_origem ?? []).slice(0, 4).map((a) => ({ iata: a.iata, cidade: a.cidade })),
+  });
+  if (web) {
+    fontes = web.fontes;
+    for (const voo of web.data.voos) {
+      const iata = voo.origem_iata.toUpperCase();
+      if (realFlights[iata]) continue; // Amadeus tem prioridade
+      if (!(voo.preco_pp_ida_volta > 0)) continue;
+      realFlights[iata] = {
+        totalGrupo: voo.preco_pp_ida_volta * r.passageiros,
+        dataIda: r.data_ida,
+        dataVolta: r.data_volta,
+        companhia: voo.companhia,
+        source: "web",
+        fonte: voo.fonte,
+      };
+    }
+    if (web.data.onibus && web.data.onibus.preco_pp_ida_volta > 0) {
+      webOnibus = web.data.onibus;
+    }
+    if (web.data.gasolina_litro && web.data.gasolina_litro > 0) {
+      facts.preco_gasolina_litro = web.data.gasolina_litro;
+    }
+    if (hotelRealDiaria == null && web.data.hotel_diaria && web.data.hotel_diaria > 0) {
+      hotelRealDiaria = web.data.hotel_diaria;
+    }
+  }
+
   // 3) Monta os 3 orçamentos porta-a-porta.
   const quotes = buildQuotes({
     origem: r.origem,
@@ -184,8 +224,10 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     config,
     facts,
     realFlights,
+    webOnibus,
     hotelRealDiaria,
     hotelRealNome,
+    fontes,
   });
 
   // Melhor total anterior (pra detectar queda de preço no monitoramento).
