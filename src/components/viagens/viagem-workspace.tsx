@@ -7,6 +7,7 @@ import {
   Car,
   CheckCircle2,
   ExternalLink,
+  Lightbulb,
   Loader2,
   Plane,
   RefreshCw,
@@ -91,6 +92,8 @@ export function ViagemWorkspace({ detail, isAprovador }: { detail: ViagemRequest
 
   const chosen = detail.quotes.find((q) => q.id === detail.chosen_quote_id) ?? null;
   const melhor = detail.quotes.length ? Math.min(...detail.quotes.map((q) => q.total)) : null;
+  const aviaoQuote = detail.quotes.find((q) => q.modal === "aviao");
+  const recomendacao = (aviaoQuote?.detalhes?.recomendacao as string | undefined) ?? null;
 
   return (
     <div className="space-y-5">
@@ -143,6 +146,14 @@ export function ViagemWorkspace({ detail, isAprovador }: { detail: ViagemRequest
             {busy === "retry" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Buscar de novo
           </button>
+        </div>
+      )}
+
+      {/* Recomendação proativa (aeroportos alternativos) */}
+      {recomendacao && detail.quotes.length > 0 && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-teal-500/30 bg-teal-500/5 p-3.5 text-sm text-teal-800 dark:text-teal-200">
+          <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" />
+          <span>{recomendacao}</span>
         </div>
       )}
 
@@ -334,13 +345,23 @@ function QuoteCard({
     );
   }
 
-  const rows: Array<[string, number]> = [
-    ["Transporte", quote.custo_transporte],
-    ["Hospedagem", quote.custo_hospedagem],
-    ["Traslados", quote.custo_traslados],
-    ["Alimentação", quote.custo_alimentacao],
-    ["Taxas", quote.custo_taxas],
-  ];
+  // Linhas detalhadas (gasolina, pedágio, uber↔aeroporto…) vindas do cálculo;
+  // fallback pro breakdown por coluna se não houver.
+  const linhas = (quote.detalhes?.linhas as Array<{ label: string; valor: number }> | undefined) ?? null;
+  const rows: Array<[string, number]> = linhas
+    ? linhas.map((l) => [l.label, l.valor] as [string, number])
+    : [
+        ["Transporte", quote.custo_transporte],
+        ["Hospedagem", quote.custo_hospedagem],
+        ["Traslados", quote.custo_traslados],
+        ["Alimentação", quote.custo_alimentacao],
+        ["Taxas", quote.custo_taxas],
+      ];
+
+  const alternativas =
+    (quote.detalhes?.alternativas as
+      | Array<{ iata: string; voo_total: number; transfer_total: number; total_porta_a_porta: number; preco_real: boolean; escolhida: boolean }>
+      | undefined) ?? null;
 
   return (
     <div
@@ -379,15 +400,47 @@ function QuoteCard({
 
       <div className="mt-3 space-y-1">
         {rows.filter(([, v]) => v > 0).map(([k, v]) => (
-          <div key={k} className="flex justify-between text-xs text-ink-secondary">
+          <div key={k} className="flex justify-between gap-2 text-xs text-ink-secondary">
             <span>{k}</span>
-            <span className="tabular-nums">{fmtBRL(v)}</span>
+            <span className="shrink-0 tabular-nums">{fmtBRL(v)}</span>
           </div>
         ))}
       </div>
 
+      {alternativas && alternativas.length > 1 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-medium text-teal-600 hover:underline dark:text-teal-400">
+            Comparar aeroportos de saída ({alternativas.length})
+          </summary>
+          <table className="mt-2 w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-ink-muted">
+                <th className="py-0.5 pr-2 font-medium">Saída</th>
+                <th className="py-0.5 pr-2 text-right font-medium">Voo</th>
+                <th className="py-0.5 pr-2 text-right font-medium">Chegar lá</th>
+                <th className="py-0.5 text-right font-medium">Porta-a-porta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alternativas.map((alt) => (
+                <tr key={alt.iata} className={`border-t border-border/50 ${alt.escolhida ? "font-semibold text-ink-primary" : "text-ink-secondary"}`}>
+                  <td className="py-1 pr-2">
+                    {alt.iata}
+                    {alt.escolhida && " ✓"}
+                    {!alt.preco_real && <span className="ml-1 text-[9px] text-amber-500">est.</span>}
+                  </td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{fmtBRL(alt.voo_total)}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{fmtBRL(alt.transfer_total)}</td>
+                  <td className="py-1 text-right tabular-nums">{fmtBRL(alt.total_porta_a_porta)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+
       <div className="mt-3 border-t border-border pt-2 text-right">
-        <span className="text-[10px] uppercase text-ink-muted">Total</span>
+        <span className="text-[10px] uppercase text-ink-muted">Total porta-a-porta</span>
         <div className="text-xl font-bold tabular-nums text-ink-primary">{fmtBRL(quote.total)}</div>
       </div>
 

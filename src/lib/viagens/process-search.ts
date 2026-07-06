@@ -6,7 +6,7 @@ import {
   searchCheapestFlight,
   searchHotelRate,
 } from "@/lib/viagens/providers/amadeus";
-import { buildQuotes } from "@/lib/viagens/cost";
+import { buildQuotes, type RealFlightByAirport } from "@/lib/viagens/cost";
 import { getViagemConfig } from "@/lib/viagens/queries";
 import { notifyViagemAprovadores, notifyViagemUser } from "@/lib/viagens/notifications";
 import type { ViagemModoCarro } from "@/lib/viagens/types";
@@ -132,28 +132,35 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     dataVolta: r.data_volta,
   });
 
-  // 2) Preços reais quando o Amadeus estiver configurado.
-  let vooRealTotal: number | null = null;
-  let vooRealInfo: { dataIda: string; dataVolta: string; companhia: string | null } | null = null;
+  // 2) Preços reais quando o Amadeus estiver configurado — cota CADA aeroporto
+  //    de partida candidato (ex.: JF → IZA, GIG e CNF) até o destino.
+  const realFlights: RealFlightByAirport = {};
   let hotelRealDiaria: number | null = null;
   let hotelRealNome: string | null = null;
 
-  if (amadeusConfigured() && facts.tem_voo_comercial && facts.aeroporto_origem && facts.aeroporto_destino) {
-    const flight = await searchCheapestFlight({
-      origemIata: facts.aeroporto_origem,
-      destinoIata: facts.aeroporto_destino,
-      dataIda: r.data_ida,
-      dataVolta: r.data_volta,
-      janelaFlexDias: r.janela_flex_dias,
-      passageiros: r.passageiros,
-    });
-    if (flight) {
-      vooRealTotal = flight.totalBrl;
-      vooRealInfo = { dataIda: flight.dataIda, dataVolta: flight.dataVolta, companhia: flight.companhia };
+  if (amadeusConfigured() && facts.aeroporto_destino) {
+    const destinoIata = facts.aeroporto_destino.iata;
+    for (const candidate of (facts.aeroportos_origem ?? []).slice(0, 4)) {
+      const flight = await searchCheapestFlight({
+        origemIata: candidate.iata,
+        destinoIata,
+        dataIda: r.data_ida,
+        dataVolta: r.data_volta,
+        janelaFlexDias: r.janela_flex_dias,
+        passageiros: r.passageiros,
+      });
+      if (flight) {
+        realFlights[candidate.iata] = {
+          totalGrupo: flight.totalBrl,
+          dataIda: flight.dataIda,
+          dataVolta: flight.dataVolta,
+          companhia: flight.companhia,
+        };
+      }
     }
     if (r.incluir_hospedagem) {
       const hotel = await searchHotelRate({
-        cityCode: facts.aeroporto_destino,
+        cityCode: destinoIata,
         checkIn: r.data_ida,
         checkOut: r.data_volta,
         adults: r.passageiros,
@@ -165,7 +172,7 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     }
   }
 
-  // 3) Monta os 3 orçamentos.
+  // 3) Monta os 3 orçamentos porta-a-porta.
   const quotes = buildQuotes({
     origem: r.origem,
     destino: r.destino,
@@ -176,8 +183,7 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     incluirHospedagem: r.incluir_hospedagem,
     config,
     facts,
-    vooRealTotal,
-    vooRealInfo,
+    realFlights,
     hotelRealDiaria,
     hotelRealNome,
   });
