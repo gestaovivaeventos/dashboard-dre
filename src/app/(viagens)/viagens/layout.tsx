@@ -6,11 +6,11 @@ import { resolveLayoutContext } from "@/lib/context/modules";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 import type { Segment } from "@/lib/supabase/types";
 
-export default async function CaseLayout({ children }: { children: React.ReactNode }) {
+export default async function ViagensLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getSessionContext();
 
   if (!ctx.user) redirect("/login");
-  if (!ctx.modules?.case) redirect("/");
+  if (!ctx.modules?.viagens) redirect("/");
 
   const { profile, supabase, modules } = ctx;
   const userName = profile?.name || ctx.user.email || "Usuario";
@@ -46,7 +46,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
     dreRole,
     ctrlRoles,
     segments,
-    "case",
+    "viagens",
     canCase,
     canViagens,
   );

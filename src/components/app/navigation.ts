@@ -15,6 +15,7 @@ import {
   MapPinned,
   Music2,
   PieChart,
+  Plane,
   Plug,
   Receipt,
   Sliders,
@@ -197,9 +198,13 @@ export interface NavItem {
   ctrlRoles?: readonly CtrlRole[];
   /** Item do módulo Case — visível quando o usuário tem acesso ao Case. */
   caseAccess?: boolean;
+  /** Item do módulo Viagens — visível quando o usuário tem can_viagens. */
+  viagensAccess?: boolean;
+  /** Item restrito a aprovadores de Viagens (can_viagens_aprovar). */
+  viagensAprovarOnly?: boolean;
 }
 
-export type NavGroupId = "financeiro" | "compras" | "case" | "plataforma";
+export type NavGroupId = "financeiro" | "compras" | "case" | "viagens" | "plataforma";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -248,6 +253,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "case-contratos", title: "Contratos", icon: Music2, scope: "global", href: "/case/contratos", caseAccess: true },
       { key: "case-dash", title: "Dashboard", icon: LayoutDashboard, scope: "global", href: "/case/dashboard", caseAccess: true },
       { key: "case-config", title: "Configuracao Omie", icon: Sliders, scope: "global", href: "/case/config", dreRoles: ["admin"] },
+    ],
+  },
+  {
+    id: "viagens",
+    label: "VIAGENS",
+    items: [
+      { key: "vg-req", title: "Requisicoes", icon: Plane, scope: "global", href: "/viagens/requisicoes", viagensAccess: true },
+      { key: "vg-apr", title: "Aprovacoes", icon: CheckSquare, scope: "global", href: "/viagens/aprovacoes", viagensAccess: true, viagensAprovarOnly: true },
+      { key: "vg-config", title: "Configuracao", icon: Sliders, scope: "global", href: "/viagens/config", dreRoles: ["admin"] },
     ],
   },
   {

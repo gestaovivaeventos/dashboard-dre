@@ -23,7 +23,7 @@ export default async function UsuariosPage() {
     adminClient
       .from("users")
       .select(
-        "id,email,name,phone,position,profile,can_financeiro,can_compras,can_case,active,created_at",
+        "id,email,name,phone,position,profile,can_financeiro,can_compras,can_case,can_viagens,can_viagens_aprovar,active,created_at",
       )
       .order("name", { ascending: true, nullsFirst: false }),
     adminClient.from("companies").select("id,name").eq("active", true).order("name"),
@@ -65,6 +65,8 @@ export default async function UsuariosPage() {
     can_financeiro: Boolean(item.can_financeiro),
     can_compras: Boolean(item.can_compras),
     can_case: Boolean(item.can_case),
+    can_viagens: Boolean(item.can_viagens),
+    can_viagens_aprovar: Boolean(item.can_viagens_aprovar),
     active: Boolean(item.active),
     company_ids: userCompanies.get(item.id as string) ?? [],
     sector_ids: userSectors.get(item.id as string) ?? [],

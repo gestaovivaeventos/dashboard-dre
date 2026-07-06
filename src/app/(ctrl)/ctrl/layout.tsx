@@ -26,6 +26,8 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const navDreRole = modules.dre?.role ?? null;
   const ctrlRoles = modules.ctrl?.roles ?? [];
   const canCase = Boolean(modules.case);
+  const canViagens = Boolean(modules.viagens);
+  const canViagensAprovar = Boolean(modules.viagens?.aprovador);
 
   // Segmentos para o shell DRE (mesmo do (app) layout).
   // 1) Admin: vê todos os segmentos ativos.
@@ -92,6 +94,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     segments,
     "ctrl",
     canCase,
+    canViagens,
   );
 
   const unreadNotifications = profile?.id
@@ -105,6 +108,8 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       userRole={navDreRole}
       ctrlRoles={ctrlRoles}
       canCase={canCase}
+      canViagens={canViagens}
+      canViagensAprovar={canViagensAprovar}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

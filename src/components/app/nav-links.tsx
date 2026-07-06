@@ -18,6 +18,8 @@ interface NavLinksProps {
   dreRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   canCase?: boolean;
+  canViagens?: boolean;
+  canViagensAprovar?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -67,6 +69,12 @@ const MODULE_COLOR: Record<
     rail: "bg-amber-600 dark:bg-amber-400",
     dot: "bg-amber-600 dark:bg-amber-400",
   },
+  viagens: {
+    text: "text-teal-600 dark:text-teal-400",
+    bg: "bg-teal-600/[0.06] dark:bg-teal-400/[0.08]",
+    rail: "bg-teal-600 dark:bg-teal-400",
+    dot: "bg-teal-600 dark:bg-teal-400",
+  },
   plataforma: {
     text: "text-slate-600 dark:text-slate-300",
     bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
@@ -79,6 +87,8 @@ export function NavLinks({
   dreRole,
   ctrlRoles,
   canCase,
+  canViagens,
+  canViagensAprovar,
   segments,
   activeSegmentSlug,
   collapsed,
@@ -93,7 +103,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, segments, activeSegmentSlug, isFranqueado });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -225,6 +235,8 @@ interface BuildInput {
   dreRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   canCase?: boolean;
+  canViagens?: boolean;
+  canViagensAprovar?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -253,6 +265,8 @@ function buildGroups({
   dreRole,
   ctrlRoles,
   canCase,
+  canViagens,
+  canViagensAprovar,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -269,7 +283,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), isFranqueado)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -290,6 +304,8 @@ function isItemVisible(
   dreRole: DreRole | null,
   ctrlSet: Set<CtrlRole>,
   canCase: boolean,
+  canViagens: boolean,
+  canViagensAprovar: boolean,
   isFranqueado?: boolean,
 ): boolean {
   // Franqueado: a visibilidade não segue o dreRole (cai em 'gestor_unidade',
@@ -305,9 +321,12 @@ function isItemVisible(
     ? item.ctrlRoles.some((r) => ctrlSet.has(r))
     : false;
   const caseOk = item.caseAccess ? canCase : false;
+  const viagensOk = item.viagensAccess
+    ? canViagens && (!item.viagensAprovarOnly || canViagensAprovar)
+    : false;
 
-  if (!item.dreRoles && !item.ctrlRoles && !item.caseAccess) return false;
-  return dreOk || ctrlOk || caseOk;
+  if (!item.dreRoles && !item.ctrlRoles && !item.caseAccess && !item.viagensAccess) return false;
+  return dreOk || ctrlOk || caseOk || viagensOk;
 }
 
 function resolveHref(item: NavItem, activeSlug: string | null): string | null {

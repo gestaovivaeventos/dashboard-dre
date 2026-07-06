@@ -26,6 +26,8 @@ export default async function ProtectedLayout({
   const navDreRole = modules?.dre?.role ?? null;
   const ctrlRoles = modules?.ctrl?.roles ?? [];
   const canCase = Boolean(modules?.case);
+  const canViagens = Boolean(modules?.viagens);
+  const canViagensAprovar = Boolean(modules?.viagens?.aprovador);
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
 
@@ -92,6 +94,7 @@ export default async function ProtectedLayout({
     segments,
     "dre",
     canCase,
+    canViagens,
   );
 
   const unreadNotifications = profile?.id
@@ -105,6 +108,8 @@ export default async function ProtectedLayout({
       userRole={navDreRole}
       ctrlRoles={ctrlRoles}
       canCase={canCase}
+      canViagens={canViagens}
+      canViagensAprovar={canViagensAprovar}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}
