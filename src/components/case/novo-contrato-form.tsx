@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
@@ -81,7 +81,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   // Cliente
   const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
-  const [clientId, setClientId] = useState<string>(clients[0]?.id ?? "");
+  const [clientId, setClientId] = useState<string>("");
   const [cName, setCName] = useState("");
   const [cDoc, setCDoc] = useState("");
   const [cEmail, setCEmail] = useState("");
@@ -132,7 +132,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   // Aba Atração — identidade + anexo/OCR + pagamento
   const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
-  const [bandId, setBandId] = useState<string>(bands[0]?.id ?? "");
+  const [bandId, setBandId] = useState<string>("");
   const [bName, setBName] = useState("");
   const [bDoc, setBDoc] = useState("");
   const [bEmail, setBEmail] = useState("");
@@ -311,9 +311,12 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
               <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
             </div>
             {clientMode === "existing" ? (
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={INPUT_CLS}>
-                {clients.map((c) => (<option key={c.id} value={c.id}>{c.name} {c.cnpj_cpf ? `— ${c.cnpj_cpf}` : ""}</option>))}
-              </select>
+              <SearchSelect
+                items={clients.map((c) => ({ id: c.id, label: c.name, sub: c.cnpj_cpf }))}
+                value={clientId}
+                onChange={setClientId}
+                placeholder="Buscar e selecionar o cliente…"
+              />
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
@@ -415,9 +418,12 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
               <ModeToggle mode={bandMode} setMode={setBandMode} hasExisting={bandsList.length > 0} />
             </div>
             {bandMode === "existing" ? (
-              <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
-                {bandsList.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
-              </select>
+              <SearchSelect
+                items={bandsList.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+                value={bandId}
+                onChange={setBandId}
+                placeholder="Buscar e selecionar a atração/artista…"
+              />
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Nome / Razão social" value={bName} onChange={setBName} />
@@ -484,6 +490,78 @@ function TabBtn({ active, done, label, onClick }: { active: boolean; done: boole
       {done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-ink-muted" />}
       {label}
     </button>
+  );
+}
+
+function SearchSelect({ items, value, onChange, placeholder }: {
+  items: Array<{ id: string; label: string; sub?: string | null }>;
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const selected = items.find((i) => i.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? items.filter((i) => `${i.label} ${i.sub ?? ""}`.toLowerCase().includes(q))
+    : items;
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={INPUT_CLS + " flex items-center justify-between gap-2 text-left"}
+      >
+        <span className={"truncate " + (selected ? "text-ink-primary" : "text-ink-muted")}>
+          {selected ? `${selected.label}${selected.sub ? ` — ${selected.sub}` : ""}` : placeholder}
+        </span>
+        <ChevronsUpDown className="h-4 w-4 shrink-0 text-ink-muted" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full rounded-md border border-border bg-surface-1 shadow-lg">
+          <div className="p-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+              {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+              <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nome ou documento…" className={INPUT_CLS + " pl-8"} />
+            </div>
+          </div>
+          <div className="max-h-64 overflow-auto pb-1">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-ink-muted">Nenhum resultado.</div>
+            ) : (
+              filtered.slice(0, 50).map((i) => (
+                <button
+                  key={i.id}
+                  type="button"
+                  onClick={() => { onChange(i.id); setQuery(""); setOpen(false); }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2 ${i.id === value ? "text-amber-600 dark:text-amber-400" : "text-ink-secondary"}`}
+                >
+                  <Check className={`h-4 w-4 shrink-0 ${i.id === value ? "opacity-100" : "opacity-0"}`} />
+                  <span className="truncate">{i.label}{i.sub ? <span className="text-ink-muted"> — {i.sub}</span> : null}</span>
+                </button>
+              ))
+            )}
+            {filtered.length > 50 && (
+              <div className="px-3 py-1.5 text-xs text-ink-muted">Mostrando 50 de {filtered.length} — refine a busca.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
