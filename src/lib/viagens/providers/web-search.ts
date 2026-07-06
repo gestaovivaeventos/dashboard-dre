@@ -82,11 +82,20 @@ export async function searchWebPrices(params: {
       ),
     ]);
 
+    // Só http(s) — essas URLs viram <a href> na UI; bloqueia javascript:/data:.
     const fontes = Array.from(
       new Set(
         (res.sources ?? [])
           .map((s) => ("url" in s && typeof s.url === "string" ? s.url : null))
-          .filter((u): u is string => Boolean(u)),
+          .filter((u): u is string => {
+            if (!u) return false;
+            try {
+              const p = new URL(u).protocol;
+              return p === "http:" || p === "https:";
+            } catch {
+              return false;
+            }
+          }),
       ),
     ).slice(0, 10);
 

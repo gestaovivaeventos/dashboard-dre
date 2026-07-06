@@ -362,7 +362,15 @@ function QuoteCard({
     (quote.detalhes?.alternativas as
       | Array<{ iata: string; voo_total: number; transfer_total: number; total_porta_a_porta: number; preco_real: boolean; escolhida: boolean }>
       | undefined) ?? null;
-  const fontes = (quote.detalhes?.fontes as string[] | undefined) ?? [];
+  // Só http(s) — as fontes vêm de conteúdo não confiável (pesquisa web).
+  const fontes = ((quote.detalhes?.fontes as string[] | undefined) ?? []).filter((f) => {
+    try {
+      const p = new URL(f).protocol;
+      return p === "http:" || p === "https:";
+    } catch {
+      return false;
+    }
+  });
 
   return (
     <div
