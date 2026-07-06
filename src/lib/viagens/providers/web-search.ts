@@ -76,10 +76,15 @@ export async function searchWebPrices(params: {
     `Pesquise na web os preços reais para uma viagem de ${params.origem} a ${params.destino}, ` +
     `ida ${params.dataIda} e volta ${params.dataVolta}:\n` +
     `1) PASSAGEM AÉREA ida-e-volta em classe econômica, por pessoa, para cada rota: ${rotas}. ` +
-    "Busque em Google Flights, LATAM, GOL, Azul, Kayak ou Skyscanner.\n" +
+    "Sites de companhia (LATAM/GOL/Azul) e Google Flights não mostram preço em busca — use agregadores e " +
+    "comparadores que publicam tarifas em páginas indexadas: Voopter, Kayak (páginas 'voos de X para Y'), " +
+    "Skyscanner, Melhores Destinos, Passagens Promo, Decolar. Faça uma busca POR ROTA (ex.: " +
+    "'passagem aérea CNF GRU ida e volta preço'). Aceite o menor preço 'a partir de R$ X' que encontrar " +
+    "para o mês da viagem, informando a fonte.\n" +
     `2) PASSAGEM DE ÔNIBUS ida-e-volta por pessoa ${params.origem} → ${params.destino} (ClickBus, Buser, sites das viações).\n` +
     `3) Preço médio ATUAL da gasolina comum em ${params.origem}.\n` +
     `4) Diária de hotel 3 estrelas em ${params.destino} nessas datas (Booking/Google Hotels).\n\n` +
+    "Faça quantas buscas forem necessárias (uma por rota aérea, no mínimo). " +
     "Liste cada preço encontrado com valor em R$ e a fonte.";
 
   const attempts: Array<{ engine: string; run: () => Promise<{ text: string; sources?: unknown[] }> }> = [
@@ -91,7 +96,7 @@ export async function searchWebPrices(params: {
             model: provider("gpt-5-mini"),
             system,
             prompt,
-            tools: { web_search: provider.tools.webSearch({ searchContextSize: "medium" }) },
+            tools: { web_search: provider.tools.webSearch({ searchContextSize: "high" }) },
             toolChoice: { type: "tool", toolName: "web_search" },
           }),
         ),
