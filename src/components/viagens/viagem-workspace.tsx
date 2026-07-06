@@ -511,6 +511,11 @@ const PROVIDER_BADGE: Record<string, { label: string; cls: string; title: string
     cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     title: "Preço real do provedor Amadeus",
   },
+  apidevoos: {
+    label: "preço real",
+    cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    title: "Preço real em tempo real (API de Voos — LATAM/GOL/Azul)",
+  },
 };
 
 function ProviderBadge({ provider }: { provider: string }) {

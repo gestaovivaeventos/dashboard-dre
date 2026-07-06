@@ -34,15 +34,17 @@ export interface QuoteBreakdown {
   viavel: boolean;
 }
 
-/** Preço real (Amadeus ou pesquisa web) por aeroporto de partida — chave = IATA. */
+/** Preço real (API de voos, Amadeus ou pesquisa web) por aeroporto de partida — chave = IATA. */
 export interface RealFlightByAirport {
   [iata: string]: {
     totalGrupo: number;
     dataIda: string;
     dataVolta: string;
     companhia: string | null;
-    source: "amadeus" | "web";
+    source: "apidevoos" | "amadeus" | "web";
     fonte?: string | null;
+    /** Link direto de compra (quando o provedor fornece). */
+    bookingUrl?: string | null;
   };
 }
 
@@ -269,7 +271,8 @@ function buildAviao(
     transferOrigem: number;
     total: number;
     real: boolean;
-    source: "amadeus" | "web" | "estimativa";
+    source: "apidevoos" | "amadeus" | "web" | "estimativa";
+    bookingUrl?: string | null;
     realInfo?: { dataIda: string; dataVolta: string; companhia: string | null };
   }
 
@@ -287,6 +290,7 @@ function buildAviao(
       total: round2(vooTotal + transferOrigem),
       real: Boolean(real),
       source: real?.source ?? "estimativa",
+      bookingUrl: real?.bookingUrl ?? null,
       realInfo: real ? { dataIda: real.dataIda, dataVolta: real.dataVolta, companhia: real.companhia } : undefined,
     };
   });
@@ -303,7 +307,12 @@ function buildAviao(
       ? `Ônibus executivo ${input.origem.split("/")[0]}↔${a.iata} (${Math.round(a.distancia_km)} km, ida+volta${a.transfer_por_pessoa ? ` × ${input.passageiros} pax` : ""})`
       : `Uber/táxi até ${a.iata} (${Math.round(a.distancia_km)} km, ida+volta)`;
 
-  const vooTag = best.source === "amadeus" ? "" : best.source === "web" ? " — pesquisado na web" : " — estimado";
+  const vooTag =
+    best.source === "apidevoos" || best.source === "amadeus"
+      ? ""
+      : best.source === "web"
+        ? " — pesquisado na web"
+        : " — estimado";
   const linhas: QuoteLine[] = [
     { label: `Voo ${a.iata}→${destino.iata} (${input.passageiros} pax, ida+volta)${vooTag}`, valor: transporte },
     { label: transferLabel, valor: best.transferOrigem },
@@ -361,7 +370,7 @@ function buildAviao(
     custo_alimentacao: alimentacao,
     custo_taxas: 0,
     total: round2(transporte + traslados + hospedagem + alimentacao),
-    booking_link: `https://www.google.com/travel/flights?q=${q}`,
+    booking_link: best.bookingUrl ?? `https://www.google.com/travel/flights?q=${q}`,
     viavel: transporte > 0,
   };
 }

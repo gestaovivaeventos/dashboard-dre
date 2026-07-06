@@ -8,6 +8,7 @@ import {
 } from "@/lib/viagens/providers/amadeus";
 import { buildQuotes, type RealFlightByAirport, type WebBusPrice } from "@/lib/viagens/cost";
 import { searchWebPrices } from "@/lib/viagens/providers/web-search";
+import { apidevoosConfigured, searchApidevoosRoundTrip } from "@/lib/viagens/providers/apidevoos";
 import { getViagemConfig } from "@/lib/viagens/queries";
 import { notifyViagemAprovadores, notifyViagemUser } from "@/lib/viagens/notifications";
 import type { ViagemModoCarro } from "@/lib/viagens/types";
@@ -133,19 +134,56 @@ async function executeSearchRun(db: DB, requestId: string, kind: string): Promis
     dataVolta: r.data_volta,
   });
 
-  // 2) Preços REAIS. Duas fontes, nesta ordem de prioridade:
-  //    a) Amadeus (quando configurado) — cota cada aeroporto de partida candidato;
-  //    b) Pesquisa na web (Google Flights/LATAM/GOL/Azul/ClickBus) via OpenAI
-  //       web search — cobre voos, ônibus, gasolina e hotel sem chave extra.
+  // 2) Preços REAIS. Fontes, nesta ordem de prioridade:
+  //    a) API de Voos (apidevoos.dev — LATAM/GOL/Azul, preço real + link de compra);
+  //    b) Amadeus (quando configurado);
+  //    c) Pesquisa na web via OpenAI web search — voos (fallback), ônibus,
+  //       gasolina e hotel.
   const realFlights: RealFlightByAirport = {};
   let webOnibus: WebBusPrice | null = null;
   let hotelRealDiaria: number | null = null;
   let hotelRealNome: string | null = null;
   let fontes: string[] = [];
 
+  if (apidevoosConfigured() && facts.aeroporto_destino) {
+    const destinoIata = facts.aeroporto_destino.iata;
+    const candidatos = (facts.aeroportos_origem ?? []).slice(0, 3);
+    // Buscas em paralelo — cada uma leva ~60s no provedor.
+    const resultados = await Promise.all(
+      candidatos.map((c) =>
+        searchApidevoosRoundTrip({
+          origemIata: c.iata,
+          destinoIata,
+          dataIda: r.data_ida,
+          dataVolta: r.data_volta,
+          passageiros: r.passageiros,
+        }).then((res) => ({ iata: c.iata, res })),
+      ),
+    );
+    for (const { iata, res } of resultados) {
+      if (!res) continue;
+      realFlights[iata] = {
+        totalGrupo: res.totalGrupo,
+        dataIda: r.data_ida,
+        dataVolta: r.data_volta,
+        companhia: res.companhia,
+        source: "apidevoos",
+        bookingUrl: res.bookingUrl,
+      };
+    }
+    await db.from("viagem_history").insert({
+      request_id: requestId,
+      action: "cotacao_voos_api",
+      comment: resultados
+        .map(({ iata, res }) => `${iata}: ${res ? `R$ ${res.totalGrupo.toFixed(2)} (${res.companhia ?? res.provider ?? "?"})` : "sem oferta"}`)
+        .join(" | "),
+    });
+  }
+
   if (amadeusConfigured() && facts.aeroporto_destino) {
     const destinoIata = facts.aeroporto_destino.iata;
     for (const candidate of (facts.aeroportos_origem ?? []).slice(0, 4)) {
+      if (realFlights[candidate.iata]) continue; // apidevoos tem prioridade
       const flight = await searchCheapestFlight({
         origemIata: candidate.iata,
         destinoIata,
