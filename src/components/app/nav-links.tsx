@@ -63,6 +63,12 @@ const MODULE_COLOR: Record<
     rail: "bg-violet-600 dark:bg-violet-400",
     dot: "bg-violet-600 dark:bg-violet-400",
   },
+  cadastros: {
+    text: "text-emerald-600 dark:text-emerald-400",
+    bg: "bg-emerald-600/[0.06] dark:bg-emerald-400/[0.08]",
+    rail: "bg-emerald-600 dark:bg-emerald-400",
+    dot: "bg-emerald-600 dark:bg-emerald-400",
+  },
   case: {
     text: "text-amber-600 dark:text-amber-400",
     bg: "bg-amber-600/[0.06] dark:bg-amber-400/[0.08]",
