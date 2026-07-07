@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
-import { getBudgetRequestWindow } from "@/lib/ctrl/budget-cutoff";
+import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
 
@@ -15,7 +15,6 @@ interface BudgetRow {
 
 async function getOrcamentoData(year: number) {
   const supabase = await createClient();
-  const { requestStartIso, requestEndIso } = getBudgetRequestWindow(year);
 
   const [budgetRes, requestsRes, typesRes] = await Promise.all([
     supabase
@@ -24,10 +23,9 @@ async function getOrcamentoData(year: number) {
       .eq("period_year", year),
     supabase
       .from("ctrl_requests")
-      .select("expense_type_id, status, amount")
+      .select("expense_type_id, status, amount, due_date, created_at")
       .not("status", "in", '("rejeitado","estornado","inativado_csc")')
-      .gte("created_at", requestStartIso)
-      .lt("created_at", requestEndIso),
+      .eq("reference_year", year),
     supabase
       .from("ctrl_expense_types")
       .select("id, name")
@@ -56,11 +54,13 @@ async function getOrcamentoData(year: number) {
   }
 
   // A planilha-base já carrega o realizado até 06/07/2026. Para 2026, o
-  // realizado dinâmico considera apenas solicitações criadas a partir de
-  // 07/07/2026, evitando desconto duplicado.
+  // realizado/pendente dinâmico considera apenas ocorrências com VENCIMENTO a
+  // partir de 07/07/2026 (parcelas/recorrências já lançadas seguem contando
+  // pelas datas futuras), evitando desconto duplicado.
   // Requisições aprovadas somam ao realizado; pendentes ficam à parte.
   const pendenteMap = new Map<string, number>();
   for (const r of requestsRes.data ?? []) {
+    if (!countsTowardBudget(r, year)) continue;
     const key = r.expense_type_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
     if (isApproved) {
