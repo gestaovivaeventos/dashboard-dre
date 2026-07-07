@@ -4,6 +4,7 @@ import type {
   ComposicaoStep,
   CustodyClosingBlock,
   DreIndicatorsBlock,
+  FeatContasReceberAbertoBlock,
   FeatEventosBlock,
   HistoricoPoint,
   HoldingComparativoBlock,
@@ -118,6 +119,7 @@ export interface OnePageApiResponse {
   // Quadro de eventos exclusivo da Feat Produções (mesmo shape do componente).
   // Presente só quando a empresa analisada é a Feat Produções.
   featEventos?: FeatEventosBlock;
+  featContasReceberAberto?: FeatContasReceberAbertoBlock;
   // Saldo final da Custódia de Artistas (Case Shows). Mesmo shape do componente
   // (R$ cheios). Presente só quando a empresa analisada é a Case Shows.
   custodyClosing?: CustodyClosingBlock;
@@ -673,6 +675,7 @@ export function mapOnePageApiResponseToPreviewData(
     // Quadro de eventos da Feat Produções — passa direto (já vem no shape do
     // componente); undefined para todas as demais empresas.
     featEventos: response.featEventos,
+    featContasReceberAberto: response.featContasReceberAberto,
     // Saldo final da Custódia de Artistas (Case Shows) — passa direto (já vem
     // em R$ cheios, mesmo shape do componente). undefined nas demais empresas.
     custodyClosing: response.custodyClosing,

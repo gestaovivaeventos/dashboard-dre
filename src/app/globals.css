@@ -107,7 +107,8 @@
   .opr-page .opr-resumo-grid,
   .opr-page .opr-charts-2,
   .opr-page .opr-vvr-grid,
-  .opr-page .opr-cards-2 {
+  .opr-page .opr-cards-2,
+  .opr-page .opr-cards-4 {
     grid-template-columns: 1fr !important;
   }
   .opr-page .opr-kpi-grid {

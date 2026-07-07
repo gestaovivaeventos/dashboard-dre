@@ -448,6 +448,13 @@ export function BusinessIntelligenceClient({
                 el.setAttribute("overflow", "visible");
               }
             });
+          // Elementos interativos (ex.: botão de exportar planilha) não fazem
+          // parte do documento impresso — remove-os do clone capturado.
+          clonedDoc
+            .querySelectorAll<HTMLElement>("[data-export-hide]")
+            .forEach((el) => {
+              el.style.display = "none";
+            });
         },
       });
 

@@ -13,6 +13,10 @@ import {
   buildCaseShowsCustodyClosing,
   type CaseShowsCustodyClosingPayload,
 } from "./case-shows-custody-closing";
+import {
+  buildFeatContasReceberAberto,
+  type FeatContasReceberAbertoPayload,
+} from "./feat-contas-receber-aberto";
 import { buildFeatEventos, type FeatEventosPayload } from "./feat-eventos";
 import {
   buildHeroHoldingComparativo,
@@ -221,6 +225,9 @@ export interface OnePagePayload {
   // (undefined) para todas as demais empresas. Alimenta o quadro próprio no
   // One Page Report (indicadores + gráficos por tipo de evento).
   featEventos?: FeatEventosPayload;
+  // Contas a receber em aberto — EXCLUSIVO da Feat Producoes. Leitura Omie
+  // somente leitura, filtrada pelos departamentos selecionados da empresa.
+  featContasReceberAberto?: FeatContasReceberAbertoPayload;
   // Saldo final da "Custódia de Artistas" (regime de caixa + competência) —
   // EXCLUSIVO da Case Shows. Ausente (undefined) para todas as demais empresas.
   custodyClosing?: CaseShowsCustodyClosingPayload;
@@ -1701,6 +1708,11 @@ export async function buildOnePagePayload(
   // EXCLUSIVO da Case Shows. Reproduz, no mês de referência (dateTo), os dois
   // saldos de fechamento já calculados na tela de Fluxo de Caixa. Gate por NOME
   // dentro do helper: qualquer outra empresa devolve null (quadro não aparece).
+  const featContasReceberAbertoResult =
+    template.id === "feat-producoes"
+      ? await buildFeatContasReceberAberto(supabase, companyId, referenciaLabel)
+      : null;
+
   const custodyClosing = await buildCaseShowsCustodyClosing(supabase, {
     companyId,
     companyName: company.name,
@@ -1975,6 +1987,8 @@ export async function buildOnePagePayload(
           : null,
         // Resumo gerencial de eventos — só presente para a Feat Produções.
         feat_eventos: featEventosResult?.resumoIA ?? null,
+        feat_contas_receber_aberto:
+          featContasReceberAbertoResult?.resumoIA ?? null,
         // Comparativo da holding — só presente para a Hero Holding.
         holding_comparativo: holdingComparativoInput,
       },
@@ -1998,6 +2012,7 @@ export async function buildOnePagePayload(
       vvrSerieAnual: template.capabilities.vvrFee ? vvrSerieAnual : [],
       // Quadro de eventos — só presente para a Feat Produções (undefined nos demais).
       featEventos: featEventosResult?.payload,
+      featContasReceberAberto: featContasReceberAbertoResult?.payload,
       // Saldo final da Custódia de Artistas — só presente para a Case Shows.
       custodyClosing: custodyClosing ?? undefined,
       // Comparativo das empresas da holding — só presente para a Hero Holding.

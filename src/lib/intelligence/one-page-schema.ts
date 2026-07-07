@@ -161,6 +161,40 @@ export const FeatEventosResumoSchema = z.object({
   percentual_atingimento_projecao: z.number().nullable(),
 });
 
+export const FeatContasReceberAbertoSchema = z.object({
+  referencia: z.string().min(1).max(80),
+  total_em_aberto: z.number(),
+  total_em_atraso: z.number(),
+  percentual_em_atraso: z.number(),
+  titulos_em_aberto: z.number(),
+  titulos_em_atraso: z.number(),
+  clientes_em_aberto: z.number(),
+  clientes_em_atraso: z.number(),
+  // Faixas de atraso (aging): "A vencer", "1 a 30 dias", … "Acima de 90 dias".
+  aging: z
+    .array(
+      z.object({
+        faixa: z.string().min(1).max(40),
+        valor: z.number(),
+        titulos: z.number(),
+      }),
+    )
+    .max(6),
+  // Consolidado por cliente (uma linha por cliente), maior atraso primeiro.
+  principais_clientes: z
+    .array(
+      z.object({
+        cliente: z.string().min(1).max(160),
+        valor_em_aberto: z.number(),
+        valor_em_atraso: z.number(),
+        dias_atraso_max: z.number(),
+        titulos: z.number(),
+        titulos_em_atraso: z.number(),
+      }),
+    )
+    .max(10),
+});
+
 // Comparativo das empresas de uma HOLDING (EXCLUSIVO da Hero Holding). Cada
 // item = uma unidade Viva do grupo. A comparação de VVR é feita por % de
 // ATINGIMENTO DA META (realizado ÷ meta) — não por VVR absoluto — para permitir
@@ -240,6 +274,9 @@ export const OnePageInputSchema = z.object({
   // Bloco gerencial de eventos da Feat Produções (ver FeatEventosResumoSchema).
   // Presente APENAS para a Feat Produções; null/ausente para todas as demais.
   feat_eventos: FeatEventosResumoSchema.nullable().optional(),
+  // Contas a receber em aberto da Omie, filtradas pelos departamentos da Feat.
+  // Presente APENAS para a Feat Producoes; null/ausente para todas as demais.
+  feat_contas_receber_aberto: FeatContasReceberAbertoSchema.nullable().optional(),
   // Comparativo das empresas da holding (ver HoldingComparativoSchema).
   // Presente APENAS para a Hero Holding; null/ausente para todas as demais.
   holding_comparativo: HoldingComparativoSchema.nullable().optional(),
@@ -248,6 +285,7 @@ export const OnePageInputSchema = z.object({
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
 export type FeeVvrInput = z.infer<typeof FeeVvrInputSchema>;
 export type FeatEventosResumo = z.infer<typeof FeatEventosResumoSchema>;
+export type FeatContasReceberAberto = z.infer<typeof FeatContasReceberAbertoSchema>;
 export type HoldingEmpresaIndicadores = z.infer<typeof HoldingEmpresaIndicadoresSchema>;
 export type HoldingComparativo = z.infer<typeof HoldingComparativoSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

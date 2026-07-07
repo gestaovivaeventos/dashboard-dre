@@ -16,6 +16,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { downloadFeatContasReceberXlsx } from "@/lib/financeiro/relatorios/feat-contas-receber-export";
+
 // ============================================================================
 // RELATÓRIO FINANCEIRO MENSAL — One Page Report (documento A4).
 //
@@ -122,6 +124,49 @@ export interface FeatEventosBlock {
   percentualAtingimentoProjecao: number | null;
 }
 
+export interface FeatAgingBucket {
+  faixa: string;
+  valor: number;
+  titulos: number;
+}
+
+export interface FeatClienteReceberAberto {
+  cliente: string;
+  valorEmAberto: number;
+  valorEmAtraso: number;
+  diasAtrasoMax: number;
+  titulos: number;
+  titulosEmAtraso: number;
+}
+
+export interface FeatContaReceberDetalhe {
+  cliente: string;
+  projeto: string;
+  categoria: string;
+  dataVencimento: string | null;
+  dataPrevisao: string | null;
+  status: "Em atraso" | "A vencer";
+  diasAtraso: number;
+  valorEmAberto: number;
+}
+
+export interface FeatContasReceberAbertoBlock {
+  referenciaLabel: string;
+  totalEmAberto: number;
+  totalEmAtraso: number;
+  percentualEmAtraso: number;
+  titulosEmAberto: number;
+  titulosEmAtraso: number;
+  clientesEmAberto: number;
+  clientesEmAtraso: number;
+  aging: FeatAgingBucket[];
+  clientes: FeatClienteReceberAberto[];
+  clientesExibidos: number;
+  clientesTotais: number;
+  restanteValor: number;
+  detalhes: FeatContaReceberDetalhe[];
+}
+
 // Saldo final da "Custódia de Artistas" da Case Shows (regime de caixa +
 // competência), no mês de referência do relatório. Valores em R$ cheios. Só
 // presente quando a empresa analisada é a Case Shows.
@@ -198,6 +243,8 @@ export interface OnePageReportPreviewData {
   kpiSectionTitle?: string;
   /** Quadro de eventos exclusivo da Feat Produções. Ausência = não renderiza. */
   featEventos?: FeatEventosBlock;
+  /** Contas a receber em aberto da Omie — exclusivo da Feat Producoes. */
+  featContasReceberAberto?: FeatContasReceberAbertoBlock;
   /** Saldo final da Custódia de Artistas (Case Shows). Ausência = não renderiza. */
   custodyClosing?: CustodyClosingBlock;
   /** Indicadores por conta DRE (Terrazzo — "Locação de Espaço"). Ausência = não renderiza. */
@@ -2314,9 +2361,7 @@ function QuadroEventosFeat({
           hint={
             <>
               {data.eventosRealizados} fechamentos realizado(s) ·{" "}
-              {data.eventosEmAberto} fechamentos em aberto ·{" "}
-              {data.eventosNaoRealizados} eventos previsto(s) e
-              não realizado(s)
+              {data.eventosEmAberto} fechamentos em aberto
             </>
           }
           footer={`Acumulado até ${data.referenciaLabel}`}
@@ -2412,6 +2457,318 @@ function QuadroEventosFeat({
 // dois saldos de fechamento já calculados na tela de Fluxo de Caixa, no mês de
 // referência: regime de caixa (por data de pagamento) e regime de competência
 // (por data de registro). Valores em R$ cheios.
+// Cor semântica de cada faixa de aging: quanto mais vencido, mais crítico.
+function agingSev(faixa: string): SevKey {
+  if (faixa === "A vencer") return "neutral";
+  if (faixa === "1 a 30 dias" || faixa === "31 a 60 dias") return "attention";
+  return "critical";
+}
+
+function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock }) {
+  const pctAtrasoLabel = fmtPctPtBr(data.percentualEmAtraso);
+  const resumo: Array<{ label: string; value: string; hint?: string; sev?: SevKey }> = [
+    {
+      label: "Total em aberto",
+      value: fmtMoneyFull(data.totalEmAberto),
+      hint: `${data.titulosEmAberto} títulos · ${data.clientesEmAberto} clientes`,
+    },
+    {
+      label: "Total em atraso",
+      value: fmtMoneyFull(data.totalEmAtraso),
+      hint: `${pctAtrasoLabel} do aberto`,
+      sev: data.totalEmAtraso > 0 ? "critical" : "neutral",
+    },
+  ];
+
+  const maxAging = Math.max(1, ...data.aging.map((b) => b.valor));
+
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    fontWeight: 600,
+    color: C.sub,
+    padding: "7px 8px",
+    borderBottom: `1px solid ${C.cardBorder}`,
+    whiteSpace: "nowrap",
+  };
+  const td: CSSProperties = {
+    fontSize: 10.5,
+    color: C.body,
+    padding: "7px 8px",
+    borderBottom: `1px solid ${C.grid}`,
+    verticalAlign: "middle",
+  };
+
+  const vazio = data.clientesEmAberto === 0;
+
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SectionTitle>Contas a receber em aberto — Feat Produções</SectionTitle>
+        </div>
+        {data.detalhes.length > 0 ? (
+          <button
+            type="button"
+            onClick={() =>
+              downloadFeatContasReceberXlsx(data.detalhes, {
+                referenciaLabel: data.referenciaLabel,
+              })
+            }
+            // Ignora este botão na captura do PDF (html2canvas) — é interativo,
+            // não faz parte do documento impresso.
+            data-html2canvas-ignore="true"
+            data-export-hide="true"
+            title="Baixa uma planilha (.xlsx) com todos os títulos que compõem os valores em aberto e em atraso."
+            style={{
+              flexShrink: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 14,
+              padding: "6px 12px",
+              borderRadius: 7,
+              border: `1px solid ${C.cardBorder}`,
+              background: C.cardBg,
+              color: C.body,
+              fontSize: 10.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ↓ Exportar detalhamento (.xlsx)
+          </button>
+        ) : null}
+      </div>
+      <div style={{ fontSize: 10, color: C.sub, marginTop: -4, marginBottom: 8 }}>
+        Saldo em aberto dos títulos da Feat na Omie (líquido de recebimentos parciais),
+        filtrado pelos departamentos selecionados e consolidado por cliente e faixa de
+        atraso. Use “Exportar detalhamento” para a planilha título a título.
+      </div>
+
+      {/* Resumo — indicadores principais */}
+      <div
+        className="opr-cards-2"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, 1fr)",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        {resumo.map((item) => (
+          <div key={item.label} style={{ ...panelStyle, padding: "10px 12px" }}>
+            <div
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                fontWeight: 600,
+                color: C.sub,
+              }}
+            >
+              {item.label}
+            </div>
+            <div
+              style={{
+                fontFamily: FONT_MONO,
+                fontSize: 15,
+                fontWeight: 700,
+                color: item.sev === "critical" ? SEV.critical.text : C.ink,
+                marginTop: 6,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {item.value}
+            </div>
+            {item.hint ? (
+              <div style={{ fontSize: 9.5, color: C.sub, marginTop: 2 }}>{item.hint}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {vazio ? (
+        <div style={{ ...panelStyle, padding: 14, fontSize: 11.5, color: C.body }}>
+          Não há contas a receber em aberto nos departamentos selecionados da Feat.
+        </div>
+      ) : (
+        <div
+          className="opr-cards-2"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 0.9fr) minmax(0, 1.1fr)",
+            gap: 10,
+            alignItems: "start",
+          }}
+        >
+          {/* Aging — faixas de atraso */}
+          <div style={{ ...panelStyle, padding: "12px 14px" }}>
+            <div
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+                color: C.sub,
+                marginBottom: 10,
+              }}
+            >
+              Faixas de atraso
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {data.aging.map((b) => {
+                const tone = SEV[agingSev(b.faixa)];
+                const width = b.valor > 0 ? Math.max(3, (b.valor / maxAging) * 100) : 0;
+                return (
+                  <div key={b.faixa}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "baseline",
+                        marginBottom: 3,
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 10, color: C.body, fontWeight: 600 }}>
+                        {b.faixa}
+                      </span>
+                      <span
+                        style={{
+                          fontFamily: FONT_MONO,
+                          fontSize: 10,
+                          color: C.ink,
+                          fontWeight: 600,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {fmtMoneyFull(b.valor)}
+                        <span style={{ color: C.sub, fontWeight: 400 }}> · {b.titulos}</span>
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: 7,
+                        borderRadius: 999,
+                        background: C.grid,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${width}%`,
+                          height: "100%",
+                          borderRadius: 999,
+                          background: tone.text,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Ranking por cliente */}
+          <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "left", width: "40%" }}>Cliente</th>
+                  <th style={{ ...th, textAlign: "right", width: "22%" }}>Em aberto</th>
+                  <th style={{ ...th, textAlign: "right", width: "22%" }}>Em atraso</th>
+                  <th style={{ ...th, textAlign: "center", width: "16%" }}>Atraso</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.clientes.map((c, index) => {
+                  const emAtraso = c.valorEmAtraso > 0;
+                  return (
+                    <tr key={`${c.cliente}-${index}`}>
+                      <td style={{ ...td, fontWeight: 600, color: C.ink }}>
+                        <span
+                          style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title={c.cliente}
+                        >
+                          {c.cliente}
+                        </span>
+                        <span style={{ fontSize: 9, color: C.sub, fontWeight: 400 }}>
+                          {c.titulos} {c.titulos === 1 ? "título" : "títulos"}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          ...td,
+                          fontFamily: FONT_MONO,
+                          textAlign: "right",
+                          whiteSpace: "nowrap",
+                          color: C.ink,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {fmtMoneyFull(c.valorEmAberto)}
+                      </td>
+                      <td
+                        style={{
+                          ...td,
+                          fontFamily: FONT_MONO,
+                          textAlign: "right",
+                          whiteSpace: "nowrap",
+                          color: emAtraso ? SEV.critical.text : C.sub,
+                          fontWeight: emAtraso ? 700 : 400,
+                        }}
+                      >
+                        {emAtraso ? fmtMoneyFull(c.valorEmAtraso) : "—"}
+                      </td>
+                      <td style={{ ...td, textAlign: "center" }}>
+                        {emAtraso ? (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              borderRadius: 999,
+                              border: `1px solid ${SEV.critical.border}`,
+                              background: SEV.critical.bg,
+                              color: SEV.critical.text,
+                              fontSize: 9.5,
+                              fontWeight: 700,
+                              padding: "3px 7px",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {c.diasAtrasoMax}d
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 9.5, color: C.sub }}>em dia</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {data.clientesTotais > data.clientesExibidos ? (
+              <div
+                style={{
+                  padding: "7px 10px",
+                  fontSize: 10,
+                  color: C.sub,
+                  borderTop: `1px solid ${C.grid}`,
+                }}
+              >
+                + {data.clientesTotais - data.clientesExibidos} outros clientes ·{" "}
+                {fmtMoneyFull(data.restanteValor)} em aberto. Ranking pelos maiores valores em atraso.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function QuadroCustodiaCaseShows({ data }: { data: CustodyClosingBlock }) {
   return (
     <section style={{ breakInside: "avoid" }}>
@@ -2868,6 +3225,10 @@ export function OnePageReportPreview({
         {/* Saldo final da Custódia de Artistas — exclusivo da Case Shows (gated
             por bloco + presença de dados). Mostra os dois saldos de fechamento
             (caixa e competência) já calculados na tela de Fluxo de Caixa. */}
+        {show("featEventos") && data.featContasReceberAberto ? (
+          <QuadroContasReceberFeat data={data.featContasReceberAberto} />
+        ) : null}
+
         {show("custodyClosing") && data.custodyClosing ? (
           <QuadroCustodiaCaseShows data={data.custodyClosing} />
         ) : null}
