@@ -55,9 +55,9 @@ async function getOrcamentoData(year: number) {
     realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(b.realized ?? 0));
   }
 
-  // A planilha-base já carrega o realizado até 30/06/2026. Para 2026, o
+  // A planilha-base já carrega o realizado até 06/07/2026. Para 2026, o
   // realizado dinâmico considera apenas solicitações criadas a partir de
-  // 01/07/2026, evitando desconto duplicado.
+  // 07/07/2026, evitando desconto duplicado.
   // Requisições aprovadas somam ao realizado; pendentes ficam à parte.
   const pendenteMap = new Map<string, number>();
   for (const r of requestsRes.data ?? []) {

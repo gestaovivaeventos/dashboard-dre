@@ -151,8 +151,8 @@ async function performBudgetVerification(
 
   const isBudgeted = budgetedAnnual > 0;
 
-  // A planilha-base já incorpora o realizado até 30/06/2026. Para 2026, o
-  // saldo dinâmico usa apenas solicitações criadas a partir de 01/07/2026.
+  // A planilha-base já incorpora o realizado até 06/07/2026. Para 2026, o
+  // saldo dinâmico usa apenas solicitações criadas a partir de 07/07/2026.
   const { data: approved } = await supabase
     .from("ctrl_requests")
     .select("amount")
