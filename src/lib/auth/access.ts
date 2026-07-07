@@ -1,3 +1,4 @@
+import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 /** Alias retrocompatível */
@@ -76,6 +77,7 @@ export function canAccessPathByProfile(
   // Módulo Viagens — acesso binário via can_viagens (admin sempre pode).
   // A fila de aprovações tem gate extra (can_viagens_aprovar) no server action.
   if (pathname === "/viagens" || pathname.startsWith("/viagens/")) {
+    if (!VIAGENS_ENABLED) return false; // kill-switch: bloqueado pra todos
     return canViagens || profile === "admin";
   }
 

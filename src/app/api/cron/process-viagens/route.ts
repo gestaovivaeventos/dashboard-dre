@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { enqueueMonitorRuns, processPendingSearchRuns } from "@/lib/viagens/process-search";
+import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -15,6 +16,11 @@ function isAuthorized(request: Request) {
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Kill-switch: módulo desativado → nada é buscado nem re-cotado (zero custo).
+  if (!VIAGENS_ENABLED) {
+    return NextResponse.json({ ok: true, disabled: true });
   }
 
   const db = createAdminClient();

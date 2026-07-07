@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
 
 export type { ModuleAccess, UnifiedProfile };
@@ -125,9 +126,10 @@ export async function getSessionContext(): Promise<SessionContext> {
     userProfile === "admin" ||
     profileRow.role === "admin";
   // Admin sempre enxerga Viagens e pode aprovar (espelha has_viagens_access()).
+  // VIAGENS_ENABLED=false desliga o módulo pra todos (kill-switch).
   const isAdminUser = userProfile === "admin" || profileRow.role === "admin";
-  const canViagens = Boolean(profileRow.can_viagens) || isAdminUser;
-  const canViagensAprovar = Boolean(profileRow.can_viagens_aprovar) || isAdminUser;
+  const canViagens = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens) || isAdminUser);
+  const canViagensAprovar = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens_aprovar) || isAdminUser);
 
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
