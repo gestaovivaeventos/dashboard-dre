@@ -10,7 +10,8 @@ export async function getExpenseTypes() {
 
   const { data, error } = await supabase
     .from("ctrl_expense_types")
-    .select("id, name, created_at")
+    .select("id, name, created_at, active")
+    .eq("active", true)
     .order("name");
 
   if (error) return { error: error.message };

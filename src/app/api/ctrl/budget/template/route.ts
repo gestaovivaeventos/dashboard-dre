@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const db = createAdminClientIfAvailable() ?? (await createClient());
   const [sectorsRes, typesRes] = await Promise.all([
     db.from("ctrl_sectors").select("name").order("name"),
-    db.from("ctrl_expense_types").select("name").order("name"),
+    db.from("ctrl_expense_types").select("name").eq("active", true).order("name"),
   ]);
   const sectors = (sectorsRes.data ?? []).map((s) => s.name);
   const types = (typesRes.data ?? []).map((t) => t.name);

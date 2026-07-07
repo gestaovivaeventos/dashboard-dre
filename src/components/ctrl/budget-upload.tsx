@@ -26,8 +26,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<UploadError | null>(null);
   const [createdTypes, setCreatedTypes] = useState<string[]>([]);
-  const [removedTypes, setRemovedTypes] = useState<string[]>([]);
-  const [keptTypesWithRequests, setKeptTypesWithRequests] = useState<string[]>([]);
+  const [reactivatedTypes, setReactivatedTypes] = useState<string[]>([]);
+  const [inactivatedTypes, setInactivatedTypes] = useState<string[]>([]);
 
   const years = [defaultYear - 1, defaultYear, defaultYear + 1].map(String);
 
@@ -39,8 +39,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
     setSubmitting(true);
     setError(null);
     setCreatedTypes([]);
-    setRemovedTypes([]);
-    setKeptTypesWithRequests([]);
+    setReactivatedTypes([]);
+    setInactivatedTypes([]);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -61,7 +61,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
       const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       const extras: string[] = [];
       if (data.createdTypes?.length) extras.push(`${data.createdTypes.length} tipo(s) criado(s)`);
-      if (data.removedTypes?.length) extras.push(`${data.removedTypes.length} tipo(s) removido(s)`);
+      if (data.reactivatedTypes?.length) extras.push(`${data.reactivatedTypes.length} tipo(s) reativado(s)`);
+      if (data.inactivatedTypes?.length) extras.push(`${data.inactivatedTypes.length} tipo(s) inativado(s)`);
       if (data.skippedBlankType) extras.push(`${data.skippedBlankType} linha(s) sem tipo ignorada(s)`);
       const realizadoMsg = data.totalRealized ? ` — realizado ${fmt.format(data.totalRealized)}` : "";
       showToast({
@@ -71,8 +72,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
           (extras.length ? ` (${extras.join("; ")})` : ""),
       });
       if (data.createdTypes?.length) setCreatedTypes(data.createdTypes);
-      if (data.removedTypes?.length) setRemovedTypes(data.removedTypes);
-      if (data.keptTypesWithRequests?.length) setKeptTypesWithRequests(data.keptTypesWithRequests);
+      if (data.reactivatedTypes?.length) setReactivatedTypes(data.reactivatedTypes);
+      if (data.inactivatedTypes?.length) setInactivatedTypes(data.inactivatedTypes);
       setFile(null);
       router.refresh();
     } catch (e) {
@@ -92,7 +93,8 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
           Planilha .xlsx com colunas <strong>Setor</strong>, <strong>Tipo de Despesa</strong>,{" "}
           <strong>Data</strong> (mês) e <strong>Valor orçado</strong> — uma linha por mês. Também aceita
           o modelo gerado pelo sistema (Setor, Tipo de Despesa, Jan…Dez). Tipos de despesa que não
-          existirem no cadastro são <strong>criados automaticamente</strong>. O upload{" "}
+          existirem no cadastro são <strong>criados automaticamente</strong>. Tipos ausentes na planilha
+          são <strong>inativados</strong>, não excluídos. O upload{" "}
           <strong>substitui todo o orçamento do ano selecionado</strong>.
         </p>
 
@@ -166,23 +168,23 @@ export function BudgetUpload({ defaultYear }: BudgetUploadProps) {
           </div>
         )}
 
-        {removedTypes.length > 0 && (
+        {reactivatedTypes.length > 0 && (
           <div className="rounded-md border border-muted-foreground/30 bg-muted/30 p-3 text-sm">
             <p className="font-medium">
-              {removedTypes.length} tipo(s) de despesa removido(s) (não constavam no orçamento)
+              {reactivatedTypes.length} tipo(s) de despesa reativado(s)
             </p>
-            <p className="mt-1 text-muted-foreground">{removedTypes.join(", ")}.</p>
+            <p className="mt-1 text-muted-foreground">{reactivatedTypes.join(", ")}.</p>
           </div>
         )}
 
-        {keptTypesWithRequests.length > 0 && (
+        {inactivatedTypes.length > 0 && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
             <p className="font-medium text-amber-700">
-              {keptTypesWithRequests.length} tipo(s) mantido(s) por terem requisições vinculadas
+              {inactivatedTypes.length} tipo(s) de despesa inativado(s)
             </p>
             <p className="mt-1 text-muted-foreground">
-              {keptTypesWithRequests.join(", ")}. Não estavam no orçamento, mas têm requisições e por
-              isso não foram removidos.
+              {inactivatedTypes.join(", ")}. Eles deixam de aparecer em novos lançamentos, mas o histórico
+              permanece preservado.
             </p>
           </div>
         )}

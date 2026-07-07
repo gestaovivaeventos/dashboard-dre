@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { getBudgetRequestWindow } from "@/lib/ctrl/budget-cutoff";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
@@ -111,6 +112,7 @@ async function performBudgetVerification(
     style: "currency",
     currency: "BRL",
   });
+  const { requestStartIso, requestEndIso } = getBudgetRequestWindow(referenceYear);
 
   // Budget accumulated Jan → referenceMonth
   const { data: budgetUpTo } = await supabase
@@ -149,14 +151,17 @@ async function performBudgetVerification(
 
   const isBudgeted = budgetedAnnual > 0;
 
-  // Total approved for this sector+type in this year
+  // A planilha-base já incorpora o realizado até 30/06/2026. Para 2026, o
+  // saldo dinâmico usa apenas solicitações criadas a partir de 01/07/2026.
   const { data: approved } = await supabase
     .from("ctrl_requests")
     .select("amount")
     .eq("sector_id", sectorId)
     .eq("expense_type_id", expenseTypeId)
     .eq("reference_year", referenceYear)
-    .eq("status", "aprovado");
+    .eq("status", "aprovado")
+    .gte("created_at", requestStartIso)
+    .lt("created_at", requestEndIso);
 
   const totalApproved = (approved ?? []).reduce(
     (s, r) => s + Number(r.amount),
