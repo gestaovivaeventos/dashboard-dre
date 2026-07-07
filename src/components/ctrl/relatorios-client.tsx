@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download } from "lucide-react";
 
 const MONTHS = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
@@ -38,10 +39,13 @@ const PAYMENT_LABELS: Record<string, string> = {
   cartao_credito: "Cartão", dinheiro: "Dinheiro",
 };
 
+type Person = { name: string | null; email: string } | null;
+
 type Req = {
   id: string;
   request_number: number;
   title: string;
+  description: string | null;
   amount: number;
   status: string;
   due_date: string | null;
@@ -52,100 +56,217 @@ type Req = {
   sector_id: string | null;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
-  creator?: { name: string | null; email: string } | null;
+  ctrl_suppliers?: { name: string } | { name: string }[] | null;
+  creator?: Person;
+  approver?: Person;
 };
-
-type Sector = { id: string; name: string };
 
 function resolve<T>(v: T | T[] | null | undefined): T | null {
   if (!v) return null;
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
+function personName(p: Person): string {
+  if (!p) return "";
+  return p.name ?? p.email ?? "";
+}
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Data (criação/vencimento) → "dd/mm/aaaa". due_date é DATE ('YYYY-MM-DD');
-// created_at é timestamp ISO. Compara-se pela parte da data (YYYY-MM-DD).
 function dayPart(iso: string): string {
   return iso.slice(0, 10);
 }
 function formatDate(iso: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "";
   return new Date(dayPart(iso) + "T00:00:00").toLocaleDateString("pt-BR");
 }
-// Retorna true se `day` (YYYY-MM-DD) está dentro de [from, to] (limites opcionais).
 function inRange(day: string, from: string, to: string): boolean {
   if (from && day < from) return false;
   if (to && day > to) return false;
   return true;
 }
+// Aceita "1.234,56", "1234,56", "1234.56", "250".
+function parseNum(raw: string): number {
+  const t = (raw ?? "").trim();
+  if (!t) return 0;
+  const body = t.replace(/[R$\s]/g, "");
+  const n = body.includes(",") ? Number(body.replace(/\./g, "").replace(",", ".")) : Number(body);
+  return Number.isFinite(n) ? n : 0;
+}
 
-export function RelatoriosClient({ requests, sectors }: { requests: Req[]; sectors: Sector[] }) {
-  const [sectorFilter, setSectorFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [createdFrom, setCreatedFrom] = useState("");
-  const [createdTo, setCreatedTo] = useState("");
-  const [dueFrom, setDueFrom] = useState("");
-  const [dueTo, setDueTo] = useState("");
-  const [exporting, setExporting] = useState(false);
+type FilterKind = "text" | "select" | "dateRange" | "numRange";
+
+interface Column {
+  key: string;
+  label: string;
+  kind: FilterKind;
+  plain: (r: Req) => string; // texto p/ filtro, opções de select e export
+  sortVal: (r: Req) => string | number;
+  cell?: (r: Req) => ReactNode; // render custom (default = plain)
+  rawDate?: (r: Req) => string | null; // p/ dateRange (YYYY-MM-DD ou null)
+  right?: boolean;
+}
+
+const COLUMNS: Column[] = [
+  {
+    key: "num", label: "#", kind: "text",
+    plain: (r) => String(r.request_number),
+    sortVal: (r) => r.request_number,
+    cell: (r) => <span className="font-mono text-xs text-muted-foreground">#{r.request_number}</span>,
+  },
+  { key: "title", label: "Título", kind: "text", plain: (r) => r.title ?? "", sortVal: (r) => (r.title ?? "").toLowerCase() },
+  { key: "description", label: "Descrição", kind: "text", plain: (r) => r.description ?? "", sortVal: (r) => (r.description ?? "").toLowerCase() },
+  { key: "requester", label: "Solicitante", kind: "text", plain: (r) => personName(r.creator ?? null), sortVal: (r) => personName(r.creator ?? null).toLowerCase() },
+  { key: "approver", label: "Aprovador", kind: "text", plain: (r) => personName(r.approver ?? null), sortVal: (r) => personName(r.approver ?? null).toLowerCase() },
+  { key: "sector", label: "Setor", kind: "select", plain: (r) => resolve(r.ctrl_sectors)?.name ?? "", sortVal: (r) => resolve(r.ctrl_sectors)?.name ?? "" },
+  { key: "type", label: "Tipo", kind: "select", plain: (r) => resolve(r.ctrl_expense_types)?.name ?? "", sortVal: (r) => resolve(r.ctrl_expense_types)?.name ?? "" },
+  { key: "supplier", label: "Fornecedor", kind: "text", plain: (r) => resolve(r.ctrl_suppliers)?.name ?? "", sortVal: (r) => resolve(r.ctrl_suppliers)?.name ?? "" },
+  { key: "method", label: "Método", kind: "select", plain: (r) => (r.payment_method ? PAYMENT_LABELS[r.payment_method] ?? r.payment_method : ""), sortVal: (r) => (r.payment_method ? PAYMENT_LABELS[r.payment_method] ?? r.payment_method : "") },
+  {
+    key: "competencia", label: "Mês/Ano", kind: "select",
+    plain: (r) => (r.reference_month && r.reference_year ? `${MONTHS[r.reference_month - 1]}/${r.reference_year}` : ""),
+    sortVal: (r) => (r.reference_year ?? 0) * 100 + (r.reference_month ?? 0),
+  },
+  {
+    key: "amount", label: "Valor", kind: "numRange", right: true,
+    plain: (r) => fmt.format(Number(r.amount)),
+    sortVal: (r) => Number(r.amount),
+    cell: (r) => <span className="font-medium">{fmt.format(Number(r.amount))}</span>,
+  },
+  {
+    key: "status", label: "Status", kind: "select",
+    plain: (r) => STATUS_LABELS[r.status] ?? r.status,
+    sortVal: (r) => STATUS_LABELS[r.status] ?? r.status,
+    cell: (r) => (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${STATUS_CLS[r.status] ?? "bg-gray-100 text-gray-700"}`}>
+        {STATUS_LABELS[r.status] ?? r.status}
+      </span>
+    ),
+  },
+  {
+    key: "created", label: "Criação", kind: "dateRange",
+    plain: (r) => formatDate(r.created_at),
+    sortVal: (r) => dayPart(r.created_at),
+    rawDate: (r) => dayPart(r.created_at),
+  },
+  {
+    key: "due", label: "Vencimento", kind: "dateRange",
+    plain: (r) => formatDate(r.due_date),
+    sortVal: (r) => (r.due_date ? dayPart(r.due_date) : ""),
+    rawDate: (r) => (r.due_date ? dayPart(r.due_date) : null),
+  },
+];
+
+const INPUT = "w-full rounded-md border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-ring";
+
+export function RelatoriosClient({ requests }: { requests: Req[] }) {
+  const [textFilters, setTextFilters] = useState<Record<string, string>>({});
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({});
+  const [amountRange, setAmountRange] = useState<{ min: string; max: string }>({ min: "", max: "" });
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Opções dos filtros do tipo select — valores distintos presentes nos dados.
+  const selectOptions = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const col of COLUMNS) {
+      if (col.kind !== "select") continue;
+      const set = new Set<string>();
+      for (const r of requests) {
+        const v = col.plain(r);
+        if (v) set.add(v);
+      }
+      map[col.key] = Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    }
+    return map;
+  }, [requests]);
 
   const hasFilters =
-    sectorFilter || statusFilter || createdFrom || createdTo || dueFrom || dueTo;
+    Object.values(textFilters).some(Boolean) ||
+    Object.values(dateFilters).some((d) => d?.from || d?.to) ||
+    amountRange.min ||
+    amountRange.max;
 
   const filtered = useMemo(() => {
     return requests.filter((r) => {
-      if (sectorFilter && r.sector_id !== sectorFilter) return false;
-      if (statusFilter && r.status !== statusFilter) return false;
-      // Criação (created_at)
-      if ((createdFrom || createdTo) && !inRange(dayPart(r.created_at), createdFrom, createdTo)) {
-        return false;
-      }
-      // Vencimento (due_date) — sem vencimento é excluído quando há filtro de vencimento
-      if (dueFrom || dueTo) {
-        if (!r.due_date) return false;
-        if (!inRange(dayPart(r.due_date), dueFrom, dueTo)) return false;
+      for (const col of COLUMNS) {
+        if (col.kind === "text") {
+          const f = textFilters[col.key];
+          if (f && !col.plain(r).toLowerCase().includes(f.toLowerCase())) return false;
+        } else if (col.kind === "select") {
+          const f = textFilters[col.key];
+          if (f && col.plain(r) !== f) return false;
+        } else if (col.kind === "dateRange") {
+          const range = dateFilters[col.key];
+          if (range && (range.from || range.to)) {
+            const day = col.rawDate?.(r) ?? null;
+            if (!day || !inRange(day, range.from, range.to)) return false;
+          }
+        } else if (col.kind === "numRange") {
+          if (amountRange.min && Number(r.amount) < parseNum(amountRange.min)) return false;
+          if (amountRange.max && Number(r.amount) > parseNum(amountRange.max)) return false;
+        }
       }
       return true;
     });
-  }, [requests, sectorFilter, statusFilter, createdFrom, createdTo, dueFrom, dueTo]);
+  }, [requests, textFilters, dateFilters, amountRange]);
 
-  const total = filtered.reduce((s, r) => s + Number(r.amount), 0);
-  const byStatus = filtered.reduce<Record<string, number>>((acc, r) => {
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const col = COLUMNS.find((c) => c.key === sortKey);
+    if (!col) return filtered;
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const va = col.sortVal(a);
+      const vb = col.sortVal(b);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  const total = sorted.reduce((s, r) => s + Number(r.amount), 0);
+  const byStatus = sorted.reduce<Record<string, number>>((acc, r) => {
     acc[r.status] = (acc[r.status] ?? 0) + Number(r.amount);
     return acc;
   }, {});
 
-  function clearFilters() {
-    setSectorFilter("");
-    setStatusFilter("");
-    setCreatedFrom("");
-    setCreatedTo("");
-    setDueFrom("");
-    setDueTo("");
+  function toggleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   }
 
+  function setText(key: string, value: string) {
+    setTextFilters((prev) => ({ ...prev, [key]: value }));
+  }
+  function setDate(key: string, field: "from" | "to", value: string) {
+    setDateFilters((prev) => {
+      const cur = prev[key] ?? { from: "", to: "" };
+      return { ...prev, [key]: { ...cur, [field]: value } };
+    });
+  }
+  function clearFilters() {
+    setTextFilters({});
+    setDateFilters({});
+    setAmountRange({ min: "", max: "" });
+  }
+
+  const [exporting, setExporting] = useState(false);
   async function handleExport() {
-    if (filtered.length === 0) return;
+    if (sorted.length === 0) return;
     setExporting(true);
     try {
       const XLSX = await import("xlsx");
-      const rows = filtered.map((r) => ({
-        "#": r.request_number,
-        "Título": r.title,
-        "Solicitante": r.creator?.name ?? r.creator?.email ?? "",
-        "Setor": resolve(r.ctrl_sectors)?.name ?? "",
-        "Tipo": resolve(r.ctrl_expense_types)?.name ?? "",
-        "Método": r.payment_method ? PAYMENT_LABELS[r.payment_method] ?? r.payment_method : "",
-        "Competência":
-          r.reference_month && r.reference_year
-            ? `${MONTHS[r.reference_month - 1]}/${r.reference_year}`
-            : "",
-        "Valor": Number(r.amount),
-        "Status": STATUS_LABELS[r.status] ?? r.status,
-        "Criação": formatDate(r.created_at),
-        "Vencimento": r.due_date ? formatDate(r.due_date) : "",
-      }));
-      const ws = XLSX.utils.json_to_sheet(rows);
+      const data = sorted.map((r) => {
+        const row: Record<string, string | number> = {};
+        for (const col of COLUMNS) {
+          row[col.label] = col.key === "amount" ? Number(r.amount) : col.plain(r);
+        }
+        return row;
+      });
+      const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Requisições");
       const stamp = new Date().toISOString().slice(0, 10);
@@ -155,57 +276,22 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
     }
   }
 
-  const INPUT = "rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
-  const DATE = INPUT + " [color-scheme:light] dark:[color-scheme:dark]";
-
   return (
-    <div className="space-y-6">
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-4">
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-muted-foreground">Setor</label>
-          <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)} className={INPUT}>
-            <option value="">Todos os setores</option>
-            {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+    <div className="space-y-4">
+      {/* Top bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">{sorted.length} requisição(ões)</span>
+          {hasFilters && (
+            <button onClick={clearFilters} className="text-sm text-muted-foreground hover:text-foreground">
+              Limpar filtros
+            </button>
+          )}
         </div>
-
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-muted-foreground">Status</label>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={INPUT}>
-            <option value="">Todos os status</option>
-            {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
-
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-muted-foreground">Criação</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className={DATE} />
-            <span className="text-muted-foreground text-sm">até</span>
-            <input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} className={DATE} />
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-muted-foreground">Vencimento</label>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dueFrom} onChange={(e) => setDueFrom(e.target.value)} className={DATE} />
-            <span className="text-muted-foreground text-sm">até</span>
-            <input type="date" value={dueTo} onChange={(e) => setDueTo(e.target.value)} className={DATE} />
-          </div>
-        </div>
-
-        {hasFilters && (
-          <button onClick={clearFilters} className="pb-1.5 text-sm text-muted-foreground hover:text-foreground">
-            Limpar filtros
-          </button>
-        )}
-
         <button
           onClick={handleExport}
-          disabled={exporting || filtered.length === 0}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+          disabled={exporting || sorted.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
         >
           <Download className="h-4 w-4" />
           {exporting ? "Exportando…" : "Exportar XLSX"}
@@ -217,7 +303,7 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground uppercase font-medium">Total</p>
           <p className="text-xl font-bold mt-1">{fmt.format(total)}</p>
-          <p className="text-xs text-muted-foreground">{filtered.length} req.</p>
+          <p className="text-xs text-muted-foreground">{sorted.length} req.</p>
         </div>
         {Object.entries(byStatus).slice(0, 3).map(([s, v]) => (
           <div key={s} className="rounded-lg border p-4">
@@ -228,66 +314,121 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
       </div>
 
       {/* Table */}
-      {filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-          Nenhuma requisição encontrada com os filtros aplicados.
-        </div>
-      ) : (
-        <div className="rounded-lg border overflow-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                {["#", "Título", "Setor", "Tipo", "Método", "Mês/Ano", "Valor", "Status", "Criação", "Vencimento"].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filtered.map((req) => {
-                const sector = resolve(req.ctrl_sectors);
-                const expType = resolve(req.ctrl_expense_types);
-                const badge = STATUS_CLS[req.status];
+      <div className="rounded-lg border overflow-auto">
+        <table className="w-full text-sm">
+          <thead>
+            {/* Cabeçalho clicável (ordenação) */}
+            <tr className="border-b bg-muted/40">
+              {COLUMNS.map((col) => {
+                const active = sortKey === col.key;
+                const Arrow = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
                 return (
-                  <tr key={req.id} className="hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">#{req.request_number}</td>
-                    <td className="px-4 py-2.5 max-w-[200px]">
-                      <p className="font-medium truncate">{req.title}</p>
-                      {req.creator && <p className="text-xs text-muted-foreground">{req.creator.name ?? req.creator.email}</p>}
-                    </td>
-                    <td className="px-4 py-2.5 text-xs">{sector?.name ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-xs">{expType?.name ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-xs">{req.payment_method ? PAYMENT_LABELS[req.payment_method] : "—"}</td>
-                    <td className="px-4 py-2.5 text-xs">
-                      {req.reference_month && req.reference_year
-                        ? `${MONTHS[req.reference_month - 1]}/${req.reference_year}`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-medium whitespace-nowrap">{fmt.format(Number(req.amount))}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${badge ?? "bg-gray-100 text-gray-700"}`}>
-                        {STATUS_LABELS[req.status] ?? req.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDate(req.created_at)}
-                    </td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDate(req.due_date)}
-                    </td>
-                  </tr>
+                  <th key={col.key} className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
+                    <button
+                      onClick={() => toggleSort(col.key)}
+                      className={`inline-flex items-center gap-1 hover:text-foreground ${active ? "text-foreground" : ""}`}
+                    >
+                      {col.label}
+                      <Arrow className={`h-3.5 w-3.5 ${active ? "" : "opacity-40"}`} />
+                    </button>
+                  </th>
                 );
               })}
-            </tbody>
-            <tfoot>
-              <tr className="border-t bg-muted/20">
-                <td colSpan={6} className="px-4 py-2.5 text-sm font-semibold">Total</td>
-                <td className="px-4 py-2.5 text-right font-bold">{fmt.format(total)}</td>
-                <td colSpan={3} />
+            </tr>
+            {/* Linha de filtros por coluna */}
+            <tr className="border-b bg-background">
+              {COLUMNS.map((col) => (
+                <th key={col.key} className="px-2 py-1.5 align-top">
+                  {col.kind === "text" && (
+                    <input
+                      value={textFilters[col.key] ?? ""}
+                      onChange={(e) => setText(col.key, e.target.value)}
+                      placeholder="Filtrar"
+                      className={INPUT + " min-w-[90px]"}
+                    />
+                  )}
+                  {col.kind === "select" && (
+                    <select
+                      value={textFilters[col.key] ?? ""}
+                      onChange={(e) => setText(col.key, e.target.value)}
+                      className={INPUT + " min-w-[110px]"}
+                    >
+                      <option value="">Todos</option>
+                      {(selectOptions[col.key] ?? []).map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  )}
+                  {col.kind === "numRange" && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        value={amountRange.min}
+                        onChange={(e) => setAmountRange((p) => ({ ...p, min: e.target.value }))}
+                        placeholder="mín"
+                        className={INPUT + " w-20 text-right"}
+                      />
+                      <input
+                        value={amountRange.max}
+                        onChange={(e) => setAmountRange((p) => ({ ...p, max: e.target.value }))}
+                        placeholder="máx"
+                        className={INPUT + " w-20 text-right"}
+                      />
+                    </div>
+                  )}
+                  {col.kind === "dateRange" && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="date"
+                        value={dateFilters[col.key]?.from ?? ""}
+                        onChange={(e) => setDate(col.key, "from", e.target.value)}
+                        className={INPUT + " [color-scheme:light] dark:[color-scheme:dark]"}
+                      />
+                      <input
+                        type="date"
+                        value={dateFilters[col.key]?.to ?? ""}
+                        onChange={(e) => setDate(col.key, "to", e.target.value)}
+                        className={INPUT + " [color-scheme:light] dark:[color-scheme:dark]"}
+                      />
+                    </div>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  Nenhuma requisição encontrada com os filtros aplicados.
+                </td>
               </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
+            ) : (
+              sorted.map((r) => (
+                <tr key={r.id} className="hover:bg-muted/20 transition-colors">
+                  {COLUMNS.map((col) => (
+                    <td
+                      key={col.key}
+                      className={`px-3 py-2 text-xs whitespace-nowrap ${col.right ? "text-right" : ""} ${
+                        col.key === "title" || col.key === "description" ? "max-w-[220px] truncate" : ""
+                      }`}
+                      title={col.key === "title" || col.key === "description" ? col.plain(r) : undefined}
+                    >
+                      {col.cell ? col.cell(r) : col.plain(r) || <span className="text-muted-foreground">—</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+          <tfoot>
+            <tr className="border-t bg-muted/20">
+              <td colSpan={COLUMNS.length} className="px-4 py-2.5 text-right text-sm font-semibold">
+                Total: {fmt.format(total)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 }
