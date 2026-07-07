@@ -150,8 +150,8 @@ async function performBudgetVerification(
 
   const isBudgeted = budgetedAnnual > 0;
 
-  // A planilha-base já incorpora o realizado até 06/07/2026. Para 2026, o saldo
-  // dinâmico conta só ocorrências com VENCIMENTO a partir de 07/07/2026 — assim
+  // A planilha-base já incorpora o realizado até 07/07/2026. Para 2026, o saldo
+  // dinâmico conta só ocorrências com VENCIMENTO a partir de 08/07/2026 — assim
   // parcelas/recorrências já lançadas seguem descontando pelas datas futuras.
   const { data: approved } = await supabase
     .from("ctrl_requests")

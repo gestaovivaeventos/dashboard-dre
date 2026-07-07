@@ -53,9 +53,9 @@ async function getOrcamentoData(year: number) {
     realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(b.realized ?? 0));
   }
 
-  // A planilha-base já carrega o realizado até 06/07/2026. Para 2026, o
+  // A planilha-base já carrega o realizado até 07/07/2026. Para 2026, o
   // realizado/pendente dinâmico considera apenas ocorrências com VENCIMENTO a
-  // partir de 07/07/2026 (parcelas/recorrências já lançadas seguem contando
+  // partir de 08/07/2026 (parcelas/recorrências já lançadas seguem contando
   // pelas datas futuras), evitando desconto duplicado.
   // Requisições aprovadas somam ao realizado; pendentes ficam à parte.
   const pendenteMap = new Map<string, number>();
