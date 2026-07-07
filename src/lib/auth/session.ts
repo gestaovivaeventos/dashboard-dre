@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
 
 export type { ModuleAccess, UnifiedProfile };
@@ -30,6 +31,14 @@ export function hasCaseAccess(ctx: SessionContext): boolean {
   return Boolean(ctx.modules?.case);
 }
 
+export function hasViagensAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.viagens);
+}
+
+export function hasViagensAprovar(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.viagens?.aprovador);
+}
+
 // ─── Função principal ─────────────────────────────────────────────────────────
 
 export async function getSessionContext(): Promise<SessionContext> {
@@ -45,7 +54,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     .from("users")
     .select(`
       id, email, name, role, company_id, active, created_at, contracts_only,
-      profile, can_financeiro, can_compras, can_case,
+      profile, can_financeiro, can_compras, can_case, can_viagens, can_viagens_aprovar,
       user_module_roles!user_module_roles_user_id_fkey(role, module),
       user_sectors(sector_id),
       user_company_access(company_id)
@@ -116,6 +125,11 @@ export async function getSessionContext(): Promise<SessionContext> {
     Boolean(profileRow.can_case) ||
     userProfile === "admin" ||
     profileRow.role === "admin";
+  // Admin sempre enxerga Viagens e pode aprovar (espelha has_viagens_access()).
+  // VIAGENS_ENABLED=false desliga o módulo pra todos (kill-switch).
+  const isAdminUser = userProfile === "admin" || profileRow.role === "admin";
+  const canViagens = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens) || isAdminUser);
+  const canViagensAprovar = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens_aprovar) || isAdminUser);
 
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
@@ -140,6 +154,8 @@ export async function getSessionContext(): Promise<SessionContext> {
     can_financeiro: canFinanceiro,
     can_compras: canCompras,
     can_case: canCase,
+    can_viagens: canViagens,
+    can_viagens_aprovar: canViagensAprovar,
     sector_ids: sectorIds,
     company_ids: companyIds,
     active: profileRow.active,
@@ -155,6 +171,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     dre: canFinanceiro ? { role: dreRole, companyId: profile.company_id } : null,
     ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
     case: canCase ? {} : null,
+    viagens: canViagens ? { aprovador: canViagensAprovar } : null,
   };
 
   return { supabase, user, profile, modules };

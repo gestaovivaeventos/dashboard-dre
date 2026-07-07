@@ -19,6 +19,8 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
   const navDreRole = modules.dre?.role ?? null;
   const ctrlRoles = modules.ctrl?.roles ?? [];
   const canCase = Boolean(modules.case);
+  const canViagens = Boolean(modules.viagens);
+  const canViagensAprovar = Boolean(modules.viagens?.aprovador);
 
   // Segmentos para o shell (mesmo padrão dos outros layouts) — admin vê todos.
   let segments: Segment[] = [];
@@ -46,6 +48,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
     segments,
     "case",
     canCase,
+    canViagens,
   );
 
   const unreadNotifications = profile?.id
@@ -59,6 +62,8 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       userRole={navDreRole}
       ctrlRoles={ctrlRoles}
       canCase={canCase}
+      canViagens={canViagens}
+      canViagensAprovar={canViagensAprovar}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

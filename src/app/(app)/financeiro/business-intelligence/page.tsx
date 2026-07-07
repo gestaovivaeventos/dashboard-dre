@@ -17,6 +17,14 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
+// Empresas ocultadas do seletor de Empresa APENAS no Business Intelligence
+// (pedido de negocio). Nao aparecem no filtro para NENHUM usuario, inclusive
+// admin e quem tem acesso a empresa. Escopo restrito a esta tela: Dashboard,
+// Fluxo de Caixa, Budget e Forecast etc. continuam mostrando a empresa.
+const BI_HIDDEN_COMPANY_IDS = new Set<string>([
+  "36e5e164-f5ca-4498-9771-ab0999b977d6", // Express
+]);
+
 export default async function BusinessIntelligencePage() {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
@@ -43,10 +51,11 @@ export default async function BusinessIntelligencePage() {
     allCompanies.map((c) => c.id),
   );
 
-  const visibleCompanies =
+  const visibleCompanies = (
     profile?.role === "admin"
       ? allCompanies
-      : allCompanies.filter((c) => allowedCompanyIds.includes(c.id));
+      : allCompanies.filter((c) => allowedCompanyIds.includes(c.id))
+  ).filter((c) => !BI_HIDDEN_COMPANY_IDS.has(c.id));
 
   // Geracao liberada para quem tem acesso ao modulo Financeiro. A rota
   // /api/intelligence/one-page valida, por empresa, se o usuario pode gerar

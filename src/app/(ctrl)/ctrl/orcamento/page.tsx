@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
+import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
 
@@ -22,10 +23,9 @@ async function getOrcamentoData(year: number) {
       .eq("period_year", year),
     supabase
       .from("ctrl_requests")
-      .select("expense_type_id, status, amount")
+      .select("expense_type_id, status, amount, due_date, created_at")
       .not("status", "in", '("rejeitado","estornado","inativado_csc")')
-      .gte("created_at", `${year}-01-01`)
-      .lt("created_at", `${year + 1}-01-01`),
+      .eq("reference_year", year),
     supabase
       .from("ctrl_expense_types")
       .select("id, name")
@@ -53,9 +53,14 @@ async function getOrcamentoData(year: number) {
     realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(b.realized ?? 0));
   }
 
-  // Requisições aprovadas somam ao realizado; pendentes ficam à parte
+  // A planilha-base já carrega o realizado até 07/07/2026. Para 2026, o
+  // realizado/pendente dinâmico considera apenas ocorrências com VENCIMENTO a
+  // partir de 08/07/2026 (parcelas/recorrências já lançadas seguem contando
+  // pelas datas futuras), evitando desconto duplicado.
+  // Requisições aprovadas somam ao realizado; pendentes ficam à parte.
   const pendenteMap = new Map<string, number>();
   for (const r of requestsRes.data ?? []) {
+    if (!countsTowardBudget(r, year)) continue;
     const key = r.expense_type_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
     if (isApproved) {

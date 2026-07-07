@@ -269,7 +269,7 @@ export async function POST(request: Request) {
   // Resolve setor / tipo names against the catalog.
   const [sectorsRes, typesRes] = await Promise.all([
     db.from("ctrl_sectors").select("id, name"),
-    db.from("ctrl_expense_types").select("id, name"),
+    db.from("ctrl_expense_types").select("id, name, active"),
   ]);
   if (sectorsRes.error || typesRes.error) {
     return NextResponse.json(
@@ -279,6 +279,9 @@ export async function POST(request: Request) {
   }
   const sectorByName = new Map((sectorsRes.data ?? []).map((s) => [normalize(s.name), s.id]));
   const typeByName = new Map((typesRes.data ?? []).map((t) => [normalize(t.name), t.id]));
+  const inactiveTypeIds = new Set(
+    (typesRes.data ?? []).filter((t) => !t.active).map((t) => t.id),
+  );
 
   // Setores são validados de forma estrita: têm que existir no cadastro.
   const unknownSectors = new Set<string>();
@@ -322,6 +325,33 @@ export async function POST(request: Request) {
       typeByName.set(normalize(t.name), t.id);
       createdTypes.push(t.name);
     }
+  }
+
+  const reactivatedTypeIds = new Set<string>();
+  for (const row of parsed.rows) {
+    const typeId = typeByName.get(normalize(row.typeName));
+    if (typeId && inactiveTypeIds.has(typeId)) {
+      reactivatedTypeIds.add(typeId);
+    }
+  }
+  const reactivatedTypes: string[] = [];
+  if (reactivatedTypeIds.size > 0) {
+    const ids = Array.from(reactivatedTypeIds);
+    const { error: reactivateErr } = await db
+      .from("ctrl_expense_types")
+      .update({ active: true })
+      .in("id", ids);
+    if (reactivateErr) {
+      return NextResponse.json(
+        { error: `Falha ao reativar tipos de despesa: ${reactivateErr.message}` },
+        { status: 500 },
+      );
+    }
+    const nameById = new Map((typesRes.data ?? []).map((t) => [t.id, t.name]));
+    ids.forEach((id) => {
+      const name = nameById.get(id);
+      if (name) reactivatedTypes.push(name);
+    });
   }
 
   const skippedBlankType = parsed.rows.filter((r) => !r.typeName.trim()).length;
@@ -378,41 +408,30 @@ export async function POST(request: Request) {
     }
   }
 
-  // Cadastro fica espelhando a planilha: tipos de despesa que não aparecem nela
-  // são removidos. Exceção: tipos já referenciados por alguma requisição (FK
-  // RESTRICT) — esses são preservados e reportados.
+  // Cadastro passa a ser atualizado de forma segura: tipos que não aparecem na
+  // planilha deixam de ser oferecidos para novos lançamentos, mas preservam
+  // histórico e vínculos antigos.
   const allTypeIds = Array.from(new Set(Array.from(typeByName.values())));
   const orphanIds = allTypeIds.filter((id) => !usedTypeIds.has(id));
-  const removedTypes: string[] = [];
-  const keptTypesWithRequests: string[] = [];
+  const inactivatedTypes: string[] = [];
   if (orphanIds.length > 0) {
-    const idToName = new Map(Array.from(typeByName.entries()).map(([n, id]) => [id, n]));
-    const { data: reqRows, error: reqErr } = await db
-      .from("ctrl_requests")
-      .select("expense_type_id")
-      .in("expense_type_id", orphanIds);
-    if (reqErr) {
-      return NextResponse.json(
-        { error: `Falha ao verificar requisições dos tipos de despesa: ${reqErr.message}` },
-        { status: 500 },
-      );
-    }
-    const protectedIds = new Set((reqRows ?? []).map((r) => r.expense_type_id));
-    const deletableIds = orphanIds.filter((id) => !protectedIds.has(id));
-    // Nomes para o feedback (usa o catálogo original, não o normalizado).
-    const nameById = new Map((typesRes.data ?? []).map((t) => [t.id, t.name]));
-    for (const id of orphanIds) {
-      if (protectedIds.has(id)) keptTypesWithRequests.push(nameById.get(id) ?? idToName.get(id) ?? id);
-    }
-    if (deletableIds.length > 0) {
-      const { error: delTypeErr } = await db.from("ctrl_expense_types").delete().in("id", deletableIds);
-      if (delTypeErr) {
+    const activeOrphanIds = orphanIds.filter((id) => !inactiveTypeIds.has(id));
+    if (activeOrphanIds.length > 0) {
+      const { error: inactivateErr } = await db
+        .from("ctrl_expense_types")
+        .update({ active: false })
+        .in("id", activeOrphanIds);
+      if (inactivateErr) {
         return NextResponse.json(
-          { error: `Falha ao remover tipos de despesa fora do orçamento: ${delTypeErr.message}` },
+          { error: `Falha ao inativar tipos de despesa fora da planilha: ${inactivateErr.message}` },
           { status: 500 },
         );
       }
-      for (const id of deletableIds) removedTypes.push(nameById.get(id) ?? id);
+      const nameById = new Map((typesRes.data ?? []).map((t) => [t.id, t.name]));
+      activeOrphanIds.forEach((id) => {
+        const name = nameById.get(id);
+        if (name) inactivatedTypes.push(name);
+      });
     }
   }
 
@@ -427,8 +446,8 @@ export async function POST(request: Request) {
     totalAmount,
     totalRealized,
     createdTypes,
-    removedTypes,
-    keptTypesWithRequests,
+    reactivatedTypes,
+    inactivatedTypes,
     skippedBlankType,
   });
 }

@@ -58,7 +58,7 @@ export async function updateSession(request: NextRequest) {
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase
       .from("users")
-      .select("profile, active, can_financeiro, can_compras, can_case")
+      .select("profile, active, can_financeiro, can_compras, can_case, can_viagens")
       .eq("id", user.id)
       .maybeSingle<{
         profile: UserProfileType | null;
@@ -66,21 +66,23 @@ export async function updateSession(request: NextRequest) {
         can_financeiro: boolean | null;
         can_compras: boolean | null;
         can_case: boolean | null;
+        can_viagens: boolean | null;
       }>();
 
     const userProfile: UserProfileType = profileData?.profile ?? "solicitante";
     const canFinanceiro = Boolean(profileData?.can_financeiro);
     const canCompras = Boolean(profileData?.can_compras);
     const canCase = Boolean(profileData?.can_case);
+    const canViagens = Boolean(profileData?.can_viagens);
     const isActive = profileData?.active ?? true;
 
     if (!isActive) {
       const url = request.nextUrl.clone();
       url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
-    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras, canCase)) {
+    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras, canCase, canViagens)) {
       const url = request.nextUrl.clone();
-      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras, canCase);
+      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras, canCase, canViagens);
       supabaseResponse = NextResponse.redirect(url);
     }
   }

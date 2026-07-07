@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
-import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { createClient } from "@/lib/supabase/server";
 import { RelatoriosClient } from "@/components/ctrl/relatorios-client";
 
@@ -20,6 +19,7 @@ async function getRelatorioData(params: {
       id,
       request_number,
       title,
+      description,
       amount,
       status,
       due_date,
@@ -28,10 +28,12 @@ async function getRelatorioData(params: {
       reference_month,
       reference_year,
       paying_company,
+      sector_id,
       ctrl_sectors(name),
       ctrl_expense_types(name),
       ctrl_suppliers(name),
-      creator:users!ctrl_requests_created_by_fkey(name, email)
+      creator:users!ctrl_requests_created_by_fkey(name, email),
+      approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
     .order("created_at", { ascending: false });
 
@@ -41,7 +43,7 @@ async function getRelatorioData(params: {
   if (params.monthFrom) query = query.gte("reference_month", params.monthFrom);
   if (params.monthTo) query = query.lte("reference_month", params.monthTo);
 
-  const { data, error } = await query.limit(500);
+  const { data, error } = await query.limit(1000);
   if (error) return { error: error.message };
   return { requests: data ?? [] };
 }
@@ -54,23 +56,20 @@ export default async function RelatoriosPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const [sectorsResult, requestsResult] = await Promise.all([
-    getSectors(),
-    getRelatorioData({}),
-  ]);
-
-  const sectors = sectorsResult.sectors ?? [];
+  const requestsResult = await getRelatorioData({});
   const requests = requestsResult.requests ?? [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Relatórios</h1>
-        <p className="text-muted-foreground">Analise e filtre requisições por período, setor e status</p>
+        <p className="text-muted-foreground">
+          Filtre por qualquer coluna, ordene clicando no cabeçalho e exporte em XLSX
+        </p>
       </div>
 
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <RelatoriosClient requests={requests as any} sectors={sectors} />
+      <RelatoriosClient requests={requests as any} />
     </div>
   );
 }

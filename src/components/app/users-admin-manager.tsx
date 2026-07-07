@@ -60,6 +60,8 @@ interface UserItem {
   can_financeiro: boolean;
   can_compras: boolean;
   can_case: boolean;
+  can_viagens: boolean;
+  can_viagens_aprovar: boolean;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -149,6 +151,8 @@ interface FormState {
   can_financeiro: boolean;
   can_compras: boolean;
   can_case: boolean;
+  can_viagens: boolean;
+  can_viagens_aprovar: boolean;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -162,6 +166,8 @@ const emptyForm: FormState = {
   can_financeiro: true,
   can_compras: true,
   can_case: false,
+  can_viagens: false,
+  can_viagens_aprovar: false,
   sector_ids: [],
   company_ids: [],
 };
@@ -176,6 +182,8 @@ function userToForm(u: UserItem): FormState {
     can_financeiro: u.can_financeiro,
     can_compras: u.can_compras,
     can_case: u.can_case,
+    can_viagens: u.can_viagens,
+    can_viagens_aprovar: u.can_viagens_aprovar,
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -305,6 +313,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_financeiro = false;
         next.can_compras = false;
         next.can_case = false;
+        next.can_viagens = false;
+        next.can_viagens_aprovar = false;
         next.sector_ids = [];
         next.company_ids = [];
       }
@@ -319,7 +329,13 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_financeiro = true;
         next.can_compras = false;
         next.can_case = false;
+        next.can_viagens = false;
+        next.can_viagens_aprovar = false;
         next.sector_ids = [];
+      }
+      // Sem Viagens → não pode aprovar viagens
+      if (key === "can_viagens" && value === false) {
+        next.can_viagens_aprovar = false;
       }
       // Sem Financeiro → limpa unidades
       if (key === "can_financeiro" && value === false) {
@@ -361,6 +377,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_financeiro: boolean;
         can_compras: boolean;
         can_case: boolean;
+        can_viagens: boolean;
+        can_viagens_aprovar: boolean;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -377,6 +395,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_financeiro: u.can_financeiro,
         can_compras: u.can_compras,
         can_case: u.can_case,
+        can_viagens: u.can_viagens,
+        can_viagens_aprovar: u.can_viagens_aprovar,
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -391,8 +411,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       // Tudo OK — sem módulos/setores/unidades é o esperado
       return null;
     }
-    if (!form.can_financeiro && !form.can_compras && !form.can_case && form.profile !== "admin") {
-      return "Marque ao menos um módulo (Financeiro, Compras ou Case).";
+    if (!form.can_financeiro && !form.can_compras && !form.can_case && !form.can_viagens && form.profile !== "admin") {
+      return "Marque ao menos um módulo (Financeiro, Compras, Case ou Viagens).";
     }
     if (profileNeedsSectors(form.profile) && form.sector_ids.length === 0) {
       return "Gerente e Solicitante precisam de pelo menos um setor.";
@@ -424,6 +444,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_financeiro: form.can_financeiro,
         can_compras: form.can_compras,
         can_case: form.can_case,
+        can_viagens: form.can_viagens,
+        can_viagens_aprovar: form.can_viagens_aprovar,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -459,6 +481,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_financeiro: form.can_financeiro,
         can_compras: form.can_compras,
         can_case: form.can_case,
+        can_viagens: form.can_viagens,
+        can_viagens_aprovar: form.can_viagens_aprovar,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -623,7 +647,12 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                   ? "(isolado)"
                   : u.profile === "admin"
                   ? "Todos"
-                  : [u.can_financeiro && "Financeiro", u.can_compras && "Compras", u.can_case && "Case"]
+                  : [
+                      u.can_financeiro && "Financeiro",
+                      u.can_compras && "Compras",
+                      u.can_case && "Case",
+                      u.can_viagens && (u.can_viagens_aprovar ? "Viagens (aprova)" : "Viagens"),
+                    ]
                       .filter(Boolean)
                       .join(", ") || "—"}
               </TableCell>
@@ -910,7 +939,30 @@ function UserForm({
               {form.can_case ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
               Case
             </button>
+            <button
+              type="button"
+              onClick={() => onChange("can_viagens", !form.can_viagens)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                form.can_viagens
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "hover:bg-muted"
+              }`}
+            >
+              {form.can_viagens ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Viagens
+            </button>
           </div>
+          {form.can_viagens && (
+            <label className="flex cursor-pointer items-center gap-2 pt-1 text-sm">
+              <input
+                type="checkbox"
+                checked={form.can_viagens_aprovar}
+                onChange={(e) => onChange("can_viagens_aprovar", e.target.checked)}
+                className="h-4 w-4 rounded border"
+              />
+              Pode aprovar viagens (escolhe o orçamento e fecha a reserva)
+            </label>
+          )}
           <p className="text-xs text-muted-foreground">
             Plataforma (Conexões, Usuários, Inteligência) é automática pra admin.
           </p>

@@ -1,3 +1,4 @@
+import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 /** Alias retrocompatível */
@@ -10,6 +11,7 @@ export function defaultLandingFor(
   canFinanceiro: boolean,
   canCompras: boolean,
   canCase: boolean = false,
+  canViagens: boolean = false,
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
@@ -19,6 +21,8 @@ export function defaultLandingFor(
   if (canFinanceiro || canCompras || profile === "admin") return "/home";
   // Usuário só-Case cai direto nos contratos da Case.
   if (canCase) return "/case/contratos";
+  // Usuário só-Viagens cai direto nas requisições de viagem.
+  if (canViagens) return "/viagens/requisicoes";
   return "/pendente";
 }
 
@@ -58,6 +62,7 @@ export function canAccessPathByProfile(
   canFinanceiro: boolean,
   canCompras: boolean,
   canCase: boolean = false,
+  canViagens: boolean = false,
 ): boolean {
   // Validador de contrato: ilha. Só /contratos.
   if (profile === "validador_contrato") {
@@ -67,6 +72,13 @@ export function canAccessPathByProfile(
   // Módulo Case (Case Shows) — acesso binário via can_case (admin sempre pode).
   if (pathname === "/case" || pathname.startsWith("/case/")) {
     return canCase || profile === "admin";
+  }
+
+  // Módulo Viagens — acesso binário via can_viagens (admin sempre pode).
+  // A fila de aprovações tem gate extra (can_viagens_aprovar) no server action.
+  if (pathname === "/viagens" || pathname.startsWith("/viagens/")) {
+    if (!VIAGENS_ENABLED) return false; // kill-switch: bloqueado pra todos
+    return canViagens || profile === "admin";
   }
 
   // Franqueado: whitelist explícita de telas do Financeiro.

@@ -25,6 +25,8 @@ interface AppShellProps {
   userRole: DreRole | null;
   ctrlRoles?: CtrlRole[];
   canCase?: boolean;
+  canViagens?: boolean;
+  canViagensAprovar?: boolean;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -41,6 +43,8 @@ export function AppShell({
   userRole,
   ctrlRoles,
   canCase,
+  canViagens,
+  canViagensAprovar,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -62,6 +66,8 @@ export function AppShell({
       dreRole={userRole}
       ctrlRoles={ctrlRoles}
       canCase={canCase}
+      canViagens={canViagens}
+      canViagensAprovar={canViagensAprovar}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

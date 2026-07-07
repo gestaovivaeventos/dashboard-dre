@@ -29,6 +29,8 @@ export interface ModuleAccess {
   } | null;
   /** Módulo Case (Case Shows). Acesso binário via can_case. */
   case: Record<string, never> | null;
+  /** Módulo Viagens. Acesso via can_viagens; `aprovador` habilita a fila de aprovações. */
+  viagens: { aprovador: boolean } | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -57,6 +59,10 @@ export interface UnifiedProfile {
   can_compras: boolean;
   /** Visibilidade do módulo Case (Case Shows). */
   can_case: boolean;
+  /** Visibilidade do módulo Viagens. */
+  can_viagens: boolean;
+  /** Pode aprovar/escolher orçamentos no módulo Viagens (gerente de viagens). */
+  can_viagens_aprovar: boolean;
   /** Setores aos quais este usuário está vinculado (relevante pra Gerente/Solicitante). */
   sector_ids: string[];
   /** Empresas (unidades) que o usuário enxerga. Ignorado para admin (vê tudo). */
@@ -141,6 +147,7 @@ export interface CtrlSector {
 export interface CtrlExpenseType {
   id: string;
   name: string;
+  active: boolean;
   created_at: string;
 }
 

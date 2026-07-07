@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bell,
   Brain,
+  Building2,
   Calendar,
   CheckSquare,
   Cog,
@@ -15,10 +16,13 @@ import {
   MapPinned,
   Music2,
   PieChart,
+  Plane,
   Plug,
   Receipt,
   Sliders,
   Sparkles,
+  Table2,
+  Tags,
   Target,
   Truck,
   Users,
@@ -197,9 +201,13 @@ export interface NavItem {
   ctrlRoles?: readonly CtrlRole[];
   /** Item do módulo Case — visível quando o usuário tem acesso ao Case. */
   caseAccess?: boolean;
+  /** Item do módulo Viagens — visível quando o usuário tem can_viagens. */
+  viagensAccess?: boolean;
+  /** Item restrito a aprovadores de Viagens (can_viagens_aprovar). */
+  viagensAprovarOnly?: boolean;
 }
 
-export type NavGroupId = "financeiro" | "compras" | "case" | "plataforma";
+export type NavGroupId = "financeiro" | "compras" | "case" | "viagens" | "plataforma";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -235,10 +243,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "ct-apr", title: "Aprovacoes", icon: CheckSquare, scope: "global", href: "/ctrl/aprovacoes", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-cap", title: "Contas a Pagar", icon: Receipt, scope: "global", href: "/ctrl/contas-a-pagar", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-orc", title: "Orcamento", icon: DollarSign, scope: "global", href: "/ctrl/orcamento", ctrlRoles: ["gerente", "diretor", "csc", "admin"] },
+      { key: "ct-orc-edit", title: "Editar Orçamento", icon: Table2, scope: "global", href: "/ctrl/orcamento/editar", ctrlRoles: ["csc", "admin"] },
       { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
       { key: "ct-evt", title: "Eventos", icon: Calendar, scope: "global", href: "/ctrl/admin/eventos", ctrlRoles: ["csc", "admin"] },
       { key: "ct-omie", title: "Mapeamento Omie", icon: GitMerge, scope: "global", href: "/ctrl/admin/omie-mapeamento", ctrlRoles: ["csc", "admin"] },
+      { key: "cad-setores", title: "Setores", icon: Building2, scope: "global", href: "/ctrl/admin/setores", ctrlRoles: ["csc", "admin"] },
+      { key: "cad-tipos", title: "Tipos de Despesa", icon: Tags, scope: "global", href: "/ctrl/admin/tipos-de-despesa", ctrlRoles: ["csc", "admin"] },
     ],
   },
   {
@@ -248,6 +259,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "case-contratos", title: "Contratos", icon: Music2, scope: "global", href: "/case/contratos", caseAccess: true },
       { key: "case-dash", title: "Dashboard", icon: LayoutDashboard, scope: "global", href: "/case/dashboard", caseAccess: true },
       { key: "case-config", title: "Configuracao Omie", icon: Sliders, scope: "global", href: "/case/config", dreRoles: ["admin"] },
+    ],
+  },
+  {
+    id: "viagens",
+    label: "VIAGENS",
+    items: [
+      { key: "vg-req", title: "Requisicoes", icon: Plane, scope: "global", href: "/viagens/requisicoes", viagensAccess: true },
+      { key: "vg-apr", title: "Aprovacoes", icon: CheckSquare, scope: "global", href: "/viagens/aprovacoes", viagensAccess: true, viagensAprovarOnly: true },
+      { key: "vg-config", title: "Configuracao", icon: Sliders, scope: "global", href: "/viagens/config", dreRoles: ["admin"] },
     ],
   },
   {

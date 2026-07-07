@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
@@ -149,19 +150,20 @@ async function performBudgetVerification(
 
   const isBudgeted = budgetedAnnual > 0;
 
-  // Total approved for this sector+type in this year
+  // A planilha-base já incorpora o realizado até 07/07/2026. Para 2026, o saldo
+  // dinâmico conta só ocorrências com VENCIMENTO a partir de 08/07/2026 — assim
+  // parcelas/recorrências já lançadas seguem descontando pelas datas futuras.
   const { data: approved } = await supabase
     .from("ctrl_requests")
-    .select("amount")
+    .select("amount, due_date, created_at")
     .eq("sector_id", sectorId)
     .eq("expense_type_id", expenseTypeId)
     .eq("reference_year", referenceYear)
     .eq("status", "aprovado");
 
-  const totalApproved = (approved ?? []).reduce(
-    (s, r) => s + Number(r.amount),
-    0
-  );
+  const totalApproved = (approved ?? [])
+    .filter((r) => countsTowardBudget(r, referenceYear))
+    .reduce((s, r) => s + Number(r.amount), 0);
 
   // Realizado total = importado da planilha + requisições já aprovadas.
   const currentBalance = budgetedUpToMonth - realizedUpToMonth - totalApproved;

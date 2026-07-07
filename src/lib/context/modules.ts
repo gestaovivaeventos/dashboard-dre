@@ -30,9 +30,15 @@ export const MODULES: Record<ActiveModule, ModuleDefinition> = {
     usesSegments: false,
     defaultPath: "/case/contratos",
   },
+  viagens: {
+    id: "viagens",
+    label: "Viagens",
+    usesSegments: false,
+    defaultPath: "/viagens/requisicoes",
+  },
 };
 
-export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case"] as const;
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "viagens"] as const;
 
 /**
  * Returns the modules the user has any access to.
@@ -44,11 +50,13 @@ export function resolveAvailableModules(
   dreRole: DreRole | null | undefined,
   ctrlRoles: CtrlRole[] | null | undefined,
   canCase?: boolean | null,
+  canViagens?: boolean | null,
 ): ModuleDefinition[] {
   const result: ModuleDefinition[] = [];
   if (dreRole) result.push(MODULES.dre);
   if (ctrlRoles && ctrlRoles.length > 0) result.push(MODULES.ctrl);
   if (canCase) result.push(MODULES.case);
+  if (canViagens) result.push(MODULES.viagens);
   return result;
 }
 
@@ -88,8 +96,9 @@ export async function resolveLayoutContext(
   segments: Segment[],
   fallbackModule: ActiveModule,
   canCase?: boolean | null,
+  canViagens?: boolean | null,
 ): Promise<ResolvedLayoutContext> {
-  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase);
+  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase, canViagens);
   const moduleCookie = await readActiveModule();
   const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
   const activeModule: ActiveModule = activeModuleDef?.id ?? fallbackModule;

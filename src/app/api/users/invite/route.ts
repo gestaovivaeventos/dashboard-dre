@@ -47,6 +47,8 @@ export async function POST(request: Request) {
     can_financeiro?: boolean;
     can_compras?: boolean;
     can_case?: boolean;
+    can_viagens?: boolean;
+    can_viagens_aprovar?: boolean;
     sector_ids?: string[];
     company_ids?: string[];
   };
@@ -80,6 +82,11 @@ export async function POST(request: Request) {
     userProfile === "validador_contrato" || userProfile === "franqueado"
       ? false
       : Boolean(body.can_case);
+  const canViagens =
+    userProfile === "validador_contrato" || userProfile === "franqueado"
+      ? false
+      : Boolean(body.can_viagens);
+  const canViagensAprovar = canViagens && Boolean(body.can_viagens_aprovar);
   const sectorIds =
     userProfile === "validador_contrato" || userProfile === "franqueado"
       ? []
@@ -136,6 +143,8 @@ export async function POST(request: Request) {
       can_financeiro: canFinanceiro,
       can_compras: canCompras,
       can_case: canCase,
+      can_viagens: canViagens,
+      can_viagens_aprovar: canViagensAprovar,
       contracts_only: userProfile === "validador_contrato",
       role: legacyDreRole, // compat
       company_id: null,
