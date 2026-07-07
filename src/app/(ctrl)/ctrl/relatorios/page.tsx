@@ -28,6 +28,7 @@ async function getRelatorioData(params: {
       reference_month,
       reference_year,
       paying_company,
+      sector_id,
       ctrl_sectors(name),
       ctrl_expense_types(name),
       ctrl_suppliers(name),
@@ -41,7 +42,7 @@ async function getRelatorioData(params: {
   if (params.monthFrom) query = query.gte("reference_month", params.monthFrom);
   if (params.monthTo) query = query.lte("reference_month", params.monthTo);
 
-  const { data, error } = await query.limit(500);
+  const { data, error } = await query.limit(1000);
   if (error) return { error: error.message };
   return { requests: data ?? [] };
 }

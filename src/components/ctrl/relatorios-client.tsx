@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Download } from "lucide-react";
 
 const MONTHS = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
@@ -48,6 +49,7 @@ type Req = {
   payment_method: string | null;
   reference_month: number | null;
   reference_year: number | null;
+  sector_id: string | null;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
   creator?: { name: string | null; email: string } | null;
@@ -62,32 +64,50 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Data (criação/vencimento) → "dd/mm/aaaa". due_date é DATE ('YYYY-MM-DD');
+// created_at é timestamp ISO. Compara-se pela parte da data (YYYY-MM-DD).
+function dayPart(iso: string): string {
+  return iso.slice(0, 10);
+}
+function formatDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(dayPart(iso) + "T00:00:00").toLocaleDateString("pt-BR");
+}
+// Retorna true se `day` (YYYY-MM-DD) está dentro de [from, to] (limites opcionais).
+function inRange(day: string, from: string, to: string): boolean {
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
 export function RelatoriosClient({ requests, sectors }: { requests: Req[]; sectors: Sector[] }) {
-  const now = new Date();
   const [sectorFilter, setSectorFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [monthFrom, setMonthFrom] = useState(1);
-  const [monthTo, setMonthTo] = useState(12);
-  const [yearFilter, setYearFilter] = useState(now.getFullYear());
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
+  const [exporting, setExporting] = useState(false);
+
+  const hasFilters =
+    sectorFilter || statusFilter || createdFrom || createdTo || dueFrom || dueTo;
 
   const filtered = useMemo(() => {
     return requests.filter((r) => {
-      if (sectorFilter) {
-        const sec = resolve(r.ctrl_sectors);
-        if (!sec || sec.name !== sectors.find((s) => s.id === sectorFilter)?.name) {
-          // Filter by sector id match — compare via stored id (workaround: compare name)
-          const found = sectors.find((s) => s.id === sectorFilter);
-          if (!found || resolve(r.ctrl_sectors)?.name !== found.name) return false;
-        }
-      }
+      if (sectorFilter && r.sector_id !== sectorFilter) return false;
       if (statusFilter && r.status !== statusFilter) return false;
-      if (r.reference_year && r.reference_year !== yearFilter) return false;
-      if (r.reference_month) {
-        if (r.reference_month < monthFrom || r.reference_month > monthTo) return false;
+      // Criação (created_at)
+      if ((createdFrom || createdTo) && !inRange(dayPart(r.created_at), createdFrom, createdTo)) {
+        return false;
+      }
+      // Vencimento (due_date) — sem vencimento é excluído quando há filtro de vencimento
+      if (dueFrom || dueTo) {
+        if (!r.due_date) return false;
+        if (!inRange(dayPart(r.due_date), dueFrom, dueTo)) return false;
       }
       return true;
     });
-  }, [requests, sectorFilter, statusFilter, yearFilter, monthFrom, monthTo, sectors]);
+  }, [requests, sectorFilter, statusFilter, createdFrom, createdTo, dueFrom, dueTo]);
 
   const total = filtered.reduce((s, r) => s + Number(r.amount), 0);
   const byStatus = filtered.reduce<Record<string, number>>((acc, r) => {
@@ -95,43 +115,100 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
     return acc;
   }, {});
 
+  function clearFilters() {
+    setSectorFilter("");
+    setStatusFilter("");
+    setCreatedFrom("");
+    setCreatedTo("");
+    setDueFrom("");
+    setDueTo("");
+  }
+
+  async function handleExport() {
+    if (filtered.length === 0) return;
+    setExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const rows = filtered.map((r) => ({
+        "#": r.request_number,
+        "Título": r.title,
+        "Solicitante": r.creator?.name ?? r.creator?.email ?? "",
+        "Setor": resolve(r.ctrl_sectors)?.name ?? "",
+        "Tipo": resolve(r.ctrl_expense_types)?.name ?? "",
+        "Método": r.payment_method ? PAYMENT_LABELS[r.payment_method] ?? r.payment_method : "",
+        "Competência":
+          r.reference_month && r.reference_year
+            ? `${MONTHS[r.reference_month - 1]}/${r.reference_year}`
+            : "",
+        "Valor": Number(r.amount),
+        "Status": STATUS_LABELS[r.status] ?? r.status,
+        "Criação": formatDate(r.created_at),
+        "Vencimento": r.due_date ? formatDate(r.due_date) : "",
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Requisições");
+      const stamp = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `relatorio-compras-${stamp}.xlsx`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const INPUT = "rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring";
+  const DATE = INPUT + " [color-scheme:light] dark:[color-scheme:dark]";
 
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 rounded-lg border bg-muted/30 p-4">
-        <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)} className={INPUT}>
-          <option value="">Todos os setores</option>
-          {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={INPUT}>
-          <option value="">Todos os status</option>
-          {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-
-        <select value={yearFilter} onChange={(e) => setYearFilter(Number(e.target.value))} className={INPUT}>
-          {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-
-        <div className="flex items-center gap-2">
-          <select value={monthFrom} onChange={(e) => setMonthFrom(Number(e.target.value))} className={INPUT}>
-            {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-          </select>
-          <span className="text-muted-foreground text-sm">até</span>
-          <select value={monthTo} onChange={(e) => setMonthTo(Number(e.target.value))} className={INPUT}>
-            {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-4">
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-muted-foreground">Setor</label>
+          <select value={sectorFilter} onChange={(e) => setSectorFilter(e.target.value)} className={INPUT}>
+            <option value="">Todos os setores</option>
+            {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
 
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-muted-foreground">Status</label>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={INPUT}>
+            <option value="">Todos os status</option>
+            {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-muted-foreground">Criação</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className={DATE} />
+            <span className="text-muted-foreground text-sm">até</span>
+            <input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} className={DATE} />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-muted-foreground">Vencimento</label>
+          <div className="flex items-center gap-2">
+            <input type="date" value={dueFrom} onChange={(e) => setDueFrom(e.target.value)} className={DATE} />
+            <span className="text-muted-foreground text-sm">até</span>
+            <input type="date" value={dueTo} onChange={(e) => setDueTo(e.target.value)} className={DATE} />
+          </div>
+        </div>
+
+        {hasFilters && (
+          <button onClick={clearFilters} className="pb-1.5 text-sm text-muted-foreground hover:text-foreground">
+            Limpar filtros
+          </button>
+        )}
+
         <button
-          onClick={() => { setSectorFilter(""); setStatusFilter(""); setMonthFrom(1); setMonthTo(12); setYearFilter(now.getFullYear()); }}
-          className="text-sm text-muted-foreground hover:text-foreground"
+          onClick={handleExport}
+          disabled={exporting || filtered.length === 0}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
         >
-          Limpar filtros
+          <Download className="h-4 w-4" />
+          {exporting ? "Exportando…" : "Exportar XLSX"}
         </button>
       </div>
 
@@ -160,7 +237,7 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
-                {["#", "Título", "Setor", "Tipo", "Método", "Mês/Ano", "Valor", "Status", "Data"].map((h) => (
+                {["#", "Título", "Setor", "Tipo", "Método", "Mês/Ano", "Valor", "Status", "Criação", "Vencimento"].map((h) => (
                   <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -192,7 +269,10 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(req.created_at).toLocaleDateString("pt-BR")}
+                      {formatDate(req.created_at)}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {formatDate(req.due_date)}
                     </td>
                   </tr>
                 );
@@ -202,7 +282,7 @@ export function RelatoriosClient({ requests, sectors }: { requests: Req[]; secto
               <tr className="border-t bg-muted/20">
                 <td colSpan={6} className="px-4 py-2.5 text-sm font-semibold">Total</td>
                 <td className="px-4 py-2.5 text-right font-bold">{fmt.format(total)}</td>
-                <td colSpan={2} />
+                <td colSpan={3} />
               </tr>
             </tfoot>
           </table>
