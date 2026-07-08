@@ -10,6 +10,7 @@ import { decryptSecret } from "@/lib/security/encryption";
 import {
   syncSupplierToOmieUnit,
   syncClienteToOmieUnit,
+  clienteRowToOmieData,
   type OmieSupplierData,
 } from "@/lib/omie/clientes";
 import { incluirContaPagar, toOmieDate } from "@/lib/omie/contapagar";
@@ -166,13 +167,16 @@ export async function launchContractToOmie(
   // documento antes de qualquer chamada (cadastros com omie_codigo já passaram).
   const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
   const semDoc: string[] = [];
-  if (needsClient && !client.omie_codigo && !digits(client.cnpj_cpf)) semDoc.push(`cliente "${client.name}"`);
+  // Cliente sem CNPJ pode lançar como PF do responsável legal (CPF) — fundo vira nome fantasia.
+  if (needsClient && !client.omie_codigo && !digits(client.cnpj_cpf) && !digits(client.cpf_resp_legal)) {
+    semDoc.push(`cliente "${client.name}" (informe o CNPJ ou o CPF do responsável legal)`);
+  }
   if (needsBand) {
     for (const a of atracoes) if (!a.band.omie_codigo && !digits(a.band.cnpj_cpf)) semDoc.push(`atração "${a.band.name}"`);
     for (const f of fornecedores) if (!f.band.omie_codigo && !digits(f.band.cnpj_cpf)) semDoc.push(`fornecedor "${f.band.name}"`);
   }
   if (semDoc.length > 0) {
-    return { error: `Cadastro sem CNPJ/CPF: ${semDoc.join(", ")}. Complete o documento no cadastro (Editar dados para o cliente) antes de lançar no Omie.` };
+    return { error: `Cadastro sem CNPJ/CPF: ${semDoc.join(", ")}. Complete o documento no cadastro (Editar cadastro do cliente) antes de lançar no Omie.` };
   }
   if (!company?.omie_app_key || !company?.omie_app_secret) {
     return markContractError(db, contractId, "Empresa Case Shows sem credenciais Omie configuradas.");
@@ -227,19 +231,10 @@ export async function launchContractToOmie(
       }
     }
     if (needsClient && !clientCodigo) {
-      const clientData: OmieSupplierData = {
-        id: client.id,
-        name: client.name,
-        cnpj_cpf: client.cnpj_cpf,
-        email: client.email,
-        phone: client.phone,
-        banco: null,
-        agencia: null,
-        conta_corrente: null,
-        titular_banco: null,
-        doc_titular: null,
-        chave_pix: null,
-      };
+      const clientData = clienteRowToOmieData(client);
+      if (!clientData) {
+        return markContractError(db, contractId, `Cliente "${client.name}" sem CNPJ/CPF — informe o documento ou o CPF do responsável legal.`);
+      }
       const { codigoCliente } = await syncClienteToOmieUnit(appKey, appSecret, clientData);
       clientCodigo = codigoCliente;
       await db.from("case_clients").update({ omie_codigo: clientCodigo, omie_synced_at: new Date().toISOString() }).eq("id", client.id);

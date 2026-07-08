@@ -4,6 +4,7 @@ import { getCaseOmieCreds } from "@/lib/case/omie-creds";
 import {
   syncClienteToOmieUnit,
   syncSupplierToOmieUnit,
+  clienteRowToOmieData,
   type OmieSupplierData,
 } from "@/lib/omie/clientes";
 import type { CaseBandInput, CaseClientInput } from "@/lib/case/types";
@@ -24,22 +25,30 @@ const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, ""
 export async function ensureOmieRegistration(db: DB, kind: "client" | "band", id: string): Promise<void> {
   const table = kind === "client" ? "case_clients" : "case_bands";
   const { data: row } = await db.from(table).select("*").eq("id", id).single();
-  if (!row || row.omie_codigo || !onlyDigits(row.cnpj_cpf)) return;
+  if (!row || row.omie_codigo) return;
+  // Cliente sem CNPJ pode ir como PF do responsável (fundo no nome fantasia);
+  // banda/fornecedor precisa do próprio documento.
+  const data: OmieSupplierData | null =
+    kind === "client"
+      ? clienteRowToOmieData(row)
+      : onlyDigits(row.cnpj_cpf)
+        ? {
+            id: row.id,
+            name: row.name,
+            cnpj_cpf: row.cnpj_cpf,
+            email: row.email,
+            phone: row.phone,
+            banco: row.banco,
+            agencia: row.agencia,
+            conta_corrente: row.conta_corrente,
+            titular_banco: row.titular_banco,
+            doc_titular: row.doc_titular,
+            chave_pix: row.chave_pix,
+          }
+        : null;
+  if (!data) return;
   const creds = await getCaseOmieCreds(db);
   if (!creds) return;
-  const data: OmieSupplierData = {
-    id: row.id,
-    name: row.name,
-    cnpj_cpf: row.cnpj_cpf,
-    email: row.email,
-    phone: row.phone,
-    banco: kind === "band" ? row.banco : null,
-    agencia: kind === "band" ? row.agencia : null,
-    conta_corrente: kind === "band" ? row.conta_corrente : null,
-    titular_banco: kind === "band" ? row.titular_banco : null,
-    doc_titular: kind === "band" ? row.doc_titular : null,
-    chave_pix: kind === "band" ? row.chave_pix : null,
-  };
   try {
     const { codigoCliente } =
       kind === "client"
