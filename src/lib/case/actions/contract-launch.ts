@@ -58,6 +58,8 @@ interface AtracaoInfo {
   id: string;
   attachment_path: string | null;
   band: BandInfo;
+  /** Só fornecedores: rider_camarim | comissao_externa | comissao_rider. */
+  tipo?: string;
 }
 
 const SERVICO_LABEL: Record<string, string> = {
@@ -143,7 +145,7 @@ export async function launchContractToOmie(
       .order("created_at"),
     db
       .from("case_contract_fornecedores")
-      .select("id, attachment_path, descricao, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
+      .select("id, tipo, attachment_path, descricao, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
       .eq("contract_id", contractId)
       .order("created_at"),
     db.from("companies").select("id, omie_app_key, omie_app_secret").eq("id", contract.company_id).single(),
@@ -157,7 +159,7 @@ export async function launchContractToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fornecedores: AtracaoInfo[] = ((fornecedoresData ?? []) as any[])
     .filter((f) => f.case_bands)
-    .map((f) => ({ id: f.id, attachment_path: f.attachment_path, band: f.case_bands }));
+    .map((f) => ({ id: f.id, tipo: f.tipo ?? "rider_camarim", attachment_path: f.attachment_path, band: f.case_bands }));
 
   if (!client || (needsBand && atracoes.length === 0)) {
     return markContractError(db, contractId, "Cliente ou atrações não encontrados.");
@@ -193,6 +195,12 @@ export async function launchContractToOmie(
       error:
         "Falta a categoria de CONTAS A PAGAR na Configuração Omie do Case (precisa ser categoria de despesa, 2.x.x) — o Omie não aceita categoria de receita em contas a pagar.",
     };
+  }
+  if (needsBand && fornecedores.some((f) => f.tipo === "comissao_externa") && !config?.codigo_categoria_comissao_externa) {
+    return { error: "Falta a categoria de Comissões Comercial - Externa na Configuração Omie do Case." };
+  }
+  if (needsBand && fornecedores.some((f) => f.tipo === "comissao_rider") && !config?.codigo_categoria_comissao_rider) {
+    return { error: "Falta a categoria de Comissões Comercial - Rider na Configuração Omie do Case." };
   }
 
   let appKey: string;
@@ -267,9 +275,15 @@ export async function launchContractToOmie(
 
   for (const t of rows) {
     const isPagar = t.leg === "pagar_custodia";
-    // Pagar exige categoria de DESPESA; receber usa custódia/serviços (receita).
+    const fornecedorTipo = t.fornecedor_id ? fornecedorById.get(t.fornecedor_id)?.tipo : undefined;
+    // Pagar exige categoria de DESPESA (comissões têm categoria própria por tipo);
+    // receber usa custódia/serviços (receita).
     const categoria = isPagar
-      ? String(config.codigo_categoria_pagar)
+      ? fornecedorTipo === "comissao_externa"
+        ? String(config.codigo_categoria_comissao_externa)
+        : fornecedorTipo === "comissao_rider"
+          ? String(config.codigo_categoria_comissao_rider)
+          : String(config.codigo_categoria_pagar)
       : t.leg === "receber_servicos"
         ? String(config.codigo_categoria_servicos)
         : String(config.codigo_categoria_custodia);

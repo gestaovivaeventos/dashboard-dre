@@ -336,6 +336,7 @@ interface AtracaoRow {
 
 interface FornecedorRow {
   id: string;
+  tipo: string;
   valor: number;
   pagar_schedule: CaseParcelaInput[] | null;
 }
@@ -385,7 +386,7 @@ async function recomputeContractTitles(
       .order("created_at"),
     db
       .from("case_contract_fornecedores")
-      .select("id, valor, pagar_schedule")
+      .select("id, tipo, valor, pagar_schedule")
       .eq("contract_id", contract.id)
       .order("created_at"),
   ]);
@@ -393,7 +394,10 @@ async function recomputeContractTitles(
   const fornecedores = (fornecedoresData ?? []) as FornecedorRow[];
 
   const totalArtista = atracoes.reduce((acc, a) => acc + (Number(a.valor_artista) || 0), 0);
-  const totalFornecedores = fornecedores.reduce((acc, f) => acc + (Number(f.valor) || 0), 0);
+  // Só os fornecedores da verba contam contra ela — comissões são despesas próprias.
+  const totalFornecedores = fornecedores
+    .filter((f) => (f.tipo ?? "rider_camarim") === "rider_camarim")
+    .reduce((acc, f) => acc + (Number(f.valor) || 0), 0);
   const verba = Number(contract.valor_rider_camarim) || 0;
   const valorAtracao = Number(contract.valor_atracao_cliente) || 0;
   const valorRider = Number(contract.valor_rider) || 0;
@@ -404,7 +408,7 @@ async function recomputeContractTitles(
     return { error: `Atrações (R$ ${totalArtista.toFixed(2)}) + verba Rider/Camarim (R$ ${verba.toFixed(2)}) não podem passar do valor do contrato do cliente (R$ ${valorAtracao.toFixed(2)}).` };
   }
   if (cents(totalFornecedores) > cents(verba)) {
-    return { error: `As parcelas de fornecedores (R$ ${totalFornecedores.toFixed(2)}) passam da verba Rider/Camarim (R$ ${verba.toFixed(2)}). Aumente a verba ou reduza os fornecedores.` };
+    return { error: `As parcelas de fornecedores Rider/Camarim (R$ ${totalFornecedores.toFixed(2)}) passam da verba (R$ ${verba.toFixed(2)}). Aumente a verba ou reduza os fornecedores.` };
   }
 
   // BV = contrato do cliente − atrações − verba Rider/Camarim (+ colunas legadas, hoje 0).
@@ -701,6 +705,7 @@ export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: tr
 
   const row = {
     contract_id: contract.id,
+    tipo: input.tipo ?? "rider_camarim",
     band_id: bandId,
     descricao: input.descricao?.trim() || null,
     attachment_path: input.attachment_path ?? null,
@@ -720,9 +725,11 @@ export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: tr
   const rec = await recomputeContractTitles(db, contract);
   if ("error" in rec) return { error: rec.error };
 
+  const tipoLabel =
+    input.tipo === "comissao_externa" ? "Comissão Comercial Externa" : input.tipo === "comissao_rider" ? "Comissão Comercial Rider" : "verba Rider/Camarim";
   await db.from("case_history").insert({
     contract_id: contract.id, user_id: ctx.id, action: "etapa2",
-    comment: `Fornecedor ${input.band.name} salvo — R$ ${valor.toFixed(2)} (verba Rider/Camarim).`,
+    comment: `Fornecedor ${input.band.name} salvo — R$ ${valor.toFixed(2)} (${tipoLabel}).`,
   });
   revalidatePath(`/case/contratos/${contract.id}`);
   return { ok: true };
@@ -775,12 +782,11 @@ export async function converterSaldoEmBv(contractId: string): Promise<{ ok: true
 
   const { data: fornecedoresData } = await db
     .from("case_contract_fornecedores")
-    .select("valor")
+    .select("valor, tipo")
     .eq("contract_id", contractId);
-  const totalFornecedores = ((fornecedoresData ?? []) as Array<{ valor: number }>).reduce(
-    (acc, f) => acc + (Number(f.valor) || 0),
-    0,
-  );
+  const totalFornecedores = ((fornecedoresData ?? []) as Array<{ valor: number; tipo: string }>)
+    .filter((f) => (f.tipo ?? "rider_camarim") === "rider_camarim")
+    .reduce((acc, f) => acc + (Number(f.valor) || 0), 0);
   const verba = Number(contract.valor_rider_camarim) || 0;
   const saldo = (cents(verba) - cents(totalFornecedores)) / 100;
   if (saldo <= 0) return { error: "Não há saldo disponível na verba Rider/Camarim para converter." };

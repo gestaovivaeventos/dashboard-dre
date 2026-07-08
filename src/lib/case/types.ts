@@ -155,9 +155,17 @@ export interface CaseAtracaoRow {
   pagar_schedule: CaseParcelaInput[];
 }
 
-/** Fornecedor pago com a verba Rider/Camarim do contrato. */
+/**
+ * Tipos de despesa a pagar do contrato (além das atrações):
+ * rider_camarim sai da verba; comissões são despesas próprias, cada uma
+ * lançada no Omie com sua categoria (Configuração Omie do Case).
+ */
+export type CaseFornecedorTipo = "rider_camarim" | "comissao_externa" | "comissao_rider";
+
+/** Fornecedor/comissão paga pelo contrato. */
 export interface CaseFornecedorRow {
   id: string;
+  tipo: CaseFornecedorTipo;
   band_id: string;
   band_name: string;
   band_cnpj_cpf: string | null;
@@ -167,11 +175,12 @@ export interface CaseFornecedorRow {
   pagar_schedule: CaseParcelaInput[];
 }
 
-/** Aba Contrato Atração — fornecedor da verba Rider/Camarim. */
+/** Aba Contrato Atração — fornecedor da verba Rider/Camarim ou comissão. */
 export interface FornecedorInput {
   contract_id: string;
   /** Quando presente, edita um fornecedor existente; ausente cria um novo. */
   fornecedor_id?: string | null;
+  tipo?: CaseFornecedorTipo;
   band: CaseBandInput;
   descricao?: string | null;
   attachment_path?: string | null;

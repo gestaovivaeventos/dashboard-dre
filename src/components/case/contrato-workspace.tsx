@@ -23,7 +23,7 @@ import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contract
 import { resyncContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
-import type { CaseBandRow } from "@/lib/case/types";
+import type { CaseBandRow, CaseFornecedorTipo } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -450,6 +450,8 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
       )}
 
       <RiderCamarimSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} />
+      <ComissaoSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} tipo="comissao_externa" titulo="Comissão Comercial - Externa" />
+      <ComissaoSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} tipo="comissao_rider" titulo="Comissão Comercial - Rider" />
     </div>
   );
 }
@@ -457,7 +459,7 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
 // ── VERBA RIDER/CAMARIM — reserva paga a fornecedores; saldo pode virar BV ──
 function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; launched: boolean; onChange: () => void }) {
   const verba = detail.valor_rider_camarim;
-  const fornecedores = detail.fornecedores;
+  const fornecedores = detail.fornecedores.filter((f) => f.tipo === "rider_camarim");
   const comprometido = fornecedores.reduce((a, f) => a + f.valor, 0);
   const saldo = Math.round((verba - comprometido) * 100) / 100;
 
@@ -603,6 +605,118 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
           detail={detail}
           bands={bands}
           fornecedor={fornecedorEditando}
+          tipo="rider_camarim"
+          onDone={() => { setEditing(null); onChange(); }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── COMISSÕES (Externa / Rider) — despesas lançadas com categoria própria ────
+function ComissaoSection({
+  detail,
+  bands,
+  launched,
+  onChange,
+  tipo,
+  titulo,
+}: {
+  detail: ContractDetail;
+  bands: CaseBandRow[];
+  launched: boolean;
+  onChange: () => void;
+  tipo: CaseFornecedorTipo;
+  titulo: string;
+}) {
+  const fornecedores = detail.fornecedores.filter((f) => f.tipo === tipo);
+  const total = fornecedores.reduce((a, f) => a + f.valor, 0);
+  const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const fornecedorEditando = editing?.fornecedorId ? fornecedores.find((f) => f.id === editing.fornecedorId) ?? null : null;
+
+  async function handleRemove(id: string, nome: string) {
+    if (!confirm(`Remover ${nome} de ${titulo}? As parcelas pendentes dele serão apagadas.`)) return;
+    setRemoving(id);
+    const res = await removerFornecedor(detail.id, id);
+    setRemoving(null);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-ink-primary">
+            {titulo} {fornecedores.length > 0 && <span className="text-ink-muted">({fornecedores.length})</span>}
+          </h2>
+          {!launched && !editing && (
+            <button
+              type="button"
+              onClick={() => setEditing({ fornecedorId: null })}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+            >
+              <Plus className="h-3.5 w-3.5" /> Adicionar fornecedor
+            </button>
+          )}
+        </div>
+
+        {fornecedores.length === 0 ? (
+          <p className="text-xs text-ink-muted">Nenhum lançamento — as parcelas vão para o Financeiro classificadas como {titulo}.</p>
+        ) : (
+          <div className="space-y-2">
+            {fornecedores.map((f) => (
+              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink-primary">
+                    {f.band_name}
+                    {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+                  </div>
+                  <div className="text-xs text-ink-muted">
+                    {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {f.attachment_path && (
+                    <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                      Ver contrato
+                    </button>
+                  )}
+                  {!launched && (
+                    <>
+                      <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(f.id, f.band_name)}
+                        disabled={removing === f.id}
+                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                      >
+                        {removing === f.id ? "…" : "Remover"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-sm">
+              <span className="text-ink-muted">Total {titulo}</span>
+              <span className="font-semibold tabular-nums text-ink-primary">{brl(total)}</span>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {editing && !launched && (
+        <FornecedorForm
+          key={editing.fornecedorId ?? "novo"}
+          detail={detail}
+          bands={bands}
+          fornecedor={fornecedorEditando}
+          tipo={tipo}
           onDone={() => { setEditing(null); onChange(); }}
           onCancel={() => setEditing(null)}
         />
@@ -837,20 +951,29 @@ function AtracaoForm({
   );
 }
 
-// Form de adicionar/editar UM fornecedor da verba Rider/Camarim.
+const FORNECEDOR_TIPO_LABEL: Record<CaseFornecedorTipo, string> = {
+  rider_camarim: "verba Rider/Camarim",
+  comissao_externa: "Comissão Comercial - Externa",
+  comissao_rider: "Comissão Comercial - Rider",
+};
+
+// Form de adicionar/editar UM fornecedor (verba Rider/Camarim ou comissão).
 function FornecedorForm({
   detail,
   bands,
   fornecedor,
+  tipo,
   onDone,
   onCancel,
 }: {
   detail: ContractDetail;
   bands: CaseBandRow[];
   fornecedor: ContractDetail["fornecedores"][number] | null;
+  tipo: CaseFornecedorTipo;
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const isVerba = tipo === "rider_camarim";
   const [bandMode, setBandMode] = useState<"existing" | "new">(fornecedor || bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>(fornecedor?.band_id ?? "");
   const [bName, setBName] = useState("");
@@ -881,9 +1004,11 @@ function FornecedorForm({
   const valor = parseBRL(vFornecedor);
   const soma = parcelas.reduce((a, p) => a + parseBRL(p.valorStr), 0);
   const somaOk = Math.abs(soma - valor) < 0.005 && valor > 0;
-  // Limite: verba Rider/Camarim menos os OUTROS fornecedores.
-  const outros = detail.fornecedores.filter((f) => f.id !== fornecedor?.id).reduce((a, f) => a + f.valor, 0);
-  const limiteDisponivel = detail.valor_rider_camarim - outros;
+  // Limite só na verba Rider/Camarim: verba menos os OUTROS fornecedores dela.
+  const outros = detail.fornecedores
+    .filter((f) => f.tipo === "rider_camarim" && f.id !== fornecedor?.id)
+    .reduce((a, f) => a + f.valor, 0);
+  const limiteDisponivel = isVerba ? detail.valor_rider_camarim - outros : Infinity;
 
   async function handleUpload(file: File) {
     setErr(null);
@@ -982,6 +1107,7 @@ function FornecedorForm({
     const res = await salvarFornecedor({
       contract_id: detail.id,
       fornecedor_id: fornecedor?.id ?? null,
+      tipo,
       band: buildBandInput(),
       descricao: descricao.trim() || null,
       valor,
@@ -995,7 +1121,7 @@ function FornecedorForm({
 
   return (
     <section className="space-y-3 rounded-lg border border-amber-500/40 bg-surface-1 p-4">
-      <h2 className="text-sm font-semibold text-ink-primary">{fornecedor ? `Editar fornecedor — ${fornecedor.band_name}` : "Novo fornecedor (verba Rider/Camarim)"}</h2>
+      <h2 className="text-sm font-semibold text-ink-primary">{fornecedor ? `Editar fornecedor — ${fornecedor.band_name}` : `Novo fornecedor (${FORNECEDOR_TIPO_LABEL[tipo]})`}</h2>
 
       {/* 1º: contrato (opcional) — subiu, o OCR lê e preenche fornecedor + pagamento. */}
       <p className="text-xs text-ink-muted">
@@ -1048,7 +1174,11 @@ function FornecedorForm({
       <div className="mt-1 border-t border-border pt-3">
         <h3 className="text-sm font-semibold text-ink-primary">Pagamento</h3>
       </div>
-      <p className="text-xs text-ink-muted">As parcelas saem da verba Rider/Camarim do contrato.</p>
+      <p className="text-xs text-ink-muted">
+        {isVerba
+          ? "As parcelas saem da verba Rider/Camarim do contrato."
+          : `Lançado no Omie como ${FORNECEDOR_TIPO_LABEL[tipo]}.`}
+      </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
@@ -1213,7 +1343,11 @@ function TitlesTable({ title, rows }: { title: string; rows: ContractTitleRow[] 
             {rows.map((t) => (
               <tr key={t.id} className="border-b border-border/60 last:border-0">
                 <td className="px-3 py-1.5 text-ink-primary">
-                  {LEG_LABEL[t.leg]}
+                  {t.fornecedor_tipo === "comissao_externa"
+                    ? "A pagar — Comissão Externa"
+                    : t.fornecedor_tipo === "comissao_rider"
+                      ? "A pagar — Comissão Rider"
+                      : LEG_LABEL[t.leg]}
                   {t.atracao_nome ? ` · ${t.atracao_nome}` : t.fornecedor_nome ? ` · ${t.fornecedor_nome}` : ""}
                   {t.title_item ? ` · ${ITEM_LABEL[t.title_item] ?? t.title_item}` : ""}
                   <span className="text-ink-muted"> ({t.parcela_numero}/{t.parcela_total})</span>

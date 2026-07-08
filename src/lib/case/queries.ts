@@ -80,6 +80,7 @@ export interface ContractTitleRow {
   atracao_nome: string | null;
   fornecedor_id: string | null;
   fornecedor_nome: string | null;
+  fornecedor_tipo: string | null;
 }
 
 export interface ContractDetail {
@@ -163,7 +164,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       .order("created_at"),
     db
       .from("case_contract_fornecedores")
-      .select("id, band_id, descricao, attachment_path, valor, pagar_schedule, case_bands(name, cnpj_cpf)")
+      .select("id, tipo, band_id, descricao, attachment_path, valor, pagar_schedule, case_bands(name, cnpj_cpf)")
       .eq("contract_id", id)
       .order("created_at"),
   ]);
@@ -183,6 +184,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fornecedores: CaseFornecedorRow[] = ((fornecedoresData ?? []) as any[]).map((f) => ({
     id: f.id,
+    tipo: f.tipo ?? "rider_camarim",
     band_id: f.band_id,
     band_name: f.case_bands?.name ?? "—",
     band_cnpj_cpf: f.case_bands?.cnpj_cpf ?? null,
@@ -192,6 +194,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     pagar_schedule: (Array.isArray(f.pagar_schedule) ? f.pagar_schedule : []) as CaseParcelaInput[],
   }));
   const fornecedorNomeById = new Map(fornecedores.map((f) => [f.id, f.band_name]));
+  const fornecedorTipoById = new Map(fornecedores.map((f) => [f.id, f.tipo]));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cc = c as any;
@@ -258,6 +261,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       atracao_nome: t.atracao_id ? atracaoNomeById.get(t.atracao_id) ?? null : null,
       fornecedor_id: t.fornecedor_id ?? null,
       fornecedor_nome: t.fornecedor_id ? fornecedorNomeById.get(t.fornecedor_id) ?? null : null,
+      fornecedor_tipo: t.fornecedor_id ? fornecedorTipoById.get(t.fornecedor_id) ?? null : null,
     })),
   };
 }
