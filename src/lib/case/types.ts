@@ -60,6 +60,11 @@ export interface CaseContractExtras {
   extra_translado_local: boolean;
   extra_diaria_alimentacao: boolean;
   extra_hospedagem: boolean;
+  /** Item livre extra (ex.: "DJ residente da Aula da Saudade") — sai marcado no PDF. */
+  extra_outros: string | null;
+  rider_tecnico: boolean;
+  rider_camarim: boolean;
+  rider_pre_producao: boolean;
   tipo_evento: CaseTipoEvento;
   cortesias: string | null;
   data_assinatura: string | null; // ISO YYYY-MM-DD

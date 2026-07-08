@@ -115,6 +115,10 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [extraTranslado, setExtraTranslado] = useState(false);
   const [extraDiaria, setExtraDiaria] = useState(false);
   const [extraHospedagem, setExtraHospedagem] = useState(false);
+  const [extraOutros, setExtraOutros] = useState("");
+  const [riderTecnico, setRiderTecnico] = useState(false);
+  const [riderCamarim, setRiderCamarim] = useState(false);
+  const [riderPreProducao, setRiderPreProducao] = useState(false);
   const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">("");
   const [cortesias, setCortesias] = useState("");
   const [dataAssinatura, setDataAssinatura] = useState("");
@@ -227,6 +231,8 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       espec_area_interna: especAreaInterna, espec_area_externa: especAreaExterna, espec_palco: especPalco, espec_trio: especTrio,
       extra_transporte_cidade: extraTransporte, extra_translado_local: extraTranslado,
       extra_diaria_alimentacao: extraDiaria, extra_hospedagem: extraHospedagem,
+      extra_outros: extraOutros.trim() || null,
+      rider_tecnico: riderTecnico, rider_camarim: riderCamarim, rider_pre_producao: riderPreProducao,
       tipo_evento: tipoEvento || null,
       cortesias: cortesias.trim() || null,
       data_assinatura: dataAssinatura || null,
@@ -369,6 +375,17 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
                 <CheckField label="Translado local" checked={extraTranslado} onChange={setExtraTranslado} />
                 <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
                 <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
+              </div>
+              <div className="mt-2">
+                <Field label="Outro extra incluso (texto livre — ex.: DJ residente)" value={extraOutros} onChange={setExtraOutros} />
+              </div>
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Rider e afins (custo da CONTRATADA se marcado)</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Rider técnico" checked={riderTecnico} onChange={setRiderTecnico} />
+                <CheckField label="Rider de camarim" checked={riderCamarim} onChange={setRiderCamarim} />
+                <CheckField label="Pré-produção, produção de palco e de camarins" checked={riderPreProducao} onChange={setRiderPreProducao} />
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
