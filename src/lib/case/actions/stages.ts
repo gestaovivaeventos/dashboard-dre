@@ -13,7 +13,7 @@ import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration } from "@/lib/case/resolve-cadastros";
 import { cents, validarSchedule, prorateCents } from "@/lib/case/parcelas";
-import type { CaseParcelaInput, Etapa1Input, Etapa2Input } from "@/lib/case/types";
+import type { CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 
@@ -287,12 +287,19 @@ interface AtracaoRow {
   pagar_schedule: CaseParcelaInput[] | null;
 }
 
+interface FornecedorRow {
+  id: string;
+  valor: number;
+  pagar_schedule: CaseParcelaInput[] | null;
+}
+
 interface ContractForAtracao {
   id: string;
   valor_atracao_cliente: number;
   valor_rider: number;
   valor_camarim: number;
   valor_extras: number;
+  valor_rider_camarim: number;
   receber_schedule: unknown;
 }
 
@@ -303,7 +310,7 @@ async function loadContractForAtracao(
 ): Promise<{ ok: true; contract: ContractForAtracao } | { ok: false; error: string }> {
   const { data: contract } = await db
     .from("case_contracts")
-    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, receber_schedule")
+    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_rider_camarim, receber_schedule")
     .eq("id", contractId)
     .single();
   if (!contract) return { ok: false, error: "Contrato não encontrado." };
@@ -321,27 +328,42 @@ async function loadContractForAtracao(
  */
 async function recomputeContractTitles(
   db: DB,
-  contract: { id: string; valor_atracao_cliente: number; valor_rider: number; valor_camarim: number; valor_extras: number; receber_schedule: unknown },
+  contract: ContractForAtracao,
 ): Promise<{ ok: true; totalArtista: number } | { error: string }> {
-  const { data: atracoesData } = await db
-    .from("case_contract_atracoes")
-    .select("id, band_id, attachment_path, valor_artista, pagar_schedule")
-    .eq("contract_id", contract.id)
-    .order("created_at");
+  const [{ data: atracoesData }, { data: fornecedoresData }] = await Promise.all([
+    db
+      .from("case_contract_atracoes")
+      .select("id, band_id, attachment_path, valor_artista, pagar_schedule")
+      .eq("contract_id", contract.id)
+      .order("created_at"),
+    db
+      .from("case_contract_fornecedores")
+      .select("id, valor, pagar_schedule")
+      .eq("contract_id", contract.id)
+      .order("created_at"),
+  ]);
   const atracoes = (atracoesData ?? []) as AtracaoRow[];
+  const fornecedores = (fornecedoresData ?? []) as FornecedorRow[];
 
   const totalArtista = atracoes.reduce((acc, a) => acc + (Number(a.valor_artista) || 0), 0);
+  const totalFornecedores = fornecedores.reduce((acc, f) => acc + (Number(f.valor) || 0), 0);
+  const verba = Number(contract.valor_rider_camarim) || 0;
   const valorAtracao = Number(contract.valor_atracao_cliente) || 0;
   const valorRider = Number(contract.valor_rider) || 0;
   const valorCamarim = Number(contract.valor_camarim) || 0;
   const valorExtras = Number(contract.valor_extras) || 0;
 
-  if (cents(totalArtista) > cents(valorAtracao)) {
-    return { error: `A soma paga às atrações (R$ ${totalArtista.toFixed(2)}) não pode ser maior que o valor cobrado do cliente pela atração (R$ ${valorAtracao.toFixed(2)}).` };
+  if (cents(totalArtista) + cents(verba) > cents(valorAtracao)) {
+    return { error: `Atrações (R$ ${totalArtista.toFixed(2)}) + verba Rider/Camarim (R$ ${verba.toFixed(2)}) não podem passar do valor do contrato do cliente (R$ ${valorAtracao.toFixed(2)}).` };
+  }
+  if (cents(totalFornecedores) > cents(verba)) {
+    return { error: `As parcelas de fornecedores (R$ ${totalFornecedores.toFixed(2)}) passam da verba Rider/Camarim (R$ ${verba.toFixed(2)}). Aumente a verba ou reduza os fornecedores.` };
   }
 
-  const valorMargem = valorAtracao - totalArtista;
+  // BV = contrato do cliente − atrações − verba Rider/Camarim (+ colunas legadas, hoje 0).
+  const valorMargem = valorAtracao - totalArtista - verba;
   const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
+  const custodiaTotal = totalArtista + verba;
   const primeira = atracoes[0] ?? null;
 
   await db
@@ -351,7 +373,7 @@ async function recomputeContractTitles(
       band_id: primeira?.band_id ?? null,
       attachment_path: primeira?.attachment_path ?? null,
       valor_artista: totalArtista,
-      valor_custodia: totalArtista,
+      valor_custodia: custodiaTotal,
       valor_margem: valorMargem,
       valor_servicos: valorServicos,
       // Mudou o conjunto de atrações → o BV pode ter mudado; exige reconfirmar.
@@ -380,10 +402,24 @@ async function recomputeContractTitles(
     });
   }
 
-  // A receber: custódia (total das atrações) + serviços, rateados no cronograma do cliente.
+  // A pagar: fornecedores da verba Rider/Camarim, cada um com seu cronograma.
+  for (const f of fornecedores) {
+    const parcelas = (f.pagar_schedule ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
+    if ((Number(f.valor) || 0) <= 0 || parcelas.length === 0) continue;
+    const shortId = f.id.slice(0, 8);
+    parcelas.forEach((p, idx) => {
+      const n = idx + 1;
+      titleRows.push({
+        contract_id: contract.id, fornecedor_id: f.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: parcelas.length,
+        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar-forn-${shortId}-${n}`, status: "pendente",
+      });
+    });
+  }
+
+  // A receber: custódia (atrações + verba Rider/Camarim) + serviços (BV), rateados no cronograma do cliente.
   const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (cents(totalArtista) > 0 && receberSchedule.length > 0) {
-    const custCents = prorateCents(cents(totalArtista), receberSchedule);
+  if (cents(custodiaTotal) > 0 && receberSchedule.length > 0) {
+    const custCents = prorateCents(cents(custodiaTotal), receberSchedule);
     receberSchedule.forEach((p, idx) => {
       const vc = custCents[idx];
       if (vc <= 0) return;
@@ -515,6 +551,174 @@ export async function removerAtracao(contractId: string, atracaoId: string): Pro
   });
   revalidatePath(`/case/contratos/${contractId}`);
   return { ok: true };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// VERBA RIDER/CAMARIM — reserva paga a fornecedores; saldo pode virar BV.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Define o valor da verba Rider/Camarim do contrato e regenera os títulos. */
+export async function salvarVerbaRiderCamarim(
+  contractId: string,
+  valor: number,
+): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  const loaded = await loadContractForAtracao(db, contractId);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
+
+  const verba = Number(valor) || 0;
+  if (verba < 0) return { error: "A verba não pode ser negativa." };
+  const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
+  if (verba > 0 && receberSchedule.length === 0) {
+    return { error: "Complete o Contrato Cliente (parcelas a receber) antes de definir a verba Rider/Camarim." };
+  }
+
+  const { error } = await db
+    .from("case_contracts")
+    .update({ valor_rider_camarim: verba, updated_at: new Date().toISOString() })
+    .eq("id", contractId);
+  if (error) return { error: `Falha ao salvar a verba: ${error.message}` };
+
+  const rec = await recomputeContractTitles(db, { ...contract, valor_rider_camarim: verba });
+  if ("error" in rec) return { error: rec.error };
+
+  await db.from("case_history").insert({
+    contract_id: contractId, user_id: ctx.id, action: "etapa2",
+    comment: `Verba Rider/Camarim definida em R$ ${verba.toFixed(2)}.`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true };
+}
+
+/** Cria (sem fornecedor_id) ou edita (com fornecedor_id) um fornecedor da verba. */
+export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  if (!input.band?.name?.trim()) return { error: "Informe o fornecedor." };
+
+  const loaded = await loadContractForAtracao(db, input.contract_id);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
+
+  const valor = Number(input.valor) || 0;
+  if (valor <= 0) return { error: "Informe o valor pago ao fornecedor." };
+  const parcelas = (input.parcelas_pagar ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
+  const pagarErr = validarSchedule(parcelas, valor, "pagamento ao fornecedor");
+  if (pagarErr) return { error: pagarErr };
+
+  let bandId: string;
+  try {
+    bandId = await resolveBand(db, input.band, ctx.id, "fornecedor");
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao cadastrar o fornecedor." };
+  }
+  await ensureOmieRegistration(db, "band", bandId);
+
+  const row = {
+    contract_id: contract.id,
+    band_id: bandId,
+    descricao: input.descricao?.trim() || null,
+    attachment_path: input.attachment_path ?? null,
+    valor,
+    pagar_schedule: parcelas,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.fornecedor_id) {
+    const { error } = await db.from("case_contract_fornecedores").update(row).eq("id", input.fornecedor_id).eq("contract_id", contract.id);
+    if (error) return { error: `Falha ao salvar o fornecedor: ${error.message}` };
+  } else {
+    const { error } = await db.from("case_contract_fornecedores").insert({ ...row, created_by: ctx.id });
+    if (error) return { error: `Falha ao adicionar o fornecedor: ${error.message}` };
+  }
+
+  const rec = await recomputeContractTitles(db, contract);
+  if ("error" in rec) return { error: rec.error };
+
+  await db.from("case_history").insert({
+    contract_id: contract.id, user_id: ctx.id, action: "etapa2",
+    comment: `Fornecedor ${input.band.name} salvo — R$ ${valor.toFixed(2)} (verba Rider/Camarim).`,
+  });
+  revalidatePath(`/case/contratos/${contract.id}`);
+  return { ok: true };
+}
+
+/** Remove um fornecedor da verba e regenera os títulos (bloqueado após lançamento). */
+export async function removerFornecedor(contractId: string, fornecedorId: string): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  const loaded = await loadContractForAtracao(db, contractId);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
+
+  const { data: forn } = await db
+    .from("case_contract_fornecedores")
+    .select("id, case_bands(name)")
+    .eq("id", fornecedorId)
+    .eq("contract_id", contractId)
+    .maybeSingle();
+  if (!forn) return { error: "Fornecedor não encontrado neste contrato." };
+
+  const { error } = await db.from("case_contract_fornecedores").delete().eq("id", fornecedorId);
+  if (error) return { error: `Falha ao remover: ${error.message}` };
+
+  const rec = await recomputeContractTitles(db, contract);
+  if ("error" in rec) return { error: rec.error };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nome = (forn as any).case_bands?.name ?? "fornecedor";
+  await db.from("case_history").insert({
+    contract_id: contractId, user_id: ctx.id, action: "etapa2",
+    comment: `Fornecedor ${nome} removido da verba Rider/Camarim.`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true };
+}
+
+/**
+ * Converte o saldo disponível da verba Rider/Camarim em BV: reduz a verba ao
+ * total já comprometido com fornecedores — o BV (margem) absorve a diferença.
+ */
+export async function converterSaldoEmBv(contractId: string): Promise<{ ok: true; saldo: number } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  const loaded = await loadContractForAtracao(db, contractId);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
+
+  const { data: fornecedoresData } = await db
+    .from("case_contract_fornecedores")
+    .select("valor")
+    .eq("contract_id", contractId);
+  const totalFornecedores = ((fornecedoresData ?? []) as Array<{ valor: number }>).reduce(
+    (acc, f) => acc + (Number(f.valor) || 0),
+    0,
+  );
+  const verba = Number(contract.valor_rider_camarim) || 0;
+  const saldo = (cents(verba) - cents(totalFornecedores)) / 100;
+  if (saldo <= 0) return { error: "Não há saldo disponível na verba Rider/Camarim para converter." };
+
+  const { error } = await db
+    .from("case_contracts")
+    .update({ valor_rider_camarim: totalFornecedores, updated_at: new Date().toISOString() })
+    .eq("id", contractId);
+  if (error) return { error: `Falha ao converter o saldo: ${error.message}` };
+
+  const rec = await recomputeContractTitles(db, { ...contract, valor_rider_camarim: totalFornecedores });
+  if ("error" in rec) return { error: rec.error };
+
+  await db.from("case_history").insert({
+    contract_id: contractId, user_id: ctx.id, action: "etapa2",
+    comment: `Saldo de R$ ${saldo.toFixed(2)} da verba Rider/Camarim convertido em BV.`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true, saldo };
 }
 
 /**

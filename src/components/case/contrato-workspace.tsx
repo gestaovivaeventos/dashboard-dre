@@ -6,7 +6,17 @@ import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckC
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
-import { salvarAtracao, removerAtracao, confirmarAtracoes, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
+import {
+  salvarAtracao,
+  removerAtracao,
+  confirmarAtracoes,
+  salvarVerbaRiderCamarim,
+  salvarFornecedor,
+  removerFornecedor,
+  converterSaldoEmBv,
+  gerarEnviarContrato,
+  lancarNoOmie,
+} from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
@@ -71,7 +81,7 @@ function TabButton({ active, done, label, onClick }: { active: boolean; done: bo
   );
 }
 
-export function ContratoWorkspace({ detail, bands }: { detail: ContractDetail; bands: CaseBandRow[] }) {
+export function ContratoWorkspace({ detail, bands, fornecedorBands }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[] }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
@@ -103,7 +113,7 @@ export function ContratoWorkspace({ detail, bands }: { detail: ContractDetail; b
           <TabButton active={tab === "atracao"} done={etapa2Done} label="Contrato Atração" onClick={() => setTab("atracao")} />
         </div>
         <div className="pt-4">
-          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} bands={bands} onChange={refresh} />}
+          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} bands={bands} fornecedorBands={fornecedorBands} onChange={refresh} />}
         </div>
       </div>
 
@@ -198,7 +208,7 @@ async function openStoragePath(path: string) {
   window.open(data.signedUrl, "_blank");
 }
 
-function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; onChange: () => void }) {
+function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[]; onChange: () => void }) {
   const launched = detail.titles.some((t) => t.status === "lancado");
   const atracoes = detail.atracoes;
   const [editing, setEditing] = useState<null | { atracaoId: string | null }>(
@@ -351,6 +361,165 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
           onCancel={() => setEditing(null)}
         />
       )}
+
+      <RiderCamarimSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} />
+    </div>
+  );
+}
+
+// ── VERBA RIDER/CAMARIM — reserva paga a fornecedores; saldo pode virar BV ──
+function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; launched: boolean; onChange: () => void }) {
+  const verba = detail.valor_rider_camarim;
+  const fornecedores = detail.fornecedores;
+  const comprometido = fornecedores.reduce((a, f) => a + f.valor, 0);
+  const saldo = Math.round((verba - comprometido) * 100) / 100;
+
+  const [verbaStr, setVerbaStr] = useState(brlFromNumber(verba));
+  const [savingVerba, setSavingVerba] = useState(false);
+  const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [converting, setConverting] = useState(false);
+
+  const verbaDigitada = parseBRL(verbaStr);
+  const fornecedorEditando = editing?.fornecedorId ? fornecedores.find((f) => f.id === editing.fornecedorId) ?? null : null;
+
+  async function saveVerba() {
+    setSavingVerba(true);
+    const res = await salvarVerbaRiderCamarim(detail.id, verbaDigitada);
+    setSavingVerba(false);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
+
+  async function handleRemove(id: string, nome: string) {
+    if (!confirm(`Remover o fornecedor ${nome} deste contrato? As parcelas pendentes dele serão apagadas.`)) return;
+    setRemoving(id);
+    const res = await removerFornecedor(detail.id, id);
+    setRemoving(null);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
+
+  async function handleConvert() {
+    if (!confirm(`Converter o saldo de ${brl(saldo)} em BV? A verba Rider/Camarim fica reduzida ao valor já comprometido com fornecedores (${brl(comprometido)}) e o saldo vira comissão/BV.`)) return;
+    setConverting(true);
+    const res = await converterSaldoEmBv(detail.id);
+    setConverting(false);
+    if ("error" in res) return alert(res.error);
+    setVerbaStr(brlFromNumber(comprometido));
+    onChange();
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-ink-primary">
+            Verba Rider/Camarim {fornecedores.length > 0 && <span className="text-ink-muted">({fornecedores.length} fornecedor{fornecedores.length > 1 ? "es" : ""})</span>}
+          </h2>
+          {!launched && !editing && (
+            <button
+              type="button"
+              onClick={() => setEditing({ fornecedorId: null })}
+              disabled={verba <= 0}
+              title={verba <= 0 ? "Defina a verba primeiro" : ""}
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-3.5 w-3.5" /> Adicionar fornecedor
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-ink-muted">
+          Reserva do contrato para rider, camarim e produção, paga a fornecedores. O BV é calculado como: contrato do cliente − atrações − esta verba.
+        </p>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className={LABEL_CLS}>Valor da verba</label>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
+              <input inputMode="numeric" value={verbaStr} onChange={(e) => setVerbaStr(maskBRL(e.target.value))} placeholder="0,00" disabled={launched} className={INPUT_CLS + " max-w-[180px] pl-8 text-right disabled:opacity-60"} />
+            </div>
+          </div>
+          {!launched && Math.abs(verbaDigitada - verba) >= 0.005 && (
+            <button type="button" onClick={saveVerba} disabled={savingVerba} className="inline-flex h-9 items-center gap-2 rounded-md bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+              {savingVerba && <Loader2 className="h-4 w-4 animate-spin" />} Salvar verba
+            </button>
+          )}
+        </div>
+
+        {fornecedores.length > 0 && (
+          <div className="space-y-2">
+            {fornecedores.map((f) => (
+              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink-primary">
+                    {f.band_name}
+                    {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+                  </div>
+                  <div className="text-xs text-ink-muted">
+                    {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {f.attachment_path && (
+                    <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                      Ver contrato
+                    </button>
+                  )}
+                  {!launched && (
+                    <>
+                      <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(f.id, f.band_name)}
+                        disabled={removing === f.id}
+                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                      >
+                        {removing === f.id ? "…" : "Remover"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {verba > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
+            <span className="text-ink-muted">
+              Comprometido {brl(comprometido)} / verba {brl(verba)}
+            </span>
+            <span className="flex items-center gap-3">
+              <span className={`font-semibold tabular-nums ${saldo > 0 ? "text-ink-primary" : "text-ink-muted"}`}>Saldo disponível: {brl(saldo)}</span>
+              {!launched && saldo > 0 && (
+                <button
+                  type="button"
+                  onClick={handleConvert}
+                  disabled={converting}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {converting && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Converter saldo em BV
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+      </section>
+
+      {editing && !launched && (
+        <FornecedorForm
+          key={editing.fornecedorId ?? "novo"}
+          detail={detail}
+          bands={bands}
+          fornecedor={fornecedorEditando}
+          onDone={() => { setEditing(null); onChange(); }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -430,11 +599,21 @@ function AtracaoForm({
     setOcrLoading(false);
     if ("error" in res) return setErr(res.error);
     const d = res.data;
-    if (bandMode === "new" && d.bandName) { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
+    // Se o CNPJ/CPF do contrato bate com uma atração já cadastrada, seleciona-a.
+    const doc = (d.bandDoc ?? "").replace(/\D/g, "");
+    const match = !atracao && doc ? bands.find((b) => (b.cnpj_cpf ?? "").replace(/\D/g, "") === doc) : undefined;
+    if (match) {
+      setBandMode("existing");
+      setBandId(match.id);
+    } else if (!atracao && d.bandName) {
+      setBandMode("new");
+      setBName(d.bandName);
+      setBDoc(d.bandDoc ?? "");
+    }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setParcelas(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
-    setMsg("Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
+    setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
   }
 
   function buildBandInput() {
@@ -571,9 +750,241 @@ function AtracaoForm({
   );
 }
 
+// Form de adicionar/editar UM fornecedor da verba Rider/Camarim.
+function FornecedorForm({
+  detail,
+  bands,
+  fornecedor,
+  onDone,
+  onCancel,
+}: {
+  detail: ContractDetail;
+  bands: CaseBandRow[];
+  fornecedor: ContractDetail["fornecedores"][number] | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [bandMode, setBandMode] = useState<"existing" | "new">(fornecedor || bands.length ? "existing" : "new");
+  const [bandId, setBandId] = useState<string>(fornecedor?.band_id ?? "");
+  const [bName, setBName] = useState("");
+  const [bDoc, setBDoc] = useState("");
+  const [bEmail, setBEmail] = useState("");
+  const [bPhone, setBPhone] = useState("");
+  const [bBanco, setBBanco] = useState("");
+  const [bAgencia, setBAgencia] = useState("");
+  const [bConta, setBConta] = useState("");
+  const [bTitular, setBTitular] = useState("");
+  const [bDocTitular, setBDocTitular] = useState("");
+  const [bPix, setBPix] = useState("");
+  const [descricao, setDescricao] = useState(fornecedor?.descricao ?? "");
+  const [attachmentPath, setAttachmentPath] = useState<string | null>(fornecedor?.attachment_path ?? null);
+  const [attachmentName, setAttachmentName] = useState<string>(fornecedor?.attachment_path ? "Contrato anexado" : "");
+  const [uploading, setUploading] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [vFornecedor, setVFornecedor] = useState(fornecedor && fornecedor.valor > 0 ? brlFromNumber(fornecedor.valor) : "");
+  const [parcelas, setParcelas] = useState<ParcelaRow[]>(
+    fornecedor && fornecedor.pagar_schedule.length > 0
+      ? fornecedor.pagar_schedule.map((p) => ({ vencimento: p.vencimento, valorStr: brlFromNumber(Number(p.valor)) }))
+      : [{ vencimento: "", valorStr: "" }],
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const valor = parseBRL(vFornecedor);
+  const soma = parcelas.reduce((a, p) => a + parseBRL(p.valorStr), 0);
+  const somaOk = Math.abs(soma - valor) < 0.005 && valor > 0;
+  // Limite: verba Rider/Camarim menos os OUTROS fornecedores.
+  const outros = detail.fornecedores.filter((f) => f.id !== fornecedor?.id).reduce((a, f) => a + f.valor, 0);
+  const limiteDisponivel = detail.valor_rider_camarim - outros;
+
+  async function handleUpload(file: File) {
+    setErr(null);
+    if (file.size > MAX_ATTACHMENT_SIZE) return setErr("Arquivo maior que 10MB.");
+    setUploading(true);
+    try {
+      const supabase = createSupabaseClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return setErr("Sessão expirada.");
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+      const objectPath = `${user.id}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(objectPath, file, { contentType: file.type, upsert: false });
+      if (error) return setErr(`Falha no upload: ${error.message}`);
+      setAttachmentPath(objectPath);
+      setAttachmentName(file.name);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleOcr() {
+    if (!attachmentPath) return setErr("Suba o contrato do fornecedor primeiro.");
+    setErr(null);
+    setMsg(null);
+    setOcrLoading(true);
+    const res = await extractArtistContract(attachmentPath);
+    setOcrLoading(false);
+    if ("error" in res) return setErr(res.error);
+    const d = res.data;
+    // Se o CNPJ/CPF do contrato bate com um fornecedor já cadastrado, seleciona-o.
+    const doc = (d.bandDoc ?? "").replace(/\D/g, "");
+    const match = !fornecedor && doc ? bands.find((b) => (b.cnpj_cpf ?? "").replace(/\D/g, "") === doc) : undefined;
+    if (match) {
+      setBandMode("existing");
+      setBandId(match.id);
+    } else if (!fornecedor && d.bandName) {
+      setBandMode("new");
+      setBName(d.bandName);
+      setBDoc(d.bandDoc ?? "");
+    }
+    if (d.valorCache != null) setVFornecedor(brlFromNumber(d.valorCache));
+    const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
+    if (ps.length) setParcelas(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise o fornecedor, o valor e as parcelas antes de salvar.");
+  }
+
+  function buildBandInput() {
+    const sel = bands.find((b) => b.id === bandId);
+    return bandMode === "existing" && sel
+      ? {
+          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix,
+        }
+      : {
+          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: bDoc.replace(/\D/g, "").length === 11,
+          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
+          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
+        };
+  }
+
+  async function submit() {
+    setErr(null);
+    setMsg(null);
+    if (bandMode === "existing" && !bandId) return setErr("Selecione o fornecedor.");
+    if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome do fornecedor.");
+    if (valor <= 0) return setErr("Informe o valor pago ao fornecedor.");
+    if (!somaOk) return setErr("A soma das parcelas não confere com o valor do fornecedor.");
+    if (valor > limiteDisponivel + 0.005) {
+      return setErr(`Com os outros fornecedores, o disponível na verba é ${brl(Math.max(0, limiteDisponivel))} (verba Rider/Camarim: ${brl(detail.valor_rider_camarim)}).`);
+    }
+    setSubmitting(true);
+    const res = await salvarFornecedor({
+      contract_id: detail.id,
+      fornecedor_id: fornecedor?.id ?? null,
+      band: buildBandInput(),
+      descricao: descricao.trim() || null,
+      valor,
+      parcelas_pagar: parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })),
+      attachment_path: attachmentPath,
+    });
+    setSubmitting(false);
+    if ("error" in res) return setErr(res.error);
+    onDone();
+  }
+
+  return (
+    <section className="space-y-3 rounded-lg border border-amber-500/40 bg-surface-1 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-ink-primary">{fornecedor ? `Editar fornecedor — ${fornecedor.band_name}` : "Novo fornecedor (verba Rider/Camarim)"}</h2>
+        <div className="flex gap-1 text-xs">
+          <button type="button" onClick={() => setBandMode("existing")} disabled={!bands.length} className={`rounded px-2 py-1 ${bandMode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
+          <button type="button" onClick={() => setBandMode("new")} className={`rounded px-2 py-1 ${bandMode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
+        </div>
+      </div>
+      {bandMode === "existing" ? (
+        <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
+          <option value="">— selecione —</option>
+          {bands.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
+        </select>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div><label className={LABEL_CLS}>Nome / Razão social</label><input value={bName} onChange={(e) => setBName(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>CNPJ / CPF</label><input value={bDoc} onChange={(e) => setBDoc(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>E-mail</label><input value={bEmail} onChange={(e) => setBEmail(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Telefone</label><input value={bPhone} onChange={(e) => setBPhone(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Banco</label><input value={bBanco} onChange={(e) => setBBanco(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Agência</label><input value={bAgencia} onChange={(e) => setBAgencia(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Conta corrente</label><input value={bConta} onChange={(e) => setBConta(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Titular</label><input value={bTitular} onChange={(e) => setBTitular(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>CPF/CNPJ do titular</label><input value={bDocTitular} onChange={(e) => setBDocTitular(e.target.value)} className={INPUT_CLS} /></div>
+          <div><label className={LABEL_CLS}>Chave PIX</label><input value={bPix} onChange={(e) => setBPix(e.target.value)} className={INPUT_CLS} /></div>
+        </div>
+      )}
+
+      <div><label className={LABEL_CLS}>Descrição (o que este fornecedor cobre — ex.: som e luz, camarim)</label><input value={descricao} onChange={(e) => setDescricao(e.target.value)} className={INPUT_CLS} /></div>
+
+      <div className="mt-1 border-t border-border pt-3">
+        <h3 className="text-sm font-semibold text-ink-primary">Contrato/orçamento do fornecedor + pagamento</h3>
+      </div>
+      <p className="text-xs text-ink-muted">Suba o contrato ou orçamento (opcional) e leia com OCR para pré-preencher fornecedor, valor e parcelas. As parcelas saem da verba Rider/Camarim.</p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          <span>{attachmentName || "Contrato do fornecedor (PDF/imagem)"}</span>
+          <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+        </label>
+        <button type="button" onClick={handleOcr} disabled={!attachmentPath || ocrLoading || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+          {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} Ler contrato (OCR)
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label className={LABEL_CLS}>Valor pago ao fornecedor</label>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
+            <input inputMode="numeric" value={vFornecedor} onChange={(e) => setVFornecedor(maskBRL(e.target.value))} placeholder="0,00" className={INPUT_CLS + " pl-8 text-right"} />
+          </div>
+          {valor > limiteDisponivel + 0.005 && (
+            <p className="mt-1 text-xs text-red-500">
+              Disponível na verba para este fornecedor: {brl(Math.max(0, limiteDisponivel))} (verba Rider/Camarim: {brl(detail.valor_rider_camarim)}).
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-md border border-border/70 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-ink-secondary">Parcelas a pagar ao fornecedor</span>
+          <span className={`text-xs tabular-nums ${somaOk ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted"}`}>Soma: {brl(soma)}</span>
+        </div>
+        <div className="space-y-2">
+          {parcelas.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input type="date" value={r.vencimento} onChange={(e) => { const n = [...parcelas]; n[i] = { ...n[i], vencimento: e.target.value }; setParcelas(n); }} className={INPUT_CLS + " max-w-[170px]"} />
+              <div className="relative flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
+                <input inputMode="numeric" value={r.valorStr} onChange={(e) => { const n = [...parcelas]; n[i] = { ...n[i], valorStr: maskBRL(e.target.value) }; setParcelas(n); }} placeholder="0,00" className={INPUT_CLS + " pl-8 text-right"} />
+              </div>
+              <button type="button" onClick={() => setParcelas(parcelas.filter((_, idx) => idx !== i))} disabled={parcelas.length <= 1} className="rounded p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-500 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button type="button" onClick={() => setParcelas([...parcelas, { vencimento: "", valorStr: "" }])} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"><Plus className="h-3.5 w-3.5" /> Parcela</button>
+          <button type="button" onClick={() => setParcelas([{ vencimento: detail.event_date ?? "", valorStr: brlFromNumber(valor) }])} className="rounded border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">Preencher 1 parcela</button>
+        </div>
+      </div>
+
+      {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600 dark:text-red-300">{err}</div>}
+      {msg && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-300">{msg}</div>}
+
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} disabled={submitting} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
+          Cancelar
+        </button>
+        <button onClick={submit} disabled={submitting || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {fornecedor ? "Salvar alterações" : "Adicionar fornecedor"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // ── FINANCEIRO (consolidação — sempre visível abaixo das abas) ───────────────
 const LEG_LABEL: Record<string, string> = {
-  pagar_custodia: "A pagar — Artista (custódia)",
+  pagar_custodia: "A pagar — Custódia",
   receber_custodia: "A receber — Custódia",
   receber_servicos: "A receber — Serviços",
 };
@@ -640,12 +1051,17 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
         <p className="text-xs text-amber-600 dark:text-amber-400">Para lançar no Omie: {launchHint.toLowerCase()}.</p>
       )}
 
+      <p className="text-xs text-ink-muted">
+        BV (Comissão): <span className="font-semibold tabular-nums text-ink-primary">{brl(detail.valor_margem)}</span>
+        {" · "}Custódia (atrações + verba): <span className="tabular-nums">{brl(detail.valor_custodia)}</span>
+      </p>
+
       {titles.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — salve o Contrato Atração para gerar os títulos (ficam pendentes até lançar).</p>
       ) : (
         <div className="space-y-4">
           <TitlesTable title="Contas a receber (cliente)" rows={receber} />
-          <TitlesTable title="Contas a pagar (artista)" rows={pagar} />
+          <TitlesTable title="Contas a pagar (artistas e fornecedores)" rows={pagar} />
         </div>
       )}
     </section>
@@ -678,7 +1094,7 @@ function TitlesTable({ title, rows }: { title: string; rows: ContractTitleRow[] 
               <tr key={t.id} className="border-b border-border/60 last:border-0">
                 <td className="px-3 py-1.5 text-ink-primary">
                   {LEG_LABEL[t.leg]}
-                  {t.atracao_nome ? ` · ${t.atracao_nome}` : ""}
+                  {t.atracao_nome ? ` · ${t.atracao_nome}` : t.fornecedor_nome ? ` · ${t.fornecedor_nome}` : ""}
                   {t.title_item ? ` · ${ITEM_LABEL[t.title_item] ?? t.title_item}` : ""}
                   <span className="text-ink-muted"> ({t.parcela_numero}/{t.parcela_total})</span>
                 </td>

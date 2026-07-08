@@ -10,12 +10,16 @@ export default async function CaseContratoDetailPage({ params }: { params: { id:
   const ctx = await getCaseUser();
   if (!ctx) redirect("/login");
 
-  const [detail, bands] = await Promise.all([getContractDetail(params.id), getBands()]);
+  const [detail, bands, fornecedorBands] = await Promise.all([
+    getContractDetail(params.id),
+    getBands("atracao"),
+    getBands("fornecedor"),
+  ]);
   if (!detail) notFound();
 
   return (
     <div className="mx-auto max-w-4xl">
-      <ContratoWorkspace detail={detail} bands={bands} />
+      <ContratoWorkspace detail={detail} bands={bands} fornecedorBands={fornecedorBands} />
     </div>
   );
 }

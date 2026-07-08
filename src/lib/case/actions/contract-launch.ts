@@ -35,25 +35,28 @@ interface TitleRow {
   codigo_integracao: string;
   status: string;
   atracao_id: string | null;
+  fornecedor_id: string | null;
+}
+
+interface BandInfo {
+  id: string;
+  name: string;
+  cnpj_cpf: string | null;
+  email: string | null;
+  phone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  conta_corrente: string | null;
+  titular_banco: string | null;
+  doc_titular: string | null;
+  chave_pix: string | null;
+  omie_codigo: number | null;
 }
 
 interface AtracaoInfo {
   id: string;
   attachment_path: string | null;
-  band: {
-    id: string;
-    name: string;
-    cnpj_cpf: string | null;
-    email: string | null;
-    phone: string | null;
-    banco: string | null;
-    agencia: string | null;
-    conta_corrente: string | null;
-    titular_banco: string | null;
-    doc_titular: string | null;
-    chave_pix: string | null;
-    omie_codigo: number | null;
-  };
+  band: BandInfo;
 }
 
 const SERVICO_LABEL: Record<string, string> = {
@@ -130,11 +133,16 @@ export async function launchContractToOmie(
     return { error: "Confirme na aba Contrato Atração que todos os contratos de artista já foram anexados antes de lançar no Omie." };
   }
 
-  const [{ data: client }, { data: atracoesData }, { data: company }, { data: config }] = await Promise.all([
+  const [{ data: client }, { data: atracoesData }, { data: fornecedoresData }, { data: company }, { data: config }] = await Promise.all([
     db.from("case_clients").select("*").eq("id", contract.client_id).single(),
     db
       .from("case_contract_atracoes")
       .select("id, attachment_path, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
+      .eq("contract_id", contractId)
+      .order("created_at"),
+    db
+      .from("case_contract_fornecedores")
+      .select("id, attachment_path, descricao, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
       .eq("contract_id", contractId)
       .order("created_at"),
     db.from("companies").select("id, omie_app_key, omie_app_secret").eq("id", contract.company_id).single(),
@@ -145,6 +153,10 @@ export async function launchContractToOmie(
   const atracoes: AtracaoInfo[] = ((atracoesData ?? []) as any[])
     .filter((a) => a.case_bands)
     .map((a) => ({ id: a.id, attachment_path: a.attachment_path, band: a.case_bands }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fornecedores: AtracaoInfo[] = ((fornecedoresData ?? []) as any[])
+    .filter((f) => f.case_bands)
+    .map((f) => ({ id: f.id, attachment_path: f.attachment_path, band: f.case_bands }));
 
   if (!client || (needsBand && atracoes.length === 0)) {
     return markContractError(db, contractId, "Cliente ou atrações não encontrados.");
@@ -172,13 +184,13 @@ export async function launchContractToOmie(
   const idContaCorrente = Number(config.codigo_conta_corrente);
 
   // ── Garante cadastros no Omie ──────────────────────────────────────────
-  // Cada atração (banda) é um fornecedor próprio nos títulos a pagar.
-  const bandCodigoByAtracao = new Map<string, number>();
+  // Cada atração e cada fornecedor da verba tem cadastro próprio nos títulos a pagar.
+  const bandCodigoByEntidade = new Map<string, number>();
   let clientCodigo = client.omie_codigo ? Number(client.omie_codigo) : null;
 
   try {
     if (needsBand) {
-      for (const a of atracoes) {
+      for (const a of [...atracoes, ...fornecedores]) {
         let codigo = a.band.omie_codigo ? Number(a.band.omie_codigo) : null;
         if (!codigo) {
           const bandData: OmieSupplierData = {
@@ -198,7 +210,7 @@ export async function launchContractToOmie(
           codigo = codigoCliente;
           await db.from("case_bands").update({ omie_codigo: codigo, omie_synced_at: new Date().toISOString() }).eq("id", a.band.id);
         }
-        bandCodigoByAtracao.set(a.id, codigo);
+        bandCodigoByEntidade.set(a.id, codigo);
       }
     }
     if (needsClient && !clientCodigo) {
@@ -226,7 +238,7 @@ export async function launchContractToOmie(
   // ── Lança os títulos pendentes/erro ────────────────────────────────────
   let titlesQuery = db
     .from("case_titles")
-    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, codigo_integracao, status, atracao_id")
+    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, codigo_integracao, status, atracao_id, fornecedor_id")
     .eq("contract_id", contractId)
     .in("status", ["pendente", "erro"]);
   if (legs) titlesQuery = titlesQuery.in("leg", legs);
@@ -234,6 +246,7 @@ export async function launchContractToOmie(
 
   const rows = (titles ?? []) as TitleRow[];
   const atracaoById = new Map(atracoes.map((a) => [a.id, a]));
+  const fornecedorById = new Map(fornecedores.map((f) => [f.id, f]));
   const primeiraAtracao = atracoes[0] ?? null;
   const anexadoPorChave = new Set<string>();
   let anyOk = false;
@@ -244,19 +257,22 @@ export async function launchContractToOmie(
       t.leg === "receber_servicos"
         ? String(config.codigo_categoria_servicos)
         : String(config.codigo_categoria_custodia);
-    // A pagar: fornecedor é a banda da atração do título (fallback: 1ª atração).
-    const atracao = (t.atracao_id ? atracaoById.get(t.atracao_id) : null) ?? primeiraAtracao;
-    if (isPagar && (!atracao || !bandCodigoByAtracao.get(atracao.id))) {
+    // A pagar: parceiro é o fornecedor da verba (fornecedor_id) ou a banda da
+    // atração do título (fallback: 1ª atração).
+    const entidade = t.fornecedor_id
+      ? fornecedorById.get(t.fornecedor_id) ?? null
+      : (t.atracao_id ? atracaoById.get(t.atracao_id) : null) ?? primeiraAtracao;
+    if (isPagar && (!entidade || !bandCodigoByEntidade.get(entidade.id))) {
       await db
         .from("case_titles")
-        .update({ status: "erro", launch_error: "Atração do título não encontrada/registrada no Omie.", updated_at: new Date().toISOString() })
+        .update({ status: "erro", launch_error: "Atração/fornecedor do título não encontrado/registrado no Omie.", updated_at: new Date().toISOString() })
         .eq("id", t.id);
       continue;
     }
-    const codigoParceiro = isPagar ? bandCodigoByAtracao.get(atracao!.id)! : clientCodigo!;
+    const codigoParceiro = isPagar ? bandCodigoByEntidade.get(entidade!.id)! : clientCodigo!;
     const venc = toOmieDate(t.vencimento);
     const itemLabel = t.title_item ? ` - ${SERVICO_LABEL[t.title_item] ?? t.title_item}` : "";
-    const parceiroNome = isPagar ? atracao!.band.name : (primeiraAtracao?.band.name ?? "atrações");
+    const parceiroNome = isPagar ? entidade!.band.name : (primeiraAtracao?.band.name ?? "atrações");
     const observacao = `Contrato Case ${parceiroNome} x ${client.name}${itemLabel} (parcela ${t.parcela_numero}/${t.parcela_total})`;
 
     try {
@@ -305,12 +321,12 @@ export async function launchContractToOmie(
         .eq("id", t.id);
       anyOk = true;
 
-      // Anexo: a pagar recebe o contrato da PRÓPRIA atração (1º título de cada);
-      // a receber recebe o anexo do contrato (1º título de cada leg).
-      const anexoChave = isPagar ? `pagar-${atracao!.id}` : t.leg;
+      // Anexo: a pagar recebe o contrato da PRÓPRIA atração/fornecedor (1º título
+      // de cada); a receber recebe o anexo do contrato (1º título de cada leg).
+      const anexoChave = isPagar ? `pagar-${t.fornecedor_id ? "forn-" : ""}${entidade!.id}` : t.leg;
       if (!anexadoPorChave.has(anexoChave)) {
         anexadoPorChave.add(anexoChave);
-        const anexoPath = isPagar ? atracao!.attachment_path : contract.attachment_path;
+        const anexoPath = isPagar ? entidade!.attachment_path : contract.attachment_path;
         await anexar(db, appKey, appSecret, t.leg, omieCodigo, anexoPath);
       }
     } catch (e) {

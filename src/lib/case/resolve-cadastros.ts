@@ -113,7 +113,12 @@ export async function resolveClient(db: DB, input: CaseClientInput, userId: stri
   return data.id as string;
 }
 
-export async function resolveBand(db: DB, input: CaseBandInput, userId: string): Promise<string> {
+export async function resolveBand(
+  db: DB,
+  input: CaseBandInput,
+  userId: string,
+  kind: "atracao" | "fornecedor" = "atracao",
+): Promise<string> {
   const bankFields = {
     banco: input.banco,
     agencia: input.agencia,
@@ -160,6 +165,7 @@ export async function resolveBand(db: DB, input: CaseBandInput, userId: string):
       email: input.email,
       phone: input.phone,
       ...bankFields,
+      kind,
       created_by: userId,
     })
     .select("id")

@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractStatus, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
+import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -78,6 +78,8 @@ export interface ContractTitleRow {
   pago_em: string | null;
   atracao_id: string | null;
   atracao_nome: string | null;
+  fornecedor_id: string | null;
+  fornecedor_nome: string | null;
 }
 
 export interface ContractDetail {
@@ -113,6 +115,9 @@ export interface ContractDetail {
   band: { name: string; cnpj_cpf: string | null };
   /** Atrações vinculadas (um contrato pode ter várias). */
   atracoes: CaseAtracaoRow[];
+  /** Verba Rider/Camarim: reserva paga a fornecedores; saldo pode virar BV. */
+  valor_rider_camarim: number;
+  fornecedores: CaseFornecedorRow[];
   titles: ContractTitleRow[];
 }
 
@@ -123,7 +128,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     .select(
       `id, contract_number, status, event_name, event_date, show_time, passagem_som,
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
-       valor_artista, valor_custodia, valor_margem, valor_servicos, receber_schedule,
+       valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
        attachment_path, sale_contract_path, sign_url, signed_at, atracoes_confirmadas_at, sent_for_signature_at, clicksign_status, band_id,
        case_clients(name, cnpj_cpf, email), case_bands(name, cnpj_cpf)`,
     )
@@ -131,16 +136,21 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     .maybeSingle();
   if (!c) return null;
 
-  const [{ data: titles }, { data: atracoesData }] = await Promise.all([
+  const [{ data: titles }, { data: atracoesData }, { data: fornecedoresData }] = await Promise.all([
     db
       .from("case_titles")
-      .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em, atracao_id")
+      .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em, atracao_id, fornecedor_id")
       .eq("contract_id", id)
       .order("leg")
       .order("parcela_numero"),
     db
       .from("case_contract_atracoes")
       .select("id, band_id, attachment_path, valor_artista, pagar_schedule, case_bands(name, cnpj_cpf)")
+      .eq("contract_id", id)
+      .order("created_at"),
+    db
+      .from("case_contract_fornecedores")
+      .select("id, band_id, descricao, attachment_path, valor, pagar_schedule, case_bands(name, cnpj_cpf)")
       .eq("contract_id", id)
       .order("created_at"),
   ]);
@@ -156,6 +166,19 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     pagar_schedule: (Array.isArray(a.pagar_schedule) ? a.pagar_schedule : []) as CaseParcelaInput[],
   }));
   const atracaoNomeById = new Map(atracoes.map((a) => [a.id, a.band_name]));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fornecedores: CaseFornecedorRow[] = ((fornecedoresData ?? []) as any[]).map((f) => ({
+    id: f.id,
+    band_id: f.band_id,
+    band_name: f.case_bands?.name ?? "—",
+    band_cnpj_cpf: f.case_bands?.cnpj_cpf ?? null,
+    descricao: f.descricao ?? null,
+    attachment_path: f.attachment_path,
+    valor: Number(f.valor),
+    pagar_schedule: (Array.isArray(f.pagar_schedule) ? f.pagar_schedule : []) as CaseParcelaInput[],
+  }));
+  const fornecedorNomeById = new Map(fornecedores.map((f) => [f.id, f.band_name]));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cc = c as any;
@@ -190,6 +213,8 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     band_id: cc.band_id ?? null,
     band: { name: cc.case_bands?.name ?? "—", cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null },
     atracoes,
+    valor_rider_camarim: Number(cc.valor_rider_camarim),
+    fornecedores,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     titles: ((titles ?? []) as any[]).map((t) => ({
       id: t.id,
@@ -206,6 +231,8 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       pago_em: t.pago_em,
       atracao_id: t.atracao_id ?? null,
       atracao_nome: t.atracao_id ? atracaoNomeById.get(t.atracao_id) ?? null : null,
+      fornecedor_id: t.fornecedor_id ?? null,
+      fornecedor_nome: t.fornecedor_id ? fornecedorNomeById.get(t.fornecedor_id) ?? null : null,
     })),
   };
 }
@@ -219,11 +246,12 @@ export async function getClients(): Promise<CaseClientRow[]> {
   return (data ?? []) as CaseClientRow[];
 }
 
-export async function getBands(): Promise<CaseBandRow[]> {
+export async function getBands(kind: "atracao" | "fornecedor" = "atracao"): Promise<CaseBandRow[]> {
   const db = await getDb();
   const { data } = await db
     .from("case_bands")
     .select("id, name, cnpj_cpf, pessoa_fisica, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix")
+    .eq("kind", kind)
     .order("name");
   return (data ?? []) as CaseBandRow[];
 }

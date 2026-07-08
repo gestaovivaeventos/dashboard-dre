@@ -155,6 +155,30 @@ export interface CaseAtracaoRow {
   pagar_schedule: CaseParcelaInput[];
 }
 
+/** Fornecedor pago com a verba Rider/Camarim do contrato. */
+export interface CaseFornecedorRow {
+  id: string;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  descricao: string | null;
+  attachment_path: string | null;
+  valor: number;
+  pagar_schedule: CaseParcelaInput[];
+}
+
+/** Aba Contrato Atração — fornecedor da verba Rider/Camarim. */
+export interface FornecedorInput {
+  contract_id: string;
+  /** Quando presente, edita um fornecedor existente; ausente cria um novo. */
+  fornecedor_id?: string | null;
+  band: CaseBandInput;
+  descricao?: string | null;
+  attachment_path?: string | null;
+  valor: number;
+  parcelas_pagar: CaseParcelaInput[];
+}
+
 export interface CaseClientRow {
   id: string;
   name: string;
