@@ -52,6 +52,45 @@ export interface ArtistOcrResult {
   cidade: string | null;
 }
 
+const FornecedorContractSchema = z.object({
+  fornecedor_nome: z.string().nullable().describe("Nome/razão social do FORNECEDOR — quem presta o serviço e recebe o pagamento (não o contratante). Null se não encontrar."),
+  fornecedor_cnpj_cpf: z.string().nullable().describe("CNPJ ou CPF do fornecedor. Só números. Null se não encontrar."),
+  descricao_servico: z.string().nullable().describe("Descrição curta do serviço contratado (ex.: 'sonorização e iluminação', 'buffet do camarim'). Null se não encontrar."),
+  valor_total: z.number().nullable().describe("Valor total do serviço em reais (número decimal). Null se não encontrar."),
+  parcelas_pagamento: z
+    .array(
+      z.object({
+        data: z.string().nullable().describe("Data de vencimento/pagamento no formato YYYY-MM-DD."),
+        valor: z.number().nullable().describe("Valor da parcela em reais."),
+      }),
+    )
+    .describe("Parcelas/datas de pagamento ao fornecedor. Se houver pagamento único, retorne uma parcela com o valor total. Vazio se não encontrar."),
+  email: z.string().nullable().describe("E-mail de contato do fornecedor. Null se não encontrar."),
+  telefone: z.string().nullable().describe("Telefone de contato do fornecedor. Null se não encontrar."),
+  banco: z.string().nullable().describe("Banco do fornecedor para pagamento. Null se não encontrar."),
+  agencia: z.string().nullable().describe("Agência bancária. Null se não encontrar."),
+  conta_corrente: z.string().nullable().describe("Conta corrente. Null se não encontrar."),
+  titular_banco: z.string().nullable().describe("Nome do titular da conta. Null se não encontrar."),
+  doc_titular: z.string().nullable().describe("CPF/CNPJ do titular da conta. Null se não encontrar."),
+  chave_pix: z.string().nullable().describe("Chave PIX para pagamento. Null se não encontrar."),
+});
+
+export interface FornecedorOcrResult {
+  nome: string | null;
+  doc: string | null;
+  descricao: string | null;
+  valorTotal: number | null;
+  parcelas: Array<{ data: string | null; valor: number | null }>;
+  email: string | null;
+  telefone: string | null;
+  banco: string | null;
+  agencia: string | null;
+  contaCorrente: string | null;
+  titularBanco: string | null;
+  docTitular: string | null;
+  chavePix: string | null;
+}
+
 function detectMediaType(path: string, blobType: string | undefined): string | null {
   const t = (blobType ?? "").toLowerCase();
   if (t.startsWith("image/") || t === "application/pdf") return t;
@@ -59,6 +98,84 @@ function detectMediaType(path: string, blobType: string | undefined): string | n
   if (ext === "pdf") return "application/pdf";
   if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return `image/${ext === "jpg" ? "jpeg" : ext}`;
   return null;
+}
+
+/**
+ * Lê um contrato/orçamento de FORNECEDOR (som, luz, palco, camarim, buffet etc.)
+ * e extrai cadastro (incl. dados bancários), serviço, valor e parcelas.
+ * Não cria cadastro — o salvamento resolve/deduplica por CNPJ.
+ */
+export async function extractFornecedorContract(
+  attachmentPath: string,
+): Promise<{ data: FornecedorOcrResult } | { error: string }> {
+  await requireCaseUser();
+  if (!attachmentPath) return { error: "Anexo não informado." };
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
+
+  const db = (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
+  const { data: blob, error: dlErr } = await db.storage.from(ATTACHMENT_BUCKET).download(attachmentPath);
+  if (dlErr || !blob) return { error: "Não foi possível acessar o contrato para leitura." };
+
+  const mediaType = detectMediaType(attachmentPath, blob.type);
+  if (!mediaType) return { error: "Formato não suportado (use PDF ou imagem)." };
+
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  const docPart =
+    mediaType === "application/pdf"
+      ? { type: "file" as const, data: bytes, mediaType }
+      : { type: "file" as const, data: bytes, mediaType, providerOptions: { openai: { imageDetail: "high" as const } } };
+
+  const provider = createOpenAI({ apiKey });
+
+  try {
+    const res = await generateObject({
+      model: provider(OCR_MODEL),
+      schema: FornecedorContractSchema,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "Leia este CONTRATO ou ORÇAMENTO DE FORNECEDOR de serviços para um evento/show " +
+                "(ex.: sonorização, iluminação, palco, camarim, buffet, produção, transporte). " +
+                "Extraia: o nome/razão social e CNPJ/CPF do FORNECEDOR (a parte que presta o serviço " +
+                "e recebe o pagamento — não o contratante); uma descrição curta do serviço; o valor " +
+                "total; as datas e valores das parcelas de pagamento; contatos (e-mail, telefone); e os " +
+                "dados bancários para pagamento (banco, agência, conta, titular, CPF/CNPJ do titular, " +
+                "chave PIX). Não invente — deixe null o que não estiver no documento. Datas no formato " +
+                "YYYY-MM-DD; valores como número decimal em reais.",
+            },
+            docPart,
+          ],
+        },
+      ],
+    });
+    const o = res.object;
+    return {
+      data: {
+        nome: (o.fornecedor_nome ?? "").trim() || null,
+        doc: o.fornecedor_cnpj_cpf,
+        descricao: o.descricao_servico,
+        valorTotal: o.valor_total,
+        parcelas: o.parcelas_pagamento ?? [],
+        email: o.email,
+        telefone: o.telefone,
+        banco: o.banco,
+        agencia: o.agencia,
+        contaCorrente: o.conta_corrente,
+        titularBanco: o.titular_banco,
+        docTitular: o.doc_titular,
+        chavePix: o.chave_pix,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Não consegui interpretar o contrato: ${msg}` };
+  }
 }
 
 /**

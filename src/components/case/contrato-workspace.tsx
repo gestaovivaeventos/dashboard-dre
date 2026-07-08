@@ -17,7 +17,7 @@ import {
   gerarEnviarContrato,
   lancarNoOmie,
 } from "@/lib/case/actions/stages";
-import { extractArtistContract } from "@/lib/case/actions/ocr";
+import { extractArtistContract, extractFornecedorContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
@@ -833,25 +833,44 @@ function FornecedorForm({
     setErr(null);
     setMsg(null);
     setOcrLoading(true);
-    const res = await extractArtistContract(alvo);
+    const res = await extractFornecedorContract(alvo);
     setOcrLoading(false);
     if ("error" in res) return setErr(res.error);
     const d = res.data;
+
+    let identidade = "";
     // Se o CNPJ/CPF do contrato bate com um fornecedor já cadastrado, seleciona-o.
-    const doc = (d.bandDoc ?? "").replace(/\D/g, "");
+    const doc = (d.doc ?? "").replace(/\D/g, "");
     const match = !fornecedor && doc ? bands.find((b) => (b.cnpj_cpf ?? "").replace(/\D/g, "") === doc) : undefined;
     if (match) {
       setBandMode("existing");
       setBandId(match.id);
-    } else if (!fornecedor && d.bandName) {
+      identidade = `${match.name} já cadastrado — selecionado automaticamente`;
+    } else if (!fornecedor && d.nome) {
       setBandMode("new");
-      setBName(d.bandName);
-      setBDoc(d.bandDoc ?? "");
+      setBName(d.nome);
+      setBDoc(d.doc ?? "");
+      if (d.email) setBEmail(d.email);
+      if (d.telefone) setBPhone(d.telefone);
+      if (d.banco) setBBanco(d.banco);
+      if (d.agencia) setBAgencia(d.agencia);
+      if (d.contaCorrente) setBConta(d.contaCorrente);
+      if (d.titularBanco) setBTitular(d.titularBanco);
+      if (d.docTitular) setBDocTitular(d.docTitular);
+      if (d.chavePix) setBPix(d.chavePix);
+      identidade = `${d.nome} preenchido como novo cadastro`;
     }
-    if (d.valorCache != null) setVFornecedor(brlFromNumber(d.valorCache));
+
+    if (d.descricao && !descricao.trim()) setDescricao(d.descricao);
+    if (d.valorTotal != null && d.valorTotal > 0) setVFornecedor(brlFromNumber(d.valorTotal));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setParcelas(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
-    setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise o fornecedor, o valor e as parcelas antes de salvar.");
+
+    const achouAlgo = identidade || d.valorTotal != null || ps.length > 0 || d.descricao;
+    if (!achouAlgo) {
+      return setErr("Li o documento, mas não encontrei dados de fornecedor/valor/parcelas nele — preencha manualmente ou confira se o arquivo é o contrato certo.");
+    }
+    setMsg(`Contrato lido${identidade ? ` — ${identidade}` : ""}. Revise valor e parcelas antes de salvar.`);
   }
 
   function buildBandInput() {
