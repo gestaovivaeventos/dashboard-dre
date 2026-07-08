@@ -156,10 +156,10 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
       </div>
 
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-        <Info label="Atração" value={brl(detail.valor_atracao_cliente)} />
-        <Info label="Rider" value={brl(detail.valor_rider)} />
-        <Info label="Camarim" value={brl(detail.valor_camarim)} />
-        <Info label="Extras" value={brl(detail.valor_extras)} />
+        <Info label="Contrato" value={brl(detail.valor_atracao_cliente)} />
+        {detail.valor_rider > 0 && <Info label="Rider" value={brl(detail.valor_rider)} />}
+        {detail.valor_camarim > 0 && <Info label="Camarim" value={brl(detail.valor_camarim)} />}
+        {detail.valor_extras > 0 && <Info label="Extras" value={brl(detail.valor_extras)} />}
         <Info label="Local" value={detail.local_name ?? "—"} />
         <Info label="Cidade" value={detail.local_city ?? "—"} />
         <Info label="Horário" value={detail.show_time ?? "—"} />

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
@@ -76,6 +77,7 @@ function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
 
 export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[]; bands: CaseBandRow[] }) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
   const [bandsList] = useState<CaseBandRow[]>(bands);
 
@@ -122,11 +124,8 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [test2Nome, setTest2Nome] = useState("");
   const [test2Cpf, setTest2Cpf] = useState("");
 
-  // Valores cobrados do cliente
+  // Valor cobrado do cliente (campo único "Contrato" → valor_atracao_cliente)
   const [vAtracao, setVAtracao] = useState("");
-  const [vRider, setVRider] = useState("");
-  const [vCamarim, setVCamarim] = useState("");
-  const [vExtras, setVExtras] = useState("");
   const [observacao, setObservacao] = useState("");
   const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>([emptyParcela()]);
 
@@ -156,10 +155,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const submittingRef = useRef(false);
 
   const valAtracao = parseBRL(vAtracao);
-  const valRider = parseBRL(vRider);
-  const valCamarim = parseBRL(vCamarim);
-  const valExtras = parseBRL(vExtras);
-  const totalCliente = valAtracao + valRider + valCamarim + valExtras;
+  const totalCliente = valAtracao;
   const valArtista = parseBRL(vArtista);
   const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!bName.trim());
 
@@ -237,9 +233,9 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null, testemunha_1_email: test1Email.trim() || null,
       testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
-      valor_rider: valRider,
-      valor_camarim: valCamarim,
-      valor_extras: valExtras,
+      valor_rider: 0,
+      valor_camarim: 0,
+      valor_extras: 0,
       observacao: observacao.trim() || null,
       receber_schedule,
     };
@@ -265,7 +261,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     setError(null);
     if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
     if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
-    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente (aba Contrato Cliente).");
+    if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
 
     submittingRef.current = true;
     setSubmitting(true);
@@ -282,8 +278,16 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
       if (enviar) {
         const g = await gerarEnviarContrato(contractId);
-        if ("error" in g) { router.push(`/case/contratos/${contractId}`); return; }
-        if (g.warning) alert(g.warning);
+        if ("error" in g) {
+          showToast({ title: "Contrato salvo, mas o envio falhou", description: g.error, variant: "destructive" });
+          router.push(`/case/contratos/${contractId}`);
+          return;
+        }
+        if (g.warning) {
+          showToast({ title: "Contrato gerado", description: g.warning });
+        } else {
+          showToast({ title: "Contrato enviado para assinatura", description: "Os signatários receberão o link por e-mail.", variant: "success" });
+        }
       }
       router.push(`/case/contratos/${contractId}`);
       router.refresh();
@@ -392,10 +396,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
           <div className={SECTION_CLS}>
             <h2 className="text-sm font-semibold text-ink-primary">Valores cobrados do cliente</h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <MoneyField label="Atração" value={vAtracao} onChange={setVAtracao} />
-              <MoneyField label="Rider" value={vRider} onChange={setVRider} />
-              <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
-              <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
+              <MoneyField label="Contrato" value={vAtracao} onChange={setVAtracao} />
             </div>
             <div className="rounded-md bg-surface-2 p-3 text-center text-sm">
               <div className="text-xs text-ink-muted">Total cobrado do cliente</div>
@@ -456,7 +457,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField label="Valor pago ao artista (custódia)" value={vArtista} onChange={setVArtista} />
             </div>
-            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que a atração cobrada (R$ {fmt.format(valAtracao)}).</p>}
+            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que o valor do contrato cobrado do cliente (R$ {fmt.format(valAtracao)}).</p>}
             <ParcelasEditor label="Parcelas a pagar ao artista" rows={pagarArtista} onChange={setPagarArtista} total={valArtista} onFillSingle={() => setPagarArtista([{ vencimento: eventDate, valorStr: brlFromNumber(valArtista) }])} />
           </div>
         </>
