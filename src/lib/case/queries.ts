@@ -340,12 +340,13 @@ export async function getClients(): Promise<CaseClientRow[]> {
   return (data ?? []) as CaseClientRow[];
 }
 
-export async function getBands(kind: "atracao" | "fornecedor" = "atracao"): Promise<CaseBandRow[]> {
+// Pool único de cadastros (espelho do Omie via syncCaseCadastrosFromOmie):
+// o mesmo cadastro serve como atração OU fornecedor — sem filtro por kind.
+export async function getBands(): Promise<CaseBandRow[]> {
   const db = await getDb();
   const { data } = await db
     .from("case_bands")
     .select("id, name, cnpj_cpf, pessoa_fisica, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix")
-    .eq("kind", kind)
     .order("name");
   return (data ?? []) as CaseBandRow[];
 }
