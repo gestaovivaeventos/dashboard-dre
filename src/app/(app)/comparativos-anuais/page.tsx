@@ -36,6 +36,10 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
   if (!user) {
     redirect("/login");
   }
+  // Tela admin-only (menu e rota).
+  if (profile?.role !== "admin") {
+    redirect("/home");
+  }
 
   const segments = await resolveUserSegments(supabase, {
     isAdmin: profile?.role === "admin",

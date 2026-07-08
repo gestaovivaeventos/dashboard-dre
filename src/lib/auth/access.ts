@@ -158,9 +158,13 @@ export function canAccessPathByProfile(
     pathname.startsWith("/configuracoes")
   ) {
     if (!canFinanceiro) return false;
-    // Mapeamento e Configurações continuam admin-only — caíram acima
-    // se não fosse admin. Aqui só vê quem tem financeiro.
-    if (pathname.startsWith("/mapeamento") || pathname.startsWith("/configuracoes")) {
+    // Mapeamento, Configurações e Comparativos Anuais continuam admin-only —
+    // admins já retornaram true acima. Aqui só vê quem tem financeiro.
+    if (
+      pathname.startsWith("/mapeamento") ||
+      pathname.startsWith("/configuracoes") ||
+      pathname.startsWith("/comparativos-anuais")
+    ) {
       return false;
     }
     return true;
@@ -181,7 +185,7 @@ const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
   { suffix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { suffix: "/comparativos-anuais", roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/comparativos-anuais", roles: ["admin"] },
   { suffix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/mapeamento",       roles: ["admin"] },
   { suffix: "/lancamentos-manuais", roles: ["admin"] },
@@ -195,7 +199,7 @@ const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
   { prefix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
-  { prefix: "/comparativos-anuais", roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/comparativos-anuais", roles: ["admin"] },
   { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },
   { prefix: "/contratos",        roles: ["admin", "gestor_hero"] },
