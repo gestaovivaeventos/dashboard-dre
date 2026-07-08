@@ -89,7 +89,15 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
   const visibleCompanies =
     profile?.role === "admin" ? companies : companies.filter((c) => allowedCompanyIds.includes(c.id));
 
-  const filter = buildFilterState(searchParams, allowedCompanyIds);
+  // Esta tela NÃO usa "ano atual" (compararia o ano anterior inteiro contra o
+  // ano corrente incompleto). Só mês atual ou período específico — default e
+  // fallback (inclusive URLs antigas com periodMode=ano_atual) = mês atual.
+  const pm = searchParams.periodMode;
+  const safeSearchParams = {
+    ...searchParams,
+    periodMode: pm === "especifico" || pm === "mes_atual" ? pm : "mes_atual",
+  };
+  const filter = buildFilterState(safeSearchParams, allowedCompanyIds);
   if (!searchParams.companyIds) {
     const cookieCompanyIds = (await readActiveCompanyIds()).filter((id) => allowedCompanyIds.includes(id));
     if (cookieCompanyIds.length > 0) filter.selectedCompanyIds = cookieCompanyIds;

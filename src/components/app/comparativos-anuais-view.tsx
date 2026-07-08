@@ -412,7 +412,6 @@ export function ComparativosAnuaisView({
             <div className="flex gap-1">
               {([
                 { value: "mes_atual", label: "Mes atual" },
-                { value: "ano_atual", label: "Ano atual" },
                 { value: "especifico", label: "Periodo especifico" },
               ] as const).map((opt) => (
                 <Button
