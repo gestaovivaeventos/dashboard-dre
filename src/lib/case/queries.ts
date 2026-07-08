@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaseBandRow, CaseClientRow, CaseContractStatus, CaseLegKind } from "@/lib/case/types";
+import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractStatus, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -76,6 +76,8 @@ export interface ContractTitleRow {
   pago: boolean;
   omie_status: string | null;
   pago_em: string | null;
+  atracao_id: string | null;
+  atracao_nome: string | null;
 }
 
 export interface ContractDetail {
@@ -107,6 +109,8 @@ export interface ContractDetail {
   client: { name: string; cnpj_cpf: string | null; email: string | null };
   band_id: string | null;
   band: { name: string; cnpj_cpf: string | null };
+  /** Atrações vinculadas (um contrato pode ter várias). */
+  atracoes: CaseAtracaoRow[];
   titles: ContractTitleRow[];
 }
 
@@ -125,12 +129,31 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     .maybeSingle();
   if (!c) return null;
 
-  const { data: titles } = await db
-    .from("case_titles")
-    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em")
-    .eq("contract_id", id)
-    .order("leg")
-    .order("parcela_numero");
+  const [{ data: titles }, { data: atracoesData }] = await Promise.all([
+    db
+      .from("case_titles")
+      .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em, atracao_id")
+      .eq("contract_id", id)
+      .order("leg")
+      .order("parcela_numero"),
+    db
+      .from("case_contract_atracoes")
+      .select("id, band_id, attachment_path, valor_artista, pagar_schedule, case_bands(name, cnpj_cpf)")
+      .eq("contract_id", id)
+      .order("created_at"),
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const atracoes: CaseAtracaoRow[] = ((atracoesData ?? []) as any[]).map((a) => ({
+    id: a.id,
+    band_id: a.band_id,
+    band_name: a.case_bands?.name ?? "—",
+    band_cnpj_cpf: a.case_bands?.cnpj_cpf ?? null,
+    attachment_path: a.attachment_path,
+    valor_artista: Number(a.valor_artista),
+    pagar_schedule: (Array.isArray(a.pagar_schedule) ? a.pagar_schedule : []) as CaseParcelaInput[],
+  }));
+  const atracaoNomeById = new Map(atracoes.map((a) => [a.id, a.band_name]));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cc = c as any;
@@ -163,6 +186,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     client: { name: cc.case_clients?.name ?? "—", cnpj_cpf: cc.case_clients?.cnpj_cpf ?? null, email: cc.case_clients?.email ?? null },
     band_id: cc.band_id ?? null,
     band: { name: cc.case_bands?.name ?? "—", cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null },
+    atracoes,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     titles: ((titles ?? []) as any[]).map((t) => ({
       id: t.id,
@@ -177,6 +201,8 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       pago: Boolean(t.pago),
       omie_status: t.omie_status,
       pago_em: t.pago_em,
+      atracao_id: t.atracao_id ?? null,
+      atracao_nome: t.atracao_id ? atracaoNomeById.get(t.atracao_id) ?? null : null,
     })),
   };
 }

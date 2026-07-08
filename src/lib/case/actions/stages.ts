@@ -151,8 +151,15 @@ export async function gerarEnviarContrato(
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
-  // Atração é opcional aqui: sem band_id o PDF usa o nome do evento/atração
-  // informado na aba Cliente; o artista pode ser vinculado depois (aba Atração).
+  // Atração é opcional aqui: sem atrações o PDF usa o nome do evento/atração
+  // informado na aba Cliente; artistas podem ser vinculados depois (aba Atração).
+  const { data: atrs } = await db
+    .from("case_contract_atracoes")
+    .select("case_bands(name)")
+    .eq("contract_id", contractId)
+    .order("created_at");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const artistaNomes = ((atrs ?? []) as any[]).map((a) => a.case_bands?.name).filter(Boolean).join(", ");
 
   const client = c.case_clients;
   const pdfData: ContractPdfData = {
@@ -167,7 +174,7 @@ export async function gerarEnviarContrato(
       cep: client?.cep ?? null,
     },
     objeto: {
-      artista: c.case_bands?.name ?? c.event_name ?? "",
+      artista: artistaNomes || c.case_bands?.name || c.event_name || "",
       dataEvento: c.event_date,
       horario: c.show_time,
       passagemSom: c.passagem_som,
@@ -229,7 +236,7 @@ export async function gerarEnviarContrato(
       salePdf,
       `Contrato-Case-${c.contract_number}.pdf`,
       signers,
-      `Contrato de prestação de serviços artísticos — ${c.case_bands?.name ?? c.event_name ?? `nº ${c.contract_number}`}. Por favor, assine.`,
+      `Contrato de prestação de serviços artísticos — ${artistaNomes || c.case_bands?.name || c.event_name || `nº ${c.contract_number}`}. Por favor, assine.`,
     );
     await db
       .from("case_contracts")
@@ -258,28 +265,163 @@ export async function gerarEnviarContrato(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// ABA ATRAÇÃO — salvar (guarda anexo/valor/parcelas; gera títulos PENDENTES; sem lançar)
+// ABA ATRAÇÃO — múltiplas atrações por contrato. Cada atração tem seu anexo,
+// valor e parcelas próprias; os títulos a pagar somam todas as atrações.
 // ────────────────────────────────────────────────────────────────────────────
+
+interface AtracaoRow {
+  id: string;
+  band_id: string;
+  attachment_path: string | null;
+  valor_artista: number;
+  pagar_schedule: CaseParcelaInput[] | null;
+}
+
+interface ContractForAtracao {
+  id: string;
+  valor_atracao_cliente: number;
+  valor_rider: number;
+  valor_camarim: number;
+  valor_extras: number;
+  receber_schedule: unknown;
+}
+
+/** Guard comum: contrato + bloqueio de reedição após lançamento no Omie. */
+async function loadContractForAtracao(
+  db: DB,
+  contractId: string,
+): Promise<{ ok: true; contract: ContractForAtracao } | { ok: false; error: string }> {
+  const { data: contract } = await db
+    .from("case_contracts")
+    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, receber_schedule")
+    .eq("id", contractId)
+    .single();
+  if (!contract) return { ok: false, error: "Contrato não encontrado." };
+
+  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contractId);
+  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
+    return { ok: false, error: "Já existem títulos lançados no Omie — não é possível reeditar as atrações. Use 'Reenviar ao Omie' no Financeiro." };
+  }
+  return { ok: true, contract: contract as ContractForAtracao };
+}
+
+/**
+ * Recalcula os agregados do contrato a partir de TODAS as atrações e regenera
+ * os títulos pendentes (a pagar por atração; a receber pelo total).
+ */
+async function recomputeContractTitles(
+  db: DB,
+  contract: { id: string; valor_atracao_cliente: number; valor_rider: number; valor_camarim: number; valor_extras: number; receber_schedule: unknown },
+): Promise<{ ok: true; totalArtista: number } | { error: string }> {
+  const { data: atracoesData } = await db
+    .from("case_contract_atracoes")
+    .select("id, band_id, attachment_path, valor_artista, pagar_schedule")
+    .eq("contract_id", contract.id)
+    .order("created_at");
+  const atracoes = (atracoesData ?? []) as AtracaoRow[];
+
+  const totalArtista = atracoes.reduce((acc, a) => acc + (Number(a.valor_artista) || 0), 0);
+  const valorAtracao = Number(contract.valor_atracao_cliente) || 0;
+  const valorRider = Number(contract.valor_rider) || 0;
+  const valorCamarim = Number(contract.valor_camarim) || 0;
+  const valorExtras = Number(contract.valor_extras) || 0;
+
+  if (cents(totalArtista) > cents(valorAtracao)) {
+    return { error: `A soma paga às atrações (R$ ${totalArtista.toFixed(2)}) não pode ser maior que o valor cobrado do cliente pela atração (R$ ${valorAtracao.toFixed(2)}).` };
+  }
+
+  const valorMargem = valorAtracao - totalArtista;
+  const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
+  const primeira = atracoes[0] ?? null;
+
+  await db
+    .from("case_contracts")
+    .update({
+      // band_id/attachment_path espelham a 1ª atração (compat telas/PDF/lista).
+      band_id: primeira?.band_id ?? null,
+      attachment_path: primeira?.attachment_path ?? null,
+      valor_artista: totalArtista,
+      valor_custodia: totalArtista,
+      valor_margem: valorMargem,
+      valor_servicos: valorServicos,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", contract.id);
+
+  // Regenera os títulos como PENDENTES (limpa os antigos — todos pendentes,
+  // garantido pelo guard de lançamento).
+  await db.from("case_titles").delete().eq("contract_id", contract.id);
+  const titleRows: Array<Record<string, unknown>> = [];
+
+  // A pagar: por atração, com o cronograma próprio de cada uma.
+  for (const a of atracoes) {
+    const parcelas = (a.pagar_schedule ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
+    if ((Number(a.valor_artista) || 0) <= 0 || parcelas.length === 0) continue;
+    const shortId = a.id.slice(0, 8);
+    parcelas.forEach((p, idx) => {
+      const n = idx + 1;
+      titleRows.push({
+        contract_id: contract.id, atracao_id: a.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: parcelas.length,
+        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar-${shortId}-${n}`, status: "pendente",
+      });
+    });
+  }
+
+  // A receber: custódia (total das atrações) + serviços, rateados no cronograma do cliente.
+  const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
+  if (cents(totalArtista) > 0 && receberSchedule.length > 0) {
+    const custCents = prorateCents(cents(totalArtista), receberSchedule);
+    receberSchedule.forEach((p, idx) => {
+      const vc = custCents[idx];
+      if (vc <= 0) return;
+      const n = idx + 1;
+      titleRows.push({
+        contract_id: contract.id, leg: "receber_custodia", parcela_numero: n, parcela_total: receberSchedule.length,
+        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_custodia-${n}`, status: "pendente",
+      });
+    });
+  }
+  if (receberSchedule.length > 0) {
+    const servicoItens = [
+      { item: "margem", valor: valorMargem },
+      { item: "rider", valor: valorRider },
+      { item: "camarim", valor: valorCamarim },
+      { item: "extras", valor: valorExtras },
+    ];
+    for (const s of servicoItens) {
+      const itemCents = cents(s.valor);
+      if (itemCents <= 0) continue;
+      const vals = prorateCents(itemCents, receberSchedule);
+      receberSchedule.forEach((p, idx) => {
+        const vc = vals[idx];
+        if (vc <= 0) return;
+        const n = idx + 1;
+        titleRows.push({
+          contract_id: contract.id, leg: "receber_servicos", title_item: s.item, parcela_numero: n, parcela_total: receberSchedule.length,
+          vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`, status: "pendente",
+        });
+      });
+    }
+  }
+
+  if (titleRows.length > 0) {
+    const { error } = await db.from("case_titles").insert(titleRows);
+    if (error) return { error: `Falha ao gerar os títulos: ${error.message}` };
+  }
+  return { ok: true, totalArtista };
+}
+
+/** Cria (sem atracao_id) ou edita (com atracao_id) uma atração do contrato. */
 export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
 
   if (!input.band?.name?.trim()) return { error: "Informe a atração/artista." };
 
-  const { data: contract } = await db
-    .from("case_contracts")
-    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, receber_schedule")
-    .eq("id", input.contract_id)
-    .single();
-  if (!contract) return { error: "Contrato não encontrado." };
+  const loaded = await loadContractForAtracao(db, input.contract_id);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
 
-  // Não permite reeditar se algum título já foi lançado no Omie.
-  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contract.id);
-  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
-    return { error: "Já existem títulos lançados no Omie — não é possível reeditar a atração. Use 'Reenviar ao Omie' no Financeiro." };
-  }
-
-  // Resolve/atualiza a atração e vincula ao contrato.
   let bandId: string;
   try {
     bandId = await resolveBand(db, input.band, ctx.id);
@@ -289,99 +431,76 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   await ensureOmieRegistration(db, "band", bandId);
 
   const valorArtista = Number(input.valor_artista) || 0;
-  const valorAtracao = Number(contract.valor_atracao_cliente) || 0;
-  const valorRider = Number(contract.valor_rider) || 0;
-  const valorCamarim = Number(contract.valor_camarim) || 0;
-  const valorExtras = Number(contract.valor_extras) || 0;
+  const parcelas = (input.parcelas_pagar ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
 
-  // Sem valor do artista: guarda só a identidade + anexo (títulos ficam para depois).
-  if (valorArtista <= 0) {
-    await db
-      .from("case_contracts")
-      .update({ band_id: bandId, attachment_path: input.attachment_path ?? undefined, updated_at: new Date().toISOString() })
-      .eq("id", contract.id);
-    revalidatePath(`/case/contratos/${contract.id}`);
-    return { ok: true };
+  // Com valor, as parcelas precisam fechar; sem valor, salva só identidade+anexo.
+  if (valorArtista > 0) {
+    const pagarErr = validarSchedule(parcelas, valorArtista, "pagamento ao artista");
+    if (pagarErr) return { error: pagarErr };
+    const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
+    if (receberSchedule.length === 0) {
+      return { error: "Complete o Contrato Cliente (parcelas a receber) antes de gerar os títulos da atração." };
+    }
   }
 
-  if (cents(valorArtista) > cents(valorAtracao)) {
-    return { error: "O valor pago ao artista não pode ser maior que o valor cobrado do cliente pela atração." };
-  }
-  const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (receberSchedule.length === 0) return { error: "Complete o Contrato Cliente (parcelas a receber) antes de gerar os títulos da atração." };
-  const totalCliente = valorAtracao + valorRider + valorCamarim + valorExtras;
-  const schedErr = validarSchedule(receberSchedule, totalCliente, "recebimento do cliente");
-  if (schedErr) return { error: schedErr };
-  const pagarErr = validarSchedule(input.parcelas_pagar ?? [], valorArtista, "pagamento ao artista");
-  if (pagarErr) return { error: pagarErr };
+  const row = {
+    contract_id: contract.id,
+    band_id: bandId,
+    attachment_path: input.attachment_path ?? null,
+    valor_artista: valorArtista,
+    pagar_schedule: valorArtista > 0 ? parcelas : null,
+    updated_at: new Date().toISOString(),
+  };
 
-  const valorMargem = valorAtracao - valorArtista;
-  const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
-
-  await db
-    .from("case_contracts")
-    .update({
-      band_id: bandId,
-      valor_artista: valorArtista,
-      valor_custodia: valorArtista,
-      valor_margem: valorMargem,
-      valor_servicos: valorServicos,
-      attachment_path: input.attachment_path ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", contract.id);
-
-  // Regenera os títulos como PENDENTES (limpa os antigos, todos pendentes).
-  await db.from("case_titles").delete().eq("contract_id", contract.id);
-  const titleRows: Array<Record<string, unknown>> = [];
-  const totalPagar = (input.parcelas_pagar ?? []).length;
-  (input.parcelas_pagar ?? []).forEach((p, idx) => {
-    const n = idx + 1;
-    titleRows.push({
-      contract_id: contract.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: totalPagar,
-      vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar_custodia-${n}`, status: "pendente",
-    });
-  });
-  const custCents = prorateCents(cents(valorArtista), receberSchedule);
-  receberSchedule.forEach((p, idx) => {
-    const vc = custCents[idx];
-    if (vc <= 0) return;
-    const n = idx + 1;
-    titleRows.push({
-      contract_id: contract.id, leg: "receber_custodia", parcela_numero: n, parcela_total: receberSchedule.length,
-      vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_custodia-${n}`, status: "pendente",
-    });
-  });
-  const servicoItens = [
-    { item: "margem", valor: valorMargem },
-    { item: "rider", valor: valorRider },
-    { item: "camarim", valor: valorCamarim },
-    { item: "extras", valor: valorExtras },
-  ];
-  for (const s of servicoItens) {
-    const itemCents = cents(s.valor);
-    if (itemCents <= 0) continue;
-    const vals = prorateCents(itemCents, receberSchedule);
-    receberSchedule.forEach((p, idx) => {
-      const vc = vals[idx];
-      if (vc <= 0) return;
-      const n = idx + 1;
-      titleRows.push({
-        contract_id: contract.id, leg: "receber_servicos", title_item: s.item, parcela_numero: n, parcela_total: receberSchedule.length,
-        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`, status: "pendente",
-      });
-    });
+  if (input.atracao_id) {
+    const { error } = await db.from("case_contract_atracoes").update(row).eq("id", input.atracao_id).eq("contract_id", contract.id);
+    if (error) return { error: `Falha ao salvar a atração: ${error.message}` };
+  } else {
+    const { error } = await db.from("case_contract_atracoes").insert({ ...row, created_by: ctx.id });
+    if (error) return { error: `Falha ao adicionar a atração: ${error.message}` };
   }
-  if (titleRows.length > 0) {
-    const { error } = await db.from("case_titles").insert(titleRows);
-    if (error) return { error: `Falha ao gerar os títulos: ${error.message}` };
-  }
+
+  const rec = await recomputeContractTitles(db, contract);
+  if ("error" in rec) return { error: rec.error };
 
   await db.from("case_history").insert({
     contract_id: contract.id, user_id: ctx.id, action: "etapa2",
-    comment: `Atração salva — pagamento ao artista R$ ${valorArtista.toFixed(2)} (títulos pendentes).`,
+    comment: `Atração ${input.band.name} salva — R$ ${valorArtista.toFixed(2)} (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
   });
   revalidatePath(`/case/contratos/${contract.id}`);
+  return { ok: true };
+}
+
+/** Remove uma atração do contrato e regenera os títulos (bloqueado após lançamento). */
+export async function removerAtracao(contractId: string, atracaoId: string): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  const loaded = await loadContractForAtracao(db, contractId);
+  if (!loaded.ok) return { error: loaded.error };
+  const { contract } = loaded;
+
+  const { data: atr } = await db
+    .from("case_contract_atracoes")
+    .select("id, case_bands(name)")
+    .eq("id", atracaoId)
+    .eq("contract_id", contractId)
+    .maybeSingle();
+  if (!atr) return { error: "Atração não encontrada neste contrato." };
+
+  const { error } = await db.from("case_contract_atracoes").delete().eq("id", atracaoId);
+  if (error) return { error: `Falha ao remover: ${error.message}` };
+
+  const rec = await recomputeContractTitles(db, contract);
+  if ("error" in rec) return { error: rec.error };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bandName = (atr as any).case_bands?.name ?? "atração";
+  await db.from("case_history").insert({
+    contract_id: contractId, user_id: ctx.id, action: "etapa2",
+    comment: `Atração ${bandName} removida (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
   return { ok: true };
 }
 

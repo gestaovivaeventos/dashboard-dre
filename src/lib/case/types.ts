@@ -128,6 +128,8 @@ export interface Etapa1Input extends CaseContractExtras {
 /** Aba Contrato Atração — identidade do artista + anexo + (opcional) pagamento. */
 export interface Etapa2Input {
   contract_id: string;
+  /** Quando presente, edita uma atração existente; ausente cria uma nova. */
+  atracao_id?: string | null;
   /** Identidade do artista/atração (seleção ou cadastro na própria aba). */
   band: CaseBandInput;
   /** Contrato do artista (fonte do OCR), já no bucket. */
@@ -135,6 +137,17 @@ export interface Etapa2Input {
   /** Pagamento — opcional: dá pra salvar só banda+anexo e informar valor depois. */
   valor_artista?: number;
   parcelas_pagar?: CaseParcelaInput[];
+}
+
+/** Atração vinculada a um contrato (um contrato pode ter várias). */
+export interface CaseAtracaoRow {
+  id: string;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  attachment_path: string | null;
+  valor_artista: number;
+  pagar_schedule: CaseParcelaInput[];
 }
 
 export interface CaseClientRow {

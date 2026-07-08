@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckCircle2, Circle, RefreshCw } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
-import { salvarAtracao, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
+import { salvarAtracao, removerAtracao, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
-import { getContractAttachmentUrl, getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
+import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
 import type { CaseBandRow } from "@/lib/case/types";
@@ -84,7 +84,9 @@ export function ContratoWorkspace({ detail, bands }: { detail: ContractDetail; b
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <button onClick={() => router.push("/case/contratos")} className="text-sm text-ink-muted hover:text-ink-primary">← Contratos</button>
-          <h1 className="mt-1 text-xl font-semibold text-ink-primary">Contrato #{detail.contract_number} — {detail.band.name}</h1>
+          <h1 className="mt-1 text-xl font-semibold text-ink-primary">
+            Contrato #{detail.contract_number} — {detail.atracoes.length > 0 ? detail.atracoes.map((a) => a.band_name).join(", ") : detail.event_name ?? detail.band.name}
+          </h1>
           <p className="text-sm text-ink-muted">Cliente: {detail.client.name} · {detail.event_name ?? "evento"} · {dateBR(detail.event_date)}</p>
         </div>
         <div className="text-right">
@@ -177,12 +179,144 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
   );
 }
 
-// ── ABA: Contrato Atração (pagamento ao artista) ─────────────────────────────
+// ── ABA: Contrato Atração — múltiplas atrações por contrato ──────────────────
+async function openStoragePath(path: string) {
+  const supabase = createSupabaseClient();
+  const { data, error } = await supabase.storage.from(ATTACHMENT_BUCKET).createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) return alert("Não foi possível abrir o anexo.");
+  window.open(data.signedUrl, "_blank");
+}
+
 function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; onChange: () => void }) {
   const launched = detail.titles.some((t) => t.status === "lancado");
-  const pagarTitles = detail.titles.filter((t) => t.leg === "pagar_custodia").sort((a, b) => a.parcela_numero - b.parcela_numero);
-  const [bandMode, setBandMode] = useState<"existing" | "new">(detail.band_id || bands.length ? "existing" : "new");
-  const [bandId, setBandId] = useState<string>(detail.band_id ?? bands[0]?.id ?? "");
+  const atracoes = detail.atracoes;
+  const [editing, setEditing] = useState<null | { atracaoId: string | null }>(
+    atracoes.length === 0 && !launched ? { atracaoId: null } : null,
+  );
+  const [removing, setRemoving] = useState<string | null>(null);
+  const totalAtracoes = atracoes.reduce((a, x) => a + x.valor_artista, 0);
+
+  async function handleRemove(id: string, nome: string) {
+    if (!confirm(`Remover a atração ${nome} deste contrato? Os títulos pendentes dela serão apagados.`)) return;
+    setRemoving(id);
+    const res = await removerAtracao(detail.id, id);
+    setRemoving(null);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
+
+  const atracaoEditando = editing?.atracaoId ? atracoes.find((a) => a.id === editing.atracaoId) ?? null : null;
+
+  return (
+    <div className="space-y-4">
+      <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-ink-primary">
+            Atrações do contrato {atracoes.length > 0 && <span className="text-ink-muted">({atracoes.length})</span>}
+          </h2>
+          <div className="flex items-center gap-2">
+            {launched && <StatusPill tone="ok">Lançado no Omie</StatusPill>}
+            {!launched && !editing && (
+              <button
+                type="button"
+                onClick={() => setEditing({ atracaoId: null })}
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                <Plus className="h-3.5 w-3.5" /> Adicionar atração
+              </button>
+            )}
+          </div>
+        </div>
+
+        {atracoes.length === 0 ? (
+          <p className="text-sm text-ink-muted">Nenhuma atração vinculada ainda — adicione o(s) contrato(s) de artista abaixo.</p>
+        ) : (
+          <div className="space-y-2">
+            {atracoes.map((a) => (
+              <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink-primary">
+                    {a.band_name}
+                    {a.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{a.band_cnpj_cpf}</span>}
+                  </div>
+                  <div className="text-xs text-ink-muted">
+                    {a.valor_artista > 0
+                      ? `${brl(a.valor_artista)} em ${a.pagar_schedule.length} parcela(s)`
+                      : "sem valor informado (títulos ainda não gerados)"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {a.attachment_path && (
+                    <button
+                      type="button"
+                      onClick={() => openStoragePath(a.attachment_path!)}
+                      className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
+                    >
+                      Ver contrato
+                    </button>
+                  )}
+                  {!launched && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ atracaoId: a.id })}
+                        className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(a.id, a.band_name)}
+                        disabled={removing === a.id}
+                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                      >
+                        {removing === a.id ? "…" : "Remover"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-sm">
+              <span className="text-ink-muted">Total pago às atrações</span>
+              <span className={`font-semibold tabular-nums ${totalAtracoes > detail.valor_atracao_cliente ? "text-red-500" : "text-ink-primary"}`}>
+                {brl(totalAtracoes)} <span className="font-normal text-ink-muted">/ {brl(detail.valor_atracao_cliente)} cobrado do cliente</span>
+              </span>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {editing && !launched && (
+        <AtracaoForm
+          key={editing.atracaoId ?? "nova"}
+          detail={detail}
+          bands={bands}
+          atracao={atracaoEditando}
+          onDone={() => { setEditing(null); onChange(); }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Form de adicionar/editar UMA atração (identidade + anexo/OCR + valor/parcelas).
+function AtracaoForm({
+  detail,
+  bands,
+  atracao,
+  onDone,
+  onCancel,
+}: {
+  detail: ContractDetail;
+  bands: CaseBandRow[];
+  atracao: ContractDetail["atracoes"][number] | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [bandMode, setBandMode] = useState<"existing" | "new">(atracao || bands.length ? "existing" : "new");
+  const [bandId, setBandId] = useState<string>(atracao?.band_id ?? "");
   const [bName, setBName] = useState("");
   const [bDoc, setBDoc] = useState("");
   const [bEmail, setBEmail] = useState("");
@@ -193,14 +327,14 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
   const [bTitular, setBTitular] = useState("");
   const [bDocTitular, setBDocTitular] = useState("");
   const [bPix, setBPix] = useState("");
-  const [attachmentPath, setAttachmentPath] = useState<string | null>(detail.attachment_path);
-  const [attachmentName, setAttachmentName] = useState<string>(detail.attachment_path ? "Contrato anexado" : "");
+  const [attachmentPath, setAttachmentPath] = useState<string | null>(atracao?.attachment_path ?? null);
+  const [attachmentName, setAttachmentName] = useState<string>(atracao?.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
-  const [vArtista, setVArtista] = useState(detail.valor_artista > 0 ? brlFromNumber(detail.valor_artista) : "");
+  const [vArtista, setVArtista] = useState(atracao && atracao.valor_artista > 0 ? brlFromNumber(atracao.valor_artista) : "");
   const [parcelas, setParcelas] = useState<ParcelaRow[]>(
-    pagarTitles.length > 0
-      ? pagarTitles.map((t) => ({ vencimento: t.vencimento, valorStr: brlFromNumber(t.valor) }))
+    atracao && atracao.pagar_schedule.length > 0
+      ? atracao.pagar_schedule.map((p) => ({ vencimento: p.vencimento, valorStr: brlFromNumber(Number(p.valor)) }))
       : [{ vencimento: "", valorStr: "" }],
   );
   const [submitting, setSubmitting] = useState(false);
@@ -210,12 +344,9 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
   const valArtista = parseBRL(vArtista);
   const soma = parcelas.reduce((a, p) => a + parseBRL(p.valorStr), 0);
   const somaOk = Math.abs(soma - valArtista) < 0.005 && valArtista > 0;
-
-  async function openAttachment() {
-    const res = await getContractAttachmentUrl(detail.id);
-    if ("error" in res) return alert(res.error);
-    window.open(res.url, "_blank");
-  }
+  // Limite disponível: valor da atração cobrado do cliente menos as OUTRAS atrações.
+  const outrasAtracoes = detail.atracoes.filter((a) => a.id !== atracao?.id).reduce((a, x) => a + x.valor_artista, 0);
+  const limiteDisponivel = detail.valor_atracao_cliente - outrasAtracoes;
 
   async function handleUpload(file: File) {
     setErr(null);
@@ -272,9 +403,13 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
     if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
     if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome da atração/artista.");
     if (valArtista > 0 && !somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
+    if (valArtista > limiteDisponivel) {
+      return setErr(`Com as outras atrações, o disponível é ${brl(Math.max(0, limiteDisponivel))} (atração cobrada do cliente: ${brl(detail.valor_atracao_cliente)}).`);
+    }
     setSubmitting(true);
     const res = await salvarAtracao({
       contract_id: detail.id,
+      atracao_id: atracao?.id ?? null,
       band: buildBandInput(),
       valor_artista: valArtista > 0 ? valArtista : undefined,
       parcelas_pagar: valArtista > 0 ? parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })) : undefined,
@@ -282,38 +417,13 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
-    setMsg(valArtista > 0
-      ? "Contrato da atração salvo — títulos gerados como pendentes. Lance no Omie pelo Financeiro quando o contrato estiver assinado."
-      : "Atração salva. Informe o valor pago ao artista para gerar os títulos.");
-    onChange();
-  }
-
-  if (launched) {
-    return (
-      <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-primary">Contrato da atração / pagamento ao artista</h2>
-          <StatusPill tone="ok">Lançado no Omie</StatusPill>
-        </div>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-          <Info label="Pago ao artista" value={brl(detail.valor_artista)} />
-          <Info label="Custódia" value={brl(detail.valor_custodia)} />
-          <Info label="Margem" value={brl(detail.valor_margem)} />
-          <Info label="Serviços" value={brl(detail.valor_servicos)} />
-        </div>
-        {detail.attachment_path && (
-          <button onClick={openAttachment} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2">
-            <FileSignature className="h-4 w-4" /> Ver contrato do artista
-          </button>
-        )}
-      </section>
-    );
+    onDone();
   }
 
   return (
-    <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
+    <section className="space-y-3 rounded-lg border border-amber-500/40 bg-surface-1 p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-ink-primary">Atração / Artista</h2>
+        <h2 className="text-sm font-semibold text-ink-primary">{atracao ? `Editar atração — ${atracao.band_name}` : "Nova atração"}</h2>
         <div className="flex gap-1 text-xs">
           <button type="button" onClick={() => setBandMode("existing")} disabled={!bands.length} className={`rounded px-2 py-1 ${bandMode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
           <button type="button" onClick={() => setBandMode("new")} className={`rounded px-2 py-1 ${bandMode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
@@ -338,8 +448,6 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
           <div><label className={LABEL_CLS}>Chave PIX</label><input value={bPix} onChange={(e) => setBPix(e.target.value)} className={INPUT_CLS} /></div>
         </div>
       )}
-      {detail.band_id && <p className="text-xs text-ink-muted">Atração atual: {detail.band.name}.</p>}
-
       <div className="mt-1 border-t border-border pt-3">
         <h3 className="text-sm font-semibold text-ink-primary">Contrato do artista + pagamento</h3>
       </div>
@@ -363,8 +471,10 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
             <input inputMode="numeric" value={vArtista} onChange={(e) => setVArtista(maskBRL(e.target.value))} placeholder="0,00" className={INPUT_CLS + " pl-8 text-right"} />
           </div>
-          {valArtista > detail.valor_atracao_cliente && (
-            <p className="mt-1 text-xs text-red-500">Não pode ser maior que a atração cobrada ({brl(detail.valor_atracao_cliente)}).</p>
+          {valArtista > limiteDisponivel && (
+            <p className="mt-1 text-xs text-red-500">
+              Disponível para esta atração: {brl(Math.max(0, limiteDisponivel))} (soma de todas não pode passar de {brl(detail.valor_atracao_cliente)}).
+            </p>
           )}
         </div>
       </div>
@@ -395,9 +505,12 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
       {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600 dark:text-red-300">{err}</div>}
       {msg && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-300">{msg}</div>}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} disabled={submitting} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
+          Cancelar
+        </button>
         <button onClick={submit} disabled={submitting || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar contrato da atração
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {atracao ? "Salvar alterações" : "Adicionar atração"}
         </button>
       </div>
     </section>
@@ -508,6 +621,7 @@ function TitlesTable({ title, rows }: { title: string; rows: ContractTitleRow[] 
               <tr key={t.id} className="border-b border-border/60 last:border-0">
                 <td className="px-3 py-1.5 text-ink-primary">
                   {LEG_LABEL[t.leg]}
+                  {t.atracao_nome ? ` · ${t.atracao_nome}` : ""}
                   {t.title_item ? ` · ${ITEM_LABEL[t.title_item] ?? t.title_item}` : ""}
                   <span className="text-ink-muted"> ({t.parcela_numero}/{t.parcela_total})</span>
                 </td>
