@@ -17,7 +17,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = (await req.json()) as { call?: string; param?: Record<string, unknown> };
-  if (!body.call) return NextResponse.json({ error: "call obrigatório" }, { status: 400 });
+  // Escopo mínimo do teste: só consultar/alterar, e só o lançamento do teste.
+  const ALLOWED_CALLS = ["ConsultarContaPagar", "AlterarContaPagar"];
+  const TEST_LANCAMENTO = 9893736705;
+  if (!body.call || !ALLOWED_CALLS.includes(body.call)) {
+    return NextResponse.json({ error: "call não permitida" }, { status: 400 });
+  }
+  if (Number(body.param?.codigo_lancamento_omie) !== TEST_LANCAMENTO) {
+    return NextResponse.json({ error: "lançamento não permitido" }, { status: 400 });
+  }
 
   const db = createAdminClientIfAvailable();
   if (!db) return NextResponse.json({ error: "admin client indisponível" }, { status: 500 });
