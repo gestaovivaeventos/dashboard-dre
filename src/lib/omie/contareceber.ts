@@ -38,6 +38,26 @@ export async function incluirContaReceber(
   return { codigoLancamentoOmie: code };
 }
 
+/**
+ * Reclassifica um título a receber por rateio de categorias (percentuais).
+ * Funciona mesmo com o título BAIXADO. Regras validadas em produção:
+ * valor_documento é obrigatório e o rateio só é aplicado via `percentual`
+ * (mandar `valor` junto faz o Omie ignorar o rateio silenciosamente).
+ */
+export async function alterarContaReceberCategorias(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  valorDocumento: number,
+  categorias: Array<{ codigo_categoria: string; percentual: number }>,
+): Promise<void> {
+  await omieCall(CONTARECEBER_URL, "AlterarContaReceber", appKey, appSecret, {
+    codigo_lancamento_omie: codigoLancamentoOmie,
+    valor_documento: valorDocumento,
+    categorias,
+  });
+}
+
 export async function excluirContaReceber(
   appKey: string,
   appSecret: string,

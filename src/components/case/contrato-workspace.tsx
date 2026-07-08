@@ -9,18 +9,16 @@ import { useToast } from "@/components/ui/toaster";
 import {
   salvarAtracao,
   removerAtracao,
-  confirmarAtracoes,
   salvarVerbaRiderCamarim,
   salvarFornecedor,
   removerFornecedor,
-  converterSaldoEmBv,
   gerarEnviarContrato,
   lancarNoOmie,
   salvarCadastroCliente,
 } from "@/lib/case/actions/stages";
 import { extractArtistContract, extractFornecedorContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
-import { resyncContract } from "@/lib/case/actions/contract-launch";
+import { resyncContract, lancarBvContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
 import type { CaseBandRow, CaseFornecedorTipo } from "@/lib/case/types";
@@ -302,17 +300,7 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
     atracoes.length === 0 && !launched ? { atracaoId: null } : null,
   );
   const [removing, setRemoving] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
   const totalAtracoes = atracoes.reduce((a, x) => a + x.valor_artista, 0);
-  const confirmado = !!detail.atracoes_confirmadas_at;
-
-  async function handleConfirm(value: boolean) {
-    setConfirming(true);
-    const res = await confirmarAtracoes(detail.id, value);
-    setConfirming(false);
-    if ("error" in res) return alert(res.error);
-    onChange();
-  }
 
   async function handleRemove(id: string, nome: string) {
     if (!confirm(`Remover a atração ${nome} deste contrato? Os títulos pendentes dela serão apagados.`)) return;
@@ -404,38 +392,6 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
           </div>
         )}
 
-        {atracoes.length > 0 && !launched && (
-          confirmado ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2">
-              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                ✓ Atrações confirmadas como completas — lançamento no Omie liberado.
-              </span>
-              <button
-                type="button"
-                onClick={() => handleConfirm(false)}
-                disabled={confirming}
-                className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2 disabled:opacity-50"
-              >
-                Desfazer
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                O BV (margem) é calculado com a soma de <strong>todas</strong> as atrações. O lançamento no Omie fica
-                bloqueado até você confirmar que todos os contratos de artista deste evento já foram anexados.
-              </p>
-              <button
-                type="button"
-                onClick={() => handleConfirm(true)}
-                disabled={confirming}
-                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {confirming && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Confirmar: todos os contratos já subiram
-              </button>
-            </div>
-          )
-        )}
       </section>
 
       {editing && !launched && (
@@ -467,7 +423,6 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
   const [savingVerba, setSavingVerba] = useState(false);
   const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
   const [removing, setRemoving] = useState<string | null>(null);
-  const [converting, setConverting] = useState(false);
 
   const verbaDigitada = parseBRL(verbaStr);
   const fornecedorEditando = editing?.fornecedorId ? fornecedores.find((f) => f.id === editing.fornecedorId) ?? null : null;
@@ -486,16 +441,6 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
     const res = await removerFornecedor(detail.id, id);
     setRemoving(null);
     if ("error" in res) return alert(res.error);
-    onChange();
-  }
-
-  async function handleConvert() {
-    if (!confirm(`Converter o saldo de ${brl(saldo)} em BV? A verba Rider/Camarim fica reduzida ao valor já comprometido com fornecedores (${brl(comprometido)}) e o saldo vira comissão/BV.`)) return;
-    setConverting(true);
-    const res = await converterSaldoEmBv(detail.id);
-    setConverting(false);
-    if ("error" in res) return alert(res.error);
-    setVerbaStr(brlFromNumber(comprometido));
     onChange();
   }
 
@@ -582,18 +527,8 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
             <span className="text-ink-muted">
               Comprometido {brl(comprometido)} / verba {brl(verba)}
             </span>
-            <span className="flex items-center gap-3">
-              <span className={`font-semibold tabular-nums ${saldo > 0 ? "text-ink-primary" : "text-ink-muted"}`}>Saldo disponível: {brl(saldo)}</span>
-              {!launched && saldo > 0 && (
-                <button
-                  type="button"
-                  onClick={handleConvert}
-                  disabled={converting}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {converting && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Converter saldo em BV
-                </button>
-              )}
+            <span className={`font-semibold tabular-nums ${saldo > 0 ? "text-ink-primary" : "text-ink-muted"}`}>
+              Saldo disponível: {brl(saldo)} <span className="font-normal text-ink-muted">(sobra automaticamente no BV apurado)</span>
             </span>
           </div>
         )}
@@ -851,6 +786,7 @@ function AtracaoForm({
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
+    if (res.warning) alert(res.warning);
     onDone();
   }
 
@@ -1116,6 +1052,7 @@ function FornecedorForm({
     });
     setSubmitting(false);
     if ("error" in res) return setErr(res.error);
+    if (res.warning) alert(res.warning);
     onDone();
   }
 
@@ -1242,21 +1179,21 @@ const ITEM_LABEL: Record<string, string> = { margem: "Comissão/BV", rider: "Rid
 
 function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [lancandoBv, setLancandoBv] = useState(false);
   const titles = detail.titles;
   const receber = titles.filter((t) => t.leg !== "pagar_custodia");
   const pagar = titles.filter((t) => t.leg === "pagar_custodia");
-  const atracaoOk = detail.valor_artista > 0;
-  const confirmado = !!detail.atracoes_confirmadas_at;
   const temPendentes = titles.some((t) => t.status !== "lancado");
   const temLancados = titles.some((t) => t.status === "lancado" || t.status === "erro");
-  const canLaunch = atracaoOk && confirmado && signed;
-  const launchHint = !atracaoOk
-    ? "Salve o Contrato Atração primeiro"
-    : !confirmado
-      ? "Confirme na aba Contrato Atração que todos os contratos de artista já subiram (cálculo do BV)"
-      : !signed
-        ? "Aguardando assinatura de todos (cliente, contratado e testemunha)"
-        : "";
+  const canLaunch = signed;
+  const launchHint = signed ? "" : "Aguardando assinatura de todos (cliente, contratado e testemunha)";
+
+  // Apuração do BV: tudo que entra (a receber) menos todas as saídas (a pagar).
+  const totalReceber = Math.round(receber.reduce((a, t) => a + t.valor, 0) * 100) / 100;
+  const totalSaidas = Math.round(pagar.reduce((a, t) => a + t.valor, 0) * 100) / 100;
+  const bvApurado = Math.round((totalReceber - totalSaidas) * 100) / 100;
+  const bvLancado = !!detail.bv_lancado_at;
+  const podeLancarBv = signed && titles.length > 0 && !temPendentes && !bvLancado && bvApurado > 0;
 
   async function lancar() {
     setBusy(true);
@@ -1270,6 +1207,15 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
     const res = await resyncContract(detail.id);
     setBusy(false);
     if ("error" in res) return alert(res.error);
+    onChange();
+  }
+  async function lancarBv() {
+    if (!confirm(`Lançar BV de ${brl(bvApurado)} no Omie? Os títulos a receber serão reclassificados: ${brl(bvApurado)} vai para "Clientes - Serviços Prestados (Comissões e BV)" e o restante segue como custódia.`)) return;
+    setLancandoBv(true);
+    const res = await lancarBvContract(detail.id);
+    setLancandoBv(false);
+    if ("error" in res) return alert(res.error);
+    alert(`BV de ${brl(res.bv)} lançado — ${res.titulos} título(s) a receber reclassificado(s) no Omie.`);
     onChange();
   }
 
@@ -1301,10 +1247,35 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
         <p className="text-xs text-amber-600 dark:text-amber-400">Para lançar no Omie: {launchHint.toLowerCase()}.</p>
       )}
 
-      <p className="text-xs text-ink-muted">
-        BV (Comissão): <span className="font-semibold tabular-nums text-ink-primary">{brl(detail.valor_margem)}</span>
-        {" · "}Custódia (atrações + verba): <span className="tabular-nums">{brl(detail.valor_custodia)}</span>
-      </p>
+      {titles.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-2 px-3 py-2">
+          <span className="text-sm text-ink-muted">
+            BV apurado: <span className="font-semibold tabular-nums text-ink-primary">{brl(bvApurado)}</span>
+            <span className="text-xs"> (a receber {brl(totalReceber)} − saídas {brl(totalSaidas)})</span>
+          </span>
+          {bvLancado ? (
+            <StatusPill tone="ok">BV lançado · {brl(detail.bv_lancado_valor ?? 0)} · {dateBR(detail.bv_lancado_at)}</StatusPill>
+          ) : (
+            <button
+              type="button"
+              onClick={lancarBv}
+              disabled={lancandoBv || !podeLancarBv}
+              title={
+                !signed
+                  ? "Aguardando assinatura"
+                  : temPendentes
+                    ? "Lance todos os títulos no Omie antes de apurar o BV"
+                    : bvApurado <= 0
+                      ? "BV apurado não é positivo"
+                      : ""
+              }
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {lancandoBv && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Lançar BV no Omie
+            </button>
+          )}
+        </div>
+      )}
 
       {titles.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Nenhum lançamento ainda — salve o Contrato Atração para gerar os títulos (ficam pendentes até lançar).</p>

@@ -107,8 +107,9 @@ export interface ContractDetail {
   sale_contract_path: string | null;
   sign_url: string | null;
   signed_at: string | null;
-  /** Usuário confirmou que TODOS os contratos de artista já subiram (gate do BV). */
-  atracoes_confirmadas_at: string | null;
+  /** BV apurado e lançado no Omie (rateio de categoria nos títulos a receber). */
+  bv_lancado_valor: number | null;
+  bv_lancado_at: string | null;
   sent_for_signature_at: string | null;
   clicksign_status: string | null;
   client: {
@@ -142,7 +143,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       `id, contract_number, status, event_name, event_date, show_time, passagem_som,
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
-       attachment_path, sale_contract_path, sign_url, signed_at, atracoes_confirmadas_at, sent_for_signature_at, clicksign_status, band_id,
+       attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id,
        case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
        case_bands(name, cnpj_cpf)`,
     )
@@ -222,7 +223,8 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     sale_contract_path: cc.sale_contract_path,
     sign_url: cc.sign_url,
     signed_at: cc.signed_at,
-    atracoes_confirmadas_at: cc.atracoes_confirmadas_at,
+    bv_lancado_valor: cc.bv_lancado_valor != null ? Number(cc.bv_lancado_valor) : null,
+    bv_lancado_at: cc.bv_lancado_at,
     sent_for_signature_at: cc.sent_for_signature_at,
     clicksign_status: cc.clicksign_status,
     client: {

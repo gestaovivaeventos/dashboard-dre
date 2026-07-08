@@ -12,7 +12,7 @@ import { buildContractPdf, type ContractPdfData } from "@/lib/case/contract-pdf"
 import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "@/lib/case/clicksign";
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration } from "@/lib/case/resolve-cadastros";
-import { cents, validarSchedule, prorateCents } from "@/lib/case/parcelas";
+import { cents, validarSchedule } from "@/lib/case/parcelas";
 import type { CaseClientInput, CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
@@ -349,36 +349,63 @@ interface ContractForAtracao {
   valor_extras: number;
   valor_rider_camarim: number;
   receber_schedule: unknown;
+  signed_at: string | null;
 }
 
-/** Guard comum: contrato + bloqueio de reedição após lançamento no Omie. */
+/** Carrega o contrato para as ações da aba Atração (sem bloqueio global). */
 async function loadContractForAtracao(
   db: DB,
   contractId: string,
 ): Promise<{ ok: true; contract: ContractForAtracao } | { ok: false; error: string }> {
   const { data: contract } = await db
     .from("case_contracts")
-    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_rider_camarim, receber_schedule")
+    .select("id, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_rider_camarim, receber_schedule, signed_at")
     .eq("id", contractId)
     .single();
   if (!contract) return { ok: false, error: "Contrato não encontrado." };
-
-  const { data: existing } = await db.from("case_titles").select("id, status").eq("contract_id", contractId);
-  if ((existing ?? []).some((t: { status: string }) => t.status === "lancado")) {
-    return { ok: false, error: "Já existem títulos lançados no Omie — não é possível reeditar as atrações. Use 'Reenviar ao Omie' no Financeiro." };
-  }
   return { ok: true, contract: contract as ContractForAtracao };
 }
 
+/** Uma atração/fornecedor específico já tem título lançado no Omie? */
+async function entityLancado(
+  db: DB,
+  contractId: string,
+  col: "atracao_id" | "fornecedor_id",
+  entityId: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from("case_titles")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq(col, entityId)
+    .eq("status", "lancado")
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
 /**
- * Recalcula os agregados do contrato a partir de TODAS as atrações e regenera
- * os títulos pendentes (a pagar por atração; a receber pelo total).
+ * Despesas lançam automaticamente no Omie assim que salvas, SE o contrato já
+ * estiver assinado. Erro no lançamento não desfaz o salvamento — vira warning.
+ */
+async function autoLaunchDespesas(db: DB, contract: ContractForAtracao): Promise<string | undefined> {
+  if (!contract.signed_at) return undefined;
+  const res = await launchContractToOmie(db, contract.id, ["pagar_custodia"]);
+  if ("error" in res) return `Salvo, mas o lançamento automático no Omie falhou: ${res.error}`;
+  return undefined;
+}
+
+/**
+ * Recalcula os agregados do contrato e regenera os títulos POR ENTIDADE:
+ * atrações/fornecedores já lançados no Omie ficam intocados (fluxo incremental
+ * — o contrato assinado vai lançando despesas conforme são salvas); o restante
+ * é regenerado. A receber = contrato inteiro no cronograma do cliente
+ * (classificação custódia; o BV é apurado e rateado depois, no Financeiro).
  */
 async function recomputeContractTitles(
   db: DB,
   contract: ContractForAtracao,
 ): Promise<{ ok: true; totalArtista: number } | { error: string }> {
-  const [{ data: atracoesData }, { data: fornecedoresData }] = await Promise.all([
+  const [{ data: atracoesData }, { data: fornecedoresData }, { data: titlesData }] = await Promise.all([
     db
       .from("case_contract_atracoes")
       .select("id, band_id, attachment_path, valor_artista, pagar_schedule")
@@ -389,9 +416,20 @@ async function recomputeContractTitles(
       .select("id, tipo, valor, pagar_schedule")
       .eq("contract_id", contract.id)
       .order("created_at"),
+    db
+      .from("case_titles")
+      .select("id, status, leg, atracao_id, fornecedor_id")
+      .eq("contract_id", contract.id),
   ]);
   const atracoes = (atracoesData ?? []) as AtracaoRow[];
   const fornecedores = (fornecedoresData ?? []) as FornecedorRow[];
+  const existingTitles = (titlesData ?? []) as Array<{
+    id: string;
+    status: string;
+    leg: string;
+    atracao_id: string | null;
+    fornecedor_id: string | null;
+  }>;
 
   const totalArtista = atracoes.reduce((acc, a) => acc + (Number(a.valor_artista) || 0), 0);
   // Só os fornecedores da verba contam contra ela — comissões são despesas próprias.
@@ -429,20 +467,33 @@ async function recomputeContractTitles(
       valor_custodia: custodiaTotal,
       valor_margem: valorMargem,
       valor_servicos: valorServicos,
-      // Mudou o conjunto de atrações → o BV pode ter mudado; exige reconfirmar.
-      atracoes_confirmadas_at: null,
-      atracoes_confirmadas_by: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", contract.id);
 
-  // Regenera os títulos como PENDENTES (limpa os antigos — todos pendentes,
-  // garantido pelo guard de lançamento).
-  await db.from("case_titles").delete().eq("contract_id", contract.id);
+  // Entidades com título já LANÇADO no Omie ficam intocadas (títulos estáveis).
+  const lockedAtracoes = new Set(existingTitles.filter((t) => t.status === "lancado" && t.atracao_id).map((t) => t.atracao_id!));
+  const lockedFornecedores = new Set(existingTitles.filter((t) => t.status === "lancado" && t.fornecedor_id).map((t) => t.fornecedor_id!));
+  const receberLocked = existingTitles.some((t) => t.leg !== "pagar_custodia" && t.status === "lancado");
+
+  const deletableIds = existingTitles
+    .filter((t) => {
+      if (t.status === "lancado") return false;
+      if (t.leg !== "pagar_custodia") return !receberLocked;
+      if (t.atracao_id) return !lockedAtracoes.has(t.atracao_id);
+      if (t.fornecedor_id) return !lockedFornecedores.has(t.fornecedor_id);
+      return true; // órfão (entidade removida)
+    })
+    .map((t) => t.id);
+  if (deletableIds.length > 0) {
+    await db.from("case_titles").delete().in("id", deletableIds);
+  }
+
   const titleRows: Array<Record<string, unknown>> = [];
 
-  // A pagar: por atração, com o cronograma próprio de cada uma.
+  // A pagar: por atração (categoria custódia), com o cronograma próprio de cada uma.
   for (const a of atracoes) {
+    if (lockedAtracoes.has(a.id)) continue;
     const parcelas = (a.pagar_schedule ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
     if ((Number(a.valor_artista) || 0) <= 0 || parcelas.length === 0) continue;
     const shortId = a.id.slice(0, 8);
@@ -455,8 +506,9 @@ async function recomputeContractTitles(
     });
   }
 
-  // A pagar: fornecedores da verba Rider/Camarim, cada um com seu cronograma.
+  // A pagar: fornecedores (verba Rider/Camarim e comissões), cada um com seu cronograma.
   for (const f of fornecedores) {
+    if (lockedFornecedores.has(f.id)) continue;
     const parcelas = (f.pagar_schedule ?? []).filter((p) => p.vencimento && Number(p.valor) > 0);
     if ((Number(f.valor) || 0) <= 0 || parcelas.length === 0) continue;
     const shortId = f.id.slice(0, 8);
@@ -469,41 +521,18 @@ async function recomputeContractTitles(
     });
   }
 
-  // A receber: custódia (atrações + verba Rider/Camarim) + serviços (BV), rateados no cronograma do cliente.
+  // A receber: o CONTRATO INTEIRO no cronograma do cliente, como custódia.
+  // O BV é apurado no fim (recebido − saídas) e rateado por categoria no Omie.
   const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (cents(custodiaTotal) > 0 && receberSchedule.length > 0) {
-    const custCents = prorateCents(cents(custodiaTotal), receberSchedule);
+  if (!receberLocked && receberSchedule.length > 0) {
     receberSchedule.forEach((p, idx) => {
-      const vc = custCents[idx];
-      if (vc <= 0) return;
+      if (!p.vencimento || Number(p.valor) <= 0) return;
       const n = idx + 1;
       titleRows.push({
         contract_id: contract.id, leg: "receber_custodia", parcela_numero: n, parcela_total: receberSchedule.length,
-        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${c12}-rc-${n}`, status: "pendente",
+        vencimento: p.vencimento, valor: Number(p.valor), codigo_integracao: `case-${c12}-rc-${n}`, status: "pendente",
       });
     });
-  }
-  if (receberSchedule.length > 0) {
-    const servicoItens = [
-      { item: "margem", valor: valorMargem },
-      { item: "rider", valor: valorRider },
-      { item: "camarim", valor: valorCamarim },
-      { item: "extras", valor: valorExtras },
-    ];
-    for (const s of servicoItens) {
-      const itemCents = cents(s.valor);
-      if (itemCents <= 0) continue;
-      const vals = prorateCents(itemCents, receberSchedule);
-      receberSchedule.forEach((p, idx) => {
-        const vc = vals[idx];
-        if (vc <= 0) return;
-        const n = idx + 1;
-        titleRows.push({
-          contract_id: contract.id, leg: "receber_servicos", title_item: s.item, parcela_numero: n, parcela_total: receberSchedule.length,
-          vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${c12}-rs-${s.item}-${n}`, status: "pendente",
-        });
-      });
-    }
   }
 
   if (titleRows.length > 0) {
@@ -514,7 +543,7 @@ async function recomputeContractTitles(
 }
 
 /** Cria (sem atracao_id) ou edita (com atracao_id) uma atração do contrato. */
-export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | { error: string }> {
+export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true; warning?: string } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
 
@@ -523,6 +552,10 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   const loaded = await loadContractForAtracao(db, input.contract_id);
   if (!loaded.ok) return { error: loaded.error };
   const { contract } = loaded;
+
+  if (input.atracao_id && (await entityLancado(db, contract.id, "atracao_id", input.atracao_id))) {
+    return { error: "Esta atração já tem títulos lançados no Omie — não é possível reeditar. Ajustes precisam ser feitos direto no Omie." };
+  }
 
   let bandId: string;
   try {
@@ -539,10 +572,6 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
   if (valorArtista > 0) {
     const pagarErr = validarSchedule(parcelas, valorArtista, "pagamento ao artista");
     if (pagarErr) return { error: pagarErr };
-    const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-    if (receberSchedule.length === 0) {
-      return { error: "Complete o Contrato Cliente (parcelas a receber) antes de gerar os títulos da atração." };
-    }
   }
 
   const row = {
@@ -569,11 +598,14 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true } | 
     contract_id: contract.id, user_id: ctx.id, action: "etapa2",
     comment: `Atração ${input.band.name} salva — R$ ${valorArtista.toFixed(2)} (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
   });
+
+  // Contrato assinado → despesa lança imediatamente no Omie (custódia).
+  const warning = await autoLaunchDespesas(db, contract);
   revalidatePath(`/case/contratos/${contract.id}`);
-  return { ok: true };
+  return { ok: true, warning };
 }
 
-/** Remove uma atração do contrato e regenera os títulos (bloqueado após lançamento). */
+/** Remove uma atração do contrato e regenera os títulos (bloqueado se ELA já lançou). */
 export async function removerAtracao(contractId: string, atracaoId: string): Promise<{ ok: true } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
@@ -581,6 +613,10 @@ export async function removerAtracao(contractId: string, atracaoId: string): Pro
   const loaded = await loadContractForAtracao(db, contractId);
   if (!loaded.ok) return { error: loaded.error };
   const { contract } = loaded;
+
+  if (await entityLancado(db, contractId, "atracao_id", atracaoId)) {
+    return { error: "Esta atração já tem títulos lançados no Omie — não é possível remover. Cancele os lançamentos direto no Omie antes." };
+  }
 
   const { data: atr } = await db
     .from("case_contract_atracoes")
@@ -656,10 +692,6 @@ export async function salvarVerbaRiderCamarim(
 
   const verba = Number(valor) || 0;
   if (verba < 0) return { error: "A verba não pode ser negativa." };
-  const receberSchedule = (contract.receber_schedule as CaseParcelaInput[] | null) ?? [];
-  if (verba > 0 && receberSchedule.length === 0) {
-    return { error: "Complete o Contrato Cliente (parcelas a receber) antes de definir a verba Rider/Camarim." };
-  }
 
   const { error } = await db
     .from("case_contracts")
@@ -678,8 +710,8 @@ export async function salvarVerbaRiderCamarim(
   return { ok: true };
 }
 
-/** Cria (sem fornecedor_id) ou edita (com fornecedor_id) um fornecedor da verba. */
-export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: true } | { error: string }> {
+/** Cria (sem fornecedor_id) ou edita (com fornecedor_id) um fornecedor/comissão. */
+export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: true; warning?: string } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
 
@@ -688,6 +720,10 @@ export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: tr
   const loaded = await loadContractForAtracao(db, input.contract_id);
   if (!loaded.ok) return { error: loaded.error };
   const { contract } = loaded;
+
+  if (input.fornecedor_id && (await entityLancado(db, contract.id, "fornecedor_id", input.fornecedor_id))) {
+    return { error: "Este fornecedor já tem títulos lançados no Omie — não é possível reeditar. Ajustes precisam ser feitos direto no Omie." };
+  }
 
   const valor = Number(input.valor) || 0;
   if (valor <= 0) return { error: "Informe o valor pago ao fornecedor." };
@@ -731,11 +767,14 @@ export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: tr
     contract_id: contract.id, user_id: ctx.id, action: "etapa2",
     comment: `Fornecedor ${input.band.name} salvo — R$ ${valor.toFixed(2)} (${tipoLabel}).`,
   });
+
+  // Contrato assinado → despesa lança imediatamente no Omie.
+  const warning = await autoLaunchDespesas(db, contract);
   revalidatePath(`/case/contratos/${contract.id}`);
-  return { ok: true };
+  return { ok: true, warning };
 }
 
-/** Remove um fornecedor da verba e regenera os títulos (bloqueado após lançamento). */
+/** Remove um fornecedor/comissão e regenera os títulos (bloqueado se ELE já lançou). */
 export async function removerFornecedor(contractId: string, fornecedorId: string): Promise<{ ok: true } | { error: string }> {
   const ctx = await requireCaseUser();
   const db = await getDb();
@@ -743,6 +782,10 @@ export async function removerFornecedor(contractId: string, fornecedorId: string
   const loaded = await loadContractForAtracao(db, contractId);
   if (!loaded.ok) return { error: loaded.error };
   const { contract } = loaded;
+
+  if (await entityLancado(db, contractId, "fornecedor_id", fornecedorId)) {
+    return { error: "Este fornecedor já tem títulos lançados no Omie — não é possível remover. Cancele os lançamentos direto no Omie antes." };
+  }
 
   const { data: forn } = await db
     .from("case_contract_fornecedores")
@@ -768,98 +811,9 @@ export async function removerFornecedor(contractId: string, fornecedorId: string
   return { ok: true };
 }
 
-/**
- * Converte o saldo disponível da verba Rider/Camarim em BV: reduz a verba ao
- * total já comprometido com fornecedores — o BV (margem) absorve a diferença.
- */
-export async function converterSaldoEmBv(contractId: string): Promise<{ ok: true; saldo: number } | { error: string }> {
-  const ctx = await requireCaseUser();
-  const db = await getDb();
-
-  const loaded = await loadContractForAtracao(db, contractId);
-  if (!loaded.ok) return { error: loaded.error };
-  const { contract } = loaded;
-
-  const { data: fornecedoresData } = await db
-    .from("case_contract_fornecedores")
-    .select("valor, tipo")
-    .eq("contract_id", contractId);
-  const totalFornecedores = ((fornecedoresData ?? []) as Array<{ valor: number; tipo: string }>)
-    .filter((f) => (f.tipo ?? "rider_camarim") === "rider_camarim")
-    .reduce((acc, f) => acc + (Number(f.valor) || 0), 0);
-  const verba = Number(contract.valor_rider_camarim) || 0;
-  const saldo = (cents(verba) - cents(totalFornecedores)) / 100;
-  if (saldo <= 0) return { error: "Não há saldo disponível na verba Rider/Camarim para converter." };
-
-  const { error } = await db
-    .from("case_contracts")
-    .update({ valor_rider_camarim: totalFornecedores, updated_at: new Date().toISOString() })
-    .eq("id", contractId);
-  if (error) return { error: `Falha ao converter o saldo: ${error.message}` };
-
-  const rec = await recomputeContractTitles(db, { ...contract, valor_rider_camarim: totalFornecedores });
-  if ("error" in rec) return { error: rec.error };
-
-  await db.from("case_history").insert({
-    contract_id: contractId, user_id: ctx.id, action: "etapa2",
-    comment: `Saldo de R$ ${saldo.toFixed(2)} da verba Rider/Camarim convertido em BV.`,
-  });
-  revalidatePath(`/case/contratos/${contractId}`);
-  return { ok: true, saldo };
-}
-
-/**
- * Confirma (ou desfaz a confirmação) de que TODAS as atrações do evento já
- * tiveram contrato anexado e valor informado — pré-requisito do lançamento no
- * Omie, pois o BV (margem) depende da soma de todas as atrações.
- */
-export async function confirmarAtracoes(
-  contractId: string,
-  confirmado: boolean,
-): Promise<{ ok: true } | { error: string }> {
-  const ctx = await requireCaseUser();
-  const db = await getDb();
-
-  if (confirmado) {
-    const { data: atracoesData } = await db
-      .from("case_contract_atracoes")
-      .select("id, valor_artista, attachment_path, case_bands(name)")
-      .eq("contract_id", contractId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const atracoes = (atracoesData ?? []) as any[];
-    if (atracoes.length === 0) return { error: "Adicione ao menos uma atração antes de confirmar." };
-    const incompletas = atracoes
-      .filter((a) => !(Number(a.valor_artista) > 0) || !a.attachment_path)
-      .map((a) => a.case_bands?.name ?? "atração sem nome");
-    if (incompletas.length > 0) {
-      return { error: `Para confirmar, anexe o contrato e informe o valor de: ${incompletas.join(", ")}.` };
-    }
-  }
-
-  const { error } = await db
-    .from("case_contracts")
-    .update({
-      atracoes_confirmadas_at: confirmado ? new Date().toISOString() : null,
-      atracoes_confirmadas_by: confirmado ? ctx.id : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", contractId);
-  if (error) return { error: `Falha ao salvar a confirmação: ${error.message}` };
-
-  await db.from("case_history").insert({
-    contract_id: contractId,
-    user_id: ctx.id,
-    action: "etapa2",
-    comment: confirmado
-      ? "Atrações confirmadas como completas — lançamento no Omie liberado."
-      : "Confirmação das atrações desfeita — lançamento no Omie bloqueado.",
-  });
-  revalidatePath(`/case/contratos/${contractId}`);
-  return { ok: true };
-}
-
 // ────────────────────────────────────────────────────────────────────────────
-// FINANCEIRO — lançar no Omie (gate: atrações confirmadas + assinado por todos)
+// FINANCEIRO — lançar no Omie (gate: contrato assinado). Despesas salvas após
+// a assinatura lançam sozinhas; este botão cobre pendências/erros e o a receber.
 // ────────────────────────────────────────────────────────────────────────────
 export async function lancarNoOmie(contractId: string): Promise<{ ok: true; status: string } | { error: string }> {
   await requireCaseUser();
@@ -867,14 +821,10 @@ export async function lancarNoOmie(contractId: string): Promise<{ ok: true; stat
 
   const { data: c } = await db
     .from("case_contracts")
-    .select("id, valor_artista, signed_at, atracoes_confirmadas_at")
+    .select("id, signed_at")
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
-  if (Number(c.valor_artista) <= 0) return { error: "Conclua a aba Contrato Atração antes de lançar." };
-  if (!c.atracoes_confirmadas_at) {
-    return { error: "Confirme na aba Contrato Atração que todos os contratos de artista já foram anexados — o BV é calculado com a soma de todas as atrações." };
-  }
   if (!c.signed_at) return { error: "O contrato precisa estar assinado por todos (cliente, contratado e testemunha) antes de lançar no Omie." };
 
   const res = await launchContractToOmie(db, contractId);
