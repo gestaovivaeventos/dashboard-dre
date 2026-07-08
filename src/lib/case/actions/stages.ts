@@ -264,19 +264,27 @@ export async function gerarEnviarContrato(
   }
 
   // Signatários: cliente + contratado (CS Agência) + testemunha 1 (se e-mail).
+  // Quem assina pelo cliente é o responsável legal (pessoa física) — o nome do
+  // cliente costuma ser o fundo/razão social e a ClickSign rejeita ("nome e sobrenome").
+  const clienteSigner = client.resp_legal?.trim() || client.name;
   const signers: ClickSignSigner[] = [
-    { name: client.name, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor" },
+    { name: clienteSigner, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor" },
     { name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor" },
   ];
   if (c.testemunha_1_email?.trim()) {
     signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness" });
   }
 
-  // ClickSign exige nome E sobrenome — valida antes de enviar para dar erro claro.
-  const semSobrenome = signers.filter((s) => (s.name ?? "").trim().split(/\s+/).length < 2).map((s) => s.name);
-  if (semSobrenome.length > 0) {
+  // ClickSign exige nome E sobrenome de pessoa (sem números/símbolos) — valida
+  // antes de enviar para dar erro claro em português.
+  const nomeInvalido = (n: string | null | undefined) => {
+    const nome = (n ?? "").trim();
+    return nome.split(/\s+/).length < 2 || /[\d()\[\]\/\\@#$%&*]/.test(nome);
+  };
+  const invalidos = signers.filter((s) => nomeInvalido(s.name)).map((s) => s.name);
+  if (invalidos.length > 0) {
     return {
-      error: `A assinatura exige nome e sobrenome dos signatários. Corrija: ${semSobrenome.join(", ")} — use o botão "Editar dados" do contrato e complete o nome.`,
+      error: `A assinatura exige nome e sobrenome de pessoa física (sem números ou siglas). Corrija: ${invalidos.join(", ")} — em "Editar dados", preencha o campo Responsável legal do cliente com o nome completo de quem assina.`,
     };
   }
 
