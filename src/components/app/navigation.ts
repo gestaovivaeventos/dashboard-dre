@@ -228,7 +228,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // [KPIs OCULTO] Item escondido do menu a pedido (a pagina e a rota continuam existindo).
       // Para reexibir: descomente a linha abaixo e a entrada "fin-kpis" em FRANQUEADO_NAV_KEYS.
       // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
-      { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ["admin", "gestor_hero"] },
+      { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ALL_DRE_ROLES },
       { key: "fin-docs", title: "Documentos anexos", icon: Files, scope: "global", href: "/financeiro/documentos", dreRoles: ALL_DRE_ROLES },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
       { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
