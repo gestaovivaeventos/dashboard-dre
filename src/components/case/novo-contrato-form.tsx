@@ -521,7 +521,7 @@ function TabBtn({ active, done, label, onClick }: { active: boolean; done: boole
   );
 }
 
-function SearchSelect({ items, value, onChange, placeholder }: {
+export function SearchSelect({ items, value, onChange, placeholder }: {
   items: Array<{ id: string; label: string; sub?: string | null }>;
   value: string;
   onChange: (id: string) => void;

@@ -20,6 +20,7 @@ import {
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
+import { SearchSelect } from "@/components/case/novo-contrato-form";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
 import type { CaseBandRow } from "@/lib/case/types";
 
@@ -807,6 +808,7 @@ function FornecedorForm({
     setErr(null);
     if (file.size > MAX_ATTACHMENT_SIZE) return setErr("Arquivo maior que 10MB.");
     setUploading(true);
+    let uploadedPath: string | null = null;
     try {
       const supabase = createSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -817,17 +819,21 @@ function FornecedorForm({
       if (error) return setErr(`Falha no upload: ${error.message}`);
       setAttachmentPath(objectPath);
       setAttachmentName(file.name);
+      uploadedPath = objectPath;
     } finally {
       setUploading(false);
     }
+    // Leitura automática: subiu o contrato → OCR preenche fornecedor + pagamento.
+    if (uploadedPath) await handleOcr(uploadedPath);
   }
 
-  async function handleOcr() {
-    if (!attachmentPath) return setErr("Suba o contrato do fornecedor primeiro.");
+  async function handleOcr(path?: string) {
+    const alvo = path ?? attachmentPath;
+    if (!alvo) return setErr("Suba o contrato do fornecedor primeiro.");
     setErr(null);
     setMsg(null);
     setOcrLoading(true);
-    const res = await extractArtistContract(attachmentPath);
+    const res = await extractArtistContract(alvo);
     setOcrLoading(false);
     if ("error" in res) return setErr(res.error);
     const d = res.data;
@@ -889,18 +895,39 @@ function FornecedorForm({
 
   return (
     <section className="space-y-3 rounded-lg border border-amber-500/40 bg-surface-1 p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-ink-primary">{fornecedor ? `Editar fornecedor — ${fornecedor.band_name}` : "Novo fornecedor (verba Rider/Camarim)"}</h2>
+      <h2 className="text-sm font-semibold text-ink-primary">{fornecedor ? `Editar fornecedor — ${fornecedor.band_name}` : "Novo fornecedor (verba Rider/Camarim)"}</h2>
+
+      {/* 1º: contrato (opcional) — subiu, o OCR lê e preenche fornecedor + pagamento. */}
+      <p className="text-xs text-ink-muted">
+        Tem o contrato/orçamento? Suba aqui que o sistema lê e preenche o fornecedor, o valor e as parcelas automaticamente.
+        Sem contrato, selecione um fornecedor já cadastrado (busca abaixo) ou cadastre um novo.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          <span>{attachmentName || "Contrato do fornecedor (PDF/imagem — opcional)"}</span>
+          <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+        </label>
+        <button type="button" onClick={() => handleOcr()} disabled={!attachmentPath || ocrLoading || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+          {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} Reler contrato (OCR)
+        </button>
+      </div>
+      {msg && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-300">{msg}</div>}
+
+      <div className="mt-1 flex items-center justify-between border-t border-border pt-3">
+        <h3 className="text-sm font-semibold text-ink-primary">Fornecedor</h3>
         <div className="flex gap-1 text-xs">
           <button type="button" onClick={() => setBandMode("existing")} disabled={!bands.length} className={`rounded px-2 py-1 ${bandMode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
           <button type="button" onClick={() => setBandMode("new")} className={`rounded px-2 py-1 ${bandMode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
         </div>
       </div>
       {bandMode === "existing" ? (
-        <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
-          <option value="">— selecione —</option>
-          {bands.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
-        </select>
+        <SearchSelect
+          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+          value={bandId}
+          onChange={setBandId}
+          placeholder="Buscar e selecionar o fornecedor…"
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div><label className={LABEL_CLS}>Nome / Razão social</label><input value={bName} onChange={(e) => setBName(e.target.value)} className={INPUT_CLS} /></div>
@@ -919,20 +946,9 @@ function FornecedorForm({
       <div><label className={LABEL_CLS}>Descrição (o que este fornecedor cobre — ex.: som e luz, camarim)</label><input value={descricao} onChange={(e) => setDescricao(e.target.value)} className={INPUT_CLS} /></div>
 
       <div className="mt-1 border-t border-border pt-3">
-        <h3 className="text-sm font-semibold text-ink-primary">Contrato/orçamento do fornecedor + pagamento</h3>
+        <h3 className="text-sm font-semibold text-ink-primary">Pagamento</h3>
       </div>
-      <p className="text-xs text-ink-muted">Suba o contrato ou orçamento (opcional) e leia com OCR para pré-preencher fornecedor, valor e parcelas. As parcelas saem da verba Rider/Camarim.</p>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-ink-secondary hover:bg-surface-2">
-          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          <span>{attachmentName || "Contrato do fornecedor (PDF/imagem)"}</span>
-          <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
-        </label>
-        <button type="button" onClick={handleOcr} disabled={!attachmentPath || ocrLoading || uploading} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
-          {ocrLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />} Ler contrato (OCR)
-        </button>
-      </div>
+      <p className="text-xs text-ink-muted">As parcelas saem da verba Rider/Camarim do contrato.</p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
@@ -973,7 +989,6 @@ function FornecedorForm({
       </div>
 
       {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600 dark:text-red-300">{err}</div>}
-      {msg && <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-300">{msg}</div>}
 
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel} disabled={submitting} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
