@@ -10,6 +10,7 @@ import {
   FileCheck,
   Files,
   FileText,
+  GitCompare,
   GitMerge,
   LayoutDashboard,
   Mail,
@@ -225,6 +226,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "fin-dashboard", title: "DRE Gerencial", icon: PieChart, scope: "segment", suffix: "/dashboard", dreRoles: ALL_DRE_ROLES },
       { key: "fin-fluxo", title: "Fluxo de Caixa", icon: Wallet, scope: "segment", suffix: "/fluxo-de-caixa", dreRoles: ALL_DRE_ROLES },
       { key: "fin-budget", title: "Budget e Forecast", icon: Target, scope: "segment", suffix: "/budget-forecast", dreRoles: ALL_DRE_ROLES },
+      { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ALL_DRE_ROLES },
       // [KPIs OCULTO] Item escondido do menu a pedido (a pagina e a rota continuam existindo).
       // Para reexibir: descomente a linha abaixo e a entrada "fin-kpis" em FRANQUEADO_NAV_KEYS.
       // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },

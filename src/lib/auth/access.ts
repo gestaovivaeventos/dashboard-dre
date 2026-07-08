@@ -148,6 +148,7 @@ export function canAccessPathByProfile(
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/fluxo-de-caixa") ||
     pathname.startsWith("/budget-forecast") ||
+    pathname.startsWith("/comparativos-anuais") ||
     pathname.startsWith("/kpis") ||
     pathname.startsWith("/home") ||
     pathname.startsWith("/s/") ||
@@ -180,6 +181,7 @@ const SEGMENT_SUB_RULES: Array<{ suffix: string; roles: DreRole[] }> = [
   { suffix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { suffix: "/comparativos-anuais", roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { suffix: "/mapeamento",       roles: ["admin"] },
   { suffix: "/lancamentos-manuais", roles: ["admin"] },
@@ -193,6 +195,7 @@ const DRE_RULES: Array<{ prefix: string; roles: DreRole[] }> = [
   { prefix: "/dashboard",        roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/fluxo-de-caixa",   roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/budget-forecast",  roles: ["admin", "gestor_hero", "gestor_unidade"] },
+  { prefix: "/comparativos-anuais", roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/kpis",             roles: ["admin", "gestor_hero", "gestor_unidade"] },
   { prefix: "/conexoes",         roles: ["admin", "gestor_hero"] },
   { prefix: "/contratos",        roles: ["admin", "gestor_hero"] },
