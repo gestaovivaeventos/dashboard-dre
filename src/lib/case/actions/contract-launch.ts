@@ -161,6 +161,19 @@ export async function launchContractToOmie(
   if (!client || (needsBand && atracoes.length === 0)) {
     return markContractError(db, contractId, "Cliente ou atrações não encontrados.");
   }
+
+  // Pré-check: o Omie exige CNPJ/CPF para cadastrar. Aponta QUEM está sem
+  // documento antes de qualquer chamada (cadastros com omie_codigo já passaram).
+  const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+  const semDoc: string[] = [];
+  if (needsClient && !client.omie_codigo && !digits(client.cnpj_cpf)) semDoc.push(`cliente "${client.name}"`);
+  if (needsBand) {
+    for (const a of atracoes) if (!a.band.omie_codigo && !digits(a.band.cnpj_cpf)) semDoc.push(`atração "${a.band.name}"`);
+    for (const f of fornecedores) if (!f.band.omie_codigo && !digits(f.band.cnpj_cpf)) semDoc.push(`fornecedor "${f.band.name}"`);
+  }
+  if (semDoc.length > 0) {
+    return { error: `Cadastro sem CNPJ/CPF: ${semDoc.join(", ")}. Complete o documento no cadastro (Editar dados para o cliente) antes de lançar no Omie.` };
+  }
   if (!company?.omie_app_key || !company?.omie_app_secret) {
     return markContractError(db, contractId, "Empresa Case Shows sem credenciais Omie configuradas.");
   }

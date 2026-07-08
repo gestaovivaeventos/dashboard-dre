@@ -83,17 +83,35 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   const [bandsList] = useState<CaseBandRow[]>(bands);
 
   // Cliente
+  const initialClient = edit ? clients.find((c) => c.id === edit.client_id) ?? null : null;
   const [clientMode, setClientMode] = useState<"existing" | "new">(edit || clients.length ? "existing" : "new");
   const [clientId, setClientId] = useState<string>(edit?.client_id ?? "");
-  const [cName, setCName] = useState("");
-  const [cDoc, setCDoc] = useState("");
-  const [cEmail, setCEmail] = useState("");
-  const [cPhone, setCPhone] = useState("");
-  const [cRespLegal, setCRespLegal] = useState("");
-  const [cCpfResp, setCCpfResp] = useState("");
-  const [cEndereco, setCEndereco] = useState("");
-  const [cCidadeEstado, setCCidadeEstado] = useState("");
-  const [cCep, setCCep] = useState("");
+  const [cName, setCName] = useState(initialClient?.name ?? "");
+  const [cDoc, setCDoc] = useState(initialClient?.cnpj_cpf ?? "");
+  const [cEmail, setCEmail] = useState(initialClient?.email ?? "");
+  const [cPhone, setCPhone] = useState(initialClient?.phone ?? "");
+  const [cRespLegal, setCRespLegal] = useState(initialClient?.resp_legal ?? "");
+  const [cCpfResp, setCCpfResp] = useState(initialClient?.cpf_resp_legal ?? "");
+  const [cEndereco, setCEndereco] = useState(initialClient?.endereco ?? "");
+  const [cCidadeEstado, setCCidadeEstado] = useState(initialClient?.cidade_estado ?? "");
+  const [cCep, setCCep] = useState(initialClient?.cep ?? "");
+
+  // Na edição, trocar o cliente selecionado recarrega os campos do cadastro.
+  function selectClient(id: string) {
+    setClientId(id);
+    if (!edit) return;
+    const c = clients.find((x) => x.id === id);
+    if (!c) return;
+    setCName(c.name);
+    setCDoc(c.cnpj_cpf ?? "");
+    setCEmail(c.email ?? "");
+    setCPhone(c.phone ?? "");
+    setCRespLegal(c.resp_legal ?? "");
+    setCCpfResp(c.cpf_resp_legal ?? "");
+    setCEndereco(c.endereco ?? "");
+    setCCidadeEstado(c.cidade_estado ?? "");
+    setCCep(c.cep ?? "");
+  }
 
   // Evento / objeto
   const [eventName, setEventName] = useState(edit?.event_name ?? "");
@@ -212,12 +230,20 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       contract_id: edit?.id ?? null,
       client:
         clientMode === "existing" && selectedClient
-          ? {
-              id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
-              pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
-              resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
-              endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
-            }
+          ? edit
+            ? {
+                // Edição: os campos na tela atualizam o CADASTRO do cliente (corrige CNPJ etc.).
+                id: selectedClient.id, name: cName.trim() || selectedClient.name, cnpj_cpf: cDoc.trim() || null,
+                pessoa_fisica: onlyDigits(cDoc).length === 11, email: cEmail.trim() || null, phone: cPhone.trim() || null,
+                resp_legal: cRespLegal.trim() || null, cpf_resp_legal: cCpfResp.trim() || null,
+                endereco: cEndereco.trim() || null, cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
+              }
+            : {
+                id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
+                pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
+                resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
+                endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
+              }
           : {
               name: cName.trim(), cnpj_cpf: cDoc.trim() || null, pessoa_fisica: onlyDigits(cDoc).length === 11,
               email: cEmail.trim() || null, phone: cPhone.trim() || null, resp_legal: cRespLegal.trim() || null,
@@ -329,12 +355,30 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
               <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
             </div>
             {clientMode === "existing" ? (
-              <SearchSelect
-                items={clients.map((c) => ({ id: c.id, label: c.name, sub: c.cnpj_cpf }))}
-                value={clientId}
-                onChange={setClientId}
-                placeholder="Buscar e selecionar o cliente…"
-              />
+              <>
+                <SearchSelect
+                  items={clients.map((c) => ({ id: c.id, label: c.name, sub: c.cnpj_cpf }))}
+                  value={clientId}
+                  onChange={selectClient}
+                  placeholder="Buscar e selecionar o cliente…"
+                />
+                {edit && clientId && (
+                  <div className="space-y-3 rounded-md border border-border/70 p-3">
+                    <p className="text-xs text-ink-muted">Dados do cadastro do cliente — editar aqui atualiza o cadastro (ex.: completar o CNPJ/CPF exigido pelo Omie).</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
+                      <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
+                      <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                      <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                      <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
+                      <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
+                      <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                      <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                      <Field label="CEP" value={cCep} onChange={setCCep} />
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
