@@ -123,7 +123,7 @@ export async function launchContractToOmie(
   const { data: contract, error: cErr } = await db
     .from("case_contracts")
     .select(
-      "id, company_id, attachment_path, client_id, band_id, valor_artista, valor_servicos, atracoes_confirmadas_at",
+      "id, contract_number, company_id, attachment_path, client_id, band_id, valor_artista, valor_servicos, atracoes_confirmadas_at",
     )
     .eq("id", contractId)
     .single();
@@ -282,12 +282,17 @@ export async function launchContractToOmie(
     const itemLabel = t.title_item ? ` - ${SERVICO_LABEL[t.title_item] ?? t.title_item}` : "";
     const parceiroNome = isPagar ? entidade!.band.name : (primeiraAtracao?.band.name ?? "atrações");
     const observacao = `Contrato Case ${parceiroNome} x ${client.name}${itemLabel} (parcela ${t.parcela_numero}/${t.parcela_total})`;
+    // Limites do Omie: codigo_lancamento_integracao ≤ 60 (títulos antigos podem
+    // ter código longo — cai para o id do título, único e estável) e
+    // numero_documento ≤ 20 (usa rótulo curto com o nº do contrato).
+    const codigoIntegracao = t.codigo_integracao.length <= 60 ? t.codigo_integracao : `case-t-${t.id}`;
+    const numeroDocumento = `CASE-${contract.contract_number}-${t.parcela_numero}`.slice(0, 20);
 
     try {
       let omieCodigo: number;
       if (isPagar) {
         const { codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, {
-          codigo_lancamento_integracao: t.codigo_integracao,
+          codigo_lancamento_integracao: codigoIntegracao,
           codigo_cliente_fornecedor: codigoParceiro,
           data_vencimento: venc,
           data_previsao: venc,
@@ -297,12 +302,12 @@ export async function launchContractToOmie(
           distribuicao: [],
           id_conta_corrente: idContaCorrente,
           observacao,
-          numero_documento: t.codigo_integracao,
+          numero_documento: numeroDocumento,
         });
         omieCodigo = codigoLancamentoOmie;
       } else {
         const { codigoLancamentoOmie } = await incluirContaReceber(appKey, appSecret, {
-          codigo_lancamento_integracao: t.codigo_integracao,
+          codigo_lancamento_integracao: codigoIntegracao,
           codigo_cliente_fornecedor: codigoParceiro,
           data_vencimento: venc,
           data_previsao: venc,
@@ -311,7 +316,7 @@ export async function launchContractToOmie(
           codigo_categoria: categoria,
           id_conta_corrente: idContaCorrente,
           observacao,
-          numero_documento: t.codigo_integracao,
+          numero_documento: numeroDocumento,
           numero_parcela: `${t.parcela_numero}/${t.parcela_total}`,
         });
         omieCodigo = codigoLancamentoOmie;

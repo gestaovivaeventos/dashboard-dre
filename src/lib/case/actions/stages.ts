@@ -412,6 +412,8 @@ async function recomputeContractTitles(
   const valorServicos = valorMargem + valorRider + valorCamarim + valorExtras;
   const custodiaTotal = totalArtista + verba;
   const primeira = atracoes[0] ?? null;
+  // Omie limita codigo_lancamento_integracao a 60 chars — usa o contrato encurtado.
+  const c12 = contract.id.replace(/-/g, "").slice(0, 12);
 
   await db
     .from("case_contracts")
@@ -444,7 +446,7 @@ async function recomputeContractTitles(
       const n = idx + 1;
       titleRows.push({
         contract_id: contract.id, atracao_id: a.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: parcelas.length,
-        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar-${shortId}-${n}`, status: "pendente",
+        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${c12}-pg-${shortId}-${n}`, status: "pendente",
       });
     });
   }
@@ -458,7 +460,7 @@ async function recomputeContractTitles(
       const n = idx + 1;
       titleRows.push({
         contract_id: contract.id, fornecedor_id: f.id, leg: "pagar_custodia", parcela_numero: n, parcela_total: parcelas.length,
-        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${contract.id}-pagar-forn-${shortId}-${n}`, status: "pendente",
+        vencimento: p.vencimento, valor: p.valor, codigo_integracao: `case-${c12}-pf-${shortId}-${n}`, status: "pendente",
       });
     });
   }
@@ -473,7 +475,7 @@ async function recomputeContractTitles(
       const n = idx + 1;
       titleRows.push({
         contract_id: contract.id, leg: "receber_custodia", parcela_numero: n, parcela_total: receberSchedule.length,
-        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_custodia-${n}`, status: "pendente",
+        vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${c12}-rc-${n}`, status: "pendente",
       });
     });
   }
@@ -494,7 +496,7 @@ async function recomputeContractTitles(
         const n = idx + 1;
         titleRows.push({
           contract_id: contract.id, leg: "receber_servicos", title_item: s.item, parcela_numero: n, parcela_total: receberSchedule.length,
-          vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${contract.id}-receber_servicos-${s.item}-${n}`, status: "pendente",
+          vencimento: p.vencimento, valor: vc / 100, codigo_integracao: `case-${c12}-rs-${s.item}-${n}`, status: "pendente",
         });
       });
     }
