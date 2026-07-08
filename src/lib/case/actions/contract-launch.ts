@@ -119,11 +119,16 @@ export async function launchContractToOmie(
   const { data: contract, error: cErr } = await db
     .from("case_contracts")
     .select(
-      "id, company_id, attachment_path, client_id, band_id, valor_artista, valor_servicos",
+      "id, company_id, attachment_path, client_id, band_id, valor_artista, valor_servicos, atracoes_confirmadas_at",
     )
     .eq("id", contractId)
     .single();
   if (cErr || !contract) return { error: "Contrato não encontrado." };
+  // Gate do BV: só lança com o conjunto de atrações confirmado como completo
+  // (senão a margem sai errada e trava assim no Omie).
+  if (!contract.atracoes_confirmadas_at) {
+    return { error: "Confirme na aba Contrato Atração que todos os contratos de artista já foram anexados antes de lançar no Omie." };
+  }
 
   const [{ data: client }, { data: atracoesData }, { data: company }, { data: config }] = await Promise.all([
     db.from("case_clients").select("*").eq("id", contract.client_id).single(),

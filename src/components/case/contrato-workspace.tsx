@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckCircle2, Circle, RefreshCw } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
-import { salvarAtracao, removerAtracao, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
+import { useToast } from "@/components/ui/toaster";
+import { salvarAtracao, removerAtracao, confirmarAtracoes, gerarEnviarContrato, lancarNoOmie } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract } from "@/lib/case/actions/contract-launch";
@@ -115,6 +116,7 @@ export function ContratoWorkspace({ detail, bands }: { detail: ContractDetail; b
 // ── ABA: Contrato Cliente ────────────────────────────────────────────────────
 function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const { showToast } = useToast();
   const sent = Boolean(detail.sent_for_signature_at);
 
   async function openSale() {
@@ -126,14 +128,23 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
     setBusy(true);
     const res = await resendSignature(detail.id);
     setBusy(false);
-    alert("error" in res ? res.error : "Assinatura reenviada ao cliente.");
+    if ("error" in res) return alert(res.error);
+    showToast({ title: "Assinatura reenviada", description: "O cliente receberá um novo e-mail para assinar.", variant: "success" });
   }
   async function gerarEnviar() {
     setBusy(true);
     const res = await gerarEnviarContrato(detail.id);
     setBusy(false);
     if ("error" in res) return alert(res.error);
-    if (res.warning) alert(res.warning);
+    if (res.warning) {
+      showToast({ title: "Contrato gerado", description: res.warning });
+    } else {
+      showToast({
+        title: sent ? "Contrato reenviado para assinatura" : "Contrato enviado para assinatura",
+        description: "Os signatários receberão o link por e-mail.",
+        variant: "success",
+      });
+    }
     onChange();
   }
 
@@ -194,7 +205,17 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
     atracoes.length === 0 && !launched ? { atracaoId: null } : null,
   );
   const [removing, setRemoving] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const totalAtracoes = atracoes.reduce((a, x) => a + x.valor_artista, 0);
+  const confirmado = !!detail.atracoes_confirmadas_at;
+
+  async function handleConfirm(value: boolean) {
+    setConfirming(true);
+    const res = await confirmarAtracoes(detail.id, value);
+    setConfirming(false);
+    if ("error" in res) return alert(res.error);
+    onChange();
+  }
 
   async function handleRemove(id: string, nome: string) {
     if (!confirm(`Remover a atração ${nome} deste contrato? Os títulos pendentes dela serão apagados.`)) return;
@@ -284,6 +305,39 @@ function AtracaoTab({ detail, bands, onChange }: { detail: ContractDetail; bands
               </span>
             </div>
           </div>
+        )}
+
+        {atracoes.length > 0 && !launched && (
+          confirmado ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2">
+              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                ✓ Atrações confirmadas como completas — lançamento no Omie liberado.
+              </span>
+              <button
+                type="button"
+                onClick={() => handleConfirm(false)}
+                disabled={confirming}
+                className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2 disabled:opacity-50"
+              >
+                Desfazer
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                O BV (margem) é calculado com a soma de <strong>todas</strong> as atrações. O lançamento no Omie fica
+                bloqueado até você confirmar que todos os contratos de artista deste evento já foram anexados.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleConfirm(true)}
+                disabled={confirming}
+                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {confirming && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Confirmar: todos os contratos já subiram
+              </button>
+            </div>
+          )
         )}
       </section>
 
@@ -531,14 +585,17 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
   const receber = titles.filter((t) => t.leg !== "pagar_custodia");
   const pagar = titles.filter((t) => t.leg === "pagar_custodia");
   const atracaoOk = detail.valor_artista > 0;
+  const confirmado = !!detail.atracoes_confirmadas_at;
   const temPendentes = titles.some((t) => t.status !== "lancado");
   const temLancados = titles.some((t) => t.status === "lancado" || t.status === "erro");
-  const canLaunch = atracaoOk && signed;
+  const canLaunch = atracaoOk && confirmado && signed;
   const launchHint = !atracaoOk
     ? "Salve o Contrato Atração primeiro"
-    : !signed
-      ? "Aguardando assinatura de todos (cliente, contratado e testemunha)"
-      : "";
+    : !confirmado
+      ? "Confirme na aba Contrato Atração que todos os contratos de artista já subiram (cálculo do BV)"
+      : !signed
+        ? "Aguardando assinatura de todos (cliente, contratado e testemunha)"
+        : "";
 
   async function lancar() {
     setBusy(true);

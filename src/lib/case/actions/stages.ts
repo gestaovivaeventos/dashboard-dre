@@ -344,6 +344,9 @@ async function recomputeContractTitles(
       valor_custodia: totalArtista,
       valor_margem: valorMargem,
       valor_servicos: valorServicos,
+      // Mudou o conjunto de atrações → o BV pode ter mudado; exige reconfirmar.
+      atracoes_confirmadas_at: null,
+      atracoes_confirmadas_by: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", contract.id);
@@ -504,8 +507,58 @@ export async function removerAtracao(contractId: string, atracaoId: string): Pro
   return { ok: true };
 }
 
+/**
+ * Confirma (ou desfaz a confirmação) de que TODAS as atrações do evento já
+ * tiveram contrato anexado e valor informado — pré-requisito do lançamento no
+ * Omie, pois o BV (margem) depende da soma de todas as atrações.
+ */
+export async function confirmarAtracoes(
+  contractId: string,
+  confirmado: boolean,
+): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  if (confirmado) {
+    const { data: atracoesData } = await db
+      .from("case_contract_atracoes")
+      .select("id, valor_artista, attachment_path, case_bands(name)")
+      .eq("contract_id", contractId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const atracoes = (atracoesData ?? []) as any[];
+    if (atracoes.length === 0) return { error: "Adicione ao menos uma atração antes de confirmar." };
+    const incompletas = atracoes
+      .filter((a) => !(Number(a.valor_artista) > 0) || !a.attachment_path)
+      .map((a) => a.case_bands?.name ?? "atração sem nome");
+    if (incompletas.length > 0) {
+      return { error: `Para confirmar, anexe o contrato e informe o valor de: ${incompletas.join(", ")}.` };
+    }
+  }
+
+  const { error } = await db
+    .from("case_contracts")
+    .update({
+      atracoes_confirmadas_at: confirmado ? new Date().toISOString() : null,
+      atracoes_confirmadas_by: confirmado ? ctx.id : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", contractId);
+  if (error) return { error: `Falha ao salvar a confirmação: ${error.message}` };
+
+  await db.from("case_history").insert({
+    contract_id: contractId,
+    user_id: ctx.id,
+    action: "etapa2",
+    comment: confirmado
+      ? "Atrações confirmadas como completas — lançamento no Omie liberado."
+      : "Confirmação das atrações desfeita — lançamento no Omie bloqueado.",
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
-// FINANCEIRO — lançar no Omie (gate: atração validada + assinado por todos)
+// FINANCEIRO — lançar no Omie (gate: atrações confirmadas + assinado por todos)
 // ────────────────────────────────────────────────────────────────────────────
 export async function lancarNoOmie(contractId: string): Promise<{ ok: true; status: string } | { error: string }> {
   await requireCaseUser();
@@ -513,11 +566,14 @@ export async function lancarNoOmie(contractId: string): Promise<{ ok: true; stat
 
   const { data: c } = await db
     .from("case_contracts")
-    .select("id, valor_artista, signed_at")
+    .select("id, valor_artista, signed_at, atracoes_confirmadas_at")
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
   if (Number(c.valor_artista) <= 0) return { error: "Conclua a aba Contrato Atração antes de lançar." };
+  if (!c.atracoes_confirmadas_at) {
+    return { error: "Confirme na aba Contrato Atração que todos os contratos de artista já foram anexados — o BV é calculado com a soma de todas as atrações." };
+  }
   if (!c.signed_at) return { error: "O contrato precisa estar assinado por todos (cliente, contratado e testemunha) antes de lançar no Omie." };
 
   const res = await launchContractToOmie(db, contractId);
