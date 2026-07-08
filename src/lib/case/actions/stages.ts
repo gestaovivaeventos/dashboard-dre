@@ -151,7 +151,8 @@ export async function gerarEnviarContrato(
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
-  if (!c.band_id) return { error: "Selecione a atração/artista na aba Contrato Atração antes de gerar o contrato." };
+  // Atração é opcional aqui: sem band_id o PDF usa o nome do evento/atração
+  // informado na aba Cliente; o artista pode ser vinculado depois (aba Atração).
 
   const client = c.case_clients;
   const pdfData: ContractPdfData = {
@@ -166,7 +167,7 @@ export async function gerarEnviarContrato(
       cep: client?.cep ?? null,
     },
     objeto: {
-      artista: c.case_bands?.name ?? "",
+      artista: c.case_bands?.name ?? c.event_name ?? "",
       dataEvento: c.event_date,
       horario: c.show_time,
       passagemSom: c.passagem_som,
@@ -228,7 +229,7 @@ export async function gerarEnviarContrato(
       salePdf,
       `Contrato-Case-${c.contract_number}.pdf`,
       signers,
-      `Contrato de prestação de serviços artísticos — ${c.case_bands?.name ?? ""}. Por favor, assine.`,
+      `Contrato de prestação de serviços artísticos — ${c.case_bands?.name ?? c.event_name ?? `nº ${c.contract_number}`}. Por favor, assine.`,
     );
     await db
       .from("case_contracts")

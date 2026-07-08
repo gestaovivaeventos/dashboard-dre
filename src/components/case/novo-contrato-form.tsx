@@ -266,7 +266,6 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
     if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
     if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente (aba Contrato Cliente).");
-    if (enviar && !bandFilled) return setError("Selecione a atração/artista (aba Contrato Atração) antes de gerar o contrato.");
 
     submittingRef.current = true;
     setSubmitting(true);
