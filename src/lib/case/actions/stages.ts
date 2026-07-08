@@ -25,12 +25,12 @@ async function getDb(): Promise<DB> {
 }
 
 /** Campos do contrato vindos da aba Cliente (compartilhado por insert/update). */
-function clienteFields(input: Etapa1Input, valorArtista: number) {
+function clienteFields(input: Etapa1Input, valorArtista: number, verbaRiderCamarim = 0) {
   const valorAtracao = Number(input.valor_atracao_cliente) || 0;
   const valorRider = Number(input.valor_rider) || 0;
   const valorCamarim = Number(input.valor_camarim) || 0;
   const valorExtras = Number(input.valor_extras) || 0;
-  const margem = valorAtracao - valorArtista;
+  const margem = valorAtracao - valorArtista - verbaRiderCamarim;
   return {
     event_name: input.event_name,
     event_date: input.event_date,
@@ -101,14 +101,45 @@ export async function salvarCliente(
   if (bandId) await ensureOmieRegistration(db, "band", bandId);
 
   if (input.contract_id) {
-    // Edição — preserva o valor do artista já informado na aba Atração.
-    const { data: cur } = await db.from("case_contracts").select("valor_artista").eq("id", input.contract_id).single();
-    const valorArtista = Number(cur?.valor_artista) || 0;
+    // Edição — preserva o valor do artista e a verba já informados na aba Atração.
+    const { data: cur } = await db
+      .from("case_contracts")
+      .select("valor_artista, valor_rider_camarim, signed_at")
+      .eq("id", input.contract_id)
+      .single();
+    if (!cur) return { error: "Contrato não encontrado." };
+    if (cur.signed_at) return { error: "O contrato já foi assinado — não é possível editar os dados." };
+    const { data: lancados } = await db
+      .from("case_titles")
+      .select("id")
+      .eq("contract_id", input.contract_id)
+      .eq("status", "lancado")
+      .limit(1);
+    if ((lancados ?? []).length > 0) {
+      return { error: "Já existem títulos lançados no Omie — não é possível editar os dados do contrato." };
+    }
+    const valorArtista = Number(cur.valor_artista) || 0;
+    const verba = Number(cur.valor_rider_camarim) || 0;
     const { error } = await db
       .from("case_contracts")
-      .update({ client_id: clientId, ...(bandId ? { band_id: bandId } : {}), ...clienteFields(input, valorArtista) })
+      .update({ client_id: clientId, ...(bandId ? { band_id: bandId } : {}), ...clienteFields(input, valorArtista, verba) })
       .eq("id", input.contract_id);
     if (error) return { error: `Falha ao salvar: ${error.message}` };
+
+    // Valores/parcelas do cliente mudaram → regenera os títulos (BV, custódia e
+    // cronograma a receber) com base nas atrações/fornecedores atuais.
+    const loaded = await loadContractForAtracao(db, input.contract_id);
+    if (loaded.ok) {
+      const rec = await recomputeContractTitles(db, loaded.contract);
+      if ("error" in rec) return { error: rec.error };
+    }
+
+    await db.from("case_history").insert({
+      contract_id: input.contract_id,
+      user_id: ctx.id,
+      action: "criado",
+      comment: "Dados do contrato (aba Cliente) editados.",
+    });
     const { data: c } = await db.from("case_contracts").select("contract_number, status").eq("id", input.contract_id).single();
     revalidatePath(`/case/contratos/${input.contract_id}`);
     return { ok: true, contractId: input.contract_id, contractNumber: Number(c?.contract_number), status: String(c?.status) };
@@ -239,6 +270,14 @@ export async function gerarEnviarContrato(
   ];
   if (c.testemunha_1_email?.trim()) {
     signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness" });
+  }
+
+  // ClickSign exige nome E sobrenome — valida antes de enviar para dar erro claro.
+  const semSobrenome = signers.filter((s) => (s.name ?? "").trim().split(/\s+/).length < 2).map((s) => s.name);
+  if (semSobrenome.length > 0) {
+    return {
+      error: `A assinatura exige nome e sobrenome dos signatários. Corrija: ${semSobrenome.join(", ")} — use o botão "Editar dados" do contrato e complete o nome.`,
+    };
   }
 
   try {

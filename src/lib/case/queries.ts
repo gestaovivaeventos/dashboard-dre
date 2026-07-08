@@ -237,6 +237,100 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
   };
 }
 
+/** Dados crus do contrato para a tela de edição (aba Cliente completa). */
+export interface ContractEditData {
+  id: string;
+  contract_number: number;
+  client_id: string;
+  signed_at: string | null;
+  event_name: string | null;
+  event_date: string | null;
+  show_time: string | null;
+  show_duration: string | null;
+  passagem_som: string | null;
+  local_name: string | null;
+  local_address: string | null;
+  local_city: string | null;
+  local_cep: string | null;
+  especificacoes: string | null;
+  espec_area_interna: boolean;
+  espec_area_externa: boolean;
+  espec_palco: boolean;
+  espec_trio: boolean;
+  extra_transporte_cidade: boolean;
+  extra_translado_local: boolean;
+  extra_diaria_alimentacao: boolean;
+  extra_hospedagem: boolean;
+  extra_outros: string | null;
+  rider_tecnico: boolean;
+  rider_camarim: boolean;
+  rider_pre_producao: boolean;
+  tipo_evento: "aberto" | "fechado" | null;
+  cortesias: string | null;
+  data_assinatura: string | null;
+  testemunha_1_nome: string | null;
+  testemunha_1_cpf: string | null;
+  testemunha_1_email: string | null;
+  testemunha_2_nome: string | null;
+  testemunha_2_cpf: string | null;
+  valor_atracao_cliente: number;
+  valor_rider: number;
+  valor_camarim: number;
+  valor_extras: number;
+  observacao: string | null;
+  receber_schedule: CaseParcelaInput[];
+}
+
+export async function getContractForEdit(id: string): Promise<ContractEditData | null> {
+  const db = await getDb();
+  const { data: c } = await db.from("case_contracts").select("*").eq("id", id).maybeSingle();
+  if (!c) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cc = c as any;
+  return {
+    id: cc.id,
+    contract_number: cc.contract_number,
+    client_id: cc.client_id,
+    signed_at: cc.signed_at,
+    event_name: cc.event_name,
+    event_date: cc.event_date,
+    show_time: cc.show_time,
+    show_duration: cc.show_duration,
+    passagem_som: cc.passagem_som,
+    local_name: cc.local_name,
+    local_address: cc.local_address,
+    local_city: cc.local_city,
+    local_cep: cc.local_cep,
+    especificacoes: cc.especificacoes,
+    espec_area_interna: !!cc.espec_area_interna,
+    espec_area_externa: !!cc.espec_area_externa,
+    espec_palco: !!cc.espec_palco,
+    espec_trio: !!cc.espec_trio,
+    extra_transporte_cidade: !!cc.extra_transporte_cidade,
+    extra_translado_local: !!cc.extra_translado_local,
+    extra_diaria_alimentacao: !!cc.extra_diaria_alimentacao,
+    extra_hospedagem: !!cc.extra_hospedagem,
+    extra_outros: cc.extra_outros ?? null,
+    rider_tecnico: !!cc.rider_tecnico,
+    rider_camarim: !!cc.rider_camarim,
+    rider_pre_producao: !!cc.rider_pre_producao,
+    tipo_evento: cc.tipo_evento ?? null,
+    cortesias: cc.cortesias,
+    data_assinatura: cc.data_assinatura,
+    testemunha_1_nome: cc.testemunha_1_nome,
+    testemunha_1_cpf: cc.testemunha_1_cpf,
+    testemunha_1_email: cc.testemunha_1_email,
+    testemunha_2_nome: cc.testemunha_2_nome,
+    testemunha_2_cpf: cc.testemunha_2_cpf,
+    valor_atracao_cliente: Number(cc.valor_atracao_cliente),
+    valor_rider: Number(cc.valor_rider),
+    valor_camarim: Number(cc.valor_camarim),
+    valor_extras: Number(cc.valor_extras),
+    observacao: cc.observacao,
+    receber_schedule: Array.isArray(cc.receber_schedule) ? cc.receber_schedule : [],
+  };
+}
+
 export async function getClients(): Promise<CaseClientRow[]> {
   const db = await getDb();
   const { data } = await db

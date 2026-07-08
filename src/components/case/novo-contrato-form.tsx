@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
+import type { ContractEditData } from "@/lib/case/queries";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -75,15 +76,15 @@ function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
   );
 }
 
-export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[]; bands: CaseBandRow[] }) {
+export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
   const [bandsList] = useState<CaseBandRow[]>(bands);
 
   // Cliente
-  const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
-  const [clientId, setClientId] = useState<string>("");
+  const [clientMode, setClientMode] = useState<"existing" | "new">(edit || clients.length ? "existing" : "new");
+  const [clientId, setClientId] = useState<string>(edit?.client_id ?? "");
   const [cName, setCName] = useState("");
   const [cDoc, setCDoc] = useState("");
   const [cEmail, setCEmail] = useState("");
@@ -95,43 +96,47 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const [cCep, setCCep] = useState("");
 
   // Evento / objeto
-  const [eventName, setEventName] = useState("");
-  const [eventDate, setEventDate] = useState("");
-  const [showTime, setShowTime] = useState("");
-  const [showDuration, setShowDuration] = useState("");
-  const [passagemSom, setPassagemSom] = useState("");
-  const [localName, setLocalName] = useState("");
-  const [localAddress, setLocalAddress] = useState("");
-  const [localCity, setLocalCity] = useState("");
-  const [localCep, setLocalCep] = useState("");
-  const [especificacoes, setEspecificacoes] = useState("");
+  const [eventName, setEventName] = useState(edit?.event_name ?? "");
+  const [eventDate, setEventDate] = useState(edit?.event_date ?? "");
+  const [showTime, setShowTime] = useState(edit?.show_time ?? "");
+  const [showDuration, setShowDuration] = useState(edit?.show_duration ?? "");
+  const [passagemSom, setPassagemSom] = useState(edit?.passagem_som ?? "");
+  const [localName, setLocalName] = useState(edit?.local_name ?? "");
+  const [localAddress, setLocalAddress] = useState(edit?.local_address ?? "");
+  const [localCity, setLocalCity] = useState(edit?.local_city ?? "");
+  const [localCep, setLocalCep] = useState(edit?.local_cep ?? "");
+  const [especificacoes, setEspecificacoes] = useState(edit?.especificacoes ?? "");
 
   // Modelo CASE
-  const [especAreaInterna, setEspecAreaInterna] = useState(false);
-  const [especAreaExterna, setEspecAreaExterna] = useState(false);
-  const [especPalco, setEspecPalco] = useState(false);
-  const [especTrio, setEspecTrio] = useState(false);
-  const [extraTransporte, setExtraTransporte] = useState(false);
-  const [extraTranslado, setExtraTranslado] = useState(false);
-  const [extraDiaria, setExtraDiaria] = useState(false);
-  const [extraHospedagem, setExtraHospedagem] = useState(false);
-  const [extraOutros, setExtraOutros] = useState("");
-  const [riderTecnico, setRiderTecnico] = useState(false);
-  const [riderCamarim, setRiderCamarim] = useState(false);
-  const [riderPreProducao, setRiderPreProducao] = useState(false);
-  const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">("");
-  const [cortesias, setCortesias] = useState("");
-  const [dataAssinatura, setDataAssinatura] = useState("");
-  const [test1Nome, setTest1Nome] = useState("");
-  const [test1Cpf, setTest1Cpf] = useState("");
-  const [test1Email, setTest1Email] = useState("");
-  const [test2Nome, setTest2Nome] = useState("");
-  const [test2Cpf, setTest2Cpf] = useState("");
+  const [especAreaInterna, setEspecAreaInterna] = useState(edit?.espec_area_interna ?? false);
+  const [especAreaExterna, setEspecAreaExterna] = useState(edit?.espec_area_externa ?? false);
+  const [especPalco, setEspecPalco] = useState(edit?.espec_palco ?? false);
+  const [especTrio, setEspecTrio] = useState(edit?.espec_trio ?? false);
+  const [extraTransporte, setExtraTransporte] = useState(edit?.extra_transporte_cidade ?? false);
+  const [extraTranslado, setExtraTranslado] = useState(edit?.extra_translado_local ?? false);
+  const [extraDiaria, setExtraDiaria] = useState(edit?.extra_diaria_alimentacao ?? false);
+  const [extraHospedagem, setExtraHospedagem] = useState(edit?.extra_hospedagem ?? false);
+  const [extraOutros, setExtraOutros] = useState(edit?.extra_outros ?? "");
+  const [riderTecnico, setRiderTecnico] = useState(edit?.rider_tecnico ?? false);
+  const [riderCamarim, setRiderCamarim] = useState(edit?.rider_camarim ?? false);
+  const [riderPreProducao, setRiderPreProducao] = useState(edit?.rider_pre_producao ?? false);
+  const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">(edit?.tipo_evento ?? "");
+  const [cortesias, setCortesias] = useState(edit?.cortesias ?? "");
+  const [dataAssinatura, setDataAssinatura] = useState(edit?.data_assinatura ?? "");
+  const [test1Nome, setTest1Nome] = useState(edit?.testemunha_1_nome ?? "");
+  const [test1Cpf, setTest1Cpf] = useState(edit?.testemunha_1_cpf ?? "");
+  const [test1Email, setTest1Email] = useState(edit?.testemunha_1_email ?? "");
+  const [test2Nome, setTest2Nome] = useState(edit?.testemunha_2_nome ?? "");
+  const [test2Cpf, setTest2Cpf] = useState(edit?.testemunha_2_cpf ?? "");
 
   // Valor cobrado do cliente (campo único "Contrato" → valor_atracao_cliente)
-  const [vAtracao, setVAtracao] = useState("");
-  const [observacao, setObservacao] = useState("");
-  const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>([emptyParcela()]);
+  const [vAtracao, setVAtracao] = useState(edit ? brlFromNumber(edit.valor_atracao_cliente) : "");
+  const [observacao, setObservacao] = useState(edit?.observacao ?? "");
+  const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>(
+    edit && edit.receber_schedule.length > 0
+      ? edit.receber_schedule.map((p) => ({ vencimento: p.vencimento, valorStr: brlFromNumber(Number(p.valor)) }))
+      : [emptyParcela()],
+  );
 
   // Aba Atração — identidade + anexo/OCR + pagamento
   const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
@@ -204,6 +209,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       .map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
     const selectedClient = clients.find((c) => c.id === clientId);
     return {
+      contract_id: edit?.id ?? null,
       client:
         clientMode === "existing" && selectedClient
           ? {
@@ -239,9 +245,10 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null, testemunha_1_email: test1Email.trim() || null,
       testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
-      valor_rider: 0,
-      valor_camarim: 0,
-      valor_extras: 0,
+      // Contratos antigos podem ter esses valores — a edição preserva; novos vão zerados.
+      valor_rider: edit?.valor_rider ?? 0,
+      valor_camarim: edit?.valor_camarim ?? 0,
+      valor_extras: edit?.valor_extras ?? 0,
       observacao: observacao.trim() || null,
       receber_schedule,
     };
@@ -276,7 +283,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       if ("error" in res) { submittingRef.current = false; setSubmitting(false); return setError(res.error); }
       const contractId = res.contractId;
 
-      if (bandFilled) {
+      if (!edit && bandFilled) {
         const pagar = pagarArtista.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) }));
         const atr = await salvarAtracao({ contract_id: contractId, band: buildBandInput(), attachment_path: attachmentPath, valor_artista: valArtista > 0 ? valArtista : undefined, parcelas_pagar: valArtista > 0 ? pagar : undefined });
         if ("error" in atr) { setError(atr.error); router.push(`/case/contratos/${contractId}`); return; }
@@ -306,13 +313,15 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); handleSalvar(false); }} className="space-y-5">
-      {/* Abas */}
-      <div className="flex gap-1 border-b border-border">
-        <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
-        <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
-      </div>
+      {/* Abas (na edição só existe a aba Cliente — atrações ficam no workspace) */}
+      {!edit && (
+        <div className="flex gap-1 border-b border-border">
+          <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
+          <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
+        </div>
+      )}
 
-      {tab === "cliente" ? (
+      {edit || tab === "cliente" ? (
         <>
           <div className={SECTION_CLS}>
             <div className="flex items-center justify-between">
@@ -481,20 +490,22 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       )}
 
       {/* Financeiro (placeholder até salvar/gerar títulos) */}
-      <section className="rounded-lg border border-border bg-surface-1 p-4">
-        <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
-        <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
-      </section>
+      {!edit && (
+        <section className="rounded-lg border border-border bg-surface-1 p-4">
+          <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
+          <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
+        </section>
+      )}
 
       {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-300">{error}</div>}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={() => router.push("/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
+        <button type="button" onClick={() => router.push(edit ? `/case/contratos/${edit.id}` : "/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
         <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:text-amber-400 dark:hover:bg-amber-950/30">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar rascunho
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar alterações" : "Salvar rascunho"}
         </button>
         <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Gerar e enviar para assinatura
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar e enviar para assinatura" : "Gerar e enviar para assinatura"}
         </button>
       </div>
     </form>

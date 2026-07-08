@@ -182,6 +182,11 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSignature className="h-4 w-4" />} {sent ? "Gerar e reenviar" : "Gerar e enviar para assinatura"}
           </button>
         )}
+        {!signed && (
+          <a href={`/case/contratos/${detail.id}/editar`} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2">
+            <PenLine className="h-4 w-4" /> Editar dados
+          </a>
+        )}
         {detail.sale_contract_path && (
           <button onClick={openSale} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2">
             <FileSignature className="h-4 w-4" /> Ver contrato (PDF)
