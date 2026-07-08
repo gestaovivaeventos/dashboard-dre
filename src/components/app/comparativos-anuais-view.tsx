@@ -245,8 +245,31 @@ export function ComparativosAnuaisView({
     if (visibleRows.length === 0) return;
     setExportingTable(true);
     try {
-      const XLSX = await import("xlsx");
-      const header = ["Codigo", "Conta", "Realizado", "Orcado", "Prev. x Real.", "Ano Anterior", "Atual x Anter."];
+      // xlsx-js-style: mesmo API do SheetJS + estilos de célula (.s).
+      const XLSX = await import("xlsx-js-style");
+      type StyledCell = { v?: unknown; z?: string; s?: Record<string, unknown> };
+
+      // Config por coluna: alinhamento, formato numérico e paleta batendo com a
+      // tela (Realizado=verde, Orçado=âmbar, Ano Anterior=azul).
+      interface ColCfg {
+        align: "left" | "right" | "center";
+        num?: boolean;
+        pct?: boolean;
+        hFill: string; hText: string; // header
+        cFill?: string; cText?: string; // célula de dados
+      }
+      const NEUTRAL = { hFill: "FFE2E8F0", hText: "FF334155" };
+      const cols: ColCfg[] = [
+        { align: "left", ...NEUTRAL }, // Código
+        { align: "left", ...NEUTRAL }, // Conta
+        { align: "right", num: true, hFill: "FFA7F3D0", hText: "FF065F46", cFill: "FFF0FDF4", cText: "FF065F46" }, // Realizado
+        { align: "right", num: true, hFill: "FFFDE68A", hText: "FF92400E", cFill: "FFFFFBEB", cText: "FF92400E" }, // Orçado
+        { align: "center", pct: true, ...NEUTRAL }, // Prev x Real
+        { align: "right", num: true, hFill: "FFBAE6FD", hText: "FF075985", cFill: "FFF0F9FF", cText: "FF075985" }, // Ano Anterior
+        { align: "center", pct: true, ...NEUTRAL }, // Atual x Anter
+      ];
+
+      const header = ["Código", "Conta", "Realizado", "Orçado", "Prev. x Real.", "Ano Anterior", "Atual x Anter."];
       const aoa: (string | number)[][] = [header];
       for (const row of visibleRows) {
         const indent = "    ".repeat(Math.max(0, row.level - 1));
@@ -262,13 +285,47 @@ export function ComparativosAnuaisView({
       }
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       ws["!cols"] = [{ wch: 10 }, { wch: 46 }, { wch: 16 }, { wch: 16 }, { wch: 13 }, { wch: 16 }, { wch: 13 }];
-      for (let r = 1; r < aoa.length; r++) {
-        for (const c of [2, 3, 5]) {
-          const addr = XLSX.utils.encode_cell({ r, c });
-          const cell = ws[addr];
-          if (cell && typeof cell.v === "number") cell.z = "#,##0.00";
+      ws["!rows"] = [{ hpt: 22 }];
+
+      const thin = { style: "thin", color: { rgb: "FFE2E8F0" } };
+      const borders = { top: thin, bottom: thin, left: thin, right: thin };
+
+      for (let r = 0; r < aoa.length; r++) {
+        const meta = r === 0 ? null : visibleRows[r - 1];
+        const isKey = meta ? ["4", "6", "8", "11"].includes(meta.code) : false;
+        const isSummary = meta ? meta.is_summary : false;
+        for (let c = 0; c < cols.length; c++) {
+          const col = cols[c];
+          const cell = ws[XLSX.utils.encode_cell({ r, c })] as StyledCell | undefined;
+          if (!cell) continue;
+          const s: Record<string, unknown> = {
+            alignment: { horizontal: col.align, vertical: "center" },
+            border: borders,
+          };
+          if (r === 0) {
+            s.font = { bold: true, sz: 11, color: { rgb: col.hText } };
+            s.fill = { patternType: "solid", fgColor: { rgb: col.hFill } };
+          } else {
+            const font: Record<string, unknown> = { bold: isKey || isSummary };
+            if (col.cFill) {
+              s.fill = { patternType: "solid", fgColor: { rgb: col.cFill } };
+              font.color = { rgb: col.cText };
+            } else if (isKey) {
+              s.fill = { patternType: "solid", fgColor: { rgb: "FFE2E8F0" } };
+            } else if (isSummary) {
+              s.fill = { patternType: "solid", fgColor: { rgb: "FFF1F5F9" } };
+            }
+            if (col.num) cell.z = "#,##0.00";
+            if (col.pct) {
+              const v = String(cell.v ?? "");
+              font.color = { rgb: v.startsWith("+") ? "FF047857" : v.startsWith("-") && v.length > 1 ? "FFB91C1C" : "FF94A3B8" };
+            }
+            s.font = font;
+          }
+          cell.s = s;
         }
       }
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Comparativo");
       const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
