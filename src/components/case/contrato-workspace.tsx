@@ -16,6 +16,7 @@ import {
   converterSaldoEmBv,
   gerarEnviarContrato,
   lancarNoOmie,
+  salvarCadastroCliente,
 } from "@/lib/case/actions/stages";
 import { extractArtistContract, extractFornecedorContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
@@ -127,6 +128,7 @@ export function ContratoWorkspace({ detail, bands, fornecedorBands }: { detail: 
 // ── ABA: Contrato Cliente ────────────────────────────────────────────────────
 function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [editingCadastro, setEditingCadastro] = useState(false);
   const { showToast } = useToast();
   const sent = Boolean(detail.sent_for_signature_at);
 
@@ -188,6 +190,13 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
             <PenLine className="h-4 w-4" /> Editar dados
           </a>
         )}
+        <button
+          type="button"
+          onClick={() => setEditingCadastro((v) => !v)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2"
+        >
+          <PenLine className="h-4 w-4" /> Editar cadastro do cliente
+        </button>
         {detail.sale_contract_path && (
           <button onClick={openSale} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2">
             <FileSignature className="h-4 w-4" /> Ver contrato (PDF)
@@ -202,7 +211,79 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
           <a href={detail.sign_url} target="_blank" rel="noreferrer" className="text-xs text-amber-600 hover:underline">Link de assinatura</a>
         )}
       </div>
+
+      {editingCadastro && (
+        <ClienteCadastroForm
+          detail={detail}
+          onDone={() => { setEditingCadastro(false); onChange(); }}
+          onCancel={() => setEditingCadastro(false)}
+        />
+      )}
     </section>
+  );
+}
+
+// Edita SÓ o cadastro do cliente (CNPJ, contato, endereço) — funciona mesmo com
+// o contrato assinado; o PDF assinado não muda, só o cadastro usado no Omie.
+function ClienteCadastroForm({ detail, onDone, onCancel }: { detail: ContractDetail; onDone: () => void; onCancel: () => void }) {
+  const c = detail.client;
+  const [nome, setNome] = useState(c.name === "—" ? "" : c.name);
+  const [doc, setDoc] = useState(c.cnpj_cpf ?? "");
+  const [email, setEmail] = useState(c.email ?? "");
+  const [phone, setPhone] = useState(c.phone ?? "");
+  const [respLegal, setRespLegal] = useState(c.resp_legal ?? "");
+  const [cpfResp, setCpfResp] = useState(c.cpf_resp_legal ?? "");
+  const [endereco, setEndereco] = useState(c.endereco ?? "");
+  const [cidadeEstado, setCidadeEstado] = useState(c.cidade_estado ?? "");
+  const [cep, setCep] = useState(c.cep ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setErr(null);
+    setSaving(true);
+    const res = await salvarCadastroCliente(detail.id, {
+      id: c.id,
+      name: nome.trim(),
+      cnpj_cpf: doc.trim() || null,
+      pessoa_fisica: doc.replace(/\D/g, "").length === 11,
+      email: email.trim() || null,
+      phone: phone.trim() || null,
+      resp_legal: respLegal.trim() || null,
+      cpf_resp_legal: cpfResp.trim() || null,
+      endereco: endereco.trim() || null,
+      cidade_estado: cidadeEstado.trim() || null,
+      cep: cep.trim() || null,
+    });
+    setSaving(false);
+    if ("error" in res) return setErr(res.error);
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-amber-500/40 p-3">
+      <p className="text-xs text-ink-muted">
+        Edita o <strong>cadastro</strong> do cliente (ex.: completar o CNPJ/CPF exigido pelo Omie). O contrato assinado não é alterado.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div><label className={LABEL_CLS}>Fundo / Razão social</label><input value={nome} onChange={(e) => setNome(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>CNPJ / CPF</label><input value={doc} onChange={(e) => setDoc(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>E-mail</label><input value={email} onChange={(e) => setEmail(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>Telefone</label><input value={phone} onChange={(e) => setPhone(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>Responsável legal</label><input value={respLegal} onChange={(e) => setRespLegal(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>CPF do responsável</label><input value={cpfResp} onChange={(e) => setCpfResp(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>Endereço</label><input value={endereco} onChange={(e) => setEndereco(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>Cidade / Estado</label><input value={cidadeEstado} onChange={(e) => setCidadeEstado(e.target.value)} className={INPUT_CLS} /></div>
+        <div><label className={LABEL_CLS}>CEP</label><input value={cep} onChange={(e) => setCep(e.target.value)} className={INPUT_CLS} /></div>
+      </div>
+      {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600 dark:text-red-300">{err}</div>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} disabled={saving} className="rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">Cancelar</button>
+        <button type="button" onClick={submit} disabled={saving} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar cadastro
+        </button>
+      </div>
+    </div>
   );
 }
 

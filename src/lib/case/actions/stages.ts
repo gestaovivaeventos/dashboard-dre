@@ -13,7 +13,7 @@ import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration } from "@/lib/case/resolve-cadastros";
 import { cents, validarSchedule, prorateCents } from "@/lib/case/parcelas";
-import type { CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
+import type { CaseClientInput, CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 
@@ -595,6 +595,38 @@ export async function removerAtracao(contractId: string, atracaoId: string): Pro
   await db.from("case_history").insert({
     contract_id: contractId, user_id: ctx.id, action: "etapa2",
     comment: `Atração ${bandName} removida (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true };
+}
+
+/**
+ * Atualiza SÓ o cadastro do cliente (não os dados do contrato) — permitido
+ * mesmo com contrato assinado. Uso típico: completar o CNPJ/CPF que o Omie
+ * exige. Registra/atualiza no Omie em seguida (best-effort).
+ */
+export async function salvarCadastroCliente(
+  contractId: string,
+  input: CaseClientInput,
+): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  if (!input.id) return { error: "Cliente não identificado." };
+  if (!input.name?.trim()) return { error: "Informe o nome do cliente." };
+
+  try {
+    await resolveClient(db, input, ctx.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao atualizar o cadastro do cliente." };
+  }
+  await ensureOmieRegistration(db, "client", input.id);
+
+  await db.from("case_history").insert({
+    contract_id: contractId,
+    user_id: ctx.id,
+    action: "criado",
+    comment: "Cadastro do cliente atualizado (dados cadastrais/CNPJ).",
   });
   revalidatePath(`/case/contratos/${contractId}`);
   return { ok: true };

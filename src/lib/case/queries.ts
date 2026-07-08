@@ -110,7 +110,19 @@ export interface ContractDetail {
   atracoes_confirmadas_at: string | null;
   sent_for_signature_at: string | null;
   clicksign_status: string | null;
-  client: { name: string; cnpj_cpf: string | null; email: string | null };
+  client: {
+    id: string;
+    name: string;
+    cnpj_cpf: string | null;
+    pessoa_fisica: boolean;
+    email: string | null;
+    phone: string | null;
+    resp_legal: string | null;
+    cpf_resp_legal: string | null;
+    endereco: string | null;
+    cidade_estado: string | null;
+    cep: string | null;
+  };
   band_id: string | null;
   band: { name: string; cnpj_cpf: string | null };
   /** Atrações vinculadas (um contrato pode ter várias). */
@@ -130,7 +142,8 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
        attachment_path, sale_contract_path, sign_url, signed_at, atracoes_confirmadas_at, sent_for_signature_at, clicksign_status, band_id,
-       case_clients(name, cnpj_cpf, email), case_bands(name, cnpj_cpf)`,
+       case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
+       case_bands(name, cnpj_cpf)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -209,7 +222,19 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     atracoes_confirmadas_at: cc.atracoes_confirmadas_at,
     sent_for_signature_at: cc.sent_for_signature_at,
     clicksign_status: cc.clicksign_status,
-    client: { name: cc.case_clients?.name ?? "—", cnpj_cpf: cc.case_clients?.cnpj_cpf ?? null, email: cc.case_clients?.email ?? null },
+    client: {
+      id: cc.case_clients?.id ?? "",
+      name: cc.case_clients?.name ?? "—",
+      cnpj_cpf: cc.case_clients?.cnpj_cpf ?? null,
+      pessoa_fisica: !!cc.case_clients?.pessoa_fisica,
+      email: cc.case_clients?.email ?? null,
+      phone: cc.case_clients?.phone ?? null,
+      resp_legal: cc.case_clients?.resp_legal ?? null,
+      cpf_resp_legal: cc.case_clients?.cpf_resp_legal ?? null,
+      endereco: cc.case_clients?.endereco ?? null,
+      cidade_estado: cc.case_clients?.cidade_estado ?? null,
+      cep: cc.case_clients?.cep ?? null,
+    },
     band_id: cc.band_id ?? null,
     band: { name: cc.case_bands?.name ?? "—", cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null },
     atracoes,
