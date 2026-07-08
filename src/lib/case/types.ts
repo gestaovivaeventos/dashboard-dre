@@ -211,5 +211,7 @@ export interface CaseBandRow {
 export interface CaseOmieConfigRow {
   codigo_categoria_custodia: string | null;
   codigo_categoria_servicos: string | null;
+  /** Categoria de DESPESA (2.x.x) usada nos títulos a pagar (artistas/fornecedores). */
+  codigo_categoria_pagar: string | null;
   codigo_conta_corrente: string | null;
 }

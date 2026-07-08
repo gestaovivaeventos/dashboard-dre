@@ -188,6 +188,12 @@ export async function launchContractToOmie(
       "Configuração Omie do Case incompleta — mapeie as categorias e a conta corrente em Case › Configuração Omie.",
     );
   }
+  if (needsBand && !config?.codigo_categoria_pagar) {
+    return {
+      error:
+        "Falta a categoria de CONTAS A PAGAR na Configuração Omie do Case (precisa ser categoria de despesa, 2.x.x) — o Omie não aceita categoria de receita em contas a pagar.",
+    };
+  }
 
   let appKey: string;
   let appSecret: string;
@@ -261,8 +267,10 @@ export async function launchContractToOmie(
 
   for (const t of rows) {
     const isPagar = t.leg === "pagar_custodia";
-    const categoria =
-      t.leg === "receber_servicos"
+    // Pagar exige categoria de DESPESA; receber usa custódia/serviços (receita).
+    const categoria = isPagar
+      ? String(config.codigo_categoria_pagar)
+      : t.leg === "receber_servicos"
         ? String(config.codigo_categoria_servicos)
         : String(config.codigo_categoria_custodia);
     // A pagar: parceiro é o fornecedor da verba (fornecedor_id) ou a banda da
