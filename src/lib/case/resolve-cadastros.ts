@@ -18,6 +18,50 @@ const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, ""
 // server actions, que já fizeram requireCaseUser. Não expor como action própria.
 
 /**
+ * Regra: fornecedor que ainda NÃO existe no Omie (atração, camarim, comissão
+ * rider/externa) só entra COM documento e dados bancários pagáveis — chave PIX
+ * OU banco+agência+conta completos. Retorna a mensagem de erro (PT) ou null.
+ */
+export function bankableError(
+  band: {
+    cnpj_cpf: string | null;
+    banco: string | null;
+    agencia: string | null;
+    conta_corrente: string | null;
+    chave_pix: string | null;
+  },
+  label = "fornecedor",
+): string | null {
+  const doc = onlyDigits(band.cnpj_cpf);
+  if (doc.length !== 11 && doc.length !== 14) {
+    return `Informe o CNPJ (14 dígitos) ou CPF (11 dígitos) do ${label} — cadastro novo precisa de documento para ir ao Omie.`;
+  }
+  const pix = (band.chave_pix ?? "").trim();
+  const contaCompleta =
+    !!(band.banco ?? "").trim() && !!(band.agencia ?? "").trim() && !!(band.conta_corrente ?? "").trim();
+  if (!pix && !contaCompleta) {
+    return `Informe os dados bancários do ${label}: chave PIX ou banco + agência + conta corrente.`;
+  }
+  return null;
+}
+
+/**
+ * Bloqueia se a banda resolvida ainda não tem cadastro no Omie e falta doc/dados
+ * bancários. Banda que já tem omie_codigo passa direto — seus dados já vivem lá.
+ * Ancorado no omie_codigo (e não em "é novo?") para cobrir também o cadastro
+ * local salvo antes desta regra que nunca subiu ao Omie.
+ */
+export async function requireBankableIfNew(db: DB, bandId: string, label = "fornecedor"): Promise<string | null> {
+  const { data: row } = await db
+    .from("case_bands")
+    .select("omie_codigo, cnpj_cpf, banco, agencia, conta_corrente, chave_pix")
+    .eq("id", bandId)
+    .single();
+  if (!row || row.omie_codigo) return null;
+  return bankableError(row, label);
+}
+
+/**
  * Regra "todo cliente já cadastrado na Omie": ao criar um cadastro novo, empurra
  * pro Omie na hora e grava o omie_codigo. Best-effort — se o Omie falhar, o
  * launch do contrato é a rede de segurança (ele reexecuta o mesmo cadastro).

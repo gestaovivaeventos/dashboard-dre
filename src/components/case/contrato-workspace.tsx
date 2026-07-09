@@ -32,6 +32,23 @@ const dateBR = (iso: string | null) => (iso ? new Date(iso.slice(0, 10) + "T00:0
 const INPUT_CLS = "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
 const LABEL_CLS = "block text-xs font-medium text-ink-secondary mb-1";
 
+/**
+ * Espelho client-side da regra do servidor (resolve-cadastros.bankableError):
+ * fornecedor NOVO precisa de documento + dados bancários pagáveis (PIX ou
+ * banco+agência+conta). Retorna a mensagem de erro ou null.
+ */
+function newBandBankError(f: { doc: string; banco: string; agencia: string; conta: string; pix: string }, label: string): string | null {
+  const doc = f.doc.replace(/\D/g, "");
+  if (doc.length !== 11 && doc.length !== 14) {
+    return `Informe o CNPJ ou CPF do ${label} — cadastro novo precisa de documento para ir ao Omie.`;
+  }
+  const contaCompleta = f.banco.trim() && f.agencia.trim() && f.conta.trim();
+  if (!f.pix.trim() && !contaCompleta) {
+    return `Informe os dados bancários do ${label}: chave PIX ou banco + agência + conta corrente.`;
+  }
+  return null;
+}
+
 function maskBRL(digits: string): string {
   const clean = digits.replace(/\D/g, "");
   return clean ? fmt.format(parseInt(clean, 10) / 100) : "";
@@ -757,6 +774,13 @@ function AtracaoForm({
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setParcelas(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    // Alerta se as parcelas lidas não somam o valor do contrato.
+    const somaPs = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    if (d.valorCache != null && d.valorCache > 0 && Math.abs(somaPs - d.valorCache) >= 0.01) {
+      setMsg(null);
+      setErr(`As parcelas lidas somam ${brl(somaPs)}, mas o valor do contrato é ${brl(d.valorCache)}. Ajuste as parcelas para bater com o total antes de salvar.`);
+      return;
+    }
     setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
   }
 
@@ -779,6 +803,10 @@ function AtracaoForm({
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
     if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome da atração/artista.");
+    if (bandMode === "new") {
+      const bankErr = newBandBankError({ doc: bDoc, banco: bBanco, agencia: bAgencia, conta: bConta, pix: bPix }, "atração");
+      if (bankErr) return setErr(bankErr);
+    }
     if (valArtista > 0 && !somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
     if (valArtista > limiteDisponivel) {
       return setErr(`Com as outras atrações, o disponível é ${brl(Math.max(0, limiteDisponivel))} (atração cobrada do cliente: ${brl(detail.valor_atracao_cliente)}).`);
@@ -1020,6 +1048,13 @@ function FornecedorForm({
     if (!achouAlgo) {
       return setErr("Li o documento, mas não encontrei dados de fornecedor/valor/parcelas nele — preencha manualmente ou confira se o arquivo é o contrato certo.");
     }
+    // Alerta se as parcelas lidas não somam o valor do contrato.
+    const somaPs = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    if (d.valorTotal != null && d.valorTotal > 0 && Math.abs(somaPs - d.valorTotal) >= 0.01) {
+      setMsg(null);
+      setErr(`As parcelas lidas somam ${brl(somaPs)}, mas o valor do contrato é ${brl(d.valorTotal)}. Ajuste as parcelas para bater com o total antes de salvar.`);
+      return;
+    }
     setMsg(`Contrato lido${identidade ? ` — ${identidade}` : ""}. Revise valor e parcelas antes de salvar.`);
   }
 
@@ -1042,6 +1077,10 @@ function FornecedorForm({
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione o fornecedor.");
     if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome do fornecedor.");
+    if (bandMode === "new") {
+      const bankErr = newBandBankError({ doc: bDoc, banco: bBanco, agencia: bAgencia, conta: bConta, pix: bPix }, "fornecedor");
+      if (bankErr) return setErr(bankErr);
+    }
     if (valor <= 0) return setErr("Informe o valor pago ao fornecedor.");
     if (!somaOk) return setErr("A soma das parcelas não confere com o valor do fornecedor.");
     if (valor > limiteDisponivel + 0.005) {

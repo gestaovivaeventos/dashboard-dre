@@ -218,6 +218,13 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    // Alerta se as parcelas lidas não somam o valor do contrato.
+    const somaPs = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    if (d.valorCache != null && d.valorCache > 0 && Math.abs(somaPs - d.valorCache) >= 0.01) {
+      setError(`As parcelas lidas somam R$ ${fmt.format(somaPs)}, mas o valor do contrato é R$ ${fmt.format(d.valorCache)}. Ajuste as parcelas para bater com o total antes de salvar.`);
+      setOcrMsg(null);
+      return;
+    }
     setOcrMsg("Contrato lido — revise os dados da atração.");
   }
 

@@ -11,7 +11,7 @@ import { CONTRATADO_SIGNER } from "@/lib/case/contract-config";
 import { buildContractPdf, type ContractPdfData } from "@/lib/case/contract-pdf";
 import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "@/lib/case/clicksign";
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
-import { resolveClient, resolveBand, ensureOmieRegistration } from "@/lib/case/resolve-cadastros";
+import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew } from "@/lib/case/resolve-cadastros";
 import { cents, validarSchedule } from "@/lib/case/parcelas";
 import type { CaseClientInput, CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
@@ -103,6 +103,10 @@ export async function salvarCliente(
     }
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao cadastrar cliente/atração." };
+  }
+  if (bandId) {
+    const bankErr = await requireBankableIfNew(db, bandId, "atração");
+    if (bankErr) return { error: bankErr };
   }
   await ensureOmieRegistration(db, "client", clientId);
   if (bandId) await ensureOmieRegistration(db, "band", bandId);
@@ -572,6 +576,8 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true; war
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao cadastrar a atração." };
   }
+  const bankErr = await requireBankableIfNew(db, bandId, "atração");
+  if (bankErr) return { error: bankErr };
   await ensureOmieRegistration(db, "band", bandId);
 
   const valorArtista = Number(input.valor_artista) || 0;
@@ -746,6 +752,8 @@ export async function salvarFornecedor(input: FornecedorInput): Promise<{ ok: tr
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao cadastrar o fornecedor." };
   }
+  const bankErr = await requireBankableIfNew(db, bandId, "fornecedor");
+  if (bankErr) return { error: bankErr };
   await ensureOmieRegistration(db, "band", bandId);
 
   const row = {

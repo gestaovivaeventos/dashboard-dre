@@ -17,6 +17,23 @@ type DB = SupabaseClient<any>;
 
 const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
 
+/** Data de amanhã (YYYY-MM-DD) — padrão para pagamento "na assinatura do contrato". */
+function amanhaISO(): string {
+  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Instruções comuns de parcelas + data de assinatura para os prompts de OCR. */
+function regrasParcelas(): string {
+  return (
+    "IMPORTANTE sobre as parcelas de pagamento: a SOMA de todas as parcelas deve ser " +
+    "EXATAMENTE igual ao valor total. Extraia TODAS as parcelas (entrada, ato, saldo etc.). " +
+    `Quando uma parcela for paga "na assinatura do contrato", "no ato", "à vista", "na data de ` +
+    `assinatura" ou similar (sem data de calendário explícita), use a data ${amanhaISO()} (o dia ` +
+    "seguinte a hoje). Datas no formato YYYY-MM-DD; valores como número decimal em reais."
+  );
+}
+
 const ArtistContractSchema = z.object({
   artista_nome: z.string().nullable().describe("Nome do artista/banda contratada (a atração). Null se não encontrar."),
   artista_cnpj_cpf: z.string().nullable().describe("CNPJ ou CPF do artista/banda ou de seu representante/produtora. Só números. Null se não encontrar."),
@@ -146,8 +163,8 @@ export async function extractFornecedorContract(
                 "e recebe o pagamento — não o contratante); uma descrição curta do serviço; o valor " +
                 "total; as datas e valores das parcelas de pagamento; contatos (e-mail, telefone); e os " +
                 "dados bancários para pagamento (banco, agência, conta, titular, CPF/CNPJ do titular, " +
-                "chave PIX). Não invente — deixe null o que não estiver no documento. Datas no formato " +
-                "YYYY-MM-DD; valores como número decimal em reais.",
+                "chave PIX). Não invente — deixe null o que não estiver no documento. " +
+                regrasParcelas(),
             },
             docPart,
           ],
@@ -223,7 +240,7 @@ export async function extractArtistContract(
                 "artista/banda; o CNPJ/CPF do artista ou de sua produtora; o valor do cachê; as datas e " +
                 "valores de pagamento ao artista; e os dados do show (data, horário, duração/passagem de " +
                 "som, local, endereço e cidade). Não invente — deixe null o que não estiver no documento. " +
-                "Datas no formato YYYY-MM-DD; valores como número decimal em reais.",
+                regrasParcelas(),
             },
             docPart,
           ],
