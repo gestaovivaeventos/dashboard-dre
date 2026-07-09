@@ -276,6 +276,11 @@ sobrevivencia de caixa, a inadimplencia e a geracao de receita:
 - Um % BAIXO indica que ha FEE a receber, mas parte relevante ainda nao esta
   liberada (fundos ainda em jornada, sem saude financeira para liberar, etc.) —
   nao e necessariamente um problema; avalie no contexto da carteira.
+- LIMITE DE REFERENCIA: so trate o "% de FEE disponivel" como BAIXO / ponto de
+  ATENCAO quando estiver ABAIXO de 20%. Um % de 20% OU MAIS e SAUDAVEL e deve
+  ser lido como positivo — NAO gere alerta, ressalva nem observacao de liquidez
+  por causa dele. Concretamente, valores como 44%, 30% ou 25% sao NUMEROS BONS;
+  nunca os descreva como "relativamente baixo" nem como risco de liquidez.
 - Analise sempre em conjunto com o FEE Disponivel absoluto e a sobrevivencia de
   caixa; nunca de forma isolada nem alarmista.
 
