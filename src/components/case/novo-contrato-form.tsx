@@ -299,7 +299,12 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     if (submittingRef.current) return;
     setError(null);
     if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
-    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
+    if (clientMode === "new") {
+      if (!cName.trim()) return setError("Informe o Fundo / Razão social do cliente.");
+      // Cliente novo entra no Omie como PF do responsável (fundo vira nome fantasia).
+      if (!cRespLegal.trim()) return setError("Informe o responsável legal (nome completo) — obrigatório para cadastrar o cliente.");
+      if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
+    }
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
 
     submittingRef.current = true;
@@ -380,17 +385,22 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                 )}
               </>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
-                <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
-                <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
-                <Field label="Telefone" value={cPhone} onChange={setCPhone} />
-                <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
-                <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
-                <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
-                <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
-                <Field label="CEP" value={cCep} onChange={setCCep} />
-              </div>
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Fundo / Razão social (nome fantasia no Omie)" value={cName} onChange={setCName} />
+                  <Field label="CNPJ (opcional)" value={cDoc} onChange={setCDoc} />
+                  <Field label="Responsável legal — nome completo *" value={cRespLegal} onChange={setCRespLegal} />
+                  <Field label="CPF do responsável *" value={cCpfResp} onChange={setCCpfResp} />
+                  <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                  <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                  <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                  <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                  <Field label="CEP" value={cCep} onChange={setCCep} />
+                </div>
+                <p className="text-xs text-ink-muted">
+                  No Omie, o cliente é cadastrado como <strong>pessoa física do responsável legal</strong> (razão social = nome completo, documento = CPF) e o Fundo/Razão social vira o <strong>nome fantasia</strong>. Informe o CNPJ só se o contratante tiver um.
+                </p>
+              </>
             )}
           </div>
 

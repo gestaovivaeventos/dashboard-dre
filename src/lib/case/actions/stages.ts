@@ -85,6 +85,13 @@ export async function salvarCliente(
 
   if (!input.client?.name?.trim()) return { error: "Informe o cliente." };
   if ((Number(input.valor_atracao_cliente) || 0) <= 0) return { error: "Informe o valor da atração cobrado do cliente." };
+  // Cliente novo (sem id) precisa de responsável legal + CPF: no Omie ele entra
+  // como PF do responsável, com o fundo/razão social no nome fantasia.
+  if (!input.client.id) {
+    const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+    if (!input.client.resp_legal?.trim()) return { error: "Informe o responsável legal (nome completo) do cliente." };
+    if (onlyDigits(input.client.cpf_resp_legal).length !== 11) return { error: "Informe o CPF do responsável legal (11 dígitos) do cliente." };
+  }
 
   let clientId: string;
   let bandId: string | null = null;
