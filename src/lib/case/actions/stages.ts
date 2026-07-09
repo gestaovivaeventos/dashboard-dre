@@ -273,13 +273,15 @@ export async function gerarEnviarContrato(
   // Signatários: cliente + contratado (CS Agência) + testemunha 1 (se e-mail).
   // Quem assina pelo cliente é o responsável legal (pessoa física) — o nome do
   // cliente costuma ser o fundo/razão social e a ClickSign rejeita ("nome e sobrenome").
+  // Assinatura em ordem: o contratado (CS Agência) assina PRIMEIRO (grupo 1);
+  // só depois o ClickSign libera cliente + testemunha juntos (grupo 2).
   const clienteSigner = client.resp_legal?.trim() || client.name;
   const signers: ClickSignSigner[] = [
-    { name: clienteSigner, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor" },
-    { name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor" },
+    { name: clienteSigner, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor", group: 2 },
+    { name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor", group: 1 },
   ];
   if (c.testemunha_1_email?.trim()) {
-    signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness" });
+    signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness", group: 2 });
   }
 
   // ClickSign exige nome E sobrenome de pessoa (sem números/símbolos) — valida

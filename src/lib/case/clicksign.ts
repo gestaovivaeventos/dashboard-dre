@@ -14,6 +14,11 @@ export interface ClickSignSigner {
   cpf: string | null;
   /** Papel no ClickSign: "contractor" (parte), "witness" (testemunha)… */
   signAs?: string;
+  /**
+   * Grupo de assinatura em ordem (1 assina primeiro, depois 2, …). Assinantes do
+   * mesmo grupo assinam simultaneamente. Sem valor, todos ficam no grupo 1.
+   */
+  group?: number;
 }
 
 export interface SignatureRequest {
@@ -65,6 +70,13 @@ export async function createSignatureRequest(
   const deadline = new Date();
   deadline.setDate(deadline.getDate() + 30);
 
+  // Assinatura em ordem: só ativa se houver mais de um grupo. Só o MENOR grupo é
+  // notificado no envio; o ClickSign chama os próximos grupos automaticamente
+  // conforme cada etapa é concluída.
+  const grupos = validSigners.map((s) => s.group ?? 1);
+  const menorGrupo = Math.min(...grupos);
+  const sequenceEnabled = new Set(grupos).size > 1;
+
   // 1) Documento
   const docRes = await csFetch("/api/v1/documents", {
     document: {
@@ -72,6 +84,7 @@ export async function createSignatureRequest(
       content_base64: `data:application/pdf;base64,${pdf.toString("base64")}`,
       deadline_at: deadline.toISOString(),
       auto_close: true,
+      sequence_enabled: sequenceEnabled,
       locale: "pt-BR",
     },
   });
@@ -94,19 +107,21 @@ export async function createSignatureRequest(
     const signerKey = String((signerRes.signer as Record<string, unknown> | undefined)?.key ?? "");
     if (!signerKey) throw new Error("ClickSign não retornou a chave do signatário.");
 
-    // 3) Vincula signatário ao documento
+    // 3) Vincula signatário ao documento. O `group` só é enviado com sequência
+    // ativa — a ClickSign rejeita o campo quando sequence_enabled é falso.
     const listRes = await csFetch("/api/v1/lists", {
       list: {
         document_key: documentKey,
         signer_key: signerKey,
         sign_as: signer.signAs ?? "contractor",
+        ...(sequenceEnabled ? { group: signer.group ?? 1 } : {}),
         message,
       },
     });
     const requestKey = String((listRes.list as Record<string, unknown> | undefined)?.request_signature_key ?? "");
 
-    // 4) Dispara o e-mail de solicitação para este signatário.
-    if (requestKey) {
+    // 4) Dispara o e-mail só para o 1º grupo. Sem sequência, todos são "menorGrupo".
+    if (requestKey && (signer.group ?? 1) === menorGrupo) {
       await csFetch("/api/v1/notifications", { request_signature_key: requestKey, message });
     }
     if (!first) first = { signerKey, requestKey };
