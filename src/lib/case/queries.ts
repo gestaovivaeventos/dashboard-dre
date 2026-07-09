@@ -394,6 +394,7 @@ export async function isOmieConfigured(): Promise<boolean> {
 }
 
 export interface AgendaTitle {
+  id: string;
   leg: CaseLegKind;
   descricao: string;
   valor: number;
@@ -458,7 +459,7 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
        case_clients(name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, endereco, cidade_estado),
        case_bands(name),
        case_contract_atracoes(case_bands(name)),
-       case_titles(leg, title_item, valor, status, omie_codigo, pago, omie_status, vencimento)`,
+       case_titles(id, leg, title_item, valor, status, omie_codigo, pago, omie_status, vencimento)`,
     )
     .order("event_date", { ascending: true, nullsFirst: false });
 
@@ -468,6 +469,7 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
       .map((t) => {
         const item = t.title_item && ITEM_LABEL[t.title_item] ? ` (${ITEM_LABEL[t.title_item]})` : "";
         return {
+          id: t.id,
           leg: t.leg as CaseLegKind,
           descricao: (LEG_LABEL[t.leg as CaseLegKind] ?? t.leg) + item,
           valor: Number(t.valor),
