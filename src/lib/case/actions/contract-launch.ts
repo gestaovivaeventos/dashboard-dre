@@ -490,11 +490,13 @@ export async function lancarBvContract(
     if (tCents <= 0) continue;
     const servCents = Math.max(0, Math.min(restante, tCents));
     const custCents = tCents - servCents;
+    // Categoria ÚNICA: o Omie só aplica via percentual 100 (valor sozinho é
+    // ignorado). Parcela DIVIDIDA: valor absoluto fecha exato no BV.
     const categorias =
       custCents === 0
-        ? [{ codigo_categoria: codServicos, valor: tCents / 100 }]
+        ? [{ codigo_categoria: codServicos, percentual: 100 }]
         : servCents === 0
-          ? [{ codigo_categoria: codCustodia, valor: tCents / 100 }]
+          ? [{ codigo_categoria: codCustodia, percentual: 100 }]
           : [
               { codigo_categoria: codServicos, valor: servCents / 100 },
               { codigo_categoria: codCustodia, valor: custCents / 100 },
