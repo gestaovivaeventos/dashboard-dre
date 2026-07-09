@@ -15,11 +15,15 @@ import {
   gerarEnviarContrato,
   lancarNoOmie,
   salvarCadastroCliente,
+  salvarCadastroBanda,
+  reenviarBandaOmie,
 } from "@/lib/case/actions/stages";
 import { extractArtistContract, extractFornecedorContract } from "@/lib/case/actions/ocr";
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract, lancarBvContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
+import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { validatePix } from "@/lib/case/pix";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
 import type { CaseBandRow, CaseFornecedorTipo } from "@/lib/case/types";
 
@@ -310,6 +314,56 @@ async function openStoragePath(path: string) {
   window.open(data.signedUrl, "_blank");
 }
 
+// Edita o cadastro de uma banda/fornecedor (dados do fornecedor/favorecido/
+// bancários) e reenvia ao Omie — disponível mesmo após o lançamento.
+function BandCadastroEditor({ contractId, bandRow, onDone, onCancel }: { contractId: string; bandRow: CaseBandRow; onDone: () => void; onCancel: () => void }) {
+  const [band, setBand] = useState<BandCadastro>(bandRowToCadastro(bandRow));
+  const patch = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
+  const [saving, setSaving] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setErr(null);
+    const pixErr = validatePix(band.pixTipo || null, band.pix);
+    if (pixErr) return setErr(pixErr);
+    setSaving(true);
+    const res = await salvarCadastroBanda(contractId, bandRow.id, bandCadastroToInput(band, bandRow.id));
+    setSaving(false);
+    if ("error" in res) return setErr(res.error);
+    if (res.warning) alert(res.warning);
+    onDone();
+  }
+  async function resend() {
+    setErr(null);
+    setResending(true);
+    const res = await reenviarBandaOmie(contractId, bandRow.id);
+    setResending(false);
+    if ("error" in res) return setErr(res.error);
+    alert("Cadastro reenviado ao Omie.");
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-amber-500/40 p-3">
+      <p className="text-xs text-ink-muted">
+        Edita o cadastro de <strong>{bandRow.name}</strong> (fornecedor, favorecido e dados bancários). Ao salvar, é reenviado ao Omie — use quando precisar corrigir dados ou o envio anterior falhou.
+      </p>
+      <BandCadastroFields value={band} onChange={patch} />
+      {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-600 dark:text-red-300">{err}</div>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={onCancel} disabled={saving || resending} className="rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">Cancelar</button>
+        <button type="button" onClick={resend} disabled={saving || resending} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
+          {resending && <Loader2 className="h-4 w-4 animate-spin" />} Só reenviar ao Omie
+        </button>
+        <button type="button" onClick={save} disabled={saving || resending} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar e enviar ao Omie
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[]; onChange: () => void }) {
   const atracoes = detail.atracoes;
   // Trava POR ENTIDADE: só a atração cujo título já foi lançado no Omie fica
@@ -319,7 +373,9 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
     atracoes.length === 0 ? { atracaoId: null } : null,
   );
   const [removing, setRemoving] = useState<string | null>(null);
+  const [editCadastro, setEditCadastro] = useState<string | null>(null);
   const totalAtracoes = atracoes.reduce((a, x) => a + x.valor_artista, 0);
+  const bandRowById = (id: string) => bands.find((b) => b.id === id);
 
   async function handleRemove(id: string, nome: string) {
     if (!confirm(`Remover a atração ${nome} deste contrato? Os títulos pendentes dela serão apagados.`)) return;
@@ -357,50 +413,69 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
         ) : (
           <div className="space-y-2">
             {atracoes.map((a) => (
-              <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-ink-primary">
-                    {a.band_name}
-                    {a.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{a.band_cnpj_cpf}</span>}
+              <div key={a.id} className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-ink-primary">
+                      {a.band_name}
+                      {a.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{a.band_cnpj_cpf}</span>}
+                    </div>
+                    <div className="text-xs text-ink-muted">
+                      {a.valor_artista > 0
+                        ? `${brl(a.valor_artista)} em ${a.pagar_schedule.length} parcela(s)`
+                        : "sem valor informado (títulos ainda não gerados)"}
+                    </div>
                   </div>
-                  <div className="text-xs text-ink-muted">
-                    {a.valor_artista > 0
-                      ? `${brl(a.valor_artista)} em ${a.pagar_schedule.length} parcela(s)`
-                      : "sem valor informado (títulos ainda não gerados)"}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {a.attachment_path && (
-                    <button
-                      type="button"
-                      onClick={() => openStoragePath(a.attachment_path!)}
-                      className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
-                    >
-                      Ver contrato
-                    </button>
-                  )}
-                  {lancadoAtracaoIds.has(a.id) ? (
-                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
-                  ) : (
-                    <>
+                  <div className="flex items-center gap-1.5">
+                    {a.attachment_path && (
                       <button
                         type="button"
-                        onClick={() => setEditing({ atracaoId: a.id })}
+                        onClick={() => openStoragePath(a.attachment_path!)}
                         className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
                       >
-                        Editar
+                        Ver contrato
                       </button>
+                    )}
+                    {bandRowById(a.band_id) && (
                       <button
                         type="button"
-                        onClick={() => handleRemove(a.id, a.band_name)}
-                        disabled={removing === a.id}
-                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                        onClick={() => setEditCadastro((v) => (v === a.band_id ? null : a.band_id))}
+                        className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
                       >
-                        {removing === a.id ? "…" : "Remover"}
+                        Cadastro
                       </button>
-                    </>
-                  )}
+                    )}
+                    {lancadoAtracaoIds.has(a.id) ? (
+                      <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setEditing({ atracaoId: a.id })}
+                          className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(a.id, a.band_name)}
+                          disabled={removing === a.id}
+                          className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                        >
+                          {removing === a.id ? "…" : "Remover"}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+                {editCadastro === a.band_id && bandRowById(a.band_id) && (
+                  <BandCadastroEditor
+                    contractId={detail.id}
+                    bandRow={bandRowById(a.band_id)!}
+                    onDone={() => { setEditCadastro(null); onChange(); }}
+                    onCancel={() => setEditCadastro(null)}
+                  />
+                )}
               </div>
             ))}
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-sm">
@@ -445,6 +520,8 @@ function RiderCamarimSection({ detail, bands, onChange }: { detail: ContractDeta
   const [savingVerba, setSavingVerba] = useState(false);
   const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [editCadastro, setEditCadastro] = useState<string | null>(null);
+  const bandRowById = (id: string) => bands.find((b) => b.id === id);
 
   const verbaDigitada = parseBRL(verbaStr);
   const fornecedorEditando = editing?.fornecedorId ? fornecedores.find((f) => f.id === editing.fornecedorId) ?? null : null;
@@ -507,40 +584,50 @@ function RiderCamarimSection({ detail, bands, onChange }: { detail: ContractDeta
         {fornecedores.length > 0 && (
           <div className="space-y-2">
             {fornecedores.map((f) => (
-              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-ink-primary">
-                    {f.band_name}
-                    {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+              <div key={f.id} className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-ink-primary">
+                      {f.band_name}
+                      {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+                    </div>
+                    <div className="text-xs text-ink-muted">
+                      {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                    </div>
                   </div>
-                  <div className="text-xs text-ink-muted">
-                    {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                  <div className="flex items-center gap-1.5">
+                    {f.attachment_path && (
+                      <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Ver contrato
+                      </button>
+                    )}
+                    {bandRowById(f.band_id) && (
+                      <button type="button" onClick={() => setEditCadastro((v) => (v === f.band_id ? null : f.band_id))} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Cadastro
+                      </button>
+                    )}
+                    {lancadoFornecedorIds.has(f.id) ? (
+                      <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(f.id, f.band_name)}
+                          disabled={removing === f.id}
+                          className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                        >
+                          {removing === f.id ? "…" : "Remover"}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {f.attachment_path && (
-                    <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-                      Ver contrato
-                    </button>
-                  )}
-                  {lancadoFornecedorIds.has(f.id) ? (
-                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(f.id, f.band_name)}
-                        disabled={removing === f.id}
-                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
-                      >
-                        {removing === f.id ? "…" : "Remover"}
-                      </button>
-                    </>
-                  )}
-                </div>
+                {editCadastro === f.band_id && bandRowById(f.band_id) && (
+                  <BandCadastroEditor contractId={detail.id} bandRow={bandRowById(f.band_id)!} onDone={() => { setEditCadastro(null); onChange(); }} onCancel={() => setEditCadastro(null)} />
+                )}
               </div>
             ))}
           </div>
@@ -592,6 +679,8 @@ function ComissaoSection({
   const total = fornecedores.reduce((a, f) => a + f.valor, 0);
   const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [editCadastro, setEditCadastro] = useState<string | null>(null);
+  const bandRowById = (id: string) => bands.find((b) => b.id === id);
   const fornecedorEditando = editing?.fornecedorId ? fornecedores.find((f) => f.id === editing.fornecedorId) ?? null : null;
 
   async function handleRemove(id: string, nome: string) {
@@ -626,40 +715,50 @@ function ComissaoSection({
         ) : (
           <div className="space-y-2">
             {fornecedores.map((f) => (
-              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-ink-primary">
-                    {f.band_name}
-                    {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+              <div key={f.id} className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-ink-primary">
+                      {f.band_name}
+                      {f.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{f.band_cnpj_cpf}</span>}
+                    </div>
+                    <div className="text-xs text-ink-muted">
+                      {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                    </div>
                   </div>
-                  <div className="text-xs text-ink-muted">
-                    {f.descricao ? `${f.descricao} · ` : ""}{brl(f.valor)} em {f.pagar_schedule.length} parcela(s)
+                  <div className="flex items-center gap-1.5">
+                    {f.attachment_path && (
+                      <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Ver contrato
+                      </button>
+                    )}
+                    {bandRowById(f.band_id) && (
+                      <button type="button" onClick={() => setEditCadastro((v) => (v === f.band_id ? null : f.band_id))} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                        Cadastro
+                      </button>
+                    )}
+                    {lancadoFornecedorIds.has(f.id) ? (
+                      <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(f.id, f.band_name)}
+                          disabled={removing === f.id}
+                          className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                        >
+                          {removing === f.id ? "…" : "Remover"}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {f.attachment_path && (
-                    <button type="button" onClick={() => openStoragePath(f.attachment_path!)} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-                      Ver contrato
-                    </button>
-                  )}
-                  {lancadoFornecedorIds.has(f.id) ? (
-                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(f.id, f.band_name)}
-                        disabled={removing === f.id}
-                        className="rounded-md border border-red-500/40 px-2 py-1 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
-                      >
-                        {removing === f.id ? "…" : "Remover"}
-                      </button>
-                    </>
-                  )}
-                </div>
+                {editCadastro === f.band_id && bandRowById(f.band_id) && (
+                  <BandCadastroEditor contractId={detail.id} bandRow={bandRowById(f.band_id)!} onDone={() => { setEditCadastro(null); onChange(); }} onCancel={() => setEditCadastro(null)} />
+                )}
               </div>
             ))}
             <div className="flex items-center justify-between rounded-md bg-surface-2 px-3 py-2 text-sm">
@@ -701,16 +800,8 @@ function AtracaoForm({
 }) {
   const [bandMode, setBandMode] = useState<"existing" | "new">(atracao || bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>(atracao?.band_id ?? "");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
-  const [bBanco, setBBanco] = useState("");
-  const [bAgencia, setBAgencia] = useState("");
-  const [bConta, setBConta] = useState("");
-  const [bTitular, setBTitular] = useState("");
-  const [bDocTitular, setBDocTitular] = useState("");
-  const [bPix, setBPix] = useState("");
+  const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
+  const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
   const [attachmentPath, setAttachmentPath] = useState<string | null>(atracao?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(atracao?.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
@@ -768,8 +859,7 @@ function AtracaoForm({
       setBandId(match.id);
     } else if (!atracao && d.bandName) {
       setBandMode("new");
-      setBName(d.bandName);
-      setBDoc(d.bandDoc ?? "");
+      patchBand({ name: d.bandName, doc: d.bandDoc ?? "" });
     }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
@@ -789,23 +879,21 @@ function AtracaoForm({
     return bandMode === "existing" && sel
       ? {
           id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix,
+          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
         }
-      : {
-          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: bDoc.replace(/\D/g, "").length === 11,
-          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
-          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
-        };
+      : bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
-    if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome da atração/artista.");
+    if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome da atração/artista.");
     if (bandMode === "new") {
-      const bankErr = newBandBankError({ doc: bDoc, banco: bBanco, agencia: bAgencia, conta: bConta, pix: bPix }, "atração");
+      const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "atração");
       if (bankErr) return setErr(bankErr);
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
     }
     if (valArtista > 0 && !somaOk) return setErr("A soma das parcelas não confere com o valor do artista.");
     if (valArtista > limiteDisponivel) {
@@ -836,23 +924,14 @@ function AtracaoForm({
         </div>
       </div>
       {bandMode === "existing" ? (
-        <select value={bandId} onChange={(e) => setBandId(e.target.value)} className={INPUT_CLS}>
-          <option value="">— selecione —</option>
-          {bands.map((b) => (<option key={b.id} value={b.id}>{b.name} {b.cnpj_cpf ? `— ${b.cnpj_cpf}` : ""}</option>))}
-        </select>
+        <SearchSelect
+          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+          value={bandId}
+          onChange={setBandId}
+          placeholder="Buscar e selecionar a atração/artista…"
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div><label className={LABEL_CLS}>Nome / Razão social</label><input value={bName} onChange={(e) => setBName(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>CNPJ / CPF</label><input value={bDoc} onChange={(e) => setBDoc(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>E-mail</label><input value={bEmail} onChange={(e) => setBEmail(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Telefone</label><input value={bPhone} onChange={(e) => setBPhone(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Banco</label><input value={bBanco} onChange={(e) => setBBanco(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Agência</label><input value={bAgencia} onChange={(e) => setBAgencia(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Conta corrente</label><input value={bConta} onChange={(e) => setBConta(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Titular</label><input value={bTitular} onChange={(e) => setBTitular(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>CPF/CNPJ do titular</label><input value={bDocTitular} onChange={(e) => setBDocTitular(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Chave PIX</label><input value={bPix} onChange={(e) => setBPix(e.target.value)} className={INPUT_CLS} /></div>
-        </div>
+        <BandCadastroFields value={band} onChange={patchBand} />
       )}
       <div className="mt-1 border-t border-border pt-3">
         <h3 className="text-sm font-semibold text-ink-primary">Contrato do artista + pagamento</h3>
@@ -948,16 +1027,8 @@ function FornecedorForm({
   const isVerba = tipo === "rider_camarim";
   const [bandMode, setBandMode] = useState<"existing" | "new">(fornecedor || bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>(fornecedor?.band_id ?? "");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
-  const [bBanco, setBBanco] = useState("");
-  const [bAgencia, setBAgencia] = useState("");
-  const [bConta, setBConta] = useState("");
-  const [bTitular, setBTitular] = useState("");
-  const [bDocTitular, setBDocTitular] = useState("");
-  const [bPix, setBPix] = useState("");
+  const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
+  const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
   const [descricao, setDescricao] = useState(fornecedor?.descricao ?? "");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(fornecedor?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(fornecedor?.attachment_path ? "Contrato anexado" : "");
@@ -1026,16 +1097,18 @@ function FornecedorForm({
       identidade = `${match.name} já cadastrado — selecionado automaticamente`;
     } else if (!fornecedor && d.nome) {
       setBandMode("new");
-      setBName(d.nome);
-      setBDoc(d.doc ?? "");
-      if (d.email) setBEmail(d.email);
-      if (d.telefone) setBPhone(d.telefone);
-      if (d.banco) setBBanco(d.banco);
-      if (d.agencia) setBAgencia(d.agencia);
-      if (d.contaCorrente) setBConta(d.contaCorrente);
-      if (d.titularBanco) setBTitular(d.titularBanco);
-      if (d.docTitular) setBDocTitular(d.docTitular);
-      if (d.chavePix) setBPix(d.chavePix);
+      patchBand({
+        name: d.nome,
+        doc: d.doc ?? "",
+        ...(d.email ? { email: d.email } : {}),
+        ...(d.telefone ? { phone: d.telefone } : {}),
+        ...(d.banco ? { banco: d.banco } : {}),
+        ...(d.agencia ? { agencia: d.agencia } : {}),
+        ...(d.contaCorrente ? { conta: d.contaCorrente } : {}),
+        ...(d.titularBanco ? { titular: d.titularBanco } : {}),
+        ...(d.docTitular ? { docTitular: d.docTitular } : {}),
+        ...(d.chavePix ? { pix: d.chavePix } : {}),
+      });
       identidade = `${d.nome} preenchido como novo cadastro`;
     }
 
@@ -1063,23 +1136,21 @@ function FornecedorForm({
     return bandMode === "existing" && sel
       ? {
           id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix,
+          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
         }
-      : {
-          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: bDoc.replace(/\D/g, "").length === 11,
-          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
-          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
-        };
+      : bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione o fornecedor.");
-    if (bandMode === "new" && !bName.trim()) return setErr("Informe o nome do fornecedor.");
+    if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome do fornecedor.");
     if (bandMode === "new") {
-      const bankErr = newBandBankError({ doc: bDoc, banco: bBanco, agencia: bAgencia, conta: bConta, pix: bPix }, "fornecedor");
+      const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "fornecedor");
       if (bankErr) return setErr(bankErr);
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
     }
     if (valor <= 0) return setErr("Informe o valor pago ao fornecedor.");
     if (!somaOk) return setErr("A soma das parcelas não confere com o valor do fornecedor.");
@@ -1139,18 +1210,7 @@ function FornecedorForm({
           placeholder="Buscar e selecionar o fornecedor…"
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div><label className={LABEL_CLS}>Nome / Razão social</label><input value={bName} onChange={(e) => setBName(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>CNPJ / CPF</label><input value={bDoc} onChange={(e) => setBDoc(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>E-mail</label><input value={bEmail} onChange={(e) => setBEmail(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Telefone</label><input value={bPhone} onChange={(e) => setBPhone(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Banco</label><input value={bBanco} onChange={(e) => setBBanco(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Agência</label><input value={bAgencia} onChange={(e) => setBAgencia(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Conta corrente</label><input value={bConta} onChange={(e) => setBConta(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Titular</label><input value={bTitular} onChange={(e) => setBTitular(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>CPF/CNPJ do titular</label><input value={bDocTitular} onChange={(e) => setBDocTitular(e.target.value)} className={INPUT_CLS} /></div>
-          <div><label className={LABEL_CLS}>Chave PIX</label><input value={bPix} onChange={(e) => setBPix(e.target.value)} className={INPUT_CLS} /></div>
-        </div>
+        <BandCadastroFields value={band} onChange={patchBand} />
       )}
 
       <div><label className={LABEL_CLS}>Descrição (o que este fornecedor cobre — ex.: som e luz, camarim)</label><input value={descricao} onChange={(e) => setDescricao(e.target.value)} className={INPUT_CLS} /></div>

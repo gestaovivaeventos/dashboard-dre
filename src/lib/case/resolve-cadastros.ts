@@ -107,6 +107,39 @@ export async function ensureOmieRegistration(db: DB, kind: "client" | "band", id
   }
 }
 
+/**
+ * Empurra (ou re-empurra) o cadastro de uma banda/fornecedor para o Omie —
+ * usado para reenviar depois de corrigir dados. syncSupplierToOmieUnit faz
+ * AlterarCliente se já existe (por CNPJ) ou IncluirCliente. Retorna erro (PT) ou null.
+ */
+export async function pushBandToOmie(db: DB, bandId: string): Promise<string | null> {
+  const { data: row } = await db.from("case_bands").select("*").eq("id", bandId).single();
+  if (!row) return "Cadastro não encontrado.";
+  if (!onlyDigits(row.cnpj_cpf)) return "Cadastro sem CNPJ/CPF — informe o documento antes de enviar ao Omie.";
+  const creds = await getCaseOmieCreds(db);
+  if (!creds) return "Empresa Case Shows sem credenciais Omie configuradas.";
+  const data: OmieSupplierData = {
+    id: row.id,
+    name: row.name,
+    cnpj_cpf: row.cnpj_cpf,
+    email: row.email,
+    phone: row.phone,
+    banco: row.banco,
+    agencia: row.agencia,
+    conta_corrente: row.conta_corrente,
+    titular_banco: row.titular_banco,
+    doc_titular: row.doc_titular,
+    chave_pix: row.chave_pix,
+  };
+  try {
+    const { codigoCliente } = await syncSupplierToOmieUnit(creds.appKey, creds.appSecret, data);
+    await db.from("case_bands").update({ omie_codigo: codigoCliente, omie_synced_at: new Date().toISOString() }).eq("id", bandId);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "Falha ao enviar o cadastro ao Omie.";
+  }
+}
+
 export async function resolveClient(db: DB, input: CaseClientInput, userId: string): Promise<string> {
   const legalFields = {
     email: input.email,
@@ -179,6 +212,7 @@ export async function resolveBand(
     titular_banco: input.titular_banco,
     doc_titular: input.doc_titular,
     chave_pix: input.chave_pix,
+    chave_pix_tipo: input.chave_pix_tipo,
   };
 
   if (input.id) {

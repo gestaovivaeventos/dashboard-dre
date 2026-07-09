@@ -8,6 +8,8 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
+import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { validatePix } from "@/lib/case/pix";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 import type { ContractEditData } from "@/lib/case/queries";
 
@@ -159,16 +161,8 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   // Aba Atração — identidade + anexo/OCR + pagamento
   const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>("");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
-  const [bBanco, setBBanco] = useState("");
-  const [bAgencia, setBAgencia] = useState("");
-  const [bConta, setBConta] = useState("");
-  const [bTitular, setBTitular] = useState("");
-  const [bDocTitular, setBDocTitular] = useState("");
-  const [bPix, setBPix] = useState("");
+  const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
+  const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentName, setAttachmentName] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -184,7 +178,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   const valAtracao = parseBRL(vAtracao);
   const totalCliente = valAtracao;
   const valArtista = parseBRL(vArtista);
-  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!bName.trim());
+  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!band.name.trim());
 
   async function handleUpload(file: File) {
     setError(null);
@@ -214,7 +208,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     setOcrLoading(false);
     if ("error" in res) return setError(res.error);
     const d = res.data;
-    if (d.bandName && bandMode === "new") { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
+    if (d.bandName && bandMode === "new") { patchBand({ name: d.bandName, doc: d.bandDoc ?? "" }); }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
@@ -293,13 +287,9 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       ? {
           id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
           email: selectedBand.email, phone: selectedBand.phone, banco: selectedBand.banco, agencia: selectedBand.agencia,
-          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix,
+          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix, chave_pix_tipo: selectedBand.chave_pix_tipo,
         }
-      : {
-          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: onlyDigits(bDoc).length === 11,
-          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
-          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
-        };
+      : bandCadastroToInput(band);
   }
 
   async function handleSalvar(enviar: boolean) {
@@ -313,6 +303,10 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
     }
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
+    if (!edit && bandMode === "new" && band.name.trim()) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setError(pixErr);
+    }
 
     submittingRef.current = true;
     setSubmitting(true);
@@ -512,18 +506,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                 placeholder="Buscar e selecionar a atração/artista…"
               />
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Nome / Razão social" value={bName} onChange={setBName} />
-                <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
-                <Field label="E-mail" value={bEmail} onChange={setBEmail} />
-                <Field label="Telefone" value={bPhone} onChange={setBPhone} />
-                <Field label="Banco" value={bBanco} onChange={setBBanco} />
-                <Field label="Agência" value={bAgencia} onChange={setBAgencia} />
-                <Field label="Conta corrente" value={bConta} onChange={setBConta} />
-                <Field label="Titular" value={bTitular} onChange={setBTitular} />
-                <Field label="CPF/CNPJ do titular" value={bDocTitular} onChange={setBDocTitular} />
-                <Field label="Chave PIX" value={bPix} onChange={setBPix} />
-              </div>
+              <BandCadastroFields value={band} onChange={patchBand} />
             )}
           </div>
 

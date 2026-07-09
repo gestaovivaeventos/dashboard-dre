@@ -393,6 +393,150 @@ export async function isOmieConfigured(): Promise<boolean> {
   );
 }
 
+export interface AgendaTitle {
+  leg: CaseLegKind;
+  descricao: string;
+  valor: number;
+  status: string; // pendente | lancado | erro
+  omie_codigo: number | null;
+  pago: boolean;
+  omie_status: string | null;
+  vencimento: string | null;
+}
+
+export interface AgendaContract {
+  id: string;
+  contract_number: number;
+  status: CaseContractStatus;
+  event_name: string | null;
+  event_date: string | null;
+  show_time: string | null;
+  local_name: string | null;
+  local_city: string | null;
+  local_address: string | null;
+  client_name: string;
+  client_doc: string | null;
+  client_pf: boolean;
+  client_email: string | null;
+  client_phone: string | null;
+  client_resp_legal: string | null;
+  client_endereco: string | null;
+  client_cidade_estado: string | null;
+  band_name: string;
+  atracoes: string[];
+  valor_total: number;
+  valor_custodia: number;
+  valor_servicos: number;
+  has_attachment: boolean;
+  has_sale_contract: boolean;
+  sign_url: string | null;
+  titles: AgendaTitle[];
+  aReceberTotal: number;
+  aReceberPago: number;
+  aPagarTotal: number;
+  aPagarPago: number;
+  temErro: boolean;
+}
+
+const LEG_LABEL: Record<CaseLegKind, string> = {
+  receber_custodia: "A receber — Custódia",
+  receber_servicos: "A receber — Serviços/BV",
+  pagar_custodia: "A pagar — Custódia (artista)",
+};
+
+const ITEM_LABEL: Record<string, string> = { margem: "Comissão/BV", rider: "Rider", camarim: "Camarim", extras: "Extras" };
+
+export async function getAgendaContracts(): Promise<AgendaContract[]> {
+  const db = await getDb();
+  const { data } = await db
+    .from("case_contracts")
+    .select(
+      `id, contract_number, status, event_name, event_date, show_time,
+       local_name, local_city, local_address,
+       valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_custodia, valor_servicos,
+       attachment_path, sale_contract_path, sign_url,
+       case_clients(name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, endereco, cidade_estado),
+       case_bands(name),
+       case_contract_atracoes(case_bands(name)),
+       case_titles(leg, title_item, valor, status, omie_codigo, pago, omie_status, vencimento)`,
+    )
+    .order("event_date", { ascending: true, nullsFirst: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data ?? []) as any[]).map((c) => {
+    const titles: AgendaTitle[] = ((c.case_titles ?? []) as any[]) // eslint-disable-line @typescript-eslint/no-explicit-any
+      .map((t) => {
+        const item = t.title_item && ITEM_LABEL[t.title_item] ? ` (${ITEM_LABEL[t.title_item]})` : "";
+        return {
+          leg: t.leg as CaseLegKind,
+          descricao: (LEG_LABEL[t.leg as CaseLegKind] ?? t.leg) + item,
+          valor: Number(t.valor),
+          status: t.status,
+          omie_codigo: t.omie_codigo ?? null,
+          pago: Boolean(t.pago),
+          omie_status: t.omie_status ?? null,
+          vencimento: t.vencimento ?? null,
+        };
+      })
+      .sort((a, b) => (a.vencimento ?? "").localeCompare(b.vencimento ?? ""));
+
+    let aReceberTotal = 0;
+    let aReceberPago = 0;
+    let aPagarTotal = 0;
+    let aPagarPago = 0;
+    let temErro = false;
+    for (const t of titles) {
+      if (t.status === "erro") temErro = true;
+      if (t.leg === "pagar_custodia") {
+        aPagarTotal += t.valor;
+        if (t.pago) aPagarPago += t.valor;
+      } else {
+        aReceberTotal += t.valor;
+        if (t.pago) aReceberPago += t.valor;
+      }
+    }
+
+    const atracoes = ((c.case_contract_atracoes ?? []) as Array<{ case_bands?: { name?: string } }>)
+      .map((a) => a.case_bands?.name)
+      .filter((n): n is string => Boolean(n));
+
+    return {
+      id: c.id,
+      contract_number: c.contract_number,
+      status: c.status,
+      event_name: c.event_name,
+      event_date: c.event_date,
+      show_time: c.show_time,
+      local_name: c.local_name,
+      local_city: c.local_city,
+      local_address: c.local_address,
+      client_name: c.case_clients?.name ?? "—",
+      client_doc: c.case_clients?.cnpj_cpf ?? null,
+      client_pf: Boolean(c.case_clients?.pessoa_fisica),
+      client_email: c.case_clients?.email ?? null,
+      client_phone: c.case_clients?.phone ?? null,
+      client_resp_legal: c.case_clients?.resp_legal ?? null,
+      client_endereco: c.case_clients?.endereco ?? null,
+      client_cidade_estado: c.case_clients?.cidade_estado ?? null,
+      band_name: c.case_bands?.name ?? (atracoes[0] ?? "—"),
+      atracoes,
+      valor_total:
+        Number(c.valor_atracao_cliente) + Number(c.valor_rider) + Number(c.valor_camarim) + Number(c.valor_extras),
+      valor_custodia: Number(c.valor_custodia),
+      valor_servicos: Number(c.valor_servicos),
+      has_attachment: Boolean(c.attachment_path),
+      has_sale_contract: Boolean(c.sale_contract_path),
+      sign_url: c.sign_url ?? null,
+      titles,
+      aReceberTotal,
+      aReceberPago,
+      aPagarTotal,
+      aPagarPago,
+      temErro,
+    };
+  });
+}
+
 export type CaseClosingStatus =
   | "aguardando_evento"
   | "pendente_fechamento"

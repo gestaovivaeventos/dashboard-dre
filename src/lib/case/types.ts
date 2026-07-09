@@ -40,6 +40,8 @@ export interface CaseBandInput {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  /** Tipo da chave PIX (cpf_cnpj|telefone|email|aleatoria) — UI/validação. */
+  chave_pix_tipo: string | null;
 }
 
 export interface CaseParcelaInput {
@@ -215,6 +217,7 @@ export interface CaseBandRow {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  chave_pix_tipo: string | null;
 }
 
 export interface CaseOmieConfigRow {

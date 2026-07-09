@@ -11,9 +11,9 @@ import { CONTRATADO_SIGNER } from "@/lib/case/contract-config";
 import { buildContractPdf, type ContractPdfData } from "@/lib/case/contract-pdf";
 import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "@/lib/case/clicksign";
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
-import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew } from "@/lib/case/resolve-cadastros";
+import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew, pushBandToOmie } from "@/lib/case/resolve-cadastros";
 import { cents, validarSchedule } from "@/lib/case/parcelas";
-import type { CaseClientInput, CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
+import type { CaseBandInput, CaseClientInput, CaseParcelaInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 
@@ -653,6 +653,45 @@ export async function removerAtracao(contractId: string, atracaoId: string): Pro
     contract_id: contractId, user_id: ctx.id, action: "etapa2",
     comment: `Atração ${bandName} removida (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
   });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return { ok: true };
+}
+
+/**
+ * Atualiza o cadastro de uma banda/fornecedor (case_bands) e reenvia ao Omie —
+ * funciona a qualquer momento (mesmo após lançamento). Corrige dados bancários,
+ * PIX etc. sem mexer nos títulos já lançados.
+ */
+export async function salvarCadastroBanda(
+  contractId: string,
+  bandId: string,
+  input: CaseBandInput,
+): Promise<{ ok: true; warning?: string } | { error: string }> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+  if (!bandId) return { error: "Cadastro não identificado." };
+  if (!input.name?.trim()) return { error: "Informe o nome do fornecedor/atração." };
+
+  try {
+    await resolveBand(db, { ...input, id: bandId }, ctx.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falha ao salvar o cadastro." };
+  }
+  const omieErr = await pushBandToOmie(db, bandId);
+  await db.from("case_history").insert({
+    contract_id: contractId, user_id: ctx.id, action: "etapa2",
+    comment: `Cadastro de ${input.name} atualizado${omieErr ? " (envio ao Omie falhou)" : " e reenviado ao Omie"}.`,
+  });
+  revalidatePath(`/case/contratos/${contractId}`);
+  return omieErr ? { ok: true, warning: `Cadastro salvo, mas o envio ao Omie falhou: ${omieErr}` } : { ok: true };
+}
+
+/** Reenvia o cadastro da banda ao Omie sem alterar dados (retry de falha). */
+export async function reenviarBandaOmie(contractId: string, bandId: string): Promise<{ ok: true } | { error: string }> {
+  await requireCaseUser();
+  const db = await getDb();
+  const err = await pushBandToOmie(db, bandId);
+  if (err) return { error: err };
   revalidatePath(`/case/contratos/${contractId}`);
   return { ok: true };
 }
