@@ -38,24 +38,48 @@ export async function incluirContaReceber(
   return { codigoLancamentoOmie: code };
 }
 
+export interface OmieCategoriaRateio {
+  codigo_categoria: string;
+  /** Valor absoluto em reais (exato — evita a imprecisão do percentual). */
+  valor?: number;
+  percentual?: number;
+}
+
 /**
- * Reclassifica um título a receber por rateio de categorias (percentuais).
- * Funciona mesmo com o título BAIXADO. Regras validadas em produção:
- * valor_documento é obrigatório e o rateio só é aplicado via `percentual`
- * (mandar `valor` junto faz o Omie ignorar o rateio silenciosamente).
+ * Reclassifica um título a receber por rateio de categorias.
+ * valor_documento é obrigatório. Usamos `valor` absoluto para o rateio fechar
+ * exatamente no BV (percentual de 2 casas não bate em valores quebrados).
  */
 export async function alterarContaReceberCategorias(
   appKey: string,
   appSecret: string,
   codigoLancamentoOmie: number,
   valorDocumento: number,
-  categorias: Array<{ codigo_categoria: string; percentual: number }>,
+  categorias: OmieCategoriaRateio[],
 ): Promise<void> {
   await omieCall(CONTARECEBER_URL, "AlterarContaReceber", appKey, appSecret, {
     codigo_lancamento_omie: codigoLancamentoOmie,
     valor_documento: valorDocumento,
     categorias,
   });
+}
+
+/** Lê as categorias atualmente aplicadas num título a receber (para conferência). */
+export async function consultarContaReceberCategorias(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+): Promise<Array<{ codigo_categoria: string; valor: number; percentual: number }>> {
+  const { data } = await omieCall(CONTARECEBER_URL, "ConsultarContaReceber", appKey, appSecret, {
+    codigo_lancamento_omie: codigoLancamentoOmie,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const arr = (data.categorias as any[] | undefined) ?? [];
+  return arr.map((c) => ({
+    codigo_categoria: String(c.codigo_categoria ?? ""),
+    valor: Number(c.valor ?? 0),
+    percentual: Number(c.percentual ?? 0),
+  }));
 }
 
 export async function excluirContaReceber(

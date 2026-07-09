@@ -14,7 +14,7 @@ import {
   type OmieSupplierData,
 } from "@/lib/omie/clientes";
 import { incluirContaPagar, toOmieDate } from "@/lib/omie/contapagar";
-import { incluirContaReceber, alterarContaReceberCategorias } from "@/lib/omie/contareceber";
+import { incluirContaReceber, alterarContaReceberCategorias, consultarContaReceberCategorias } from "@/lib/omie/contareceber";
 import { incluirAnexoContaPagar, incluirAnexoContaReceber } from "@/lib/omie/anexo";
 import type { CaseLegKind } from "@/lib/case/types";
 
@@ -424,7 +424,7 @@ export async function resyncContract(contractId: string): Promise<LaunchResult> 
  */
 export async function lancarBvContract(
   contractId: string,
-): Promise<{ ok: true; bv: number; titulos: number } | { error: string }> {
+): Promise<{ ok: true; bv: number; servicosAplicado: number; titulos: number } | { error: string }> {
   await requireCaseUser();
   const db = (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
 
@@ -435,9 +435,8 @@ export async function lancarBvContract(
     .single();
   if (!contract) return { error: "Contrato não encontrado." };
   if (!contract.signed_at) return { error: "O contrato precisa estar assinado antes de apurar o BV." };
-  if (contract.bv_lancado_at) {
-    return { error: `O BV deste contrato já foi lançado (R$ ${Number(contract.bv_lancado_valor).toFixed(2)}).` };
-  }
+  // Re-lançável: AlterarContaReceber é um SET (substitui as categorias), então
+  // rodar de novo é idempotente e corrige um rateio anterior.
 
   const { data: titlesData } = await db
     .from("case_titles")
@@ -473,37 +472,61 @@ export async function lancarBvContract(
     return { error: "Falha ao descriptografar credenciais Omie." };
   }
 
-  // Rateia o BV nos títulos a receber (custódia), da última parcela para a primeira.
+  const codServicos = String(config.codigo_categoria_servicos);
+  const codCustodia = String(config.codigo_categoria_custodia);
+
+  // Rateia o BV nos títulos a receber, da última parcela para a primeira, usando
+  // VALOR ABSOLUTO (centavos) — o total de Serviços fecha EXATO no BV. Parcelas
+  // inteiras viram Serviços; uma parcela "quebrada" é dividida; o resto é custódia.
   const receberTitles = titles
-    .filter((t) => t.leg === "receber_custodia" && t.omie_codigo)
+    .filter((t) => t.leg !== "pagar_custodia" && t.omie_codigo)
     .sort((a, b) => b.parcela_numero - a.parcela_numero);
   if (receberTitles.length === 0) return { error: "Nenhum título a receber lançado no Omie para reclassificar." };
 
-  let restante = Math.round(bv * 100);
+  let restante = Math.round(bv * 100); // centavos de Serviços a alocar
   let alterados = 0;
   for (const t of receberTitles) {
-    if (restante <= 0) break;
     const tCents = Math.round(Number(t.valor) * 100);
     if (tCents <= 0) continue;
-    const aloca = Math.min(restante, tCents);
-    const pct = Math.round((aloca / tCents) * 10000) / 100;
+    const servCents = Math.max(0, Math.min(restante, tCents));
+    const custCents = tCents - servCents;
     const categorias =
-      pct >= 99.995
-        ? [{ codigo_categoria: String(config.codigo_categoria_servicos), percentual: 100 }]
-        : [
-            { codigo_categoria: String(config.codigo_categoria_servicos), percentual: pct },
-            { codigo_categoria: String(config.codigo_categoria_custodia), percentual: Math.round((100 - pct) * 100) / 100 },
-          ];
+      custCents === 0
+        ? [{ codigo_categoria: codServicos, valor: tCents / 100 }]
+        : servCents === 0
+          ? [{ codigo_categoria: codCustodia, valor: tCents / 100 }]
+          : [
+              { codigo_categoria: codServicos, valor: servCents / 100 },
+              { codigo_categoria: codCustodia, valor: custCents / 100 },
+            ];
     try {
       await alterarContaReceberCategorias(appKey, appSecret, Number(t.omie_codigo), Number(t.valor), categorias);
     } catch (e) {
       return { error: `Falha ao reclassificar a parcela ${t.parcela_numero} no Omie: ${e instanceof Error ? e.message : String(e)}` };
     }
-    restante -= aloca;
+    restante -= servCents;
     alterados += 1;
   }
   if (restante > 0) {
-    return { error: `O BV (R$ ${bv.toFixed(2)}) é maior que o total a receber reclassificável — sobraram R$ ${(restante / 100).toFixed(2)}.` };
+    return { error: `O BV (R$ ${bv.toFixed(2)}) é maior que o total a receber — sobraram R$ ${(restante / 100).toFixed(2)}.` };
+  }
+
+  // Conferência: lê de volta do Omie e soma o que ficou em Serviços/BV. Se o Omie
+  // não aplicou o rateio como esperado, avisa SEM marcar o BV como lançado.
+  let servicosCents = 0;
+  try {
+    for (const t of receberTitles) {
+      const cats = await consultarContaReceberCategorias(appKey, appSecret, Number(t.omie_codigo));
+      for (const c of cats) if (c.codigo_categoria === codServicos) servicosCents += Math.round(c.valor * 100);
+    }
+  } catch (e) {
+    return { error: `Rateio enviado, mas falhou a conferência no Omie: ${e instanceof Error ? e.message : String(e)}. Confira o contrato no Omie.` };
+  }
+  const servicosAplicado = servicosCents / 100;
+  if (Math.abs(servicosCents - Math.round(bv * 100)) > 1) {
+    return {
+      error: `O Omie aplicou R$ ${servicosAplicado.toFixed(2)} em Serviços/BV, mas o BV apurado é R$ ${bv.toFixed(2)}. O rateio não foi aplicado como esperado — verifique o contrato no Omie antes de repetir.`,
+    };
   }
 
   await db
@@ -514,10 +537,10 @@ export async function lancarBvContract(
     contract_id: contractId,
     user_id: null,
     action: "lancado",
-    comment: `BV apurado e lançado: R$ ${bv.toFixed(2)} (recebido R$ ${recebido.toFixed(2)} − saídas R$ ${saidas.toFixed(2)}), rateado em ${alterados} título(s) a receber na categoria de Serviços/BV.`,
+    comment: `BV apurado e lançado: R$ ${bv.toFixed(2)} (recebido R$ ${recebido.toFixed(2)} − saídas R$ ${saidas.toFixed(2)}). Serviços/BV aplicado no Omie: R$ ${servicosAplicado.toFixed(2)} em ${alterados} título(s) a receber.`,
   });
 
   revalidatePath(`/case/contratos/${contractId}`);
   revalidatePath("/case/contratos");
-  return { ok: true, bv, titulos: alterados };
+  return { ok: true, bv, servicosAplicado, titulos: alterados };
 }

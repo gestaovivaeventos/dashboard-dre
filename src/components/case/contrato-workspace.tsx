@@ -1240,7 +1240,8 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
   const totalSaidas = Math.round(pagar.reduce((a, t) => a + t.valor, 0) * 100) / 100;
   const bvApurado = Math.round((totalReceber - totalSaidas) * 100) / 100;
   const bvLancado = !!detail.bv_lancado_at;
-  const podeLancarBv = signed && titles.length > 0 && !temPendentes && !bvLancado && bvApurado > 0;
+  // Re-lançável (idempotente no Omie): permite corrigir/reaplicar mesmo já lançado.
+  const podeLancarBv = signed && titles.length > 0 && !temPendentes && bvApurado > 0;
 
   async function lancar() {
     setBusy(true);
@@ -1262,7 +1263,7 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
     const res = await lancarBvContract(detail.id);
     setLancandoBv(false);
     if ("error" in res) return alert(res.error);
-    alert(`BV de ${brl(res.bv)} lançado — ${res.titulos} título(s) a receber reclassificado(s) no Omie.`);
+    alert(`BV de ${brl(res.bv)} lançado. Serviços/BV aplicado no Omie: ${brl(res.servicosAplicado)} (conferido) em ${res.titulos} título(s) a receber.`);
     onChange();
   }
 
@@ -1300,9 +1301,8 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
             BV apurado: <span className="font-semibold tabular-nums text-ink-primary">{brl(bvApurado)}</span>
             <span className="text-xs"> (a receber {brl(totalReceber)} − saídas {brl(totalSaidas)})</span>
           </span>
-          {bvLancado ? (
-            <StatusPill tone="ok">BV lançado · {brl(detail.bv_lancado_valor ?? 0)} · {dateBR(detail.bv_lancado_at)}</StatusPill>
-          ) : (
+          <div className="flex items-center gap-2">
+            {bvLancado && <StatusPill tone="ok">BV lançado · {brl(detail.bv_lancado_valor ?? 0)} · {dateBR(detail.bv_lancado_at)}</StatusPill>}
             <button
               type="button"
               onClick={lancarBv}
@@ -1316,11 +1316,11 @@ function FinanceiroPanel({ detail, signed, onChange }: { detail: ContractDetail;
                       ? "BV apurado não é positivo"
                       : ""
               }
-              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${bvLancado ? "border border-border text-ink-secondary hover:bg-surface-2" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
             >
-              {lancandoBv && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Lançar BV no Omie
+              {lancandoBv && <Loader2 className="h-3.5 w-3.5 animate-spin" />} {bvLancado ? "Relançar BV" : "Lançar BV no Omie"}
             </button>
-          )}
+          </div>
         </div>
       )}
 
