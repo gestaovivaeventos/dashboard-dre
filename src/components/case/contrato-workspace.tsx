@@ -294,10 +294,12 @@ async function openStoragePath(path: string) {
 }
 
 function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[]; onChange: () => void }) {
-  const launched = detail.titles.some((t) => t.status === "lancado");
   const atracoes = detail.atracoes;
+  // Trava POR ENTIDADE: só a atração cujo título já foi lançado no Omie fica
+  // bloqueada. Adicionar novas continua liberado mesmo com o contrato lançado.
+  const lancadoAtracaoIds = new Set(detail.titles.filter((t) => t.status === "lancado" && t.atracao_id).map((t) => t.atracao_id));
   const [editing, setEditing] = useState<null | { atracaoId: string | null }>(
-    atracoes.length === 0 && !launched ? { atracaoId: null } : null,
+    atracoes.length === 0 ? { atracaoId: null } : null,
   );
   const [removing, setRemoving] = useState<string | null>(null);
   const totalAtracoes = atracoes.reduce((a, x) => a + x.valor_artista, 0);
@@ -321,8 +323,7 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
             Atrações do contrato {atracoes.length > 0 && <span className="text-ink-muted">({atracoes.length})</span>}
           </h2>
           <div className="flex items-center gap-2">
-            {launched && <StatusPill tone="ok">Lançado no Omie</StatusPill>}
-            {!launched && !editing && (
+            {!editing && (
               <button
                 type="button"
                 onClick={() => setEditing({ atracaoId: null })}
@@ -361,7 +362,9 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
                       Ver contrato
                     </button>
                   )}
-                  {!launched && (
+                  {lancadoAtracaoIds.has(a.id) ? (
+                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                  ) : (
                     <>
                       <button
                         type="button"
@@ -394,7 +397,7 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
 
       </section>
 
-      {editing && !launched && (
+      {editing && (
         <AtracaoForm
           key={editing.atracaoId ?? "nova"}
           detail={detail}
@@ -405,17 +408,19 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
         />
       )}
 
-      <RiderCamarimSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} />
-      <ComissaoSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} tipo="comissao_externa" titulo="Comissão Comercial - Externa" />
-      <ComissaoSection detail={detail} bands={fornecedorBands} launched={launched} onChange={onChange} tipo="comissao_rider" titulo="Comissão Comercial - Rider" />
+      <RiderCamarimSection detail={detail} bands={fornecedorBands} onChange={onChange} />
+      <ComissaoSection detail={detail} bands={fornecedorBands} onChange={onChange} tipo="comissao_externa" titulo="Comissão Comercial - Externa" />
+      <ComissaoSection detail={detail} bands={fornecedorBands} onChange={onChange} tipo="comissao_rider" titulo="Comissão Comercial - Rider" />
     </div>
   );
 }
 
 // ── VERBA RIDER/CAMARIM — reserva paga a fornecedores; saldo pode virar BV ──
-function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; launched: boolean; onChange: () => void }) {
+function RiderCamarimSection({ detail, bands, onChange }: { detail: ContractDetail; bands: CaseBandRow[]; onChange: () => void }) {
   const verba = detail.valor_rider_camarim;
   const fornecedores = detail.fornecedores.filter((f) => f.tipo === "rider_camarim");
+  // Trava por entidade: só o fornecedor já lançado no Omie fica bloqueado.
+  const lancadoFornecedorIds = new Set(detail.titles.filter((t) => t.status === "lancado" && t.fornecedor_id).map((t) => t.fornecedor_id));
   const comprometido = fornecedores.reduce((a, f) => a + f.valor, 0);
   const saldo = Math.round((verba - comprometido) * 100) / 100;
 
@@ -451,7 +456,7 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
           <h2 className="text-sm font-semibold text-ink-primary">
             Verba Rider/Camarim {fornecedores.length > 0 && <span className="text-ink-muted">({fornecedores.length} fornecedor{fornecedores.length > 1 ? "es" : ""})</span>}
           </h2>
-          {!launched && !editing && (
+          {!editing && (
             <button
               type="button"
               onClick={() => setEditing({ fornecedorId: null })}
@@ -472,10 +477,10 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
             <label className={LABEL_CLS}>Valor da verba</label>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-ink-muted">R$</span>
-              <input inputMode="numeric" value={verbaStr} onChange={(e) => setVerbaStr(maskBRL(e.target.value))} placeholder="0,00" disabled={launched} className={INPUT_CLS + " max-w-[180px] pl-8 text-right disabled:opacity-60"} />
+              <input inputMode="numeric" value={verbaStr} onChange={(e) => setVerbaStr(maskBRL(e.target.value))} placeholder="0,00" className={INPUT_CLS + " max-w-[180px] pl-8 text-right"} />
             </div>
           </div>
-          {!launched && Math.abs(verbaDigitada - verba) >= 0.005 && (
+          {Math.abs(verbaDigitada - verba) >= 0.005 && (
             <button type="button" onClick={saveVerba} disabled={savingVerba} className="inline-flex h-9 items-center gap-2 rounded-md bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
               {savingVerba && <Loader2 className="h-4 w-4 animate-spin" />} Salvar verba
             </button>
@@ -501,7 +506,9 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
                       Ver contrato
                     </button>
                   )}
-                  {!launched && (
+                  {lancadoFornecedorIds.has(f.id) ? (
+                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                  ) : (
                     <>
                       <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
                         Editar
@@ -534,7 +541,7 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
         )}
       </section>
 
-      {editing && !launched && (
+      {editing && (
         <FornecedorForm
           key={editing.fornecedorId ?? "novo"}
           detail={detail}
@@ -553,19 +560,18 @@ function RiderCamarimSection({ detail, bands, launched, onChange }: { detail: Co
 function ComissaoSection({
   detail,
   bands,
-  launched,
   onChange,
   tipo,
   titulo,
 }: {
   detail: ContractDetail;
   bands: CaseBandRow[];
-  launched: boolean;
   onChange: () => void;
   tipo: CaseFornecedorTipo;
   titulo: string;
 }) {
   const fornecedores = detail.fornecedores.filter((f) => f.tipo === tipo);
+  const lancadoFornecedorIds = new Set(detail.titles.filter((t) => t.status === "lancado" && t.fornecedor_id).map((t) => t.fornecedor_id));
   const total = fornecedores.reduce((a, f) => a + f.valor, 0);
   const [editing, setEditing] = useState<null | { fornecedorId: string | null }>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -587,7 +593,7 @@ function ComissaoSection({
           <h2 className="text-sm font-semibold text-ink-primary">
             {titulo} {fornecedores.length > 0 && <span className="text-ink-muted">({fornecedores.length})</span>}
           </h2>
-          {!launched && !editing && (
+          {!editing && (
             <button
               type="button"
               onClick={() => setEditing({ fornecedorId: null })}
@@ -619,7 +625,9 @@ function ComissaoSection({
                       Ver contrato
                     </button>
                   )}
-                  {!launched && (
+                  {lancadoFornecedorIds.has(f.id) ? (
+                    <StatusPill tone="ok">Lançado no Omie</StatusPill>
+                  ) : (
                     <>
                       <button type="button" onClick={() => setEditing({ fornecedorId: f.id })} className="rounded-md border border-border px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2">
                         Editar
@@ -645,7 +653,7 @@ function ComissaoSection({
         )}
       </section>
 
-      {editing && !launched && (
+      {editing && (
         <FornecedorForm
           key={editing.fornecedorId ?? "novo"}
           detail={detail}
