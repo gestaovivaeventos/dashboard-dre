@@ -30,6 +30,9 @@ export interface CaseOmieConfigData {
   config: {
     codigo_categoria_custodia: string | null;
     codigo_categoria_servicos: string | null;
+    codigo_categoria_pagar: string | null;
+    codigo_categoria_comissao_externa: string | null;
+    codigo_categoria_comissao_rider: string | null;
     codigo_conta_corrente: string | null;
   };
 }
@@ -60,6 +63,9 @@ export async function getOmieConfigData(): Promise<CaseOmieConfigData> {
     config: {
       codigo_categoria_custodia: config?.codigo_categoria_custodia ?? null,
       codigo_categoria_servicos: config?.codigo_categoria_servicos ?? null,
+      codigo_categoria_pagar: config?.codigo_categoria_pagar ?? null,
+      codigo_categoria_comissao_externa: config?.codigo_categoria_comissao_externa ?? null,
+      codigo_categoria_comissao_rider: config?.codigo_categoria_comissao_rider ?? null,
       codigo_conta_corrente: config?.codigo_conta_corrente ?? null,
     },
   };
@@ -158,6 +164,9 @@ export async function syncCasePagamentos(): Promise<
 export async function saveOmieConfig(input: {
   codigo_categoria_custodia: string | null;
   codigo_categoria_servicos: string | null;
+  codigo_categoria_pagar: string | null;
+  codigo_categoria_comissao_externa: string | null;
+  codigo_categoria_comissao_rider: string | null;
   codigo_conta_corrente: string | null;
 }): Promise<{ ok: true } | { error: string }> {
   await requireCaseAdmin();
@@ -168,6 +177,9 @@ export async function saveOmieConfig(input: {
       company_id: CASE_COMPANY_ID,
       codigo_categoria_custodia: input.codigo_categoria_custodia,
       codigo_categoria_servicos: input.codigo_categoria_servicos,
+      codigo_categoria_pagar: input.codigo_categoria_pagar,
+      codigo_categoria_comissao_externa: input.codigo_categoria_comissao_externa,
+      codigo_categoria_comissao_rider: input.codigo_categoria_comissao_rider,
       codigo_conta_corrente: input.codigo_conta_corrente,
       updated_at: new Date().toISOString(),
     },

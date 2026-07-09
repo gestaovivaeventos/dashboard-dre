@@ -4,6 +4,7 @@ import { getCaseOmieCreds } from "@/lib/case/omie-creds";
 import {
   syncClienteToOmieUnit,
   syncSupplierToOmieUnit,
+  clienteRowToOmieData,
   type OmieSupplierData,
 } from "@/lib/omie/clientes";
 import type { CaseBandInput, CaseClientInput } from "@/lib/case/types";
@@ -17,6 +18,50 @@ const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, ""
 // server actions, que já fizeram requireCaseUser. Não expor como action própria.
 
 /**
+ * Regra: fornecedor que ainda NÃO existe no Omie (atração, camarim, comissão
+ * rider/externa) só entra COM documento e dados bancários pagáveis — chave PIX
+ * OU banco+agência+conta completos. Retorna a mensagem de erro (PT) ou null.
+ */
+export function bankableError(
+  band: {
+    cnpj_cpf: string | null;
+    banco: string | null;
+    agencia: string | null;
+    conta_corrente: string | null;
+    chave_pix: string | null;
+  },
+  label = "fornecedor",
+): string | null {
+  const doc = onlyDigits(band.cnpj_cpf);
+  if (doc.length !== 11 && doc.length !== 14) {
+    return `Informe o CNPJ (14 dígitos) ou CPF (11 dígitos) do ${label} — cadastro novo precisa de documento para ir ao Omie.`;
+  }
+  const pix = (band.chave_pix ?? "").trim();
+  const contaCompleta =
+    !!(band.banco ?? "").trim() && !!(band.agencia ?? "").trim() && !!(band.conta_corrente ?? "").trim();
+  if (!pix && !contaCompleta) {
+    return `Informe os dados bancários do ${label}: chave PIX ou banco + agência + conta corrente.`;
+  }
+  return null;
+}
+
+/**
+ * Bloqueia se a banda resolvida ainda não tem cadastro no Omie e falta doc/dados
+ * bancários. Banda que já tem omie_codigo passa direto — seus dados já vivem lá.
+ * Ancorado no omie_codigo (e não em "é novo?") para cobrir também o cadastro
+ * local salvo antes desta regra que nunca subiu ao Omie.
+ */
+export async function requireBankableIfNew(db: DB, bandId: string, label = "fornecedor"): Promise<string | null> {
+  const { data: row } = await db
+    .from("case_bands")
+    .select("omie_codigo, cnpj_cpf, banco, agencia, conta_corrente, chave_pix")
+    .eq("id", bandId)
+    .single();
+  if (!row || row.omie_codigo) return null;
+  return bankableError(row, label);
+}
+
+/**
  * Regra "todo cliente já cadastrado na Omie": ao criar um cadastro novo, empurra
  * pro Omie na hora e grava o omie_codigo. Best-effort — se o Omie falhar, o
  * launch do contrato é a rede de segurança (ele reexecuta o mesmo cadastro).
@@ -24,22 +69,30 @@ const onlyDigits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, ""
 export async function ensureOmieRegistration(db: DB, kind: "client" | "band", id: string): Promise<void> {
   const table = kind === "client" ? "case_clients" : "case_bands";
   const { data: row } = await db.from(table).select("*").eq("id", id).single();
-  if (!row || row.omie_codigo || !onlyDigits(row.cnpj_cpf)) return;
+  if (!row || row.omie_codigo) return;
+  // Cliente sem CNPJ pode ir como PF do responsável (fundo no nome fantasia);
+  // banda/fornecedor precisa do próprio documento.
+  const data: OmieSupplierData | null =
+    kind === "client"
+      ? clienteRowToOmieData(row)
+      : onlyDigits(row.cnpj_cpf)
+        ? {
+            id: row.id,
+            name: row.name,
+            cnpj_cpf: row.cnpj_cpf,
+            email: row.email,
+            phone: row.phone,
+            banco: row.banco,
+            agencia: row.agencia,
+            conta_corrente: row.conta_corrente,
+            titular_banco: row.titular_banco,
+            doc_titular: row.doc_titular,
+            chave_pix: row.chave_pix,
+          }
+        : null;
+  if (!data) return;
   const creds = await getCaseOmieCreds(db);
   if (!creds) return;
-  const data: OmieSupplierData = {
-    id: row.id,
-    name: row.name,
-    cnpj_cpf: row.cnpj_cpf,
-    email: row.email,
-    phone: row.phone,
-    banco: kind === "band" ? row.banco : null,
-    agencia: kind === "band" ? row.agencia : null,
-    conta_corrente: kind === "band" ? row.conta_corrente : null,
-    titular_banco: kind === "band" ? row.titular_banco : null,
-    doc_titular: kind === "band" ? row.doc_titular : null,
-    chave_pix: kind === "band" ? row.chave_pix : null,
-  };
   try {
     const { codigoCliente } =
       kind === "client"
@@ -51,6 +104,39 @@ export async function ensureOmieRegistration(db: DB, kind: "client" | "band", id
       .eq("id", id);
   } catch (e) {
     console.error(`[case] falha ao cadastrar ${kind} no Omie na criação:`, e);
+  }
+}
+
+/**
+ * Empurra (ou re-empurra) o cadastro de uma banda/fornecedor para o Omie —
+ * usado para reenviar depois de corrigir dados. syncSupplierToOmieUnit faz
+ * AlterarCliente se já existe (por CNPJ) ou IncluirCliente. Retorna erro (PT) ou null.
+ */
+export async function pushBandToOmie(db: DB, bandId: string): Promise<string | null> {
+  const { data: row } = await db.from("case_bands").select("*").eq("id", bandId).single();
+  if (!row) return "Cadastro não encontrado.";
+  if (!onlyDigits(row.cnpj_cpf)) return "Cadastro sem CNPJ/CPF — informe o documento antes de enviar ao Omie.";
+  const creds = await getCaseOmieCreds(db);
+  if (!creds) return "Empresa Case Shows sem credenciais Omie configuradas.";
+  const data: OmieSupplierData = {
+    id: row.id,
+    name: row.name,
+    cnpj_cpf: row.cnpj_cpf,
+    email: row.email,
+    phone: row.phone,
+    banco: row.banco,
+    agencia: row.agencia,
+    conta_corrente: row.conta_corrente,
+    titular_banco: row.titular_banco,
+    doc_titular: row.doc_titular,
+    chave_pix: row.chave_pix,
+  };
+  try {
+    const { codigoCliente } = await syncSupplierToOmieUnit(creds.appKey, creds.appSecret, data);
+    await db.from("case_bands").update({ omie_codigo: codigoCliente, omie_synced_at: new Date().toISOString() }).eq("id", bandId);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "Falha ao enviar o cadastro ao Omie.";
   }
 }
 
@@ -113,7 +199,12 @@ export async function resolveClient(db: DB, input: CaseClientInput, userId: stri
   return data.id as string;
 }
 
-export async function resolveBand(db: DB, input: CaseBandInput, userId: string): Promise<string> {
+export async function resolveBand(
+  db: DB,
+  input: CaseBandInput,
+  userId: string,
+  kind: "atracao" | "fornecedor" = "atracao",
+): Promise<string> {
   const bankFields = {
     banco: input.banco,
     agencia: input.agencia,
@@ -121,6 +212,7 @@ export async function resolveBand(db: DB, input: CaseBandInput, userId: string):
     titular_banco: input.titular_banco,
     doc_titular: input.doc_titular,
     chave_pix: input.chave_pix,
+    chave_pix_tipo: input.chave_pix_tipo,
   };
 
   if (input.id) {
@@ -160,6 +252,7 @@ export async function resolveBand(db: DB, input: CaseBandInput, userId: string):
       email: input.email,
       phone: input.phone,
       ...bankFields,
+      kind,
       created_by: userId,
     })
     .select("id")

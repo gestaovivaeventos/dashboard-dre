@@ -15,7 +15,7 @@ export default async function CaseContratoDetailPage({ params }: { params: { id:
 
   return (
     <div className="mx-auto max-w-4xl">
-      <ContratoWorkspace detail={detail} bands={bands} />
+      <ContratoWorkspace detail={detail} bands={bands} fornecedorBands={bands} />
     </div>
   );
 }

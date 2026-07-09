@@ -3,6 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyWebhook } from "@/lib/case/clicksign";
+import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
+
+// Lançamento automático no Omie na assinatura pode levar dezenas de chamadas.
+export const maxDuration = 300;
 
 // Eventos do ClickSign que indicam documento finalizado (todos assinaram).
 const FINALIZED_EVENTS = new Set(["auto_close", "close", "document_closed"]);
@@ -56,11 +60,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: "contrato-nao-encontrado" });
   }
 
-  // A assinatura conclui a Etapa 1. O lançamento no Omie NÃO acontece mais aqui —
-  // passou para a conclusão da Etapa 2 (pagamento ao artista), quando o valor do
-  // artista é conhecido e a separação custódia/serviços fica correta. Aqui só
-  // registramos a assinatura (usada no status da Etapa 3). Não sobrescreve um
-  // contrato que já avançou (lancado/parcial).
+  // Não sobrescreve o status de um contrato que já avançou (lancado/parcial).
   if (["lancado", "parcial"].includes(contract.status as string)) {
     await db
       .from("case_contracts")
@@ -84,6 +84,15 @@ export async function POST(request: Request) {
     action: "assinado",
     comment: "Contrato assinado pelo cliente (ClickSign).",
   });
+
+  // Assinou → lança tudo que estiver pendente no Omie (a receber como custódia
+  // + despesas já salvas). Best-effort: falha vira status erro/parcial no
+  // contrato e pode ser reprocessada pelo botão Lançar no Omie.
+  try {
+    await launchContractToOmie(db, contract.id);
+  } catch (e) {
+    console.error("[case/clicksign] falha no lançamento automático pós-assinatura:", e);
+  }
 
   return NextResponse.json({ ok: true });
 }

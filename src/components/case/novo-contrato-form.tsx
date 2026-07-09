@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
+import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { validatePix } from "@/lib/case/pix";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
+import type { ContractEditData } from "@/lib/case/queries";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -74,75 +78,91 @@ function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
   );
 }
 
-export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[]; bands: CaseBandRow[] }) {
+export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData }) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
   const [bandsList] = useState<CaseBandRow[]>(bands);
 
   // Cliente
-  const [clientMode, setClientMode] = useState<"existing" | "new">(clients.length ? "existing" : "new");
-  const [clientId, setClientId] = useState<string>("");
-  const [cName, setCName] = useState("");
-  const [cDoc, setCDoc] = useState("");
-  const [cEmail, setCEmail] = useState("");
-  const [cPhone, setCPhone] = useState("");
-  const [cRespLegal, setCRespLegal] = useState("");
-  const [cCpfResp, setCCpfResp] = useState("");
-  const [cEndereco, setCEndereco] = useState("");
-  const [cCidadeEstado, setCCidadeEstado] = useState("");
-  const [cCep, setCCep] = useState("");
+  const initialClient = edit ? clients.find((c) => c.id === edit.client_id) ?? null : null;
+  const [clientMode, setClientMode] = useState<"existing" | "new">(edit || clients.length ? "existing" : "new");
+  const [clientId, setClientId] = useState<string>(edit?.client_id ?? "");
+  const [cName, setCName] = useState(initialClient?.name ?? "");
+  const [cDoc, setCDoc] = useState(initialClient?.cnpj_cpf ?? "");
+  const [cEmail, setCEmail] = useState(initialClient?.email ?? "");
+  const [cPhone, setCPhone] = useState(initialClient?.phone ?? "");
+  const [cRespLegal, setCRespLegal] = useState(initialClient?.resp_legal ?? "");
+  const [cCpfResp, setCCpfResp] = useState(initialClient?.cpf_resp_legal ?? "");
+  const [cEndereco, setCEndereco] = useState(initialClient?.endereco ?? "");
+  const [cCidadeEstado, setCCidadeEstado] = useState(initialClient?.cidade_estado ?? "");
+  const [cCep, setCCep] = useState(initialClient?.cep ?? "");
+
+  // Na edição, trocar o cliente selecionado recarrega os campos do cadastro.
+  function selectClient(id: string) {
+    setClientId(id);
+    if (!edit) return;
+    const c = clients.find((x) => x.id === id);
+    if (!c) return;
+    setCName(c.name);
+    setCDoc(c.cnpj_cpf ?? "");
+    setCEmail(c.email ?? "");
+    setCPhone(c.phone ?? "");
+    setCRespLegal(c.resp_legal ?? "");
+    setCCpfResp(c.cpf_resp_legal ?? "");
+    setCEndereco(c.endereco ?? "");
+    setCCidadeEstado(c.cidade_estado ?? "");
+    setCCep(c.cep ?? "");
+  }
 
   // Evento / objeto
-  const [eventName, setEventName] = useState("");
-  const [eventDate, setEventDate] = useState("");
-  const [showTime, setShowTime] = useState("");
-  const [showDuration, setShowDuration] = useState("");
-  const [passagemSom, setPassagemSom] = useState("");
-  const [localName, setLocalName] = useState("");
-  const [localAddress, setLocalAddress] = useState("");
-  const [localCity, setLocalCity] = useState("");
-  const [localCep, setLocalCep] = useState("");
-  const [especificacoes, setEspecificacoes] = useState("");
+  const [eventName, setEventName] = useState(edit?.event_name ?? "");
+  const [eventDate, setEventDate] = useState(edit?.event_date ?? "");
+  const [showTime, setShowTime] = useState(edit?.show_time ?? "");
+  const [showDuration, setShowDuration] = useState(edit?.show_duration ?? "");
+  const [passagemSom, setPassagemSom] = useState(edit?.passagem_som ?? "");
+  const [localName, setLocalName] = useState(edit?.local_name ?? "");
+  const [localAddress, setLocalAddress] = useState(edit?.local_address ?? "");
+  const [localCity, setLocalCity] = useState(edit?.local_city ?? "");
+  const [localCep, setLocalCep] = useState(edit?.local_cep ?? "");
+  const [especificacoes, setEspecificacoes] = useState(edit?.especificacoes ?? "");
 
   // Modelo CASE
-  const [especAreaInterna, setEspecAreaInterna] = useState(false);
-  const [especAreaExterna, setEspecAreaExterna] = useState(false);
-  const [especPalco, setEspecPalco] = useState(false);
-  const [especTrio, setEspecTrio] = useState(false);
-  const [extraTransporte, setExtraTransporte] = useState(false);
-  const [extraTranslado, setExtraTranslado] = useState(false);
-  const [extraDiaria, setExtraDiaria] = useState(false);
-  const [extraHospedagem, setExtraHospedagem] = useState(false);
-  const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">("");
-  const [cortesias, setCortesias] = useState("");
-  const [dataAssinatura, setDataAssinatura] = useState("");
-  const [test1Nome, setTest1Nome] = useState("");
-  const [test1Cpf, setTest1Cpf] = useState("");
-  const [test1Email, setTest1Email] = useState("");
-  const [test2Nome, setTest2Nome] = useState("");
-  const [test2Cpf, setTest2Cpf] = useState("");
+  const [especAreaInterna, setEspecAreaInterna] = useState(edit?.espec_area_interna ?? false);
+  const [especAreaExterna, setEspecAreaExterna] = useState(edit?.espec_area_externa ?? false);
+  const [especPalco, setEspecPalco] = useState(edit?.espec_palco ?? false);
+  const [especTrio, setEspecTrio] = useState(edit?.espec_trio ?? false);
+  const [extraTransporte, setExtraTransporte] = useState(edit?.extra_transporte_cidade ?? false);
+  const [extraTranslado, setExtraTranslado] = useState(edit?.extra_translado_local ?? false);
+  const [extraDiaria, setExtraDiaria] = useState(edit?.extra_diaria_alimentacao ?? false);
+  const [extraHospedagem, setExtraHospedagem] = useState(edit?.extra_hospedagem ?? false);
+  const [extraOutros, setExtraOutros] = useState(edit?.extra_outros ?? "");
+  const [riderTecnico, setRiderTecnico] = useState(edit?.rider_tecnico ?? false);
+  const [riderCamarim, setRiderCamarim] = useState(edit?.rider_camarim ?? false);
+  const [riderPreProducao, setRiderPreProducao] = useState(edit?.rider_pre_producao ?? false);
+  const [tipoEvento, setTipoEvento] = useState<"aberto" | "fechado" | "">(edit?.tipo_evento ?? "");
+  const [cortesias, setCortesias] = useState(edit?.cortesias ?? "");
+  const [dataAssinatura, setDataAssinatura] = useState(edit?.data_assinatura ?? "");
+  const [test1Nome, setTest1Nome] = useState(edit?.testemunha_1_nome ?? "");
+  const [test1Cpf, setTest1Cpf] = useState(edit?.testemunha_1_cpf ?? "");
+  const [test1Email, setTest1Email] = useState(edit?.testemunha_1_email ?? "");
+  const [test2Nome, setTest2Nome] = useState(edit?.testemunha_2_nome ?? "");
+  const [test2Cpf, setTest2Cpf] = useState(edit?.testemunha_2_cpf ?? "");
 
-  // Valores cobrados do cliente
-  const [vAtracao, setVAtracao] = useState("");
-  const [vRider, setVRider] = useState("");
-  const [vCamarim, setVCamarim] = useState("");
-  const [vExtras, setVExtras] = useState("");
-  const [observacao, setObservacao] = useState("");
-  const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>([emptyParcela()]);
+  // Valor cobrado do cliente (campo único "Contrato" → valor_atracao_cliente)
+  const [vAtracao, setVAtracao] = useState(edit ? brlFromNumber(edit.valor_atracao_cliente) : "");
+  const [observacao, setObservacao] = useState(edit?.observacao ?? "");
+  const [receberCliente, setReceberCliente] = useState<ParcelaRow[]>(
+    edit && edit.receber_schedule.length > 0
+      ? edit.receber_schedule.map((p) => ({ vencimento: p.vencimento, valorStr: brlFromNumber(Number(p.valor)) }))
+      : [emptyParcela()],
+  );
 
   // Aba Atração — identidade + anexo/OCR + pagamento
   const [bandMode, setBandMode] = useState<"existing" | "new">(bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>("");
-  const [bName, setBName] = useState("");
-  const [bDoc, setBDoc] = useState("");
-  const [bEmail, setBEmail] = useState("");
-  const [bPhone, setBPhone] = useState("");
-  const [bBanco, setBBanco] = useState("");
-  const [bAgencia, setBAgencia] = useState("");
-  const [bConta, setBConta] = useState("");
-  const [bTitular, setBTitular] = useState("");
-  const [bDocTitular, setBDocTitular] = useState("");
-  const [bPix, setBPix] = useState("");
+  const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
+  const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentName, setAttachmentName] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -156,12 +176,9 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
   const submittingRef = useRef(false);
 
   const valAtracao = parseBRL(vAtracao);
-  const valRider = parseBRL(vRider);
-  const valCamarim = parseBRL(vCamarim);
-  const valExtras = parseBRL(vExtras);
-  const totalCliente = valAtracao + valRider + valCamarim + valExtras;
+  const totalCliente = valAtracao;
   const valArtista = parseBRL(vArtista);
-  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!bName.trim());
+  const bandFilled = (bandMode === "existing" && !!bandId) || (bandMode === "new" && !!band.name.trim());
 
   async function handleUpload(file: File) {
     setError(null);
@@ -191,10 +208,17 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
     setOcrLoading(false);
     if ("error" in res) return setError(res.error);
     const d = res.data;
-    if (d.bandName && bandMode === "new") { setBName(d.bandName); setBDoc(d.bandDoc ?? ""); }
+    if (d.bandName && bandMode === "new") { patchBand({ name: d.bandName, doc: d.bandDoc ?? "" }); }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+    // Alerta se as parcelas lidas não somam o valor do contrato.
+    const somaPs = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    if (d.valorCache != null && d.valorCache > 0 && Math.abs(somaPs - d.valorCache) >= 0.01) {
+      setError(`As parcelas lidas somam R$ ${fmt.format(somaPs)}, mas o valor do contrato é R$ ${fmt.format(d.valorCache)}. Ajuste as parcelas para bater com o total antes de salvar.`);
+      setOcrMsg(null);
+      return;
+    }
     setOcrMsg("Contrato lido — revise os dados da atração.");
   }
 
@@ -204,14 +228,23 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       .map((r) => ({ vencimento: r.vencimento, valor: parseBRL(r.valorStr) }));
     const selectedClient = clients.find((c) => c.id === clientId);
     return {
+      contract_id: edit?.id ?? null,
       client:
         clientMode === "existing" && selectedClient
-          ? {
-              id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
-              pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
-              resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
-              endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
-            }
+          ? edit
+            ? {
+                // Edição: os campos na tela atualizam o CADASTRO do cliente (corrige CNPJ etc.).
+                id: selectedClient.id, name: cName.trim() || selectedClient.name, cnpj_cpf: cDoc.trim() || null,
+                pessoa_fisica: onlyDigits(cDoc).length === 11, email: cEmail.trim() || null, phone: cPhone.trim() || null,
+                resp_legal: cRespLegal.trim() || null, cpf_resp_legal: cCpfResp.trim() || null,
+                endereco: cEndereco.trim() || null, cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
+              }
+            : {
+                id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
+                pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
+                resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
+                endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
+              }
           : {
               name: cName.trim(), cnpj_cpf: cDoc.trim() || null, pessoa_fisica: onlyDigits(cDoc).length === 11,
               email: cEmail.trim() || null, phone: cPhone.trim() || null, resp_legal: cRespLegal.trim() || null,
@@ -231,15 +264,18 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       espec_area_interna: especAreaInterna, espec_area_externa: especAreaExterna, espec_palco: especPalco, espec_trio: especTrio,
       extra_transporte_cidade: extraTransporte, extra_translado_local: extraTranslado,
       extra_diaria_alimentacao: extraDiaria, extra_hospedagem: extraHospedagem,
+      extra_outros: extraOutros.trim() || null,
+      rider_tecnico: riderTecnico, rider_camarim: riderCamarim, rider_pre_producao: riderPreProducao,
       tipo_evento: tipoEvento || null,
       cortesias: cortesias.trim() || null,
       data_assinatura: dataAssinatura || null,
       testemunha_1_nome: test1Nome.trim() || null, testemunha_1_cpf: test1Cpf.trim() || null, testemunha_1_email: test1Email.trim() || null,
       testemunha_2_nome: test2Nome.trim() || null, testemunha_2_cpf: test2Cpf.trim() || null,
       valor_atracao_cliente: valAtracao,
-      valor_rider: valRider,
-      valor_camarim: valCamarim,
-      valor_extras: valExtras,
+      // Contratos antigos podem ter esses valores — a edição preserva; novos vão zerados.
+      valor_rider: edit?.valor_rider ?? 0,
+      valor_camarim: edit?.valor_camarim ?? 0,
+      valor_extras: edit?.valor_extras ?? 0,
       observacao: observacao.trim() || null,
       receber_schedule,
     };
@@ -251,22 +287,26 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       ? {
           id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
           email: selectedBand.email, phone: selectedBand.phone, banco: selectedBand.banco, agencia: selectedBand.agencia,
-          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix,
+          conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix, chave_pix_tipo: selectedBand.chave_pix_tipo,
         }
-      : {
-          name: bName.trim(), cnpj_cpf: bDoc.trim() || null, pessoa_fisica: onlyDigits(bDoc).length === 11,
-          email: bEmail.trim() || null, phone: bPhone.trim() || null, banco: bBanco.trim() || null, agencia: bAgencia.trim() || null,
-          conta_corrente: bConta.trim() || null, titular_banco: bTitular.trim() || null, doc_titular: bDocTitular.trim() || null, chave_pix: bPix.trim() || null,
-        };
+      : bandCadastroToInput(band);
   }
 
   async function handleSalvar(enviar: boolean) {
     if (submittingRef.current) return;
     setError(null);
     if (clientMode === "existing" && !clientId) return setError("Selecione o cliente.");
-    if (clientMode === "new" && !cName.trim()) return setError("Informe o nome do cliente.");
-    if (valAtracao <= 0) return setError("Informe o valor da atração cobrado do cliente (aba Contrato Cliente).");
-    if (enviar && !bandFilled) return setError("Selecione a atração/artista (aba Contrato Atração) antes de gerar o contrato.");
+    if (clientMode === "new") {
+      if (!cName.trim()) return setError("Informe o Fundo / Razão social do cliente.");
+      // Cliente novo entra no Omie como PF do responsável (fundo vira nome fantasia).
+      if (!cRespLegal.trim()) return setError("Informe o responsável legal (nome completo) — obrigatório para cadastrar o cliente.");
+      if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
+    }
+    if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
+    if (!edit && bandMode === "new" && band.name.trim()) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setError(pixErr);
+    }
 
     submittingRef.current = true;
     setSubmitting(true);
@@ -275,7 +315,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
       if ("error" in res) { submittingRef.current = false; setSubmitting(false); return setError(res.error); }
       const contractId = res.contractId;
 
-      if (bandFilled) {
+      if (!edit && bandFilled) {
         const pagar = pagarArtista.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) }));
         const atr = await salvarAtracao({ contract_id: contractId, band: buildBandInput(), attachment_path: attachmentPath, valor_artista: valArtista > 0 ? valArtista : undefined, parcelas_pagar: valArtista > 0 ? pagar : undefined });
         if ("error" in atr) { setError(atr.error); router.push(`/case/contratos/${contractId}`); return; }
@@ -283,8 +323,16 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
       if (enviar) {
         const g = await gerarEnviarContrato(contractId);
-        if ("error" in g) { router.push(`/case/contratos/${contractId}`); return; }
-        if (g.warning) alert(g.warning);
+        if ("error" in g) {
+          showToast({ title: "Contrato salvo, mas o envio falhou", description: g.error, variant: "destructive" });
+          router.push(`/case/contratos/${contractId}`);
+          return;
+        }
+        if (g.warning) {
+          showToast({ title: "Contrato gerado", description: g.warning });
+        } else {
+          showToast({ title: "Contrato enviado para assinatura", description: "Os signatários receberão o link por e-mail.", variant: "success" });
+        }
       }
       router.push(`/case/contratos/${contractId}`);
       router.refresh();
@@ -297,13 +345,15 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); handleSalvar(false); }} className="space-y-5">
-      {/* Abas */}
-      <div className="flex gap-1 border-b border-border">
-        <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
-        <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
-      </div>
+      {/* Abas (na edição só existe a aba Cliente — atrações ficam no workspace) */}
+      {!edit && (
+        <div className="flex gap-1 border-b border-border">
+          <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
+          <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
+        </div>
+      )}
 
-      {tab === "cliente" ? (
+      {edit || tab === "cliente" ? (
         <>
           <div className={SECTION_CLS}>
             <div className="flex items-center justify-between">
@@ -311,24 +361,47 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
               <ModeToggle mode={clientMode} setMode={setClientMode} hasExisting={clients.length > 0} />
             </div>
             {clientMode === "existing" ? (
-              <SearchSelect
-                items={clients.map((c) => ({ id: c.id, label: c.name, sub: c.cnpj_cpf }))}
-                value={clientId}
-                onChange={setClientId}
-                placeholder="Buscar e selecionar o cliente…"
-              />
+              <>
+                <SearchSelect
+                  items={clients.map((c) => ({ id: c.id, label: c.name, sub: c.cnpj_cpf }))}
+                  value={clientId}
+                  onChange={selectClient}
+                  placeholder="Buscar e selecionar o cliente…"
+                />
+                {edit && clientId && (
+                  <div className="space-y-3 rounded-md border border-border/70 p-3">
+                    <p className="text-xs text-ink-muted">Dados do cadastro do cliente — editar aqui atualiza o cadastro (ex.: completar o CNPJ/CPF exigido pelo Omie).</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
+                      <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
+                      <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                      <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                      <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
+                      <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
+                      <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                      <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                      <Field label="CEP" value={cCep} onChange={setCCep} />
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
-                <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
-                <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
-                <Field label="Telefone" value={cPhone} onChange={setCPhone} />
-                <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
-                <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
-                <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
-                <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
-                <Field label="CEP" value={cCep} onChange={setCCep} />
-              </div>
+              <>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Fundo / Razão social (nome fantasia no Omie)" value={cName} onChange={setCName} />
+                  <Field label="CNPJ (opcional)" value={cDoc} onChange={setCDoc} />
+                  <Field label="Responsável legal — nome completo *" value={cRespLegal} onChange={setCRespLegal} />
+                  <Field label="CPF do responsável *" value={cCpfResp} onChange={setCCpfResp} />
+                  <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                  <Field label="Telefone" value={cPhone} onChange={setCPhone} />
+                  <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
+                  <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
+                  <Field label="CEP" value={cCep} onChange={setCCep} />
+                </div>
+                <p className="text-xs text-ink-muted">
+                  No Omie, o cliente é cadastrado como <strong>pessoa física do responsável legal</strong> (razão social = nome completo, documento = CPF) e o Fundo/Razão social vira o <strong>nome fantasia</strong>. Informe o CNPJ só se o contratante tiver um.
+                </p>
+              </>
             )}
           </div>
 
@@ -367,6 +440,17 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
                 <CheckField label="Diária de alimentação" checked={extraDiaria} onChange={setExtraDiaria} />
                 <CheckField label="Hospedagem" checked={extraHospedagem} onChange={setExtraHospedagem} />
               </div>
+              <div className="mt-2">
+                <Field label="Outro extra incluso (texto livre — ex.: DJ residente)" value={extraOutros} onChange={setExtraOutros} />
+              </div>
+            </div>
+            <div>
+              <label className={LABEL_CLS}>Rider e afins (custo da CONTRATADA se marcado)</label>
+              <div className="flex flex-wrap gap-4">
+                <CheckField label="Rider técnico" checked={riderTecnico} onChange={setRiderTecnico} />
+                <CheckField label="Rider de camarim" checked={riderCamarim} onChange={setRiderCamarim} />
+                <CheckField label="Pré-produção, produção de palco e de camarins" checked={riderPreProducao} onChange={setRiderPreProducao} />
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
@@ -393,10 +477,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
           <div className={SECTION_CLS}>
             <h2 className="text-sm font-semibold text-ink-primary">Valores cobrados do cliente</h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <MoneyField label="Atração" value={vAtracao} onChange={setVAtracao} />
-              <MoneyField label="Rider" value={vRider} onChange={setVRider} />
-              <MoneyField label="Camarim" value={vCamarim} onChange={setVCamarim} />
-              <MoneyField label="Extras" value={vExtras} onChange={setVExtras} />
+              <MoneyField label="Contrato" value={vAtracao} onChange={setVAtracao} />
             </div>
             <div className="rounded-md bg-surface-2 p-3 text-center text-sm">
               <div className="text-xs text-ink-muted">Total cobrado do cliente</div>
@@ -425,18 +506,7 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
                 placeholder="Buscar e selecionar a atração/artista…"
               />
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Nome / Razão social" value={bName} onChange={setBName} />
-                <Field label="CNPJ / CPF" value={bDoc} onChange={setBDoc} />
-                <Field label="E-mail" value={bEmail} onChange={setBEmail} />
-                <Field label="Telefone" value={bPhone} onChange={setBPhone} />
-                <Field label="Banco" value={bBanco} onChange={setBBanco} />
-                <Field label="Agência" value={bAgencia} onChange={setBAgencia} />
-                <Field label="Conta corrente" value={bConta} onChange={setBConta} />
-                <Field label="Titular" value={bTitular} onChange={setBTitular} />
-                <Field label="CPF/CNPJ do titular" value={bDocTitular} onChange={setBDocTitular} />
-                <Field label="Chave PIX" value={bPix} onChange={setBPix} />
-              </div>
+              <BandCadastroFields value={band} onChange={patchBand} />
             )}
           </div>
 
@@ -457,27 +527,29 @@ export function NovoContratoForm({ clients, bands }: { clients: CaseClientRow[];
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField label="Valor pago ao artista (custódia)" value={vArtista} onChange={setVArtista} />
             </div>
-            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que a atração cobrada (R$ {fmt.format(valAtracao)}).</p>}
+            {valArtista > valAtracao && valAtracao > 0 && <p className="text-xs text-red-500">Não pode ser maior que o valor do contrato cobrado do cliente (R$ {fmt.format(valAtracao)}).</p>}
             <ParcelasEditor label="Parcelas a pagar ao artista" rows={pagarArtista} onChange={setPagarArtista} total={valArtista} onFillSingle={() => setPagarArtista([{ vencimento: eventDate, valorStr: brlFromNumber(valArtista) }])} />
           </div>
         </>
       )}
 
       {/* Financeiro (placeholder até salvar/gerar títulos) */}
-      <section className="rounded-lg border border-border bg-surface-1 p-4">
-        <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
-        <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
-      </section>
+      {!edit && (
+        <section className="rounded-lg border border-border bg-surface-1 p-4">
+          <h2 className="text-sm font-semibold text-ink-primary">Financeiro</h2>
+          <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted"><Circle className="h-4 w-4" /> Os lançamentos aparecem aqui depois de salvar, no contrato.</p>
+        </section>
+      )}
 
       {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-300">{error}</div>}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <button type="button" onClick={() => router.push("/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
+        <button type="button" onClick={() => router.push(edit ? `/case/contratos/${edit.id}` : "/case/contratos")} className="rounded-md border border-border px-4 py-2 text-sm text-ink-secondary hover:bg-surface-2">Cancelar</button>
         <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:text-amber-400 dark:hover:bg-amber-950/30">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Salvar rascunho
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar alterações" : "Salvar rascunho"}
         </button>
         <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} Gerar e enviar para assinatura
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar e enviar para assinatura" : "Gerar e enviar para assinatura"}
         </button>
       </div>
     </form>
@@ -493,7 +565,7 @@ function TabBtn({ active, done, label, onClick }: { active: boolean; done: boole
   );
 }
 
-function SearchSelect({ items, value, onChange, placeholder }: {
+export function SearchSelect({ items, value, onChange, placeholder }: {
   items: Array<{ id: string; label: string; sub?: string | null }>;
   value: string;
   onChange: (id: string) => void;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -11,6 +11,7 @@ import {
   ChevronsUpDown,
   Download,
   FileSpreadsheet,
+  FileText,
   Inbox,
   Loader2,
   Search,
@@ -34,6 +35,7 @@ import {
   useSharedCompanyFilterHydration,
 } from "@/lib/dashboard/shared-company-filter";
 import type { Segment } from "@/lib/supabase/types";
+import { ComparativoReport } from "@/components/app/comparativo-report";
 
 interface CompanyOption {
   id: string;
@@ -343,6 +345,66 @@ export function ComparativosAnuaisView({
     }
   };
 
+  // ── Export PDF (identidade do BI, 1 página, respeita linhas abertas/fechadas) ─
+  const reportRef = useRef<HTMLDivElement>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [geradoEm, setGeradoEm] = useState("");
+  useEffect(() => {
+    const now = new Date();
+    setGeradoEm(
+      `Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
+    );
+  }, []);
+  const companyLabel = useMemo(() => {
+    if (selectedCompanyIds.length === 1) {
+      return companies.find((c) => c.id === selectedCompanyIds[0])?.name ?? "Consolidado";
+    }
+    const seg = segments.find((s) => s.slug === activeSegmentSlug);
+    return `${seg?.name ?? "Consolidado"} — ${selectedCompanyIds.length} empresas`;
+  }, [selectedCompanyIds, companies, segments, activeSegmentSlug]);
+
+  const handleExportPdf = async () => {
+    if (!reportRef.current || visibleRows.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const aspect = canvas.height / canvas.width;
+      let w: number;
+      let h: number;
+      if (pw * aspect <= ph) {
+        w = pw;
+        h = pw * aspect;
+      } else {
+        h = ph;
+        w = ph / aspect;
+      }
+      pdf.addImage(imgData, "PNG", (pw - w) / 2, (ph - h) / 2, w, h);
+      pdf.save(`comparativo-anual-${range.label.replace(/[^a-zA-Z0-9]+/g, "_")}.pdf`);
+      showToast({ title: "PDF gerado", description: "Relatório em uma página.", variant: "success" });
+    } catch (e) {
+      showToast({
+        title: "Falha ao gerar PDF",
+        description: e instanceof Error ? e.message : "Erro ao gerar o PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   // ── Filtros → URL ────────────────────────────────────────────────────────────
   const buildQuery = () => {
     const params = new URLSearchParams();
@@ -374,10 +436,16 @@ export function ComparativosAnuaisView({
               Realizado x Orçado x Ano Anterior | {range.label} <span className="text-muted-foreground/70">(anterior: {priorRange.label})</span>
             </p>
           </div>
-          <Button type="button" variant="outline" onClick={() => void handleExportTable()} disabled={exportingTable || visibleRows.length === 0}>
-            {exportingTable ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-            Exportar XLSX
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={() => void handleExportPdf()} disabled={exportingPdf || visibleRows.length === 0}>
+              {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+              Exportar PDF
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void handleExportTable()} disabled={exportingTable || visibleRows.length === 0}>
+              {exportingTable ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Exportar XLSX
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -615,6 +683,18 @@ export function ComparativosAnuaisView({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Relatório oculto (fora da tela) capturado no PDF — sempre em sync com
+          as linhas abertas/fechadas via visibleRows. */}
+      <div ref={reportRef} style={{ position: "absolute", left: "-99999px", top: 0 }} aria-hidden>
+        <ComparativoReport
+          companyLabel={companyLabel}
+          periodLabel={range.label}
+          priorPeriodLabel={priorRange.label}
+          geradoEm={geradoEm}
+          rows={visibleRows}
+        />
+      </div>
     </div>
   );
 }

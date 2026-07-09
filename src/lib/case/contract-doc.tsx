@@ -100,6 +100,12 @@ export interface ContractPdfData {
     transladoLocal: boolean;
     diariaAlimentacao: boolean;
     hospedagem: boolean;
+    outros: string | null;
+  };
+  rider: {
+    tecnico: boolean;
+    camarim: boolean;
+    preProducao: boolean;
   };
   tipoEvento: "aberto" | "fechado" | null;
   valorTotal: number;
@@ -501,14 +507,24 @@ export function ContractDoc({ data }: { data: ContractPdfData }) {
               <Checkbox label="TRANSLADO LOCAL" checked={data.extras.transladoLocal} />
               <Checkbox label="DIÁRIA DE ALIMENTAÇÃO" checked={data.extras.diariaAlimentacao} />
               <Checkbox label="HOSPEDAGEM" checked={data.extras.hospedagem} />
+              {(data.extras.outros ?? "").trim() !== "" && (
+                <Checkbox label={data.extras.outros!.trim().toUpperCase()} checked />
+              )}
             </View>
           </View>
         </View>
 
-        <Text style={s.logistica}>
-          <Text style={{ fontFamily: "Archivo", fontSize: 8, fontWeight: 700 }}>LOGÍSTICA: </Text>
-          Rider e camarim por conta do contratante.
-        </Text>
+        <View style={{ borderWidth: 1, borderColor: LINE, borderRadius: 6, padding: 11, marginBottom: 14 }}>
+          <Text style={s.cardTitle}>RIDER E AFINS</Text>
+          <Text style={{ fontSize: 7, color: LABEL, marginBottom: 8, lineHeight: 1.4 }}>
+            Se marcado, considere como custo da CONTRATADA
+          </Text>
+          <View style={s.extrasCol}>
+            <Checkbox label="RIDER TÉCNICO" checked={data.rider.tecnico} />
+            <Checkbox label="RIDER DE CAMARIM" checked={data.rider.camarim} />
+            <Checkbox label="PRÉ-PRODUÇÃO, PRODUÇÃO DE PALCO E PRODUÇÃO DE CAMARINS" checked={data.rider.preProducao} />
+          </View>
+        </View>
 
         <Text style={s.payLabel}>FORMA DE PAGAMENTO</Text>
         <View style={s.payCards}>

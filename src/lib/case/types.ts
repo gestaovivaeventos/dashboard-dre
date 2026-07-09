@@ -40,6 +40,8 @@ export interface CaseBandInput {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  /** Tipo da chave PIX (cpf_cnpj|telefone|email|aleatoria) — UI/validação. */
+  chave_pix_tipo: string | null;
 }
 
 export interface CaseParcelaInput {
@@ -60,6 +62,11 @@ export interface CaseContractExtras {
   extra_translado_local: boolean;
   extra_diaria_alimentacao: boolean;
   extra_hospedagem: boolean;
+  /** Item livre extra (ex.: "DJ residente da Aula da Saudade") — sai marcado no PDF. */
+  extra_outros: string | null;
+  rider_tecnico: boolean;
+  rider_camarim: boolean;
+  rider_pre_producao: boolean;
   tipo_evento: CaseTipoEvento;
   cortesias: string | null;
   data_assinatura: string | null; // ISO YYYY-MM-DD
@@ -128,6 +135,8 @@ export interface Etapa1Input extends CaseContractExtras {
 /** Aba Contrato Atração — identidade do artista + anexo + (opcional) pagamento. */
 export interface Etapa2Input {
   contract_id: string;
+  /** Quando presente, edita uma atração existente; ausente cria uma nova. */
+  atracao_id?: string | null;
   /** Identidade do artista/atração (seleção ou cadastro na própria aba). */
   band: CaseBandInput;
   /** Contrato do artista (fonte do OCR), já no bucket. */
@@ -135,6 +144,50 @@ export interface Etapa2Input {
   /** Pagamento — opcional: dá pra salvar só banda+anexo e informar valor depois. */
   valor_artista?: number;
   parcelas_pagar?: CaseParcelaInput[];
+}
+
+/** Atração vinculada a um contrato (um contrato pode ter várias). */
+export interface CaseAtracaoRow {
+  id: string;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  attachment_path: string | null;
+  valor_artista: number;
+  pagar_schedule: CaseParcelaInput[];
+}
+
+/**
+ * Tipos de despesa a pagar do contrato (além das atrações):
+ * rider_camarim sai da verba; comissões são despesas próprias, cada uma
+ * lançada no Omie com sua categoria (Configuração Omie do Case).
+ */
+export type CaseFornecedorTipo = "rider_camarim" | "comissao_externa" | "comissao_rider";
+
+/** Fornecedor/comissão paga pelo contrato. */
+export interface CaseFornecedorRow {
+  id: string;
+  tipo: CaseFornecedorTipo;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  descricao: string | null;
+  attachment_path: string | null;
+  valor: number;
+  pagar_schedule: CaseParcelaInput[];
+}
+
+/** Aba Contrato Atração — fornecedor da verba Rider/Camarim ou comissão. */
+export interface FornecedorInput {
+  contract_id: string;
+  /** Quando presente, edita um fornecedor existente; ausente cria um novo. */
+  fornecedor_id?: string | null;
+  tipo?: CaseFornecedorTipo;
+  band: CaseBandInput;
+  descricao?: string | null;
+  attachment_path?: string | null;
+  valor: number;
+  parcelas_pagar: CaseParcelaInput[];
 }
 
 export interface CaseClientRow {
@@ -164,10 +217,13 @@ export interface CaseBandRow {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  chave_pix_tipo: string | null;
 }
 
 export interface CaseOmieConfigRow {
   codigo_categoria_custodia: string | null;
   codigo_categoria_servicos: string | null;
+  /** Categoria de DESPESA (2.x.x) usada nos títulos a pagar (artistas/fornecedores). */
+  codigo_categoria_pagar: string | null;
   codigo_conta_corrente: string | null;
 }

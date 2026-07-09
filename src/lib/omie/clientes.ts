@@ -91,6 +91,8 @@ export interface OmieSupplierData {
   id: string;
   name: string;
   cnpj_cpf: string | null;
+  /** Quando difere da razão social (ex.: fundo de formatura em cadastro PF do responsável). */
+  nome_fantasia?: string | null;
   email: string | null;
   phone: string | null;
   banco: string | null;
@@ -114,7 +116,7 @@ function buildClientePayload(
   const payload: Record<string, unknown> = {
     codigo_cliente_integracao: supplier.id,
     razao_social: supplier.name,
-    nome_fantasia: supplier.name,
+    nome_fantasia: supplier.nome_fantasia?.trim() || supplier.name,
     cnpj_cpf: doc,
     pessoa_fisica: doc.length === 11 ? "S" : "N",
     email: supplier.email ?? "",
@@ -145,6 +147,46 @@ function buildClientePayload(
     };
   }
   return payload;
+}
+
+/**
+ * Monta o payload Omie de um CLIENTE do Case a partir da linha de case_clients.
+ * Cliente sem CNPJ (ex.: fundo de formatura) vira PESSOA FÍSICA no Omie: CPF e
+ * nome do responsável legal, com o fundo/razão social no nome fantasia.
+ * Retorna null quando não há documento nenhum (nem CNPJ, nem CPF do responsável).
+ */
+export function clienteRowToOmieData(row: {
+  id: string;
+  name: string;
+  cnpj_cpf: string | null;
+  email: string | null;
+  phone: string | null;
+  resp_legal?: string | null;
+  cpf_resp_legal?: string | null;
+}): OmieSupplierData | null {
+  const base = {
+    id: row.id,
+    email: row.email,
+    phone: row.phone,
+    banco: null,
+    agencia: null,
+    conta_corrente: null,
+    titular_banco: null,
+    doc_titular: null,
+    chave_pix: null,
+  };
+  if (onlyDigits(row.cnpj_cpf)) {
+    return { ...base, name: row.name, cnpj_cpf: row.cnpj_cpf };
+  }
+  if (onlyDigits(row.cpf_resp_legal)) {
+    return {
+      ...base,
+      name: (row.resp_legal ?? "").trim() || row.name,
+      cnpj_cpf: row.cpf_resp_legal ?? null,
+      nome_fantasia: row.name,
+    };
+  }
+  return null;
 }
 
 // Cadastra/atualiza o fornecedor em UMA unidade Omie, sem duplicar:

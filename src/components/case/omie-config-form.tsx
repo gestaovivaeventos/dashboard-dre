@@ -16,6 +16,9 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
 
   const [custodia, setCustodia] = useState(initial.config.codigo_categoria_custodia ?? "");
   const [servicos, setServicos] = useState(initial.config.codigo_categoria_servicos ?? "");
+  const [pagar, setPagar] = useState(initial.config.codigo_categoria_pagar ?? "");
+  const [comissaoExterna, setComissaoExterna] = useState(initial.config.codigo_categoria_comissao_externa ?? "");
+  const [comissaoRider, setComissaoRider] = useState(initial.config.codigo_categoria_comissao_rider ?? "");
   const [conta, setConta] = useState(initial.config.codigo_conta_corrente ?? "");
 
   const [syncing, setSyncing] = useState(false);
@@ -84,6 +87,9 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
     const res = await saveOmieConfig({
       codigo_categoria_custodia: custodia || null,
       codigo_categoria_servicos: servicos || null,
+      codigo_categoria_pagar: pagar || null,
+      codigo_categoria_comissao_externa: comissaoExterna || null,
+      codigo_categoria_comissao_rider: comissaoRider || null,
       codigo_conta_corrente: conta || null,
     });
     setSaving(false);
@@ -173,6 +179,43 @@ export function OmieConfigForm({ initial }: { initial: CaseOmieConfigData }) {
         <div>
           <label className={LABEL_CLS}>Categoria — Clientes / Serviços Prestados (Comissões e BV)</label>
           <select value={servicos} onChange={(e) => setServicos(e.target.value)} className={INPUT_CLS}>
+            <option value="">— selecione —</option>
+            {initial.categorias.map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.descricao} ({c.codigo})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={LABEL_CLS}>Categoria — Contas a pagar (artistas e fornecedores)</label>
+          <select value={pagar} onChange={(e) => setPagar(e.target.value)} className={INPUT_CLS}>
+            <option value="">— selecione —</option>
+            {initial.categorias.map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.descricao} ({c.codigo})
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-ink-muted">Precisa ser uma categoria de DESPESA (código 2.x.x) — o Omie não aceita categoria de receita em contas a pagar.</p>
+        </div>
+
+        <div>
+          <label className={LABEL_CLS}>Categoria — Comissões Comercial - Externa</label>
+          <select value={comissaoExterna} onChange={(e) => setComissaoExterna(e.target.value)} className={INPUT_CLS}>
+            <option value="">— selecione —</option>
+            {initial.categorias.map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.descricao} ({c.codigo})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={LABEL_CLS}>Categoria — Comissões Comercial - Rider</label>
+          <select value={comissaoRider} onChange={(e) => setComissaoRider(e.target.value)} className={INPUT_CLS}>
             <option value="">— selecione —</option>
             {initial.categorias.map((c) => (
               <option key={c.codigo} value={c.codigo}>
