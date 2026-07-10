@@ -47,6 +47,7 @@ export async function generateComparison(
       .select("id, code, name, parent_id, level, type, is_summary, formula, sort_order, active")
       .eq("active", true)
       .order("code")
+      .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
       .range(from, to),
   );
 

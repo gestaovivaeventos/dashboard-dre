@@ -106,7 +106,8 @@ export default async function DashboardPage({ searchParams, params }: DashboardP
           ? query.or(`company_id.is.null,company_id.in.(${scopeCompanyIds.join(",")})`)
           : query.is("company_id", null);
     }
-    return query.order("code").range(from, to);
+    // .order("id"): desempate único → paginação por range estável (ver fetchAllDreAccountRows)
+    return query.order("code").order("id").range(from, to);
   });
   const allowedCompanyIds = await resolveAllowedCompanyIds(
     supabase,

@@ -414,6 +414,16 @@ export type RawDreAccount = DreAccountBase & { company_id: string | null };
  * de cálculo: apenas devolve o conjunto completo que o código já esperava.
  *
  * `makeQuery(from, to)` deve montar a query JÁ com `.range(from, to)` aplicado.
+ *
+ * IMPORTANTE — a ordenação DEVE incluir uma chave ÚNICA (ex.: `.order("id")`, ou
+ * `.order("code").order("id")`). Ordenar SÓ por `code` — que se repete entre
+ * empresas (planos custom reusam os mesmos codes) — torna a paginação por range
+ * INSTÁVEL: as linhas de mesmo `code` na fronteira de página são reordenadas de
+ * forma inconsistente entre as chamadas, e algumas somem do conjunto (enquanto
+ * outras duplicam). Bug real corrigido: a conta 7.2.13 da Terrazzo sumia do
+ * relatório one-page (que carrega TODAS as empresas, ~2000 contas, cruzando a
+ * fronteira), subtraindo ~R$ 21 mil das Despesas Operacionais e divergindo do
+ * Dashboard DRE (que só carrega global + empresas do segmento, sem cruzar 1000).
  */
 export async function fetchAllDreAccountRows<T>(
   makeQuery: (
@@ -558,6 +568,7 @@ export async function loadScopedDreAccounts(
       .select(SCOPED_DRE_ACCOUNTS_SELECT)
       .eq("active", true)
       .order("code")
+      .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
       .range(from, to),
   );
 
