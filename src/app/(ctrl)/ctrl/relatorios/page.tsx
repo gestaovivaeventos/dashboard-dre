@@ -35,6 +35,7 @@ async function getRelatorioData(params: {
       creator:users!ctrl_requests_created_by_fkey(name, email),
       approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
+    .is("deleted_at", null) // exclui requisições excluídas logicamente
     .order("created_at", { ascending: false });
 
   if (params.sectorId) query = query.eq("sector_id", params.sectorId);

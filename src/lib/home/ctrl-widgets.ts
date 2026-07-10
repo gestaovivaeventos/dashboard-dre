@@ -90,12 +90,14 @@ async function loadApprovals(roles: CtrlRole[]): Promise<HomeApprovals | null> {
         .from("ctrl_requests")
         .select("id, request_number, title, amount, status, ctrl_suppliers(name)")
         .in("status", statuses)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true })
         .limit(5),
       db
         .from("ctrl_requests")
         .select("id", { count: "exact", head: true })
-        .in("status", statuses),
+        .in("status", statuses)
+        .is("deleted_at", null),
     ]);
 
     return {
@@ -122,18 +124,21 @@ async function loadPayments(): Promise<HomePayments | null> {
         db
           .from("ctrl_requests")
           .select("id", { count: "exact", head: true })
-          .eq("status", "aprovado"),
+          .eq("status", "aprovado")
+          .is("deleted_at", null),
         db
           .from("ctrl_requests")
           .select("id", { count: "exact", head: true })
           .eq("status", "aprovado")
+          .is("deleted_at", null)
           .gte("due_date", todayIso())
           .lte("due_date", inDaysIso(7)),
         db
           .from("ctrl_requests")
           .select("id", { count: "exact", head: true })
           .eq("status", "agendado")
-          .eq("omie_launch_status", "erro"),
+          .eq("omie_launch_status", "erro")
+          .is("deleted_at", null),
       ]);
     return {
       toSend: toSend ?? 0,
@@ -151,7 +156,8 @@ async function loadMyRequests(userId: string): Promise<HomeMyRequests | null> {
     const { data } = await db
       .from("ctrl_requests")
       .select("status")
-      .eq("created_by", userId);
+      .eq("created_by", userId)
+      .is("deleted_at", null);
     const rows = data ?? [];
     const count = (...s: string[]) =>
       rows.filter((r) => s.includes(r.status as string)).length;
@@ -183,7 +189,8 @@ async function loadBudget(sectorIds: string[]): Promise<HomeBudgetSector[] | nul
         .select("sector_id, amount")
         .in("sector_id", sectorIds)
         .eq("reference_year", year)
-        .in("status", ["aprovado", "agendado", "info_pagamento_pendente"]),
+        .in("status", ["aprovado", "agendado", "info_pagamento_pendente"])
+        .is("deleted_at", null),
       db.from("ctrl_sectors").select("id, name").in("id", sectorIds),
     ]);
 

@@ -1,9 +1,14 @@
 "use client";
 
-import { Eye, FileText, Loader2, MessageCircle, Receipt, X } from "lucide-react";
+import { Eye, FileText, Loader2, MessageCircle, Pencil, Receipt, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  DeleteRequestDialog,
+  EditRequestModal,
+  type CadastroOption,
+} from "@/components/ctrl/edit-request-modal";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import {
   RequestDetailModal,
@@ -18,9 +23,23 @@ import {
 
 interface Props {
   requests: RequestDetail[];
+  isAdmin?: boolean;
+  sectors?: CadastroOption[];
+  expenseTypes?: CadastroOption[];
 }
 
-export function RequisicoesTable({ requests }: Props) {
+// Requisição já lançada no Omie (agendada ou com título) não pode ser
+// editada/excluída aqui — evita divergência CTRL ↔ Omie.
+function isOmieLaunched(req: RequestDetail): boolean {
+  return req.status === "agendado" || req.omie_contapagar_codigo != null;
+}
+
+export function RequisicoesTable({
+  requests,
+  isAdmin = false,
+  sectors = [],
+  expenseTypes = [],
+}: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<RequestDetail | null>(null);
@@ -44,6 +63,9 @@ export function RequisicoesTable({ requests }: Props) {
     number: number;
     title: string;
   } | null>(null);
+  // Edição/exclusão administrativa (admin-only).
+  const [editReq, setEditReq] = useState<RequestDetail | null>(null);
+  const [deleteReq, setDeleteReq] = useState<RequestDetail | null>(null);
 
   async function openAttachment(requestId: string) {
     setAttachmentLoading(true);
@@ -226,6 +248,38 @@ export function RequisicoesTable({ requests }: Props) {
                             Responder
                           </button>
                         )}
+                        {isAdmin && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditReq(req)}
+                              disabled={isOmieLaunched(req)}
+                              title={
+                                isOmieLaunched(req)
+                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                  : "Editar requisição"
+                              }
+                              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteReq(req)}
+                              disabled={isOmieLaunched(req)}
+                              title={
+                                isOmieLaunched(req)
+                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                  : "Excluir requisição"
+                              }
+                              className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Excluir
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -283,6 +337,30 @@ export function RequisicoesTable({ requests }: Props) {
           requestNumber={comprovanteModal.number}
           requestTitle={comprovanteModal.title}
           onClose={() => setComprovanteModal(null)}
+        />
+      )}
+
+      {editReq && (
+        <EditRequestModal
+          req={editReq}
+          sectors={sectors}
+          expenseTypes={expenseTypes}
+          onClose={() => setEditReq(null)}
+          onSaved={() => {
+            setEditReq(null);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {deleteReq && (
+        <DeleteRequestDialog
+          req={deleteReq}
+          onClose={() => setDeleteReq(null)}
+          onDeleted={() => {
+            setDeleteReq(null);
+            router.refresh();
+          }}
         />
       )}
     </div>

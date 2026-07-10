@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { APPROVAL_ROUTING } from "@/lib/ctrl/routing";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -23,26 +24,8 @@ export type PaymentMethod =
 
 export type ApprovalTier = "nivel_2" | "nivel_3";
 
-// ─── Regras de roteamento de aprovação (overrides de negócio) ────────────────
-// Estes IDs são acordos de negócio explícitos, não dados derivados — por isso
-// ficam fixos no código. Mudaram? Atualize aqui.
-const APPROVAL_ROUTING = {
-  // Requisições deste solicitante pulam o gerente e nascem aguardando o diretor.
-  directorOnly: {
-    requesterId: "45a367ad-695e-4758-b033-470483758b4c",
-    directorId: "f159c959-55c2-4cc9-a1e4-acc4b2ab69c3",
-  },
-  // Tipo de despesa cuja etapa de gerente é direcionada a este gerente.
-  expenseTypeManager: {
-    expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
-    managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
-  },
-  // Setor cujas requisições vão sempre direto ao diretor, mesmo com orçamento
-  // aprovado (pula o gerente). Notifica todos os diretores.
-  directorSector: {
-    sectorId: "306ef9b3-7895-446d-b9d3-5537942627b2", // Diretoria
-  },
-} as const;
+// As regras de roteamento (IDs fixos) vivem em "@/lib/ctrl/routing" para serem
+// compartilhadas com a UI (badges). Ver APPROVAL_ROUTING importado acima.
 
 export interface BudgetVerification {
   approvalTier: ApprovalTier;
@@ -159,7 +142,10 @@ async function performBudgetVerification(
     .eq("sector_id", sectorId)
     .eq("expense_type_id", expenseTypeId)
     .eq("reference_year", referenceYear)
-    .eq("status", "aprovado");
+    .eq("status", "aprovado")
+    // Ignora requisições excluídas logicamente (soft delete) — devolvem o valor
+    // ao orçamento automaticamente por saírem desta soma.
+    .is("deleted_at", null);
 
   const totalApproved = (approved ?? [])
     .filter((r) => countsTowardBudget(r, referenceYear))
@@ -356,9 +342,11 @@ export async function createRequest(data: CreateRequestInput) {
   // Setor Diretoria vai sempre direto ao diretor, independente do orçamento.
   const directorSectorOnly = data.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
   const forceDirector = directorOnly || directorSectorOnly;
-  const approvalTier: ApprovalTier = forceDirector
-    ? "nivel_3"
-    : verification?.approvalTier ?? "nivel_2";
+  // approval_tier reflete SÓ o orçamento (nivel_2 = dentro / nivel_3 = fora). O
+  // envio direto ao diretor (setor Diretoria / solicitante especial) é feito
+  // pelo STATUS inicial (pendente_diretor), não pelo tier — senão uma
+  // requisição dentro do orçamento seria rotulada como "Fora do orçamento".
+  const approvalTier: ApprovalTier = verification?.approvalTier ?? "nivel_2";
   // Sem auto-aprovação: toda requisição entra pendente.
   const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
@@ -540,9 +528,7 @@ export async function createRequest(data: CreateRequestInput) {
           inst.year
         );
       }
-      const instTier: ApprovalTier = forceDirector
-        ? "nivel_3"
-        : instVerification?.approvalTier ?? "nivel_2";
+      const instTier: ApprovalTier = instVerification?.approvalTier ?? "nivel_2";
       const instStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: instReq } = await supabase
@@ -597,9 +583,7 @@ export async function createRequest(data: CreateRequestInput) {
           data.reference_year
         );
       }
-      const monthTier: ApprovalTier = forceDirector
-        ? "nivel_3"
-        : monthVerification?.approvalTier ?? "nivel_2";
+      const monthTier: ApprovalTier = monthVerification?.approvalTier ?? "nivel_2";
       const monthStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
 
       const { data: recReq } = await supabase
@@ -780,6 +764,9 @@ export async function getRequests(filters?: {
        creator:users!ctrl_requests_created_by_fkey(name, email),
        approver:users!ctrl_requests_approved_by_fkey(name, email)`
     )
+    // Oculta requisições excluídas logicamente (cobre Requisições e Aprovações,
+    // que passam por aqui).
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (filters?.status) query = query.eq("status", filters.status);

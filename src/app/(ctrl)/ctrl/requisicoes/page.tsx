@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests } from "@/lib/ctrl/actions/requests";
+import { getSectors } from "@/lib/ctrl/actions/sectors";
+import { getExpenseTypes } from "@/lib/ctrl/actions/expense-types";
 import { RequisicoesTable } from "@/components/ctrl/requisicoes-table";
 import type { RequestDetail } from "@/components/ctrl/request-detail-modal";
 
@@ -32,6 +34,19 @@ export default async function RequisicoesPage() {
     "csc",
     "admin",
   );
+
+  // Edição/exclusão administrativa (a princípio) só para admin. Carrega os
+  // cadastros de setor/tipo só nesse caso, para alimentar o form de edição.
+  const isAdmin = hasCtrlRole(ctx, "admin");
+  const [sectorsRes, typesRes] = isAdmin
+    ? await Promise.all([getSectors(), getExpenseTypes()])
+    : [null, null];
+  const sectors = (
+    sectorsRes && "sectors" in sectorsRes ? sectorsRes.sectors ?? [] : []
+  ).map((s) => ({ id: s.id, name: s.name }));
+  const expenseTypes = (
+    typesRes && "expenseTypes" in typesRes ? typesRes.expenseTypes ?? [] : []
+  ).map((t) => ({ id: t.id, name: t.name }));
 
   const { requests, error } = await getRequests();
 
@@ -65,6 +80,8 @@ export default async function RequisicoesPage() {
       favorecido: (r.favorecido as string | null) ?? null,
       supplier_issues_invoice: (r.supplier_issues_invoice as string | null) ?? null,
       attachment_path: (r.attachment_path as string | null) ?? null,
+      sector_id: (r.sector_id as string | null) ?? null,
+      expense_type_id: (r.expense_type_id as string | null) ?? null,
       paying_company: (r.paying_company as string | null) ?? null,
       omie_contapagar_codigo: (r.omie_contapagar_codigo as number | null) ?? null,
       sent_to_payment_at: (r.sent_to_payment_at as string | null) ?? null,
@@ -104,7 +121,12 @@ export default async function RequisicoesPage() {
       {error ? (
         <p className="text-sm text-destructive">{error}</p>
       ) : (
-        <RequisicoesTable requests={rows} />
+        <RequisicoesTable
+          requests={rows}
+          isAdmin={isAdmin}
+          sectors={sectors}
+          expenseTypes={expenseTypes}
+        />
       )}
     </div>
   );

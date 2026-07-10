@@ -10,6 +10,7 @@ import {
   batchApproveRequests,
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 
 type Req = {
   id: string;
@@ -21,6 +22,7 @@ type Req = {
   // usada para decidir a aprovação de dentro da própria aba de Complementação.
   complement_return_status?: string | null;
   approval_tier: string | null;
+  sector_id?: string | null;
   description: string | null;
   justification: string | null;
   observations: string | null;
@@ -280,7 +282,16 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                 const supplier = resolve(req.ctrl_suppliers);
                 const actionable = canActOn(req);
                 const canSelectThis = activeTab === "pendente" && actionable;
-                const isNivel3 = req.approval_tier === "nivel_3";
+                // Roteado ao diretor por regra (setor Diretoria / solicitante
+                // especial) — não é "fora do orçamento".
+                const isForcedDirector = isForcedDirectorRouting({
+                  sector_id: req.sector_id,
+                  created_by: req.created_by,
+                });
+                // "Fora do orçamento" só quando o nível 3 vem do orçamento, não
+                // do roteamento forçado (cobre também dados antigos, cujo tier
+                // foi marcado nível 3 pela regra de setor).
+                const isOverBudget = req.approval_tier === "nivel_3" && !isForcedDirector;
                 const isSelected = canSelectThis && selected.has(req.id);
 
                 return (
@@ -305,9 +316,14 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{req.title}</span>
                         {(() => { const b = STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
-                        {isNivel3 && (
+                        {isOverBudget && (
                           <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
                             Fora do orçamento
+                          </span>
+                        )}
+                        {isForcedDirector && (
+                          <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                            Direto ao Diretor
                           </span>
                         )}
                         {awaitingSet.has(req.id) && (
@@ -421,7 +437,21 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                   {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
                   {modal.req.payment_method && <Row label="Pagamento" value={PAYMENT_LABELS[modal.req.payment_method] ?? modal.req.payment_method} />}
                   {modal.req.due_date && <Row label="Vencimento" value={new Intl.DateTimeFormat("pt-BR").format(new Date(modal.req.due_date + "T00:00:00"))} />}
-                  {modal.req.approval_tier && <Row label="Nível de aprovação" value={modal.req.approval_tier === "nivel_3" ? "Diretor (nível 3)" : "Gerente (nível 2)"} />}
+                  {modal.req.approval_tier && (
+                    <Row
+                      label="Nível de aprovação"
+                      value={
+                        isForcedDirectorRouting({
+                          sector_id: modal.req.sector_id,
+                          created_by: modal.req.created_by,
+                        })
+                          ? "Diretor (direto — regra do setor)"
+                          : modal.req.approval_tier === "nivel_3"
+                            ? "Diretor (fora do orçamento)"
+                            : "Gerente (nível 2)"
+                      }
+                    />
+                  )}
                   {modal.req.creator && <Row label="Solicitante" value={modal.req.creator.name ?? modal.req.creator.email} />}
                   {modal.req.description && <Row label="Descrição" value={modal.req.description} />}
                   {modal.req.justification && <Row label="Justificativa" value={modal.req.justification} />}

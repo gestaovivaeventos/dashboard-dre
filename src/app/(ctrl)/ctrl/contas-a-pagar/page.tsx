@@ -84,6 +84,7 @@ async function getContasAPagar() {
       approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
     .in("status", ["aprovado", "agendado", "inativado_csc", "info_pagamento_pendente"])
+    .is("deleted_at", null) // exclui requisições excluídas logicamente
     .order("due_date", { ascending: true, nullsFirst: false });
 
   if (error) return { error: error.message };

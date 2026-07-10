@@ -59,6 +59,9 @@ export type RequestDetail = {
   attachment_path?: string | null;
   created_at?: string | null;
   approved_at?: string | null;
+  // IDs crus dos vínculos — usados pelo form de edição administrativa.
+  sector_id?: string | null;
+  expense_type_id?: string | null;
   ctrl_suppliers: Supplier | Supplier[] | null;
   ctrl_expense_types: NamedRef;
   ctrl_sectors?: NamedRef;

@@ -25,6 +25,7 @@ async function getOrcamentoData(year: number) {
       .from("ctrl_requests")
       .select("expense_type_id, status, amount, due_date, created_at")
       .not("status", "in", '("rejeitado","estornado","inativado_csc")')
+      .is("deleted_at", null) // exclui requisições excluídas logicamente
       .eq("reference_year", year),
     supabase
       .from("ctrl_expense_types")
