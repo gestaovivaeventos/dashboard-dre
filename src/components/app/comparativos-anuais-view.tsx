@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -348,13 +348,6 @@ export function ComparativosAnuaisView({
   // ── Export PDF (identidade do BI, 1 página, respeita linhas abertas/fechadas) ─
   const reportRef = useRef<HTMLDivElement>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [geradoEm, setGeradoEm] = useState("");
-  useEffect(() => {
-    const now = new Date();
-    setGeradoEm(
-      `Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
-    );
-  }, []);
   const companyLabel = useMemo(() => {
     if (selectedCompanyIds.length === 1) {
       return companies.find((c) => c.id === selectedCompanyIds[0])?.name ?? "Consolidado";
@@ -691,7 +684,6 @@ export function ComparativosAnuaisView({
           companyLabel={companyLabel}
           periodLabel={range.label}
           priorPeriodLabel={priorRange.label}
-          geradoEm={geradoEm}
           rows={visibleRows}
         />
       </div>
