@@ -44,6 +44,59 @@ export async function getSaleContractUrl(contractId: string) {
   return signedUrlFor(contractId, "sale_contract_path");
 }
 
+export interface TituloComprovantes {
+  titleId: string;
+  descricao: string;
+  anexos: Array<{ nome: string; url: string }>;
+}
+
+/**
+ * Comprovantes (anexos) dos títulos de um contrato, direto do Omie. Resolvido
+ * sob demanda (Omie limita a 350ms/chamada) — só para títulos já lançados.
+ * pagar_custodia → conta-pagar; receber_* → conta-receber.
+ */
+export async function getContratoComprovantes(
+  contractId: string,
+): Promise<{ titulos: TituloComprovantes[] } | { error: string }> {
+  await requireCaseUser();
+  const db = await getDb();
+
+  const { data: titles } = await db
+    .from("case_titles")
+    .select("id, leg, title_item, omie_codigo")
+    .eq("contract_id", contractId)
+    .not("omie_codigo", "is", null)
+    .order("leg");
+  const rows = (titles ?? []) as Array<{ id: string; leg: string; title_item: string | null; omie_codigo: number }>;
+  if (rows.length === 0) return { titulos: [] };
+
+  const { getCaseOmieCreds } = await import("@/lib/case/omie-creds");
+  const { listarAnexos, obterAnexoLink } = await import("@/lib/omie/anexo");
+  const creds = await getCaseOmieCreds(db);
+  if (!creds) return { error: "Empresa Case Shows sem credenciais Omie." };
+
+  const legLabel: Record<string, string> = {
+    pagar_custodia: "A pagar — Custódia (artista)",
+    receber_custodia: "A receber — Custódia",
+    receber_servicos: "A receber — Serviços/BV",
+  };
+
+  const titulos: TituloComprovantes[] = [];
+  for (const t of rows) {
+    const cTabela = t.leg === "pagar_custodia" ? "conta-pagar" : "conta-receber";
+    const anexosOmie = await listarAnexos(creds.appKey, creds.appSecret, cTabela, Number(t.omie_codigo));
+    const anexos: Array<{ nome: string; url: string }> = [];
+    for (const a of anexosOmie) {
+      const url = await obterAnexoLink(creds.appKey, creds.appSecret, cTabela, Number(t.omie_codigo), a.nIdAnexo);
+      if (url) anexos.push({ nome: a.nome, url });
+    }
+    if (anexos.length > 0) {
+      titulos.push({ titleId: t.id, descricao: legLabel[t.leg] ?? t.leg, anexos });
+    }
+  }
+  return { titulos };
+}
+
 /** Reenvia o e-mail de assinatura ClickSign para o cliente. */
 export async function resendSignature(
   contractId: string,

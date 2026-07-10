@@ -259,6 +259,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "CASE",
     items: [
       { key: "case-contratos", title: "Contratos", icon: Music2, scope: "global", href: "/case/contratos", caseAccess: true },
+      { key: "case-agenda", title: "Agenda", icon: Calendar, scope: "global", href: "/case/agenda", caseAccess: true },
       { key: "case-dash", title: "Dashboard", icon: LayoutDashboard, scope: "global", href: "/case/dashboard", caseAccess: true },
       { key: "case-config", title: "Configuracao Omie", icon: Sliders, scope: "global", href: "/case/config", dreRoles: ["admin"] },
     ],

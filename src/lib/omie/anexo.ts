@@ -56,11 +56,14 @@ export interface OmieAnexo {
   tipo: string;
 }
 
-// Lista os anexos (comprovantes) de uma conta a pagar do Omie. Pagina até o fim.
+export type OmieAnexoTabela = "conta-pagar" | "conta-receber";
+
+// Lista os anexos (comprovantes) de um título do Omie. Pagina até o fim.
 // Retorna [] quando o título não tem anexos (a Omie devolve notFound).
-export async function listarAnexosContaPagar(
+export async function listarAnexos(
   appKey: string,
   appSecret: string,
+  cTabela: OmieAnexoTabela,
   codigoLancamentoOmie: number,
 ): Promise<OmieAnexo[]> {
   const anexos: OmieAnexo[] = [];
@@ -70,7 +73,7 @@ export async function listarAnexosContaPagar(
     const { data, notFound } = await omieCall(ANEXO_URL, "ListarAnexo", appKey, appSecret, {
       nPagina: pagina,
       nRegPorPagina: 50,
-      cTabela: "conta-pagar",
+      cTabela,
       nId: codigoLancamentoOmie,
     });
     if (notFound) break;
@@ -91,20 +94,38 @@ export async function listarAnexosContaPagar(
 
 // Obtém a URL temporária de download de um anexo específico (ObterAnexo →
 // cLinkDownload). A URL expira (dDtExpiracao), então é resolvida sob demanda.
-export async function obterAnexoLinkContaPagar(
+export async function obterAnexoLink(
   appKey: string,
   appSecret: string,
+  cTabela: OmieAnexoTabela,
   codigoLancamentoOmie: number,
   nIdAnexo: number,
 ): Promise<string | null> {
   const { data, notFound } = await omieCall(ANEXO_URL, "ObterAnexo", appKey, appSecret, {
-    cTabela: "conta-pagar",
+    cTabela,
     nId: codigoLancamentoOmie,
     nIdAnexo,
   });
   if (notFound) return null;
   const link = data.cLinkDownload;
   return typeof link === "string" && link ? link : null;
+}
+
+export function listarAnexosContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+): Promise<OmieAnexo[]> {
+  return listarAnexos(appKey, appSecret, "conta-pagar", codigoLancamentoOmie);
+}
+
+export function obterAnexoLinkContaPagar(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  nIdAnexo: number,
+): Promise<string | null> {
+  return obterAnexoLink(appKey, appSecret, "conta-pagar", codigoLancamentoOmie, nIdAnexo);
 }
 
 // Anexa um arquivo a um título do Omie (conta-pagar ou conta-receber). Lança em
