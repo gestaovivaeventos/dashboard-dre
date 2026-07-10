@@ -401,8 +401,11 @@ especificamente:
 - NAO trate FEE Disponivel como questao de liquidez nem o transforme em ponto
   de atencao. Pode mencionar como reserva tatica, sem urgencia.
 - O indicador-chave de saude e o VVR (volume de vendas realizadas), que
-  sinaliza a saude FUTURA do negocio. Priorize o VVR em "destaques",
-  "pontosAtencao" e "acoesRecomendadas".
+  sinaliza a saude FUTURA do negocio. Priorize o VVR em "destaques" e
+  "pontosAtencao". Em "acoesRecomendadas", respeite a "Regra do VVR para acoes
+  comerciais" abaixo: se o VVR ja esta acima da meta, NAO transforme o VVR em
+  acao recomendada (nem monitoramento nem conversao em FEE) — reconheca o
+  desempenho em "destaques".
 - Mesmo com prejuizo de curto prazo no DRE, NAO classifique como "Crítica" —
   ha reserva externa que nao aparece no DRE. Use "Atenção" apenas se o VVR
   estiver consistentemente abaixo da meta nos ultimos periodos; caso
@@ -440,10 +443,16 @@ Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
     realizado >= meta). NAO inclua NENHUMA acao comercial (de NENHUMA das
     formulacoes acima, inclusive "fortalecer a estrategia de vendas para novos
     fundos") em \`acoesRecomendadas\` — sugerir "vender mais" para quem ja
-    atingiu a meta nao faz sentido e soa contraditorio. A operacao comercial
-    esta funcionando: reconheca o bom desempenho em "destaques" e direcione as
-    \`acoesRecomendadas\` para OUTRAS alavancas (conversao de VVR em FEE,
-    disponibilidade de FEE, saude dos fundos, despesas, margem, caixa).
+    atingiu a meta nao faz sentido e soa contraditorio. ALEM DISSO, com o VVR
+    acima da meta, tambem NAO inclua acoes de ACOMPANHAMENTO ou ANALISE
+    centradas no VVR — em especial "acompanhar a evolucao do VVR" e "analisar a
+    conversao de VVR em FEE orcado" (e quaisquer variacoes com o mesmo sentido).
+    Com as vendas muito boas, monitorar ou questionar o VVR soa contraditorio
+    com o desempenho. A operacao comercial esta funcionando: reconheca o bom
+    desempenho em "destaques" e direcione as \`acoesRecomendadas\` para alavancas
+    NAO relacionadas ao VVR (disponibilidade de FEE para saque, saude financeira
+    dos fundos, despesas operacionais, margem media dos eventos, sobrevivencia
+    de caixa).
   - EXCECAO: se \`acima_da_meta\` === true mas \`abaixo_meta_ultimos_2_meses\`
     === true, houve QUEDA RECENTE apesar do acumulado positivo. So nesse caso
     inclua UMA acao de ATENCAO ao comercial para reverter o ritmo dos ultimos 2
