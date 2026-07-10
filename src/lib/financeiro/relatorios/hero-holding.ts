@@ -45,8 +45,11 @@ export interface HoldingCompanyIndicators {
   pctMetaAnualVvrAcumulada: number | null;
   /**
    * % de atingimento da meta de VVR do MÊS de referência: VVR realizado ÷ meta
-   * de VVR no período selecionado, em pontos percentuais (ex.: 62.45). Null
-   * quando a meta do mês é zero/ausente (evita divisão por zero).
+   * de VVR do ÚLTIMO mês selecionado (`toYear`/`toMonth`), em pontos percentuais
+   * (ex.: 62.45). Quando o período abrange um único mês, é o próprio mês; quando
+   * abrange vários (ex.: Jan→Jun), é sempre o mês FINAL (ex.: 06/2026) — nunca a
+   * soma do intervalo, que coincidiria com o acumulado. Null quando a meta do
+   * mês é zero/ausente (evita divisão por zero).
    */
   pctMetaVvrMes: number | null;
   /**
@@ -125,7 +128,6 @@ export async function buildHeroHoldingComparativo(
   const db = createAdminClientIfAvailable() ?? supabase;
 
   const fromYear = parseInt(dateFrom.slice(0, 4), 10);
-  const fromMonth = parseInt(dateFrom.slice(5, 7), 10);
   const toYear = parseInt(dateTo.slice(0, 4), 10);
   const toMonth = parseInt(dateTo.slice(5, 7), 10);
 
@@ -189,11 +191,12 @@ export async function buildHeroHoldingComparativo(
       if (vvr !== null) add(vvrAcumByCompany, row.company_id, vvr);
       if (meta !== null) add(metaAcumByCompany, row.company_id, meta);
     }
-    // Mês de referência: mesmo range [dateFrom..dateTo] do card individual.
-    const inRange =
-      (row.year > fromYear || (row.year === fromYear && row.month >= fromMonth)) &&
-      (row.year < toYear || (row.year === toYear && row.month <= toMonth));
-    if (inRange) {
+    // Mês de referência: SEMPRE o ÚLTIMO mês selecionado (toYear/toMonth). Com um
+    // único mês selecionado é o próprio mês; com um período de vários meses (ex.:
+    // Jan→Jun) mostramos o mês FINAL (ex.: 06/2026), e NÃO a soma do intervalo —
+    // que coincidiria com o acumulado e igualaria os dois indicadores.
+    const isReferenceMonth = row.year === toYear && row.month === toMonth;
+    if (isReferenceMonth) {
       if (vvr !== null) add(vvrMesByCompany, row.company_id, vvr);
       if (meta !== null) add(metaMesByCompany, row.company_id, meta);
     }
