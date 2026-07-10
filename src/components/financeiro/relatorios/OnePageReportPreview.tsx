@@ -572,6 +572,16 @@ const panelStyle: CSSProperties = {
   breakInside: "avoid",
 };
 
+// Formata o "gerado em" para "Gerado em: dd/mm/aa" (data BR, sem hora),
+// aceitando ISO (2026-07-10T...) ou dd/mm/aaaa já formatado.
+function formatGeradoEm(raw: string): string {
+  const iso = /(\d{4})-(\d{2})-(\d{2})/.exec(raw ?? "");
+  if (iso) return `Gerado em: ${iso[3]}/${iso[2]}/${iso[1].slice(-2)}`;
+  const br = /(\d{2})\/(\d{2})\/(\d{2,4})/.exec(raw ?? "");
+  if (br) return `Gerado em: ${br[1]}/${br[2]}/${br[3].slice(-2)}`;
+  return raw ?? "";
+}
+
 // ─── 1. Header ──────────────────────────────────────────────────────────────
 
 function Header({
@@ -601,7 +611,7 @@ function Header({
             fontWeight: 700,
           }}
         >
-          Relatório Financeiro Mensal
+          Relatório Financeiro
         </div>
         <h1
           style={{
@@ -615,7 +625,7 @@ function Header({
         >
           {data.empresa}
         </h1>
-        <div style={{ fontSize: 12, color: C.sub }}>{data.geradoEm}</div>
+        <div style={{ fontSize: 12, color: C.sub }}>{formatGeradoEm(data.geradoEm)}</div>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>

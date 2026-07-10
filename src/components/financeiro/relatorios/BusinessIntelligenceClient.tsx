@@ -423,7 +423,13 @@ export function BusinessIntelligenceClient({
         import("jspdf"),
       ]);
 
-      const canvas = await html2canvas(reportRef.current, {
+      // Captura apenas a FOLHA branca (.one-page-report), nao o fundo cinza
+      // "de mesa" (.opr-page) que existe so para a previa na tela — assim o PDF
+      // sai como folha branca limpa, sem a moldura cinza ao redor.
+      const captureTarget =
+        reportRef.current.querySelector<HTMLElement>(".one-page-report") ??
+        reportRef.current;
+      const canvas = await html2canvas(captureTarget, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
@@ -455,45 +461,33 @@ export function BusinessIntelligenceClient({
             .forEach((el) => {
               el.style.display = "none";
             });
+          // Folha branca plana no PDF: remove sombra, cantos arredondados e
+          // margem do card (a moldura cinza vem do pai, que nao e capturado).
+          const art = clonedDoc.querySelector<HTMLElement>(".one-page-report");
+          if (art) {
+            art.style.boxShadow = "none";
+            art.style.borderRadius = "0";
+            art.style.margin = "0";
+          }
         },
       });
 
       const imgData = canvas.toDataURL("image/png");
+
+      // Página com o formato EXATO do relatório: largura fixa de 210 mm (A4
+      // retrato) e altura proporcional ao conteúdo. Assim o relatório preenche a
+      // folha inteira na largura — sem margens laterais sobrando — e sai em UMA
+      // única página, sem distorção. (Antes: A4 fixo + fit-to-page, que em
+      // relatórios altos deixava o conteúdo estreito e centralizado na folha.)
+      const pageWidth = 210;
+      const pageHeight = Math.max(1, Math.round((canvas.height / canvas.width) * pageWidth));
       const pdf = new jsPDF({
-        orientation: "portrait",
+        orientation: pageHeight >= pageWidth ? "portrait" : "landscape",
         unit: "mm",
-        format: "a4",
+        format: [pageWidth, pageHeight],
         compress: true,
       });
-
-      // A4 retrato (210 x 297 mm) — preenche a pagina inteira. A imagem do
-      // relatorio e ancorada no canto superior esquerdo (0, 0) e esticada
-      // para ocupar 210 mm de largura. A altura e proporcional ao aspect
-      // do canvas (preserva proporcao, sem distorcao).
-      //
-      // Quando a altura proporcional excederia 297 mm, fazemos o caminho
-      // inverso: ancorar pela altura (297 mm) e calcular largura. Garante
-      // que tudo cabe em UMA pagina e ainda assim usa o maximo do espaco
-      // disponivel.
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const canvasAspect = canvas.height / canvas.width;
-
-      let imgWidth: number;
-      let imgHeight: number;
-      if (pdfWidth * canvasAspect <= pdfHeight) {
-        // Fit-by-width: largura cheia, altura proporcional cabe na pagina.
-        imgWidth = pdfWidth;
-        imgHeight = pdfWidth * canvasAspect;
-      } else {
-        // Fit-by-height: altura cheia, largura proporcional.
-        imgHeight = pdfHeight;
-        imgWidth = pdfHeight / canvasAspect;
-      }
-      const xOffset = (pdfWidth - imgWidth) / 2;
-      const yOffset = (pdfHeight - imgHeight) / 2;
-
-      pdf.addImage(imgData, "PNG", xOffset, yOffset, imgWidth, imgHeight);
+      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
 
       const empresa = data?.cabecalho.empresa ?? "preview";
       const periodo = data?.cabecalho.periodo ?? "preview";

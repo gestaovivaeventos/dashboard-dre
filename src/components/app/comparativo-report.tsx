@@ -68,7 +68,6 @@ interface Props {
   companyLabel: string;
   periodLabel: string;
   priorPeriodLabel: string;
-  geradoEm: string;
   rows: ComparativoReportRow[];
 }
 
@@ -85,13 +84,17 @@ function Chip({ label, sev }: { label: string; sev: { text: string; bg: string; 
       style={{
         display: "inline-flex",
         alignItems: "center",
+        justifyContent: "center",
+        minWidth: 46,
         padding: "2px 8px",
+        boxSizing: "border-box",
         borderRadius: 5,
         border: `1px solid ${sev.border}`,
         background: sev.bg,
         color: sev.text,
-        fontSize: 10.5,
+        fontSize: 11,
         fontWeight: 600,
+        lineHeight: 1.4,
         fontFamily: FONT_MONO,
         whiteSpace: "nowrap",
       }}
@@ -101,15 +104,15 @@ function Chip({ label, sev }: { label: string; sev: { text: string; bg: string; 
   );
 }
 
-export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel, geradoEm, rows }: Props) {
+export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel, rows }: Props) {
   const th: CSSProperties = {
     fontSize: 9,
     letterSpacing: "0.1em",
     textTransform: "uppercase",
     fontWeight: 700,
-    color: C.sub,
-    padding: "6px 10px 8px",
-    borderBottom: `1px solid ${C.rule}`,
+    color: "#f1f4f8",
+    background: "#383c44",
+    padding: "9px 10px",
   };
   const tdNum: CSSProperties = {
     fontFamily: FONT_MONO,
@@ -138,10 +141,9 @@ export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel,
           <div style={{ color: C.tertiary, fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 700 }}>
             Relatório — Comparativo Anual
           </div>
-          <h1 style={{ margin: "6px 0 4px", fontSize: 26, lineHeight: 1.1, fontWeight: 700, color: C.ink, letterSpacing: "-0.01em" }}>
+          <h1 style={{ margin: "6px 0 0", fontSize: 26, lineHeight: 1.1, fontWeight: 700, color: C.ink, letterSpacing: "-0.01em" }}>
             {companyLabel}
           </h1>
-          <div style={{ fontSize: 12, color: C.sub }}>{geradoEm}</div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <div style={{ background: C.darkCard, borderRadius: 8, padding: "12px 16px", minWidth: 150 }}>
@@ -178,10 +180,10 @@ export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel,
           <thead>
             <tr>
               <th style={{ ...th, textAlign: "left" }}>Contas</th>
-              <th style={{ ...th, textAlign: "right", background: "#eaf5ee", color: "#0f5a34" }}>Realizado</th>
-              <th style={{ ...th, textAlign: "right", background: "#faf1e1", color: "#8a5a13" }}>Orçado</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado</th>
+              <th style={{ ...th, textAlign: "right" }}>Orçado</th>
               <th style={{ ...th, textAlign: "center" }}>Prev. × Real.</th>
-              <th style={{ ...th, textAlign: "right", background: "#eef4fb", color: "#33507a" }}>Ano Anterior</th>
+              <th style={{ ...th, textAlign: "right" }}>Ano Anterior</th>
               <th style={{ ...th, textAlign: "center" }}>Atual × Anter.</th>
             </tr>
           </thead>
