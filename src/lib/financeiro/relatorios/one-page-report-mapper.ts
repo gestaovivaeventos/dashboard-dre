@@ -442,30 +442,116 @@ function mapHistorico(api: ApiHistorico[] | undefined): HistoricoPoint[] {
 //   - pontoAtencao com risco Alto -> "Crítico"
 //   - pontoAtencao com risco Médio/Baixo -> "Atenção"
 //   - destaque (qualquer impacto) -> "Positivo"
-function mapAlertas(analysis: OnePageReport | undefined): AlertaCard[] {
+// Formata valor cheio em BRL — ex.: "R$ 1.062.414,63".
+function formatBRLFull(n: number): string {
+  return `R$ ${n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// Alerta sobre AUMENTO / despesa ACIMA do orcado (em qualquer sub-linha de
+// despesa/custo). Usado para suprimir esse tipo de alerta quando o TOTAL de
+// despesas ficou abaixo do orcado — deteccao por texto, ja que os
+// pontosAtencao da IA nao vem vinculados a um code de indicador.
+function isExpenseIncreaseAlert(titulo: string, descricao: string): boolean {
+  const t = `${titulo} ${descricao}`.toLowerCase();
+  const mencionaDespesa =
+    t.includes("despesa") || t.includes("custo") || t.includes("gasto");
+  const mencionaAlta =
+    t.includes("aumento") ||
+    t.includes("acima") ||
+    t.includes("cresc") ||
+    t.includes("elevad") ||
+    t.includes("estouro") ||
+    t.includes("estourou") ||
+    t.includes("excede") ||
+    t.includes("maior que o orc") ||
+    t.includes("maior que o orç");
+  return mencionaDespesa && mencionaAlta;
+}
+
+// Destaque que ja fala de despesas/custos ABAIXO do orcado — evita duplicar o
+// card positivo injetado deterministicamente.
+function isExpenseBelowHighlight(titulo: string, descricao: string): boolean {
+  const t = `${titulo} ${descricao}`.toLowerCase();
+  const mencionaDespesa =
+    t.includes("despesa") || t.includes("custo") || t.includes("gasto");
+  const mencionaBaixa =
+    t.includes("abaixo") ||
+    t.includes("menor") ||
+    t.includes("reduc") ||
+    t.includes("reduç") ||
+    t.includes("economia") ||
+    t.includes("controle");
+  return mencionaDespesa && mencionaBaixa;
+}
+
+function mapAlertas(
+  analysis: OnePageReport | undefined,
+  previstoRealizado: ApiPrevistoRealizado[] | undefined,
+): AlertaCard[] {
   if (!analysis) return [];
 
-  const alertas: AlertaCard[] = [];
+  const despesasItem = previstoRealizado?.find(
+    (p) => p.label.toLowerCase() === "despesas",
+  );
+  const despesasAbaixo =
+    despesasItem?.realizado != null &&
+    despesasItem?.previsto != null &&
+    despesasItem.previsto !== 0 &&
+    despesasItem.realizado < despesasItem.previsto;
 
+  // Riscos (pontosAtencao). Quando o TOTAL de despesas ficou ABAIXO do orcado,
+  // suprime deterministicamente alertas sobre AUMENTO de despesas/custos em
+  // sub-linhas — o quadro agregado e favoravel e esse alerta distorce a
+  // leitura executiva (nao depende da IA respeitar o prompt).
+  const riscos: AlertaCard[] = [];
   for (const ponto of analysis.pontosAtencao ?? []) {
-    if (alertas.length >= 3) break;
-    alertas.push({
+    if (despesasAbaixo && isExpenseIncreaseAlert(ponto.titulo, ponto.descricao)) {
+      continue;
+    }
+    riscos.push({
       titulo: ponto.titulo,
       texto: ponto.descricao,
       classificacao: ponto.risco === "Alto" ? "Crítico" : "Atenção",
     });
   }
 
+  // Positivos (destaques). Quando as despesas ficaram abaixo do orcado, injeta
+  // na frente um card positivo com os numeros reais — garante o comentario
+  // favoravel independentemente da IA.
+  const positivos: AlertaCard[] = [];
+  if (despesasAbaixo && despesasItem) {
+    const realizado = despesasItem.realizado as number;
+    const previsto = despesasItem.previsto as number;
+    const varPct = ((realizado - previsto) / Math.abs(previsto)) * 100;
+    positivos.push({
+      titulo: "Despesas operacionais abaixo do orçado",
+      texto: `As despesas operacionais totalizaram ${formatBRLFull(
+        realizado,
+      )}, abaixo do orçamento de ${formatBRLFull(previsto)} (variação de ${varPct
+        .toFixed(2)
+        .replace(".", ",")}%), o que ajuda a preservar a margem.`,
+      classificacao: "Positivo",
+    });
+  }
   for (const destaque of analysis.destaques ?? []) {
-    if (alertas.length >= 3) break;
-    alertas.push({
+    if (
+      despesasAbaixo &&
+      isExpenseBelowHighlight(destaque.titulo, destaque.descricao)
+    ) {
+      continue; // ja coberto pelo card injetado
+    }
+    positivos.push({
       titulo: destaque.titulo,
       texto: destaque.descricao,
       classificacao: "Positivo",
     });
   }
 
-  return alertas;
+  // Riscos primeiro (mantem criticos a esquerda), depois positivos; cap de 3.
+  return [...riscos, ...positivos].slice(0, 3);
 }
 
 // ─── Semaforo ──────────────────────────────────────────────────────────────
@@ -727,7 +813,7 @@ export function mapOnePageApiResponseToPreviewData(
     historico: mapHistorico(response.historicoResultado),
     acumuladoAno: mapAcumuladoAno(response.acumuladoAno),
     vvrSerieAnual: mapVvrSerieAnual(response.vvrSerieAnual),
-    alertas: mapAlertas(response.analysis),
+    alertas: mapAlertas(response.analysis, response.previstoRealizado),
     semaforo: customKpis
       ? mapSemaforoFromList(response.analysis, customKpis)
       : mapSemaforo(response.analysis, response.kpis, response.previstoRealizado),
