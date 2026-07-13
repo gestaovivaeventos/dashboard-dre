@@ -109,11 +109,15 @@ function formatVar(a: number, b: number): string {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
-function varColor(a: number, b: number): string {
+// Para linhas de entrada (receita/resultado), o lado direito maior que o
+// esquerdo e bom (verde). Para linhas de saida (despesa) a relacao e inversa:
+// valor maior no comparado e ruim (vermelho). O sinal exibido nao muda.
+function varColor(a: number, b: number, isExpense = false): string {
   if (a === 0 && b === 0) return "text-muted-foreground/60";
   if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? "text-emerald-700" : "text-red-700";
+  const favorable = isExpense ? pct <= 0 : pct >= 0;
+  return favorable ? "text-emerald-700" : "text-red-700";
 }
 
 const MONTHS = [
@@ -833,7 +837,7 @@ export function CashFlowView({
                 const leftVal = cv[col.leftId] ?? 0;
                 const rightVal = cv[col.rightId] ?? 0;
                 return (
-                  <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal)}`}>
+                  <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, row.type === "despesa")}`}>
                     {formatVar(leftVal, rightVal)}
                   </div>
                 );

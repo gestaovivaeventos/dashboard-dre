@@ -129,6 +129,16 @@ function formatCurrencyCompact(value: number) {
   return currencyCompactFormatter.format(value);
 }
 
+// Formata uma data ISO (YYYY-MM-DD) como DD/MM/YYYY SEM passar por `new Date()`,
+// que interpretaria a data como meia-noite UTC e, em fuso negativo (BRT), a
+// exibiria um dia antes (ex.: 2026-07-01 → "30/06/2026"). Aqui formatamos os
+// componentes diretamente, então a data mostrada é sempre a data armazenada.
+function formatIsoDate(value: string | null | undefined): string {
+  if (!value) return "-";
+  const [y, m, d] = value.slice(0, 10).split("-");
+  return y && m && d ? `${d}/${m}/${y}` : value;
+}
+
 function formatVar(a: number, b: number): string {
   if (a === 0 && b === 0) return "-";
   if (a === 0) return "-";
@@ -137,11 +147,15 @@ function formatVar(a: number, b: number): string {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
-function varColor(a: number, b: number): string {
+// Para contas de RECEITA/resultado, o lado direito maior que o esquerdo e bom
+// (verde). Para DESPESA a relacao e inversa: valor maior no periodo/empresa
+// comparado e ruim (vermelho). O sinal exibido nao muda; apenas a cor.
+function varColor(a: number, b: number, isExpense = false): string {
   if (a === 0 && b === 0) return "text-muted-foreground/60";
   if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? "text-emerald-700" : "text-red-700";
+  const favorable = isExpense ? pct <= 0 : pct >= 0;
+  return favorable ? "text-emerald-700" : "text-red-700";
 }
 
 const MONTHS = [
@@ -810,7 +824,7 @@ export function DashboardDreView({
                       const leftVal = cv[col.leftId] ?? 0;
                       const rightVal = cv[col.rightId] ?? 0;
                       return (
-                        <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal)}`}>
+                        <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, row.type === "despesa")}`}>
                           {formatVar(leftVal, rightVal)}
                         </div>
                       );
@@ -1044,7 +1058,7 @@ export function DashboardDreView({
                 ) : (
                   drillRows.map((row) => (
                     <div key={row.id} className="grid grid-cols-[100px_2fr_1.5fr_140px_1fr] gap-2 border-t px-3 py-2 text-sm">
-                      <span>{new Date(row.payment_date).toLocaleDateString("pt-BR")}</span>
+                      <span>{formatIsoDate(row.payment_date)}</span>
                       <span className="truncate cursor-default" title={row.description}>{row.description}</span>
                       <span className="truncate cursor-default" title={row.supplier_customer || "-"}>{row.supplier_customer || "-"}</span>
                       <span className="text-right">{formatCurrency(row.value)}</span>

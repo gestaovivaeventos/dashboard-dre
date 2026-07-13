@@ -147,11 +147,24 @@ function formatVar(a: number, b: number): string {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
-function varColor(a: number, b: number): string {
+// Colore a variacao Previsto x Realizado. Para contas de RECEITA/resultado,
+// realizado acima do previsto e bom (verde). Para contas de DESPESA a relacao
+// e inversa: estourar o previsto (realizado maior) e ruim (vermelho) e ficar
+// abaixo do previsto e bom (verde). O sinal exibido (+/-) nao muda; apenas a
+// cor reflete se a variacao e favoravel ou desfavoravel.
+function varColor(a: number, b: number, isExpense = false): string {
   if (a === 0 && b === 0) return "text-muted-foreground/60";
   if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? "text-emerald-700" : "text-red-700";
+  const favorable = isExpense ? pct <= 0 : pct >= 0;
+  return favorable ? "text-emerald-700" : "text-red-700";
+}
+
+// Uma linha representa despesa quando seu tipo no plano de contas e "despesa"
+// (grupos como Despesas Diretas/Custos/Deducoes e suas contas). Linhas de
+// receita, resultado (calculado) ou mistas mantem a leitura padrao.
+function isExpenseRow(row: { type: BudgetForecastDisplayRow["type"] }): boolean {
+  return row.type === "despesa";
 }
 
 const MONTHS = [
@@ -1038,7 +1051,7 @@ function RealizadoTable({
                   formatCurrency(actualVal)
                 )}
               </div>
-              <div className={`text-center ${varColor(budgetVal, actualVal)}`}>
+              <div className={`text-center ${varColor(budgetVal, actualVal, isExpenseRow(row))}`}>
                 {formatVar(budgetVal, actualVal)}
               </div>
             </div>
@@ -1155,14 +1168,14 @@ function RealizadoMensalTable({
                         formatCurrency(real)
                       )}
                     </span>
-                    <span className={`text-center ${varColor(bud, real)}`}>{formatVar(bud, real)}</span>
+                    <span className={`text-center ${varColor(bud, real, isExpenseRow(row))}`}>{formatVar(bud, real)}</span>
                   </span>
                 );
               })}
 
               <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
               <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
-              <span className={`text-center font-semibold ${varColor(totalBudget, totalReal)}`}>{formatVar(totalBudget, totalReal)}</span>
+              <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, isExpenseRow(row))}`}>{formatVar(totalBudget, totalReal)}</span>
             </div>
           );
         })}
@@ -1311,7 +1324,7 @@ function ComparativoTable({
                         formatCurrency(real)
                       )}
                     </span>
-                    <span className={`text-center ${varColor(bud, real)}`}>{formatVar(bud, real)}</span>
+                    <span className={`text-center ${varColor(bud, real, isExpenseRow(row))}`}>{formatVar(bud, real)}</span>
                   </span>
                 );
               })}
@@ -1320,7 +1333,7 @@ function ComparativoTable({
                 <span className="contents">
                   <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
                   <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
-                  <span className={`text-center font-semibold ${varColor(totalBudget, totalReal)}`}>{formatVar(totalBudget, totalReal)}</span>
+                  <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, isExpenseRow(row))}`}>{formatVar(totalBudget, totalReal)}</span>
                 </span>
               ) : (
                 <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>

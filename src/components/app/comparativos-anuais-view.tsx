@@ -101,10 +101,14 @@ function formatVar(a: number, b: number): string {
   const pct = ((b - a) / Math.abs(a)) * 100;
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
-function varColor(a: number, b: number): string {
+// Para contas de RECEITA/resultado, realizado acima da base (orcado/ano
+// anterior) e bom (verde). Para DESPESA a relacao e inversa: valor realizado
+// maior que a base e ruim (vermelho). O sinal exibido nao muda; so a cor.
+function varColor(a: number, b: number, isExpense = false): string {
   if (a === 0) return "text-muted-foreground/60";
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? "text-emerald-700" : "text-red-700";
+  const favorable = isExpense ? pct <= 0 : pct >= 0;
+  return favorable ? "text-emerald-700" : "text-red-700";
 }
 
 const MONTHS = [
@@ -572,7 +576,7 @@ export function ComparativosAnuaisView({
                 <div className={`px-2 text-right text-amber-800 ${COL_ORC}`}>{formatCurrency(row.orcado)}</div>
 
                 {/* Prev x Real */}
-                <div className={`px-2 text-center ${varColor(row.orcado, row.realizado)}`}>{formatVar(row.orcado, row.realizado)}</div>
+                <div className={`px-2 text-center ${varColor(row.orcado, row.realizado, row.type === "despesa")}`}>{formatVar(row.orcado, row.realizado)}</div>
 
                 {/* Ano Anterior */}
                 <div className={`px-2 text-right text-sky-800 ${COL_ANT}`}>
@@ -586,7 +590,7 @@ export function ComparativosAnuaisView({
                 </div>
 
                 {/* Atual x Anter */}
-                <div className={`px-2 text-center ${varColor(row.anoAnterior, row.realizado)}`}>{formatVar(row.anoAnterior, row.realizado)}</div>
+                <div className={`px-2 text-center ${varColor(row.anoAnterior, row.realizado, row.type === "despesa")}`}>{formatVar(row.anoAnterior, row.realizado)}</div>
               </div>
             );
           })}
