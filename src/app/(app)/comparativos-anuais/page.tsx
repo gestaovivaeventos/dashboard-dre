@@ -5,6 +5,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
+import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 import {
   buildDashboardRows,
   buildDateRange,
@@ -149,6 +150,18 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
   const accounts = scope.coreAccounts;
   const custosNegation = resolveFranquiasVivaCustosNegation(activeSegmentSlug, accounts);
 
+  // Impostos calculados da Sirena: só quando a ÚNICA empresa selecionada é a
+  // Sirena (mesma regra do Dashboard/Budget). Aplicado apenas ao REALIZADO
+  // (dashboard_dre_aggregate — ano corrente e ano anterior), NUNCA ao orçamento.
+  // Ver src/lib/dashboard/sirena-taxes.ts.
+  const isSingleSirena =
+    filter.selectedCompanyIds.length === 1 &&
+    companies.some(
+      (c) =>
+        c.id === filter.selectedCompanyIds[0] &&
+        c.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase(),
+    );
+
   const aggregate = async (rpcName: string, dateFrom: string, dateTo: string) => {
     const { data, error } = await supabase.rpc(rpcName, {
       p_company_ids: filter.selectedCompanyIds,
@@ -162,6 +175,11 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
       if (!scopedId) return;
       amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
+    // Só o realizado (dashboard_dre_aggregate) recebe os impostos calculados; o
+    // orçamento (budget_aggregate) vem das metas cadastradas e não é tocado.
+    if (isSingleSirena && rpcName === "dashboard_dre_aggregate") {
+      applySirenaCalculatedTaxes(scope.scopedAccounts, amounts);
+    }
     return buildDashboardRows(accounts, amounts, { negateChildCodesInSummary: custosNegation }).rows;
   };
 
