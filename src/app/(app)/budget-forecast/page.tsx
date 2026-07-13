@@ -5,6 +5,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { readActiveCompanyIds, readActiveSegmentSlug } from "@/lib/context/active-context";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
+import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 
 export const dynamic = "force-dynamic";
 import {
@@ -196,6 +197,23 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE, para o
   // Realizado/Orçamento não divergirem. Inerte para outros segmentos.
   const custosNegation = resolveFranquiasVivaCustosNegation(activeSegmentSlug, accounts);
+
+  // Impostos calculados da Sirena (ISS/PIS/COFINS/IRPJ/Contrib. Social): mesma
+  // regra do Dashboard DRE — só quando a ÚNICA empresa selecionada é a Sirena
+  // (nesse caso o `scope` é o plano custom dela). O hook recalcula essas linhas
+  // no REALIZADO a partir de "Receita de Estacionamento" (Omie) + "Locação de
+  // Espaço" (planilha, já incluída no RPC via manual_account_values). Sem isso,
+  // o Previsto x Realizado mostrava 0 no realizado desses impostos. O Orçamento
+  // (previsto) NÃO é tocado — vem das metas cadastradas. Ver
+  // src/lib/dashboard/sirena-taxes.ts.
+  const isSingleSirena =
+    filter.selectedCompanyIds.length === 1 &&
+    companies.some(
+      (c) =>
+        c.id === filter.selectedCompanyIds[0] &&
+        c.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase(),
+    );
+
   const visibleBuckets = buildVisibleBuckets(filter);
 
   // Periodo invalido (ex.: customizado com inicio > fim) gera zero buckets.
@@ -238,6 +256,10 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       if (!scopedId) return;
       amounts.set(scopedId, (amounts.get(scopedId) ?? 0) + Number(item.amount ?? 0));
     });
+    // Sirena: sobrescreve os impostos calculados no realizado (no-op p/ demais).
+    if (isSingleSirena) {
+      applySirenaCalculatedTaxes(scope.scopedAccounts, amounts);
+    }
     return buildDashboardRows(accounts, amounts, {
       negateChildCodesInSummary: custosNegation,
     }).rows;
@@ -500,6 +522,10 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
 
       for (const companyId of filter.selectedCompanyIds) {
         const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
+        // Sirena: impostos calculados no realizado por empresa (no-op p/ demais).
+        if (isSingleSirena) {
+          applySirenaCalculatedTaxes(scope.scopedAccounts, companyAmounts);
+        }
         const companyRows = buildDashboardRows(accounts, companyAmounts, {
           negateChildCodesInSummary: custosNegation,
         }).rows;
