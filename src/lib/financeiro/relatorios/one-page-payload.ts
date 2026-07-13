@@ -7,6 +7,10 @@ import {
   type RawDreAccount,
 } from "@/lib/dashboard/dre";
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
+import {
+  SIRENA_COMPANY_NAME,
+  applySirenaCalculatedTaxes,
+} from "@/lib/dashboard/sirena-taxes";
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
 import {
@@ -369,7 +373,29 @@ export async function buildOnePagePayload(
   // que o agregado foi materializado (frequentemente a conta GLOBAL), mesmo
   // quando a empresa tem plano custom. Sem traduzir rawId → code → scopedId,
   // os valores nao casam com `accounts` (custom) e todos os KPIs zeram.
-  const { coreAccounts: accounts, translateToScopedId } = scopeDreAccounts(allAccounts, [companyId]);
+  const {
+    coreAccounts: accounts,
+    scopedAccounts,
+    translateToScopedId,
+  } = scopeDreAccounts(allAccounts, [companyId]);
+
+  // Impostos calculados da Sirena — MESMA regra do Dashboard DRE (ver
+  // src/lib/dashboard/sirena-taxes.ts): quando a empresa do relatório é a
+  // Sirena, injeta ISS/PIS/COFINS/IRPJ/Contribuição Social no mapa de
+  // REALIZADO (a partir de "Receita de Estacionamento" + "Locação de Espaço")
+  // ANTES de `buildDashboardRows`, para que as linhas totalizadoras (Receita
+  // Líquida, Resultado do Exercício) do One Page casem com o DRE gerencial. Sem
+  // isto o relatório omitia os impostos e o Resultado divergia da tela (ex.:
+  // +9.470 no relatório vs -4.516 no DRE). Aplicado só ao realizado — o orçado
+  // segue o padrão do Budget/Forecast, que não calcula esses impostos. No-op
+  // seguro para as demais empresas (o hook resolve as contas por nome e não faz
+  // nada se as linhas-base não existirem). `scopedAccounts` (plano completo) é o
+  // mesmo argumento usado pelo dashboard, não o `coreAccounts` filtrado.
+  const isSingleSirena =
+    company.name.trim().toLowerCase() === SIRENA_COMPANY_NAME.toLowerCase();
+  const applySirenaTaxesIfNeeded = (map: Map<string, number>) => {
+    if (isSingleSirena) applySirenaCalculatedTaxes(scopedAccounts, map);
+  };
 
   // Franquias Viva: "Receitas Ressarciveis - Fundos" (5.8) é receita dentro do
   // grupo de custos (5) e reduz o total — mesma regra do Dashboard DRE, para o
@@ -433,6 +459,7 @@ export async function buildOnePagePayload(
   // -------------------------------------------------------------------------
   // 4. Build de linhas com formulas aplicadas (mesmo motor do dashboard)
   // -------------------------------------------------------------------------
+  applySirenaTaxesIfNeeded(realizedMap);
   const { rows: realizedRows } = buildDashboardRows(accounts, realizedMap, {
     negateChildCodesInSummary: custosNegation,
   });
@@ -758,6 +785,7 @@ export async function buildOnePagePayload(
         if (!scopedId) return;
         closedMap.set(scopedId, (closedMap.get(scopedId) ?? 0) + Number(r.amount));
       });
+      applySirenaTaxesIfNeeded(closedMap);
       const { rows: closedRows } = buildDashboardRows(accounts, closedMap, {
         negateChildCodesInSummary: custosNegation,
       });
@@ -1306,6 +1334,7 @@ export async function buildOnePagePayload(
           if (!scopedId) return;
           map.set(scopedId, (map.get(scopedId) ?? 0) + Number(r.amount));
         });
+        applySirenaTaxesIfNeeded(map);
         return { year: m.year, month: m.month, map };
       }),
     );
@@ -1411,6 +1440,7 @@ export async function buildOnePagePayload(
           const sid = translateToScopedId(r.dre_account_id);
           if (sid) map.set(sid, (map.get(sid) ?? 0) + Number(r.amount));
         });
+        applySirenaTaxesIfNeeded(map);
         return { key, map };
       }),
     );
@@ -1660,6 +1690,7 @@ export async function buildOnePagePayload(
     ytdBudgetMap.set(scopedId, (ytdBudgetMap.get(scopedId) ?? 0) + Number(b.amount));
   });
 
+  applySirenaTaxesIfNeeded(ytdRealizedMap);
   const { rows: ytdRealizedRows } = buildDashboardRows(accounts, ytdRealizedMap, {
     negateChildCodesInSummary: custosNegation,
   });
