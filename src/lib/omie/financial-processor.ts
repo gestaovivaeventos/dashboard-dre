@@ -579,6 +579,12 @@ function extrairRateioParcelas(
 export interface FinancialProcessorOptions {
   companyId: string;
   batchIndex: number;
+  /**
+   * Case Shows: usa a data de pagamento da perna do TÍTULO (recebimento real)
+   * em vez da perna de BAIXA (crédito D+1 do Omie.CASH). Ver nota detalhada em
+   * processBaixasDoTitulo. Inerte para as demais empresas.
+   */
+  useTituloReceiptDate?: boolean;
 }
 
 interface ProcessingResult {
@@ -969,6 +975,32 @@ function processBaixasDoTitulo(
   // por isso o array da propria baixa tem prioridade.
   const parentRateio = calcularRateioPercentuais(parent);
 
+  // ---------------------------------------------------------------------------
+  // CASE SHOWS — data de RECEBIMENTO real vs crédito D+1 do Omie.CASH.
+  // Boletos recebidos via Omie.CASH creditam na conta corrente no dia útil
+  // SEGUINTE ao pagamento do cliente (D+1). A Omie expõe, para o MESMO título,
+  // duas pernas em ListarMovimentos:
+  //   • perna do TÍTULO (cOrigem não-baixa): dDtPagamento = recebimento REAL
+  //   • perna da BAIXA (BAXR):               dDtPagamento = data do CRÉDITO (D+1)
+  // O pipeline usa a baixa como fonte de verdade de período/valor, então um
+  // boleto recebido no último dia do mês e creditado no dia 1º do mês seguinte
+  // caía no mês errado (ex.: recebido 30/06, creditado 01/07 → contado em Julho).
+  // O relatório oficial da Omie ("Data de Pagto ou Recbto") usa a data do
+  // TÍTULO. Aqui, SÓ para Case Shows (options.useTituloReceiptDate) e SÓ quando
+  // há UMA baixa (recebimento integral — pagamentos parciais mantêm a data de
+  // cada baixa), sobrescrevemos apenas a DATA/PERÍODO pela data de pagamento da
+  // perna do título. Valor, rateio e omie_id (por nCodMovCC) ficam intactos.
+  let tituloReceiptDate: string | null = null;
+  if (options.useTituloReceiptDate && baixas.length === 1) {
+    for (const p of flattenedParents) {
+      const d = parseDate(getString(p as Record<string, unknown>, ["dDtPagamento"]));
+      if (d) {
+        tituloReceiptDate = d;
+        break;
+      }
+    }
+  }
+
   for (let i = 0; i < baixas.length; i++) {
     const rawBaixa = baixas[i];
     const baixa = flattenMovimento(rawBaixa as RawOmieMovimento);
@@ -987,7 +1019,7 @@ function processBaixasDoTitulo(
     };
 
     try {
-      const paymentDate = parseDate(
+      let paymentDate = parseDate(
         getString(baixa as Record<string, unknown>, ["dDtPagamento"])
       );
       if (!paymentDate) {
@@ -995,6 +1027,12 @@ function processBaixasDoTitulo(
         auditLog.razao = "Baixa sem dDtPagamento (regime caixa exige data).";
         results.push({ entries: [], auditLog });
         continue;
+      }
+
+      // Case Shows: troca o crédito D+1 pela data de recebimento do título
+      // (ver nota acima). Só quando a perna do título trouxe uma data válida.
+      if (tituloReceiptDate) {
+        paymentDate = tituloReceiptDate;
       }
 
       const [year, month] = paymentDate.split("-").map(Number);
@@ -1319,7 +1357,8 @@ function processBaixasDoTitulo(
 
 export function processMovimentos(
   rawMovimentos: Record<string, unknown>[],
-  companyId: string
+  companyId: string,
+  options?: { useTituloReceiptDate?: boolean }
 ): {
   entries: ProcessedFinancialEntry[];
   auditLogs: ProcessingAuditLog[];
@@ -1368,6 +1407,7 @@ export function processMovimentos(
         {
           companyId,
           batchIndex: grupo.baixas[0].index,
+          useTituloReceiptDate: options?.useTituloReceiptDate,
         }
       );
       for (const r of baixaResults) {

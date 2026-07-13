@@ -8,6 +8,7 @@ import {
 } from "@/lib/dashboard/aggregate-refresh";
 import { decryptSecret } from "@/lib/security/encryption";
 import { CASE_SHOWS_COMPANY_NAME } from "@/lib/dashboard/case-shows-custody";
+import { CASE_COMPANY_ID } from "@/lib/case/constants";
 import { runCaseShowsCustodyCompetenciaSync } from "@/lib/omie/case-shows-custody-sync";
 import type { UserProfile } from "@/lib/supabase/types";
 import { processMovimentos } from "@/lib/omie/financial-processor";
@@ -1070,7 +1071,12 @@ async function syncEntries({
 
   // 3. Usar o processador financeiro que implementa as 11 regras
   //    de negócio completas para DRE em regime de caixa.
-  const { entries } = processMovimentos(rawMovimentos, companyId);
+  // Case Shows: usa a data de recebimento do TÍTULO nas baixas de boleto
+  // (Omie.CASH credita D+1), reproduzindo o relatório oficial da Omie. Inerte
+  // para as demais empresas. Ver processBaixasDoTitulo em financial-processor.ts.
+  const { entries } = processMovimentos(rawMovimentos, companyId, {
+    useTituloReceiptDate: companyId === CASE_COMPANY_ID,
+  });
 
   // 3.1 Regra Franquias Viva: Ressarciveis com projeto → Fundos
   //     Baseada no MAPEAMENTO existente (contas DRE 2.4 e 7.5.5).
