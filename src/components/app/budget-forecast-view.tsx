@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toaster";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
+import { computeExpenseRowIds } from "@/lib/dashboard/expense-nature";
 import type {
   DashboardFilterState,
   DashboardRange,
@@ -160,13 +161,6 @@ function varColor(a: number, b: number, isExpense = false): string {
   return favorable ? "text-emerald-700" : "text-red-700";
 }
 
-// Uma linha representa despesa quando seu tipo no plano de contas e "despesa"
-// (grupos como Despesas Diretas/Custos/Deducoes e suas contas). Linhas de
-// receita, resultado (calculado) ou mistas mantem a leitura padrao.
-function isExpenseRow(row: { type: BudgetForecastDisplayRow["type"] }): boolean {
-  return row.type === "despesa";
-}
-
 const MONTHS = [
   { value: 1, label: "Janeiro" },
   { value: 2, label: "Fevereiro" },
@@ -288,6 +282,11 @@ export function BudgetForecastView({
     walk(null);
     return result;
   }, [byParent, expanded]);
+
+  // Ids das linhas coloridas como despesa (relacao inversa na VAR%). Derivado
+  // da lista COMPLETA `rows` para que grupos com filhos colapsados nao percam a
+  // inferencia. Ver src/lib/dashboard/expense-nature.ts.
+  const expenseRowIds = useMemo(() => computeExpenseRowIds(rows), [rows]);
 
   const selectedAccount = rows.find((r) => r.id === selectedAccountId) ?? rows[0];
 
@@ -656,6 +655,7 @@ export function BudgetForecastView({
       {view === "comparativo" ? (
         <ComparativoTable
           rows={visibleRows}
+          expenseRowIds={expenseRowIds}
           expanded={expanded}
           setExpanded={setExpanded}
           companies={companies.filter((c) => selectedCompanyIds.includes(c.id))}
@@ -668,6 +668,7 @@ export function BudgetForecastView({
       ) : view === "realizado" && subView === "consolidado" ? (
         <RealizadoTable
           rows={visibleRows}
+          expenseRowIds={expenseRowIds}
           expanded={expanded}
           setExpanded={setExpanded}
           accumulatedBucket={accumulatedBucket}
@@ -677,6 +678,7 @@ export function BudgetForecastView({
       ) : view === "realizado" && subView === "mensal" ? (
         <RealizadoMensalTable
           rows={visibleRows}
+          expenseRowIds={expenseRowIds}
           expanded={expanded}
           setExpanded={setExpanded}
           columns={columns}
@@ -986,6 +988,7 @@ function MonthlyTable({
 
 function RealizadoTable({
   rows,
+  expenseRowIds,
   expanded,
   setExpanded,
   accumulatedBucket,
@@ -993,6 +996,7 @@ function RealizadoTable({
   onDrilldownRealized,
 }: {
   rows: BudgetForecastDisplayRow[];
+  expenseRowIds: Set<string>;
   expanded: Record<string, boolean>;
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   accumulatedBucket: DashboardPeriodBucket;
@@ -1051,7 +1055,7 @@ function RealizadoTable({
                   formatCurrency(actualVal)
                 )}
               </div>
-              <div className={`text-center ${varColor(budgetVal, actualVal, isExpenseRow(row))}`}>
+              <div className={`text-center ${varColor(budgetVal, actualVal, expenseRowIds.has(row.id))}`}>
                 {formatVar(budgetVal, actualVal)}
               </div>
             </div>
@@ -1064,6 +1068,7 @@ function RealizadoTable({
 
 function RealizadoMensalTable({
   rows,
+  expenseRowIds,
   expanded,
   setExpanded,
   columns,
@@ -1072,6 +1077,7 @@ function RealizadoMensalTable({
   onDrilldownRealized,
 }: {
   rows: BudgetForecastDisplayRow[];
+  expenseRowIds: Set<string>;
   expanded: Record<string, boolean>;
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   columns: DashboardPeriodBucket[];
@@ -1168,14 +1174,14 @@ function RealizadoMensalTable({
                         formatCurrency(real)
                       )}
                     </span>
-                    <span className={`text-center ${varColor(bud, real, isExpenseRow(row))}`}>{formatVar(bud, real)}</span>
+                    <span className={`text-center ${varColor(bud, real, expenseRowIds.has(row.id))}`}>{formatVar(bud, real)}</span>
                   </span>
                 );
               })}
 
               <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
               <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
-              <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, isExpenseRow(row))}`}>{formatVar(totalBudget, totalReal)}</span>
+              <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, expenseRowIds.has(row.id))}`}>{formatVar(totalBudget, totalReal)}</span>
             </div>
           );
         })}
@@ -1186,6 +1192,7 @@ function RealizadoMensalTable({
 
 function ComparativoTable({
   rows,
+  expenseRowIds,
   expanded,
   setExpanded,
   companies,
@@ -1194,6 +1201,7 @@ function ComparativoTable({
   onDrilldownRealized,
 }: {
   rows: BudgetForecastDisplayRow[];
+  expenseRowIds: Set<string>;
   expanded: Record<string, boolean>;
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   companies: CompanyOption[];
@@ -1324,7 +1332,7 @@ function ComparativoTable({
                         formatCurrency(real)
                       )}
                     </span>
-                    <span className={`text-center ${varColor(bud, real, isExpenseRow(row))}`}>{formatVar(bud, real)}</span>
+                    <span className={`text-center ${varColor(bud, real, expenseRowIds.has(row.id))}`}>{formatVar(bud, real)}</span>
                   </span>
                 );
               })}
@@ -1333,7 +1341,7 @@ function ComparativoTable({
                 <span className="contents">
                   <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>
                   <span className="text-right font-semibold">{formatCurrency(totalReal)}</span>
-                  <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, isExpenseRow(row))}`}>{formatVar(totalBudget, totalReal)}</span>
+                  <span className={`text-center font-semibold ${varColor(totalBudget, totalReal, expenseRowIds.has(row.id))}`}>{formatVar(totalBudget, totalReal)}</span>
                 </span>
               ) : (
                 <span className="text-right font-semibold">{formatCurrency(totalBudget)}</span>

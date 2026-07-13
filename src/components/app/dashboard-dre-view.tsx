@@ -36,6 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
 import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
+import { computeExpenseRowIds } from "@/lib/dashboard/expense-nature";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import type {
   DashboardFilterState,
@@ -331,6 +332,10 @@ export function DashboardDreView({
     walk(null);
     return result;
   }, [byParent, expanded]);
+
+  // Linhas coloridas como despesa na VAR% (modo comparativo). Derivado da lista
+  // completa `rows`. Ver src/lib/dashboard/expense-nature.ts.
+  const expenseRowIds = useMemo(() => computeExpenseRowIds(rows), [rows]);
 
   const selectedAccount = rows.find((row) => row.id === selectedAccountId) ?? rows[0];
 
@@ -824,7 +829,7 @@ export function DashboardDreView({
                       const leftVal = cv[col.leftId] ?? 0;
                       const rightVal = cv[col.rightId] ?? 0;
                       return (
-                        <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, row.type === "despesa")}`}>
+                        <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, expenseRowIds.has(row.id))}`}>
                           {formatVar(leftVal, rightVal)}
                         </div>
                       );

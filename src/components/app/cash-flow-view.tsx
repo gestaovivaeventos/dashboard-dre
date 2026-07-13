@@ -23,6 +23,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
+import { computeExpenseRowIds } from "@/lib/dashboard/expense-nature";
 import type {
   CashFlowAccountBase,
   CashFlowAccumulatedSection,
@@ -224,6 +225,11 @@ export function CashFlowView({
   const [expanded, setExpanded] = useState<Record<string, boolean>>(
     () => rows.filter((r) => r.hasChildren).reduce((acc, r) => ({ ...acc, [r.id]: true }), {}),
   );
+
+  // Linhas coloridas como despesa na VAR% (modo comparativo). Saidas sao
+  // 'despesa'; linhas mistas (Emprestimos e Mutuos) ficam neutras. Derivado da
+  // lista completa `rows`. Ver src/lib/dashboard/expense-nature.ts.
+  const expenseRowIds = useMemo(() => computeExpenseRowIds(rows), [rows]);
 
   // Subniveis dos acumulados iniciam COLAPSADOS para reduzir poluicao visual
   // — usuario que quiser ver detalhamento por socio expande manualmente.
@@ -837,7 +843,7 @@ export function CashFlowView({
                 const leftVal = cv[col.leftId] ?? 0;
                 const rightVal = cv[col.rightId] ?? 0;
                 return (
-                  <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, row.type === "despesa")}`}>
+                  <div key={`${row.id}-v-${idx}`} className={`text-center text-xs ${varColor(leftVal, rightVal, expenseRowIds.has(row.id))}`}>
                     {formatVar(leftVal, rightVal)}
                   </div>
                 );

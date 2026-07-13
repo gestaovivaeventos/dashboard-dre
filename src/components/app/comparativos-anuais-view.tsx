@@ -24,6 +24,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useToast } from "@/components/ui/toaster";
 import { SegmentCompanyPicker } from "@/components/app/segment-company-picker";
 import { fetchAllDrilldownRows, downloadDrilldownXlsx } from "@/lib/financeiro/drilldown-export";
+import { computeExpenseRowIds } from "@/lib/dashboard/expense-nature";
 import type {
   DashboardFilterState,
   DashboardRange,
@@ -177,6 +178,10 @@ export function ComparativosAnuaisView({
     walk(null);
     return result;
   }, [byParent, expanded]);
+
+  // Linhas coloridas como despesa na VAR% (relacao inversa). Derivado da lista
+  // completa `rows`. Ver src/lib/dashboard/expense-nature.ts.
+  const expenseRowIds = useMemo(() => computeExpenseRowIds(rows), [rows]);
 
   // ── Drilldown ──────────────────────────────────────────────────────────────
   const [drilldown, setDrilldown] = useState<DrilldownState>({
@@ -576,7 +581,7 @@ export function ComparativosAnuaisView({
                 <div className={`px-2 text-right text-amber-800 ${COL_ORC}`}>{formatCurrency(row.orcado)}</div>
 
                 {/* Prev x Real */}
-                <div className={`px-2 text-center ${varColor(row.orcado, row.realizado, row.type === "despesa")}`}>{formatVar(row.orcado, row.realizado)}</div>
+                <div className={`px-2 text-center ${varColor(row.orcado, row.realizado, expenseRowIds.has(row.id))}`}>{formatVar(row.orcado, row.realizado)}</div>
 
                 {/* Ano Anterior */}
                 <div className={`px-2 text-right text-sky-800 ${COL_ANT}`}>
@@ -590,7 +595,7 @@ export function ComparativosAnuaisView({
                 </div>
 
                 {/* Atual x Anter */}
-                <div className={`px-2 text-center ${varColor(row.anoAnterior, row.realizado, row.type === "despesa")}`}>{formatVar(row.anoAnterior, row.realizado)}</div>
+                <div className={`px-2 text-center ${varColor(row.anoAnterior, row.realizado, expenseRowIds.has(row.id))}`}>{formatVar(row.anoAnterior, row.realizado)}</div>
               </div>
             );
           })}
