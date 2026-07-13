@@ -7,6 +7,10 @@ import { resolveUserSegments } from "@/lib/context/user-segments";
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
 import { SIRENA_COMPANY_NAME, applySirenaCalculatedTaxes } from "@/lib/dashboard/sirena-taxes";
 import {
+  SIRENA_COMPARATIVO_PRIOR_YEAR,
+  buildSirenaComparativo2025Amounts,
+} from "@/lib/dashboard/sirena-comparativo-2025";
+import {
   buildDashboardRows,
   buildDateRange,
   buildFilterState,
@@ -183,10 +187,32 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
     return buildDashboardRows(accounts, amounts, { negateChildCodesInSummary: custosNegation }).rows;
   };
 
+  // Sirena: a coluna "Ano Anterior" de 2025 NÃO usa a Omie (lançamentos 2025
+  // incompletos). Usa a planilha fechada fornecida pelo gestor, exclusivamente
+  // nesta tela (ver sirena-comparativo-2025.ts). Só vale quando o ano anterior
+  // é exatamente 2025 (período dentro de um único ano); nos demais anos e nas
+  // demais empresas mantém a agregação Omie de sempre.
+  const useSirenaPrior2025 =
+    isSingleSirena &&
+    filter.yearFrom - 1 === SIRENA_COMPARATIVO_PRIOR_YEAR &&
+    filter.yearTo - 1 === SIRENA_COMPARATIVO_PRIOR_YEAR;
+
+  const aggregatePriorYear = async () => {
+    if (useSirenaPrior2025) {
+      const amounts = buildSirenaComparativo2025Amounts(
+        scope.scopedAccounts,
+        filter.monthFrom,
+        filter.monthTo,
+      );
+      return buildDashboardRows(accounts, amounts, { negateChildCodesInSummary: custosNegation }).rows;
+    }
+    return aggregate("dashboard_dre_aggregate", priorBucket.dateFrom, priorBucket.dateTo);
+  };
+
   const [realizadoRows, orcadoRows, anoAnteriorRows] = await Promise.all([
     aggregate("dashboard_dre_aggregate", currentBucket.dateFrom, currentBucket.dateTo),
     aggregate("budget_aggregate", currentBucket.dateFrom, currentBucket.dateTo),
-    aggregate("dashboard_dre_aggregate", priorBucket.dateFrom, priorBucket.dateTo),
+    aggregatePriorYear(),
   ]);
 
   const realMap: Record<string, number> = {};
