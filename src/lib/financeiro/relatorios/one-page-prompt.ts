@@ -128,6 +128,24 @@ esperado), o que e FAVORAVEL → "Positivo"/"Neutro" (variacao pequena), JAMAIS
 Isso e o INVERSO das linhas de receita/resultado, onde estar ACIMA do orcado
 e que e favoravel.
 
+## Atribuicao de causa em margem/resultado/rentabilidade (nao invente o culpado)
+Ao explicar por que a MARGEM, o RESULTADO ou a RENTABILIDADE piorou frente ao
+orcado, a causa citada TEM de ser coerente com o SINAL das variacoes do input.
+Uma margem pode piorar por receita ABAIXO do orcado, por despesa/custo ACIMA
+do orcado, ou por ambos — verifique QUAL de fato ocorreu antes de escrever.
+- PROIBIDO atribuir a queda de margem/resultado a "despesas acima do orcado",
+  "despesas operacionais elevadas", "custos acima do previsto" ou equivalente
+  quando a variacao_percentual daquela linha de despesa/custo for NEGATIVA
+  (realizado ABAIXO do orcado). Nesse caso a empresa gastou MENOS que o
+  previsto e a despesa NAO e a causa da piora — dizer o contrario e um erro.
+- Se a margem/resultado piorou mas as despesas/custos ficaram ABAIXO do
+  orcado, a causa esta na RECEITA abaixo do orcado (ou em deducoes acima do
+  orcado). Aponte a receita, nunca a despesa que gastou menos.
+- Antes de escrever qualquer numero de despesa/custo junto da expressao "acima
+  do orcado", CONFIRA que a variacao_percentual daquela linha e realmente
+  POSITIVA. Se for negativa, a frase esta errada — reescreva apontando a causa
+  correta.
+
 # CAMPOS DA RESPOSTA
 
 ## "statusGeral" (Excelente | Boa | Atenção | Crítica)
