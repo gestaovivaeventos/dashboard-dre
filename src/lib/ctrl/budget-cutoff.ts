@@ -1,10 +1,10 @@
 // Virada única de meio de ano: o consumo/realizado de orçamento de 2026 passa a
 // considerar a DATA DE VENCIMENTO (due_date), não a data de lançamento. A
-// planilha-base cobre o realizado até 07/07/2026; ocorrências com vencimento a
-// partir de 08/07/2026 — inclusive parcelas e recorrências já lançadas —
+// planilha-base cobre o realizado até 11/07/2026; ocorrências com vencimento a
+// partir de 12/07/2026 — inclusive parcelas e recorrências já lançadas —
 // continuam descontando do orçamento. Sem due_date, cai pra data de criação.
 const BUDGET_IMPORT_BASELINE_YEAR = 2026;
-const BUDGET_IMPORT_BASELINE_DUE_START = "2026-07-08";
+const BUDGET_IMPORT_BASELINE_DUE_START = "2026-07-12";
 
 /** Janela [startDate, endDate) do ano, como datas puras (YYYY-MM-DD). */
 export function getBudgetWindowDates(year: number) {
