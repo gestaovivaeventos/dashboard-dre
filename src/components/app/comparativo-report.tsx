@@ -47,10 +47,15 @@ function formatVar(a: number, b: number): string {
   const pct = ((b - a) / Math.abs(a)) * 100;
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }
-function varSev(a: number, b: number) {
+// Para RECEITA/resultado, realizado acima da base (orçado/ano anterior) é bom
+// (verde). Para DESPESA a relação é inversa: realizado MAIOR que a base é ruim
+// (vermelho). O sinal exibido não muda; só a cor. Espelha `varColor` da
+// ComparativosAnuaisView — sem o flag, o PDF pintava despesa que subiu de verde.
+function varSev(a: number, b: number, isExpense = false) {
   if (a === 0) return SEV.neutral;
   const pct = ((b - a) / Math.abs(a)) * 100;
-  return pct >= 0 ? SEV.positive : SEV.critical;
+  const favorable = isExpense ? pct <= 0 : pct >= 0;
+  return favorable ? SEV.positive : SEV.critical;
 }
 
 export interface ComparativoReportRow {
@@ -69,6 +74,9 @@ interface Props {
   periodLabel: string;
   priorPeriodLabel: string;
   rows: ComparativoReportRow[];
+  // Ids das linhas de natureza DESPESA — colorem a variação pela relação
+  // inversa (subir = ruim). Mesmo conjunto usado na tabela online (varColor).
+  expenseRowIds: ReadonlySet<string>;
 }
 
 const panelStyle: CSSProperties = {
@@ -104,7 +112,7 @@ function Chip({ label, sev }: { label: string; sev: { text: string; bg: string; 
   );
 }
 
-export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel, rows }: Props) {
+export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel, rows, expenseRowIds }: Props) {
   const th: CSSProperties = {
     fontSize: 9,
     letterSpacing: "0.1em",
@@ -191,6 +199,7 @@ export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel,
             {rows.map((row) => {
               const isKey = ["4", "6", "8", "11"].includes(row.code);
               const bold = isKey || row.is_summary;
+              const isExpense = expenseRowIds.has(row.id);
               const rowBg = isKey ? "#eef1f5" : row.is_summary ? "#f7f8fa" : "transparent";
               const nameColor = bold ? C.ink : C.body;
               return (
@@ -215,11 +224,11 @@ export function ComparativoReport({ companyLabel, periodLabel, priorPeriodLabel,
                   <td style={{ ...tdNum, color: C.ink, fontWeight: bold ? 700 : 600 }}>{fmt(row.realizado)}</td>
                   <td style={{ ...tdNum, color: C.sub, fontWeight: bold ? 700 : 400 }}>{fmt(row.orcado)}</td>
                   <td style={{ padding: "6px 8px", textAlign: "center", borderBottom: `1px solid ${C.grid}` }}>
-                    <Chip label={formatVar(row.orcado, row.realizado)} sev={varSev(row.orcado, row.realizado)} />
+                    <Chip label={formatVar(row.orcado, row.realizado)} sev={varSev(row.orcado, row.realizado, isExpense)} />
                   </td>
                   <td style={{ ...tdNum, color: C.prior, fontWeight: bold ? 700 : 500 }}>{fmt(row.anoAnterior)}</td>
                   <td style={{ padding: "6px 8px", textAlign: "center", borderBottom: `1px solid ${C.grid}` }}>
-                    <Chip label={formatVar(row.anoAnterior, row.realizado)} sev={varSev(row.anoAnterior, row.realizado)} />
+                    <Chip label={formatVar(row.anoAnterior, row.realizado)} sev={varSev(row.anoAnterior, row.realizado, isExpense)} />
                   </td>
                 </tr>
               );

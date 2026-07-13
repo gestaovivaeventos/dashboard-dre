@@ -694,6 +694,7 @@ export function ComparativosAnuaisView({
           periodLabel={range.label}
           priorPeriodLabel={priorRange.label}
           rows={visibleRows}
+          expenseRowIds={expenseRowIds}
         />
       </div>
     </div>
