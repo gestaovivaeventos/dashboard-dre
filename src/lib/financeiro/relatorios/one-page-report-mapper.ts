@@ -488,36 +488,86 @@ function findLeituraClassificacao(
   return null;
 }
 
+// Direcao OBJETIVA de um indicador do quadro previsto x realizado, derivada
+// APENAS dos numeros (mesma regra do `variationCell` da UI). Linhas redutoras
+// (despesa/custo/deducao) invertem o sentido: abaixo do orcado = FAVORAVEL.
+// Usada para impedir que uma classificacao textual da IA contradiga o sinal.
+function numericClassificacao(
+  label: string,
+  realizado: number | null,
+  previsto: number | null,
+  unidade: ApiPrevistoRealizado["unidade"],
+): SemaforoItem["classificacao"] | null {
+  if (realizado === null || previsto === null) return null;
+  if (unidade === "percent") {
+    // Margem: variacao em pontos percentuais (diferenca absoluta).
+    const diff = realizado - previsto;
+    if (diff >= 0) return "Positivo";
+    if (diff >= -1) return "Atenção";
+    return "Crítico";
+  }
+  if (previsto === 0) return null;
+  const pct = ((realizado - previsto) / Math.abs(previsto)) * 100;
+  const nome = label.toLowerCase();
+  const isRedutora =
+    nome.includes("despesa") || nome.includes("custo") || nome.includes("dedu");
+  if (isRedutora) {
+    // Gastar MENOS que o orcado e favoravel.
+    if (pct <= 0) return "Positivo";
+    return pct > 10 ? "Crítico" : "Atenção";
+  }
+  if (pct >= 0) return "Positivo";
+  return pct < -10 ? "Crítico" : "Atenção";
+}
+
+// Duas classificacoes apontam para a mesma direcao (favoravel / neutra /
+// desfavoravel)? Positivo = favoravel; Atenção/Crítico = desfavoravel.
+function sameDirection(
+  a: SemaforoItem["classificacao"],
+  b: SemaforoItem["classificacao"],
+): boolean {
+  const bucket = (c: SemaforoItem["classificacao"]) =>
+    c === "Positivo" ? "fav" : c === "Neutro" ? "neu" : "desf";
+  return bucket(a) === bucket(b);
+}
+
 function mapSemaforo(
   analysis: OnePageReport | undefined,
   kpis: ApiKpis | undefined,
+  previstoRealizado: ApiPrevistoRealizado[] | undefined,
 ): SemaforoItem[] {
   // Cada entrada: rotulo a exibir + termos de busca no leituraPorIndicador
-  // + kpi correspondente para fallback.
+  // + kpi correspondente para fallback. `deterministic` marca os indicadores
+  // estruturais cuja direcao vem do NUMERO (quadro previsto x realizado).
   const config: Array<{
     indicador: string;
     searchTerms: string[];
     fallbackKpi: ApiKpiCard | undefined;
+    deterministic?: boolean;
   }> = [
     {
       indicador: "Receita",
       searchTerms: ["receita operacional bruta", "receita bruta", "receita"],
       fallbackKpi: kpis?.receita,
+      deterministic: true,
     },
     {
       indicador: "Despesas",
       searchTerms: ["despesas operacionais", "despesas"],
       fallbackKpi: undefined, // nao temos KPI de Despesas direto
+      deterministic: true,
     },
     {
       indicador: "Resultado",
       searchTerms: ["resultado do exercicio", "resultado do exercício", "resultado"],
       fallbackKpi: kpis?.resultado,
+      deterministic: true,
     },
     {
       indicador: "Margem",
       searchTerms: ["margem"],
       fallbackKpi: kpis?.margem,
+      deterministic: true,
     },
   ];
 
@@ -538,8 +588,30 @@ function mapSemaforo(
     });
   }
 
-  return config.map(({ indicador, searchTerms, fallbackKpi }) => {
+  return config.map(({ indicador, searchTerms, fallbackKpi, deterministic }) => {
     const fromIa = findLeituraClassificacao(analysis?.leituraPorIndicador, searchTerms);
+
+    // Indicadores estruturais: a direcao (favoravel/desfavoravel) e OBJETIVA e
+    // vem do numero. A classificacao textual da IA pode divergir do sinal —
+    // ex.: marcar despesa ABAIXO do orcado como "Atenção". Quando ha
+    // contradicao, o numero prevalece; a IA so e usada quando concorda com a
+    // direcao (podendo refinar Atenção <-> Crítico).
+    if (deterministic) {
+      const pr = previstoRealizado?.find(
+        (p) => p.label.toLowerCase() === indicador.toLowerCase(),
+      );
+      const numerica = pr
+        ? numericClassificacao(pr.label, pr.realizado, pr.previsto, pr.unidade)
+        : null;
+      if (numerica) {
+        return {
+          indicador,
+          classificacao:
+            fromIa && sameDirection(fromIa, numerica) ? fromIa : numerica,
+        };
+      }
+    }
+
     if (fromIa) return { indicador, classificacao: fromIa };
     // Fallback: derivar do KPI; se nao houver KPI, fica "Neutro" — nunca quebra.
     return { indicador, classificacao: statusToSign(fallbackKpi?.status) };
@@ -658,7 +730,7 @@ export function mapOnePageApiResponseToPreviewData(
     alertas: mapAlertas(response.analysis),
     semaforo: customKpis
       ? mapSemaforoFromList(response.analysis, customKpis)
-      : mapSemaforo(response.analysis, response.kpis),
+      : mapSemaforo(response.analysis, response.kpis, response.previstoRealizado),
     diagnosticoPrincipal: mapDiagnostico(response.analysis),
     acoes: mapAcoes(response.analysis),
     // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).

@@ -146,6 +146,21 @@ do orcado, ou por ambos — verifique QUAL de fato ocorreu antes de escrever.
   POSITIVA. Se for negativa, a frase esta errada — reescreva apontando a causa
   correta.
 
+## Despesas totais abaixo do orcado: destaque positivo, sem alarme em sub-linhas
+Quando a linha ESTRUTURAL de Despesas (o total de despesas/custos
+operacionais) ficar ABAIXO do orcado no periodo (variacao_percentual
+negativa), trate o agregado como FAVORAVEL:
+- GERE um item em "destaques" registrando que as despesas totais ficaram
+  abaixo do orcamento (ex.: "Despesas operacionais abaixo do orcado"),
+  copiando os numeros do input.
+- NAO gere "pontosAtencao" nem alertas sobre AUMENTO de despesas/custos em
+  SUB-LINHAS individuais (ex.: "Aumento nas Despesas com Pessoal", "Despesas
+  com Pessoal acima do orcado") enquanto o TOTAL de despesas estiver abaixo do
+  orcado. O quadro agregado e favoravel; transformar um sub-item acima do
+  orcado em alerta distorce a leitura executiva. Se um sub-item acima do
+  orcado for material, no maximo cite-o de forma equilibrada em
+  "leituraPorIndicador" — NUNCA como risco, alerta ou "pontoAtencao".
+
 # CAMPOS DA RESPOSTA
 
 ## "statusGeral" (Excelente | Boa | Atenção | Crítica)
