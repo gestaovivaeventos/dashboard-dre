@@ -41,6 +41,17 @@ REGRAS DE NEGÓCIO (Case Shows):
 - Quando um dado operacional (ex.: quantidade de contratos, BV por contrato) NÃO estiver no input, você pode RECOMENDAR acompanhá-lo, mas NUNCA afirme que ele ocorreu ou variou. Ex.: pode dizer "vale acompanhar o volume de contratos fechados"; não pode dizer "o volume de contratos caiu" se esse dado não foi enviado.
 - Tom executivo, claro e objetivo, conectado ao agenciamento. Mesmo em cenário negativo, aponte pontos de atenção com foco em análise e ação — sem alarmismo.
 
+CALIBRAÇÃO DE ALERTAS E AÇÕES (Case Shows) — LEIA O CENÁRIO ANTES DE ESCREVER:
+Antes de montar "pontosAtencao" e "acoesRecomendadas", verifique o SINAL dos indicadores estruturais (Receita, Resultado, Margem, Despesas). O texto deve ESPELHAR o cenário — não invente dificuldade onde os números são bons.
+
+- CENÁRIO FAVORÁVEL (Receita ACIMA do orçado E Resultado ACIMA do orçado E Despesas ABAIXO ou dentro do orçado): a leitura é POSITIVA. Nesse caso "pontosAtencao" deve ficar VAZIO ou conter, no máximo, um ponto REALMENTE desfavorável e material. É PROIBIDO fabricar alerta de "Atenção" a partir de qualquer variação favorável só para preencher a lista. Se não houver variação desfavorável material, deixe "pontosAtencao" vazio e concentre a análise em "destaques". O statusGeral aqui é "Boa" ou "Excelente", nunca "Atenção" só porque existe algo a monitorar.
+
+- LINHA DE RECEITA ACIMA DO ORÇADO = FAVORÁVEL (inclui "Outras Receitas", "Receita de BV", "Receitas Financeiras" e qualquer linha de receita). Receita acima do orçamento é RESULTADO BOM → vai em "destaques", NUNCA em "pontosAtencao". É PROIBIDO transformar uma receita acima do orçado em ponto de atenção ou dizer que "merece acompanhamento" só porque ela representa uma fração pequena da receita total — participação pequena NÃO é problema; superar o orçamento é bom independentemente do tamanho da linha.
+
+- DEDUÇÕES / CUSTOS / DESPESAS ABAIXO DO ORÇADO = FAVORÁVEL. Confira o sinal antes de escrever: se o realizado é MENOR que o orçado, a linha ficou ABAIXO do orçamento (a empresa deduziu/gastou menos) — isso é bom. É PROIBIDO descrever uma dedução/despesa abaixo do orçado como "acima do orçamento", "elevada" ou "pode impactar a receita líquida no futuro", e é PROIBIDO colocá-la em "pontosAtencao". Se for relevante, vá em "destaques" com título positivo.
+
+- AÇÕES RECOMENDADAS PROPORCIONAIS AO CENÁRIO: calibre "impacto" e "urgencia" pela realidade dos números. Em cenário favorável, as ações têm tom de SUSTENTAÇÃO/OTIMIZAÇÃO (acompanhar, consolidar, aproveitar o bom momento) com urgência "Média" ou "Baixa" — NÃO marque "Urgência: Alta" em todas as ações quando o resultado está muito acima do orçado, pois isso soa como gestão de crise e contradiz o desempenho. Reserve "Alta" para ações ligadas a uma variação REALMENTE desfavorável e material observada no input.
+
 NÃO use, NÃO cite e NÃO recomende ações relacionadas a: VVR; FEE disponível; sobrevivência de caixa; carteira de fundos; fundos de formatura; margem média de eventos das Franquias Viva; locação de espaços/salão; fechamento de margem de eventos da Feat Produções; taxa condominial; estacionamento; franquias; nem projetos de Real Estate. Esses conceitos pertencem a OUTRAS empresas/segmentos e não fazem sentido para a Case Shows. Analise EXCLUSIVAMENTE os dados da Case Shows — nunca misture dados ou contexto de outras empresas do grupo.`;
 
 export const caseShowsTemplate: ReportTemplate = {
