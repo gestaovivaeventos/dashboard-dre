@@ -147,13 +147,18 @@ export async function extractAttachmentData(
                 type: "text",
                 text:
                   "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia o NÚMERO da nota fiscal. " +
-                  "Se for uma NFS-e (nota fiscal de serviço eletrônica, emitida por prefeitura — cabeçalho " +
-                  "'DANFSe' ou 'Documento Auxiliar da NFS-e'), o número é o campo rotulado 'Número da NFS-e'. " +
-                  "ATENÇÃO: não confunda com 'Número da DPS', 'Série da DPS', 'Competência', a data de emissão " +
-                  "nem a chave de acesso — esses NÃO são o número da nota. " +
-                  "Se for uma NF-e comum (produto), use o campo 'Nº'/'NF-e nº'; havendo uma chave de acesso de " +
-                  "44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
-                  "Prefira sempre o valor rotulado explicitamente como número da nota.",
+                  "REGRA 1 (prioritária): procure um campo rotulado explicitamente com o número da nota e " +
+                  "copie EXATAMENTE o valor impresso ao lado do rótulo. Os rótulos possíveis são, nesta ordem: " +
+                  "'Número da NFS-e', 'Número da NF-e', 'Nº', 'NF-e nº', 'Número'. " +
+                  "Em NFS-e (nota de serviço de prefeitura — cabeçalho 'DANFSe' / 'Documento Auxiliar da NFS-e') " +
+                  "o valor correto é sempre o de 'Número da NFS-e' (costuma ter poucos dígitos, ex.: 388). " +
+                  "NUNCA confunda com 'Número da DPS', 'Série da DPS', 'Competência', datas, valores em R$ " +
+                  "nem com a chave de acesso — nenhum desses é o número da nota. " +
+                  "REGRA 2 (só se NÃO existir nenhum campo rotulado da Regra 1): se houver uma chave de acesso " +
+                  "de NF-e com EXATAMENTE 44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
+                  "A chave de acesso de NFS-e tem cerca de 50 dígitos e NÃO deve ser fatiada — ignore-a. " +
+                  "NUNCA retorne um número composto apenas de zeros; se você chegou a algo assim, você leu o " +
+                  "campo errado — volte e leia o valor ao lado do rótulo 'Número da NFS-e'.",
               },
               docPart,
             ],
@@ -205,7 +210,11 @@ function emptyToNull(s: string | null | undefined): string | null {
 
 function cleanInvoice(s: string | null | undefined): string | null {
   const t = (s ?? "").trim();
-  return t && t.toLowerCase() !== "null" ? t : null;
+  if (!t || t.toLowerCase() === "null") return null;
+  // Número composto só de zeros = leitura equivocada (ex.: fatia da chave de
+  // acesso de uma NFS-e que caiu numa sequência de zeros). Descarta.
+  if (/^0+$/.test(t.replace(/\D/g, "")) && !/[1-9]/.test(t)) return null;
+  return t;
 }
 
 // Boleto: mantém só dígitos (linha digitável/código de barras).
