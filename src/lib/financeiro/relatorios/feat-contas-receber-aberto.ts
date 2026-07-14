@@ -54,11 +54,13 @@ interface DepartmentPart {
   percentual: number; // fração 0..1
 }
 
-// Dados do título que só o contareceber expõe (o MF não tem): projeto + rateio
-// de departamento (distribuicao).
+// Dados do título que só o contareceber expõe (o MF não tem): projeto, rateio
+// de departamento (distribuicao) e o número da nota fiscal (campo onde a Feat
+// registra "PERMUTA" nos títulos de permuta).
 interface TituloExtra {
   projetoCode: string | null;
   deptParts: DepartmentPart[];
+  notaFiscal: string | null;
 }
 
 // ─── Saída ──────────────────────────────────────────────────────────────────
@@ -95,10 +97,10 @@ export interface FeatContasReceberAbertoPayload {
   referenciaLabel: string;
   totalEmAberto: number;
   totalEmAtraso: number;
-  // Parcela dos totais acima que vem da categoria "Patrocínio" (detalhamento
-  // gerencial pedido pela Feat). Exibida abaixo de cada total.
-  patrocinioEmAberto: number;
-  patrocinioEmAtraso: number;
+  // Parcela dos totais acima que vem de PERMUTA (Nota Fiscal = "PERMUTA").
+  // Detalhamento gerencial pedido pela Feat, exibido abaixo de cada total.
+  permutaEmAberto: number;
+  permutaEmAtraso: number;
   percentualEmAtraso: number;
   titulosEmAberto: number;
   titulosEmAtraso: number;
@@ -118,8 +120,8 @@ export interface FeatContasReceberAbertoResumoIA {
   referencia: string;
   total_em_aberto: number;
   total_em_atraso: number;
-  patrocinio_em_aberto: number;
-  patrocinio_em_atraso: number;
+  permuta_em_aberto: number;
+  permuta_em_atraso: number;
   percentual_em_atraso: number;
   titulos_em_aberto: number;
   titulos_em_atraso: number;
@@ -225,11 +227,11 @@ function isCategoriaSistema(categoria: string): boolean {
 }
 
 // Detalhamento pedido pelo gestor da Feat: dentro dos totais em aberto/atraso,
-// quanto vem da categoria "Patrocínio". Casamento por NOME normalizado (sem
-// acento, minúsculo) para tolerar variações de cadastro ("Patrocínios",
-// "Receita de Patrocínio" etc.).
-function isPatrocinio(categoria: string): boolean {
-  return normalizeName(categoria).includes("patrocinio");
+// quanto vem de PERMUTA. A Feat registra isso no campo Nota Fiscal
+// (numero_documento_fiscal) preenchido com "PERMUTA". Casamento por texto
+// normalizado (sem acento, minúsculo) para tolerar variações ("Permuta" etc.).
+function isPermuta(notaFiscal: string | null): boolean {
+  return notaFiscal ? normalizeName(notaFiscal).includes("permuta") : false;
 }
 
 // ─── Leitura da Omie ──────────────────────────────────────────────────────────
@@ -472,6 +474,8 @@ async function fetchTituloExtraByTitulo(
         byTitulo.set(tituloCode, {
           projetoCode: projetoCodeNum > 0 ? String(projetoCodeNum) : null,
           deptParts: parseDeptParts(titulo),
+          // A Omie OMITE numero_documento_fiscal quando vazio (como codigo_projeto).
+          notaFiscal: getString(titulo, ["numero_documento_fiscal"]),
         });
       }
       totalPaginas = Number(
@@ -534,6 +538,8 @@ interface TituloNormalizado {
   valorEmAberto: number;
   emAtraso: boolean;
   diasAtraso: number;
+  // Título de permuta (Nota Fiscal preenchida com "PERMUTA" no contareceber).
+  emPermuta: boolean;
 }
 
 function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
@@ -546,8 +552,8 @@ function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
       referenciaLabel,
       totalEmAberto: 0,
       totalEmAtraso: 0,
-      patrocinioEmAberto: 0,
-      patrocinioEmAtraso: 0,
+      permutaEmAberto: 0,
+      permutaEmAtraso: 0,
       percentualEmAtraso: 0,
       titulosEmAberto: 0,
       titulosEmAtraso: 0,
@@ -564,8 +570,8 @@ function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
       referencia: referenciaLabel,
       total_em_aberto: 0,
       total_em_atraso: 0,
-      patrocinio_em_aberto: 0,
-      patrocinio_em_atraso: 0,
+      permuta_em_aberto: 0,
+      permuta_em_atraso: 0,
       percentual_em_atraso: 0,
       titulos_em_aberto: 0,
       titulos_em_atraso: 0,
@@ -667,6 +673,7 @@ export async function buildFeatContasReceberAberto(
         valorEmAberto,
         emAtraso,
         diasAtraso: emAtraso ? diasEmAtraso(vencimento) : 0,
+        emPermuta: isPermuta(extra?.notaFiscal ?? null),
       });
     }
 
@@ -726,16 +733,16 @@ export async function buildFeatContasReceberAberto(
     const percentualEmAtraso =
       totalEmAberto > 0 ? round2((totalEmAtraso / totalEmAberto) * 100) : 0;
 
-    // Detalhamento da categoria "Patrocínio" dentro dos totais (mesma base de
-    // títulos que já compõe aberto/atraso — só recorta pela categoria).
-    const patrocinioEmAberto = round2(
+    // Detalhamento de PERMUTA dentro dos totais (mesma base de títulos que já
+    // compõe aberto/atraso — só recorta pelos títulos marcados como permuta).
+    const permutaEmAberto = round2(
       normalizados
-        .filter((t) => isPatrocinio(t.categoria))
+        .filter((t) => t.emPermuta)
         .reduce((sum, t) => sum + t.valorEmAberto, 0),
     );
-    const patrocinioEmAtraso = round2(
+    const permutaEmAtraso = round2(
       normalizados
-        .filter((t) => t.emAtraso && isPatrocinio(t.categoria))
+        .filter((t) => t.emAtraso && t.emPermuta)
         .reduce((sum, t) => sum + t.valorEmAberto, 0),
     );
 
@@ -769,8 +776,8 @@ export async function buildFeatContasReceberAberto(
         referenciaLabel,
         totalEmAberto,
         totalEmAtraso,
-        patrocinioEmAberto,
-        patrocinioEmAtraso,
+        permutaEmAberto,
+        permutaEmAtraso,
         percentualEmAtraso,
         titulosEmAberto: normalizados.length,
         titulosEmAtraso,
@@ -787,8 +794,8 @@ export async function buildFeatContasReceberAberto(
         referencia: referenciaLabel,
         total_em_aberto: totalEmAberto,
         total_em_atraso: totalEmAtraso,
-        patrocinio_em_aberto: patrocinioEmAberto,
-        patrocinio_em_atraso: patrocinioEmAtraso,
+        permuta_em_aberto: permutaEmAberto,
+        permuta_em_atraso: permutaEmAtraso,
         percentual_em_atraso: percentualEmAtraso,
         titulos_em_aberto: normalizados.length,
         titulos_em_atraso: titulosEmAtraso,

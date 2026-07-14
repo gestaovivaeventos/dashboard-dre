@@ -154,8 +154,8 @@ export interface FeatContasReceberAbertoBlock {
   referenciaLabel: string;
   totalEmAberto: number;
   totalEmAtraso: number;
-  patrocinioEmAberto: number;
-  patrocinioEmAtraso: number;
+  permutaEmAberto: number;
+  permutaEmAtraso: number;
   percentualEmAtraso: number;
   titulosEmAberto: number;
   titulosEmAtraso: number;
@@ -2478,15 +2478,15 @@ function agingSev(faixa: string): SevKey {
 
 function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock }) {
   const pctAtrasoLabel = fmtPctPtBr(data.percentualEmAtraso);
-  // Detalhamento da categoria "Patrocínio" dentro de cada total. Só exibido
-  // quando há valor de patrocínio a destacar.
-  const patrocinioAbertoLabel =
-    data.patrocinioEmAberto > 0
-      ? `Inclui ${fmtMoneyFull(data.patrocinioEmAberto)} de Patrocínio`
+  // Detalhamento de PERMUTA (Nota Fiscal = "PERMUTA") dentro de cada total. Só
+  // exibido quando há valor de permuta a destacar.
+  const permutaAbertoLabel =
+    data.permutaEmAberto > 0
+      ? `Inclui ${fmtMoneyFull(data.permutaEmAberto)} de Permuta`
       : undefined;
-  const patrocinioAtrasoLabel =
-    data.patrocinioEmAtraso > 0
-      ? `Inclui ${fmtMoneyFull(data.patrocinioEmAtraso)} de Patrocínio`
+  const permutaAtrasoLabel =
+    data.permutaEmAtraso > 0
+      ? `Inclui ${fmtMoneyFull(data.permutaEmAtraso)} de Permuta`
       : undefined;
   const resumo: Array<{
     label: string;
@@ -2499,13 +2499,13 @@ function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock 
       label: "Total em aberto",
       value: fmtMoneyFull(data.totalEmAberto),
       hint: `${data.titulosEmAberto} títulos · ${data.clientesEmAberto} clientes`,
-      sub: patrocinioAbertoLabel,
+      sub: permutaAbertoLabel,
     },
     {
       label: "Total em atraso",
       value: fmtMoneyFull(data.totalEmAtraso),
       hint: `${pctAtrasoLabel} do aberto`,
-      sub: patrocinioAtrasoLabel,
+      sub: permutaAtrasoLabel,
       sev: data.totalEmAtraso > 0 ? "critical" : "neutral",
     },
   ];
