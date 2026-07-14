@@ -50,13 +50,30 @@ export function formatBanco(banco: Banco): string {
 }
 
 // Tenta inverter: dado "237 - Bradesco" devolve { codigo: "237", nome: "Bradesco" }
-// Usado pra pré-selecionar o select no modo edição.
+// Usado tanto pra pré-selecionar o select no modo edição quanto pra extrair o
+// `codigo_banco` enviado ao Omie (dadosBancarios / transferência em contas a
+// pagar). Precisa cobrir todos os formatos que a coluna `banco` pode ter.
 export function parseBanco(stored: string | null | undefined): Banco | null {
   if (!stored) return null;
-  const match = stored.match(/^(\d{3})\s*-\s*(.+)$/);
+  const trimmed = stored.trim();
+  if (!trimmed) return null;
+  // Formato canônico gravado pelo select: "237 - Bradesco" (com ou sem espaços
+  // ao redor do traço).
+  const match = trimmed.match(/^(\d{3})\s*-\s*(.+)$/);
   if (match) return { codigo: match[1], nome: match[2].trim() };
+  // Só o código, sem o nome (ex.: "237"). É o que o pull do Omie grava
+  // (mapCadastro guarda apenas o codigo_banco) e também aparece em cadastros
+  // legados. Sem este ramo, parseBanco devolvia null e o codigo_banco ia VAZIO
+  // para o Omie mesmo com o banco preenchido no sistema — o banco não aparecia
+  // no cadastro do fornecedor. Recupera o nome pela lista curada quando possível.
+  const codeOnly = trimmed.match(/^0*(\d{1,3})$/);
+  if (codeOnly) {
+    const padded = codeOnly[1].padStart(3, "0");
+    const known = BANCOS_BR.find((b) => b.codigo === padded);
+    return known ?? { codigo: padded, nome: padded };
+  }
   // Compatibilidade com cadastros antigos sem código — busca pelo nome
-  const byName = BANCOS_BR.find((b) => b.nome.toLowerCase() === stored.toLowerCase());
+  const byName = BANCOS_BR.find((b) => b.nome.toLowerCase() === trimmed.toLowerCase());
   if (byName) return byName;
   return null;
 }
