@@ -154,6 +154,8 @@ export interface FeatContasReceberAbertoBlock {
   referenciaLabel: string;
   totalEmAberto: number;
   totalEmAtraso: number;
+  patrocinioEmAberto: number;
+  patrocinioEmAtraso: number;
   percentualEmAtraso: number;
   titulosEmAberto: number;
   titulosEmAtraso: number;
@@ -2476,16 +2478,34 @@ function agingSev(faixa: string): SevKey {
 
 function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock }) {
   const pctAtrasoLabel = fmtPctPtBr(data.percentualEmAtraso);
-  const resumo: Array<{ label: string; value: string; hint?: string; sev?: SevKey }> = [
+  // Detalhamento da categoria "Patrocínio" dentro de cada total. Só exibido
+  // quando há valor de patrocínio a destacar.
+  const patrocinioAbertoLabel =
+    data.patrocinioEmAberto > 0
+      ? `Desses, ${fmtMoneyFull(data.patrocinioEmAberto)} é Patrocínio`
+      : undefined;
+  const patrocinioAtrasoLabel =
+    data.patrocinioEmAtraso > 0
+      ? `Desses, ${fmtMoneyFull(data.patrocinioEmAtraso)} é Patrocínio`
+      : undefined;
+  const resumo: Array<{
+    label: string;
+    value: string;
+    hint?: string;
+    sub?: string;
+    sev?: SevKey;
+  }> = [
     {
       label: "Total em aberto",
       value: fmtMoneyFull(data.totalEmAberto),
       hint: `${data.titulosEmAberto} títulos · ${data.clientesEmAberto} clientes`,
+      sub: patrocinioAbertoLabel,
     },
     {
       label: "Total em atraso",
       value: fmtMoneyFull(data.totalEmAtraso),
       hint: `${pctAtrasoLabel} do aberto`,
+      sub: patrocinioAtrasoLabel,
       sev: data.totalEmAtraso > 0 ? "critical" : "neutral",
     },
   ];
@@ -2595,6 +2615,20 @@ function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock 
             </div>
             {item.hint ? (
               <div style={{ fontSize: 9.5, color: C.sub, marginTop: 2 }}>{item.hint}</div>
+            ) : null}
+            {item.sub ? (
+              <div
+                style={{
+                  fontSize: 9.5,
+                  color: C.body,
+                  fontWeight: 600,
+                  marginTop: 4,
+                  paddingTop: 4,
+                  borderTop: `1px dashed ${C.grid}`,
+                }}
+              >
+                {item.sub}
+              </div>
             ) : null}
           </div>
         ))}
