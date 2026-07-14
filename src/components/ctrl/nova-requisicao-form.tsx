@@ -1086,20 +1086,38 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
       {/* ── Verificação Orçamentária ─────────────────────────────────────────── */}
       {needsVerification && (
-        <div className="space-y-3 rounded-lg border p-4">
+        <div className={`space-y-3 rounded-lg border p-4 transition-colors ${
+          verification
+            ? "border-border"
+            : "border-amber-300 bg-amber-50/60 ring-1 ring-amber-200 dark:border-amber-800 dark:bg-amber-950/20 dark:ring-amber-900"
+        }`}>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium">Verificação Orçamentária</p>
+              <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                Verificação Orçamentária
+                {!verification && (
+                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:ring-amber-700">
+                    Obrigatório
+                  </span>
+                )}
+              </p>
               <p className="text-xs text-muted-foreground">
-                Consulta o saldo disponível para este setor e tipo de despesa antes de enviar.
+                {verification
+                  ? "Consulta o saldo disponível para este setor e tipo de despesa antes de enviar."
+                  : "Passo obrigatório: verifique o orçamento para liberar o envio da requisição."}
               </p>
             </div>
             <button
               type="button"
               onClick={handleVerify}
               disabled={!canVerify || verifying}
-              className="shrink-0 rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`shrink-0 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                verification
+                  ? "border font-medium hover:bg-muted"
+                  : "bg-amber-500 font-semibold text-white shadow-sm hover:bg-amber-600"
+              }`}
             >
+              {!verification && !verifying && <AlertTriangle className="h-4 w-4 shrink-0" />}
               {verifying ? "Verificando..." : verification ? "Reverificar" : "Verificar Orçamento"}
             </button>
           </div>
@@ -1184,8 +1202,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
           )}
 
           {!verification && !verifyError && canVerify && (
-            <p className="text-xs text-muted-foreground">
-              Clique em &quot;Verificar Orçamento&quot; para consultar o saldo antes de enviar.
+            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              Clique em &quot;Verificar Orçamento&quot; para liberar o envio da requisição.
             </p>
           )}
           {!canVerify && (
@@ -1343,8 +1362,9 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         </button>
       </div>
       {needsVerification && !canSubmit && (
-        <p className="text-center text-xs text-muted-foreground -mt-3">
-          Verifique o orçamento antes de enviar a requisição.
+        <p className="-mt-3 flex items-center justify-end gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          Clique em &quot;Verificar Orçamento&quot; para habilitar o botão &quot;Enviar Requisição&quot;.
         </p>
       )}
     </form>
