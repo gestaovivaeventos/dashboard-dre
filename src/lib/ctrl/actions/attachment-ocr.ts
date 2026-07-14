@@ -29,7 +29,11 @@ const NotaSchema = z.object({
   invoice_number: z
     .string()
     .nullable()
-    .describe("Número da nota fiscal (campo 'Nº', 'NF-e nº' ou os 9 dígitos nNF da chave de acesso). Null se não encontrar."),
+    .describe(
+      "O número da nota fiscal. Em NFS-e (nota de serviço municipal/prefeitura) é o campo rotulado " +
+      "'Número da NFS-e'. Em NF-e (produto) é 'Nº'/'NF-e nº' ou os 9 dígitos nNF da chave de acesso. " +
+      "NÃO use 'Número da DPS', 'Série', 'Competência', nem a chave de acesso completa. Null se não encontrar.",
+    ),
 });
 
 const BoletoSchema = z.object({
@@ -142,8 +146,14 @@ export async function extractAttachmentData(
               {
                 type: "text",
                 text:
-                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia o número da nota fiscal. " +
-                  "Se houver a chave de acesso de 44 dígitos, o número da nota são os dígitos 26 a 34 (nNF).",
+                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia o NÚMERO da nota fiscal. " +
+                  "Se for uma NFS-e (nota fiscal de serviço eletrônica, emitida por prefeitura — cabeçalho " +
+                  "'DANFSe' ou 'Documento Auxiliar da NFS-e'), o número é o campo rotulado 'Número da NFS-e'. " +
+                  "ATENÇÃO: não confunda com 'Número da DPS', 'Série da DPS', 'Competência', a data de emissão " +
+                  "nem a chave de acesso — esses NÃO são o número da nota. " +
+                  "Se for uma NF-e comum (produto), use o campo 'Nº'/'NF-e nº'; havendo uma chave de acesso de " +
+                  "44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
+                  "Prefira sempre o valor rotulado explicitamente como número da nota.",
               },
               docPart,
             ],
