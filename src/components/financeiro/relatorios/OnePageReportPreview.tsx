@@ -143,6 +143,7 @@ export interface FeatContaReceberDetalhe {
   cliente: string;
   projeto: string;
   categoria: string;
+  notaFiscal: string;
   dataVencimento: string | null;
   dataPrevisao: string | null;
   status: "Em atraso" | "A vencer";

@@ -86,6 +86,9 @@ export interface FeatContaReceberDetalhe {
   cliente: string; // nome fantasia (fallback: razão social)
   projeto: string;
   categoria: string;
+  // Número da nota fiscal (numero_documento_fiscal). "PERMUTA" nos títulos de
+  // permuta; vazio quando não preenchido no Omie.
+  notaFiscal: string;
   dataVencimento: string | null;
   dataPrevisao: string | null;
   status: "Em atraso" | "A vencer";
@@ -538,6 +541,8 @@ interface TituloNormalizado {
   valorEmAberto: number;
   emAtraso: boolean;
   diasAtraso: number;
+  // Número da nota fiscal (numero_documento_fiscal), como veio do Omie.
+  notaFiscal: string;
   // Título de permuta (Nota Fiscal preenchida com "PERMUTA" no contareceber).
   emPermuta: boolean;
 }
@@ -673,6 +678,7 @@ export async function buildFeatContasReceberAberto(
         valorEmAberto,
         emAtraso,
         diasAtraso: emAtraso ? diasEmAtraso(vencimento) : 0,
+        notaFiscal: extra?.notaFiscal ?? "",
         emPermuta: isPermuta(extra?.notaFiscal ?? null),
       });
     }
@@ -764,6 +770,7 @@ export async function buildFeatContasReceberAberto(
         cliente: t.clienteFantasia,
         projeto: t.projeto,
         categoria: t.categoria,
+        notaFiscal: t.notaFiscal,
         dataVencimento: t.dataVencimento,
         dataPrevisao: t.dataPrevisao,
         status: t.emAtraso ? "Em atraso" : "A vencer",

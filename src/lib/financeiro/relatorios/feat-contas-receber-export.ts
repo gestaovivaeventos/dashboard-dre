@@ -36,6 +36,7 @@ export function downloadFeatContasReceberXlsx(
     "Valor em aberto (R$)",
     "Projeto",
     "Categoria",
+    "Nota fiscal",
   ];
   const valueColIdx = 5; // "Valor em aberto (R$)"
   const diasColIdx = 4; // "Dias em atraso"
@@ -54,6 +55,7 @@ export function downloadFeatContasReceberXlsx(
       Number.isFinite(v) ? v : 0,
       d.projeto,
       d.categoria,
+      d.notaFiscal ?? "",
     ]);
   }
   const totalLine: (string | number | null)[] = new Array(header.length).fill("");
@@ -71,6 +73,7 @@ export function downloadFeatContasReceberXlsx(
     { wch: 18 }, // Valor em aberto (R$)
     { wch: 34 }, // Projeto
     { wch: 30 }, // Categoria
+    { wch: 16 }, // Nota fiscal
   ];
   // Formato numérico na coluna de valor (milhar + 2 casas) e inteiro nos dias.
   for (let r = 1; r < aoa.length; r++) {
