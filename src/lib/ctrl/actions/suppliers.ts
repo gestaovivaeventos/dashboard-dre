@@ -52,7 +52,7 @@ export async function approveSupplier(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_sync_required",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -112,6 +112,7 @@ export async function approveSupplier(
       titular_banco: supplier.titular_banco,
       doc_titular: supplier.doc_titular,
       chave_pix: supplier.chave_pix,
+      transf_padrao: supplier.transf_padrao ?? false,
     };
 
     for (const companyId of companyIds) {
@@ -185,7 +186,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
   const { data: supplier } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao",
     )
     .eq("id", supplierId)
     .maybeSingle();

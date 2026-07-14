@@ -101,6 +101,8 @@ export interface OmieSupplierData {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  /** "Usar transferência como método de pagamento padrão" — vira transf_padrao "S"/"N". */
+  transf_padrao?: boolean;
 }
 
 function onlyDigits(s: string | null | undefined): string {
@@ -144,6 +146,8 @@ function buildClientePayload(
       doc_titular: onlyDigits(supplier.doc_titular) || doc,
       nome_titular: supplier.titular_banco ?? supplier.name,
       cChavePix: chavePix,
+      // "Definir transferência como forma de pagamento padrão" no Omie ("S"/"N").
+      transf_padrao: supplier.transf_padrao ? "S" : "N",
     };
   }
   return payload;
