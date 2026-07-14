@@ -2482,11 +2482,11 @@ function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock 
   // quando há valor de patrocínio a destacar.
   const patrocinioAbertoLabel =
     data.patrocinioEmAberto > 0
-      ? `Desses, ${fmtMoneyFull(data.patrocinioEmAberto)} é Patrocínio`
+      ? `Inclui ${fmtMoneyFull(data.patrocinioEmAberto)} de Patrocínio`
       : undefined;
   const patrocinioAtrasoLabel =
     data.patrocinioEmAtraso > 0
-      ? `Desses, ${fmtMoneyFull(data.patrocinioEmAtraso)} é Patrocínio`
+      ? `Inclui ${fmtMoneyFull(data.patrocinioEmAtraso)} de Patrocínio`
       : undefined;
   const resumo: Array<{
     label: string;
