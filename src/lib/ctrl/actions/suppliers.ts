@@ -39,7 +39,7 @@ export async function approveSupplier(
   expenseTypeIds: string[],
   companyIds: string[] = [],
 ) {
-  const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+  const ctx = await requireCtrlRole("gerente", "csc", "admin", "aprovacao_fornecedor");
 
   if (!Array.isArray(expenseTypeIds) || expenseTypeIds.length === 0) {
     return { error: "Selecione ao menos um tipo de despesa." };
@@ -179,7 +179,7 @@ export async function approveSupplier(
 
 // Reenvia o fornecedor ao Omie em uma unidade (botão "Reenviar ao Omie").
 export async function resyncSupplierOmie(supplierId: string, companyId: string) {
-  await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+  await requireCtrlRole("gerente", "csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
@@ -238,7 +238,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
 }
 
 export async function rejectSupplier(supplierId: string, reason: string) {
-  const ctx = await requireCtrlRole("csc", "admin", "aprovacao_fornecedor");
+  const ctx = await requireCtrlRole("gerente", "csc", "admin", "aprovacao_fornecedor");
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
