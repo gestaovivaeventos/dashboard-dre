@@ -176,6 +176,15 @@ export interface CtrlSupplier {
   transf_padrao: boolean;
   pix_padrao: boolean;
   omie_sync_required: boolean;
+  // Fornecedor estrangeiro (sem CNPJ/CPF; no Omie vira estado=EX + codigo_pais).
+  estrangeiro: boolean;
+  pais: string | null;
+  codigo_pais: string | null;
+  estado: string | null;
+  cidade: string | null;
+  endereco: string | null;
+  endereco_numero: string | null;
+  complemento: string | null;
 }
 
 export interface CtrlSupplierOmieLink {

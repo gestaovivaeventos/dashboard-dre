@@ -5,6 +5,7 @@ import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, Truck,
 
 import { approveSupplier, rejectSupplier, updateSupplier, resyncSupplierOmie } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
+import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL, paisNomeByCodigo } from "@/lib/ctrl/paises";
 import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
 
 interface SupplierRow {
@@ -24,6 +25,14 @@ interface SupplierRow {
   doc_titular: string | null;
   transf_padrao: boolean;
   pix_padrao: boolean;
+  estrangeiro: boolean;
+  pais: string | null;
+  codigo_pais: string | null;
+  estado: string | null;
+  cidade: string | null;
+  endereco: string | null;
+  endereco_numero: string | null;
+  complemento: string | null;
   status: string;
   rejection_reason: string | null;
   created_at: string;
@@ -116,11 +125,27 @@ export function FornecedoresTable({
       setEditError("O nome do fornecedor é obrigatório.");
       return;
     }
+    if (editForm.estrangeiro && !editForm.codigo_pais) {
+      setEditError("Selecione o País do fornecedor estrangeiro.");
+      return;
+    }
     setEditSaving(true);
     setEditError(null);
+    const paisNome = editForm.estrangeiro
+      ? paisNomeByCodigo(editForm.codigo_pais) ?? undefined
+      : undefined;
     const result = await updateSupplier(detailSupplier.id, {
       name: editForm.name,
-      cnpj_cpf: editForm.cnpj_cpf,
+      // Estrangeiro não tem CNPJ/CPF brasileiro; limpa o documento no salvamento.
+      cnpj_cpf: editForm.estrangeiro ? null : editForm.cnpj_cpf,
+      estrangeiro: editForm.estrangeiro,
+      pais: editForm.estrangeiro ? paisNome ?? null : null,
+      codigo_pais: editForm.estrangeiro ? editForm.codigo_pais || null : null,
+      estado: editForm.estrangeiro ? ESTADO_EXTERIOR : null,
+      cidade: editForm.estrangeiro ? editForm.cidade || null : null,
+      endereco: editForm.estrangeiro ? editForm.endereco || null : null,
+      endereco_numero: editForm.estrangeiro ? editForm.endereco_numero || null : null,
+      complemento: editForm.estrangeiro ? editForm.complemento || null : null,
       email: editForm.email,
       phone: editForm.phone,
       chave_pix: editForm.chave_pix,
@@ -413,7 +438,13 @@ export function FornecedoresTable({
                   onClick={() => openDetail(s)}
                 >
                   <td className="px-4 py-3 font-medium">{s.name}</td>
-                  <td className="px-4 py-3 font-mono text-muted-foreground">{s.cnpj_cpf ?? "—"}</td>
+                  <td className="px-4 py-3 font-mono text-muted-foreground">
+                    {s.estrangeiro ? (
+                      <span className="italic">Estrangeiro</span>
+                    ) : (
+                      s.cnpj_cpf ?? "—"
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {linkedNames.length > 0 ? linkedNames.join(", ") : "—"}
                     {s.status === "aprovado" && s.omie_links.some((l) => l.sync_status === "erro") && (
@@ -621,15 +652,90 @@ export function FornecedoresTable({
                 </header>
                 {editMode ? (
                   <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={editForm.estrangeiro}
+                        onChange={(e) =>
+                          setEditForm({
+                            ...editForm,
+                            estrangeiro: e.target.checked,
+                            // Estrangeiro não tem CNPJ/CPF brasileiro.
+                            cnpj_cpf: e.target.checked ? "" : editForm.cnpj_cpf,
+                          })
+                        }
+                        className="h-4 w-4"
+                      />
+                      Fornecedor estrangeiro (sem CNPJ/CPF)
+                    </label>
                     <EditField label="Nome *" value={editForm.name} maxLength={60} onChange={(v) => setEditForm({ ...editForm, name: v })} />
-                    <EditField label="CNPJ/CPF" value={editForm.cnpj_cpf} onChange={(v) => setEditForm({ ...editForm, cnpj_cpf: v })} mono />
+                    {editForm.estrangeiro ? (
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          CNPJ/CPF
+                        </label>
+                        <input
+                          type="text"
+                          disabled
+                          value="Estrangeiro"
+                          className="w-full rounded-md border bg-background px-3 py-2 text-sm italic text-muted-foreground disabled:opacity-100 font-mono"
+                        />
+                      </div>
+                    ) : (
+                      <EditField label="CNPJ/CPF" value={editForm.cnpj_cpf} onChange={(v) => setEditForm({ ...editForm, cnpj_cpf: v })} mono />
+                    )}
                     <EditField label="E-mail" value={editForm.email} onChange={(v) => setEditForm({ ...editForm, email: v })} />
                     <EditField label="Telefone" value={editForm.phone} onChange={(v) => setEditForm({ ...editForm, phone: v })} />
+                    {editForm.estrangeiro && (
+                      <>
+                        <EditSelect
+                          label="País *"
+                          value={editForm.codigo_pais}
+                          onChange={(v) => setEditForm({ ...editForm, codigo_pais: v })}
+                          options={[
+                            { value: "", label: "Selecione o país" },
+                            ...PAISES_EXTERIOR.map((p) => ({ value: p.codigo, label: p.nome })),
+                          ]}
+                        />
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Estado *
+                          </label>
+                          <input
+                            type="text"
+                            disabled
+                            value={ESTADO_EXTERIOR_LABEL}
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-100"
+                          />
+                        </div>
+                        <EditField label="Cidade" value={editForm.cidade} onChange={(v) => setEditForm({ ...editForm, cidade: v })} />
+                        <EditField label="Endereço" value={editForm.endereco} onChange={(v) => setEditForm({ ...editForm, endereco: v })} />
+                        <EditField label="Número" value={editForm.endereco_numero} onChange={(v) => setEditForm({ ...editForm, endereco_numero: v })} />
+                        <EditField label="Complemento" value={editForm.complemento} onChange={(v) => setEditForm({ ...editForm, complemento: v })} />
+                      </>
+                    )}
                   </div>
                 ) : (
                   <dl className="grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2 text-sm">
                     <DataField label="Nome" value={detailSupplier.name} />
-                    <DataField label="CNPJ/CPF" value={detailSupplier.cnpj_cpf} mono />
+                    <DataField
+                      label="CNPJ/CPF"
+                      value={detailSupplier.estrangeiro ? "Estrangeiro" : detailSupplier.cnpj_cpf}
+                      mono={!detailSupplier.estrangeiro}
+                    />
+                    {detailSupplier.estrangeiro && (
+                      <>
+                        <DataField
+                          label="País"
+                          value={detailSupplier.pais ?? paisNomeByCodigo(detailSupplier.codigo_pais)}
+                        />
+                        <DataField label="Estado" value={ESTADO_EXTERIOR_LABEL} />
+                        <DataField label="Cidade" value={detailSupplier.cidade} />
+                        <DataField label="Endereço" value={detailSupplier.endereco} />
+                        <DataField label="Número" value={detailSupplier.endereco_numero} />
+                        <DataField label="Complemento" value={detailSupplier.complemento} />
+                      </>
+                    )}
                     <DataField label="E-mail" value={detailSupplier.email} />
                     <DataField label="Telefone" value={detailSupplier.phone} />
                     <DataField
@@ -849,7 +955,17 @@ export function FornecedoresTable({
                 </header>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2 text-sm">
                   <DataField label="Nome" value={approveModal.name} />
-                  <DataField label="CNPJ/CPF" value={approveModal.cnpj_cpf} mono />
+                  <DataField
+                    label="CNPJ/CPF"
+                    value={approveModal.estrangeiro ? "Estrangeiro" : approveModal.cnpj_cpf}
+                    mono={!approveModal.estrangeiro}
+                  />
+                  {approveModal.estrangeiro && (
+                    <DataField
+                      label="País"
+                      value={approveModal.pais ?? paisNomeByCodigo(approveModal.codigo_pais)}
+                    />
+                  )}
                   <DataField label="E-mail" value={approveModal.email} />
                   <DataField label="Telefone" value={approveModal.phone} />
                   <DataField
@@ -1043,6 +1159,12 @@ function DataField({
 interface EditFormState {
   name: string;
   cnpj_cpf: string;
+  estrangeiro: boolean;
+  codigo_pais: string;
+  cidade: string;
+  endereco: string;
+  endereco_numero: string;
+  complemento: string;
   email: string;
   phone: string;
   chave_pix: string;
@@ -1060,6 +1182,12 @@ function emptyEditForm(): EditFormState {
   return {
     name: "",
     cnpj_cpf: "",
+    estrangeiro: false,
+    codigo_pais: "",
+    cidade: "",
+    endereco: "",
+    endereco_numero: "",
+    complemento: "",
     email: "",
     phone: "",
     chave_pix: "",
@@ -1078,6 +1206,12 @@ function toEditForm(s: SupplierRow): EditFormState {
   return {
     name: s.name ?? "",
     cnpj_cpf: s.cnpj_cpf ?? "",
+    estrangeiro: !!s.estrangeiro,
+    codigo_pais: s.codigo_pais ?? "",
+    cidade: s.cidade ?? "",
+    endereco: s.endereco ?? "",
+    endereco_numero: s.endereco_numero ?? "",
+    complemento: s.complemento ?? "",
     email: s.email ?? "",
     phone: s.phone ?? "",
     chave_pix: s.chave_pix ?? "",

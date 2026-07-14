@@ -52,7 +52,7 @@ export async function approveSupplier(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -113,6 +113,13 @@ export async function approveSupplier(
       doc_titular: supplier.doc_titular,
       chave_pix: supplier.chave_pix,
       transf_padrao: supplier.transf_padrao ?? false,
+      estrangeiro: supplier.estrangeiro ?? false,
+      codigo_pais: supplier.codigo_pais,
+      estado: supplier.estado,
+      cidade: supplier.cidade,
+      endereco: supplier.endereco,
+      endereco_numero: supplier.endereco_numero,
+      complemento: supplier.complemento,
     };
 
     for (const companyId of companyIds) {
@@ -186,7 +193,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
   const { data: supplier } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -280,6 +287,15 @@ export async function updateSupplier(
     doc_titular?: string | null;
     transf_padrao?: boolean;
     pix_padrao?: boolean;
+    // Fornecedor estrangeiro.
+    estrangeiro?: boolean;
+    pais?: string | null;
+    codigo_pais?: string | null;
+    estado?: string | null;
+    cidade?: string | null;
+    endereco?: string | null;
+    endereco_numero?: string | null;
+    complemento?: string | null;
   },
 ) {
   // Any user in CTRL can edit a supplier they can see. The act of editing
@@ -356,6 +372,36 @@ export async function updateSupplier(
   if (data.transf_padrao !== undefined) payload.transf_padrao = data.transf_padrao;
   if (data.pix_padrao !== undefined) payload.pix_padrao = data.pix_padrao;
 
+  // Fornecedor estrangeiro: quando marcado, País e Estado são obrigatórios e os
+  // campos brasileiros de documento deixam de ser exigidos. Quando desmarcado,
+  // limpamos os campos de exterior para o cadastro voltar ao fluxo brasileiro.
+  if (data.estrangeiro !== undefined) {
+    const isEstrangeiro = !!data.estrangeiro;
+    payload.estrangeiro = isEstrangeiro;
+    if (isEstrangeiro) {
+      const codigoPais = (data.codigo_pais ?? "").trim();
+      const paisNome = (data.pais ?? "").trim();
+      const estado = (data.estado ?? "").trim();
+      if (!codigoPais || !paisNome) return { error: "Selecione o País do fornecedor estrangeiro." };
+      if (!estado) return { error: "Informe o Estado do fornecedor estrangeiro." };
+      payload.pais = paisNome;
+      payload.codigo_pais = codigoPais;
+      payload.estado = estado;
+      payload.cidade = data.cidade?.trim() || null;
+      payload.endereco = data.endereco?.trim() || null;
+      payload.endereco_numero = data.endereco_numero?.trim() || null;
+      payload.complemento = data.complemento?.trim() || null;
+    } else {
+      payload.pais = null;
+      payload.codigo_pais = null;
+      payload.estado = null;
+      payload.cidade = null;
+      payload.endereco = null;
+      payload.endereco_numero = null;
+      payload.complemento = null;
+    }
+  }
+
   const { error } = await supabase
     .from("ctrl_suppliers")
     .update(payload)
@@ -421,12 +467,32 @@ export async function createSupplier(data: {
   doc_titular?: string;
   transf_padrao?: boolean;
   pix_padrao?: boolean;
+  // Fornecedor estrangeiro (sem CNPJ/CPF; exige País e Estado).
+  estrangeiro?: boolean;
+  pais?: string;
+  codigo_pais?: string;
+  estado?: string;
+  cidade?: string;
+  endereco?: string;
+  endereco_numero?: string;
+  complemento?: string;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
 
-  // CNPJ ou CPF é obrigatório — sem documento, fornecedor nao pode ser
-  // identificado de forma unica e cria duplicatas no Omie.
-  if (!data.cnpj_cpf?.trim()) {
+  const isEstrangeiro = !!data.estrangeiro;
+
+  if (isEstrangeiro) {
+    // Estrangeiro dispensa CNPJ/CPF, mas País e Estado passam a ser obrigatórios
+    // — a Omie precisa deles (codigo_pais + estado="EX") para o cadastro do exterior.
+    if (!data.codigo_pais?.trim() || !data.pais?.trim()) {
+      return { error: "Selecione o País do fornecedor estrangeiro." };
+    }
+    if (!data.estado?.trim()) {
+      return { error: "Informe o Estado do fornecedor estrangeiro." };
+    }
+  } else if (!data.cnpj_cpf?.trim()) {
+    // CNPJ ou CPF é obrigatório — sem documento, fornecedor nao pode ser
+    // identificado de forma unica e cria duplicatas no Omie.
     return { error: "Informe o CNPJ ou CPF do fornecedor." };
   }
   // requireCtrlRole already enforces auth + role. We use the admin client
@@ -452,7 +518,7 @@ export async function createSupplier(data: {
   // aprovação. A comparação roda no banco (ctrl_find_supplier_by_doc): o scan
   // antigo no JS era cortado em 1000 linhas pelo PostgREST e, com >1000
   // fornecedores, documentos além desse limite escapavam e permitiam recadastro.
-  const normalizedDoc = data.cnpj_cpf.replace(/\D/g, "");
+  const normalizedDoc = (data.cnpj_cpf ?? "").replace(/\D/g, "");
   if (normalizedDoc) {
     const { data: existing, error: dupErr } = await supabase.rpc(
       "ctrl_find_supplier_by_doc",
@@ -489,6 +555,14 @@ export async function createSupplier(data: {
       doc_titular: data.doc_titular?.trim() || null,
       transf_padrao: data.transf_padrao ?? false,
       pix_padrao: data.pix_padrao ?? false,
+      estrangeiro: isEstrangeiro,
+      pais: isEstrangeiro ? data.pais?.trim() || null : null,
+      codigo_pais: isEstrangeiro ? data.codigo_pais?.trim() || null : null,
+      estado: isEstrangeiro ? data.estado?.trim() || null : null,
+      cidade: isEstrangeiro ? data.cidade?.trim() || null : null,
+      endereco: isEstrangeiro ? data.endereco?.trim() || null : null,
+      endereco_numero: isEstrangeiro ? data.endereco_numero?.trim() || null : null,
+      complemento: isEstrangeiro ? data.complemento?.trim() || null : null,
       status: "pendente",
       omie_sync_required: true,
       created_by: ctx.id,

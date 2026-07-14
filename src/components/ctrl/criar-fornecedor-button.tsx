@@ -1,11 +1,12 @@
 "use client";
 
-import { Banknote, Building2, Contact, KeyRound, Plus, User } from "lucide-react";
+import { Banknote, Building2, Contact, Globe, KeyRound, MapPin, Plus, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
+import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL } from "@/lib/ctrl/paises";
 
 const INPUT_CLS =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2";
@@ -15,8 +16,15 @@ type PersonType = "pj" | "pf";
 
 interface FormState {
   personType: PersonType;
+  estrangeiro: boolean;
   name: string;
   cnpj_cpf: string;
+  // Endereço internacional (só usado quando estrangeiro).
+  codigo_pais: string;
+  cidade: string;
+  endereco: string;
+  endereco_numero: string;
+  complemento: string;
   email: string;
   phone: string;
   pix_key_type: PixKeyType | "";
@@ -32,8 +40,14 @@ interface FormState {
 
 const emptyForm: FormState = {
   personType: "pj",
+  estrangeiro: false,
   name: "",
   cnpj_cpf: "",
+  codigo_pais: "",
+  cidade: "",
+  endereco: "",
+  endereco_numero: "",
+  complemento: "",
   email: "",
   phone: "",
   pix_key_type: "",
@@ -119,7 +133,14 @@ export function CriarFornecedorButton() {
       setError("Informe o nome do fornecedor.");
       return;
     }
-    if (!form.cnpj_cpf.trim()) {
+    if (form.estrangeiro) {
+      // Estrangeiro: País é obrigatório; CNPJ/CPF não é exigido. O Estado é
+      // sempre "EX - Exterior" (a Omie exige isso para cadastros do exterior).
+      if (!form.codigo_pais) {
+        setError("Selecione o País do fornecedor estrangeiro.");
+        return;
+      }
+    } else if (!form.cnpj_cpf.trim()) {
       setError(form.personType === "pf" ? "Informe o CPF." : "Informe o CNPJ.");
       return;
     }
@@ -133,9 +154,20 @@ export function CriarFornecedorButton() {
       return;
     }
     setLoading(true);
+    const paisNome = form.estrangeiro
+      ? PAISES_EXTERIOR.find((p) => p.codigo === form.codigo_pais)?.nome
+      : undefined;
     const result = await createSupplier({
       name: form.name,
-      cnpj_cpf: form.cnpj_cpf || undefined,
+      cnpj_cpf: form.estrangeiro ? undefined : form.cnpj_cpf || undefined,
+      estrangeiro: form.estrangeiro || undefined,
+      pais: form.estrangeiro ? paisNome : undefined,
+      codigo_pais: form.estrangeiro ? form.codigo_pais || undefined : undefined,
+      estado: form.estrangeiro ? ESTADO_EXTERIOR : undefined,
+      cidade: form.estrangeiro ? form.cidade || undefined : undefined,
+      endereco: form.estrangeiro ? form.endereco || undefined : undefined,
+      endereco_numero: form.estrangeiro ? form.endereco_numero || undefined : undefined,
+      complemento: form.estrangeiro ? form.complemento || undefined : undefined,
       email: form.email || undefined,
       phone: form.phone || undefined,
       chave_pix: form.chave_pix || undefined,
@@ -205,38 +237,67 @@ export function CriarFornecedorButton() {
                     <Building2 className="h-4 w-4 text-primary" />
                     <h3 className="text-sm font-semibold">Tipo de pessoa</h3>
                   </header>
-                  <div className="grid grid-cols-2 gap-2 p-4">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        update("personType", "pj");
-                        // Reseta documento ao trocar tipo pra não ficar mascarado errado
-                        if (form.cnpj_cpf) update("cnpj_cpf", "");
-                      }}
-                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                        form.personType === "pj"
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <Building2 className="h-4 w-4" />
-                      Pessoa Jurídica
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        update("personType", "pf");
-                        if (form.cnpj_cpf) update("cnpj_cpf", "");
-                      }}
-                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                        form.personType === "pf"
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <User className="h-4 w-4" />
-                      Pessoa Física
-                    </button>
+                  <div className="space-y-3 p-4">
+                    <label className="flex items-start gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2.5 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={form.estrangeiro}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          update("estrangeiro", checked);
+                          // Estrangeiro é sempre PJ e não tem CNPJ/CPF brasileiro.
+                          if (checked) {
+                            update("personType", "pj");
+                            update("cnpj_cpf", "");
+                          }
+                        }}
+                        className="mt-0.5 h-4 w-4"
+                      />
+                      <span>
+                        <Globe className="mr-1 inline h-3.5 w-3.5 text-primary" />
+                        <strong>Fornecedor estrangeiro</strong> (sem CNPJ/CPF)
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          Plataformas/serviços internacionais. Exige País e Estado; o cadastro
+                          vai para a Omie como “Estrangeiro” (Estado {ESTADO_EXTERIOR_LABEL}).
+                        </span>
+                      </span>
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={form.estrangeiro}
+                        onClick={() => {
+                          update("personType", "pj");
+                          // Reseta documento ao trocar tipo pra não ficar mascarado errado
+                          if (form.cnpj_cpf) update("cnpj_cpf", "");
+                        }}
+                        className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                          form.personType === "pj" && !form.estrangeiro
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        <Building2 className="h-4 w-4" />
+                        Pessoa Jurídica
+                      </button>
+                      <button
+                        type="button"
+                        disabled={form.estrangeiro}
+                        onClick={() => {
+                          update("personType", "pf");
+                          if (form.cnpj_cpf) update("cnpj_cpf", "");
+                        }}
+                        className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                          form.personType === "pf" && !form.estrangeiro
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        <User className="h-4 w-4" />
+                        Pessoa Física
+                      </button>
+                    </div>
                   </div>
                 </section>
 
@@ -249,7 +310,11 @@ export function CriarFornecedorButton() {
                   <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
                     <div className="space-y-1.5 sm:col-span-2">
                       <label htmlFor="new-supplier-name" className={LABEL_CLS}>
-                        {form.personType === "pj" ? "Razão Social" : "Nome Completo"}{" "}
+                        {form.estrangeiro
+                          ? "Razão Social / Nome Completo"
+                          : form.personType === "pj"
+                            ? "Razão Social"
+                            : "Nome Completo"}{" "}
                         <span className="text-destructive">*</span>
                       </label>
                       <input
@@ -260,7 +325,13 @@ export function CriarFornecedorButton() {
                         maxLength={60}
                         value={form.name}
                         onChange={(e) => update("name", e.target.value.toUpperCase().slice(0, 60))}
-                        placeholder={form.personType === "pj" ? "Ex: ACME SERVIÇOS LTDA" : "Ex: JOÃO DA SILVA"}
+                        placeholder={
+                          form.estrangeiro
+                            ? "Ex: OPENAI, LLC"
+                            : form.personType === "pj"
+                              ? "Ex: ACME SERVIÇOS LTDA"
+                              : "Ex: JOÃO DA SILVA"
+                        }
                         className={INPUT_CLS}
                       />
                       <p className="text-right text-xs text-muted-foreground">
@@ -269,20 +340,30 @@ export function CriarFornecedorButton() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="new-supplier-cnpj" className={LABEL_CLS}>
-                        {form.personType === "pj" ? "CNPJ" : "CPF"}{" "}
-                        <span className="text-destructive">*</span>
+                        {form.estrangeiro ? "CNPJ/CPF" : form.personType === "pj" ? "CNPJ" : "CPF"}{" "}
+                        {!form.estrangeiro && <span className="text-destructive">*</span>}
                       </label>
-                      <input
-                        id="new-supplier-cnpj"
-                        type="text"
-                        required
-                        value={form.cnpj_cpf}
-                        onChange={(e) =>
-                          update("cnpj_cpf", maskCpfCnpj(e.target.value, form.personType))
-                        }
-                        placeholder={form.personType === "pj" ? "00.000.000/0000-00" : "000.000.000-00"}
-                        className={`${INPUT_CLS} font-mono`}
-                      />
+                      {form.estrangeiro ? (
+                        <input
+                          id="new-supplier-cnpj"
+                          type="text"
+                          disabled
+                          value="Estrangeiro"
+                          className={`${INPUT_CLS} font-mono italic text-muted-foreground disabled:opacity-100`}
+                        />
+                      ) : (
+                        <input
+                          id="new-supplier-cnpj"
+                          type="text"
+                          required
+                          value={form.cnpj_cpf}
+                          onChange={(e) =>
+                            update("cnpj_cpf", maskCpfCnpj(e.target.value, form.personType))
+                          }
+                          placeholder={form.personType === "pj" ? "00.000.000/0000-00" : "000.000.000-00"}
+                          className={`${INPUT_CLS} font-mono`}
+                        />
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="new-supplier-phone" className={LABEL_CLS}>Telefone</label>
@@ -308,6 +389,95 @@ export function CriarFornecedorButton() {
                     </div>
                   </div>
                 </section>
+
+                {/* Endereço internacional — só para fornecedor estrangeiro */}
+                {form.estrangeiro && (
+                  <section className="rounded-lg border bg-background shadow-sm">
+                    <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <h3 className="text-sm font-semibold">Endereço internacional</h3>
+                    </header>
+                    <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-pais" className={LABEL_CLS}>
+                          País <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          id="new-supplier-pais"
+                          value={form.codigo_pais}
+                          onChange={(e) => update("codigo_pais", e.target.value)}
+                          className={INPUT_CLS}
+                        >
+                          <option value="">Selecione o país</option>
+                          {PAISES_EXTERIOR.map((p) => (
+                            <option key={p.codigo} value={p.codigo}>
+                              {p.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-estado" className={LABEL_CLS}>
+                          Estado <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="new-supplier-estado"
+                          type="text"
+                          disabled
+                          value={ESTADO_EXTERIOR_LABEL}
+                          className={`${INPUT_CLS} disabled:opacity-100`}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          A Omie usa “{ESTADO_EXTERIOR_LABEL}” para todo cadastro do exterior.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label htmlFor="new-supplier-cidade" className={LABEL_CLS}>Cidade</label>
+                        <input
+                          id="new-supplier-cidade"
+                          type="text"
+                          value={form.cidade}
+                          onChange={(e) => update("cidade", e.target.value)}
+                          placeholder="Ex: San Francisco"
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label htmlFor="new-supplier-endereco" className={LABEL_CLS}>Endereço</label>
+                        <input
+                          id="new-supplier-endereco"
+                          type="text"
+                          value={form.endereco}
+                          onChange={(e) => update("endereco", e.target.value)}
+                          placeholder="Ex: Market Street"
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-numero" className={LABEL_CLS}>Número</label>
+                        <input
+                          id="new-supplier-numero"
+                          type="text"
+                          value={form.endereco_numero}
+                          onChange={(e) => update("endereco_numero", e.target.value)}
+                          placeholder="Ex: 548"
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-complemento" className={LABEL_CLS}>Complemento</label>
+                        <input
+                          id="new-supplier-complemento"
+                          type="text"
+                          value={form.complemento}
+                          onChange={(e) => update("complemento", e.target.value)}
+                          placeholder="Ex: 97273"
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                    </div>
+                  </section>
+                )}
 
                 {/* PIX */}
                 <section className="rounded-lg border bg-background shadow-sm">

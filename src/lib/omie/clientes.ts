@@ -1,5 +1,6 @@
 import { omieCall, OMIE_CLIENTES_URL } from "@/lib/omie/client";
 import { parseBanco } from "@/lib/ctrl/bancos";
+import { ESTADO_EXTERIOR } from "@/lib/ctrl/paises";
 
 /** Cadastro do Omie normalizado (usado no pull Omie → banco local do Case). */
 export interface OmiePartner {
@@ -103,6 +104,15 @@ export interface OmieSupplierData {
   chave_pix: string | null;
   /** "Usar transferência como método de pagamento padrão" — vira transf_padrao "S"/"N". */
   transf_padrao?: boolean;
+  // Fornecedor estrangeiro: a Omie recebe estado="EX" (Exterior) + codigo_pais
+  // (tabela BACEN) e o campo cnpj_cpf vazio (a interface mostra "Estrangeiro").
+  estrangeiro?: boolean;
+  codigo_pais?: string | null;
+  estado?: string | null;
+  cidade?: string | null;
+  endereco?: string | null;
+  endereco_numero?: string | null;
+  complemento?: string | null;
 }
 
 function onlyDigits(s: string | null | undefined): string {
@@ -119,11 +129,22 @@ function buildClientePayload(
     codigo_cliente_integracao: supplier.id,
     razao_social: supplier.name,
     nome_fantasia: supplier.nome_fantasia?.trim() || supplier.name,
-    cnpj_cpf: doc,
-    pessoa_fisica: doc.length === 11 ? "S" : "N",
+    // Estrangeiro: cnpj_cpf vazio (a Omie exibe "Estrangeiro") e sempre PJ.
+    cnpj_cpf: supplier.estrangeiro ? "" : doc,
+    pessoa_fisica: supplier.estrangeiro ? "N" : doc.length === 11 ? "S" : "N",
     email: supplier.email ?? "",
     tags: [{ tag }],
   };
+  if (supplier.estrangeiro) {
+    // A Omie trata o cadastro como do exterior quando estado="EX". O país vem
+    // no codigo_pais (BACEN); cidade/endereço são texto livre do exterior.
+    payload.estado = (supplier.estado ?? ESTADO_EXTERIOR).trim() || ESTADO_EXTERIOR;
+    if (supplier.codigo_pais?.trim()) payload.codigo_pais = supplier.codigo_pais.trim();
+    if (supplier.cidade?.trim()) payload.cidade = supplier.cidade.trim();
+    if (supplier.endereco?.trim()) payload.endereco = supplier.endereco.trim();
+    if (supplier.endereco_numero?.trim()) payload.endereco_numero = supplier.endereco_numero.trim();
+    if (supplier.complemento?.trim()) payload.complemento = supplier.complemento.trim();
+  }
   if (phone.length >= 10) {
     payload.telefone1_ddd = phone.slice(0, 2);
     payload.telefone1_numero = phone.slice(2);
@@ -197,6 +218,9 @@ export function clienteRowToOmieData(row: {
 //   1. Procura por CNPJ (cobre legado e re-sync) → AlterarCliente (por
 //      codigo_cliente_omie, SEM código de integração — ver nota abaixo).
 //   2. Não achou → IncluirCliente (com código de integração = supplier.id).
+// Fornecedor estrangeiro não tem CNPJ: a busca de duplicata é pelo código de
+// integração (supplier.id) via ConsultarCliente, garantindo idempotência no
+// re-sync sem depender do documento.
 export async function syncSupplierToOmieUnit(
   appKey: string,
   appSecret: string,
@@ -204,20 +228,32 @@ export async function syncSupplierToOmieUnit(
   tag: string = "Fornecedor",
 ): Promise<{ codigoCliente: number }> {
   const doc = onlyDigits(supplier.cnpj_cpf);
-  if (!doc) throw new Error("Cadastro sem CNPJ/CPF — não é possível cadastrar no Omie.");
-
-  const list = await omieCall(OMIE_CLIENTES_URL, "ListarClientes", appKey, appSecret, {
-    pagina: 1,
-    registros_por_pagina: 50,
-    clientesFiltro: { cnpj_cpf: doc },
-  });
+  if (!doc && !supplier.estrangeiro) {
+    throw new Error("Cadastro sem CNPJ/CPF — não é possível cadastrar no Omie.");
+  }
 
   let existingCode: number | null = null;
-  if (!list.notFound) {
-    const arr =
-      (list.data.clientes_cadastro as Array<Record<string, unknown>> | undefined) ?? [];
-    const match = arr.find((c) => onlyDigits(String(c.cnpj_cpf ?? "")) === doc) ?? arr[0];
-    if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
+  if (doc) {
+    // Fluxo brasileiro: dedupe por CNPJ/CPF (cobre legado e re-sync).
+    const list = await omieCall(OMIE_CLIENTES_URL, "ListarClientes", appKey, appSecret, {
+      pagina: 1,
+      registros_por_pagina: 50,
+      clientesFiltro: { cnpj_cpf: doc },
+    });
+    if (!list.notFound) {
+      const arr =
+        (list.data.clientes_cadastro as Array<Record<string, unknown>> | undefined) ?? [];
+      const match = arr.find((c) => onlyDigits(String(c.cnpj_cpf ?? "")) === doc) ?? arr[0];
+      if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
+    }
+  } else {
+    // Estrangeiro (sem documento): dedupe pelo código de integração.
+    const consulta = await omieCall(OMIE_CLIENTES_URL, "ConsultarCliente", appKey, appSecret, {
+      codigo_cliente_integracao: supplier.id,
+    });
+    if (!consulta.notFound && consulta.data.codigo_cliente_omie) {
+      existingCode = Number(consulta.data.codigo_cliente_omie);
+    }
   }
 
   const fields = buildClientePayload(supplier, tag);

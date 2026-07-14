@@ -9,6 +9,7 @@ import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button
 
 const SUPPLIERS_SELECT = `id, name, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
    chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
+   estrangeiro, pais, codigo_pais, estado, cidade, endereco, endereco_numero, complemento,
    status, rejection_reason, created_at, approved_at,
    approver:users!ctrl_suppliers_approved_by_fkey(name, email),
    ctrl_supplier_expense_types(expense_type_id)`;
@@ -80,6 +81,14 @@ async function getData() {
       doc_titular: string | null;
       transf_padrao: boolean | null;
       pix_padrao: boolean | null;
+      estrangeiro: boolean | null;
+      pais: string | null;
+      codigo_pais: string | null;
+      estado: string | null;
+      cidade: string | null;
+      endereco: string | null;
+      endereco_numero: string | null;
+      complemento: string | null;
       status: string;
       rejection_reason: string | null;
       created_at: string;
@@ -156,6 +165,14 @@ export default async function FornecedoresPage() {
               doc_titular: s.doc_titular,
               transf_padrao: s.transf_padrao ?? false,
               pix_padrao: s.pix_padrao ?? false,
+              estrangeiro: s.estrangeiro ?? false,
+              pais: s.pais,
+              codigo_pais: s.codigo_pais,
+              estado: s.estado,
+              cidade: s.cidade,
+              endereco: s.endereco,
+              endereco_numero: s.endereco_numero,
+              complemento: s.complemento,
               status: s.status,
               rejection_reason: s.rejection_reason,
               created_at: s.created_at,
