@@ -347,8 +347,43 @@ export async function createRequest(data: CreateRequestInput) {
   // pelo STATUS inicial (pendente_diretor), não pelo tier — senão uma
   // requisição dentro do orçamento seria rotulada como "Fora do orçamento".
   const approvalTier: ApprovalTier = verification?.approvalTier ?? "nivel_2";
-  // Sem auto-aprovação: toda requisição entra pendente.
-  const initialStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
+
+  // Exceção de auto-aprovação gerencial: quando o PRÓPRIO gerente é o solicitante
+  // e a despesa está prevista em orçamento (nivel_2, não exige diretor), a etapa
+  // do gerente é dispensada — não faz sentido o gerente aprovar a própria
+  // requisição. A etapa é marcada como aprovada automaticamente, com auditoria.
+  //
+  // Não se aplica quando:
+  //  - a requisição é forçada ao diretor (setor Diretoria / solicitante especial);
+  //  - está fora do orçamento (nivel_3) — diretor continua obrigatório;
+  //  - a despesa não está prevista em orçamento (isBudgeted false);
+  //  - a etapa de gerente está roteada a um gerente ESPECÍFICO diferente do
+  //    solicitante (regra expenseTypeManager) — aí não é auto-aprovação do
+  //    próprio, e o outro gerente deve decidir manualmente.
+  const requesterIsManager = ctx.ctrlRoles.includes("gerente");
+  const routedToOtherSpecificManager =
+    data.expense_type_id === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId &&
+    ctx.id !== APPROVAL_ROUTING.expenseTypeManager.managerId;
+  const managerAutoApproves = (
+    tier: ApprovalTier,
+    v: BudgetVerification | null,
+  ): boolean =>
+    !forceDirector &&
+    tier === "nivel_2" &&
+    (v?.isBudgeted ?? false) &&
+    requesterIsManager &&
+    !routedToOtherSpecificManager;
+
+  const autoApproveManagerStep = managerAutoApproves(approvalTier, verification);
+  const nowIso = new Date().toISOString();
+  const AUTO_APPROVAL_COMMENT =
+    "Aprovação gerencial automática: solicitante é gerente e a despesa está prevista em orçamento.";
+
+  const initialStatus: CtrlRequestStatus = forceDirector
+    ? "pendente_diretor"
+    : autoApproveManagerStep
+      ? "aprovado"
+      : "pendente";
 
   // Installments
   const isCreditCard = data.payment_method === "cartao_credito";
@@ -445,6 +480,8 @@ export async function createRequest(data: CreateRequestInput) {
       installment_total: isInstallment ? data.installments : null,
       status: initialStatus,
       approval_level: approvalTier === "nivel_3" ? 2 : 1,
+      approved_by: autoApproveManagerStep ? ctx.id : null,
+      approved_at: autoApproveManagerStep ? nowIso : null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)
     .select("id, request_number")
@@ -473,14 +510,33 @@ export async function createRequest(data: CreateRequestInput) {
       : null,
   });
 
-  {
+  // Auditoria da auto-aprovação gerencial (etapa do gerente dispensada porque o
+  // solicitante é o próprio gerente e a despesa está prevista em orçamento).
+  if (autoApproveManagerStep) {
+    await supabase.from("ctrl_history").insert({
+      request_id: newReq.id,
+      user_id: ctx.id,
+      action: "aprovado",
+      comment: AUTO_APPROVAL_COMMENT,
+      metadata: {
+        approver_roles: ctx.ctrlRoles,
+        stage: "gerente",
+        auto_approved: true,
+        reason: "requester_is_manager_and_budgeted",
+      },
+    });
+  }
+
+  // Não notifica etapa pendente quando a etapa do gerente foi auto-aprovada:
+  // não há aprovação manual a fazer (nem cabe o gerente aprovar a própria).
+  if (!autoApproveManagerStep) {
     const { data: sec } = await supabase
       .from("ctrl_sectors")
       .select("name")
       .eq("id", data.sector_id)
       .single();
 
-    // Etapa inicial e quem notificar. Sem auto-aprovação.
+    // Etapa inicial e quem notificar.
     const stage: "gerente" | "diretor" = forceDirector ? "diretor" : "gerente";
     let explicitApproverIds: string[] | undefined;
     if (directorOnly) {
@@ -529,7 +585,12 @@ export async function createRequest(data: CreateRequestInput) {
         );
       }
       const instTier: ApprovalTier = instVerification?.approvalTier ?? "nivel_2";
-      const instStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
+      const instAutoApprove = managerAutoApproves(instTier, instVerification);
+      const instStatus: CtrlRequestStatus = forceDirector
+        ? "pendente_diretor"
+        : instAutoApprove
+          ? "aprovado"
+          : "pendente";
 
       const { data: instReq } = await supabase
         .from("ctrl_requests")
@@ -545,8 +606,8 @@ export async function createRequest(data: CreateRequestInput) {
           status: instStatus,
           approval_level: instTier === "nivel_3" ? 2 : 1,
           approval_tier: instTier,
-          approved_by: null,
-          approved_at: null,
+          approved_by: instAutoApprove ? ctx.id : null,
+          approved_at: instAutoApprove ? nowIso : null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any)
         .select("id, request_number")
@@ -560,6 +621,20 @@ export async function createRequest(data: CreateRequestInput) {
           action: "criado",
           comment: `Parcela ${inst.installment}/${data.installments} (grupo #${newReq.request_number})`,
         });
+        if (instAutoApprove) {
+          await supabase.from("ctrl_history").insert({
+            request_id: instReq.id,
+            user_id: ctx.id,
+            action: "aprovado",
+            comment: AUTO_APPROVAL_COMMENT,
+            metadata: {
+              approver_roles: ctx.ctrlRoles,
+              stage: "gerente",
+              auto_approved: true,
+              reason: "requester_is_manager_and_budgeted",
+            },
+          });
+        }
       }
     }
   }
@@ -584,7 +659,12 @@ export async function createRequest(data: CreateRequestInput) {
         );
       }
       const monthTier: ApprovalTier = monthVerification?.approvalTier ?? "nivel_2";
-      const monthStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
+      const monthAutoApprove = managerAutoApproves(monthTier, monthVerification);
+      const monthStatus: CtrlRequestStatus = forceDirector
+        ? "pendente_diretor"
+        : monthAutoApprove
+          ? "aprovado"
+          : "pendente";
 
       const { data: recReq } = await supabase
         .from("ctrl_requests")
@@ -599,8 +679,8 @@ export async function createRequest(data: CreateRequestInput) {
           status: monthStatus,
           approval_level: monthTier === "nivel_3" ? 2 : 1,
           approval_tier: monthTier,
-          approved_by: null,
-          approved_at: null,
+          approved_by: monthAutoApprove ? ctx.id : null,
+          approved_at: monthAutoApprove ? nowIso : null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any)
         .select("id, request_number")
@@ -614,6 +694,20 @@ export async function createRequest(data: CreateRequestInput) {
           action: "criado",
           comment: `Recorrente (grupo #${newReq.request_number}) — mês ${month}/${data.reference_year}`,
         });
+        if (monthAutoApprove) {
+          await supabase.from("ctrl_history").insert({
+            request_id: recReq.id,
+            user_id: ctx.id,
+            action: "aprovado",
+            comment: AUTO_APPROVAL_COMMENT,
+            metadata: {
+              approver_roles: ctx.ctrlRoles,
+              stage: "gerente",
+              auto_approved: true,
+              reason: "requester_is_manager_and_budgeted",
+            },
+          });
+        }
       }
     }
   }
@@ -624,7 +718,7 @@ export async function createRequest(data: CreateRequestInput) {
     requestId: newReq.id,
     requestNumber: newReq.request_number,
     totalCreated,
-    autoApproved: false,
+    autoApproved: autoApproveManagerStep,
     verification,
   };
 }
