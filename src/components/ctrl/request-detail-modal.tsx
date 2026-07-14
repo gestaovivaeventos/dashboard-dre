@@ -56,6 +56,7 @@ export type RequestDetail = {
   bank_cpf_cnpj?: string | null;
   favorecido?: string | null;
   supplier_issues_invoice?: string | null;
+  invoice_number?: string | null;
   attachment_path?: string | null;
   created_at?: string | null;
   approved_at?: string | null;
@@ -234,6 +235,9 @@ export function RequestDetailModal({
             <DetailField label="Fornecedor" value={sup?.name ?? req.favorecido ?? "—"} />
             <DetailField label="CNPJ/CPF" value={sup?.cnpj_cpf ?? req.bank_cpf_cnpj ?? "—"} mono />
             <DetailField label="Emite nota fiscal?" value={formatIssuesInvoice(req.supplier_issues_invoice)} />
+            {req.invoice_number && (
+              <DetailField label="Número da nota fiscal" value={req.invoice_number} mono />
+            )}
             {req.payment_method === "pix" && (
               <>
                 <DetailField label="Tipo Chave PIX" value={req.pix_key_type ?? "—"} />

@@ -66,6 +66,7 @@ async function getContasAPagar() {
       bank_cpf_cnpj,
       favorecido,
       supplier_issues_invoice,
+      invoice_number,
       attachment_path,
       created_at,
       approved_at,
