@@ -123,9 +123,17 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/aprovacoes")) {
       return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
     }
-    // Contas a pagar
+    // Contas a pagar: fora do alcance do gerente/solicitante.
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
-      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+      return ["diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Orcamento e Relatorios: colaborativos p/ diretor + contas_a_pagar (csc),
+    // mas escondidos do gerente/solicitante (menu + rota).
+    if (
+      pathname.startsWith("/ctrl/orcamento") ||
+      pathname.startsWith("/ctrl/relatorios")
+    ) {
+      return ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
     // A aprovação em si fica restrita ao CSC/admin (gate no client + server
