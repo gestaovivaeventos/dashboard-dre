@@ -127,12 +127,17 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
       return ["diretor", "contas_a_pagar"].includes(profile);
     }
-    // Orcamento e Relatorios: colaborativos p/ diretor + contas_a_pagar (csc),
-    // mas escondidos do gerente/solicitante (menu + rota).
-    if (
-      pathname.startsWith("/ctrl/orcamento") ||
-      pathname.startsWith("/ctrl/relatorios")
-    ) {
+    // Editar Orcamento: restrito ao contas_a_pagar (csc) — nem gerente nem
+    // diretor editam. Precede a regra de /ctrl/orcamento abaixo.
+    if (pathname.startsWith("/ctrl/orcamento/editar")) {
+      return profile === "contas_a_pagar";
+    }
+    // Orcamento (visualizacao): gerente + diretor + contas_a_pagar (csc).
+    if (pathname.startsWith("/ctrl/orcamento")) {
+      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Relatorios: diretor + contas_a_pagar (csc); escondido do gerente/solicitante.
+    if (pathname.startsWith("/ctrl/relatorios")) {
       return ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
