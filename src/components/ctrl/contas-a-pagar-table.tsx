@@ -604,6 +604,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
           onClose={() => setDetail(null)}
           onOpenAttachment={openAttachment}
           attachmentLoading={attachmentLoading}
+          showApprovalHistory
         />
       )}
 

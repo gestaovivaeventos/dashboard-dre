@@ -2,6 +2,8 @@
 
 import { Download, FileText, Loader2, Paperclip, X } from "lucide-react";
 
+import { ApprovalHistory } from "@/components/ctrl/approval-history";
+
 // ── Tipos compartilhados ──────────────────────────────────────────────────────
 
 export type Supplier = {
@@ -127,11 +129,16 @@ export function RequestDetailModal({
   onClose,
   onOpenAttachment,
   attachmentLoading,
+  showApprovalHistory = false,
 }: {
   req: RequestDetail;
   onClose: () => void;
   onOpenAttachment: (id: string) => void;
   attachmentLoading: boolean;
+  // Exibe a seção "Histórico de aprovações" (etapas gerente/diretor a partir de
+  // ctrl_history). Ativada na tela de Contas a Pagar; nas Requisições o modal
+  // segue sem essa seção.
+  showApprovalHistory?: boolean;
 }) {
   const sup = resolveSupplier(req.ctrl_suppliers);
   const sector = resolveNamed(req.ctrl_sectors ?? null);
@@ -318,6 +325,14 @@ export function RequestDetailModal({
               />
             )}
           </Section>
+
+          {/* Histórico de aprovações (etapas gerente/diretor) — persistente em
+              ctrl_history. Renderizado só quando a tela solicita (Contas a Pagar). */}
+          {showApprovalHistory && (
+            <Section title="Histórico de aprovações" twoCol={false}>
+              <ApprovalHistory requestId={req.id} showTitle={false} />
+            </Section>
+          )}
         </div>
 
         <div className="border-t px-6 py-3 flex justify-end gap-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -8,10 +8,9 @@ import {
   rejectRequest,
   reverseRequest,
   batchApproveRequests,
-  getApprovalHistory,
-  type ApprovalHistoryEntry,
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 
 type Req = {
@@ -460,7 +459,9 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                   {modal.req.observations && <Row label="Observações" value={modal.req.observations} />}
                   <Row label="Criado em" value={new Date(modal.req.created_at).toLocaleString("pt-BR")} />
 
-                  <ApprovalHistorySection req={modal.req} />
+                  <div className="border-t pt-4 mt-4">
+                    <ApprovalHistory requestId={modal.req.id} pending={pendingStage(modal.req)} />
+                  </div>
                 </div>
               )}
 
@@ -572,25 +573,10 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-const STAGE_LABEL: Record<"gerente" | "diretor", string> = {
-  gerente: "Gerente",
-  diretor: "Diretor",
-};
-
-function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 // Etapa que ainda aguarda decisão, derivada do status atual da requisição.
 // aguardando_complementacao usa a etapa de origem guardada (mesma lógica de
 // canActOn). Retorna null quando não há etapa pendente (aprovado/rejeitado/etc).
-function pendingStage(req: Req): "gerente" | "diretor" | null {
+function pendingStage(req: Req): PendingStage {
   const stage =
     req.status === "aguardando_complementacao"
       ? req.complement_return_status ?? "pendente"
@@ -598,118 +584,4 @@ function pendingStage(req: Req): "gerente" | "diretor" | null {
   if (stage === "pendente") return "gerente";
   if (stage === "pendente_diretor") return "diretor";
   return null;
-}
-
-// "Histórico de aprovações" — lê os eventos persistentes de decisão (ctrl_history)
-// e os exibe em ordem cronológica. Some após aprovação/reload porque a fonte é o
-// banco, não o estado da tela. Mostra também a etapa ainda pendente, se houver.
-function ApprovalHistorySection({ req }: { req: Req }) {
-  const [entries, setEntries] = useState<ApprovalHistoryEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setEntries(null);
-    setError(null);
-    (async () => {
-      const res = await getApprovalHistory(req.id);
-      if (!alive) return;
-      if (res.error) {
-        setError(res.error);
-        setEntries([]);
-        return;
-      }
-      setEntries(res.entries ?? []);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [req.id]);
-
-  const pending = pendingStage(req);
-
-  return (
-    <div className="border-t pt-4 mt-4">
-      <h4 className="mb-3 text-sm font-semibold">Histórico de aprovações</h4>
-
-      {entries === null ? (
-        <p className="text-xs text-muted-foreground">Carregando histórico…</p>
-      ) : error ? (
-        <p className="text-xs text-destructive">{error}</p>
-      ) : entries.length === 0 && !pending ? (
-        <p className="text-xs text-muted-foreground">
-          Nenhuma aprovação registrada ainda.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {entries.map((e) => (
-            <ApprovalHistoryItem key={e.id} entry={e} />
-          ))}
-
-          {pending && (
-            <div className="rounded-md border border-dashed px-3 py-2">
-              <p className="text-sm font-semibold">{STAGE_LABEL[pending]}</p>
-              <p className="text-xs text-muted-foreground">Pendente de aprovação</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ApprovalHistoryItem({ entry }: { entry: ApprovalHistoryEntry }) {
-  const actor = entry.actorName ?? entry.actorEmail ?? "—";
-
-  // Cabeçalho: etapa (Gerente/Diretor) quando houver; senão o tipo da ação.
-  const heading = entry.stage
-    ? STAGE_LABEL[entry.stage]
-    : entry.action === "rejeitado"
-    ? "Rejeição"
-    : entry.action === "estornado"
-    ? "Estorno"
-    : "Aprovação";
-
-  const accent =
-    entry.action === "aprovado"
-      ? "border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-950/20"
-      : entry.action === "rejeitado"
-      ? "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20"
-      : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20";
-
-  return (
-    <div className={`rounded-md border px-3 py-2 ${accent}`}>
-      <p className="text-sm font-semibold">{heading}</p>
-
-      {entry.action === "aprovado" && entry.autoApproved ? (
-        <>
-          <p className="text-sm">Aprovação automática</p>
-          <p className="text-sm">Solicitante: {actor}</p>
-          <p className="text-xs text-muted-foreground">
-            Motivo: solicitante é gerente e a despesa está prevista em orçamento
-          </p>
-        </>
-      ) : entry.action === "aprovado" ? (
-        <p className="text-sm">Aprovado por: {actor}</p>
-      ) : entry.action === "rejeitado" ? (
-        <>
-          <p className="text-sm">Rejeitado por: {actor}</p>
-          {entry.comment && (
-            <p className="text-xs text-muted-foreground">Motivo: {entry.comment}</p>
-          )}
-        </>
-      ) : (
-        <>
-          <p className="text-sm">Estornado por: {actor}</p>
-          {entry.comment && (
-            <p className="text-xs text-muted-foreground">Motivo: {entry.comment}</p>
-          )}
-        </>
-      )}
-
-      <p className="mt-0.5 text-xs text-muted-foreground">
-        Data: {fmtDateTime(entry.createdAt)}
-      </p>
-    </div>
-  );
 }
