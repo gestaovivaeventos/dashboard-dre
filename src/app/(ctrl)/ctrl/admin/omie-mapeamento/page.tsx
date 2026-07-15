@@ -24,7 +24,7 @@ export default async function OmieMapeamentoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "admin", "csc")) {
+  if (!hasCtrlRole(ctx, "admin")) {
     redirect("/ctrl/requisicoes");
   }
 

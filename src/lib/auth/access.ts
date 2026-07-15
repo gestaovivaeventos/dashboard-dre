@@ -133,11 +133,17 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
       return ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar"].includes(profile);
     }
-    // Demais áreas administrativas do CTRL
-    if (pathname.startsWith("/ctrl/admin")) {
-      return profile === "contas_a_pagar";
+    // Configurações do módulo Compras (admin-only, que já retornou true no topo):
+    // o hub /ctrl/configuracoes e as telas que ele agrupa — Editar Orçamento,
+    // Eventos, Mapeamento Omie, Setores e Tipos de Despesa.
+    if (
+      pathname.startsWith("/ctrl/configuracoes") ||
+      pathname.startsWith("/ctrl/orcamento/editar") ||
+      pathname.startsWith("/ctrl/admin")
+    ) {
+      return false;
     }
-    // Padrão dentro de /ctrl (requisicoes, notificações, etc.)
+    // Padrão dentro de /ctrl (requisicoes, orçamento, notificações, etc.)
     return true;
   }
 

@@ -19,7 +19,7 @@ export default async function EventosPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "csc", "admin")) {
+  if (!hasCtrlRole(ctx, "admin")) {
     redirect("/ctrl/requisicoes");
   }
 
