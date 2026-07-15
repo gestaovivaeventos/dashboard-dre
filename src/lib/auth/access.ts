@@ -128,17 +128,17 @@ export function canAccessPathByProfile(
       return ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
-    // ANTES da regra geral /ctrl/orcamento abaixo, senão diretor/csc herdariam
-    // acesso. Admin já retornou true no topo desta função.
+    // ANTES da regra geral /ctrl/orcamento abaixo, senão gerente/diretor/csc
+    // herdariam acesso. Admin já retornou true no topo desta função.
     if (pathname.startsWith("/ctrl/orcamento/editar")) {
       return false;
     }
-    // Orcamento e Relatorios: colaborativos p/ diretor + contas_a_pagar (csc),
-    // mas escondidos do gerente/solicitante (menu + rota).
-    if (
-      pathname.startsWith("/ctrl/orcamento") ||
-      pathname.startsWith("/ctrl/relatorios")
-    ) {
+    // Orcamento (visualizacao): gerente + diretor + contas_a_pagar (csc).
+    if (pathname.startsWith("/ctrl/orcamento")) {
+      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Relatorios: diretor + contas_a_pagar (csc); escondido do gerente/solicitante.
+    if (pathname.startsWith("/ctrl/relatorios")) {
       return ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
