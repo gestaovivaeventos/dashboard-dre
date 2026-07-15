@@ -127,10 +127,11 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
       return ["diretor", "contas_a_pagar"].includes(profile);
     }
-    // Editar Orcamento: restrito ao contas_a_pagar (csc) — nem gerente nem
-    // diretor editam. Precede a regra de /ctrl/orcamento abaixo.
+    // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
+    // ANTES da regra geral /ctrl/orcamento abaixo, senão gerente/diretor/csc
+    // herdariam acesso. Admin já retornou true no topo desta função.
     if (pathname.startsWith("/ctrl/orcamento/editar")) {
-      return profile === "contas_a_pagar";
+      return false;
     }
     // Orcamento (visualizacao): gerente + diretor + contas_a_pagar (csc).
     if (pathname.startsWith("/ctrl/orcamento")) {
@@ -146,11 +147,16 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
       return ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar"].includes(profile);
     }
-    // Demais áreas administrativas do CTRL
-    if (pathname.startsWith("/ctrl/admin")) {
-      return profile === "contas_a_pagar";
+    // Configurações do módulo Compras (admin-only): o hub /ctrl/configuracoes e
+    // as demais áreas administrativas — Eventos, Mapeamento Omie, Setores e
+    // Tipos de Despesa.
+    if (
+      pathname.startsWith("/ctrl/configuracoes") ||
+      pathname.startsWith("/ctrl/admin")
+    ) {
+      return false;
     }
-    // Padrão dentro de /ctrl (requisicoes, notificações, etc.)
+    // Padrão dentro de /ctrl (requisicoes, orçamento, notificações, etc.)
     return true;
   }
 

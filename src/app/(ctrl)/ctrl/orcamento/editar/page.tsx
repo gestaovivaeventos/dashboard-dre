@@ -10,7 +10,7 @@ export default async function EditarOrcamentoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "csc", "admin")) {
+  if (!hasCtrlRole(ctx, "admin")) {
     redirect("/ctrl/orcamento");
   }
 
