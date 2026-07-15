@@ -129,13 +129,16 @@ function buildClientePayload(
     codigo_cliente_integracao: supplier.id,
     razao_social: supplier.name,
     nome_fantasia: supplier.nome_fantasia?.trim() || supplier.name,
-    // Estrangeiro: cnpj_cpf vazio (a Omie exibe "Estrangeiro") e sempre PJ.
-    cnpj_cpf: supplier.estrangeiro ? "" : doc,
+    // Estrangeiro é sempre PJ. O CNPJ/CPF é OMITIDO (a Omie desabilita o campo
+    // para cadastros do exterior e exibe "Estrangeiro"); enviar vazio pode ser
+    // rejeitado como documento inválido.
     pessoa_fisica: supplier.estrangeiro ? "N" : doc.length === 11 ? "S" : "N",
     email: supplier.email ?? "",
     tags: [{ tag }],
   };
-  if (supplier.estrangeiro) {
+  if (!supplier.estrangeiro) {
+    payload.cnpj_cpf = doc;
+  } else {
     // A Omie trata o cadastro como do exterior quando estado="EX". O país vem
     // no codigo_pais (BACEN); cidade/endereço são texto livre do exterior.
     payload.estado = (supplier.estado ?? ESTADO_EXTERIOR).trim() || ESTADO_EXTERIOR;
@@ -247,12 +250,23 @@ export async function syncSupplierToOmieUnit(
       if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
     }
   } else {
-    // Estrangeiro (sem documento): dedupe pelo código de integração.
-    const consulta = await omieCall(OMIE_CLIENTES_URL, "ConsultarCliente", appKey, appSecret, {
-      codigo_cliente_integracao: supplier.id,
-    });
-    if (!consulta.notFound && consulta.data.codigo_cliente_omie) {
-      existingCode = Number(consulta.data.codigo_cliente_omie);
+    // Estrangeiro (sem documento): dedupe pelo código de integração. Quando o
+    // cliente ainda não existe, a Omie NÃO devolve o "não encontrado" padrão —
+    // lança "Cliente não cadastrado para o Código [0]", que o omieCall trata
+    // como erro. Capturamos essa mensagem e seguimos para o IncluirCliente
+    // (primeiro cadastro). Qualquer outro erro (rede, credenciais…) propaga.
+    try {
+      const consulta = await omieCall(OMIE_CLIENTES_URL, "ConsultarCliente", appKey, appSecret, {
+        codigo_cliente_integracao: supplier.id,
+      });
+      if (!consulta.notFound) {
+        existingCode = Number(consulta.data.codigo_cliente_omie) || null;
+      }
+    } catch (err) {
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      const isNotFound =
+        /n[ãa]o cadastrado|n[ãa]o encontrado|not found|c[óo]digo \[?0\]?/.test(msg);
+      if (!isNotFound) throw err;
     }
   }
 

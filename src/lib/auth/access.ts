@@ -123,9 +123,23 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/aprovacoes")) {
       return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
     }
-    // Contas a pagar
+    // Contas a pagar: fora do alcance do gerente/solicitante.
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
-      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+      return ["diretor", "contas_a_pagar"].includes(profile);
+    }
+    // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
+    // ANTES da regra geral /ctrl/orcamento abaixo, senão diretor/csc herdariam
+    // acesso. Admin já retornou true no topo desta função.
+    if (pathname.startsWith("/ctrl/orcamento/editar")) {
+      return false;
+    }
+    // Orcamento e Relatorios: colaborativos p/ diretor + contas_a_pagar (csc),
+    // mas escondidos do gerente/solicitante (menu + rota).
+    if (
+      pathname.startsWith("/ctrl/orcamento") ||
+      pathname.startsWith("/ctrl/relatorios")
+    ) {
+      return ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
     // A aprovação em si fica restrita ao CSC/admin (gate no client + server
@@ -133,12 +147,11 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
       return ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar"].includes(profile);
     }
-    // Configurações do módulo Compras (admin-only, que já retornou true no topo):
-    // o hub /ctrl/configuracoes e as telas que ele agrupa — Editar Orçamento,
-    // Eventos, Mapeamento Omie, Setores e Tipos de Despesa.
+    // Configurações do módulo Compras (admin-only): o hub /ctrl/configuracoes e
+    // as demais áreas administrativas — Eventos, Mapeamento Omie, Setores e
+    // Tipos de Despesa.
     if (
       pathname.startsWith("/ctrl/configuracoes") ||
-      pathname.startsWith("/ctrl/orcamento/editar") ||
       pathname.startsWith("/ctrl/admin")
     ) {
       return false;

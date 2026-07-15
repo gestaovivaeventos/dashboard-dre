@@ -240,9 +240,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: "ct-req", title: "Requisicoes", icon: FileText, scope: "global", href: "/ctrl/requisicoes", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-apr", title: "Aprovacoes", icon: CheckSquare, scope: "global", href: "/ctrl/aprovacoes", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
-      { key: "ct-cap", title: "Contas a Pagar", icon: Receipt, scope: "global", href: "/ctrl/contas-a-pagar", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
-      { key: "ct-orc", title: "Orcamento", icon: DollarSign, scope: "global", href: "/ctrl/orcamento", ctrlRoles: ["gerente", "diretor", "csc", "admin"] },
-      { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["gerente", "diretor", "csc", "contas_a_pagar", "admin"] },
+      { key: "ct-cap", title: "Contas a Pagar", icon: Receipt, scope: "global", href: "/ctrl/contas-a-pagar", ctrlRoles: ["diretor", "csc", "contas_a_pagar", "admin"] },
+      { key: "ct-orc", title: "Orcamento", icon: DollarSign, scope: "global", href: "/ctrl/orcamento", ctrlRoles: ["diretor", "csc", "admin"] },
+      { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
       // Configurações: hub admin-only que agrupa Editar Orçamento, Eventos,
       // Mapeamento Omie, Setores e Tipos de Despesa (ver /ctrl/configuracoes).
