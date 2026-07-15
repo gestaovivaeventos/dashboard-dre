@@ -1432,6 +1432,109 @@ export async function getComplementThread(
   return { messages };
 }
 
+// ─── Histórico de aprovações (para o modal de Detalhes) ──────────────────────
+//
+// Reconstrói o histórico persistente das DECISÕES de aprovação de uma requisição
+// a partir de `ctrl_history` — a mesma tabela onde approveRequest /
+// applyApprovalStep / batchApproveRequests / rejectRequest / reverseRequest e a
+// auto-aprovação gerencial já gravam cada ação. Não altera nada do fluxo: só LÊ.
+//
+// Considera apenas as ações de decisão de aprovação (aprovado / rejeitado /
+// estornado); a conversa de complementação tem sua própria thread. A etapa
+// (gerente/diretor) e sinais de auto-aprovação vêm do `metadata` gravado na
+// origem. Nomes dos autores são resolvidos via admin client porque a RLS de
+// `users` não expõe o registro de outro usuário ao aprovador (mesma técnica de
+// getComplementThread); a autorização é por papel + dono.
+
+export type ApprovalHistoryAction = "aprovado" | "rejeitado" | "estornado";
+
+export interface ApprovalHistoryEntry {
+  id: string;
+  action: ApprovalHistoryAction;
+  /** Etapa do fluxo (quando aplicável): quem decidiu. */
+  stage: "gerente" | "diretor" | null;
+  /** true quando a etapa do gerente foi dispensada por auto-aprovação. */
+  autoApproved: boolean;
+  actorName: string | null;
+  actorEmail: string | null;
+  /** Comentário/motivo gravado no evento (motivo da rejeição/estorno, etc.). */
+  comment: string | null;
+  createdAt: string;
+}
+
+export async function getApprovalHistory(
+  requestId: string,
+): Promise<{ entries?: ApprovalHistoryEntry[]; error?: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("created_by")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string }>();
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const { data, error } = await supabase
+    .from("ctrl_history")
+    .select(
+      `id, user_id, action, comment, metadata, created_at,
+       user:users!ctrl_history_user_id_fkey(name, email)`,
+    )
+    .eq("request_id", requestId)
+    .in("action", ["aprovado", "rejeitado", "estornado"])
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  type Row = {
+    id: string;
+    user_id: string;
+    action: ApprovalHistoryAction;
+    comment: string | null;
+    metadata: Record<string, unknown> | null;
+    created_at: string;
+    user:
+      | { name: string | null; email: string | null }
+      | Array<{ name: string | null; email: string | null }>
+      | null;
+  };
+
+  const entries: ApprovalHistoryEntry[] = ((data ?? []) as Row[]).map((row) => {
+    const u = Array.isArray(row.user) ? row.user[0] ?? null : row.user;
+    const stageRaw = row.metadata?.stage;
+    const stage =
+      stageRaw === "gerente" || stageRaw === "diretor" ? stageRaw : null;
+    return {
+      id: row.id,
+      action: row.action,
+      stage,
+      autoApproved: row.metadata?.auto_approved === true,
+      actorName: u?.name ?? null,
+      actorEmail: u?.email ?? null,
+      comment: row.comment,
+      createdAt: row.created_at,
+    };
+  });
+
+  return { entries };
+}
+
 // Dentre as requisições em `aguardando_complementacao`, quais têm o ÚLTIMO turno
 // da conversa como resposta do solicitante (`complementado`) — ou seja, estão
 // aguardando a análise do aprovador. Usado para o alerta da aba Complementação.
