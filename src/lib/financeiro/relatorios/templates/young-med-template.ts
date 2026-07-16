@@ -83,7 +83,7 @@ export const youngMedTemplate: ReportTemplate = {
     { key: "margem_liquida", label: "Margem Líquida", source: "core-margem" },
   ],
   expectedCharts: [
-    { key: "performance_parceiro", title: "Performance por Parceiro — Mês e Acumulado" },
+    { key: "performance_parceiro", title: "Performance por Parceiro — Período e Acumulado" },
     { key: "resultado_exercicio", title: "Resultado do Exercício — Previsto x Realizado" },
   ],
   semaforoIndicators: ["Resultado Operacional", "Margem Líquida", "Comissões"],
@@ -129,7 +129,7 @@ export const youngMedTemplate: ReportTemplate = {
       { label: "Margem Líquida", kind: "margem", ratio: { numerator: ["11"], denominator: ["6"] } },
     ],
     kpiColumns: 5,
-    // Tabela "Desempenho do mês vs orçamento" — 4 linhas (Comissões ficam no card).
+    // Tabela "Desempenho do período vs orçamento" — 4 linhas (Comissões ficam no card).
     previstoRealizado: [
       { label: "Receita Total", code: "1", unidade: "currency" },
       { label: "Despesas Operacionais", code: "7", unidade: "currency" },
@@ -138,7 +138,7 @@ export const youngMedTemplate: ReportTemplate = {
     // Bloco Performance por Parceiro — realizado por fornecedor da conta 1.1
     // (mês + acumulado do ano). Orçamento existe por conta, não por parceiro.
     partnerPerformance: {
-      title: "Performance por Parceiro — Mês e Acumulado",
+      title: "Performance por Parceiro — Período e Acumulado",
       accountCode: "1.1",
       categoryLabel: "BV - Vendas YoungMed",
     },

@@ -194,7 +194,7 @@ export interface TemplatePrevistoRealizadoSpec {
   /**
    * Subtítulo do subgrupo na tabela. Linhas com o mesmo `group` consecutivo
    * ficam sob um subtítulo; a troca de group desenha um divisor. Ex.: Village
-   * usa "Resultado do mês" e "Leitura gerencial". Ausência = sem agrupamento
+   * usa "Resultado do período" e "Leitura gerencial". Ausência = sem agrupamento
    * (Franquias Viva / SGX permanecem com a tabela plana atual).
    */
   group?: string;
