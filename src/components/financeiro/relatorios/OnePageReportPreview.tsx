@@ -3262,7 +3262,7 @@ export function OnePageReportPreview({
 
         {/* Quadro de eventos — exclusivo da Feat Produções (gated por bloco +
             presença de dados). Eventos são a principal fonte de receita da Feat,
-            por isso aparece em destaque, logo após os indicadores do mês. */}
+            por isso aparece em destaque, logo após os indicadores do período. */}
         {show("featEventos") && data.featEventos ? (
           <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
         ) : null}
