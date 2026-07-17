@@ -16,7 +16,7 @@ export async function GET(request: Request) {
 
   let companyQuery = supabase
     .from("companies")
-    .select("id,name,active,segment_id,last_full_sync_at")
+    .select("id,name,active,segment_id,last_full_sync_at,sync_enabled")
     .eq("active", true);
 
   if (segmentSlug) {
@@ -74,6 +74,7 @@ export async function GET(request: Request) {
       return {
         id: company.id as string,
         name: company.name as string,
+        sync_enabled: (company.sync_enabled as boolean | null) ?? true,
         last_full_sync_at: (company.last_full_sync_at as string | null) ?? null,
         last_sync_at: sync?.finished_at ?? sync?.started_at ?? null,
         last_sync_status: sync?.status ?? null,

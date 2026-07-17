@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/toaster";
 interface ConnectionCompany {
   id: string;
   name: string;
+  sync_enabled: boolean;
   last_sync_at: string | null;
   last_full_sync_at: string | null;
   last_sync_status: "success" | "error" | "running" | null;
@@ -496,7 +497,13 @@ export function ConnectionsGrid({ segmentSlug, hideManualSync = false }: Connect
                 {company.last_sync_error ? (
                   <p className="rounded-md bg-red-50 p-2 text-xs text-red-700">{company.last_sync_error}</p>
                 ) : null}
-                {!hideManualSync ? (
+                {!company.sync_enabled ? (
+                  <p className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
+                    Sincronizacao desativada (empresa fora do pacote de servicos).
+                    Dados historicos mantidos para consulta.
+                  </p>
+                ) : null}
+                {!hideManualSync && company.sync_enabled ? (
                   <>
                     <Button
                       type="button"

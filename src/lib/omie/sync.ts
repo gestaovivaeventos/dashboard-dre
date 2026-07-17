@@ -856,7 +856,7 @@ async function runCompanySyncInternal(
 
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .select("id, name, omie_app_key, omie_app_secret, last_full_sync_at, segment_id")
+    .select("id, name, omie_app_key, omie_app_secret, last_full_sync_at, segment_id, sync_enabled")
     .eq("id", companyId)
     .single<{
       id: string;
@@ -865,10 +865,22 @@ async function runCompanySyncInternal(
       omie_app_secret: string | null;
       last_full_sync_at: string | null;
       segment_id: string | null;
+      sync_enabled: boolean | null;
     }>();
 
   if (companyError || !company) {
     throw new Error("Empresa nao encontrada.");
+  }
+
+  // Gate central de sincronizacao: cobre o cron e todos os disparos manuais
+  // (/api/sync/[id], /full, /manual). Empresas fora do pacote de servicos
+  // (sync_enabled=false) nao sao sincronizadas, preservando os dados historicos
+  // ja apagados a partir do fim do contrato. `active` continua controlando so a
+  // visibilidade nas telas.
+  if (company.sync_enabled === false) {
+    throw new Error(
+      "Sincronizacao desativada para esta empresa (fora do pacote de servicos).",
+    );
   }
 
   const effectiveMode =
