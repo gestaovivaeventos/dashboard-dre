@@ -963,7 +963,10 @@ export function SettingsCompanies({
                         Fechar
                       </Button>
                     </div>
-                    <SettingsFeeVvrTable companyId={company.id} />
+                    <SettingsFeeVvrTable
+                      companyId={company.id}
+                      companyName={company.name}
+                    />
                   </div>
                 )}
 
