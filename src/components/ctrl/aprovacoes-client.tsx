@@ -49,13 +49,13 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  pendente:                    { label: "Pendente",        cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  pendente:                    { label: "Aguardando Gerente", cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
   pendente_diretor:            { label: "Aguardando Diretor", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   aprovado:                    { label: "Aprovado",        cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   rejeitado:                   { label: "Rejeitado",       cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   aguardando_complementacao:   { label: "Complementação",  cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   estornado:                   { label: "Estornado",       cls: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400" },
-  agendado:                    { label: "Agendado",        cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  agendado:                    { label: "Enviado Pgto",    cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
