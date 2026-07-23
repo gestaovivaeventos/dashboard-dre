@@ -41,6 +41,7 @@ export default async function AprovacoesPage() {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           requests={requests as any}
           ctrlRoles={ctx.ctrlRoles}
+          ownSectorIds={ctx.sectorIds}
           awaitingApproverIds={awaitingApproverIds}
         />
       )}

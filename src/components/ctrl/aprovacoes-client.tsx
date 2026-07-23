@@ -77,12 +77,16 @@ type SortDir = "asc" | "desc";
 interface Props {
   requests: Req[];
   ctrlRoles: string[];
+  // Setores pelos quais o diretor é responsável (user_sectors). Não filtram a
+  // visibilidade (o diretor vê tudo) — servem para separar visualmente "seu
+  // setor" das demais requisições na tela.
+  ownSectorIds?: string[];
   // Ids de requisições em complementação aguardando análise do aprovador
   // (último turno foi resposta do solicitante). Alimenta o alerta da aba.
   awaitingApproverIds?: string[];
 }
 
-export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = [] }: Props) {
+export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
   const [sortField, setSortField] = useState<SortField>("data");
@@ -134,6 +138,24 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
     }
     return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
   });
+
+  // Diretor com setores vinculados: separa visualmente as requisições do(s)
+  // setor(es) sob sua responsabilidade das demais. Ele vê TODAS de qualquer
+  // forma (visão global no getRequests) — a separação é só de leitura.
+  const ownSectorSet = new Set(ownSectorIds);
+  const groupByOwnSector = hasRole("diretor") && ownSectorSet.size > 0;
+  const isOwnSector = (r: Req) =>
+    groupByOwnSector && !!r.sector_id && ownSectorSet.has(r.sector_id);
+  const mineRows = groupByOwnSector ? tabRequests.filter(isOwnSector) : [];
+  const otherRows = groupByOwnSector
+    ? tabRequests.filter((r) => !isOwnSector(r))
+    : tabRequests;
+  // Só mostra as seções quando há mistura — se tudo (ou nada) é do setor dele,
+  // uma lista única já é clara e evita poluir a tela com cabeçalhos vazios.
+  const showSectorGroups =
+    groupByOwnSector && mineRows.length > 0 && otherRows.length > 0;
+  const showCheckboxCol = activeTab === "pendente" && canApprove;
+  const colCount = (showCheckboxCol ? 1 : 0) + 8;
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -279,7 +301,8 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
               </tr>
             </thead>
             <tbody className="divide-y">
-              {tabRequests.map((req) => {
+              {(() => {
+              const renderRow = (req: Req) => {
                 const sector = resolve(req.ctrl_sectors);
                 const supplier = resolve(req.ctrl_suppliers);
                 const actionable = canActOn(req);
@@ -299,7 +322,7 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                 return (
                   <tr
                     key={req.id}
-                    className={`align-top transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"}`}
+                    className={`align-top transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"} ${showSectorGroups && isOwnSector(req) ? "shadow-[inset_3px_0_0_#8b5cf6]" : ""}`}
                   >
                     {activeTab === "pendente" && canApprove && (
                       <td className="px-3 py-3">
@@ -404,7 +427,20 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                     </td>
                   </tr>
                 );
-              })}
+              };
+
+              if (showSectorGroups) {
+                return (
+                  <>
+                    <SectorGroupHeader label="Do seu setor" count={mineRows.length} tone="own" colCount={colCount} />
+                    {mineRows.map(renderRow)}
+                    <SectorGroupHeader label="Demais setores" count={otherRows.length} tone="other" colCount={colCount} />
+                    {otherRows.map(renderRow)}
+                  </>
+                );
+              }
+              return tabRequests.map(renderRow);
+              })()}
             </tbody>
           </table>
         </div>
@@ -563,6 +599,37 @@ function SortHeader({
         <span aria-hidden className={active ? "" : "opacity-30"}>{active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span>
       </button>
     </th>
+  );
+}
+
+// Cabeçalho de seção na tabela de aprovações — separa "Do seu setor" das
+// "Demais setores" para o diretor. Linha discreta que ocupa toda a largura.
+function SectorGroupHeader({
+  label,
+  count,
+  tone,
+  colCount,
+}: {
+  label: string;
+  count: number;
+  tone: "own" | "other";
+  colCount: number;
+}) {
+  return (
+    <tr className="bg-muted/50">
+      <td
+        colSpan={colCount}
+        className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={`h-2 w-2 rounded-full ${tone === "own" ? "bg-violet-500" : "bg-muted-foreground/40"}`}
+          />
+          {label}
+          <span className="font-normal normal-case text-muted-foreground/70">· {count}</span>
+        </span>
+      </td>
+    </tr>
   );
 }
 
