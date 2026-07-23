@@ -495,6 +495,34 @@ export async function createSupplier(data: {
     // identificado de forma unica e cria duplicatas no Omie.
     return { error: "Informe o CNPJ ou CPF do fornecedor." };
   }
+
+  // Método marcado como padrão = o pagamento sai por ele sem ninguém perguntar
+  // nada depois. Então os dados daquele método têm que vir completos.
+  if (data.pix_padrao) {
+    const faltando = [
+      !data.pix_key_type?.trim() && "Tipo",
+      !data.chave_pix?.trim() && "Chave",
+    ].filter(Boolean) as string[];
+    if (faltando.length) {
+      return {
+        error: `Para usar o PIX como método de pagamento padrão, preencha: ${faltando.join(", ")}.`,
+      };
+    }
+  }
+  if (data.transf_padrao) {
+    const faltando = [
+      !data.banco?.trim() && "Banco",
+      !data.agencia?.trim() && "Agência",
+      !data.conta_corrente?.trim() && "Conta corrente",
+      !data.titular_banco?.trim() && "Titular da conta",
+      !data.doc_titular?.trim() && "CPF/CNPJ do titular",
+    ].filter(Boolean) as string[];
+    if (faltando.length) {
+      return {
+        error: `Para usar a transferência como método de pagamento padrão, preencha: ${faltando.join(", ")}.`,
+      };
+    }
+  }
   // requireCtrlRole already enforces auth + role. We use the admin client
   // here because RLS on ctrl_suppliers checks has_ctrl_role() against
   // user_module_roles directly — DRE admins (who get an implicit ctrl admin
