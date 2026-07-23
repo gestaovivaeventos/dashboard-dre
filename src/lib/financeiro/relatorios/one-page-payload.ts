@@ -995,7 +995,7 @@ export async function buildOnePagePayload(
         .sort((a, b) => b.realizadoAcum - a.realizadoAcum);
       if (partners.length > 0) {
         partnerPerformance = {
-          title: partnerCfg?.title ?? "Performance por Parceiro — Mês e Acumulado",
+          title: partnerCfg?.title ?? "Performance por Parceiro — Período e Acumulado",
           categoria: partnerCfg?.categoryLabel ?? null,
           partners,
           totalMes: totMes,

@@ -10,6 +10,7 @@ import {
   batchApproveRequests,
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 
 type Req = {
@@ -48,13 +49,13 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  pendente:                    { label: "Pendente",        cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
+  pendente:                    { label: "Aguardando Gerente", cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" },
   pendente_diretor:            { label: "Aguardando Diretor", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   aprovado:                    { label: "Aprovado",        cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   rejeitado:                   { label: "Rejeitado",       cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   aguardando_complementacao:   { label: "Complementação",  cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   estornado:                   { label: "Estornado",       cls: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400" },
-  agendado:                    { label: "Agendado",        cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  agendado:                    { label: "Enviado Pgto",    cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -457,6 +458,10 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                   {modal.req.justification && <Row label="Justificativa" value={modal.req.justification} />}
                   {modal.req.observations && <Row label="Observações" value={modal.req.observations} />}
                   <Row label="Criado em" value={new Date(modal.req.created_at).toLocaleString("pt-BR")} />
+
+                  <div className="border-t pt-4 mt-4">
+                    <ApprovalHistory requestId={modal.req.id} pending={pendingStage(modal.req)} />
+                  </div>
                 </div>
               )}
 
@@ -566,4 +571,17 @@ function Row({ label, value }: { label: string; value: string }) {
       <span className="font-medium break-words">{value}</span>
     </div>
   );
+}
+
+// Etapa que ainda aguarda decisão, derivada do status atual da requisição.
+// aguardando_complementacao usa a etapa de origem guardada (mesma lógica de
+// canActOn). Retorna null quando não há etapa pendente (aprovado/rejeitado/etc).
+function pendingStage(req: Req): PendingStage {
+  const stage =
+    req.status === "aguardando_complementacao"
+      ? req.complement_return_status ?? "pendente"
+      : req.status;
+  if (stage === "pendente") return "gerente";
+  if (stage === "pendente_diretor") return "diretor";
+  return null;
 }

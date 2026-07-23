@@ -274,7 +274,7 @@ export interface OnePageReportPreviewData {
   consolidated?: Consolidated;
   /** Acumulado do ano (Jan→análise) do gráfico de histórico — rodapé. */
   historicoAcum?: { previsto: number | null; realizado: number | null };
-  /** Bloco "Performance por Parceiro — Mês e Acumulado" (ex.: Young Med). */
+  /** Bloco "Performance por Parceiro — Período e Acumulado" (ex.: Young Med). */
   partnerPerformance?: PartnerPerformance;
   /** Blocos de breakdown em barras (ex.: Spot — composição da receita, frete). */
   breakdownBlocks?: BreakdownBlock[];
@@ -695,7 +695,7 @@ function ResumoExecutivo({
         }}
         className="opr-resumo-grid"
       >
-        {/* Resultado operacional do mês */}
+        {/* Resultado operacional do período */}
         {resultadoKpi ? (
           <div style={panelStyle}>
             <div
@@ -707,7 +707,7 @@ function ResumoExecutivo({
                 color: C.sub,
               }}
             >
-              Resultado operacional do mês
+              Resultado operacional do período
             </div>
             <div
               style={{
@@ -798,7 +798,7 @@ function ResumoExecutivo({
   );
 }
 
-// ─── 3. Desempenho do mês vs orçamento (tabela) ──────────────────────────────
+// ─── 3. Desempenho do período vs orçamento (tabela) ──────────────────────────
 
 function variationCell(
   item: PrevistoRealizadoItem,
@@ -872,7 +872,7 @@ function TabelaDesempenho({
 
   return (
     <section style={{ breakInside: "avoid" }}>
-      <SectionTitle>Desempenho do mês vs orçamento</SectionTitle>
+      <SectionTitle>Desempenho do período vs orçamento</SectionTitle>
       <div style={{ ...panelStyle, padding: "14px 16px 12px" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -1126,7 +1126,7 @@ function GraficoAcumulado({
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>Acumulado do Ano</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: margemNota ? 2 : 6 }}>
-        Janeiro do ano selecionado até o mês de análise — Previsto × Realizado
+        Janeiro do ano selecionado até o fim do período — Previsto × Realizado
       </div>
       {margemNota ? (
         <div style={{ fontSize: 10, color: C.body, fontFamily: FONT_MONO, marginBottom: 6 }}>{margemNota}</div>
@@ -1246,7 +1246,7 @@ function GraficoVVR({
   return (
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>VVR — Realizado × Meta</div>
-      <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Janeiro do ano selecionado até o mês de análise.</div>
+      <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>Janeiro do ano selecionado até o fim do período.</div>
       <div
         className="opr-vvr-grid"
         style={{ display: "grid", gridTemplateColumns: "1fr 232px", gap: 16, alignItems: "stretch" }}
@@ -1307,7 +1307,7 @@ function GraficoVVR({
           <span style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700, color: C.sub }}>
             VVR Acumulado
           </span>
-          <span style={{ fontSize: 9, color: C.tertiary }}>Jan até o mês de análise</span>
+          <span style={{ fontSize: 9, color: C.tertiary }}>Jan até o fim do período</span>
         </div>
         <AcumBar label="Meta" value={acumMeta} max={acumMax} color={C.metaAmber} valueColor={C.body} />
         <div style={{ height: 6 }} />
@@ -1530,7 +1530,7 @@ function GraficoBarras({
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title}</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
-        Janeiro do ano de análise até o mês selecionado.
+        Janeiro do ano de análise até o fim do período.
       </div>
       <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -1845,7 +1845,7 @@ function GraficoBarrasPrevReal({
     <div style={panelStyle}>
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{title}</div>
       <div style={{ fontSize: 10, color: C.sub, marginBottom: 6 }}>
-        Janeiro do ano de análise até o mês selecionado.
+        Janeiro do ano de análise até o fim do período.
       </div>
       <div style={{ height: 188, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -2008,7 +2008,7 @@ function ConsolidadoBlock({ data }: { data: Consolidated }) {
 }
 
 // ─── 5h. Bloco PERFORMANCE POR PARCEIRO (ex.: Young Med) ──────────────────────
-// Realizado por fornecedor (supplier_customer) da conta de BVs, no mês e no
+// Realizado por fornecedor (supplier_customer) da conta de BVs, no período e no
 // acumulado do ano, com o % de cada parceiro. Orçamento existe por CONTA, não
 // por fornecedor → bloco realizado-only (limitação no rodapé). Só dados da
 // própria empresa; "Turmas Heppi" (outra conta) não entra.
@@ -2040,8 +2040,8 @@ function PartnerPerformanceBlock({ data }: { data: PartnerPerformance }) {
           <thead>
             <tr>
               <th style={{ ...th, textAlign: "left" }}>Parceiro</th>
-              <th style={{ ...th, textAlign: "right" }}>Realizado mês</th>
-              <th style={{ ...th, textAlign: "right" }}>% mês</th>
+              <th style={{ ...th, textAlign: "right" }}>Realizado período</th>
+              <th style={{ ...th, textAlign: "right" }}>% período</th>
               <th style={{ ...th, textAlign: "right" }}>Realizado acum.</th>
               <th style={{ ...th, textAlign: "right" }}>% acum.</th>
             </tr>
@@ -2070,7 +2070,7 @@ function PartnerPerformanceBlock({ data }: { data: PartnerPerformance }) {
           </tbody>
         </table>
         <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
-          Valores em milhares de R$ (mil). Acumulado = janeiro do ano de análise até o mês filtrado.
+          Valores em milhares de R$ (mil). Acumulado = janeiro do ano de análise até o fim do período.
         </div>
       </div>
     </section>
@@ -2866,7 +2866,7 @@ function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
   // recebe destaque.
   const cols: Col[] = [
     { key: "pctMetaAnualVvrAcumulada", label: "% meta anual (acum.)", kind: "pctMeta", destacaMelhorPior: true },
-    { key: "pctMetaVvrMes", label: "% meta do mês", kind: "pctMeta", destacaMelhorPior: true },
+    { key: "pctMetaVvrMes", label: "% meta do período", kind: "pctMeta", destacaMelhorPior: true },
     { key: "pctFeeDisponivel", label: "% FEE disp.", kind: "pctMeta", destacaMelhorPior: true },
     { key: "sobrevivenciaCaixaMeses", label: "Sobrev. caixa", kind: "months", destacaMelhorPior: true },
     { key: "margemMediaEventos", label: "Margem média", kind: "pct", destacaMelhorPior: true },
@@ -3262,7 +3262,7 @@ export function OnePageReportPreview({
 
         {/* Quadro de eventos — exclusivo da Feat Produções (gated por bloco +
             presença de dados). Eventos são a principal fonte de receita da Feat,
-            por isso aparece em destaque, logo após os indicadores do mês. */}
+            por isso aparece em destaque, logo após os indicadores do período. */}
         {show("featEventos") && data.featEventos ? (
           <QuadroEventosFeat data={data.featEventos} accent={accentColor} />
         ) : null}

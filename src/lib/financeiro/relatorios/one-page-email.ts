@@ -284,7 +284,7 @@ export function renderOnePageEmail({
     ${sectionTitle("Resumo Executivo")}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td width="38%" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:16px;vertical-align:top;">
-        <div style="font-family:${FF};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;color:${C.sub};">Resultado operacional do mês</div>
+        <div style="font-family:${FF};font-size:10px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;color:${C.sub};">Resultado operacional do período</div>
         <div style="font-family:${FM};font-size:30px;font-weight:600;color:${resultadoColor};margin:10px 0 6px;">${esc(
           resultadoKpi.formattedValue ?? "—",
         )}</div>
@@ -336,7 +336,7 @@ export function renderOnePageEmail({
     .join("");
   const thStyle = `font-family:${FF};font-size:9px;letter-spacing:0.1em;text-transform:uppercase;font-weight:700;color:${C.sub};padding:0 10px 8px;border-bottom:1px solid ${C.rule};`;
   const desempenho = `
-    ${sectionTitle("Desempenho do mês vs orçamento")}
+    ${sectionTitle("Desempenho do período vs orçamento")}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px 16px;border-collapse:separate;">
       <tr>
         <td style="${thStyle}text-align:left;">Indicador</td>
@@ -398,7 +398,7 @@ export function renderOnePageEmail({
   const acumPanel = `
     <td width="50%" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px;vertical-align:top;">
       <div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">Acumulado do Ano</div>
-      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o mês de análise — Previsto × Realizado</div>
+      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o fim do período — Previsto × Realizado</div>
       ${acumNota}
       ${acumBlocks || `<div style="font-family:${FF};font-size:12px;color:${C.tertiary};">Sem dados acumulados disponíveis.</div>`}
     </td>`;
@@ -425,7 +425,7 @@ export function renderOnePageEmail({
   const vvrFull = `
     <div style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px;">
       <div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">VVR — Realizado × Meta</div>
-      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o mês de análise.</div>
+      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Janeiro do ano selecionado até o fim do período.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td style="vertical-align:top;padding-right:14px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">

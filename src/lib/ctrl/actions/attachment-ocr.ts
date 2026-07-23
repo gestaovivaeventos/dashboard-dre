@@ -20,6 +20,9 @@ const OCR_MODEL = "gpt-4o";
 // leitura é best-effort — o que não for lido fica para preenchimento manual.
 export interface AttachmentReadResult {
   invoice_number?: string | null;
+  // Valor líquido da nota (após retenções), já convertido para número. Usado só
+  // para alertar divergência com o Valor da requisição — nunca preenche o campo.
+  net_amount?: number | null;
   barcode?: string | null;
   favorecido?: string | null;
   cnpj_cpf?: string | null;
@@ -33,6 +36,18 @@ const NotaSchema = z.object({
       "O número da nota fiscal. Em NFS-e (nota de serviço municipal/prefeitura) é o campo rotulado " +
       "'Número da NFS-e'. Em NF-e (produto) é 'Nº'/'NF-e nº' ou os 9 dígitos nNF da chave de acesso. " +
       "NÃO use 'Número da DPS', 'Série', 'Competência', nem a chave de acesso completa. Null se não encontrar.",
+    ),
+  valor_liquido: z
+    .string()
+    .nullable()
+    .describe(
+      "O VALOR LÍQUIDO da nota fiscal — o valor que efetivamente deve ser pago, já descontadas as " +
+      "retenções (ISS retido, INSS, IR/IRRF, PIS, COFINS, CSLL). Rótulos possíveis, nesta ordem de " +
+      "preferência: 'Valor Líquido', 'Valor Líquido da NFS-e', 'Valor líquido a pagar', 'Valor Líquido " +
+      "do documento', 'Valor Líquido'. NÃO confunda com 'Valor Serviços', 'Valor Bruto', 'Valor Total', " +
+      "'Base de Cálculo' nem com o valor de qualquer imposto isolado — esses são o valor bruto ou parte " +
+      "dele, não o líquido. Copie EXATAMENTE o valor impresso, mantendo a formatação brasileira (ex.: " +
+      "'295,47' ou '1.234,56'). Null se não houver um campo de valor líquido.",
     ),
 });
 
@@ -146,26 +161,38 @@ export async function extractAttachmentData(
               {
                 type: "text",
                 text:
-                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia o NÚMERO da nota fiscal. " +
-                  "REGRA 1 (prioritária): procure um campo rotulado explicitamente com o número da nota e " +
-                  "copie EXATAMENTE o valor impresso ao lado do rótulo. Os rótulos possíveis são, nesta ordem: " +
-                  "'Número da NFS-e', 'Número da NF-e', 'Nº', 'NF-e nº', 'Número'. " +
+                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia dois dados: o NÚMERO da " +
+                  "nota fiscal e o VALOR LÍQUIDO da nota.\n\n" +
+                  "NÚMERO DA NOTA — REGRA 1 (prioritária): procure um campo rotulado explicitamente com o " +
+                  "número da nota e copie EXATAMENTE o valor impresso ao lado do rótulo. Os rótulos possíveis " +
+                  "são, nesta ordem: 'Número da NFS-e', 'Número da NF-e', 'Nº', 'NF-e nº', 'Número'. " +
                   "Em NFS-e (nota de serviço de prefeitura — cabeçalho 'DANFSe' / 'Documento Auxiliar da NFS-e') " +
                   "o valor correto é sempre o de 'Número da NFS-e' (costuma ter poucos dígitos, ex.: 388). " +
                   "NUNCA confunda com 'Número da DPS', 'Série da DPS', 'Competência', datas, valores em R$ " +
                   "nem com a chave de acesso — nenhum desses é o número da nota. " +
-                  "REGRA 2 (só se NÃO existir nenhum campo rotulado da Regra 1): se houver uma chave de acesso " +
-                  "de NF-e com EXATAMENTE 44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
+                  "NÚMERO DA NOTA — REGRA 2 (só se NÃO existir nenhum campo rotulado da Regra 1): se houver uma " +
+                  "chave de acesso de NF-e com EXATAMENTE 44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
                   "A chave de acesso de NFS-e tem cerca de 50 dígitos e NÃO deve ser fatiada — ignore-a. " +
                   "NUNCA retorne um número composto apenas de zeros; se você chegou a algo assim, você leu o " +
-                  "campo errado — volte e leia o valor ao lado do rótulo 'Número da NFS-e'.",
+                  "campo errado — volte e leia o valor ao lado do rótulo 'Número da NFS-e'.\n\n" +
+                  "VALOR LÍQUIDO: procure o campo rotulado 'Valor Líquido' (ou 'Valor líquido a pagar', 'Valor " +
+                  "Líquido da NFS-e', 'Valor Líquido do documento') — é o valor a pagar já com as retenções " +
+                  "descontadas (ISS retido, INSS, IR, PIS, COFINS, CSLL). NÃO confunda com 'Valor Serviços', " +
+                  "'Valor Bruto', 'Valor Total' nem 'Base de Cálculo', que são o valor bruto. Copie o valor " +
+                  "impresso mantendo a formatação brasileira (ex.: '295,47'). Se não houver campo de valor " +
+                  "líquido, retorne null nesse campo — não invente nem calcule.",
               },
               docPart,
             ],
           },
         ],
       });
-      return { data: { invoice_number: cleanInvoice(object.invoice_number) } };
+      return {
+        data: {
+          invoice_number: cleanInvoice(object.invoice_number),
+          net_amount: parseBRLCurrency(object.valor_liquido),
+        },
+      };
     }
 
     const { object } = await generateObject({
@@ -206,6 +233,27 @@ export async function extractAttachmentData(
 function emptyToNull(s: string | null | undefined): string | null {
   const t = (s ?? "").trim();
   return t ? t : null;
+}
+
+// Converte um valor monetário brasileiro impresso na nota ("R$ 1.234,56",
+// "295,47") para número (1234.56 / 295.47). Regras: ignora "R$" e espaços,
+// vírgula = separador decimal, ponto = separador de milhar. Best-effort — se não
+// der para interpretar com segurança, retorna null (o cliente só não alerta).
+function parseBRLCurrency(s: string | null | undefined): number | null {
+  const raw = (s ?? "").trim();
+  if (!raw || raw.toLowerCase() === "null") return null;
+  // Mantém só dígitos, ponto e vírgula.
+  let t = raw.replace(/[^\d.,]/g, "");
+  if (!t) return null;
+  if (t.includes(",")) {
+    // Vírgula é o decimal: pontos são milhar.
+    t = t.replace(/\./g, "").replace(",", ".");
+  } else if (!/^\d+\.\d{2}$/.test(t)) {
+    // Sem vírgula e não é "295.47" (ponto decimal): pontos são milhar.
+    t = t.replace(/\./g, "");
+  }
+  const n = parseFloat(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function cleanInvoice(s: string | null | undefined): string | null {

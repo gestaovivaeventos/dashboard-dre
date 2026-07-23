@@ -829,7 +829,7 @@ export function mapOnePageApiResponseToPreviewData(
     // Título da seção de KPIs. Templates com KPIs custom (ex.: SGX) trazem
     // cards de resultado/indicador próprios — não os de "Saúde financeira &
     // caixa" da Viva; um título neutro evita rótulo enganoso.
-    kpiSectionTitle: customKpis ? "Indicadores do mês" : undefined,
+    kpiSectionTitle: customKpis ? "Indicadores do período" : undefined,
     // Quadro de eventos da Feat Produções — passa direto (já vem no shape do
     // componente); undefined para todas as demais empresas.
     featEventos: response.featEventos,

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Download, Loader2, Plus } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,7 @@ interface ClientRow {
 
 interface SettingsFeeVvrTableProps {
   companyId: string;
+  companyName?: string;
 }
 
 function rowKey(year: number, month: number): string {
@@ -110,7 +112,10 @@ function mergeServerWithDefaults(server: ServerRow[]): ClientRow[] {
   );
 }
 
-export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
+export function SettingsFeeVvrTable({
+  companyId,
+  companyName,
+}: SettingsFeeVvrTableProps) {
   const { showToast } = useToast();
   const [rows, setRows] = useState<ClientRow[]>(() => buildDefaultRows());
   const [loading, setLoading] = useState(true);
@@ -398,8 +403,77 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
     return {
       vvrMeta: formatNumberPtBr(total.vvrMeta),
       vvr: formatNumberPtBr(total.vvr),
+      vvrMetaValue: total.vvrMeta,
+      vvrValue: total.vvr,
     };
   }, [rows]);
+
+  // Exporta o registro FEE / VVR para .xlsx — mesmo padrao do modal de
+  // Projetos da Feat Producoes. Duas abas: um resumo dos campos de balanco da
+  // empresa e a tabela mensal de VVR META x VVR (com total).
+  const exportExcel = () => {
+    if (loading) return;
+
+    const currencyFmt = "R$ #,##0.00";
+    const applyNumberFormat = (
+      worksheet: XLSX.WorkSheet,
+      colIndexes: number[],
+      format: string,
+    ) => {
+      const rangeRef = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
+      for (let rowIndex = 1; rowIndex <= rangeRef.e.r; rowIndex += 1) {
+        for (const colIndex of colIndexes) {
+          const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+          const cell = worksheet[cellAddress];
+          if (!cell || typeof cell.v !== "number") continue;
+          cell.z = format;
+        }
+      }
+    };
+
+    const workbook = XLSX.utils.book_new();
+
+    // Aba 1 — campos de balanco (um valor por empresa).
+    const balanceRows = [
+      { Indicador: "FEE Disponível", Valor: parseNumberPtBr(feeDisponivelText) ?? "" },
+      { Indicador: "FEE A Receber", Valor: parseNumberPtBr(feeAReceberText) ?? "" },
+      {
+        Indicador: "Margem média dos eventos (%)",
+        Valor: parseNumberPtBr(margemMediaText) ?? "",
+      },
+      {
+        Indicador: "Inadimplência Atual",
+        Valor: parseNumberPtBr(inadimplenciaText) ?? "",
+      },
+    ];
+    const balanceSheet = XLSX.utils.json_to_sheet(balanceRows);
+    applyNumberFormat(balanceSheet, [1], "#,##0.00");
+    XLSX.utils.book_append_sheet(workbook, balanceSheet, "Balanço");
+
+    // Aba 2 — tabela mensal VVR META x VVR, com linha de total.
+    const monthlyRows: Array<Record<string, string | number>> = rows.map((row) => ({
+      "Mês/Ano": `${MONTH_NAMES_PT[row.month - 1]}/${String(row.year).slice(-2)}`,
+      "VVR META": parseNumberPtBr(row.vvrMetaText) ?? "",
+      VVR: parseNumberPtBr(row.vvrText) ?? "",
+    }));
+    monthlyRows.push({
+      "Mês/Ano": "Total",
+      "VVR META": totalsLabel.vvrMetaValue,
+      VVR: totalsLabel.vvrValue,
+    });
+    const monthlySheet = XLSX.utils.json_to_sheet(monthlyRows);
+    applyNumberFormat(monthlySheet, [1, 2], currencyFmt);
+    XLSX.utils.book_append_sheet(workbook, monthlySheet, "VVR Mensal");
+
+    const safeName = (companyName ?? "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const fileName = safeName ? `FEE_VVR_${safeName}.xlsx` : "FEE_VVR.xlsx";
+    XLSX.writeFile(workbook, fileName);
+    showToast({ title: "Exportação concluída", variant: "success" });
+  };
 
   return (
     <div className="space-y-4">
@@ -547,16 +621,28 @@ export function SettingsFeeVvrTable({ companyId }: SettingsFeeVvrTableProps) {
         <p className="text-[11px] text-muted-foreground">
           Valores apenas para registro. Nao afetam DRE, KPIs nem Fluxo de Caixa.
         </p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={handleAddNextRow}
-          disabled={loading}
-        >
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          Adicionar mes
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={exportExcel}
+            disabled={loading}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Exportar Excel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleAddNextRow}
+            disabled={loading}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Adicionar mes
+          </Button>
+        </div>
       </div>
     </div>
   );

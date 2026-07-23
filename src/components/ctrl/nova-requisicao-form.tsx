@@ -232,12 +232,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   const [invoiceAttachmentError, setInvoiceAttachmentError] = useState<string | null>(null);
   const [invoiceReading, setInvoiceReading] = useState(false);
   const [invoiceReadMsg, setInvoiceReadMsg] = useState<string | null>(null);
+  // Valor líquido lido da nota fiscal. Usado só para alertar divergência com o
+  // campo Valor (R$) — nunca preenche/altera o valor da requisição.
+  const [invoiceNetAmount, setInvoiceNetAmount] = useState<number | null>(null);
   const invoiceInputRef = useRef<HTMLInputElement | null>(null);
 
   async function pickInvoiceAttachment(file: File | null) {
     setInvoiceAttachmentError(null);
     setInvoiceReadMsg(null);
     setInvoiceAttachmentPath(null);
+    setInvoiceNetAmount(null);
     if (!file) {
       setInvoiceAttachment(null);
       return;
@@ -259,9 +263,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       }
       if (res.data.invoice_number) {
         setInvoiceNumber(res.data.invoice_number);
-        setInvoiceReadMsg("Número da nota fiscal lido do documento.");
+      }
+      // Valor líquido é usado só para o alerta de divergência (Caso 3: se não
+      // for identificado, mantém o fluxo normal sem erro crítico).
+      const net = typeof res.data.net_amount === "number" ? res.data.net_amount : null;
+      setInvoiceNetAmount(net);
+      const netMsg = net !== null ? ` Valor líquido identificado: R$ ${fmt.format(net)}.` : "";
+      if (res.data.invoice_number) {
+        setInvoiceReadMsg(`Número da nota fiscal lido do documento.${netMsg}`);
       } else {
-        setInvoiceReadMsg("Não encontrei o número da nota — preencha manualmente.");
+        setInvoiceReadMsg(`Não encontrei o número da nota — preencha manualmente.${netMsg}`);
       }
     } catch (err) {
       setInvoiceReading(false);
@@ -277,6 +288,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     setInvoiceAttachmentError(null);
     setInvoiceReadMsg(null);
     setInvoiceReading(false);
+    setInvoiceNetAmount(null);
     if (invoiceInputRef.current) invoiceInputRef.current.value = "";
   }
 
@@ -333,6 +345,17 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // tem o seu próprio anexo, obrigatório quando o fornecedor emite NF "agora".
   const attachmentRequired = paymentMethod === "boleto";
   const invoiceAttachmentRequired = supplierIssuesInvoice === "sim";
+
+  // Alerta (não bloqueia) quando o Valor (R$) da requisição diverge do valor
+  // líquido lido da nota. Só quando: fornecedor emite NF "sim", nota anexada,
+  // valor líquido identificado e Valor (R$) preenchido. Tolerância de R$ 0,01
+  // evita falso positivo por arredondamento.
+  const invoiceNetMismatch =
+    supplierIssuesInvoice === "sim" &&
+    !!invoiceAttachment &&
+    invoiceNetAmount !== null &&
+    parsedAmount > 0 &&
+    Math.abs(invoiceNetAmount - parsedAmount) > 0.01;
 
   // Budget check is only required when an expense type is selected
   const needsVerification = !!expenseTypeId;
@@ -1255,6 +1278,21 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
               className={INPUT_CLS}
             />
           </div>
+
+          {/* Alerta de divergência de valor — apenas informativo, não bloqueia. */}
+          {invoiceNetMismatch && invoiceNetAmount !== null && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/20">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1 text-amber-800 dark:text-amber-200">
+                <p className="font-medium">
+                  O valor informado na requisição está diferente do valor líquido identificado na nota fiscal.
+                </p>
+                <p>Valor informado na requisição: R$ {fmt.format(parsedAmount)}</p>
+                <p>Valor líquido identificado na nota fiscal: R$ {fmt.format(invoiceNetAmount)}</p>
+                <p>Confira se o valor correto para pagamento foi preenchido.</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

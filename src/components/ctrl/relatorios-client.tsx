@@ -10,16 +10,16 @@ const MONTHS = [
 ];
 
 const STATUS_LABELS: Record<string, string> = {
-  pendente: "Pendente",
-  pendente_diretor: "Aguard. Diretor",
+  pendente: "Aguardando Gerente",
+  pendente_diretor: "Aguardando Diretor",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
   estornado: "Estornado",
   agendado: "Enviado Pgto",
-  travado: "Travado",
   inativado_csc: "Inativado CSC",
-  aguardando_aprovacao_fornecedor: "Aguard. Fornec.",
+  aguardando_aprovacao_fornecedor: "Homologação fornec. pendente",
+  info_pagamento_pendente: "Info pendente",
 };
 
 const STATUS_CLS: Record<string, string> = {
@@ -30,8 +30,9 @@ const STATUS_CLS: Record<string, string> = {
   aguardando_complementacao: "bg-blue-100 text-blue-800",
   estornado: "bg-gray-100 text-gray-700",
   agendado: "bg-purple-100 text-purple-800",
-  travado: "bg-orange-100 text-orange-800",
   inativado_csc: "bg-gray-100 text-gray-500",
+  aguardando_aprovacao_fornecedor: "bg-indigo-100 text-indigo-800",
+  info_pagamento_pendente: "bg-amber-100 text-amber-800",
 };
 
 const PAYMENT_LABELS: Record<string, string> = {

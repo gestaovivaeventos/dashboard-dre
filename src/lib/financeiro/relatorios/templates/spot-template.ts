@@ -124,7 +124,7 @@ export const spotTemplate: ReportTemplate = {
       { label: "Margem Líquida", kind: "margem", ratio: { numerator: ["15"], denominator: ["4"] } },
     ],
     kpiColumns: 5,
-    // Tabela "Desempenho do mês vs orçamento" — 3 linhas, só Spot.
+    // Tabela "Desempenho do período vs orçamento" — 3 linhas, só Spot.
     previstoRealizado: [
       { label: "Receita Total", code: "1", unidade: "currency" },
       { label: "Despesas Operacionais", code: "7", unidade: "currency" },

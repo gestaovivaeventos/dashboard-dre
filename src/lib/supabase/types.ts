@@ -113,7 +113,6 @@ export type CtrlRequestStatus =
   | "aguardando_complementacao"
   | "estornado"
   | "agendado"
-  | "travado"
   | "inativado_csc"
   | "aguardando_aprovacao_fornecedor"
   | "info_pagamento_pendente";

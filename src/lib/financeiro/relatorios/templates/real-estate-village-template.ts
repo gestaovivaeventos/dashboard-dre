@@ -127,17 +127,17 @@ export const realEstateVillageTemplate: ReportTemplate = {
       { label: "Margem Líquida", kind: "margem", ratio: { numerator: ["11"], denominator: ["4"] } },
     ],
     kpiColumns: 5,
-    // Tabela "Desempenho do mês vs orçamento" em 2 grupos:
-    //   "Resultado do mês"  — Receita, Reembolsos, Custos, Despesas Op, Resultado Final.
+    // Tabela "Desempenho do período vs orçamento" em 2 grupos:
+    //   "Resultado do período" — Receita, Reembolsos, Custos, Despesas Op, Resultado Final.
     //   "Leitura gerencial" — Gap de Reembolso e Resultado Ajustado (com nota).
     // Resultado Operacional (8) e Margem Líquida saíram da tabela (Margem segue
     // como card). Resultado Final destacado; Gap negativo em vermelho (preview).
     previstoRealizado: [
-      { label: "Receita de Serviços", code: "1.1", unidade: "currency", group: "Resultado do mês" },
-      { label: "Reembolsos Recebidos", code: "1.2", unidade: "currency", group: "Resultado do mês" },
-      { label: "Custos Reembolsáveis", code: "5.1", unidade: "currency", group: "Resultado do mês" },
-      { label: "Despesas Operacionais", code: "7", unidade: "currency", group: "Resultado do mês" },
-      { label: "Resultado Final", code: "11", unidade: "currency", group: "Resultado do mês" },
+      { label: "Receita de Serviços", code: "1.1", unidade: "currency", group: "Resultado do período" },
+      { label: "Reembolsos Recebidos", code: "1.2", unidade: "currency", group: "Resultado do período" },
+      { label: "Custos Reembolsáveis", code: "5.1", unidade: "currency", group: "Resultado do período" },
+      { label: "Despesas Operacionais", code: "7", unidade: "currency", group: "Resultado do período" },
+      { label: "Resultado Final", code: "11", unidade: "currency", group: "Resultado do período" },
       { label: "Gap de Reembolso", codes: ["1.2"], minus: ["5.1"], unidade: "currency", group: "Leitura gerencial" },
       {
         label: "Resultado Ajustado",

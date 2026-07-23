@@ -470,32 +470,30 @@ function ComprovantesModal({
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  pendente: "Pendente",
-  pendente_diretor: "Aguard. Diretor",
+  pendente: "Aguardando Gerente",
+  pendente_diretor: "Aguardando Diretor",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
   estornado: "Estornado",
-  agendado: "Agendado",
-  travado: "Travado",
-  inativado_csc: "Inativado",
-  aguardando_aprovacao_fornecedor: "Aguard. Fornec.",
+  agendado: "Enviado Pgto",
+  inativado_csc: "Inativado CSC",
+  aguardando_aprovacao_fornecedor: "Homologação fornec. pendente",
   info_pagamento_pendente: "Info pendente",
 };
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
-    pendente: { label: "Pendente", className: "bg-yellow-100 text-yellow-800" },
-    pendente_diretor: { label: "Aguard. Diretor", className: "bg-orange-100 text-orange-800" },
+    pendente: { label: "Aguardando Gerente", className: "bg-yellow-100 text-yellow-800" },
+    pendente_diretor: { label: "Aguardando Diretor", className: "bg-orange-100 text-orange-800" },
     aprovado: { label: "Aprovado", className: "bg-green-100 text-green-800" },
     rejeitado: { label: "Rejeitado", className: "bg-red-100 text-red-800" },
     aguardando_complementacao: { label: "Complementação", className: "bg-blue-100 text-blue-800" },
     estornado: { label: "Estornado", className: "bg-gray-100 text-gray-800" },
-    agendado: { label: "Agendado", className: "bg-purple-100 text-purple-800" },
-    travado: { label: "Travado", className: "bg-orange-100 text-orange-800" },
-    inativado_csc: { label: "Inativado", className: "bg-gray-100 text-gray-500" },
+    agendado: { label: "Enviado Pgto", className: "bg-purple-100 text-purple-800" },
+    inativado_csc: { label: "Inativado CSC", className: "bg-gray-100 text-gray-500" },
     aguardando_aprovacao_fornecedor: {
-      label: "Aguard. Fornec.",
+      label: "Homologação fornec. pendente",
       className: "bg-indigo-100 text-indigo-800",
     },
     info_pagamento_pendente: {

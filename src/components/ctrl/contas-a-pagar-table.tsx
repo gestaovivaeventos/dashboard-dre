@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Eye, Loader2, MessageCircle, RefreshCw, Search, X } from "lucide-react";
+import { Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
 
 import {
   sendToPayment,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/ctrl/actions/requests";
 import { resyncContaPagar } from "@/lib/ctrl/actions/contapagar-launch";
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
+import { EditExpenseRoutingModal } from "@/components/ctrl/edit-expense-routing-modal";
 import {
   RequestDetailModal,
   resolveSupplier,
@@ -36,6 +37,10 @@ interface Props {
   requests: ContasRequest[];
   ctrlRoles: string[];
   companies: { id: string; name: string }[];
+  // Cadastros para o modal de correção de setor/tipo (só carregados quando o
+  // usuário pode editar). Vazios para quem não pode.
+  sectors: { id: string; name: string }[];
+  expenseTypes: { id: string; name: string }[];
 }
 
 function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
@@ -62,7 +67,7 @@ function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
   return <span className="text-xs text-muted-foreground">Dados não informados</span>;
 }
 
-export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
+export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, expenseTypes }: Props) {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<Tab>("aprovado");
@@ -82,6 +87,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
   // Detail modal — opened by "Detalhes" button in any row.
   const [detail, setDetail] = useState<ContasRequest | null>(null);
   const [attachmentLoading, setAttachmentLoading] = useState(false);
+
+  // Modal de correção de setor/tipo (perfil Contas a Pagar / admin).
+  const [editRouting, setEditRouting] = useState<ContasRequest | null>(null);
+  const canEditRouting = ctrlRoles.some((r) => ["contas_a_pagar", "admin"].includes(r));
 
   // Modal de thread de info — aberto pelo botao "Pedir info" / "Continuar conversa".
   const [infoModal, setInfoModal] = useState<{
@@ -371,6 +380,17 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
                           <Eye className="h-3.5 w-3.5" />
                           Detalhes
                         </button>
+                        {canEditRouting && req.status === "aprovado" && !req.omie_contapagar_codigo && (
+                          <button
+                            type="button"
+                            onClick={() => setEditRouting(req)}
+                            className="inline-flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300"
+                            title="Corrigir setor/tipo de despesa (retorna à aprovação)"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Editar setor/tipo
+                          </button>
+                        )}
                         {canAskInfo && (req.status === "aprovado" || req.status === "info_pagamento_pendente") && (
                           <button
                             type="button"
@@ -604,6 +624,22 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies }: Props) {
           onClose={() => setDetail(null)}
           onOpenAttachment={openAttachment}
           attachmentLoading={attachmentLoading}
+          showApprovalHistory
+        />
+      )}
+
+      {/* Editar setor/tipo (retorna à aprovação) */}
+      {editRouting && (
+        <EditExpenseRoutingModal
+          req={editRouting}
+          sectors={sectors}
+          expenseTypes={expenseTypes}
+          onClose={() => setEditRouting(null)}
+          onSaved={() => {
+            setEditRouting(null);
+            notify("Requisição atualizada e retornada à aprovação para nova validação.");
+            router.refresh();
+          }}
         />
       )}
 

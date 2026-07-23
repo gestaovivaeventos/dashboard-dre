@@ -68,8 +68,9 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
   const { data: companies, error: companiesError } = await supabase
     .from("companies")
-    .select("id,name,active")
+    .select("id,name,active,sync_enabled")
     .eq("active", true)
+    .eq("sync_enabled", true)
     .order("name");
 
   if (companiesError) {
