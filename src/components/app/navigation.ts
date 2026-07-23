@@ -228,7 +228,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
       { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ALL_DRE_ROLES },
       { key: "fin-docs", title: "Documentos anexos", icon: Files, scope: "global", href: "/financeiro/documentos", dreRoles: ALL_DRE_ROLES },
-      { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ["admin"] },
+      { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ALL_DRE_ROLES },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
       { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
       { key: "fin-config", title: "Configuracoes", icon: Cog, scope: "segment", suffix: "/configuracoes", dreRoles: ["admin"] },
@@ -304,4 +304,5 @@ export const FRANQUEADO_NAV_KEYS: ReadonlySet<string> = new Set([
   // "fin-kpis", // [KPIs OCULTO] reexibir junto com a linha em NAV_GROUPS
   "fin-bi",
   "fin-docs",
+  "fin-comparativos",
 ]);
