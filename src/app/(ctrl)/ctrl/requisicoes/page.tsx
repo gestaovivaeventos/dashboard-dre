@@ -82,6 +82,7 @@ export default async function RequisicoesPage() {
       attachment_path: (r.attachment_path as string | null) ?? null,
       sector_id: (r.sector_id as string | null) ?? null,
       expense_type_id: (r.expense_type_id as string | null) ?? null,
+      event_id: (r.event_id as string | null) ?? null,
       paying_company: (r.paying_company as string | null) ?? null,
       omie_contapagar_codigo: (r.omie_contapagar_codigo as number | null) ?? null,
       sent_to_payment_at: (r.sent_to_payment_at as string | null) ?? null,
@@ -92,6 +93,7 @@ export default async function RequisicoesPage() {
       ctrl_suppliers: (r.ctrl_suppliers as RequestDetail["ctrl_suppliers"]) ?? null,
       ctrl_expense_types: (r.ctrl_expense_types as RequestDetail["ctrl_expense_types"]) ?? null,
       ctrl_sectors: (r.ctrl_sectors as RequestDetail["ctrl_sectors"]) ?? null,
+      ctrl_events: (r.ctrl_events as RequestDetail["ctrl_events"]) ?? null,
       creator: (r.creator as RequestDetail["creator"]) ?? null,
       approver: (r.approver as RequestDetail["approver"]) ?? null,
     })) ?? [];

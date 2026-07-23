@@ -65,9 +65,11 @@ export type RequestDetail = {
   // IDs crus dos vínculos — usados pelo form de edição administrativa.
   sector_id?: string | null;
   expense_type_id?: string | null;
+  event_id?: string | null;
   ctrl_suppliers: Supplier | Supplier[] | null;
   ctrl_expense_types: NamedRef;
   ctrl_sectors?: NamedRef;
+  ctrl_events?: NamedRef;
   creator?: UserRef;
   approver?: UserRef;
 };
@@ -143,6 +145,7 @@ export function RequestDetailModal({
   const sup = resolveSupplier(req.ctrl_suppliers);
   const sector = resolveNamed(req.ctrl_sectors ?? null);
   const expenseType = resolveNamed(req.ctrl_expense_types);
+  const event = resolveNamed(req.ctrl_events ?? null);
   const creator = resolveUser(req.creator ?? null);
   const approver = resolveUser(req.approver ?? null);
 
@@ -222,6 +225,7 @@ export function RequestDetailModal({
             />
             <DetailField label="Setor" value={sector ?? "—"} />
             <DetailField label="Tipo de Despesa" value={expenseType ?? "—"} />
+            <DetailField label="Evento" value={event ?? "Nenhum evento"} />
             <DetailField
               label="Método de pagamento"
               value={req.payment_method ? PAYMENT_METHOD_LABEL[req.payment_method] ?? req.payment_method : "—"}

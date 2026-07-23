@@ -83,6 +83,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   // ── Supplier selection ───────────────────────────────────────────────────────
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
 
+  // ── Evento (obrigatório) ─────────────────────────────────────────────────────
+  // "" = ainda não escolhido (placeholder); "none" = escolha explícita "Nenhum
+  // evento"; caso contrário, o id do evento. O solicitante precisa escolher
+  // conscientemente — não vem pré-preenchido com "Nenhum evento".
+  const [eventId, setEventId] = useState("");
+
   // ── Payment fields — auto-filled from supplier, still editable ──────────────
   const [favorecido, setFavorecido] = useState("");
   const [bankCpfCnpj, setBankCpfCnpj] = useState("");
@@ -460,6 +466,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       return;
     }
 
+    // Evento é obrigatório quando há eventos cadastrados: exige uma escolha
+    // consciente ("Nenhum evento" ou um evento). O <select> é controlado, então
+    // o `required` do HTML não cobre o placeholder — validamos aqui também.
+    if (events.length > 0 && !eventId) {
+      setError("Selecione o evento (ou \"Nenhum evento\").");
+      return;
+    }
+
     if (attachmentRequired && !attachment) {
       setError("Anexe o boleto (PDF, imagem ou documento) antes de enviar.");
       return;
@@ -529,7 +543,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       payment_method: paymentMethod as "boleto" | "pix" | "transferencia" | "cartao_credito" | "dinheiro" | "pix_copia_cola",
       justification: (form.get("justification") as string) || undefined,
       observations: (form.get("observations") as string) || undefined,
-      event_id: (form.get("event_id") as string) || undefined,
+      event_id: eventId && eventId !== "none" ? eventId : undefined,
       supplier_issues_invoice: supplierIssuesInvoice || undefined,
       invoice_number:
         supplierIssuesInvoice === "sim_apos_pagamento"
@@ -780,12 +794,23 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
         )}
       </div>
 
-      {/* Evento */}
+      {/* Evento — obrigatório: o solicitante escolhe um evento ou "Nenhum
+          evento" explicitamente (não vem pré-preenchido). */}
       {events.length > 0 && (
         <div className="space-y-1.5">
-          <label htmlFor="event_id" className={LABEL_CLS}>Evento</label>
-          <select id="event_id" name="event_id" className={INPUT_CLS}>
-            <option value="">Nenhum evento</option>
+          <label htmlFor="event_id" className={LABEL_CLS}>
+            Evento <span className="text-destructive">*</span>
+          </label>
+          <select
+            id="event_id"
+            name="event_id"
+            required
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
+            className={INPUT_CLS}
+          >
+            <option value="" disabled>Selecione o evento</option>
+            <option value="none">Nenhum evento</option>
             {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
           </select>
         </div>

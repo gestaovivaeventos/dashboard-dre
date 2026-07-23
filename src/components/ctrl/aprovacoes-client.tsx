@@ -33,6 +33,7 @@ type Req = {
   created_by: string;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
+  ctrl_events?: { name: string } | { name: string }[] | null;
   ctrl_suppliers?: { name: string } | null;
   creator?: { name: string | null; email: string } | null;
   approver?: { name: string | null } | null;
@@ -435,6 +436,7 @@ export function AprovacoesClient({ requests, ctrlRoles, awaitingApproverIds = []
                   <Row label="Status" value={STATUS_BADGE[modal.req.status]?.label ?? modal.req.status} />
                   {modal.req.ctrl_sectors && <Row label="Setor" value={resolve(modal.req.ctrl_sectors)?.name ?? "—"} />}
                   {modal.req.ctrl_expense_types && <Row label="Tipo" value={resolve(modal.req.ctrl_expense_types)?.name ?? "—"} />}
+                  <Row label="Evento" value={resolve(modal.req.ctrl_events)?.name ?? "Nenhum evento"} />
                   {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
                   {modal.req.payment_method && <Row label="Pagamento" value={PAYMENT_LABELS[modal.req.payment_method] ?? modal.req.payment_method} />}
                   {modal.req.due_date && <Row label="Vencimento" value={new Intl.DateTimeFormat("pt-BR").format(new Date(modal.req.due_date + "T00:00:00"))} />}

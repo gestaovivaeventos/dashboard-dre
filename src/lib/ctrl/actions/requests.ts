@@ -853,7 +853,7 @@ export async function getRequests(filters?: {
   let query = supabase
     .from("ctrl_requests")
     .select(
-      `*, ctrl_sectors(name), ctrl_expense_types(name),
+      `*, ctrl_sectors(name), ctrl_expense_types(name), ctrl_events(name),
        ctrl_suppliers(name, cnpj_cpf, chave_pix, banco, agencia, conta_corrente, titular_banco),
        creator:users!ctrl_requests_created_by_fkey(name, email),
        approver:users!ctrl_requests_approved_by_fkey(name, email)`

@@ -44,6 +44,7 @@ async function getContasAPagar() {
       status,
       sector_id,
       expense_type_id,
+      event_id,
       paying_company,
       paying_company_id,
       omie_launch_status,
@@ -83,6 +84,7 @@ async function getContasAPagar() {
       ),
       ctrl_expense_types(name),
       ctrl_sectors(name),
+      ctrl_events(name),
       creator:users!ctrl_requests_created_by_fkey(name, email),
       approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
