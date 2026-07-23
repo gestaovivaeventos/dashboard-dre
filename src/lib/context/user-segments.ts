@@ -5,15 +5,19 @@ import type { Segment } from "@/lib/supabase/types";
  * Resolve os segmentos que o usuário pode ver, na MESMA ordem de prioridade do
  * layout (app):
  *   1. admin → todos os segmentos ativos
- *   2. user_segment_access (acesso explícito por segmento)
- *   3. fallback: deriva os segmentos das empresas em user_company_access
+ *   2. UNIÃO de user_segment_access (acesso explícito por segmento) com os
+ *      segmentos derivados das empresas em user_company_access.
  *
- * Sem o passo 3, um usuário com acesso só por EMPRESA (sem segment_access) fica
- * com `segments = []` nas telas DRE → `segmentId` nulo → a página carrega TODAS
- * as empresas e a agregação estoura o `statement_timeout` (8s do role
- * authenticated, agravado pelo overhead de RLS por linha). Admin nunca cai nisso
- * porque sempre tem um segmento default. Este helper alinha as páginas ao
- * comportamento do layout.
+ * A união (não fallback) é essencial: um usuário pode ter 1 acesso explícito
+ * por segmento (ex.: Dataforte) E várias empresas em OUTROS segmentos via
+ * user_company_access. Tratar as empresas como fallback "só quando não há
+ * segment_access" escondia todos os demais segmentos — o seletor da DRE ficava
+ * preso no único segmento explícito. Alinha com `resolveSegment` (segments/
+ * resolve.ts), que já libera o segmento por qualquer uma das duas fontes.
+ *
+ * Também cobre o caso de acesso só por EMPRESA (sem segment_access): sem os
+ * segmentos derivados, `segments = []` → `segmentId` nulo → a página carrega
+ * TODAS as empresas e a agregação estoura o `statement_timeout`.
  */
 export async function resolveUserSegments(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,17 +35,19 @@ export async function resolveUserSegments(
 
   if (!opts.userId) return [];
 
+  // Fonte 1: acesso explícito por segmento.
   const { data } = await supabase
     .from("user_segment_access")
     .select("segments(id,name,slug,display_order,active)")
     .eq("user_id", opts.userId);
 
-  let segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
+  const explicitSegments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
     .map((row) => row.segments)
-    .filter((s) => s && s.active)
-    .sort((a, b) => a.display_order - b.display_order);
+    .filter((s): s is Segment => Boolean(s && s.active));
 
-  if (segments.length === 0 && opts.companyIds.length > 0) {
+  // Fonte 2: segmentos derivados das empresas em user_company_access.
+  const companyDerivedSegments: Segment[] = [];
+  if (opts.companyIds.length > 0) {
     const { data: companiesData } = await supabase
       .from("companies")
       .select("segment_id")
@@ -61,11 +67,16 @@ export async function resolveUserSegments(
         .from("segments")
         .select("id,name,slug,display_order,active")
         .in("id", segmentIds)
-        .eq("active", true)
-        .order("display_order");
-      segments = (segData as Segment[]) ?? [];
+        .eq("active", true);
+      companyDerivedSegments.push(...((segData as Segment[]) ?? []));
     }
   }
 
-  return segments;
+  // UNIÃO das duas fontes, deduplicada por id e ordenada por display_order.
+  const byId = new Map<string, Segment>();
+  for (const s of [...explicitSegments, ...companyDerivedSegments]) {
+    if (s && s.active) byId.set(s.id, s);
+  }
+
+  return Array.from(byId.values()).sort((a, b) => a.display_order - b.display_order);
 }

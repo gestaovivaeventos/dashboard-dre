@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/app-shell";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
+import { resolveUserSegments } from "@/lib/context/user-segments";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
-import type { Segment } from "@/lib/supabase/types";
 
 export default async function ProtectedLayout({
   children,
@@ -31,61 +31,17 @@ export default async function ProtectedLayout({
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
 
-  // Fetch segments the user has access to.
-  // 1) Admin: vê todos os segmentos ativos.
-  // 2) Outros: primeiro tenta user_segment_access; se vazio, deriva dos
-  //    companies em user_company_access (cada company carrega segment_id).
-  //    Esse fallback cobre franqueado e qualquer perfil que só recebeu
-  //    vínculo por unidade — o sidebar precisa de um slug válido pra
-  //    renderizar itens scope:"segment" (/s/<slug>/dashboard, etc.).
-  let segments: Segment[] = [];
-  if (userRole === "admin") {
-    const { data } = await supabase
-      .from("segments")
-      .select("id,name,slug,display_order,active")
-      .eq("active", true)
-      .order("display_order");
-    segments = (data as Segment[]) ?? [];
-  } else if (profile) {
-    const { data } = await supabase
-      .from("user_segment_access")
-      .select("segments(id,name,slug,display_order,active)")
-      .eq("user_id", profile.id);
-    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
-      .map((row) => row.segments)
-      .filter((s) => s && s.active)
-      .sort((a, b) => a.display_order - b.display_order);
-
-    if (segments.length === 0 && profile.company_ids.length > 0) {
-      // Duas queries simples em vez de PostgREST embed (mais robusto contra
-      // ambiguidade de relations):
-      // 1) pega segment_ids distintos das companies do usuário
-      // 2) carrega segments por esses IDs
-      const { data: companiesData } = await supabase
-        .from("companies")
-        .select("segment_id")
-        .in("id", profile.company_ids)
-        .eq("active", true);
-
-      const segmentIds = Array.from(
-        new Set(
-          ((companiesData ?? []) as Array<{ segment_id: string | null }>)
-            .map((c) => c.segment_id)
-            .filter((s): s is string => !!s),
-        ),
-      );
-
-      if (segmentIds.length > 0) {
-        const { data: segData } = await supabase
-          .from("segments")
-          .select("id,name,slug,display_order,active")
-          .in("id", segmentIds)
-          .eq("active", true)
-          .order("display_order");
-        segments = (segData as Segment[]) ?? [];
-      }
-    }
-  }
+  // Fetch segments the user has access to. Fonte única compartilhada com as
+  // páginas DRE (resolveUserSegments): admin vê todos; os demais recebem a
+  // UNIÃO de user_segment_access com os segmentos derivados das empresas em
+  // user_company_access. A união (não fallback) é o que evita o seletor ficar
+  // preso num único segmento quando o usuário tem 1 acesso explícito + várias
+  // empresas em outros segmentos.
+  const segments = await resolveUserSegments(supabase, {
+    isAdmin: userRole === "admin",
+    userId: profile?.id ?? null,
+    companyIds: profile?.company_ids ?? [],
+  });
 
   // Resolve module/segment context.
   const { availableModules, activeModule, activeSegmentSlug } = await resolveLayoutContext(
