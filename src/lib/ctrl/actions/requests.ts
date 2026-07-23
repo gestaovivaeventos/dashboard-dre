@@ -1446,7 +1446,14 @@ export async function getComplementThread(
 // `users` não expõe o registro de outro usuário ao aprovador (mesma técnica de
 // getComplementThread); a autorização é por papel + dono.
 
-export type ApprovalHistoryAction = "aprovado" | "rejeitado" | "estornado";
+export type ApprovalHistoryAction = "aprovado" | "rejeitado" | "estornado" | "editado";
+
+/** De/para de um campo alterado (evento 'editado'). */
+export interface ApprovalHistoryChange {
+  field: string;
+  from: string | null;
+  to: string | null;
+}
 
 export interface ApprovalHistoryEntry {
   id: string;
@@ -1459,6 +1466,10 @@ export interface ApprovalHistoryEntry {
   actorEmail: string | null;
   /** Comentário/motivo gravado no evento (motivo da rejeição/estorno, etc.). */
   comment: string | null;
+  /** Campos alterados (só em 'editado'): lista de de/para legível. */
+  changes?: ApprovalHistoryChange[];
+  /** Origem da edição, quando 'editado' (ex.: "contas_a_pagar"). */
+  editSource?: string | null;
   createdAt: string;
 }
 
@@ -1497,7 +1508,7 @@ export async function getApprovalHistory(
        user:users!ctrl_history_user_id_fkey(name, email)`,
     )
     .eq("request_id", requestId)
-    .in("action", ["aprovado", "rejeitado", "estornado"])
+    .in("action", ["aprovado", "rejeitado", "estornado", "editado"])
     .order("created_at", { ascending: true });
 
   if (error) return { error: error.message };
@@ -1520,6 +1531,28 @@ export async function getApprovalHistory(
     const stageRaw = row.metadata?.stage;
     const stage =
       stageRaw === "gerente" || stageRaw === "diretor" ? stageRaw : null;
+
+    // 'editado': normaliza o mapa metadata.changes ({ campo: [de, para] }) numa
+    // lista legível. Valores não-string (ids, números) viram texto ou null.
+    let changes: ApprovalHistoryChange[] | undefined;
+    let editSource: string | null | undefined;
+    if (row.action === "editado") {
+      const raw = row.metadata?.changes as
+        | Record<string, [unknown, unknown]>
+        | undefined;
+      const toText = (v: unknown): string | null =>
+        v === null || v === undefined ? null : String(v);
+      changes = raw
+        ? Object.entries(raw).map(([field, pair]) => ({
+            field,
+            from: toText(Array.isArray(pair) ? pair[0] : null),
+            to: toText(Array.isArray(pair) ? pair[1] : null),
+          }))
+        : [];
+      const src = row.metadata?.source;
+      editSource = typeof src === "string" ? src : null;
+    }
+
     return {
       id: row.id,
       action: row.action,
@@ -1528,6 +1561,8 @@ export async function getApprovalHistory(
       actorName: u?.name ?? null,
       actorEmail: u?.email ?? null,
       comment: row.comment,
+      changes,
+      editSource,
       createdAt: row.created_at,
     };
   });
@@ -2092,6 +2127,191 @@ export async function inactivateRequests(requestIds: string[], reason: string) {
     failed: results.filter((r) => !r.ok).length,
     results,
   };
+}
+
+// ─── Editar setor/tipo em Contas a Pagar (retorna à aprovação) ───────────────
+//
+// O usuário de Contas a Pagar (ou admin) corrige o SETOR e/ou o TIPO DE DESPESA
+// de uma requisição já aprovada, ANTES de enviá-la ao Omie — campos que o
+// solicitante pode ter informado errado e que definem o controle orçamentário e
+// o mapeamento Omie (departamento/categoria). Após a correção a requisição VOLTA
+// automaticamente ao fluxo de aprovação (gerente/diretor) para nova validação:
+// recalcula o orçamento com o novo setor+tipo e roteia como na criação, mas SEM
+// auto-aprovação — sempre exige decisão humana. A alteração fica registrada em
+// ctrl_history (action 'editado', com o de/para e o motivo).
+export async function editExpenseRoutingFromContasAPagar(
+  requestId: string,
+  input: { sector_id: string; expense_type_id: string | null; reason: string },
+) {
+  const ctx = await requireCtrlRole("contas_a_pagar", "admin");
+
+  if (!input.reason?.trim()) return { error: "Informe o motivo da alteração." };
+  if (!input.sector_id) return { error: "Selecione o setor." };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req, error: fetchErr } = await supabase
+    .from("ctrl_requests")
+    .select(
+      `id, status, deleted_at, omie_contapagar_codigo, request_number,
+       sector_id, expense_type_id, amount, due_date, reference_month, reference_year, created_by,
+       ctrl_sectors(name), ctrl_expense_types(name)`,
+    )
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (fetchErr || !req) return { error: "Requisição não encontrada." };
+  if (req.deleted_at) return { error: "Requisição excluída não pode ser editada." };
+  // Só requisições aprovadas e ainda não lançadas no Omie (aba "Aguardando Envio").
+  if (req.status !== "aprovado" || req.omie_contapagar_codigo != null) {
+    return {
+      error:
+        "Só é possível editar requisições aprovadas que ainda não foram enviadas ao Omie.",
+    };
+  }
+
+  const newSectorId = input.sector_id;
+  const newExpenseTypeId = input.expense_type_id || null;
+  const oldSectorId = (req.sector_id as string | null) ?? null;
+  const oldExpenseTypeId = (req.expense_type_id as string | null) ?? null;
+
+  const sectorChanged = newSectorId !== oldSectorId;
+  const expenseChanged = newExpenseTypeId !== oldExpenseTypeId;
+  if (!sectorChanged && !expenseChanged) {
+    return { error: "Altere o setor e/ou o tipo de despesa." };
+  }
+
+  // Nomes (para o histórico legível): atuais via join, novos via consulta.
+  const resolveName = (v: unknown): string | null => {
+    if (!v) return null;
+    if (Array.isArray(v)) return (v[0] as { name?: string } | undefined)?.name ?? null;
+    return (v as { name?: string }).name ?? null;
+  };
+  const oldSectorName = resolveName(req.ctrl_sectors);
+  const oldExpenseName = resolveName(req.ctrl_expense_types);
+
+  const [newSectorRes, newExpenseRes, requesterRes] = await Promise.all([
+    supabase.from("ctrl_sectors").select("name").eq("id", newSectorId).maybeSingle(),
+    newExpenseTypeId
+      ? supabase.from("ctrl_expense_types").select("name").eq("id", newExpenseTypeId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase.from("users").select("name, email").eq("id", req.created_by as string).maybeSingle(),
+  ]);
+  const newSectorName = (newSectorRes.data as { name?: string } | null)?.name ?? null;
+  const newExpenseName = (newExpenseRes.data as { name?: string } | null)?.name ?? null;
+  const requester = requesterRes.data as { name: string | null; email: string | null } | null;
+
+  // Recalcula o orçamento com o NOVO setor+tipo (mês/ano pelo vencimento, com
+  // fallback para a competência) e roteia como na criação.
+  const verificationMonth = req.due_date
+    ? new Date((req.due_date as string) + "T00:00:00").getMonth() + 1
+    : (req.reference_month as number);
+  const verificationYear = req.due_date
+    ? new Date((req.due_date as string) + "T00:00:00").getFullYear()
+    : (req.reference_year as number);
+
+  let verification: BudgetVerification | null = null;
+  if (newExpenseTypeId) {
+    verification = await performBudgetVerification(
+      supabase,
+      newSectorId,
+      newExpenseTypeId,
+      Number(req.amount),
+      verificationMonth,
+      verificationYear,
+    );
+  }
+  const approvalTier: ApprovalTier = verification?.approvalTier ?? "nivel_2";
+
+  // Roteamento forçado ao diretor (setor Diretoria / solicitante especial), igual
+  // à criação. Nunca auto-aprova: sempre volta a 'pendente' (ou 'pendente_diretor').
+  const directorOnly = req.created_by === APPROVAL_ROUTING.directorOnly.requesterId;
+  const directorSectorOnly = newSectorId === APPROVAL_ROUTING.directorSector.sectorId;
+  const forceDirector = directorOnly || directorSectorOnly;
+  const newStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("ctrl_requests")
+    .update({
+      sector_id: newSectorId,
+      expense_type_id: newExpenseTypeId,
+      is_budgeted: verification?.isBudgeted ?? false,
+      approval_tier: approvalTier,
+      approval_level: approvalTier === "nivel_3" ? 2 : 1,
+      status: newStatus,
+      approved_by: null,
+      approved_at: null,
+      complement_return_status: null,
+      updated_at: now,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .eq("id", requestId)
+    // Guarda contra corrida: só reverte se ainda estiver aprovada (não enviada).
+    .eq("status", "aprovado");
+  if (updErr) return { error: updErr.message };
+
+  const changes: Record<string, [string | null, string | null]> = {};
+  if (sectorChanged) changes.setor = [oldSectorName, newSectorName];
+  if (expenseChanged) changes.tipo_despesa = [oldExpenseName, newExpenseName];
+
+  await supabase.from("ctrl_history").insert({
+    request_id: requestId,
+    user_id: ctx.id,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    action: "editado" as any,
+    comment: input.reason.trim(),
+    metadata: {
+      source: "contas_a_pagar",
+      changes,
+      reason: input.reason.trim(),
+      returned_to: newStatus,
+      approval_tier: approvalTier,
+      edited_by_roles: ctx.ctrlRoles,
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+
+  // Notifica a etapa de aprovação de destino (mesma lógica de roteamento da criação).
+  const stage: "gerente" | "diretor" = forceDirector ? "diretor" : "gerente";
+  let explicitApproverIds: string[] | undefined;
+  if (directorOnly) {
+    explicitApproverIds = [APPROVAL_ROUTING.directorOnly.directorId];
+  } else if (
+    !forceDirector &&
+    newExpenseTypeId === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
+  ) {
+    explicitApproverIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
+  }
+
+  await notifyPendingApproval({
+    requestId,
+    requestNumber: req.request_number as number,
+    requesterName: requester?.name ?? requester?.email ?? "Solicitante",
+    sectorId: newSectorId,
+    sectorName: newSectorName ?? "Setor",
+    amount: Number(req.amount),
+    stage,
+    explicitApproverIds,
+  });
+
+  // Avisa o solicitante que a requisição voltou à aprovação após a correção.
+  await notifyRequester({
+    userId: req.created_by as string,
+    requestId,
+    requestNumber: req.request_number as number,
+    title: "Requisição retornou à aprovação",
+    message: `Sua requisição #${req.request_number} teve o setor/tipo de despesa ajustado por Contas a Pagar e voltou para nova validação.`,
+    type: "info_solicitada",
+  });
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  revalidatePath("/ctrl/aprovacoes");
+  revalidatePath("/ctrl/requisicoes");
+  revalidatePath("/ctrl/orcamento");
+  revalidatePath("/home");
+  return { ok: true as const, returnedTo: newStatus, tier: approvalTier };
 }
 
 // ─── Backward-compat alias ────────────────────────────────────────────────────

@@ -42,6 +42,8 @@ async function getContasAPagar() {
       reference_month,
       reference_year,
       status,
+      sector_id,
+      expense_type_id,
       paying_company,
       paying_company_id,
       omie_launch_status,
@@ -92,6 +94,21 @@ async function getContasAPagar() {
   return { requests: (data ?? []) as ContasRequest[] };
 }
 
+// Cadastros para o modal de correção de setor/tipo. Busca TODOS os ativos via
+// admin client — o perfil contas_a_pagar não é coberto pelo gate de getSectors/
+// getExpenseTypes (e getSectors ainda filtraria por vínculo de setor do usuário).
+async function getCadastros() {
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const [sec, exp] = await Promise.all([
+    supabase.from("ctrl_sectors").select("id, name").eq("active", true).order("name"),
+    supabase.from("ctrl_expense_types").select("id, name").eq("active", true).order("name"),
+  ]);
+  return {
+    sectors: (sec.data ?? []) as { id: string; name: string }[],
+    expenseTypes: (exp.data ?? []) as { id: string; name: string }[],
+  };
+}
+
 export default async function ContasAPagarPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
@@ -100,9 +117,13 @@ export default async function ContasAPagarPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const [{ requests = [], error }, companies] = await Promise.all([
+  // Só carrega os cadastros de setor/tipo quando o usuário pode editar (perfil
+  // Contas a Pagar ou admin); os demais recebem listas vazias.
+  const canEditRouting = hasCtrlRole(ctx, "contas_a_pagar", "admin");
+  const [{ requests = [], error }, companies, cadastros] = await Promise.all([
     getContasAPagar(),
     getCompanies(),
+    canEditRouting ? getCadastros() : Promise.resolve({ sectors: [], expenseTypes: [] }),
   ]);
 
   const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -139,7 +160,13 @@ export default async function ContasAPagarPage() {
         </div>
       </div>
 
-      <ContasAPagarTable requests={requests} ctrlRoles={ctx.ctrlRoles} companies={companies} />
+      <ContasAPagarTable
+        requests={requests}
+        ctrlRoles={ctx.ctrlRoles}
+        companies={companies}
+        sectors={cadastros.sectors}
+        expenseTypes={cadastros.expenseTypes}
+      />
     </div>
   );
 }

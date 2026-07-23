@@ -17,6 +17,22 @@ const STAGE_LABEL: Record<"gerente" | "diretor", string> = {
   diretor: "Diretor",
 };
 
+// Rótulos amigáveis dos campos que aparecem num evento de alteração ('editado').
+// Cobre tanto as chaves da edição de Contas a Pagar (setor / tipo_despesa) quanto
+// as chaves cruas da edição administrativa (sector_id, title, amount, …).
+const CHANGE_FIELD_LABEL: Record<string, string> = {
+  setor: "Setor",
+  tipo_despesa: "Tipo de despesa",
+  sector_id: "Setor",
+  expense_type_id: "Tipo de despesa",
+  title: "Título",
+  amount: "Valor",
+  description: "Descrição",
+  due_date: "Vencimento",
+  reference_month: "Mês de competência",
+  reference_year: "Ano de competência",
+};
+
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", {
     day: "2-digit",
@@ -99,27 +115,56 @@ export function ApprovalHistory({
 function ApprovalHistoryItem({ entry }: { entry: ApprovalHistoryEntry }) {
   const actor = entry.actorName ?? entry.actorEmail ?? "—";
 
-  // Cabeçalho: etapa (Gerente/Diretor) quando houver; senão o tipo da ação.
-  const heading = entry.stage
-    ? STAGE_LABEL[entry.stage]
-    : entry.action === "rejeitado"
-    ? "Rejeição"
-    : entry.action === "estornado"
-    ? "Estorno"
-    : "Aprovação";
+  // Cabeçalho: alteração de campos; senão etapa (Gerente/Diretor); senão o tipo.
+  const heading =
+    entry.action === "editado"
+      ? entry.editSource === "contas_a_pagar"
+        ? "Alteração (Contas a Pagar)"
+        : "Alteração"
+      : entry.stage
+      ? STAGE_LABEL[entry.stage]
+      : entry.action === "rejeitado"
+      ? "Rejeição"
+      : entry.action === "estornado"
+      ? "Estorno"
+      : "Aprovação";
 
   const accent =
     entry.action === "aprovado"
       ? "border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-950/20"
       : entry.action === "rejeitado"
       ? "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20"
+      : entry.action === "editado"
+      ? "border-sky-200 bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/20"
       : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20";
 
   return (
     <div className={`rounded-md border px-3 py-2 ${accent}`}>
       <p className="text-sm font-semibold">{heading}</p>
 
-      {entry.action === "aprovado" && entry.autoApproved ? (
+      {entry.action === "editado" ? (
+        <>
+          <p className="text-sm">Alterado por: {actor}</p>
+          {entry.changes && entry.changes.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {entry.changes.map((c, i) => (
+                <li key={i} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {CHANGE_FIELD_LABEL[c.field] ?? c.field}:
+                  </span>{" "}
+                  {c.from ?? "—"} → {c.to ?? "—"}
+                </li>
+              ))}
+            </ul>
+          )}
+          {entry.comment && (
+            <p className="mt-1 text-xs text-muted-foreground">Motivo: {entry.comment}</p>
+          )}
+          {entry.editSource === "contas_a_pagar" && (
+            <p className="text-xs text-muted-foreground">Retornada à aprovação para nova validação.</p>
+          )}
+        </>
+      ) : entry.action === "aprovado" && entry.autoApproved ? (
         <>
           <p className="text-sm">Aprovação automática</p>
           <p className="text-sm">Solicitante: {actor}</p>
