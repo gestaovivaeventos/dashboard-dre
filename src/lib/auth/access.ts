@@ -34,6 +34,7 @@ const FRANQUEADO_BASE_PATHS = [
   "/dashboard",
   "/fluxo-de-caixa",
   "/budget-forecast",
+  "/comparativos-anuais",
   "/kpis",
   "/financeiro/business-intelligence",
   "/financeiro/documentos",
@@ -44,6 +45,7 @@ const FRANQUEADO_SEGMENT_SUBS = new Set([
   "/dashboard",
   "/fluxo-de-caixa",
   "/budget-forecast",
+  "/comparativos-anuais",
   "/kpis",
 ]);
 
@@ -177,12 +179,12 @@ export function canAccessPathByProfile(
     pathname.startsWith("/configuracoes")
   ) {
     if (!canFinanceiro) return false;
-    // Mapeamento, Configurações e Comparativos Anuais continuam admin-only —
-    // admins já retornaram true acima. Aqui só vê quem tem financeiro.
+    // Mapeamento e Configurações continuam admin-only — admins já retornaram
+    // true acima. Comparativos Anuais foi ABERTO a quem tem Financeiro (as
+    // empresas são escopadas ao acesso do usuário na própria tela).
     if (
       pathname.startsWith("/mapeamento") ||
-      pathname.startsWith("/configuracoes") ||
-      pathname.startsWith("/comparativos-anuais")
+      pathname.startsWith("/configuracoes")
     ) {
       return false;
     }

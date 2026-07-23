@@ -41,8 +41,10 @@ export default async function ComparativosAnuaisPage({ searchParams, params }: P
   if (!user) {
     redirect("/login");
   }
-  // Tela admin-only (menu e rota).
-  if (profile?.role !== "admin") {
+  // Aberto a quem tem o módulo Financeiro. As empresas são escopadas ao acesso
+  // do usuário mais abaixo (visibleCompanies / allowedCompanyIds), como no Budget:
+  // admin vê todas; os demais, só as empresas a que têm acesso.
+  if (!profile?.can_financeiro) {
     redirect("/home");
   }
 
