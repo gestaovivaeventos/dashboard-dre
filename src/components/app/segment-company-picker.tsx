@@ -60,6 +60,15 @@ export function SegmentCompanyPicker({
 
   const allSelected = selected.length === companies.length && companies.length > 0;
 
+  // O `disabled` que vem das views significa "não há empresa pra escolher"
+  // (companies.length <= 1). Mas o SELETOR DE SEGMENTO mora dentro desta mesma
+  // dropdown — se o usuário tem acesso a vários segmentos e o segmento ativo
+  // por acaso tem só 1 empresa (ex.: Larissa presa em Viva Company/Dataforte),
+  // desabilitar o botão inteiro tira o único jeito de trocar de segmento no
+  // desktop (o SegmentChip do header só existe no mobile). Então só desabilita
+  // de fato quando NÃO há nada a trocar: 1 empresa E 1 segmento.
+  const effectivelyDisabled = disabled && segments.length <= 1;
+
   const triggerLabel = useMemo(() => {
     // Acesso a uma unica empresa: fixa o nome dela no filtro. O picker ja vem
     // desabilitado nesse caso (disabled={companies.length <= 1} nas views),
@@ -110,7 +119,7 @@ export function SegmentCompanyPicker({
     <div ref={ref} className="relative">
       <button
         type="button"
-        disabled={disabled}
+        disabled={effectivelyDisabled}
         onClick={() => setOpen((v) => !v)}
         className="flex h-10 w-full min-w-[260px] items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm hover:bg-accent disabled:opacity-50"
       >

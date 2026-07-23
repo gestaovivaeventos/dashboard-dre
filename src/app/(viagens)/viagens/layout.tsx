@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
+import { resolveUserSegments } from "@/lib/context/user-segments";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
-import type { Segment } from "@/lib/supabase/types";
 
 export default async function ViagensLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getSessionContext();
@@ -22,25 +22,14 @@ export default async function ViagensLayout({ children }: { children: React.Reac
   const canViagens = Boolean(modules.viagens);
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
 
-  // Segmentos para o shell (mesmo padrão dos outros layouts) — admin vê todos.
-  let segments: Segment[] = [];
-  if (dreRole === "admin") {
-    const { data } = await supabase
-      .from("segments")
-      .select("id,name,slug,display_order,active")
-      .eq("active", true)
-      .order("display_order");
-    segments = (data as Segment[]) ?? [];
-  } else if (profile) {
-    const { data } = await supabase
-      .from("user_segment_access")
-      .select("segments(id,name,slug,display_order,active)")
-      .eq("user_id", profile.id);
-    segments = ((data ?? []) as unknown as Array<{ segments: Segment }>)
-      .map((row) => row.segments)
-      .filter((s) => s && s.active)
-      .sort((a, b) => a.display_order - b.display_order);
-  }
+  // Segmentos para o shell — fonte única compartilhada (resolveUserSegments):
+  // admin vê todos; os demais recebem a UNIÃO de user_segment_access com os
+  // segmentos derivados das empresas em user_company_access.
+  const segments = await resolveUserSegments(supabase, {
+    isAdmin: dreRole === "admin",
+    userId: profile?.id ?? null,
+    companyIds: profile?.company_ids ?? [],
+  });
 
   const { availableModules, activeModule, activeSegmentSlug } = await resolveLayoutContext(
     dreRole,

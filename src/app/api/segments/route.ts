@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { resolveUserSegments } from "@/lib/context/user-segments";
 
 export async function GET() {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -8,29 +9,15 @@ export async function GET() {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
 
-  // Admin sees all segments; others see only assigned segments
-  if (profile.role === "admin") {
-    const { data, error } = await supabase
-      .from("segments")
-      .select("id,name,slug,display_order,active")
-      .eq("active", true)
-      .order("display_order");
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ segments: data });
-  }
-
-  const { data, error } = await supabase
-    .from("user_segment_access")
-    .select("segment_id, segments(id,name,slug,display_order,active)")
-    .eq("user_id", user.id);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-  const segments = (data ?? [])
-    .map((row) => (row as unknown as { segments: { id: string; name: string; slug: string; display_order: number; active: boolean } }).segments)
-    .filter((s) => s && s.active)
-    .sort((a, b) => a.display_order - b.display_order);
+  // Fonte única (resolveUserSegments): admin vê todos; os demais recebem a
+  // UNIÃO de user_segment_access com os segmentos derivados das empresas em
+  // user_company_access — evita sub-reportar segmentos de quem tem acesso
+  // explícito a um só + empresas em outros segmentos.
+  const segments = await resolveUserSegments(supabase, {
+    isAdmin: profile.role === "admin",
+    userId: user.id,
+    companyIds: profile.company_ids ?? [],
+  });
 
   return NextResponse.json({ segments });
 }
