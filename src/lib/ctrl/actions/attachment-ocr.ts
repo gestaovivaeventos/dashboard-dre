@@ -1,9 +1,9 @@
 "use server";
 
 import { generateObject } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
@@ -117,8 +117,10 @@ export async function extractAttachmentData(
 
   if (!attachmentPath) return { error: "Anexo não informado." };
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
+  // OCR usa visão — sempre OpenAI (o resolver força isso mesmo se o provedor
+  // ativo for outro). O consumo é registrado para aparecer no painel de IA.
+  const resolved = await resolveAiProvider({ capability: "vision" }).catch(() => null);
+  if (!resolved) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
 
   // Baixa os bytes do anexo (bucket privado) para mandar direto ao GPT visão.
   const admin = createAdminClientIfAvailable() ?? (await createClient());
@@ -147,11 +149,11 @@ export async function extractAttachmentData(
           providerOptions: { openai: { imageDetail: "high" as const } },
         };
 
-  const provider = createOpenAI({ apiKey });
+  const provider = resolved.provider;
 
   try {
     if (kind === "nota") {
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model: provider(OCR_MODEL),
         schema: NotaSchema,
         messages: [
@@ -187,6 +189,7 @@ export async function extractAttachmentData(
           },
         ],
       });
+      await logResolvedUsage(resolved, "ocr", usage, { modelName: OCR_MODEL });
       return {
         data: {
           invoice_number: cleanInvoice(object.invoice_number),
@@ -195,7 +198,7 @@ export async function extractAttachmentData(
       };
     }
 
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model: provider(OCR_MODEL),
       schema: BoletoSchema,
       messages: [
@@ -217,6 +220,7 @@ export async function extractAttachmentData(
         },
       ],
     });
+    await logResolvedUsage(resolved, "ocr", usage, { modelName: OCR_MODEL });
     return {
       data: {
         barcode: pickBarcode(object.linha_digitavel, object.codigo_barras),

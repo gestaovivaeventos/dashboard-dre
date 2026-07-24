@@ -1,6 +1,8 @@
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
+
 import {
   ONE_PAGE_SYSTEM_PROMPT,
   buildOnePageUserPrompt,
@@ -69,22 +71,20 @@ export async function analyzeOnePage(
   const input: OnePageInput = parsedInput.data;
 
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new OnePageAnalyzerError(
-      "OPENAI_API_KEY nao configurada no ambiente.",
-    );
-  }
 
-  const provider = createOpenAI({ apiKey });
+  // Resolve o provedor ativo (OpenAI/DeepSeek) via config no banco. `options.apiKey`
+  // força OpenAI direto (usado em testes) e pula a medição de consumo.
+  const resolved = options.apiKey ? null : await resolveAiProvider({ capability: "text" });
+  const provider = resolved ? resolved.provider : createOpenAI({ apiKey: options.apiKey as string });
+  const modelName = options.model ?? resolved?.modelName ?? opts.model;
   const userPrompt = buildOnePageUserPrompt(input);
 
   // 2. Chama o LLM forcando estrutura via schema. O generateObject usa
   //    response_format do OpenAI por baixo e valida internamente — se nao
   //    bater com o schema, lanca NoObjectGeneratedError.
   try {
-    const { object } = await generateObject({
-      model: provider(opts.model),
+    const { object, usage } = await generateObject({
+      model: provider(modelName),
       schema: OnePageAnalysisSchema,
       system: ONE_PAGE_SYSTEM_PROMPT,
       prompt: userPrompt,
@@ -101,6 +101,7 @@ export async function analyzeOnePage(
         verified.error,
       );
     }
+    if (resolved) await logResolvedUsage(resolved, "bi", usage);
     return verified.data;
   } catch (err) {
     if (err instanceof OnePageAnalyzerError) throw err;
@@ -110,8 +111,8 @@ export async function analyzeOnePage(
     // caller decide como tratar — UI pode oferecer "tentar novamente").
     if (err instanceof NoObjectGeneratedError) {
       try {
-        const { object } = await generateObject({
-          model: provider(opts.model),
+        const { object, usage } = await generateObject({
+          model: provider(modelName),
           schema: OnePageAnalysisSchema,
           system: ONE_PAGE_SYSTEM_PROMPT,
           prompt:
@@ -128,6 +129,7 @@ export async function analyzeOnePage(
             verified.error,
           );
         }
+        if (resolved) await logResolvedUsage(resolved, "bi", usage);
         return verified.data;
       } catch (retryErr) {
         throw new OnePageAnalyzerError(

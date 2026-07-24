@@ -1,8 +1,7 @@
 import { generateObject } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
-const MODEL = "gpt-4o-mini";
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 
 const AirportOptionSchema = z.object({
   iata: z.string().describe("Código IATA do aeroporto (ex.: IZA, GIG, SDU, CNF, GRU)."),
@@ -72,14 +71,13 @@ export async function estimateRouteFacts(params: {
   dataIda: string;
   dataVolta: string;
 }): Promise<RouteFacts> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const resolved = await resolveAiProvider({ capability: "text" }).catch(() => null);
+  if (!resolved) {
     throw new Error("Busca indisponível: configure OPENAI_API_KEY (estimativa) ou AMADEUS_CLIENT_ID/SECRET.");
   }
-  const provider = createOpenAI({ apiKey });
 
-  const { object } = await generateObject({
-    model: provider(MODEL),
+  const { object, usage } = await generateObject({
+    model: resolved.provider(resolved.modelName),
     schema: RouteFactsSchema,
     temperature: 0.2,
     system:
@@ -100,6 +98,7 @@ export async function estimateRouteFacts(params: {
       "4) Ônibus rodoviário: existência, preço ida-e-volta por pessoa, duração, e custo do uber casa↔rodoviária.\n" +
       "5) Diária média de hotel 3 estrelas no destino.",
   });
+  await logResolvedUsage(resolved, "viagens", usage);
 
   return object;
 }
