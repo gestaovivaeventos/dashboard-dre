@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
 import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
-const SUPPLIERS_SELECT = `id, name, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
+const SUPPLIERS_SELECT = `id, name, nome_fantasia, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
    chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
    estrangeiro, pais, codigo_pais, estado, cidade, endereco, endereco_numero, complemento,
    status, rejection_reason, created_at, approved_at,
@@ -66,6 +66,7 @@ async function getData() {
     suppliers: (suppliersResult.data ?? []) as Array<{
       id: string;
       name: string;
+      nome_fantasia: string | null;
       cnpj_cpf: string | null;
       email: string | null;
       phone: string | null;
@@ -151,6 +152,7 @@ export default async function FornecedoresPage() {
             return {
               id: s.id,
               name: s.name,
+              nome_fantasia: s.nome_fantasia,
               cnpj_cpf: s.cnpj_cpf,
               email: s.email,
               phone: s.phone,

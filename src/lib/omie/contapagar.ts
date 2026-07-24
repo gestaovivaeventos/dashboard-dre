@@ -1,8 +1,72 @@
 import { omieCall } from "@/lib/omie/client";
 
 const CONTAPAGAR_URL = "https://app.omie.com.br/api/v1/financas/contapagar/";
+const PROJETOS_URL = "https://app.omie.com.br/api/v1/geral/projetos/";
 
 const cents = (v: number) => Math.round(v * 100);
+
+// Normaliza um nome para comparação: minúsculas, sem acento, espaços colapsados
+// e aparados nas pontas. Usada para casar o nome do evento (ControlHub) com o
+// nome do projeto cadastrado na Omie da empresa.
+function normalizeNome(s: string | null | undefined): string {
+  return (s ?? "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Procura um projeto pelo NOME no cadastro de projetos da empresa (ListarProjetos)
+// e devolve o código numérico do projeto (nCodProj) — o valor aceito em
+// `codigo_projeto` do IncluirContaPagar. Casa por nome normalizado
+// (case/acento-insensível). Prefere projeto ATIVO; se só houver homônimo
+// inativo, usa-o como fallback. Retorna null quando não existe projeto com esse
+// nome (o chamador então lança sem projeto — não criamos projeto na Omie).
+export async function findProjetoByNome(
+  appKey: string,
+  appSecret: string,
+  nome: string,
+): Promise<number | null> {
+  const alvo = normalizeNome(nome);
+  if (!alvo) return null;
+
+  let pagina = 1;
+  let total = 1;
+  let fallbackInativo: number | null = null;
+  do {
+    const { data, notFound } = await omieCall(
+      PROJETOS_URL,
+      "ListarProjetos",
+      appKey,
+      appSecret,
+      { pagina, registros_por_pagina: 500 },
+    );
+    if (notFound) break;
+    // A Omie retorna o array de projetos sob `cadastro`; extraímos de forma
+    // tolerante (primeiro array do payload) para não depender do nome da chave.
+    const arr =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((data.cadastro as any[] | undefined) ??
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (Object.values(data).find(Array.isArray) as any[] | undefined)) ??
+      [];
+    for (const p of arr) {
+      const nomeProjeto = normalizeNome(String(p.nome ?? p.cNome ?? ""));
+      if (nomeProjeto !== alvo) continue;
+      const codigo = Number(p.codigo ?? p.nCodProj ?? p.nCodProjeto ?? 0);
+      if (!codigo) continue;
+      const inativo = String(p.inativo ?? p.cInativo ?? "").toUpperCase() === "S";
+      if (!inativo) return codigo;
+      if (fallbackInativo === null) fallbackInativo = codigo;
+    }
+    total = Number(data.total_de_paginas ?? 1);
+    pagina += 1;
+  } while (pagina <= total);
+
+  return fallbackInativo;
+}
 
 // Procura um título de NF de produto (id_origem 'NFEP') do fornecedor (por CNPJ)
 // com valor igual, ainda em aberto. SÓ casa com NFEP — títulos de previsão
@@ -53,6 +117,9 @@ export interface ContaPagarPayload {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   distribuicao: any[];
   id_conta_corrente: number;
+  // Código numérico do projeto Omie (nCodProj). Vinculado a partir do evento da
+  // requisição quando há projeto homônimo na Omie da empresa.
+  codigo_projeto?: number;
   observacao?: string;
   numero_documento?: string;
   numero_documento_fiscal?: string;
@@ -81,6 +148,21 @@ export async function alterarContaPagarCategoria(
   await omieCall(CONTAPAGAR_URL, "AlterarContaPagar", appKey, appSecret, {
     codigo_lancamento_omie: codigoLancamentoOmie,
     codigo_categoria: codigoCategoria,
+  });
+}
+
+// Vincula um projeto (codigo_projeto) a um título já existente via
+// AlterarContaPagar. Usado no caminho "recebido" (título de NF já no Omie),
+// para que o projeto do evento também apareça nesses títulos.
+export async function alterarContaPagarProjeto(
+  appKey: string,
+  appSecret: string,
+  codigoLancamentoOmie: number,
+  codigoProjeto: number,
+): Promise<void> {
+  await omieCall(CONTAPAGAR_URL, "AlterarContaPagar", appKey, appSecret, {
+    codigo_lancamento_omie: codigoLancamentoOmie,
+    codigo_projeto: codigoProjeto,
   });
 }
 

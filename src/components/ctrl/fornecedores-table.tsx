@@ -11,6 +11,7 @@ import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
 interface SupplierRow {
   id: string;
   name: string;
+  nome_fantasia: string | null;
   cnpj_cpf: string | null;
   email: string | null;
   phone: string | null;
@@ -136,6 +137,7 @@ export function FornecedoresTable({
       : undefined;
     const result = await updateSupplier(detailSupplier.id, {
       name: editForm.name,
+      nome_fantasia: editForm.nome_fantasia || null,
       // Estrangeiro não tem CNPJ/CPF brasileiro; limpa o documento no salvamento.
       cnpj_cpf: editForm.estrangeiro ? null : editForm.cnpj_cpf,
       estrangeiro: editForm.estrangeiro,
@@ -669,6 +671,7 @@ export function FornecedoresTable({
                       Fornecedor estrangeiro (sem CNPJ/CPF)
                     </label>
                     <EditField label="Nome *" value={editForm.name} maxLength={60} onChange={(v) => setEditForm({ ...editForm, name: v })} />
+                    <EditField label="Nome Fantasia" value={editForm.nome_fantasia} maxLength={60} onChange={(v) => setEditForm({ ...editForm, nome_fantasia: v })} />
                     {editForm.estrangeiro ? (
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1158,6 +1161,7 @@ function DataField({
 
 interface EditFormState {
   name: string;
+  nome_fantasia: string;
   cnpj_cpf: string;
   estrangeiro: boolean;
   codigo_pais: string;
@@ -1181,6 +1185,7 @@ interface EditFormState {
 function emptyEditForm(): EditFormState {
   return {
     name: "",
+    nome_fantasia: "",
     cnpj_cpf: "",
     estrangeiro: false,
     codigo_pais: "",
@@ -1205,6 +1210,7 @@ function emptyEditForm(): EditFormState {
 function toEditForm(s: SupplierRow): EditFormState {
   return {
     name: s.name ?? "",
+    nome_fantasia: s.nome_fantasia ?? "",
     cnpj_cpf: s.cnpj_cpf ?? "",
     estrangeiro: !!s.estrangeiro,
     codigo_pais: s.codigo_pais ?? "",

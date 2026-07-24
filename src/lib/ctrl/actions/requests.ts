@@ -853,7 +853,7 @@ export async function getRequests(filters?: {
   let query = supabase
     .from("ctrl_requests")
     .select(
-      `*, ctrl_sectors(name), ctrl_expense_types(name),
+      `*, ctrl_sectors(name), ctrl_expense_types(name), ctrl_events(name),
        ctrl_suppliers(name, cnpj_cpf, chave_pix, banco, agencia, conta_corrente, titular_banco),
        creator:users!ctrl_requests_created_by_fkey(name, email),
        approver:users!ctrl_requests_approved_by_fkey(name, email)`
@@ -868,17 +868,19 @@ export async function getRequests(filters?: {
   if (filters?.sector_id) query = query.eq("sector_id", filters.sector_id);
 
   // Visibilidade em tres niveis:
-  //  - Global (admin, csc, contas_a_pagar): ve todas as requisicoes.
-  //  - Por setor (gerente, diretor): ve apenas as requisicoes dos setores aos
-  //    quais esta vinculado em user_sectors. Sem vinculo => fallback ve tudo,
-  //    pra nao quebrar o fluxo enquanto os cadastros estao incompletos (mesma
-  //    regra usada em notifyPendingApproval).
+  //  - Global (diretor, admin, csc, contas_a_pagar): ve todas as requisicoes. O
+  //    diretor tem visao geral da empresa; os setores vinculados a ele NAO
+  //    filtram a visibilidade — servem apenas para destacar "seu setor" na tela
+  //    de Aprovacoes (separacao visual no client).
+  //  - Por setor (gerente): ve apenas as requisicoes dos setores aos quais esta
+  //    vinculado em user_sectors. Sem vinculo => fallback ve tudo, pra nao
+  //    quebrar o fluxo enquanto os cadastros estao incompletos.
   //  - Solicitante (nenhum dos anteriores): apenas as proprias requisicoes.
   const hasGlobalVisibility = ctx.ctrlRoles.some((r) =>
-    ["csc", "admin", "contas_a_pagar"].includes(r),
+    ["diretor", "csc", "admin", "contas_a_pagar"].includes(r),
   );
   const hasSectorVisibility = ctx.ctrlRoles.some((r) =>
-    ["gerente", "diretor"].includes(r),
+    ["gerente"].includes(r),
   );
   if (!hasGlobalVisibility) {
     if (hasSectorVisibility) {

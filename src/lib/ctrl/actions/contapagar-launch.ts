@@ -9,8 +9,10 @@ import { decryptSecret } from "@/lib/security/encryption";
 import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
 import {
   findContaPagarByCnpjValor,
+  findProjetoByNome,
   incluirContaPagar,
   alterarContaPagarCategoria,
+  alterarContaPagarProjeto,
   excluirContaPagar,
   toOmieDate,
 } from "@/lib/omie/contapagar";
@@ -158,7 +160,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, event_id",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -332,6 +334,27 @@ export async function launchRequestToOmie(
   // ou transferência.
   const integracaoBancaria = buildIntegracaoBancaria(request, supplier);
 
+  // Projeto Omie a partir do EVENTO da requisição. O evento (ControlHub) casa
+  // com o projeto cadastrado na Omie da empresa pagadora pelo NOME. Só vincula
+  // se o projeto já existir na Omie (não criamos projeto); sem match, lança sem
+  // projeto. Best-effort: falha na consulta não derruba o lançamento.
+  let codigoProjeto: number | null = null;
+  if (request.event_id) {
+    const { data: eventRow } = await supabase
+      .from("ctrl_events")
+      .select("name")
+      .eq("id", request.event_id)
+      .maybeSingle();
+    const eventName = (eventRow?.name as string | null) ?? null;
+    if (eventName) {
+      try {
+        codigoProjeto = await findProjetoByNome(appKey, appSecret, eventName);
+      } catch (e) {
+        console.error("[contapagar] falha ao resolver projeto do evento no Omie:", e);
+      }
+    }
+  }
+
   // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
   // codigo_lancamento_omie e remove codigo_lancamento_integracao).
   const basePayload = {
@@ -343,6 +366,7 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
+    ...(codigoProjeto ? { codigo_projeto: codigoProjeto } : {}),
     ...(numeroPedido ? { numero_pedido: numeroPedido } : {}),
     ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
     ...(integracaoBancaria ? { cnab_integracao_bancaria: integracaoBancaria } : {}),
@@ -372,6 +396,44 @@ export async function launchRequestToOmie(
     );
   };
 
+  // Erro do Omie relacionado ao campo de projeto (codigo_projeto). Projeto é
+  // enriquecimento best-effort vindo do evento — nunca pode derrubar o
+  // lançamento. Se a Omie recusar o projeto por qualquer motivo, re-tentamos
+  // sem ele.
+  const isProjetoError = (e: unknown) => {
+    const msg = e instanceof Error ? e.message.toLowerCase() : "";
+    return msg.includes("projeto") || msg.includes("codigo_projeto");
+  };
+
+  // Inclui a conta a pagar tolerando falhas nos campos best-effort (integração
+  // bancária e projeto): ao bater num erro desses, remove só o campo ofensor e
+  // re-tenta, garantindo que o título seja criado. Erros de campos essenciais
+  // (categoria, conta corrente, fornecedor, etc.) continuam relançados.
+  const incluirTolerante = async (
+    p: Record<string, unknown>,
+  ): Promise<{ codigoLancamentoOmie: number }> => {
+    try {
+      return await incluirContaPagar(appKey, appSecret, p as never);
+    } catch (e) {
+      let retry = p;
+      let dropped = false;
+      if (isCnabError(e) && "cnab_integracao_bancaria" in retry) {
+        const { cnab_integracao_bancaria: _c, ...rest } = retry;
+        void _c;
+        retry = rest;
+        dropped = true;
+      }
+      if (isProjetoError(e) && "codigo_projeto" in retry) {
+        const { codigo_projeto: _p, ...rest } = retry;
+        void _p;
+        retry = rest;
+        dropped = true;
+      }
+      if (!dropped) throw e;
+      return await incluirContaPagar(appKey, appSecret, retry as never);
+    }
+  };
+
   try {
     if (previsaoCodigo) {
       // Substituição de previsão: o Omie NÃO substitui a observação de título
@@ -385,18 +447,7 @@ export async function launchRequestToOmie(
         ...basePayload,
         ...(observacao ? { observacao } : {}),
       };
-      let novoCodigo: number;
-      try {
-        ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, payload));
-      } catch (e) {
-        if (isCnabError(e) && "cnab_integracao_bancaria" in payload) {
-          const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
-          void _drop;
-          ({ codigoLancamentoOmie: novoCodigo } = await incluirContaPagar(appKey, appSecret, noCnab));
-        } else {
-          throw e;
-        }
-      }
+      const { codigoLancamentoOmie: novoCodigo } = await incluirTolerante(payload);
       // Exclui a previsão recorrente DEPOIS de criar o título real (best-effort):
       // se a exclusão falhar, fica um duplicado para limpeza manual, mas nunca se
       // perde o lançamento.
@@ -422,6 +473,23 @@ export async function launchRequestToOmie(
           found.codigoLancamentoOmie,
           codigoCategoria,
         );
+        // Projeto do evento também no título já existente (best-effort — não
+        // pode derrubar o fluxo de recategorização).
+        if (codigoProjeto) {
+          try {
+            await alterarContaPagarProjeto(
+              appKey,
+              appSecret,
+              found.codigoLancamentoOmie,
+              codigoProjeto,
+            );
+          } catch (e) {
+            console.error(
+              "[contapagar] falha best-effort ao vincular projeto ao título existente:",
+              e,
+            );
+          }
+        }
         omieStatus = "recebido";
         omieCode = found.codigoLancamentoOmie;
       } else {
@@ -430,18 +498,7 @@ export async function launchRequestToOmie(
           ...basePayload,
           ...(request.description ? { observacao: request.description as string } : {}),
         };
-        let codigoLancamentoOmie: number;
-        try {
-          ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, payload));
-        } catch (e) {
-          if (isCnabError(e) && "cnab_integracao_bancaria" in payload) {
-            const { cnab_integracao_bancaria: _drop, ...noCnab } = payload;
-            void _drop;
-            ({ codigoLancamentoOmie } = await incluirContaPagar(appKey, appSecret, noCnab));
-          } else {
-            throw e;
-          }
-        }
+        const { codigoLancamentoOmie } = await incluirTolerante(payload);
         omieStatus = "lancado";
         omieCode = codigoLancamentoOmie;
       }

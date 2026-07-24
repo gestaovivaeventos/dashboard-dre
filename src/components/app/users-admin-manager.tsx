@@ -101,7 +101,8 @@ const PROFILES: Array<{
   {
     value: "diretor",
     label: "Diretor",
-    description: "Aprova qualquer requisição (sem filtro de setor).",
+    description:
+      "Aprova requisições. Selecione setores para restringir; sem setor, vê todos.",
   },
   {
     value: "validador_contrato",
@@ -135,9 +136,16 @@ const PROFILE_BADGE_CLASS: Record<string, string> = {
   franqueado: "bg-amber-100 text-amber-800 border-transparent",
 };
 
-// Whether the profile needs sector assignments
+// Whether the profile REQUIRES at least one sector (blocks save when empty).
 function profileNeedsSectors(p: Profile): boolean {
   return p === "gerente" || p === "solicitante";
+}
+
+// Whether the sector picker is shown. Diretor pode selecionar setores
+// (opcional): com setores => vê só esses; sem setores => vê todos (fallback
+// em getRequests). Gerente/Solicitante são obrigatórios (profileNeedsSectors).
+function profileShowsSectors(p: Profile): boolean {
+  return profileNeedsSectors(p) || p === "diretor";
 }
 
 // ─── Form state ─────────────────────────────────────────────────────────────
@@ -811,7 +819,8 @@ function UserForm({
   onToggleCompany: (id: string) => void;
   onSubmit: (e: FormEvent) => void;
 }) {
-  const showSectors = profileNeedsSectors(form.profile);
+  const showSectors = profileShowsSectors(form.profile);
+  const sectorsRequired = profileNeedsSectors(form.profile);
   const showCompanies =
     form.can_financeiro && form.profile !== "admin" && form.profile !== "validador_contrato";
   const isValidator = form.profile === "validador_contrato";
@@ -972,7 +981,7 @@ function UserForm({
       {showSectors && (
         <div className="space-y-1.5">
           <Label>
-            Setores <span className="text-destructive">*</span>
+            Setores {sectorsRequired && <span className="text-destructive">*</span>}
           </Label>
           <PillMultiSelect
             options={sectors}
@@ -980,6 +989,12 @@ function UserForm({
             onToggle={onToggleSector}
             emptyMessage="Nenhum setor cadastrado."
           />
+          {form.profile === "diretor" && (
+            <p className="text-xs text-muted-foreground">
+              Selecione os setores para restringir as aprovações do diretor. Sem
+              nenhum setor, ele aprova requisições de todos os setores.
+            </p>
+          )}
         </div>
       )}
 
