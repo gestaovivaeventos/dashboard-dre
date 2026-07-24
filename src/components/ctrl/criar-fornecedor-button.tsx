@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, Building2, Contact, Globe, KeyRound, MapPin, Plus, User } from "lucide-react";
+import { Banknote, Building2, Contact, Globe, KeyRound, MapPin, Plus, Tags, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
@@ -93,10 +93,15 @@ function maskPhone(value: string): string {
   return digits.replace(/(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d{1,4})$/, "$1-$2");
 }
 
-export function CriarFornecedorButton() {
+export function CriarFornecedorButton({
+  expenseTypes = [],
+}: {
+  expenseTypes?: Array<{ id: string; name: string }>;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [selectedExpenseTypes, setSelectedExpenseTypes] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -106,10 +111,20 @@ export function CriarFornecedorButton() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function toggleExpenseType(id: string) {
+    setSelectedExpenseTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   function close() {
     if (loading) return;
     setOpen(false);
     setForm(emptyForm);
+    setSelectedExpenseTypes(new Set());
     setError(null);
     setSubmitAttempted(false);
   }
@@ -244,6 +259,7 @@ export function CriarFornecedorButton() {
       doc_titular: form.doc_titular || undefined,
       transf_padrao: form.transf_padrao,
       pix_padrao: form.pix_padrao,
+      expenseTypeIds: Array.from(selectedExpenseTypes),
     });
     setLoading(false);
     if ("error" in result && result.error) {
@@ -252,6 +268,7 @@ export function CriarFornecedorButton() {
     }
     setOpen(false);
     setForm(emptyForm);
+    setSelectedExpenseTypes(new Set());
     setSubmitAttempted(false);
     startTransition(() => router.refresh());
   }
@@ -470,6 +487,45 @@ export function CriarFornecedorButton() {
                         className={INPUT_CLS}
                       />
                     </div>
+                  </div>
+                </section>
+
+                {/* Tipos de despesa — pré-seleção que já vem marcada na aprovação */}
+                <section className="rounded-lg border bg-background shadow-sm">
+                  <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                    <Tags className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-semibold">Tipos de despesa</h3>
+                  </header>
+                  <div className="p-4">
+                    <p className="mb-3 text-xs text-muted-foreground">
+                      Vincule os tipos de despesa deste fornecedor. A seleção já virá marcada
+                      na hora da aprovação (o aprovador ainda pode ajustar).
+                    </p>
+                    {expenseTypes.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Nenhum tipo de despesa cadastrado.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {expenseTypes.map((et) => {
+                          const checked = selectedExpenseTypes.has(et.id);
+                          return (
+                            <label
+                              key={et.id}
+                              className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleExpenseType(et.id)}
+                                className="h-4 w-4"
+                              />
+                              <span>{et.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </section>
 

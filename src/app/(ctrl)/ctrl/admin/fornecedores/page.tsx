@@ -132,7 +132,7 @@ export default async function FornecedoresPage() {
             Gestão de fornecedores aprovados para pagamento
           </p>
         </div>
-        <CriarFornecedorButton />
+        <CriarFornecedorButton expenseTypes={expenseTypes} />
       </div>
 
       {suppliersError ? (

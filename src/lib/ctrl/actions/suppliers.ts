@@ -485,6 +485,8 @@ export async function createSupplier(data: {
   doc_titular?: string;
   transf_padrao?: boolean;
   pix_padrao?: boolean;
+  // Tipos de despesa pré-vinculados no cadastro (já vêm marcados na aprovação).
+  expenseTypeIds?: string[];
   // Fornecedor estrangeiro (sem CNPJ/CPF; exige País e Estado).
   estrangeiro?: boolean;
   pais?: string;
@@ -632,6 +634,23 @@ export async function createSupplier(data: {
       return { error: "Já existe um fornecedor com este CNPJ/CPF." };
     }
     return { error: error.message };
+  }
+
+  // Vínculos de tipo de despesa escolhidos no cadastro. Ficam gravados desde já
+  // e reaparecem pré-marcados na tela de aprovação (que ainda pode ajustá-los).
+  const expenseTypeIds = (data.expenseTypeIds ?? []).filter(Boolean);
+  if (expenseTypeIds.length > 0) {
+    const { error: linkError } = await supabase
+      .from("ctrl_supplier_expense_types")
+      .insert(
+        expenseTypeIds.map((expenseTypeId) => ({
+          supplier_id: inserted.id,
+          expense_type_id: expenseTypeId,
+        })),
+      );
+    // Não falha o cadastro por causa do vínculo — o fornecedor já existe e o
+    // aprovador consegue selecionar os tipos manualmente se algo escapar aqui.
+    if (linkError) console.error("createSupplier: falha ao vincular tipos de despesa", linkError);
   }
 
   await logSupplierHistory(supabase, {
