@@ -52,7 +52,7 @@ export async function approveSupplier(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -103,6 +103,7 @@ export async function approveSupplier(
     const supplierData: OmieSupplierData = {
       id: supplier.id,
       name: supplier.name,
+      nome_fantasia: supplier.nome_fantasia,
       cnpj_cpf: supplier.cnpj_cpf,
       email: supplier.email,
       phone: supplier.phone,
@@ -193,7 +194,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
   const { data: supplier } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -275,6 +276,7 @@ export async function updateSupplier(
   supplierId: string,
   data: {
     name?: string;
+    nome_fantasia?: string | null;
     cnpj_cpf?: string | null;
     email?: string | null;
     phone?: string | null;
@@ -310,7 +312,7 @@ export async function updateSupplier(
   const { data: current } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "name, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao",
+      "name, nome_fantasia, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -335,6 +337,9 @@ export async function updateSupplier(
       return { error: "O nome do fornecedor deve ter no máximo 60 caracteres (limite do Omie)." };
     }
     payload.name = trimmed;
+  }
+  if (data.nome_fantasia !== undefined) {
+    payload.nome_fantasia = data.nome_fantasia?.trim().toUpperCase() || null;
   }
   if (data.cnpj_cpf !== undefined) {
     payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
@@ -418,6 +423,7 @@ export async function updateSupplier(
   // internos como status/approved_by que sao consequencia da edicao).
   const TRACKED = [
     "name",
+    "nome_fantasia",
     "cnpj_cpf",
     "email",
     "phone",
@@ -455,6 +461,7 @@ export async function updateSupplier(
 
 export async function createSupplier(data: {
   name: string;
+  nome_fantasia?: string;
   cnpj_cpf?: string;
   email?: string;
   phone?: string;
@@ -568,6 +575,7 @@ export async function createSupplier(data: {
     .from("ctrl_suppliers")
     .insert({
       name: trimmedName,
+      nome_fantasia: data.nome_fantasia?.trim().toUpperCase() || null,
       cnpj_cpf: data.cnpj_cpf?.trim() || null,
       email: data.email?.trim() || null,
       phone: data.phone?.trim() || null,

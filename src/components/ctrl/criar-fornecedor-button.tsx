@@ -21,6 +21,7 @@ interface FormState {
   personType: PersonType;
   estrangeiro: boolean;
   name: string;
+  nome_fantasia: string;
   cnpj_cpf: string;
   // Endereço internacional (só usado quando estrangeiro).
   codigo_pais: string;
@@ -45,6 +46,7 @@ const emptyForm: FormState = {
   personType: "pj",
   estrangeiro: false,
   name: "",
+  nome_fantasia: "",
   cnpj_cpf: "",
   codigo_pais: "",
   cidade: "",
@@ -210,6 +212,7 @@ export function CriarFornecedorButton() {
       : undefined;
     const result = await createSupplier({
       name: form.name,
+      nome_fantasia: form.nome_fantasia || undefined,
       cnpj_cpf: form.estrangeiro ? undefined : form.cnpj_cpf || undefined,
       estrangeiro: form.estrangeiro || undefined,
       pais: form.estrangeiro ? paisNome : undefined,
@@ -389,6 +392,22 @@ export function CriarFornecedorButton() {
                       <p className="text-right text-xs text-muted-foreground">
                         {form.name.length}/60 — limite do Omie
                       </p>
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <label htmlFor="new-supplier-nome-fantasia" className={LABEL_CLS}>
+                        Nome Fantasia
+                      </label>
+                      <input
+                        id="new-supplier-nome-fantasia"
+                        type="text"
+                        maxLength={60}
+                        value={form.nome_fantasia}
+                        onChange={(e) =>
+                          update("nome_fantasia", e.target.value.toUpperCase().slice(0, 60))
+                        }
+                        placeholder="Ex: ACME"
+                        className={INPUT_CLS}
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="new-supplier-cnpj" className={LABEL_CLS}>
