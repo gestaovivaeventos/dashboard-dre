@@ -4,87 +4,95 @@ import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
-
-interface BudgetRow {
-  expense_type_id: string | null;
-  name: string;
-  orcado: number;
-  realizado: number; // realizado importado (planilha) + requisições aprovadas
-  pendente: number;
-}
+import { OrcamentoTable, type OrcamentoRow } from "@/components/ctrl/orcamento-table";
 
 async function getOrcamentoData(year: number) {
   const supabase = await createClient();
 
-  const [budgetRes, requestsRes, typesRes] = await Promise.all([
+  const [budgetRes, requestsRes, typesRes, sectorsRes] = await Promise.all([
     supabase
       .from("ctrl_budget")
-      .select("expense_type_id, amount, realized, ctrl_expense_types(name)")
+      .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
       .eq("period_year", year),
     supabase
       .from("ctrl_requests")
-      .select("expense_type_id, status, amount, due_date, created_at")
+      .select("expense_type_id, sector_id, status, amount, due_date, created_at")
       .not("status", "in", '("rejeitado","estornado","inativado_csc")')
       .is("deleted_at", null) // exclui requisições excluídas logicamente
       .eq("reference_year", year),
-    supabase
-      .from("ctrl_expense_types")
-      .select("id, name")
-      .order("name"),
+    supabase.from("ctrl_expense_types").select("id, name").order("name"),
+    supabase.from("ctrl_sectors").select("id, name"),
   ]);
 
   if (budgetRes.error) return { error: budgetRes.error.message };
   if (requestsRes.error) return { error: requestsRes.error.message };
 
-  const types = typesRes.data ?? [];
+  const typeName = new Map<string, string>((typesRes.data ?? []).map((t) => [t.id, t.name]));
+  typeName.set("__none__", "Sem categoria");
+  const sectorName = new Map<string, string>((sectorsRes.data ?? []).map((s) => [s.id, s.name]));
+  sectorName.set("__none__", "Sem setor");
 
-  // Map expense_type_id → name
-  const nameMap = new Map<string, string>(types.map((t) => [t.id, t.name]));
-  nameMap.set("__none__", "Sem categoria");
+  // Acumuladores por tipo (totais) e por (tipo × setor) — o detalhamento.
+  type Agg = { orcado: number; realizado: number; pendente: number };
+  const newAgg = (): Agg => ({ orcado: 0, realizado: 0, pendente: 0 });
+  const typeAgg = new Map<string, Agg>();
+  const sectorAgg = new Map<string, Map<string, Agg>>();
 
-  // Aggregate budget + realizado importado per expense_type
-  const budgetMap = new Map<string, number>();
-  const realizadoMap = new Map<string, number>();
+  const bump = (typeKey: string, sectorKey: string, field: keyof Agg, val: number) => {
+    let t = typeAgg.get(typeKey);
+    if (!t) { t = newAgg(); typeAgg.set(typeKey, t); }
+    t[field] += val;
+    let sm = sectorAgg.get(typeKey);
+    if (!sm) { sm = new Map(); sectorAgg.set(typeKey, sm); }
+    let s = sm.get(sectorKey);
+    if (!s) { s = newAgg(); sm.set(sectorKey, s); }
+    s[field] += val;
+  };
+
+  // Orçado + realizado importado da planilha (por tipo × setor).
   for (const b of budgetRes.data ?? []) {
-    const key = b.expense_type_id ?? "__none__";
+    const typeKey = b.expense_type_id ?? "__none__";
+    const sectorKey = b.sector_id ?? "__none__";
     const expType = b.ctrl_expense_types as { name: string } | { name: string }[] | null;
-    const typeName = (Array.isArray(expType) ? expType[0]?.name : expType?.name) ?? "Sem categoria";
-    if (!nameMap.has(key)) nameMap.set(key, typeName);
-    budgetMap.set(key, (budgetMap.get(key) ?? 0) + Number(b.amount));
-    realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(b.realized ?? 0));
+    const nm = (Array.isArray(expType) ? expType[0]?.name : expType?.name) ?? null;
+    if (nm && !typeName.has(typeKey)) typeName.set(typeKey, nm);
+    bump(typeKey, sectorKey, "orcado", Number(b.amount));
+    bump(typeKey, sectorKey, "realizado", Number(b.realized ?? 0));
   }
 
-  // A planilha-base já carrega o realizado até 07/07/2026. Para 2026, o
-  // realizado/pendente dinâmico considera apenas ocorrências com VENCIMENTO a
-  // partir de 08/07/2026 (parcelas/recorrências já lançadas seguem contando
-  // pelas datas futuras), evitando desconto duplicado.
-  // Requisições aprovadas somam ao realizado; pendentes ficam à parte.
-  const pendenteMap = new Map<string, number>();
+  // A planilha-base já carrega o realizado até o corte (ver budget-cutoff.ts). O
+  // realizado/pendente dinâmico só conta ocorrências com VENCIMENTO a partir do
+  // corte, evitando desconto duplicado. Aprovadas/agendadas → realizado; demais
+  // em aberto → pendente. Mesmo critério da agregação por tipo, agora por setor.
   for (const r of requestsRes.data ?? []) {
     if (!countsTowardBudget(r, year)) continue;
-    const key = r.expense_type_id ?? "__none__";
+    const typeKey = r.expense_type_id ?? "__none__";
+    const sectorKey = r.sector_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
-    if (isApproved) {
-      realizadoMap.set(key, (realizadoMap.get(key) ?? 0) + Number(r.amount));
-    } else {
-      pendenteMap.set(key, (pendenteMap.get(key) ?? 0) + Number(r.amount));
-    }
+    bump(typeKey, sectorKey, isApproved ? "realizado" : "pendente", Number(r.amount));
   }
 
-  // Merge all keys that appear in any map
-  const allKeys = new Set<string>([
-    ...Array.from(budgetMap.keys()),
-    ...Array.from(realizadoMap.keys()),
-    ...Array.from(pendenteMap.keys()),
-  ]);
-
-  const rows: BudgetRow[] = Array.from(allKeys).map((key) => ({
-    expense_type_id: key === "__none__" ? null : key,
-    name: nameMap.get(key) ?? key,
-    orcado: budgetMap.get(key) ?? 0,
-    realizado: realizadoMap.get(key) ?? 0,
-    pendente: pendenteMap.get(key) ?? 0,
-  })).sort((a, b) => b.orcado - a.orcado || b.realizado - a.realizado);
+  const rows: OrcamentoRow[] = Array.from(typeAgg.entries())
+    .map(([typeKey, t]) => {
+      const sectors = Array.from(sectorAgg.get(typeKey)?.entries() ?? [])
+        .map(([sectorKey, a]) => ({
+          sector_id: sectorKey === "__none__" ? null : sectorKey,
+          sector_name: sectorName.get(sectorKey) ?? sectorKey,
+          orcado: a.orcado,
+          realizado: a.realizado,
+          pendente: a.pendente,
+        }))
+        .sort((x, y) => y.orcado - x.orcado || y.realizado - x.realizado);
+      return {
+        expense_type_id: typeKey === "__none__" ? null : typeKey,
+        name: typeName.get(typeKey) ?? typeKey,
+        orcado: t.orcado,
+        realizado: t.realizado,
+        pendente: t.pendente,
+        sectors,
+      };
+    })
+    .sort((a, b) => b.orcado - a.orcado || b.realizado - a.realizado);
 
   return { rows };
 }
@@ -107,11 +115,6 @@ export default async function OrcamentoPage() {
   const grandDisponivel = grandOrcado - grandRealizado - grandPendente;
 
   const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  function pct(value: number, total: number) {
-    if (total <= 0) return 0;
-    return Math.min(100, (value / total) * 100);
-  }
 
   return (
     <div className="space-y-6">
@@ -150,7 +153,7 @@ export default async function OrcamentoPage() {
         </div>
       </div>
 
-      {/* Tabela */}
+      {/* Tabela — clique num tipo de despesa para ver o detalhamento por setor */}
       {rows.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center">
           <p className="text-sm text-muted-foreground">
@@ -158,63 +161,7 @@ export default async function OrcamentoPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tipo de despesa</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Orçado</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Realizado</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Pendente</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Disponível</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground w-32">Execução</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {rows.map((row) => {
-                const usado = row.realizado + row.pendente;
-                const disponivel = row.orcado - usado;
-                const execPct = pct(row.realizado, row.orcado);
-                const pendPct = pct(row.pendente, row.orcado);
-                const overBudget = row.orcado > 0 && usado > row.orcado;
-                return (
-                  <tr key={row.name} className="hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 font-medium">{row.name}</td>
-                    <td className="px-4 py-3 text-right">{fmt.format(row.orcado)}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{fmt.format(row.realizado)}</td>
-                    <td className="px-4 py-3 text-right text-amber-600">{fmt.format(row.pendente)}</td>
-                    <td className={`px-4 py-3 text-right font-medium ${disponivel < 0 ? "text-red-600" : "text-sky-600"}`}>
-                      {row.orcado > 0 ? fmt.format(disponivel) : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {row.orcado > 0 ? (
-                        <div className="space-y-1">
-                          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                            <div className="h-full flex">
-                              <div
-                                className="bg-green-500 transition-all"
-                                style={{ width: `${execPct}%` }}
-                              />
-                              <div
-                                className={`transition-all ${overBudget ? "bg-red-400" : "bg-amber-400"}`}
-                                style={{ width: `${Math.min(pendPct, 100 - execPct)}%` }}
-                              />
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {(execPct + pendPct).toFixed(0)}% utilizado
-                          </p>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">sem orçamento</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <OrcamentoTable rows={rows} />
       )}
     </div>
   );
