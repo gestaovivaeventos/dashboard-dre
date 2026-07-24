@@ -5,7 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
-import { APPROVAL_ROUTING } from "@/lib/ctrl/routing";
+import {
+  APPROVAL_ROUTING,
+  approverSectorRestrictionFor,
+  normalizeSectorName,
+} from "@/lib/ctrl/routing";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -839,6 +843,11 @@ export async function getRequests(filters?: {
   status?: CtrlRequestStatus;
   sector_id?: string;
   statuses?: CtrlRequestStatus[];
+  // Escopo da tela de Aprovações: aplica a restrição de alçada de aprovação
+  // (APPROVER_SECTOR_RESTRICTIONS). Fora deste escopo (ex.: tela de Requisições)
+  // a restrição NÃO se aplica, para não esconder do gerente as requisições que
+  // ele mesmo criou em outros setores.
+  approvalScope?: boolean;
 }) {
   const ctx = await requireCtrlRole(
     "solicitante",
@@ -893,6 +902,21 @@ export async function getRequests(filters?: {
     }
   }
 
+  // Restrição de alçada de aprovação (só na tela de Aprovações): usuários com
+  // vínculo em vários setores para CRIAR requisições mas alçada de aprovação
+  // limitada a um subconjunto. Intersecta a visibilidade com os setores
+  // permitidos por NOME. Falha fechada: se nenhum setor casar, não mostra nada.
+  if (filters?.approvalScope && approverSectorRestrictionFor(ctx)) {
+    const allowedNames = approverSectorRestrictionFor(ctx)!;
+    const { data: allSectors } = await supabase
+      .from("ctrl_sectors")
+      .select("id, name");
+    const allowedIds = (allSectors ?? [])
+      .filter((s) => s.name != null && allowedNames.has(normalizeSectorName(s.name)))
+      .map((s) => s.id);
+    query = query.in("sector_id", allowedIds);
+  }
+
   const { data, error } = await query;
   if (error) return { error: error.message };
 
@@ -941,6 +965,29 @@ type ApprovableReq = {
   created_by: string;
   request_number: number;
 };
+
+// Guarda autoritativa de alçada de aprovação: dado o setor de uma requisição,
+// retorna uma mensagem de erro se o usuário do contexto NÃO tem alçada para
+// aprovar/rejeitar/pedir info nesse setor (APPROVER_SECTOR_RESTRICTIONS), ou
+// null quando é permitido (ou quando o usuário não tem restrição). É a proteção
+// definitiva — independe da UI e cobre qualquer caminho até a ação.
+async function approverSectorBlock(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
+  sectorId: string | null | undefined,
+): Promise<string | null> {
+  const allowedNames = approverSectorRestrictionFor(ctx);
+  if (!allowedNames) return null; // sem restrição → segue as regras normais
+  if (!sectorId) return "Setor da requisição não identificado.";
+  const { data: sec } = await supabase
+    .from("ctrl_sectors")
+    .select("name")
+    .eq("id", sectorId)
+    .single();
+  const name = sec?.name;
+  if (name && allowedNames.has(normalizeSectorName(name))) return null;
+  return "Você não tem alçada para aprovar requisições deste setor.";
+}
 
 // Notifica os diretores quando uma requisição fora do orçamento avança da etapa
 // do gerente para a do diretor. Solicitante especial → diretor específico.
@@ -1086,6 +1133,9 @@ export async function approveRequest(requestId: string, comment?: string) {
 
   if (fetchErr || !req) return { error: "Requisição não encontrada." };
 
+  const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
+  if (sectorBlock) return { error: sectorBlock };
+
   // Permite aprovar diretamente de dentro da Complementação: a decisão usa a
   // etapa de origem guardada em complement_return_status (gerente/diretor).
   const isComplement = req.status === "aguardando_complementacao";
@@ -1125,11 +1175,13 @@ export async function rejectRequest(requestId: string, reason: string) {
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("id, status, created_by, request_number")
+    .select("id, status, sector_id, created_by, request_number")
     .eq("id", requestId)
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
+  const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
+  if (sectorBlock) return { error: sectorBlock };
   if (
     req.status !== "pendente" &&
     req.status !== "pendente_diretor" &&
@@ -1179,11 +1231,13 @@ export async function requestInfo(requestId: string, question: string) {
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("id, status, created_by, request_number")
+    .select("id, status, sector_id, created_by, request_number")
     .eq("id", requestId)
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
+  const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
+  if (sectorBlock) return { error: sectorBlock };
   if (
     req.status !== "pendente" &&
     req.status !== "pendente_diretor" &&
@@ -1872,6 +1926,12 @@ export async function batchApproveRequests(
   for (const req of requests) {
     if (req.status !== "pendente" && req.status !== "pendente_diretor") {
       results.push({ id: req.id, number: req.request_number, ok: false, error: "Não está pendente." });
+      continue;
+    }
+
+    const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
+    if (sectorBlock) {
+      results.push({ id: req.id, number: req.request_number, ok: false, error: sectorBlock });
       continue;
     }
 

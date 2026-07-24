@@ -14,6 +14,7 @@ export default async function AprovacoesPage() {
 
   const { requests = [], error } = await getRequests({
     statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],
+    approvalScope: true,
   });
 
   // Requisições em complementação cujo último turno é resposta do solicitante
