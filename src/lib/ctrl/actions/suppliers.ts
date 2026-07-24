@@ -289,6 +289,7 @@ export async function updateSupplier(
     titular_banco?: string | null;
     doc_titular?: string | null;
     transf_padrao?: boolean;
+    transf_tipo_conta?: "corrente" | "poupanca" | null;
     pix_padrao?: boolean;
     // Fornecedor estrangeiro.
     estrangeiro?: boolean;
@@ -313,7 +314,7 @@ export async function updateSupplier(
   const { data: current } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "name, nome_fantasia, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao",
+      "name, nome_fantasia, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, transf_tipo_conta, pix_padrao",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -386,6 +387,13 @@ export async function updateSupplier(
   if (data.titular_banco !== undefined) payload.titular_banco = data.titular_banco?.trim() || null;
   if (data.doc_titular !== undefined) payload.doc_titular = data.doc_titular?.trim() || null;
   if (data.transf_padrao !== undefined) payload.transf_padrao = data.transf_padrao;
+  // Sub-tipo da conta (corrente/poupança) só faz sentido com transferência padrão;
+  // ao desligar a transferência, zera o tipo. Se explicitado, prevalece.
+  if (data.transf_tipo_conta !== undefined) {
+    payload.transf_tipo_conta = data.transf_tipo_conta ?? null;
+  } else if (data.transf_padrao === false) {
+    payload.transf_tipo_conta = null;
+  }
   if (data.pix_padrao !== undefined) payload.pix_padrao = data.pix_padrao;
 
   // Fornecedor estrangeiro: quando marcado, País e Estado são obrigatórios e os
@@ -446,6 +454,7 @@ export async function updateSupplier(
     "titular_banco",
     "doc_titular",
     "transf_padrao",
+    "transf_tipo_conta",
     "pix_padrao",
   ] as const;
   const changes: Record<string, [unknown, unknown]> = {};
@@ -484,6 +493,9 @@ export async function createSupplier(data: {
   titular_banco?: string;
   doc_titular?: string;
   transf_padrao?: boolean;
+  // Sub-tipo da transferência padrão (Conta Corrente x Poupança) — usado na
+  // finalidade do lançamento em contas a pagar.
+  transf_tipo_conta?: "corrente" | "poupanca";
   pix_padrao?: boolean;
   // Tipos de despesa pré-vinculados no cadastro (já vêm marcados na aprovação).
   expenseTypeIds?: string[];
@@ -611,6 +623,7 @@ export async function createSupplier(data: {
       titular_banco: data.titular_banco?.trim() || null,
       doc_titular: data.doc_titular?.trim() || null,
       transf_padrao: data.transf_padrao ?? false,
+      transf_tipo_conta: data.transf_padrao ? (data.transf_tipo_conta ?? "corrente") : null,
       pix_padrao: data.pix_padrao ?? false,
       estrangeiro: isEstrangeiro,
       pais: isEstrangeiro ? data.pais?.trim() || null : null,

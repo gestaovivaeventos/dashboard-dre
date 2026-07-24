@@ -76,7 +76,17 @@ interface IntegracaoSupplier {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  // Sub-tipo da transferência padrão: define a finalidade (corrente x poupança).
+  transf_tipo_conta: "corrente" | "poupanca" | null;
 }
+
+// Finalidade da transferência (campo finalidade_transferencia do CNAB Omie).
+// Códigos confirmados lendo lançamentos reais de volta pela API da Omie
+// (ConsultarContaPagar → cnab_integracao_bancaria.finalidade_transferencia).
+const FINALIDADE_TRANSFERENCIA = {
+  corrente: "07", // Conta Corrente — já validado e enviado em produção. NÃO ALTERAR.
+  poupanca: "01.41", // "Transferência PIX por Dados Bancários (Conta Poupança)".
+} as const;
 
 // Monta o bloco cnab_integracao_bancaria conforme o método de pagamento. Antes
 // só boleto era enviado; PIX, PIX copia-e-cola e transferência ficavam sem
@@ -133,12 +143,18 @@ function buildIntegracaoBancaria(
     const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
     const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
     if (banco && agencia && conta && doc && nome) {
+      // Conta poupança usa uma finalidade diferente de conta corrente. O tipo
+      // vem do cadastro do fornecedor (transf_tipo_conta); nulo/legado = corrente.
+      const finalidade =
+        supplier.transf_tipo_conta === "poupanca"
+          ? FINALIDADE_TRANSFERENCIA.poupanca
+          : FINALIDADE_TRANSFERENCIA.corrente;
       return {
         codigo_forma_pagamento: "TRA",
         banco_transferencia: banco,
         agencia_transferencia: agencia,
         conta_corrente_transferencia: conta,
-        finalidade_transferencia: "07", // Pagamento a Fornecedor
+        finalidade_transferencia: finalidade,
         cpf_cnpj_transferencia: doc,
         nome_transferencia: nome,
       };
@@ -171,7 +187,7 @@ export async function launchRequestToOmie(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta",
     )
     .eq("id", request.supplier_id)
     .maybeSingle();

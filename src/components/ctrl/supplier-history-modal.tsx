@@ -38,6 +38,7 @@ const FIELD_LABEL: Record<string, string> = {
   titular_banco: "Titular",
   doc_titular: "Doc. titular",
   transf_padrao: "Transf. padrão",
+  transf_tipo_conta: "Tipo de conta",
   pix_padrao: "PIX padrão",
 };
 
@@ -46,6 +47,9 @@ function formatFieldValue(field: string, raw: unknown): string {
   if (typeof raw === "boolean") return raw ? "Sim" : "Não";
   if (field === "pix_key_type") {
     return PIX_KEY_TYPES.find((p) => p.value === raw)?.label ?? String(raw);
+  }
+  if (field === "transf_tipo_conta") {
+    return raw === "poupanca" ? "Conta Poupança" : raw === "corrente" ? "Conta Corrente" : String(raw);
   }
   return String(raw);
 }

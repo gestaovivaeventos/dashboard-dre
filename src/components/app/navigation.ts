@@ -16,7 +16,6 @@ import {
   MapPinned,
   Music2,
   PieChart,
-  Plane,
   Plug,
   Receipt,
   Sliders,
@@ -257,15 +256,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "case-agenda", title: "Agenda", icon: Calendar, scope: "global", href: "/case/agenda", caseAccess: true },
       { key: "case-dash", title: "Dashboard", icon: LayoutDashboard, scope: "global", href: "/case/dashboard", caseAccess: true },
       { key: "case-config", title: "Configuracao Omie", icon: Sliders, scope: "global", href: "/case/config", dreRoles: ["admin"] },
-    ],
-  },
-  {
-    id: "viagens",
-    label: "VIAGENS",
-    items: [
-      { key: "vg-req", title: "Requisicoes", icon: Plane, scope: "global", href: "/viagens/requisicoes", viagensAccess: true },
-      { key: "vg-apr", title: "Aprovacoes", icon: CheckSquare, scope: "global", href: "/viagens/aprovacoes", viagensAccess: true, viagensAprovarOnly: true },
-      { key: "vg-config", title: "Configuracao", icon: Sliders, scope: "global", href: "/viagens/config", dreRoles: ["admin"] },
     ],
   },
   {

@@ -154,6 +154,7 @@ export interface CtrlSupplier {
   id: string;
   omie_id: number | null;
   name: string;
+  nome_fantasia: string | null;
   cnpj_cpf: string | null;
   email: string | null;
   phone: string | null;
@@ -173,6 +174,7 @@ export interface CtrlSupplier {
   titular_banco: string | null;
   doc_titular: string | null;
   transf_padrao: boolean;
+  transf_tipo_conta: "corrente" | "poupanca" | null;
   pix_padrao: boolean;
   omie_sync_required: boolean;
   // Fornecedor estrangeiro (sem CNPJ/CPF; no Omie vira estado=EX + codigo_pais).

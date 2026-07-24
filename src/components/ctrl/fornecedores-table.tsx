@@ -26,6 +26,7 @@ interface SupplierRow {
   titular_banco: string | null;
   doc_titular: string | null;
   transf_padrao: boolean;
+  transf_tipo_conta: "corrente" | "poupanca" | null;
   pix_padrao: boolean;
   estrangeiro: boolean;
   pais: string | null;
@@ -169,6 +170,7 @@ export function FornecedoresTable({
       titular_banco: editForm.titular_banco,
       doc_titular: editForm.doc_titular,
       transf_padrao: editForm.transf_padrao,
+      transf_tipo_conta: editForm.transf_padrao ? editForm.transf_tipo_conta || "corrente" : null,
       pix_padrao: editForm.pix_padrao,
     });
     setEditSaving(false);
@@ -826,11 +828,32 @@ export function FornecedoresTable({
                     <label className="flex items-center gap-2 text-sm sm:col-span-2">
                       <input
                         type="checkbox"
-                        checked={editForm.transf_padrao}
-                        onChange={(e) => setEditForm({ ...editForm, transf_padrao: e.target.checked })}
+                        checked={editForm.transf_padrao && editForm.transf_tipo_conta === "corrente"}
+                        onChange={(e) =>
+                          setEditForm({
+                            ...editForm,
+                            transf_padrao: e.target.checked,
+                            transf_tipo_conta: e.target.checked ? "corrente" : "",
+                          })
+                        }
                         className="h-4 w-4"
                       />
-                      Usar transferência como método padrão
+                      Usar transferência como método de pagamento padrão - Conta Corrente
+                    </label>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={editForm.transf_padrao && editForm.transf_tipo_conta === "poupanca"}
+                        onChange={(e) =>
+                          setEditForm({
+                            ...editForm,
+                            transf_padrao: e.target.checked,
+                            transf_tipo_conta: e.target.checked ? "poupanca" : "",
+                          })
+                        }
+                        className="h-4 w-4"
+                      />
+                      Usar transferência como método de pagamento padrão - Conta Poupança
                     </label>
                   </div>
                 ) : (
@@ -866,7 +889,13 @@ export function FornecedoresTable({
                         />
                         <DataField
                           label="Transf. padrão"
-                          value={detailSupplier.transf_padrao ? "Sim" : "Não"}
+                          value={
+                            detailSupplier.transf_padrao
+                              ? detailSupplier.transf_tipo_conta === "poupanca"
+                                ? "Sim - Conta Poupança"
+                                : "Sim - Conta Corrente"
+                              : "Não"
+                          }
                         />
                       </dl>
                     )}
@@ -1022,7 +1051,13 @@ export function FornecedoresTable({
                       />
                       <DataField
                         label="Transf. padrão"
-                        value={approveModal.transf_padrao ? "Sim" : "Não"}
+                        value={
+                          approveModal.transf_padrao
+                            ? approveModal.transf_tipo_conta === "poupanca"
+                              ? "Sim - Conta Poupança"
+                              : "Sim - Conta Corrente"
+                            : "Não"
+                        }
                       />
                     </dl>
                   )}
@@ -1190,6 +1225,7 @@ interface EditFormState {
   titular_banco: string;
   doc_titular: string;
   transf_padrao: boolean;
+  transf_tipo_conta: "" | "corrente" | "poupanca";
   pix_padrao: boolean;
 }
 
@@ -1214,6 +1250,7 @@ function emptyEditForm(): EditFormState {
     titular_banco: "",
     doc_titular: "",
     transf_padrao: false,
+    transf_tipo_conta: "",
     pix_padrao: false,
   };
 }
@@ -1239,6 +1276,8 @@ function toEditForm(s: SupplierRow): EditFormState {
     titular_banco: s.titular_banco ?? "",
     doc_titular: s.doc_titular ?? "",
     transf_padrao: !!s.transf_padrao,
+    // Cadastros legados com transferência padrão mas sem tipo → assume corrente.
+    transf_tipo_conta: s.transf_tipo_conta ?? (s.transf_padrao ? "corrente" : ""),
     pix_padrao: !!s.pix_padrao,
   };
 }

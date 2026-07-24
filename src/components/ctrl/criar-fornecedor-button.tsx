@@ -40,6 +40,9 @@ interface FormState {
   titular_banco: string;
   doc_titular: string;
   transf_padrao: boolean;
+  // Sub-tipo da transferência padrão: "corrente" ou "poupanca". Só relevante
+  // quando transf_padrao=true; define a finalidade no lançamento em contas a pagar.
+  transf_tipo_conta: "" | "corrente" | "poupanca";
   pix_padrao: boolean;
 }
 
@@ -64,6 +67,7 @@ const emptyForm: FormState = {
   titular_banco: "",
   doc_titular: "",
   transf_padrao: false,
+  transf_tipo_conta: "",
   pix_padrao: false,
 };
 
@@ -258,6 +262,7 @@ export function CriarFornecedorButton({
       titular_banco: form.titular_banco || undefined,
       doc_titular: form.doc_titular || undefined,
       transf_padrao: form.transf_padrao,
+      transf_tipo_conta: form.transf_padrao ? form.transf_tipo_conta || "corrente" : undefined,
       pix_padrao: form.pix_padrao,
       expenseTypeIds: Array.from(selectedExpenseTypes),
     });
@@ -801,10 +806,12 @@ export function CriarFornecedorButton({
                     <label className="flex items-center gap-2 text-sm sm:col-span-2">
                       <input
                         type="checkbox"
-                        checked={form.transf_padrao}
+                        checked={form.transf_padrao && form.transf_tipo_conta === "corrente"}
                         onChange={(e) => {
                           const checked = e.target.checked;
+                          // Mutuamente exclusivo com "Conta Poupança".
                           update("transf_padrao", checked);
+                          update("transf_tipo_conta", checked ? "corrente" : "");
                           // Na maioria dos casos a conta é do próprio fornecedor —
                           // pré-preenche titular/documento pra não digitar de novo.
                           if (checked) {
@@ -818,7 +825,29 @@ export function CriarFornecedorButton({
                         }}
                         className="h-4 w-4"
                       />
-                      Usar transferência como método de pagamento padrão
+                      Usar transferência como método de pagamento padrão - Conta Corrente
+                    </label>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={form.transf_padrao && form.transf_tipo_conta === "poupanca"}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          // Mutuamente exclusivo com "Conta Corrente".
+                          update("transf_padrao", checked);
+                          update("transf_tipo_conta", checked ? "poupanca" : "");
+                          if (checked) {
+                            if (!form.titular_banco.trim() && form.name.trim()) {
+                              update("titular_banco", form.name.trim());
+                            }
+                            if (!form.doc_titular.trim() && form.cnpj_cpf.trim()) {
+                              update("doc_titular", form.cnpj_cpf.trim());
+                            }
+                          }
+                        }}
+                        className="h-4 w-4"
+                      />
+                      Usar transferência como método de pagamento padrão - Conta Poupança
                     </label>
                     {form.transf_padrao && bankMissing.length > 0 && (
                       <p className="text-xs text-destructive sm:col-span-2">

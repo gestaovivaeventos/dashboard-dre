@@ -8,7 +8,7 @@ import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
 import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
 const SUPPLIERS_SELECT = `id, name, nome_fantasia, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
-   chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, pix_padrao,
+   chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, transf_tipo_conta, pix_padrao,
    estrangeiro, pais, codigo_pais, estado, cidade, endereco, endereco_numero, complemento,
    status, rejection_reason, created_at, approved_at,
    approver:users!ctrl_suppliers_approved_by_fkey(name, email),
@@ -81,6 +81,7 @@ async function getData() {
       titular_banco: string | null;
       doc_titular: string | null;
       transf_padrao: boolean | null;
+      transf_tipo_conta: "corrente" | "poupanca" | null;
       pix_padrao: boolean | null;
       estrangeiro: boolean | null;
       pais: string | null;
@@ -166,6 +167,7 @@ export default async function FornecedoresPage() {
               titular_banco: s.titular_banco,
               doc_titular: s.doc_titular,
               transf_padrao: s.transf_padrao ?? false,
+              transf_tipo_conta: s.transf_tipo_conta ?? null,
               pix_padrao: s.pix_padrao ?? false,
               estrangeiro: s.estrangeiro ?? false,
               pais: s.pais,
