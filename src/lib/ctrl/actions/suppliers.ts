@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
+import { omieNameError } from "@/lib/ctrl/supplier-name";
 import type { CtrlSupplier } from "@/lib/supabase/types";
 import { decryptSecret } from "@/lib/security/encryption";
 import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
@@ -336,10 +337,20 @@ export async function updateSupplier(
     if (trimmed.length > 60) {
       return { error: "O nome do fornecedor deve ter no máximo 60 caracteres (limite do Omie)." };
     }
+    // A Omie não aceita acento nem cedilha na razão social/nome fantasia.
+    const nameOmieError = omieNameError(trimmed);
+    if (nameOmieError) return { error: nameOmieError };
     payload.name = trimmed;
   }
   if (data.nome_fantasia !== undefined) {
-    payload.nome_fantasia = data.nome_fantasia?.trim().toUpperCase() || null;
+    const trimmedNomeFantasia = data.nome_fantasia?.trim().toUpperCase() || "";
+    if (!trimmedNomeFantasia) return { error: "O nome fantasia do fornecedor não pode ficar vazio." };
+    if (trimmedNomeFantasia.length > 60) {
+      return { error: "O nome fantasia deve ter no máximo 60 caracteres (limite do Omie)." };
+    }
+    const fantasiaOmieError = omieNameError(trimmedNomeFantasia);
+    if (fantasiaOmieError) return { error: fantasiaOmieError };
+    payload.nome_fantasia = trimmedNomeFantasia;
   }
   if (data.cnpj_cpf !== undefined) {
     payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
@@ -547,6 +558,14 @@ export async function createSupplier(data: {
   if (trimmedName.length > 60) {
     return { error: "O nome do fornecedor deve ter no máximo 60 caracteres (limite do Omie)." };
   }
+  const trimmedNomeFantasia = (data.nome_fantasia ?? "").trim().toUpperCase();
+  if (!trimmedNomeFantasia) return { error: "O nome fantasia do fornecedor é obrigatório." };
+  if (trimmedNomeFantasia.length > 60) {
+    return { error: "O nome fantasia deve ter no máximo 60 caracteres (limite do Omie)." };
+  }
+  // A Omie não aceita acento nem cedilha na razão social/nome fantasia.
+  const nameOmieError = omieNameError(trimmedName) ?? omieNameError(trimmedNomeFantasia);
+  if (nameOmieError) return { error: nameOmieError };
 
   // Dedupe por CNPJ/CPF normalizado (só dígitos) — bloqueia mesmo se o
   // existente ainda estiver pendente, pra evitar fila de duplicatas em
@@ -575,7 +594,7 @@ export async function createSupplier(data: {
     .from("ctrl_suppliers")
     .insert({
       name: trimmedName,
-      nome_fantasia: data.nome_fantasia?.trim().toUpperCase() || null,
+      nome_fantasia: trimmedNomeFantasia,
       cnpj_cpf: data.cnpj_cpf?.trim() || null,
       email: data.email?.trim() || null,
       phone: data.phone?.trim() || null,

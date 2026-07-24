@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
+import { omieNameError } from "@/lib/ctrl/supplier-name";
 import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL } from "@/lib/ctrl/paises";
 
 const INPUT_CLS =
@@ -172,6 +173,16 @@ export function CriarFornecedorButton() {
     setSubmitAttempted(true);
     if (!form.name.trim()) {
       setError("Informe o nome do fornecedor.");
+      return;
+    }
+    if (!form.nome_fantasia.trim()) {
+      setError("Informe o nome fantasia do fornecedor.");
+      return;
+    }
+    // A Omie não aceita acento nem cedilha na razão social/nome fantasia.
+    const nameError = omieNameError(form.name) ?? omieNameError(form.nome_fantasia);
+    if (nameError) {
+      setError(nameError);
       return;
     }
     if (form.estrangeiro) {
@@ -395,11 +406,12 @@ export function CriarFornecedorButton() {
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
                       <label htmlFor="new-supplier-nome-fantasia" className={LABEL_CLS}>
-                        Nome Fantasia
+                        Nome Fantasia <span className="text-destructive">*</span>
                       </label>
                       <input
                         id="new-supplier-nome-fantasia"
                         type="text"
+                        required
                         maxLength={60}
                         value={form.nome_fantasia}
                         onChange={(e) =>

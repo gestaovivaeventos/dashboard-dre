@@ -5,6 +5,7 @@ import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, Truck,
 
 import { approveSupplier, rejectSupplier, updateSupplier, resyncSupplierOmie } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
+import { omieNameError } from "@/lib/ctrl/supplier-name";
 import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL, paisNomeByCodigo } from "@/lib/ctrl/paises";
 import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
 
@@ -124,6 +125,16 @@ export function FornecedoresTable({
     if (!detailSupplier) return;
     if (!editForm.name.trim()) {
       setEditError("O nome do fornecedor é obrigatório.");
+      return;
+    }
+    if (!editForm.nome_fantasia.trim()) {
+      setEditError("O nome fantasia do fornecedor é obrigatório.");
+      return;
+    }
+    // A Omie não aceita acento nem cedilha na razão social/nome fantasia.
+    const nameError = omieNameError(editForm.name) ?? omieNameError(editForm.nome_fantasia);
+    if (nameError) {
+      setEditError(nameError);
       return;
     }
     if (editForm.estrangeiro && !editForm.codigo_pais) {
@@ -671,7 +682,7 @@ export function FornecedoresTable({
                       Fornecedor estrangeiro (sem CNPJ/CPF)
                     </label>
                     <EditField label="Nome *" value={editForm.name} maxLength={60} onChange={(v) => setEditForm({ ...editForm, name: v })} />
-                    <EditField label="Nome Fantasia" value={editForm.nome_fantasia} maxLength={60} onChange={(v) => setEditForm({ ...editForm, nome_fantasia: v })} />
+                    <EditField label="Nome Fantasia *" value={editForm.nome_fantasia} maxLength={60} onChange={(v) => setEditForm({ ...editForm, nome_fantasia: v })} />
                     {editForm.estrangeiro ? (
                       <div className="space-y-1">
                         <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
