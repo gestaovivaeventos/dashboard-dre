@@ -400,7 +400,14 @@ export async function launchRequestToOmie(
       msg.includes("agencia") ||
       msg.includes("finalidade") ||
       msg.includes("forma_pagamento") ||
-      msg.includes("forma de pagamento")
+      msg.includes("forma de pagamento") ||
+      // Conta pagadora que não gera remessa (ex.: caixinha/banco 999 sem
+      // instituição). Sem o bloco CNAB o título é criado normalmente e o
+      // pagamento é feito manualmente no Omie.
+      msg.includes("remessa") ||
+      msg.includes("instituição") ||
+      msg.includes("instituicao") ||
+      msg.includes("id_conta_corrente")
     );
   };
 
