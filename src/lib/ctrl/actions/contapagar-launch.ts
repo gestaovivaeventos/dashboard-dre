@@ -230,9 +230,14 @@ export async function launchRequestToOmie(
 
   const { data: ccRow } = await supabase
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao")
+    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, skip_cnab_remessa")
     .eq("company_id", companyId)
     .maybeSingle();
+
+  // Empresa cuja conta no Omie não emite remessa de pagamento (ex.: V Company):
+  // o título é criado SEM o bloco de integração bancária (CNAB). Ver migração
+  // 20260723120000. O pagamento é feito manualmente no Omie.
+  const skipCnabRemessa = Boolean(ccRow?.skip_cnab_remessa);
 
   // Conta corrente por método: dinheiro→caixa físico, cartão→cartão; ambos com
   // fallback para a conta padrão. Demais métodos usam a padrão.
@@ -347,8 +352,11 @@ export async function launchRequestToOmie(
       : ((request.invoice_number as string | null) ?? "");
 
   // Integração bancária (CNAB) conforme o método: boleto, PIX, PIX copia-e-cola
-  // ou transferência.
-  const integracaoBancaria = buildIntegracaoBancaria(request, supplier);
+  // ou transferência. Empresas com skip_cnab_remessa não enviam esse bloco (a
+  // conta delas no Omie não gera remessa) — o título é criado sem a remessa.
+  const integracaoBancaria = skipCnabRemessa
+    ? null
+    : buildIntegracaoBancaria(request, supplier);
 
   // Projeto Omie a partir do EVENTO da requisição. O evento (ControlHub) casa
   // com o projeto cadastrado na Omie da empresa pagadora pelo NOME. Só vincula
@@ -408,7 +416,14 @@ export async function launchRequestToOmie(
       msg.includes("agencia") ||
       msg.includes("finalidade") ||
       msg.includes("forma_pagamento") ||
-      msg.includes("forma de pagamento")
+      msg.includes("forma de pagamento") ||
+      // Conta pagadora que não gera remessa (ex.: caixinha/banco 999 sem
+      // instituição). Sem o bloco CNAB o título é criado normalmente e o
+      // pagamento é feito manualmente no Omie.
+      msg.includes("remessa") ||
+      msg.includes("instituição") ||
+      msg.includes("instituicao") ||
+      msg.includes("id_conta_corrente")
     );
   };
 

@@ -115,6 +115,9 @@ export interface OmieMappingData {
   contaCorrente: string | null;
   contaCorrenteCaixa: string | null;
   contaCorrenteCartao: string | null;
+  // Empresa cuja conta no Omie não emite remessa de pagamento: o lançamento
+  // cria o título sem o bloco CNAB (pagamento manual no Omie).
+  skipCnabRemessa: boolean;
   lastSyncedAt: string | null;
 }
 
@@ -185,7 +188,7 @@ export async function getOmieMappingData(
   // Conta corrente config
   const { data: ccConfig, error: ccErr } = await db
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao")
+    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, skip_cnab_remessa")
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -216,6 +219,7 @@ export async function getOmieMappingData(
     contaCorrente: ccConfig?.codigo_conta_corrente ?? null,
     contaCorrenteCaixa: ccConfig?.codigo_conta_corrente_caixa ?? null,
     contaCorrenteCartao: ccConfig?.codigo_conta_corrente_cartao ?? null,
+    skipCnabRemessa: ccConfig?.skip_cnab_remessa ?? false,
     lastSyncedAt,
   };
 }
@@ -246,6 +250,34 @@ export async function saveExpenseTypeCategoria(
         updated_at: new Date().toISOString(),
       },
       { onConflict: "expense_type_id,company_id" },
+    );
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/ctrl/admin/omie-mapeamento");
+  return { ok: true };
+}
+
+// ─── saveSkipCnabRemessa ──────────────────────────────────────────────────────
+
+// Liga/desliga o "não gerar remessa de pagamento" da empresa. Quando ligado, o
+// lançamento no Omie cria o título sem o bloco CNAB (ver contapagar-launch.ts).
+export async function saveSkipCnabRemessa(
+  companyId: string,
+  skip: boolean,
+): Promise<{ ok: true } | { error: string }> {
+  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+  const db = createAdminClient();
+
+  const { error } = await db
+    .from("ctrl_company_omie_config")
+    .upsert(
+      {
+        company_id: companyId,
+        skip_cnab_remessa: skip,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "company_id" },
     );
 
   if (error) return { error: error.message };
