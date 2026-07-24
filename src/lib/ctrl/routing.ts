@@ -42,3 +42,64 @@ export function isForcedDirectorRouting(input: {
     input.created_by === APPROVAL_ROUTING.directorOnly.requesterId
   );
 }
+
+// ─── Restrição de setores de APROVAÇÃO ────────────────────────────────────────
+//
+// A tabela user_sectors controla DOIS papéis ao mesmo tempo: os setores em que o
+// usuário pode CRIAR requisições e, para gerentes, os setores que ele pode
+// VER/APROVAR. Alguns gerentes precisam solicitar em vários setores (logo, estão
+// vinculados a todos), mas só têm alçada para aprovar um subconjunto.
+//
+// Este override separa a alçada de aprovação sem mexer nos vínculos: o usuário
+// segue com todos os setores para criar requisições, mas na tela de Aprovações
+// (e nas ações de aprovação no servidor) só enxerga/age nos setores listados
+// aqui. Identificamos por e-mail (chave natural estável); os setores são casados
+// por NOME (ctrl_sectors.name é único), de forma resiliente a acento/caixa.
+export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
+  email: string;
+  allowedSectorNames: readonly string[];
+}> = [
+  {
+    // Regis Adriano Da Costa — solicita em todos os setores, mas como gerente só
+    // aprova estes três.
+    email: "regis@vivaeventos.com.br",
+    allowedSectorNames: [
+      "Gestão de Pessoas",
+      "Associação Bem Laranja",
+      "Eventos Oficiais",
+    ],
+  },
+];
+
+// Faixa Unicode de marcas diacríticas combinantes (U+0300–U+036F), construída
+// em runtime para manter o source ASCII e dispensar a flag /u do regex.
+const COMBINING_DIACRITICS = new RegExp(
+  "[" + String.fromCharCode(0x300) + "-" + String.fromCharCode(0x36f) + "]",
+  "g",
+);
+
+/** Normaliza um nome de setor para comparação resiliente (sem acento/caixa/espaços). */
+export function normalizeSectorName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(COMBINING_DIACRITICS, "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Conjunto (normalizado) de nomes de setor que o usuário PODE aprovar, quando há
+ * uma restrição de alçada configurada para ele. Retorna `null` quando o usuário
+ * não tem restrição — nesse caso a alçada segue os vínculos normais.
+ */
+export function approverSectorRestrictionFor(user: {
+  email?: string | null;
+}): Set<string> | null {
+  const email = user.email?.trim().toLowerCase();
+  if (!email) return null;
+  const rule = APPROVER_SECTOR_RESTRICTIONS.find(
+    (r) => r.email.trim().toLowerCase() === email,
+  );
+  if (!rule) return null;
+  return new Set(rule.allowedSectorNames.map(normalizeSectorName));
+}
