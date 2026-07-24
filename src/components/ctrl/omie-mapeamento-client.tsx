@@ -9,6 +9,7 @@ import {
   saveExpenseTypeCategoria,
   saveSectorDepartamento,
   saveContaCorrente,
+  saveSkipCnabRemessa,
   type OmieMappingData,
 } from "@/lib/ctrl/actions/omie-mapping";
 
@@ -100,6 +101,22 @@ export function OmieMapeamentoClient({ companies }: Props) {
       } else {
         setSaveFeedback({ id: feedbackId, ok: true, msg: "Salvo" });
         setTimeout(() => setSaveFeedback((f) => (f?.id === feedbackId ? null : f)), 2000);
+      }
+    });
+  }
+
+  function handleSkipCnab(skip: boolean) {
+    if (!companyId || !data) return;
+    const prev = data.skipCnabRemessa;
+    setData({ ...data, skipCnabRemessa: skip });
+    startTransition(async () => {
+      const res = await saveSkipCnabRemessa(companyId, skip);
+      if ("error" in res) {
+        setData({ ...data, skipCnabRemessa: prev });
+        setSaveFeedback({ id: "skip_cnab", ok: false, msg: res.error });
+      } else {
+        setSaveFeedback({ id: "skip_cnab", ok: true, msg: "Salvo" });
+        setTimeout(() => setSaveFeedback((f) => (f?.id === "skip_cnab" ? null : f)), 2000);
       }
     });
   }
@@ -319,6 +336,31 @@ export function OmieMapeamentoClient({ companies }: Props) {
                       </span>
                     )}
                   </div>
+                </div>
+
+                {/* Empresas cuja conta no Omie não emite remessa de pagamento. */}
+                <div className="flex items-start gap-3 rounded-md border bg-muted/20 px-3 py-2.5">
+                  <input
+                    id="skip-cnab"
+                    type="checkbox"
+                    checked={data.skipCnabRemessa}
+                    onChange={(e) => handleSkipCnab(e.target.checked)}
+                    disabled={isPending}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300"
+                  />
+                  <label htmlFor="skip-cnab" className="min-w-0 flex-1 cursor-pointer text-sm">
+                    <span className="font-medium">Não gerar remessa de pagamento no Omie</span>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Marque para empresas cuja conta no Omie não emite remessa (ex.: sem
+                      instituição bancária). O título é criado normalmente, mas o pagamento é
+                      feito manualmente no Omie.
+                    </p>
+                  </label>
+                  {saveFeedback?.id === "skip_cnab" && (
+                    <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                      {saveFeedback.msg}
+                    </span>
+                  )}
                 </div>
               </section>
 
