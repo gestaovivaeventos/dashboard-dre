@@ -1,6 +1,8 @@
 import { generateObject, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
+
 import {
   resolveOnePageSystemPrompt,
   buildOnePageReportUserPrompt,
@@ -78,14 +80,12 @@ export async function analyzeOnePageReport(
   const input: OnePageInput = parsedInput.data;
 
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new OnePageReportError(
-      "OPENAI_API_KEY nao configurada no ambiente. Defina a variavel em .env.local para usar o motor de analise.",
-    );
-  }
 
-  const provider = createOpenAI({ apiKey });
+  // Resolve o provedor ativo (OpenAI/DeepSeek) via config no banco. `options.apiKey`
+  // força OpenAI direto (usado em testes) e pula a medição de consumo.
+  const resolved = options.apiKey ? null : await resolveAiProvider({ capability: "text" });
+  const provider = resolved ? resolved.provider : createOpenAI({ apiKey: options.apiKey as string });
+  const modelName = options.model ?? resolved?.modelName ?? opts.model;
   const userPrompt = buildOnePageReportUserPrompt(input);
   // Seleciona o contexto de negocio conforme o segmento da empresa: as regras
   // das Franquias Viva so se aplicam ao segmento "franquias-viva"; demais
@@ -96,8 +96,8 @@ export async function analyzeOnePageReport(
   //    response_format do OpenAI por baixo e valida internamente — quando
   //    nao bate com o schema, lanca NoObjectGeneratedError.
   try {
-    const { object } = await generateObject({
-      model: provider(opts.model),
+    const { object, usage } = await generateObject({
+      model: provider(modelName),
       schema: OnePageReportSchema,
       system: systemPrompt,
       prompt: userPrompt,
@@ -114,6 +114,7 @@ export async function analyzeOnePageReport(
         verified.error,
       );
     }
+    if (resolved) await logResolvedUsage(resolved, "bi", usage);
     return verified.data;
   } catch (err) {
     if (err instanceof OnePageReportError) throw err;
@@ -122,8 +123,8 @@ export async function analyzeOnePageReport(
     // adicional. Se falhar de novo, propaga sem inventar analise.
     if (err instanceof NoObjectGeneratedError) {
       try {
-        const { object } = await generateObject({
-          model: provider(opts.model),
+        const { object, usage } = await generateObject({
+          model: provider(modelName),
           schema: OnePageReportSchema,
           system: systemPrompt,
           prompt:
@@ -140,6 +141,7 @@ export async function analyzeOnePageReport(
             verified.error,
           );
         }
+        if (resolved) await logResolvedUsage(resolved, "bi", usage);
         return verified.data;
       } catch (retryErr) {
         if (retryErr instanceof OnePageReportError) throw retryErr;

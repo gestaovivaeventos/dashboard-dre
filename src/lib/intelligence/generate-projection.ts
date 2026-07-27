@@ -1,8 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { resolveFranquiasVivaCustosNegationForCompanies } from "@/lib/dashboard/franquias-viva-custos";
@@ -85,11 +84,13 @@ export async function generateProjection({
 
   const horizonLabel = `Proximos ${horizonMonths} meses`;
 
-  const { text } = await generateText({
-    model: openai("gpt-4o-mini"),
+  const resolved = await resolveAiProvider({ capability: "text" });
+  const { text, usage } = await generateText({
+    model: resolved.provider(resolved.modelName),
     system: PROJECTION_SYSTEM_PROMPT,
     prompt: `Historico de 12 meses de "${companyName}". Projete os proximos ${horizonMonths} meses.\n\n${JSON.stringify(historico, null, 2)}`,
   });
+  await logResolvedUsage(resolved, "projecao", usage);
 
   const aiAnalysis = JSON.parse(text);
   const html = renderProjectionEmail({ companyName, horizonLabel, aiAnalysis });

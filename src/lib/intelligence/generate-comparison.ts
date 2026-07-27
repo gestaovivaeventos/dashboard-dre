@@ -1,9 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { resolveFranquiasVivaCustosNegationForCompanies } from "@/lib/dashboard/franquias-viva-custos";
 import { COMPARISON_SYSTEM_PROMPT } from "@/lib/intelligence/prompts";
@@ -106,8 +105,9 @@ export async function generateComparison(
   }
 
   // 5. Call AI
-  const { text } = await generateText({
-    model: openai("gpt-4o-mini"),
+  const resolved = await resolveAiProvider({ capability: "text" });
+  const { text, usage } = await generateText({
+    model: resolved.provider(resolved.modelName),
     system: COMPARISON_SYSTEM_PROMPT,
     prompt: JSON.stringify({
       periodo: periodLabel,
@@ -115,6 +115,7 @@ export async function generateComparison(
       empresas: companiesContext,
     }),
   });
+  await logResolvedUsage(resolved, "comparacao", usage);
 
   // 6. Parse AI JSON and render
   const aiAnalysis = JSON.parse(text) as ComparisonData["aiAnalysis"];

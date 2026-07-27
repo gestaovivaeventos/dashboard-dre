@@ -1,10 +1,10 @@
 "use server";
 
 import { generateObject } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCaseUser } from "@/lib/case/auth";
@@ -128,8 +128,8 @@ export async function extractFornecedorContract(
   await requireCaseUser();
   if (!attachmentPath) return { error: "Anexo não informado." };
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
+  const resolved = await resolveAiProvider({ capability: "vision" }).catch(() => null);
+  if (!resolved) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
 
   const db = (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
   const { data: blob, error: dlErr } = await db.storage.from(ATTACHMENT_BUCKET).download(attachmentPath);
@@ -144,7 +144,7 @@ export async function extractFornecedorContract(
       ? { type: "file" as const, data: bytes, mediaType }
       : { type: "file" as const, data: bytes, mediaType, providerOptions: { openai: { imageDetail: "high" as const } } };
 
-  const provider = createOpenAI({ apiKey });
+  const provider = resolved.provider;
 
   try {
     const res = await generateObject({
@@ -172,6 +172,7 @@ export async function extractFornecedorContract(
       ],
     });
     const o = res.object;
+    await logResolvedUsage(resolved, "ocr", res.usage, { modelName: OCR_MODEL });
     return {
       data: {
         nome: (o.fornecedor_nome ?? "").trim() || null,
@@ -205,8 +206,8 @@ export async function extractArtistContract(
   const ctx = await requireCaseUser();
   if (!attachmentPath) return { error: "Anexo não informado." };
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
+  const resolved = await resolveAiProvider({ capability: "vision" }).catch(() => null);
+  if (!resolved) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
 
   const db = (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
 
@@ -222,7 +223,7 @@ export async function extractArtistContract(
       ? { type: "file" as const, data: bytes, mediaType }
       : { type: "file" as const, data: bytes, mediaType, providerOptions: { openai: { imageDetail: "high" as const } } };
 
-  const provider = createOpenAI({ apiKey });
+  const provider = resolved.provider;
 
   let object: z.infer<typeof ArtistContractSchema>;
   try {
@@ -248,6 +249,7 @@ export async function extractArtistContract(
       ],
     });
     object = res.object;
+    await logResolvedUsage(resolved, "ocr", res.usage, { modelName: OCR_MODEL });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { error: `Não consegui interpretar o contrato: ${msg}` };

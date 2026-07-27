@@ -1,6 +1,7 @@
 import { generateObject, generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
+
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 
 const HARD_TIMEOUT_MS = 150_000;
 
@@ -60,9 +61,11 @@ export async function searchWebPrices(params: {
   dataVolta: string;
   candidatos: Array<{ iata: string; cidade: string }>;
 }): Promise<WebSearchOutcome> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY ausente" };
-  const provider = createOpenAI({ apiKey });
+  // Web search é recurso exclusivo da OpenAI — o resolver força OpenAI mesmo se
+  // o provedor ativo for outro. O consumo é registrado no painel de IA.
+  const resolved = await resolveAiProvider({ capability: "web_search" }).catch(() => null);
+  if (!resolved) return { ok: false, error: "OPENAI_API_KEY ausente" };
+  const provider = resolved.provider;
 
   const rotas = params.candidatos
     .map((c) => `${c.iata} (${c.cidade})${params.destinoIata ? ` → ${params.destinoIata}` : ` → ${params.destino}`}`)
@@ -87,7 +90,7 @@ export async function searchWebPrices(params: {
     "Faça quantas buscas forem necessárias (uma por rota aérea, no mínimo). " +
     "Liste cada preço encontrado com valor em R$ e a fonte.";
 
-  const attempts: Array<{ engine: string; run: () => Promise<{ text: string; sources?: unknown[] }> }> = [
+  const attempts: Array<{ engine: string; run: () => Promise<{ text: string; sources?: unknown[]; usage?: unknown }> }> = [
     {
       engine: "gpt-5-mini/web_search",
       run: () =>
@@ -141,7 +144,7 @@ export async function searchWebPrices(params: {
         ),
       ).slice(0, 10);
 
-      const { object } = await generateObject({
+      const { object, usage: structUsage } = await generateObject({
         model: provider("gpt-4o-mini"),
         schema: WebPricesSchema,
         temperature: 0,
@@ -151,6 +154,9 @@ export async function searchWebPrices(params: {
           res.text,
       });
 
+      // Loga tanto a busca (web search) quanto a estruturação — ambos "viagens".
+      await logResolvedUsage(resolved, "viagens", res.usage);
+      await logResolvedUsage(resolved, "viagens", structUsage);
       return { ok: true, data: object, fontes, engine: attempt.engine };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

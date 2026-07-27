@@ -1,8 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateText } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import { buildDashboardRows, fetchAllDreAccountRows, filterCoreDreAccounts } from "@/lib/dashboard/dre";
 import type { DreAccountBase } from "@/lib/dashboard/dre";
 import { resolveFranquiasVivaCustosNegation } from "@/lib/dashboard/franquias-viva-custos";
@@ -181,14 +180,17 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
     pctRevenue: r.percentageOverNetRevenue,
   }));
 
+  const resolved = await resolveAiProvider({ capability: "text" });
+
   if (segmentPrompt) {
     // --- SEGMENT-SPECIFIC FLOW: narrative HTML output ---
-    const { text } = await generateText({
-      model: openai("gpt-4o-mini"),
+    const { text, usage } = await generateText({
+      model: resolved.provider(resolved.modelName),
       system: segmentPrompt,
       prompt: `Dados financeiros de "${companyName}" — ${periodLabel}:\n\n${JSON.stringify(fullContextRows, null, 2)}`,
       maxOutputTokens: 4000,
     });
+    await logResolvedUsage(resolved, "relatorio_mensal", usage);
 
     const html = renderNarrativeEmail(companyName, periodLabel, text);
     return {
@@ -198,11 +200,12 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
   }
 
   // --- GENERIC FLOW: JSON structured output ---
-  const { text } = await generateText({
-    model: openai("gpt-4o-mini"),
+  const { text, usage } = await generateText({
+    model: resolved.provider(resolved.modelName),
     system: REPORT_SYSTEM_PROMPT,
     prompt: JSON.stringify({ periodo: periodLabel, empresa: companyName, dre: contextRows }),
   });
+  await logResolvedUsage(resolved, "relatorio_mensal", usage);
 
   const aiAnalysis = JSON.parse(text) as ReportData["aiAnalysis"] & {
     kpi_comentarios?: Record<string, string>;

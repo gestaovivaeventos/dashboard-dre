@@ -6,9 +6,7 @@
 // verbatim (Portuguese, exact rules) so behaviour stays consistent.
 
 import type { ContractExtraction } from './types'
-
-const DEFAULT_MODEL = 'gpt-4o-mini'
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
+import { resolveAiProvider, logResolvedUsage } from '@/lib/ai/provider'
 
 export class LlmExtractionError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -148,12 +146,11 @@ export async function extractContractDataWithLlm(
   text: string,
   options: { model?: string; timeoutMs?: number } = {},
 ): Promise<ContractExtraction> {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    throw new LlmExtractionError('OPENAI_API_KEY não configurada no ambiente')
-  }
-
-  const model = options.model ?? DEFAULT_MODEL
+  // Provedor ativo (OpenAI/DeepSeek) via config no banco. Ambos expõem
+  // chat completions com response_format json_object.
+  const resolved = await resolveAiProvider({ capability: 'text' })
+  const apiKey = resolved.apiKey
+  const model = options.model ?? resolved.modelName
   const timeoutMs = options.timeoutMs ?? 120_000
 
   const controller = new AbortController()
@@ -171,7 +168,7 @@ export async function extractContractDataWithLlm(
   let response: Response
   try {
     response = await Promise.race([
-      fetch(OPENAI_URL, {
+      fetch(resolved.chatCompletionsUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -207,12 +204,15 @@ export async function extractContractDataWithLlm(
 
   const payload = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   }
 
   const rawText = payload.choices?.[0]?.message?.content
   if (!rawText) {
     throw new LlmExtractionError('OpenAI: resposta vazia ou sem choice')
   }
+
+  await logResolvedUsage(resolved, 'contratos', payload.usage, { modelName: model })
 
   let parsed: ContractExtraction
   try {
