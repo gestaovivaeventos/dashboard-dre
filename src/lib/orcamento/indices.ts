@@ -1,6 +1,11 @@
 // Índices de correção do módulo Orçamento — tipos, catálogo e helpers.
 // Módulo "puro" (sem "use server"): pode ser importado por client e server.
 
+import { numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+
+// Reexporta os helpers de número para quem já importa daqui.
+export { parseBrNumber };
+
 export type IndiceKey = "ipca" | "igpm" | "salario_minimo";
 
 export type IndiceUnit = "percent" | "brl";
@@ -26,22 +31,6 @@ export interface IndiceYear {
   salario_minimo: number | null;
 }
 
-/**
- * Converte texto pt-BR em número. Aceita "4,5", "1.518,00", "1518.00", "1518".
- * Vazio → null. Inválido → NaN (o chamador valida).
- */
-export function parseBrNumber(input: string): number | null {
-  const t = input.trim();
-  if (!t) return null;
-  let cleaned = t.replace(/[R$\s%]/g, "");
-  if (cleaned.includes(",")) {
-    // vírgula é o separador decimal; ponto é separador de milhar.
-    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
-  }
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : NaN;
-}
-
 /** Formata um valor de índice conforme sua unidade, para exibição. */
 export function formatIndice(value: number | null, unit: IndiceUnit): string {
   if (value == null) return "—";
@@ -60,10 +49,5 @@ export function formatIndice(value: number | null, unit: IndiceUnit): string {
 
 /** Valor "cru" para preencher um input de edição (sem símbolo, decimal com vírgula). */
 export function indiceToInput(value: number | null): string {
-  if (value == null) return "";
-  return value.toLocaleString("pt-BR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  });
+  return numberToInput(value);
 }

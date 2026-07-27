@@ -58,8 +58,9 @@ const CARDS: ConfigCard[] = [
   {
     title: "Plano de cargos e salários",
     description:
-      "Base de cargos e faixas salariais usada no orçamento de despesas com pessoal.",
+      "Cargos e seus níveis (Jr/Pl/Sr), cada um com salário-base, usados no orçamento de despesas com pessoal.",
     icon: Users,
+    href: "/orcamento/configuracoes/plano-cargos",
   },
   {
     title: "Categorias do planejamento dos sócios",
