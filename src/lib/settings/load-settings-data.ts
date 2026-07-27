@@ -1,0 +1,233 @@
+import { getCurrentSessionContext } from "@/lib/auth/session";
+import type { CashFlowAccountItem } from "@/components/app/cash-flow-structure-manager";
+import type { KpiDefinition } from "@/lib/kpi/calc";
+import type { Segment } from "@/lib/supabase/types";
+
+export interface SettingsCompany {
+  id: string;
+  name: string;
+  active: boolean;
+  created_at: string;
+  has_credentials: boolean;
+  has_department_apportionment: boolean;
+}
+
+export interface SettingsDepartment {
+  id: string;
+  omie_code: string;
+  name: string;
+  included: boolean;
+  synced_at: string | null;
+  routed_to_company_id: string | null;
+}
+
+export interface SettingsCompanyWithDepartments extends SettingsCompany {
+  departments: SettingsDepartment[];
+}
+
+export interface SettingsDreAccount {
+  id: string;
+  code: string;
+  name: string;
+  parent_id: string | null;
+  level: number;
+  type: "receita" | "despesa" | "calculado" | "misto";
+  is_summary: boolean;
+  formula: string | null;
+  sort_order: number;
+  active: boolean;
+  mappings: Array<{ id: string; code: string; name: string; company_id: string | null }>;
+}
+
+export interface SettingsData {
+  companies: SettingsCompany[];
+  companiesWithDepartments: SettingsCompanyWithDepartments[];
+  dreAccounts: SettingsDreAccount[];
+  cashFlowAccounts: CashFlowAccountItem[];
+  kpis: KpiDefinition[];
+  segments: Segment[];
+  segmentId: string | null;
+  currentSegmentSlug: string;
+  allCompanies: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Carrega todos os dados da tela de Configurações do Financeiro para um
+ * segmento. Extraído sem alterações da antiga page.tsx que renderizava
+ * <SettingsTabs> — as queries e transformações são idênticas. Cada sub-página
+ * do hub de Configurações chama esta função e usa apenas a fatia que precisa.
+ */
+export async function loadSettingsData(segmentSlug: string): Promise<SettingsData> {
+  const { supabase } = await getCurrentSessionContext();
+
+  const { data: allSegments } = await supabase
+    .from("segments")
+    .select("id,name,slug,display_order,active")
+    .eq("active", true)
+    .order("display_order");
+  const segments = (allSegments as Segment[] | null) ?? [];
+  const currentSegment = segments.find((s) => s.slug === segmentSlug) ?? null;
+  const segmentId = currentSegment?.id ?? null;
+
+  let companiesQuery = supabase
+    .from("companies")
+    .select(
+      "id,name,active,created_at,omie_app_key,omie_app_secret,has_department_apportionment",
+    );
+  if (segmentId) {
+    companiesQuery = companiesQuery.eq("segment_id", segmentId);
+  }
+
+  const [companiesResult, allCompaniesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
+    companiesQuery.order("name"),
+    // Lista de TODAS as empresas do sistema (cross-segment) para alimentar
+    // o seletor "Copiar Plano de Contas" do DreStructureManager.
+    supabase
+      .from("companies")
+      .select("id,name")
+      .eq("active", true)
+      .order("name"),
+    supabase
+      .from("dre_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
+      .is("company_id", null)
+      .order("code"),
+    supabase
+      .from("category_mapping")
+      .select("id,omie_category_code,omie_category_name,dre_account_id,company_id")
+      .order("omie_category_code"),
+    supabase
+      .from("kpi_definitions")
+      .select(
+        "id,name,description,formula_type,numerator_account_codes,denominator_account_codes,multiply_by,sort_order,active",
+      )
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("cash_flow_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active")
+      .order("sort_order"),
+    supabase
+      .from("cash_flow_category_mappings")
+      .select("id,omie_category_code,omie_category_name,cash_flow_account_id,company_id")
+      .order("omie_category_code"),
+  ]);
+
+  const companies: SettingsCompany[] = (companiesResult.data ?? []).map((company) => ({
+    id: company.id as string,
+    name: company.name as string,
+    active: company.active as boolean,
+    created_at: company.created_at as string,
+    has_credentials: Boolean(company.omie_app_key && company.omie_app_secret),
+    has_department_apportionment: Boolean(company.has_department_apportionment),
+  }));
+
+  // Catalogo de departamentos ja sincronizados (alimenta a aba "Departamentos"
+  // sem precisar bater na Omie a cada render).
+  const companyIds = companies.map((c) => c.id);
+  const departmentsResult = companyIds.length > 0
+    ? await supabase
+        .from("company_departments")
+        .select("id,company_id,omie_code,name,included,synced_at,routed_to_company_id")
+        .in("company_id", companyIds)
+        .order("omie_code")
+    : { data: [] as Array<Record<string, unknown>> };
+
+  const departmentsByCompany = new Map<string, SettingsDepartment[]>();
+  (departmentsResult.data ?? []).forEach((row) => {
+    const companyId = row.company_id as string;
+    const list = departmentsByCompany.get(companyId) ?? [];
+    list.push({
+      id: row.id as string,
+      omie_code: row.omie_code as string,
+      name: row.name as string,
+      included: row.included as boolean,
+      synced_at: (row.synced_at as string | null) ?? null,
+      routed_to_company_id: (row.routed_to_company_id as string | null) ?? null,
+    });
+    departmentsByCompany.set(companyId, list);
+  });
+
+  const companiesWithDepartments: SettingsCompanyWithDepartments[] = companies.map((c) => ({
+    ...c,
+    departments: departmentsByCompany.get(c.id) ?? [],
+  }));
+
+  const mappingByAccount = new Map<
+    string,
+    Array<{ id: string; code: string; name: string; company_id: string | null }>
+  >();
+  (mappingsResult.data ?? []).forEach((mapping) => {
+    const accountId = mapping.dre_account_id as string;
+    const entries = mappingByAccount.get(accountId) ?? [];
+    entries.push({
+      id: mapping.id as string,
+      code: mapping.omie_category_code as string,
+      name: mapping.omie_category_name as string,
+      company_id: (mapping.company_id as string | null) ?? null,
+    });
+    mappingByAccount.set(accountId, entries);
+  });
+
+  const dreAccounts: SettingsDreAccount[] = (dreResult.data ?? []).map((account) => ({
+    id: account.id as string,
+    code: account.code as string,
+    name: account.name as string,
+    parent_id: (account.parent_id as string | null) ?? null,
+    level: account.level as number,
+    type: account.type as "receita" | "despesa" | "calculado" | "misto",
+    is_summary: account.is_summary as boolean,
+    formula: (account.formula as string | null) ?? null,
+    sort_order: account.sort_order as number,
+    active: account.active as boolean,
+    mappings: mappingByAccount.get(account.id as string) ?? [],
+  }));
+
+  const cashFlowMappingByAccount = new Map<
+    string,
+    Array<{ id: string; code: string; name: string; company_id: string | null }>
+  >();
+  (cashFlowMappingsResult.data ?? []).forEach((mapping) => {
+    const accountId = mapping.cash_flow_account_id as string;
+    const entries = cashFlowMappingByAccount.get(accountId) ?? [];
+    entries.push({
+      id: mapping.id as string,
+      code: mapping.omie_category_code as string,
+      name: mapping.omie_category_name as string,
+      company_id: (mapping.company_id as string | null) ?? null,
+    });
+    cashFlowMappingByAccount.set(accountId, entries);
+  });
+
+  const cashFlowAccounts: CashFlowAccountItem[] = (cashFlowResult.data ?? []).map((account) => ({
+    id: account.id as string,
+    code: account.code as string,
+    name: account.name as string,
+    parent_id: (account.parent_id as string | null) ?? null,
+    level: account.level as number,
+    type: account.type as "receita" | "despesa" | "calculado" | "misto",
+    is_summary: account.is_summary as boolean,
+    formula: (account.formula as string | null) ?? null,
+    source: (account.source as string | null) ?? null,
+    is_highlight_block: account.is_highlight_block as boolean,
+    sort_order: account.sort_order as number,
+    active: account.active as boolean,
+    mappings: cashFlowMappingByAccount.get(account.id as string) ?? [],
+  }));
+
+  const allCompanies = (allCompaniesResult.data ?? []).map((c) => ({
+    id: c.id as string,
+    name: c.name as string,
+  }));
+
+  return {
+    companies,
+    companiesWithDepartments,
+    dreAccounts,
+    cashFlowAccounts,
+    kpis: (kpisResult.data ?? []) as KpiDefinition[],
+    segments,
+    segmentId,
+    currentSegmentSlug: segmentSlug,
+    allCompanies,
+  };
+}
