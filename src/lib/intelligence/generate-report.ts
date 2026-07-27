@@ -185,7 +185,7 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
   if (segmentPrompt) {
     // --- SEGMENT-SPECIFIC FLOW: narrative HTML output ---
     const { text, usage } = await generateText({
-      model: resolved.provider(resolved.modelName),
+      model: resolved.provider.chat(resolved.modelName),
       system: segmentPrompt,
       prompt: `Dados financeiros de "${companyName}" — ${periodLabel}:\n\n${JSON.stringify(fullContextRows, null, 2)}`,
       maxOutputTokens: 4000,

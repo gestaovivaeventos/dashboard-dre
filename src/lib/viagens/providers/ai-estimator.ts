@@ -71,13 +71,15 @@ export async function estimateRouteFacts(params: {
   dataIda: string;
   dataVolta: string;
 }): Promise<RouteFacts> {
-  const resolved = await resolveAiProvider({ capability: "text" }).catch(() => null);
+  // Viagens fica sempre na OpenAI (estruturado/complexo, parte do fluxo de
+  // busca que já é OpenAI-only). `web_search` força a OpenAI no resolver.
+  const resolved = await resolveAiProvider({ capability: "web_search" }).catch(() => null);
   if (!resolved) {
     throw new Error("Busca indisponível: configure OPENAI_API_KEY (estimativa) ou AMADEUS_CLIENT_ID/SECRET.");
   }
 
   const { object, usage } = await generateObject({
-    model: resolved.provider(resolved.modelName),
+    model: resolved.provider.chat(resolved.modelName),
     schema: RouteFactsSchema,
     temperature: 0.2,
     system:

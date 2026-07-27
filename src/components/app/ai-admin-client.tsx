@@ -78,10 +78,16 @@ function fmtDateTime(iso: string | null): string {
   }
 }
 
-function pricesToStrings(mp: Record<string, ModelPrice>): Record<string, { input: string; output: string }> {
-  const out: Record<string, { input: string; output: string }> = {};
+function pricesToStrings(
+  mp: Record<string, ModelPrice>,
+): Record<string, { input: string; output: string; cachedInput: string }> {
+  const out: Record<string, { input: string; output: string; cachedInput: string }> = {};
   for (const [model, p] of Object.entries(mp)) {
-    out[model] = { input: String(p.input), output: String(p.output) };
+    out[model] = {
+      input: String(p.input),
+      output: String(p.output),
+      cachedInput: p.cachedInput != null ? String(p.cachedInput) : "",
+    };
   }
   return out;
 }
@@ -149,6 +155,40 @@ function mergeModuleRows(data: AiPanelData): ModuleRow[] {
   return Array.from(map.values()).sort((a, b) => b.total - a.total);
 }
 
+interface ProviderUsageRow {
+  provider: string;
+  label: string;
+  today: number;
+  month: number;
+  total: number;
+  monthTokens: number;
+  monthCalls: number;
+}
+
+// Une a quebra por provedor (IA) dos três buckets numa tabela só. O rótulo vem
+// da lista de provedores (fallback: o próprio slug).
+function mergeProviderRows(data: AiPanelData): ProviderUsageRow[] {
+  const labelFor = (slug: string) => data.providers.find((p) => p.provider === slug)?.label ?? slug;
+  const map = new Map<string, ProviderUsageRow>();
+  const ensure = (slug: string): ProviderUsageRow => {
+    let row = map.get(slug);
+    if (!row) {
+      row = { provider: slug, label: labelFor(slug), today: 0, month: 0, total: 0, monthTokens: 0, monthCalls: 0 };
+      map.set(slug, row);
+    }
+    return row;
+  };
+  for (const p of data.usage.today.byProvider) ensure(p.provider).today += p.costBrl;
+  for (const p of data.usage.month.byProvider) {
+    const row = ensure(p.provider);
+    row.month += p.costBrl;
+    row.monthTokens += p.totalTokens;
+    row.monthCalls += p.calls;
+  }
+  for (const p of data.usage.total.byProvider) ensure(p.provider).total += p.costBrl;
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
 export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelData; embedded?: boolean }) {
   const { showToast } = useToast();
   const [pending, startTransition] = useTransition();
@@ -156,12 +196,13 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
   const [data, setData] = useState<AiPanelData>(initial);
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>(() => draftsFrom(initial));
   const [rate, setRate] = useState<string>(String(initial.usdBrlRate));
-  const [prices, setPrices] = useState<Record<string, { input: string; output: string }>>(() =>
+  const [prices, setPrices] = useState<Record<string, { input: string; output: string; cachedInput: string }>>(() =>
     pricesToStrings(initial.modelPrices),
   );
   const [newProv, setNewProv] = useState<NewProviderForm>(EMPTY_NEW_PROVIDER);
 
   const moduleRows = useMemo(() => mergeModuleRows(data), [data]);
+  const providerRows = useMemo(() => mergeProviderRows(data), [data]);
   const chartData = useMemo(
     () =>
       data.usage.daily.map((d) => ({
@@ -339,9 +380,14 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
   }
 
   function handleSavePrices() {
-    const payload: Record<string, { input: number; output: number }> = {};
+    const payload: Record<string, { input: number; output: number; cachedInput?: number }> = {};
     for (const [model, p] of Object.entries(prices)) {
-      payload[model] = { input: Number(p.input.replace(",", ".")), output: Number(p.output.replace(",", ".")) };
+      const cachedStr = (p.cachedInput ?? "").trim();
+      payload[model] = {
+        input: Number(p.input.replace(",", ".")),
+        output: Number(p.output.replace(",", ".")),
+        ...(cachedStr ? { cachedInput: Number(cachedStr.replace(",", ".")) } : {}),
+      };
     }
     startTransition(async () => {
       const res = await saveModelPrices(payload);
@@ -349,7 +395,10 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
       setData((prev) => ({
         ...prev,
         modelPrices: Object.fromEntries(
-          Object.entries(payload).map(([m, p]) => [m, { input: p.input, output: p.output }]),
+          Object.entries(payload).map(([m, p]) => [
+            m,
+            { input: p.input, output: p.output, cachedInput: p.cachedInput },
+          ]),
         ),
       }));
       toast(true, "Preços atualizados.");
@@ -483,6 +532,49 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
                 ) : (
                   moduleRows.map((r) => (
                     <tr key={r.module} className="border-b last:border-0">
+                      <td className="py-2 pr-4 font-medium">{r.label}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{brl(r.today)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{brl(r.month)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{brl(r.total)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums text-muted-foreground">
+                        {intFmt(r.monthTokens)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">{intFmt(r.monthCalls)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Consumo por IA (provedor)</CardTitle>
+            <CardDescription>Custo em reais por provedor de IA.</CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                  <th className="py-2 pr-4 font-medium">Provedor</th>
+                  <th className="py-2 pr-4 text-right font-medium">Hoje</th>
+                  <th className="py-2 pr-4 text-right font-medium">Mês</th>
+                  <th className="py-2 pr-4 text-right font-medium">Total</th>
+                  <th className="py-2 pr-4 text-right font-medium">Tokens (mês)</th>
+                  <th className="py-2 text-right font-medium">Chamadas (mês)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                      Sem consumo registrado ainda.
+                    </td>
+                  </tr>
+                ) : (
+                  providerRows.map((r) => (
+                    <tr key={r.provider} className="border-b last:border-0">
                       <td className="py-2 pr-4 font-medium">{r.label}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{brl(r.today)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{brl(r.month)}</td>
@@ -770,15 +862,18 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
           <CardHeader>
             <CardTitle className="text-base">Preços por modelo (USD por 1M tokens)</CardTitle>
             <CardDescription>
-              Ajuste conforme a tabela de preços do provedor. O custo em reais usa estes valores × o câmbio.
+              Ajuste conforme a tabela do provedor. &quot;Input cache&quot; é o preço do input em cache hit
+              (contexto repetido) — o DeepSeek cobra bem mais barato; deixe em branco para usar o preço de
+              input. O custo em reais usa estes valores × o câmbio.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase text-muted-foreground">
                   <th className="py-2 pr-4 font-medium">Modelo</th>
                   <th className="py-2 pr-4 font-medium">Input (USD/1M)</th>
+                  <th className="py-2 pr-4 font-medium">Input cache (USD/1M)</th>
                   <th className="py-2 font-medium">Output (USD/1M)</th>
                 </tr>
               </thead>
@@ -793,6 +888,17 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
                         value={prices[model]?.input ?? ""}
                         onChange={(e) =>
                           setPrices((prev) => ({ ...prev, [model]: { ...prev[model], input: e.target.value } }))
+                        }
+                      />
+                    </td>
+                    <td className="py-2 pr-4">
+                      <Input
+                        className="h-8 w-28"
+                        inputMode="decimal"
+                        placeholder="= input"
+                        value={prices[model]?.cachedInput ?? ""}
+                        onChange={(e) =>
+                          setPrices((prev) => ({ ...prev, [model]: { ...prev[model], cachedInput: e.target.value } }))
                         }
                       />
                     </td>
