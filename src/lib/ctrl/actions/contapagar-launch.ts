@@ -176,7 +176,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, event_id",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, extra_attachment_paths, event_id",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -547,9 +547,13 @@ export async function launchRequestToOmie(
     return { error: msg };
   }
 
-  // 6. Anexa boleto e nota fiscal ao título no Omie (best-effort).
+  // 6. Anexa boleto, nota fiscal e anexos diversos ao título no Omie (best-effort).
   await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.attachment_path as string | null);
   await anexarNoOmie(supabase, appKey, appSecret, omieCode, request.invoice_attachment_path as string | null);
+  const extraPaths = (request.extra_attachment_paths as string[] | null) ?? [];
+  for (const extraPath of extraPaths) {
+    await anexarNoOmie(supabase, appKey, appSecret, omieCode, extraPath);
+  }
 
   // 7. Atualizar ctrl_requests. Não ignora o erro do update: o título já foi
   // lançado/editado no Omie, então uma falha aqui (ex.: valor fora de um CHECK)

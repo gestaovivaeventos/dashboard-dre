@@ -49,6 +49,34 @@ export interface OmieResult {
   notFound: boolean;
 }
 
+// Cache curtíssimo para chamadas de LEITURA idênticas (Listar*/Consultar*).
+// A Omie bloqueia a MESMA chamada repetida numa janela de ~40s ("consumo
+// redundante"). No envio em massa de contas a pagar, o loop repete leituras
+// idênticas (ListarProjetos com params fixos; ListarContasPagar por CNPJ quando
+// vários itens compartilham fornecedor), o que disparava esse bloqueio e
+// derrubava a migração para o Omie. Memorizamos o resultado por uma janela um
+// pouco maior que a da Omie: qualquer repetição idêntica dentro dela seria
+// bloqueada de qualquer forma, então servir o resultado recente é estritamente
+// melhor que falhar o lote. SÓ leituras entram no cache — escritas
+// (Incluir/Alterar/Excluir) nunca, para não mascarar mudanças de estado.
+const READ_CACHE_TTL_MS = 45_000;
+const readCache = new Map<string, { at: number; result: OmieResult }>();
+
+// Só chamadas de leitura ("Listar…", "Consultar…") são idempotentes e seguras
+// para cachear. Escritas ficam de fora.
+function isReadCall(call: string): boolean {
+  return /^(Listar|Consultar)/i.test(call);
+}
+
+function readCacheKey(
+  endpoint: string,
+  call: string,
+  appKey: string,
+  param: Record<string, unknown>,
+): string {
+  return `${endpoint}|${call}|${appKey}|${JSON.stringify(param)}`;
+}
+
 export async function omieCall(
   endpoint: string,
   call: string,
@@ -58,6 +86,25 @@ export async function omieCall(
 ): Promise<OmieResult> {
   const MAX_ATTEMPTS = 4;
   let lastError: Error | null = null;
+
+  // Leitura idêntica recente → devolve do cache, evitando o bloqueio anti-
+  // duplicidade da Omie no envio em massa. Só para Listar*/Consultar*.
+  const cacheable = isReadCall(call);
+  const cacheKey = cacheable ? readCacheKey(endpoint, call, appKey, param) : "";
+  if (cacheable) {
+    const hit = readCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < READ_CACHE_TTL_MS) {
+      return hit.result;
+    }
+    if (hit) readCache.delete(cacheKey);
+  }
+
+  // Guarda o resultado de uma leitura bem-sucedida (inclusive notFound, que é um
+  // desfecho válido e igualmente sujeito ao bloqueio se repetido).
+  const remember = (result: OmieResult): OmieResult => {
+    if (cacheable) readCache.set(cacheKey, { at: Date.now(), result });
+    return result;
+  };
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const elapsed = Date.now() - lastRequest.value;
@@ -96,7 +143,7 @@ export async function omieCall(
       if (fault) {
         const msg = String(body?.faultstring ?? "").toLowerCase();
         if (NOT_FOUND_HINTS.some((h) => msg.includes(h))) {
-          return { data: body ?? {}, notFound: true };
+          return remember({ data: body ?? {}, notFound: true });
         }
         // Consumo redundante (anti-duplicidade): não re-tenta; mensagem clara.
         if (REDUNDANT_HINTS.some((h) => msg.includes(h))) {
@@ -126,11 +173,11 @@ export async function omieCall(
     if (faultRaw) {
       const msg = String(data.faultstring ?? "").toLowerCase();
       if (NOT_FOUND_HINTS.some((h) => msg.includes(h))) {
-        return { data, notFound: true };
+        return remember({ data, notFound: true });
       }
       throw new Error(String(data.faultstring ?? `Erro Omie em ${call}.`));
     }
-    return { data, notFound: false };
+    return remember({ data, notFound: false });
   }
 
   throw lastError ?? new Error(`Falha ao chamar Omie em ${call}.`);

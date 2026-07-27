@@ -79,6 +79,10 @@ export interface CreateRequestInput {
   // before submit). Stored verbatim in every row of this submission.
   attachment_path?: string;
   invoice_attachment_path?: string;
+  // Anexos diversos (contrato, cupom fiscal, pedido, nota, etc.) enviados em
+  // qualquer método de pagamento. Cada item é um object path no bucket
+  // 'ctrl-attachments'. Vão à Omie no lançamento da conta a pagar.
+  extra_attachment_paths?: string[];
   // Operational signal for credit card payments: does the requester need
   // to receive the physical card to make the purchase? Only meaningful
   // when payment_method === 'cartao_credito'.
@@ -280,6 +284,9 @@ export async function createRequest(data: CreateRequestInput) {
           payment_method: data.payment_method,
           observations: data.observations ?? null,
           event_id: data.event_id ?? null,
+          attachment_path: data.attachment_path ?? null,
+          invoice_attachment_path: data.invoice_attachment_path ?? null,
+          extra_attachment_paths: data.extra_attachment_paths ?? [],
           status: "aguardando_aprovacao_fornecedor",
           approval_level: 0,
           created_by: ctx.id,
@@ -440,6 +447,7 @@ export async function createRequest(data: CreateRequestInput) {
     barcode: data.barcode ?? null,
     attachment_path: data.attachment_path ?? null,
     invoice_attachment_path: data.invoice_attachment_path ?? null,
+    extra_attachment_paths: data.extra_attachment_paths ?? [],
     needs_credit_card: data.needs_credit_card ?? null,
     is_budgeted: verification?.isBudgeted ?? false,
     approval_tier: approvalTier,
@@ -762,6 +770,62 @@ export async function getRequestAttachmentUrl(requestId: string) {
 
   if (signErr) return { error: signErr.message };
   return { url: signed.signedUrl };
+}
+
+export interface RequestExtraAttachment {
+  name: string;
+  url: string;
+}
+
+// Gera URLs assinadas (5 min) dos anexos diversos de uma requisição
+// (extra_attachment_paths). Usado pelo aprovador e por contas a pagar para
+// conferir os documentos ANTES do envio à Omie. Mesma autorização por papel +
+// dono de getRequestAttachmentUrl; assina com admin client para que papéis de
+// visibilidade ampla (CSC, contas_a_pagar, diretor) leiam anexos de outros.
+export async function getRequestExtraAttachments(
+  requestId: string,
+): Promise<{ attachments: RequestExtraAttachment[] } | { error: string }> {
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  const supabase = await createClient();
+
+  const { data: req, error } = await supabase
+    .from("ctrl_requests")
+    .select("created_by, extra_attachment_paths")
+    .eq("id", requestId)
+    .maybeSingle<{ created_by: string; extra_attachment_paths: string[] | null }>();
+
+  if (error) return { error: error.message };
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const hasBroad = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
+  );
+  if (!hasBroad && req.created_by !== ctx.id) {
+    return { error: "Sem acesso a esta requisição." };
+  }
+
+  const paths = req.extra_attachment_paths ?? [];
+  if (paths.length === 0) return { attachments: [] };
+
+  const admin = createAdminClientIfAvailable() ?? supabase;
+  const attachments: RequestExtraAttachment[] = [];
+  for (const path of paths) {
+    const { data: signed, error: signErr } = await admin.storage
+      .from("ctrl-attachments")
+      .createSignedUrl(path, 60 * 5);
+    if (signErr || !signed) continue;
+    // Nome original: o path é `${userId}/${timestamp}-${nomeSeguro}`.
+    const name = (path.split("/").pop() ?? "anexo").replace(/^\d+-/, "");
+    attachments.push({ name, url: signed.signedUrl });
+  }
+  return { attachments };
 }
 
 export interface RequestComprovante {

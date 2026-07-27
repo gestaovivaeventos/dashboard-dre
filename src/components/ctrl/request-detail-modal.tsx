@@ -1,8 +1,13 @@
 "use client";
 
-import { Download, FileText, Loader2, Paperclip, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Download, ExternalLink, FileText, Loader2, Paperclip, X } from "lucide-react";
 
 import { ApprovalHistory } from "@/components/ctrl/approval-history";
+import {
+  getRequestExtraAttachments,
+  type RequestExtraAttachment,
+} from "@/lib/ctrl/actions/requests";
 
 // ── Tipos compartilhados ──────────────────────────────────────────────────────
 
@@ -60,6 +65,9 @@ export type RequestDetail = {
   supplier_issues_invoice?: string | null;
   invoice_number?: string | null;
   attachment_path?: string | null;
+  // Anexos diversos (contrato, cupom fiscal, pedido, nota, etc.). Só os paths
+  // vêm na linha; as URLs assinadas são resolvidas sob demanda no modal.
+  extra_attachment_paths?: string[] | null;
   created_at?: string | null;
   approved_at?: string | null;
   // IDs crus dos vínculos — usados pelo form de edição administrativa.
@@ -203,6 +211,12 @@ export function RequestDetailModal({
               Esta requisição não possui anexo.
             </div>
           )}
+
+          {/* Anexos diversos (contrato, cupom fiscal, pedido, nota, etc.) */}
+          <ExtraAttachments
+            requestId={req.id}
+            count={req.extra_attachment_paths?.length ?? 0}
+          />
 
           {/* Resumo */}
           <Section title="Resumo">
@@ -357,6 +371,80 @@ export function RequestDetailModal({
             Fechar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Lista os anexos diversos de uma requisição com links de download (URLs
+// assinadas resolvidas sob demanda). Reutilizada pelo modal compartilhado
+// (Requisições / Contas a Pagar) e pelo modal de detalhe das Aprovações, para
+// que aprovador e contas a pagar confiram os documentos antes do envio à Omie.
+// `count` (nº de paths na linha) evita a chamada quando não há anexos.
+export function ExtraAttachments({
+  requestId,
+  count,
+}: {
+  requestId: string;
+  count: number;
+}) {
+  const [items, setItems] = useState<RequestExtraAttachment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (count <= 0) return;
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getRequestExtraAttachments(requestId).then((res) => {
+      if (!active) return;
+      setLoading(false);
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      setItems(res.attachments);
+    });
+    return () => {
+      active = false;
+    };
+  }, [requestId, count]);
+
+  if (count <= 0) return null;
+
+  return (
+    <div className="rounded-lg border bg-background">
+      <div className="flex items-center gap-2 border-b px-4 py-2.5">
+        <Paperclip className="h-4 w-4 text-primary" />
+        <h4 className="text-sm font-semibold">Anexos ({count})</h4>
+      </div>
+      <div className="p-3">
+        {loading ? (
+          <p className="flex items-center gap-1.5 px-1 py-1 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Gerando links…
+          </p>
+        ) : error ? (
+          <p className="px-1 py-1 text-xs text-destructive">{error}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {items.map((att, i) => (
+              <li key={`${att.url}-${i}`}>
+                <a
+                  href={att.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">{att.name}</span>
+                  <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

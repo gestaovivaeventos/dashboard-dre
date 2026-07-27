@@ -298,6 +298,47 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     if (invoiceInputRef.current) invoiceInputRef.current.value = "";
   }
 
+  // ── Anexos diversos ─────────────────────────────────────────────────────────
+  // Documentos avulsos (contrato, cupom fiscal, pedido, nota, etc.) que o
+  // solicitante pode anexar em QUALQUER método de pagamento. Sem leitura OCR —
+  // são apenas comprovantes. Cada arquivo já é enviado ao bucket no momento em
+  // que é escolhido; o submit reaproveita os paths. No lançamento da conta a
+  // pagar, todos são anexados ao título no Omie.
+  const [extraAttachments, setExtraAttachments] = useState<Array<{ file: File; path: string }>>([]);
+  const [extraUploading, setExtraUploading] = useState(false);
+  const [extraError, setExtraError] = useState<string | null>(null);
+  const extraInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function addExtraAttachments(files: FileList | null) {
+    setExtraError(null);
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files);
+    const tooBig = picked.find((f) => f.size > MAX_ATTACHMENT_SIZE);
+    if (tooBig) {
+      setExtraError(`"${tooBig.name}" excede o limite de 10 MB.`);
+      if (extraInputRef.current) extraInputRef.current.value = "";
+      return;
+    }
+    setExtraUploading(true);
+    try {
+      const uploaded: Array<{ file: File; path: string }> = [];
+      for (const file of picked) {
+        const objectPath = await uploadAttachmentFile(file);
+        uploaded.push({ file, path: objectPath });
+      }
+      setExtraAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setExtraError(`Falha ao enviar o anexo: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setExtraUploading(false);
+      if (extraInputRef.current) extraInputRef.current.value = "";
+    }
+  }
+
+  function removeExtraAttachment(index: number) {
+    setExtraAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
   // ── Budget verification ──────────────────────────────────────────────────────
   const [verifying, setVerifying] = useState(false);
   const [verification, setVerification] = useState<BudgetVerification | null>(null);
@@ -533,6 +574,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       description: descriptionValue || undefined,
       attachment_path: finalAttachmentPath,
       invoice_attachment_path: finalInvoicePath,
+      extra_attachment_paths: extraAttachments.map((a) => a.path),
       sector_id: sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
@@ -1130,6 +1172,65 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Anexos diversos — disponível em qualquer método de pagamento. Enviados
+          à Omie no momento do pagamento, junto com boleto/nota (se houver). */}
+      <div className="space-y-1.5">
+        <label htmlFor="extra_attachments" className={LABEL_CLS}>
+          Anexos <span className="text-muted-foreground font-normal">(opcional)</span>
+          <span className="text-muted-foreground font-normal"> · até 10 MB cada</span>
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Adicione documentos diversos — contrato, cupom fiscal, pedido, nota fiscal, etc.
+          Serão enviados à Omie junto com a requisição no momento do pagamento.
+        </p>
+        <input
+          ref={extraInputRef}
+          id="extra_attachments"
+          type="file"
+          multiple
+          accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+          onChange={(e) => addExtraAttachments(e.target.files)}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => extraInputRef.current?.click()}
+          disabled={extraUploading}
+          className="inline-flex items-center gap-2 rounded-md border border-dashed px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+        >
+          <Paperclip className="h-4 w-4" />
+          {extraUploading ? "Enviando…" : "Adicionar anexos"}
+        </button>
+        {extraAttachments.length > 0 && (
+          <ul className="space-y-2 pt-1">
+            {extraAttachments.map((att, i) => (
+              <li
+                key={`${att.path}-${i}`}
+                className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-2 text-sm">
+                  <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{att.file.name}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    ({(att.file.size / 1024 / 1024).toFixed(2)} MB)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeExtraAttachment(i)}
+                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label={`Remover ${att.file.name}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {extraError && <p className="text-xs text-destructive">{extraError}</p>}
+        <p className="text-xs text-muted-foreground">Formatos: PDF, JPG, PNG, DOC, XLS.</p>
       </div>
 
       {/* ── Verificação Orçamentária ─────────────────────────────────────────── */}

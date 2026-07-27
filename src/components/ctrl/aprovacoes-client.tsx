@@ -11,6 +11,7 @@ import {
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
+import { ExtraAttachments } from "@/components/ctrl/request-detail-modal";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 
 type Req = {
@@ -31,6 +32,7 @@ type Req = {
   due_date: string | null;
   created_at: string;
   created_by: string;
+  extra_attachment_paths?: string[] | null;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
   ctrl_events?: { name: string } | { name: string }[] | null;
@@ -496,6 +498,13 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], await
                   {modal.req.justification && <Row label="Justificativa" value={modal.req.justification} />}
                   {modal.req.observations && <Row label="Observações" value={modal.req.observations} />}
                   <Row label="Criado em" value={new Date(modal.req.created_at).toLocaleString("pt-BR")} />
+
+                  {/* Anexos diversos — para o aprovador conferir os documentos
+                      antes de aprovar/enviar à Omie. */}
+                  <ExtraAttachments
+                    requestId={modal.req.id}
+                    count={modal.req.extra_attachment_paths?.length ?? 0}
+                  />
 
                   <div className="border-t pt-4 mt-4">
                     <ApprovalHistory requestId={modal.req.id} pending={pendingStage(modal.req)} />
