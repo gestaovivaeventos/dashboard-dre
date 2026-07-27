@@ -71,6 +71,48 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
   },
 ];
 
+// ─── Destaque "Do seu setor" para responsáveis fora do perfil diretor ─────────
+//
+// A separação visual "Do seu setor" x "Demais setores" na tela de Aprovações é
+// alimentada pelos setores vinculados ao usuário (user_sectors) e só liga para o
+// perfil `diretor`. Alguns responsáveis por aprovar setores específicos têm
+// perfil `admin` (precisam de todas as permissões do sistema) — como admin, veem
+// tudo numa lista única, sem o destaque.
+//
+// Este override marca, por e-mail, os setores que tais usuários dirigem, ligando
+// o mesmo destaque visual sem alterar seu perfil nem sua visibilidade (seguem
+// vendo TODAS as requisições). Setores casados por NOME (ctrl_sectors.name é
+// único), resiliente a acento/caixa, como no restante deste módulo.
+export const DIRECTOR_HIGHLIGHT_SECTORS: ReadonlyArray<{
+  email: string;
+  sectorNames: readonly string[];
+}> = [
+  {
+    // Marcelo Gonçalves — admin (todas as permissões) e diretor responsável pela
+    // aprovação destes três setores. Destaca-os na tela de Aprovações.
+    email: "marcelo@quokka.net.br",
+    sectorNames: ["TI", "Financeiro Cash Out", "Financeiro CSC"],
+  },
+];
+
+/**
+ * Conjunto (normalizado) de nomes de setor que o usuário DIRIGE para fins de
+ * destaque na tela de Aprovações, quando há um override configurado para ele.
+ * Retorna `null` quando não há override — nesse caso o destaque segue os vínculos
+ * normais (user_sectors) e só se aplica ao perfil diretor.
+ */
+export function directorHighlightSectorsFor(user: {
+  email?: string | null;
+}): Set<string> | null {
+  const email = user.email?.trim().toLowerCase();
+  if (!email) return null;
+  const rule = DIRECTOR_HIGHLIGHT_SECTORS.find(
+    (r) => r.email.trim().toLowerCase() === email,
+  );
+  if (!rule) return null;
+  return new Set(rule.sectorNames.map(normalizeSectorName));
+}
+
 // Faixa Unicode de marcas diacríticas combinantes (U+0300–U+036F), construída
 // em runtime para manter o source ASCII e dispensar a flag /u do regex.
 const COMBINING_DIACRITICS = new RegExp(

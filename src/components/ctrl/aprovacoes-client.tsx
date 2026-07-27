@@ -83,12 +83,16 @@ interface Props {
   // visibilidade (o diretor vê tudo) — servem para separar visualmente "seu
   // setor" das demais requisições na tela.
   ownSectorIds?: string[];
+  // Liga o destaque "Do seu setor" mesmo fora do perfil diretor (ex.: admin que
+  // também é diretor de aprovação de setores específicos — override por e-mail no
+  // servidor). Quando true, `ownSectorIds` já vem resolvido para esses setores.
+  forceSectorGroups?: boolean;
   // Ids de requisições em complementação aguardando análise do aprovador
   // (último turno foi resposta do solicitante). Alimenta o alerta da aba.
   awaitingApproverIds?: string[];
 }
 
-export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], awaitingApproverIds = [] }: Props) {
+export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], forceSectorGroups = false, awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
   const [sortField, setSortField] = useState<SortField>("data");
@@ -141,21 +145,24 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], await
     return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
   });
 
-  // Diretor com setores vinculados: separa visualmente as requisições do(s)
-  // setor(es) sob sua responsabilidade das demais. Ele vê TODAS de qualquer
-  // forma (visão global no getRequests) — a separação é só de leitura.
+  // Diretor (ou responsável marcado via override) com setores vinculados: separa
+  // visualmente as requisições do(s) setor(es) sob sua responsabilidade das
+  // demais. Ele vê TODAS de qualquer forma (visão global no getRequests) — a
+  // separação é só de leitura.
   const ownSectorSet = new Set(ownSectorIds);
-  const groupByOwnSector = hasRole("diretor") && ownSectorSet.size > 0;
+  const groupByOwnSector =
+    (hasRole("diretor") || forceSectorGroups) && ownSectorSet.size > 0;
   const isOwnSector = (r: Req) =>
     groupByOwnSector && !!r.sector_id && ownSectorSet.has(r.sector_id);
   const mineRows = groupByOwnSector ? tabRequests.filter(isOwnSector) : [];
   const otherRows = groupByOwnSector
     ? tabRequests.filter((r) => !isOwnSector(r))
     : tabRequests;
-  // Só mostra as seções quando há mistura — se tudo (ou nada) é do setor dele,
-  // uma lista única já é clara e evita poluir a tela com cabeçalhos vazios.
-  const showSectorGroups =
-    groupByOwnSector && mineRows.length > 0 && otherRows.length > 0;
+  // Diretor/responsável sempre vê as duas seções — mesmo que uma esteja vazia —
+  // para deixar claro quando não há nada do seu setor a aprovar (a seção vazia
+  // ganha uma mensagem de aviso). O bloco só aparece quando o tab tem alguma
+  // requisição (fora daqui já há o vazio "Nenhuma requisição nesta categoria").
+  const showSectorGroups = groupByOwnSector;
   const showCheckboxCol = activeTab === "pendente" && canApprove;
   const colCount = (showCheckboxCol ? 1 : 0) + 8;
 
@@ -431,13 +438,25 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], await
                 );
               };
 
+              const emptyGroupRow = (message: string) => (
+                <tr>
+                  <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-muted-foreground">
+                    {message}
+                  </td>
+                </tr>
+              );
+
               if (showSectorGroups) {
                 return (
                   <>
                     <SectorGroupHeader label="Do seu setor" count={mineRows.length} tone="own" colCount={colCount} />
-                    {mineRows.map(renderRow)}
+                    {mineRows.length > 0
+                      ? mineRows.map(renderRow)
+                      : emptyGroupRow("Nenhuma requisição do seu setor nesta categoria.")}
                     <SectorGroupHeader label="Demais setores" count={otherRows.length} tone="other" colCount={colCount} />
-                    {otherRows.map(renderRow)}
+                    {otherRows.length > 0
+                      ? otherRows.map(renderRow)
+                      : emptyGroupRow("Nenhuma requisição dos demais setores nesta categoria.")}
                   </>
                 );
               }
