@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { BarChart3, Building2, ChevronRight, GitBranch, Table2, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-import { SettingsTabs } from "@/components/app/settings-tabs";
+import { SegmentSelector } from "@/components/app/segment-selector";
 import { getCurrentSessionContext } from "@/lib/auth/session";
-import type { KpiDefinition } from "@/lib/kpi/calc";
 import type { Segment } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +12,47 @@ export const dynamic = "force-dynamic";
 interface ConfiguracoesPageProps {
   params: Promise<{ segmentSlug: string }>;
 }
+
+interface ConfigCard {
+  title: string;
+  description: string;
+  slug: string;
+  icon: LucideIcon;
+}
+
+// Telas de configuração do módulo Financeiro, agrupadas neste hub (admin-only).
+const CARDS: ConfigCard[] = [
+  {
+    title: "Estrutura DRE",
+    description: "Plano de contas do DRE e mapeamento de categorias Omie.",
+    slug: "estrutura-dre",
+    icon: Table2,
+  },
+  {
+    title: "Estrutura Fluxo de Caixa",
+    description: "Plano de contas do Fluxo de Caixa e mapeamento de categorias Omie.",
+    slug: "fluxo-de-caixa",
+    icon: GitBranch,
+  },
+  {
+    title: "KPIs",
+    description: "Definições de indicadores calculados a partir das contas do DRE.",
+    slug: "kpis",
+    icon: BarChart3,
+  },
+  {
+    title: "Departamentos",
+    description: "Departamentos sincronizados da Omie por empresa e seu roteamento.",
+    slug: "departamentos",
+    icon: Building2,
+  },
+  {
+    title: "Sócios",
+    description: "Sócios por empresa e seus vínculos para dividendos e aportes.",
+    slug: "socios",
+    icon: Users,
+  },
+];
 
 export default async function ConfiguracoesPage({ params }: ConfiguracoesPageProps) {
   const { supabase, user, profile } = await getCurrentSessionContext();
@@ -28,180 +71,46 @@ export default async function ConfiguracoesPage({ params }: ConfiguracoesPagePro
     .eq("active", true)
     .order("display_order");
   const segments = (allSegments as Segment[] | null) ?? [];
-  const currentSegment = segments.find((s) => s.slug === segmentSlug) ?? null;
-  const segmentId = currentSegment?.id ?? null;
-
-  let companiesQuery = supabase
-    .from("companies")
-    .select(
-      "id,name,active,created_at,omie_app_key,omie_app_secret,has_department_apportionment",
-    );
-  if (segmentId) {
-    companiesQuery = companiesQuery.eq("segment_id", segmentId);
-  }
-
-  const [companiesResult, allCompaniesResult, dreResult, mappingsResult, kpisResult, cashFlowResult, cashFlowMappingsResult] = await Promise.all([
-    companiesQuery.order("name"),
-    // Lista de TODAS as empresas do sistema (cross-segment) para alimentar
-    // o seletor "Copiar Plano de Contas" do DreStructureManager.
-    supabase
-      .from("companies")
-      .select("id,name")
-      .eq("active", true)
-      .order("name"),
-    supabase
-      .from("dre_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,sort_order,active")
-      .is("company_id", null)
-      .order("code"),
-    supabase
-      .from("category_mapping")
-      .select("id,omie_category_code,omie_category_name,dre_account_id,company_id")
-      .order("omie_category_code"),
-    supabase
-      .from("kpi_definitions")
-      .select(
-        "id,name,description,formula_type,numerator_account_codes,denominator_account_codes,multiply_by,sort_order,active",
-      )
-      .order("sort_order", { ascending: true }),
-    supabase
-      .from("cash_flow_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active")
-      .order("sort_order"),
-    supabase
-      .from("cash_flow_category_mappings")
-      .select("id,omie_category_code,omie_category_name,cash_flow_account_id,company_id")
-      .order("omie_category_code"),
-  ]);
-
-  const companies = (companiesResult.data ?? []).map((company) => ({
-    id: company.id as string,
-    name: company.name as string,
-    active: company.active as boolean,
-    created_at: company.created_at as string,
-    has_credentials: Boolean(company.omie_app_key && company.omie_app_secret),
-    has_department_apportionment: Boolean(company.has_department_apportionment),
-  }));
-
-  // Catalogo de departamentos ja sincronizados (alimenta a aba "Departamentos"
-  // sem precisar bater na Omie a cada render).
-  const companyIds = companies.map((c) => c.id);
-  const departmentsResult = companyIds.length > 0
-    ? await supabase
-        .from("company_departments")
-        .select("id,company_id,omie_code,name,included,synced_at,routed_to_company_id")
-        .in("company_id", companyIds)
-        .order("omie_code")
-    : { data: [] as Array<Record<string, unknown>> };
-
-  const departmentsByCompany = new Map<
-    string,
-    Array<{
-      id: string;
-      omie_code: string;
-      name: string;
-      included: boolean;
-      synced_at: string | null;
-      routed_to_company_id: string | null;
-    }>
-  >();
-  (departmentsResult.data ?? []).forEach((row) => {
-    const companyId = row.company_id as string;
-    const list = departmentsByCompany.get(companyId) ?? [];
-    list.push({
-      id: row.id as string,
-      omie_code: row.omie_code as string,
-      name: row.name as string,
-      included: row.included as boolean,
-      synced_at: (row.synced_at as string | null) ?? null,
-      routed_to_company_id: (row.routed_to_company_id as string | null) ?? null,
-    });
-    departmentsByCompany.set(companyId, list);
-  });
-
-  const companiesWithDepartments = companies.map((c) => ({
-    ...c,
-    departments: departmentsByCompany.get(c.id) ?? [],
-  }));
-
-  const mappingByAccount = new Map<
-    string,
-    Array<{ id: string; code: string; name: string; company_id: string | null }>
-  >();
-  (mappingsResult.data ?? []).forEach((mapping) => {
-    const accountId = mapping.dre_account_id as string;
-    const entries = mappingByAccount.get(accountId) ?? [];
-    entries.push({
-      id: mapping.id as string,
-      code: mapping.omie_category_code as string,
-      name: mapping.omie_category_name as string,
-      company_id: (mapping.company_id as string | null) ?? null,
-    });
-    mappingByAccount.set(accountId, entries);
-  });
-
-  const dreAccounts = (dreResult.data ?? []).map((account) => ({
-    id: account.id as string,
-    code: account.code as string,
-    name: account.name as string,
-    parent_id: (account.parent_id as string | null) ?? null,
-    level: account.level as number,
-    type: account.type as "receita" | "despesa" | "calculado" | "misto",
-    is_summary: account.is_summary as boolean,
-    formula: (account.formula as string | null) ?? null,
-    sort_order: account.sort_order as number,
-    active: account.active as boolean,
-    mappings: mappingByAccount.get(account.id as string) ?? [],
-  }));
-
-  const cashFlowMappingByAccount = new Map<
-    string,
-    Array<{ id: string; code: string; name: string; company_id: string | null }>
-  >();
-  (cashFlowMappingsResult.data ?? []).forEach((mapping) => {
-    const accountId = mapping.cash_flow_account_id as string;
-    const entries = cashFlowMappingByAccount.get(accountId) ?? [];
-    entries.push({
-      id: mapping.id as string,
-      code: mapping.omie_category_code as string,
-      name: mapping.omie_category_name as string,
-      company_id: (mapping.company_id as string | null) ?? null,
-    });
-    cashFlowMappingByAccount.set(accountId, entries);
-  });
-
-  const cashFlowAccounts = (cashFlowResult.data ?? []).map((account) => ({
-    id: account.id as string,
-    code: account.code as string,
-    name: account.name as string,
-    parent_id: (account.parent_id as string | null) ?? null,
-    level: account.level as number,
-    type: account.type as "receita" | "despesa" | "calculado" | "misto",
-    is_summary: account.is_summary as boolean,
-    formula: (account.formula as string | null) ?? null,
-    source: (account.source as string | null) ?? null,
-    is_highlight_block: account.is_highlight_block as boolean,
-    sort_order: account.sort_order as number,
-    active: account.active as boolean,
-    mappings: cashFlowMappingByAccount.get(account.id as string) ?? [],
-  }));
-
-  const allCompanies = (allCompaniesResult.data ?? []).map((c) => ({
-    id: c.id as string,
-    name: c.name as string,
-  }));
 
   return (
-    <SettingsTabs
-      companies={companies}
-      companiesWithDepartments={companiesWithDepartments}
-      dreAccounts={dreAccounts}
-      cashFlowAccounts={cashFlowAccounts}
-      kpis={(kpisResult.data ?? []) as KpiDefinition[]}
-      segmentId={segmentId}
-      segments={segments}
-      currentSegmentSlug={segmentSlug}
-      allCompanies={allCompanies}
-    />
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
+        <p className="text-muted-foreground">
+          Estruturas e cadastros administrativos do módulo Financeiro.
+        </p>
+      </div>
+
+      {segments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-ink-secondary">Segmento:</span>
+          <SegmentSelector segments={segments} activeSlug={segmentSlug} />
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {CARDS.map((card) => {
+          const Icon = card.icon;
+          return (
+            <Link
+              key={card.slug}
+              href={`/s/${segmentSlug}/configuracoes/${card.slug}`}
+              className="group flex items-start gap-4 rounded-lg border bg-card p-5 transition-colors hover:border-primary/40 hover:bg-muted/40"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground group-hover:text-foreground">
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1 font-semibold">
+                  {card.title}
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                </div>
+                <p className="mt-0.5 text-sm text-muted-foreground">{card.description}</p>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
   );
 }
