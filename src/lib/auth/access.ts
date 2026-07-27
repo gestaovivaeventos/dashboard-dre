@@ -109,10 +109,13 @@ export function canAccessPathByProfile(
   }
 
   // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios
-  // exige admin.
+  // exige admin. O módulo Orçamento (/orcamento*) também é admin-only: admin
+  // já retornou true no topo, então aqui negamos para todos os demais perfis.
+  // (Não confundir com /ctrl/orcamento, do módulo Compras, tratado abaixo.)
   if (
     pathname.startsWith("/admin") ||
     pathname.startsWith("/usuarios") ||
+    pathname.startsWith("/orcamento") ||
     pathname.startsWith("/menu-lab")
   ) {
     return false;

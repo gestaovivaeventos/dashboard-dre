@@ -204,7 +204,7 @@ export interface NavItem {
   viagensAprovarOnly?: boolean;
 }
 
-export type NavGroupId = "financeiro" | "compras" | "case" | "viagens" | "plataforma";
+export type NavGroupId = "financeiro" | "orcamento" | "compras" | "case" | "viagens" | "plataforma";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -231,6 +231,16 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
       { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
       { key: "fin-config", title: "Configuracoes", icon: Cog, scope: "segment", suffix: "/configuracoes", dreRoles: ["admin"] },
+    ],
+  },
+  {
+    // Módulo Orçamento — planejamento orçamentário (empresa × mês × categoria ×
+    // setor). Admin-only em todas as telas: o gate por `dreRoles: ["admin"]`
+    // esconde do menu, e /orcamento é bloqueado no access.ts para não-admins.
+    id: "orcamento",
+    label: "ORÇAMENTO",
+    items: [
+      { key: "orc-config", title: "Configurações", icon: Cog, scope: "global", href: "/orcamento/configuracoes", dreRoles: ["admin"] },
     ],
   },
   {
