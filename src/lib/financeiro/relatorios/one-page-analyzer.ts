@@ -1,7 +1,8 @@
-import { generateObject, NoObjectGeneratedError } from "ai";
+import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { z } from "zod";
 
-import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
+import { resolveAiProvider, logResolvedUsage, generateJsonViaChat } from "@/lib/ai/provider";
 
 import {
   resolveOnePageSystemPrompt,
@@ -61,8 +62,27 @@ interface AnalyzerOptions {
 const DEFAULT_OPTIONS: Required<Omit<AnalyzerOptions, "apiKey">> = {
   model: "gpt-4o-mini",
   temperature: 0.2,
-  maxOutputTokens: 2000,
+  // Teto generoso: o relatorio cabe em ~2000 tokens na OpenAI (structured
+  // output compacto), mas o DeepSeek em json_object gera mais tokens para o
+  // mesmo conteudo — 6000 evita truncar o JSON. Cap, nao cobranca.
+  maxOutputTokens: 6000,
 };
+
+// JSON Schema textual do relatorio — injetado no prompt dos provedores que nao
+// suportam json_schema nativo (DeepSeek etc.) para seguirem a estrutura exata,
+// incluindo as descricoes de cada campo. Memoizado; se a conversao falhar,
+// segue sem o hint.
+let cachedReportSchemaHint: string | null | undefined;
+function reportSchemaHint(): string | undefined {
+  if (cachedReportSchemaHint === undefined) {
+    try {
+      cachedReportSchemaHint = JSON.stringify(z.toJSONSchema(OnePageReportSchema));
+    } catch {
+      cachedReportSchemaHint = null;
+    }
+  }
+  return cachedReportSchemaHint ?? undefined;
+}
 
 export async function analyzeOnePageReport(
   rawInput: unknown,
@@ -81,80 +101,73 @@ export async function analyzeOnePageReport(
 
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  // Resolve o provedor ativo (OpenAI/DeepSeek) via config no banco. `options.apiKey`
-  // força OpenAI direto (usado em testes) e pula a medição de consumo.
+  // Resolve o provedor ativo (OpenAI/DeepSeek/etc.) via config no banco.
+  // `options.apiKey` força OpenAI direto (usado em testes) e pula a medição.
   const resolved = options.apiKey ? null : await resolveAiProvider({ capability: "text" });
-  const provider = resolved ? resolved.provider : createOpenAI({ apiKey: options.apiKey as string });
+  const openaiTest = options.apiKey ? createOpenAI({ apiKey: options.apiKey }) : null;
   const modelName = options.model ?? resolved?.modelName ?? opts.model;
   const userPrompt = buildOnePageReportUserPrompt(input);
-  // Seleciona o contexto de negocio conforme o segmento da empresa: as regras
-  // das Franquias Viva so se aplicam ao segmento "franquias-viva"; demais
-  // segmentos recebem o prompt generico.
+  // Seleciona o contexto de negocio conforme o segmento da empresa.
   const systemPrompt = resolveOnePageSystemPrompt(input);
 
-  // 2. Chama o LLM forcando estrutura via schema. O generateObject usa o
-  //    response_format do OpenAI por baixo e valida internamente — quando
-  //    nao bate com o schema, lanca NoObjectGeneratedError.
-  try {
-    const { object, usage } = await generateObject({
-      model: provider(modelName),
-      schema: OnePageReportSchema,
-      system: systemPrompt,
-      prompt: userPrompt,
-      temperature: opts.temperature,
-      maxOutputTokens: opts.maxOutputTokens,
-    });
+  // OpenAI (nativo) usa generateObject com structured outputs (json_schema).
+  // Provedores compatíveis (DeepSeek etc.) só aceitam json_object → caminho cru
+  // via generateJsonViaChat, validado pelo mesmo schema Zod.
+  const isOpenAi = !resolved || resolved.providerName === "openai";
 
-    // 3. Defesa em profundidade: revalida com o mesmo schema. Cobre qualquer
-    //    relaxamento futuro do AI SDK.
+  const runOnce = async (prompt: string): Promise<{ object: unknown; usage: unknown }> => {
+    if (isOpenAi) {
+      const provider = resolved ? resolved.provider : openaiTest!;
+      const { object, usage } = await generateObject({
+        model: provider.chat(modelName),
+        schema: OnePageReportSchema,
+        system: systemPrompt,
+        prompt,
+        temperature: opts.temperature,
+        maxOutputTokens: opts.maxOutputTokens,
+      });
+      return { object, usage };
+    }
+    return generateJsonViaChat(resolved!, {
+      system: systemPrompt,
+      prompt,
+      temperature: opts.temperature,
+      maxTokens: opts.maxOutputTokens,
+      modelName,
+      schemaHint: reportSchemaHint(),
+    });
+  };
+
+  // Uma tentativa: gera, valida com o schema e loga o consumo. Lança em falha.
+  const attempt = async (prompt: string): Promise<OnePageReport> => {
+    const { object, usage } = await runOnce(prompt);
     const verified = OnePageReportSchema.safeParse(object);
     if (!verified.success) {
       throw new OnePageReportError(
-        `Resposta da IA passou no SDK mas falhou na revalidacao: ${verified.error.message}`,
+        `Resposta da IA nao casou com o schema: ${verified.error.message}`,
         verified.error,
       );
     }
     if (resolved) await logResolvedUsage(resolved, "bi", usage);
     return verified.data;
-  } catch (err) {
-    if (err instanceof OnePageReportError) throw err;
+  };
 
-    // Falha de schema na primeira tentativa — retry unico com instrucao
-    // adicional. Se falhar de novo, propaga sem inventar analise.
-    if (err instanceof NoObjectGeneratedError) {
-      try {
-        const { object, usage } = await generateObject({
-          model: provider(modelName),
-          schema: OnePageReportSchema,
-          system: systemPrompt,
-          prompt:
-            userPrompt +
-            "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
-            "Refaca seguindo o schema EXATAMENTE — todos os campos com os tipos e enums corretos.",
-          temperature: opts.temperature,
-          maxOutputTokens: opts.maxOutputTokens,
-        });
-        const verified = OnePageReportSchema.safeParse(object);
-        if (!verified.success) {
-          throw new OnePageReportError(
-            `Retry da IA tambem falhou no schema: ${verified.error.message}`,
-            verified.error,
-          );
-        }
-        if (resolved) await logResolvedUsage(resolved, "bi", usage);
-        return verified.data;
-      } catch (retryErr) {
-        if (retryErr instanceof OnePageReportError) throw retryErr;
-        throw new OnePageReportError(
-          "IA falhou em produzir resposta no schema apos 2 tentativas.",
-          retryErr,
-        );
-      }
+  try {
+    return await attempt(userPrompt);
+  } catch {
+    // Retry unico com instrucao de correcao. Se falhar de novo, propaga.
+    try {
+      return await attempt(
+        userPrompt +
+          "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
+          "Refaca seguindo o schema EXATAMENTE — todos os campos com os tipos e enums corretos.",
+      );
+    } catch (retryErr) {
+      if (retryErr instanceof OnePageReportError) throw retryErr;
+      throw new OnePageReportError(
+        `Falha ao gerar One Page Report: ${retryErr instanceof Error ? retryErr.message : "erro desconhecido"}`,
+        retryErr,
+      );
     }
-
-    throw new OnePageReportError(
-      `Falha ao gerar One Page Report: ${err instanceof Error ? err.message : "erro desconhecido"}`,
-      err,
-    );
   }
 }

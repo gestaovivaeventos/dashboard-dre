@@ -90,14 +90,23 @@ function chatUrlFor(baseURL: string | undefined): string {
 export interface ModelPrice {
   input: number;
   output: number;
+  /**
+   * USD por 1M de tokens de input em CACHE HIT (contexto repetido). DeepSeek e
+   * OpenAI cobram esses tokens bem mais barato que o input normal (cache miss).
+   * Ausente → usa `input` (sem desconto).
+   */
+  cachedInput?: number;
 }
 
 export const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
-  "gpt-4o-mini": { input: 0.15, output: 0.6 },
-  "gpt-4o": { input: 2.5, output: 10.0 },
-  "gpt-5-mini": { input: 0.25, output: 2.0 },
-  "deepseek-chat": { input: 0.27, output: 1.1 },
-  "deepseek-reasoner": { input: 0.55, output: 2.19 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6, cachedInput: 0.075 },
+  "gpt-4o": { input: 2.5, output: 10.0, cachedInput: 1.25 },
+  "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
+  // Valores de referência (ajuste na tela conforme a tabela do DeepSeek):
+  "deepseek-chat": { input: 0.14, output: 0.28, cachedInput: 0.014 },
+  "deepseek-reasoner": { input: 0.55, output: 2.19, cachedInput: 0.14 },
+  "deepseek-v4-flash": { input: 0.14, output: 0.28, cachedInput: 0.0028 },
+  "deepseek-v4-pro": { input: 0.435, output: 0.87, cachedInput: 0.003625 },
 };
 
 export const DEFAULT_USD_BRL_RATE = 5.5;
@@ -245,16 +254,28 @@ export interface AiUsageTokens {
   inputTokens?: number | null;
   outputTokens?: number | null;
   totalTokens?: number | null;
+  /** Parte do input que foi CACHE HIT (subconjunto de inputTokens). */
+  cachedInputTokens?: number | null;
 }
 
 // Normaliza o objeto `usage` do AI SDK (v6: inputTokens/outputTokens) e também
 // aceita o formato snake_case da API crua (prompt_tokens/completion_tokens).
+// Captura os tokens em cache hit: AI SDK (`cachedInputTokens`), OpenAI cru
+// (`prompt_tokens_details.cached_tokens`) e DeepSeek cru (`prompt_cache_hit_tokens`).
 export function normalizeUsage(u: unknown): AiUsageTokens {
-  const usage = (u ?? {}) as Record<string, number | undefined>;
+  const usage = (u ?? {}) as Record<string, number | undefined> & {
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
   const inputTokens = usage.inputTokens ?? usage.promptTokens ?? usage.prompt_tokens ?? 0;
   const outputTokens = usage.outputTokens ?? usage.completionTokens ?? usage.completion_tokens ?? 0;
   const totalTokens = usage.totalTokens ?? usage.total_tokens ?? inputTokens + outputTokens;
-  return { inputTokens, outputTokens, totalTokens };
+  const cachedInputTokens =
+    usage.cachedInputTokens ??
+    usage.prompt_cache_hit_tokens ??
+    usage.prompt_tokens_details?.cached_tokens ??
+    usage.cached_tokens ??
+    0;
+  return { inputTokens, outputTokens, totalTokens, cachedInputTokens };
 }
 
 export function priceForModel(
@@ -291,8 +312,16 @@ export async function logAiUsage(params: {
     const totTok =
       params.usage?.totalTokens != null ? Math.max(0, Math.round(params.usage.totalTokens)) : inTok + outTok;
 
+    // Input dividido em cache hit (mais barato) e cache miss (preço cheio), como
+    // o DeepSeek/OpenAI cobram. Sem cachedInput → tudo pelo preço de input.
+    const cachedIn = Math.min(Math.max(0, Math.round(params.usage?.cachedInputTokens ?? 0)), inTok);
+    const regularIn = inTok - cachedIn;
     const price = priceForModel(params.modelName, params.modelPrices);
-    const costUsd = (inTok / 1_000_000) * price.input + (outTok / 1_000_000) * price.output;
+    const cachedPrice = price.cachedInput ?? price.input;
+    const costUsd =
+      (regularIn / 1_000_000) * price.input +
+      (cachedIn / 1_000_000) * cachedPrice +
+      (outTok / 1_000_000) * price.output;
     const costBrl = costUsd * (params.usdBrlRate || 0);
 
     await db.from("ai_usage_log").insert({
@@ -342,4 +371,71 @@ export async function logResolvedUsage(
     success: extra.success,
     errorMessage: extra.errorMessage,
   });
+}
+
+// ─── Saída JSON compatível (DeepSeek e afins) ────────────────────────────────
+//
+// O `generateObject` do AI SDK, no modelo chat, envia `response_format:
+// json_schema`, que só a OpenAI aceita. Provedores compatíveis (DeepSeek, Groq,
+// etc.) suportam `response_format: json_object`. Este helper faz a chamada crua
+// de chat completions com json_object e devolve o JSON já parseado — o caller
+// valida com o próprio schema Zod. Use-o quando `providerName !== "openai"`.
+export async function generateJsonViaChat(
+  resolved: ResolvedAiProvider,
+  opts: {
+    system: string;
+    prompt: string;
+    temperature?: number;
+    maxTokens?: number;
+    modelName?: string;
+    // JSON Schema (texto) da saída esperada. Injetado no system para o provedor
+    // seguir a estrutura exata, já que não recebe o schema como regra de máquina.
+    schemaHint?: string;
+  },
+): Promise<{ object: unknown; usage: AiUsageTokens }> {
+  const model = opts.modelName ?? resolved.modelName;
+  const systemContent = opts.schemaHint
+    ? opts.system +
+      "\n\nO JSON de resposta DEVE seguir EXATAMENTE este JSON Schema — mesmos campos, " +
+      "tipos e enums, sem campos a mais nem a menos:\n" +
+      opts.schemaHint
+    : opts.system;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const res = await fetch(resolved.chatCompletionsUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resolved.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemContent },
+          {
+            role: "user",
+            content: opts.prompt + "\n\nResponda APENAS com um único objeto JSON válido, sem texto fora do JSON.",
+          },
+        ],
+        temperature: opts.temperature ?? 0.2,
+        max_tokens: opts.maxTokens ?? 4096,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+    }
+    const payload = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: Record<string, number>;
+    };
+    const text = payload.choices?.[0]?.message?.content;
+    if (!text) throw new Error("resposta vazia do provedor");
+    return { object: JSON.parse(text), usage: normalizeUsage(payload.usage) };
+  } finally {
+    clearTimeout(timer);
+  }
 }

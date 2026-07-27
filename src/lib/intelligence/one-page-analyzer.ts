@@ -1,7 +1,8 @@
-import { generateObject, NoObjectGeneratedError } from "ai";
+import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { z } from "zod";
 
-import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
+import { resolveAiProvider, logResolvedUsage, generateJsonViaChat } from "@/lib/ai/provider";
 
 import {
   ONE_PAGE_SYSTEM_PROMPT,
@@ -52,8 +53,24 @@ interface AnalyzerOptions {
 const DEFAULT_OPTIONS: Required<Omit<AnalyzerOptions, "apiKey">> = {
   model: "gpt-4o-mini",
   temperature: 0.2,
-  maxOutputTokens: 2000,
+  // Teto generoso p/ nao truncar o JSON no DeepSeek (json_object gera mais
+  // tokens que o structured output da OpenAI). Cap, nao cobranca.
+  maxOutputTokens: 6000,
 };
+
+// JSON Schema textual da analise — injetado no prompt de provedores sem
+// json_schema nativo (DeepSeek etc.). Memoizado; falha na conversao → sem hint.
+let cachedAnalysisSchemaHint: string | null | undefined;
+function analysisSchemaHint(): string | undefined {
+  if (cachedAnalysisSchemaHint === undefined) {
+    try {
+      cachedAnalysisSchemaHint = JSON.stringify(z.toJSONSchema(OnePageAnalysisSchema));
+    } catch {
+      cachedAnalysisSchemaHint = null;
+    }
+  }
+  return cachedAnalysisSchemaHint ?? undefined;
+}
 
 export async function analyzeOnePage(
   rawInput: unknown,
@@ -72,76 +89,67 @@ export async function analyzeOnePage(
 
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  // Resolve o provedor ativo (OpenAI/DeepSeek) via config no banco. `options.apiKey`
-  // força OpenAI direto (usado em testes) e pula a medição de consumo.
+  // Resolve o provedor ativo. `options.apiKey` força OpenAI direto (testes).
   const resolved = options.apiKey ? null : await resolveAiProvider({ capability: "text" });
-  const provider = resolved ? resolved.provider : createOpenAI({ apiKey: options.apiKey as string });
+  const openaiTest = options.apiKey ? createOpenAI({ apiKey: options.apiKey }) : null;
   const modelName = options.model ?? resolved?.modelName ?? opts.model;
   const userPrompt = buildOnePageUserPrompt(input);
 
-  // 2. Chama o LLM forcando estrutura via schema. O generateObject usa
-  //    response_format do OpenAI por baixo e valida internamente — se nao
-  //    bater com o schema, lanca NoObjectGeneratedError.
-  try {
-    const { object, usage } = await generateObject({
-      model: provider(modelName),
-      schema: OnePageAnalysisSchema,
-      system: ONE_PAGE_SYSTEM_PROMPT,
-      prompt: userPrompt,
-      temperature: opts.temperature,
-      maxOutputTokens: opts.maxOutputTokens,
-    });
+  // OpenAI usa generateObject (json_schema); compatíveis (DeepSeek) usam
+  // json_object via generateJsonViaChat, validado pelo mesmo schema Zod.
+  const isOpenAi = !resolved || resolved.providerName === "openai";
 
-    // 3. Defesa em profundidade: revalida a saida com o mesmo schema. Cobre
-    //    qualquer mudanca futura no SDK que possa relaxar a validacao.
+  const runOnce = async (prompt: string): Promise<{ object: unknown; usage: unknown }> => {
+    if (isOpenAi) {
+      const provider = resolved ? resolved.provider : openaiTest!;
+      const { object, usage } = await generateObject({
+        model: provider.chat(modelName),
+        schema: OnePageAnalysisSchema,
+        system: ONE_PAGE_SYSTEM_PROMPT,
+        prompt,
+        temperature: opts.temperature,
+        maxOutputTokens: opts.maxOutputTokens,
+      });
+      return { object, usage };
+    }
+    return generateJsonViaChat(resolved!, {
+      system: ONE_PAGE_SYSTEM_PROMPT,
+      prompt,
+      temperature: opts.temperature,
+      maxTokens: opts.maxOutputTokens,
+      modelName,
+      schemaHint: analysisSchemaHint(),
+    });
+  };
+
+  const attempt = async (prompt: string): Promise<OnePageAnalysis> => {
+    const { object, usage } = await runOnce(prompt);
     const verified = OnePageAnalysisSchema.safeParse(object);
     if (!verified.success) {
       throw new OnePageAnalyzerError(
-        `Resposta da IA passou no SDK mas falhou na revalidacao: ${verified.error.message}`,
+        `Resposta da IA nao casou com o schema: ${verified.error.message}`,
         verified.error,
       );
     }
     if (resolved) await logResolvedUsage(resolved, "bi", usage);
     return verified.data;
-  } catch (err) {
-    if (err instanceof OnePageAnalyzerError) throw err;
+  };
 
-    // Falha de schema na primeira tentativa — fazemos 1 retry com instrucao
-    // de correcao. Se falhar de novo, propagamos sem inventar analise (o
-    // caller decide como tratar — UI pode oferecer "tentar novamente").
-    if (err instanceof NoObjectGeneratedError) {
-      try {
-        const { object, usage } = await generateObject({
-          model: provider(modelName),
-          schema: OnePageAnalysisSchema,
-          system: ONE_PAGE_SYSTEM_PROMPT,
-          prompt:
-            userPrompt +
-            "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
-            "Refaca seguindo o schema EXATAMENTE — todos os campos, todos os tipos.",
-          temperature: opts.temperature,
-          maxOutputTokens: opts.maxOutputTokens,
-        });
-        const verified = OnePageAnalysisSchema.safeParse(object);
-        if (!verified.success) {
-          throw new OnePageAnalyzerError(
-            `Retry da IA tambem falhou no schema: ${verified.error.message}`,
-            verified.error,
-          );
-        }
-        if (resolved) await logResolvedUsage(resolved, "bi", usage);
-        return verified.data;
-      } catch (retryErr) {
-        throw new OnePageAnalyzerError(
-          "IA falhou em produzir resposta no schema apos 2 tentativas.",
-          retryErr,
-        );
-      }
+  try {
+    return await attempt(userPrompt);
+  } catch {
+    try {
+      return await attempt(
+        userPrompt +
+          "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
+          "Refaca seguindo o schema EXATAMENTE — todos os campos, todos os tipos.",
+      );
+    } catch (retryErr) {
+      if (retryErr instanceof OnePageAnalyzerError) throw retryErr;
+      throw new OnePageAnalyzerError(
+        `Falha ao gerar analise One Page: ${retryErr instanceof Error ? retryErr.message : "erro desconhecido"}`,
+        retryErr,
+      );
     }
-
-    throw new OnePageAnalyzerError(
-      `Falha ao gerar analise One Page: ${err instanceof Error ? err.message : "erro desconhecido"}`,
-      err,
-    );
   }
 }

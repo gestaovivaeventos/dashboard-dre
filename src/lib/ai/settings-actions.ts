@@ -83,27 +83,59 @@ function normalizeSlug(s: string): string {
 }
 
 // ─── Cotação do dólar comercial (automática) ─────────────────────────────────
-// AwesomeAPI (gratuita) — USD-BRL comercial. Usa a média bid/ask.
-const USD_BRL_URL = "https://economia.awesomeapi.com.br/last/USD-BRL";
 const USD_STALE_MS = 3 * 60 * 60 * 1000; // revalida se a última cotação tem +3h
 
-async function fetchCommercialUsdBrl(): Promise<number | null> {
+// Busca a cotação USD→BRL de fontes gratuitas, com fallback. Devolve o motivo
+// da falha quando as duas fontes não respondem (para o painel exibir).
+async function fetchCommercialUsdBrl(): Promise<{ rate: number } | { error: string }> {
+  const errors: string[] = [];
+
+  // 1. AwesomeAPI — dólar comercial (média compra/venda).
   try {
-    const res = await fetch(USD_BRL_URL, { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { USDBRL?: { bid?: string; ask?: string } };
-    const bid = Number(json.USDBRL?.bid);
-    const ask = Number(json.USDBRL?.ask);
-    const mid = Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : bid || ask;
-    return Number.isFinite(mid) && mid > 0 ? Number(mid.toFixed(4)) : null;
-  } catch {
-    return null;
+    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { cache: "no-store" });
+    if (res.ok) {
+      const json = (await res.json()) as { USDBRL?: { bid?: string; ask?: string } };
+      const bid = Number(json.USDBRL?.bid);
+      const ask = Number(json.USDBRL?.ask);
+      const mid = Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : bid || ask;
+      if (Number.isFinite(mid) && mid > 0) return { rate: Number(mid.toFixed(4)) };
+      errors.push("AwesomeAPI: resposta sem cotação");
+    } else {
+      errors.push(`AwesomeAPI HTTP ${res.status}`);
+    }
+  } catch (e) {
+    errors.push(`AwesomeAPI: ${e instanceof Error ? e.message : String(e)}`);
   }
+
+  // 2. Fallback — open.er-api.com (sem chave).
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/USD", { cache: "no-store" });
+    if (res.ok) {
+      const json = (await res.json()) as { rates?: { BRL?: number } };
+      const brl = Number(json.rates?.BRL);
+      if (Number.isFinite(brl) && brl > 0) return { rate: Number(brl.toFixed(4)) };
+      errors.push("er-api: resposta sem BRL");
+    } else {
+      errors.push(`er-api HTTP ${res.status}`);
+    }
+  } catch (e) {
+    errors.push(`er-api: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  return { error: errors.join(" | ") };
 }
 
 export interface ModuleUsage {
   module: AiModule;
   label: string;
+  calls: number;
+  totalTokens: number;
+  costBrl: number;
+  costUsd: number;
+}
+
+export interface ProviderUsage {
+  provider: AiProviderName;
   calls: number;
   totalTokens: number;
   costBrl: number;
@@ -116,6 +148,7 @@ export interface UsageBucket {
   totalTokens: number;
   calls: number;
   byModule: ModuleUsage[];
+  byProvider: ProviderUsage[];
 }
 
 export interface UsageSummary {
@@ -160,30 +193,39 @@ function brtTodayInfo() {
 }
 
 function emptyBucket(): UsageBucket {
-  return { costBrl: 0, costUsd: 0, totalTokens: 0, calls: 0, byModule: [] };
+  return { costBrl: 0, costUsd: 0, totalTokens: 0, calls: 0, byModule: [], byProvider: [] };
 }
 
 function moduleLabel(m: string): string {
   return AI_MODULE_LABELS[m as AiModule] ?? m;
 }
 
-// Consolida linhas {module, ...} num bucket com total + quebra por módulo.
+// Consolida as linhas num bucket com total + quebra por módulo E por provedor.
 function buildBucket(
-  rows: Array<{ module: string; calls: number; totalTokens: number; costBrl: number; costUsd: number }>,
+  rows: Array<{
+    module: string;
+    provider: string;
+    calls: number;
+    totalTokens: number;
+    costBrl: number;
+    costUsd: number;
+  }>,
 ): UsageBucket {
   const byModuleMap = new Map<string, ModuleUsage>();
+  const byProviderMap = new Map<string, ProviderUsage>();
   const bucket = emptyBucket();
   for (const r of rows) {
     bucket.costBrl += r.costBrl;
     bucket.costUsd += r.costUsd;
     bucket.totalTokens += r.totalTokens;
     bucket.calls += r.calls;
-    const existing = byModuleMap.get(r.module);
-    if (existing) {
-      existing.calls += r.calls;
-      existing.totalTokens += r.totalTokens;
-      existing.costBrl += r.costBrl;
-      existing.costUsd += r.costUsd;
+
+    const em = byModuleMap.get(r.module);
+    if (em) {
+      em.calls += r.calls;
+      em.totalTokens += r.totalTokens;
+      em.costBrl += r.costBrl;
+      em.costUsd += r.costUsd;
     } else {
       byModuleMap.set(r.module, {
         module: r.module as AiModule,
@@ -194,8 +236,25 @@ function buildBucket(
         costUsd: r.costUsd,
       });
     }
+
+    const ep = byProviderMap.get(r.provider);
+    if (ep) {
+      ep.calls += r.calls;
+      ep.totalTokens += r.totalTokens;
+      ep.costBrl += r.costBrl;
+      ep.costUsd += r.costUsd;
+    } else {
+      byProviderMap.set(r.provider, {
+        provider: r.provider,
+        calls: r.calls,
+        totalTokens: r.totalTokens,
+        costBrl: r.costBrl,
+        costUsd: r.costUsd,
+      });
+    }
   }
   bucket.byModule = Array.from(byModuleMap.values()).sort((a, b) => b.costBrl - a.costBrl);
+  bucket.byProvider = Array.from(byProviderMap.values()).sort((a, b) => b.costBrl - a.costBrl);
   return bucket;
 }
 
@@ -311,7 +370,15 @@ export async function getAiPanelData(): Promise<AiPanelData> {
   if (override) {
     for (const [model, price] of Object.entries(override)) {
       if (price && typeof price === "object") {
-        modelPrices[model] = { input: Number(price.input) || 0, output: Number(price.output) || 0 };
+        const base = modelPrices[model];
+        modelPrices[model] = {
+          input: Number(price.input) || 0,
+          output: Number(price.output) || 0,
+          cachedInput:
+            price.cachedInput != null && Number.isFinite(Number(price.cachedInput))
+              ? Number(price.cachedInput)
+              : base?.cachedInput,
+        };
       }
     }
   }
@@ -343,7 +410,7 @@ export async function getAiPanelData(): Promise<AiPanelData> {
   // pode informar o preço na tabela.
   for (const pv of providers) {
     const m = pv.model.trim();
-    if (m && !(m in modelPrices)) modelPrices[m] = { input: 0, output: 0 };
+    if (m && !(m in modelPrices)) modelPrices[m] = { input: 0, output: 0, cachedInput: 0 };
   }
 
   // Câmbio: se automático e desatualizado (>3h), busca a cotação comercial agora
@@ -355,10 +422,10 @@ export async function getAiPanelData(): Promise<AiPanelData> {
     const stale = !usdBrlUpdatedAt || Date.now() - new Date(usdBrlUpdatedAt).getTime() > USD_STALE_MS;
     if (stale) {
       const fresh = await fetchCommercialUsdBrl();
-      if (fresh) {
+      if ("rate" in fresh) {
         const now = new Date().toISOString();
-        await db.from("ai_config").update({ usd_brl_rate: fresh, usd_brl_updated_at: now }).eq("id", 1);
-        usdBrlRate = fresh;
+        await db.from("ai_config").update({ usd_brl_rate: fresh.rate, usd_brl_updated_at: now }).eq("id", 1);
+        usdBrlRate = fresh.rate;
         usdBrlUpdatedAt = now;
       }
     }
@@ -550,10 +617,10 @@ export async function setUsdRateAuto(
   let updatedAt: string | undefined;
   if (auto) {
     const fresh = await fetchCommercialUsdBrl();
-    if (fresh) {
-      patch.usd_brl_rate = fresh;
+    if ("rate" in fresh) {
+      patch.usd_brl_rate = fresh.rate;
       patch.usd_brl_updated_at = now;
-      rate = fresh;
+      rate = fresh.rate;
       updatedAt = now;
     }
   }
@@ -569,16 +636,18 @@ export async function refreshUsdRate(): Promise<
 > {
   await requireAdmin();
   const fresh = await fetchCommercialUsdBrl();
-  if (!fresh) return { error: "Não foi possível obter a cotação do dólar agora. Tente novamente." };
+  if ("error" in fresh) {
+    return { error: `Não foi possível obter a cotação: ${fresh.error}` };
+  }
   const db = createAdminClient();
   const now = new Date().toISOString();
   const { error } = await db
     .from("ai_config")
-    .update({ usd_brl_rate: fresh, usd_brl_updated_at: now, updated_at: now })
+    .update({ usd_brl_rate: fresh.rate, usd_brl_updated_at: now, updated_at: now })
     .eq("id", 1);
   if (error) return { error: error.message };
   revalidatePath("/admin/ia");
-  return { ok: true, rate: fresh, updatedAt: now };
+  return { ok: true, rate: fresh.rate, updatedAt: now };
 }
 
 // ─── Teste de conexão ────────────────────────────────────────────────────────
@@ -665,7 +734,7 @@ export async function testProviderConnection(input: {
 }
 
 export async function saveModelPrices(
-  prices: Record<string, { input: number; output: number }>,
+  prices: Record<string, { input: number; output: number; cachedInput?: number }>,
 ): Promise<{ ok: true } | { error: string }> {
   await requireAdmin();
   const db = createAdminClient();
@@ -678,7 +747,9 @@ export async function saveModelPrices(
     const input = Number(price.input);
     const output = Number(price.output);
     if (!model.trim() || !Number.isFinite(input) || !Number.isFinite(output)) continue;
-    merged[model] = { input, output };
+    const cachedInput =
+      price.cachedInput != null && Number.isFinite(Number(price.cachedInput)) ? Number(price.cachedInput) : undefined;
+    merged[model] = cachedInput != null ? { input, output, cachedInput } : { input, output };
   }
 
   const { error } = await db

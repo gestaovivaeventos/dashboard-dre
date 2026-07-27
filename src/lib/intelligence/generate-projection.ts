@@ -86,7 +86,7 @@ export async function generateProjection({
 
   const resolved = await resolveAiProvider({ capability: "text" });
   const { text, usage } = await generateText({
-    model: resolved.provider(resolved.modelName),
+    model: resolved.provider.chat(resolved.modelName),
     system: PROJECTION_SYSTEM_PROMPT,
     prompt: `Historico de 12 meses de "${companyName}". Projete os proximos ${horizonMonths} meses.\n\n${JSON.stringify(historico, null, 2)}`,
   });

@@ -107,7 +107,7 @@ export async function generateComparison(
   // 5. Call AI
   const resolved = await resolveAiProvider({ capability: "text" });
   const { text, usage } = await generateText({
-    model: resolved.provider(resolved.modelName),
+    model: resolved.provider.chat(resolved.modelName),
     system: COMPARISON_SYSTEM_PROMPT,
     prompt: JSON.stringify({
       periodo: periodLabel,
