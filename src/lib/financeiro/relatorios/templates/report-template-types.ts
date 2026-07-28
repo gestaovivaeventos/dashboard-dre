@@ -242,8 +242,8 @@ export type ReportBlockKey =
   | "locacaoEspaco"
   // Quadro comparativo das empresas da holding EXCLUSIVO da Hero Holding
   // (uma linha por unidade Viva vinculada; colunas = VVR acumulado, VVR do mês
-  // de referência, FEE disponível, sobrevivência de caixa, margem média dos
-  // eventos, inadimplência atual). Só o template hero-holding o habilita.
+  // de referência, FEE disponível, sobrevivência de caixa e margem média dos
+  // eventos — SEM inadimplência). Só o template hero-holding o habilita.
   | "holdingComparativo"
   // Quadro de MÚTUOS do segmento Franquias Viva (valores manuais do painel
   // "Mútuos" em Configurações > Empresas). Na Hero Holding lista as unidades do
@@ -392,9 +392,11 @@ export interface TemplateReportConfig {
    * item de `companyNames`, o payload monta uma linha com os MESMOS indicadores
    * já validados no relatório individual das Franquias Viva — VVR acumulado
    * (Jan→mês de referência), VVR do mês de referência, FEE disponível,
-   * sobrevivência de caixa, margem média dos eventos e inadimplência atual —
-   * REUTILIZANDO as mesmas fontes de dados (company_fee_vvr + colunas de balanço
-   * da empresa + despesas operacionais do DRE). NÃO cria cálculo paralelo; só
+   * sobrevivência de caixa e margem média dos eventos — REUTILIZANDO as mesmas
+   * fontes de dados (company_fee_vvr + colunas de balanço da empresa + despesas
+   * operacionais do DRE). INADIMPLÊNCIA fica de fora por decisão de produto:
+   * nenhuma inadimplência das franquias entra no relatório da holding, nem no
+   * quadro nem no input da IA. NÃO cria cálculo paralelo; só
    * apresenta os dados das empresas do grupo. Gated por `key` (allowlist
    * enabledBlocks). `companyNames` define a ORDEM das linhas.
    */

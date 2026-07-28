@@ -21,9 +21,10 @@ import { normalizeCompanyName } from "./templates/hero-holding-template";
 //
 //   - VVR acumulado / VVR do mês de referência → tabela `company_fee_vvr`
 //     (mesma leitura do card VVR e do resumo YTD do relatório individual).
-//   - FEE disponível / margem média dos eventos / inadimplência atual →
-//     colunas de balanço da própria empresa em `companies` (mesmo dado do
-//     painel FEE/VVR e dos cards individuais).
+//   - FEE disponível / margem média dos eventos → colunas de balanço da própria
+//     empresa em `companies` (mesmo dado do painel FEE/VVR e dos cards
+//     individuais). Inadimplência NÃO é lida: ver nota em
+//     `HoldingCompanyIndicators`.
 //   - Sobrevivência de caixa → FEE disponível ÷ média das despesas operacionais
 //     (code "7") dos meses JÁ FECHADOS do ano corrente, via a RPC
 //     `dashboard_dre_aggregate` + plano DRE escopado por empresa. Réplica exata
@@ -63,8 +64,10 @@ export interface HoldingCompanyIndicators {
   sobrevivenciaCaixaMeses: number | null;
   /** Margem média dos eventos (%). */
   margemMediaEventos: number | null;
-  /** Inadimplência atual (R$). */
-  inadimplenciaAtual: number | null;
+  // INADIMPLÊNCIA NÃO ENTRA no comparativo: por decisão de produto, nenhuma
+  // inadimplência das franquias aparece no relatório da holding. O valor
+  // continua existindo em `companies.inadimplencia_atual` e no relatório
+  // INDIVIDUAL de cada unidade Viva — só não é lido aqui.
 }
 
 export interface HoldingComparativoResult {
@@ -81,7 +84,6 @@ interface CompanyRow {
   fee_disponivel: number | string | null;
   fee_a_receber: number | string | null;
   margem_media_eventos: number | string | null;
-  inadimplencia_atual: number | string | null;
 }
 
 interface FeeVvrRow {
@@ -143,7 +145,7 @@ export async function buildHeroHoldingComparativo(
 
   let companyQuery = db
     .from("companies")
-    .select("id,name,fee_disponivel,fee_a_receber,margem_media_eventos,inadimplencia_atual");
+    .select("id,name,fee_disponivel,fee_a_receber,margem_media_eventos");
   if (seg?.id) companyQuery = companyQuery.eq("segment_id", seg.id);
   const { data: companyRows } = await companyQuery;
 
@@ -312,7 +314,6 @@ export async function buildHeroHoldingComparativo(
         ? (sobrevivenciaByCompany.get(company.id) as number)
         : null,
       margemMediaEventos: num(company.margem_media_eventos),
-      inadimplenciaAtual: num(company.inadimplencia_atual),
     };
   });
 

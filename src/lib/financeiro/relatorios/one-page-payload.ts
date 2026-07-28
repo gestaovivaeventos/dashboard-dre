@@ -2008,7 +2008,8 @@ export async function buildOnePagePayload(
             pct_fee_disponivel: e.pctFeeDisponivel,
             sobrevivencia_caixa_meses: e.sobrevivenciaCaixaMeses,
             margem_media_eventos: e.margemMediaEventos,
-            inadimplencia_atual: e.inadimplenciaAtual,
+            // Inadimplência NÃO vai à IA no escopo da holding — nenhuma
+            // inadimplência das franquias entra neste relatório.
           })),
         }
       : null;

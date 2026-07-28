@@ -141,7 +141,6 @@ export interface OnePageApiResponse {
       pctFeeDisponivel: number | null;
       sobrevivenciaCaixaMeses: number | null;
       margemMediaEventos: number | null;
-      inadimplenciaAtual: number | null;
     }>;
   };
   // Quadro de mútuos (Franquias Viva). Já vem no shape do componente (R$
@@ -794,7 +793,6 @@ function mapHoldingComparativo(
       pctFeeDisponivel: e.pctFeeDisponivel,
       sobrevivenciaCaixaMeses: e.sobrevivenciaCaixaMeses,
       margemMediaEventos: e.margemMediaEventos,
-      inadimplenciaAtual: e.inadimplenciaAtual,
     })),
   };
 }

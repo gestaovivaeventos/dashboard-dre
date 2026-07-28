@@ -193,6 +193,8 @@ export interface DreIndicatorsBlock {
 // Comparativo das empresas de uma holding (Hero Holding). Uma linha por unidade
 // Viva do grupo; valores null quando o indicador não existe para a empresa.
 // Só presente quando o template configura `report.holdingComparativo`.
+// NÃO inclui inadimplência: nenhuma inadimplência das franquias entra no
+// relatório da holding (decisão de produto).
 export interface HoldingComparativoRow {
   empresa: string;
   /** % de atingimento acumulado da meta de VVR (Jan→mês de referência). */
@@ -203,7 +205,6 @@ export interface HoldingComparativoRow {
   pctFeeDisponivel: number | null;
   sobrevivenciaCaixaMeses: number | null;
   margemMediaEventos: number | null;
-  inadimplenciaAtual: number | null;
 }
 export interface HoldingComparativoBlock {
   /** ReportBlockKey p/ gating ("holdingComparativo"). */
@@ -2891,29 +2892,30 @@ function QuadroCustodiaCaseShows({ data }: { data: CustodyClosingBlock }) {
 // Quadro COMPARATIVO das empresas da holding (EXCLUSIVO da Hero Holding). Uma
 // linha por unidade Viva do grupo; colunas = os indicadores individuais que
 // foram removidos do topo do relatório da holding, agora POR EMPRESA. Destaca a
-// melhor empresa de cada coluna (verde) e a maior inadimplência (âmbar), para
-// leitura de portfólio rápida. Não polui: um único highlight por coluna.
+// melhor (verde) e a pior (vermelho) empresa de cada coluna, para leitura de
+// portfólio rápida. Não polui: um único highlight por coluna.
+//
+// INADIMPLÊNCIA NÃO ENTRA AQUI: por decisão de produto, nenhuma inadimplência
+// das franquias aparece no relatório da holding — o dado não é montado no
+// payload nem enviado à IA (ver hero-holding.ts e one-page-prompt.ts).
 function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
-  type ColKind = "money" | "months" | "pct" | "pctMeta";
+  type ColKind = "months" | "pct" | "pctMeta";
   interface Col {
     key: keyof HoldingComparativoRow;
     label: string;
     kind: ColKind;
     // Quando true, destaca a MELHOR (verde) e a PIOR (vermelho) franquia da
-    // coluna — todas essas colunas são "quanto maior, melhor". Ausência = coluna
-    // SEM destaque (ex.: inadimplência).
+    // coluna. Ausência = coluna SEM destaque.
     destacaMelhorPior?: boolean;
   }
 
-  // Todas as colunas comparáveis são "quanto maior, melhor". Inadimplência NÃO
-  // recebe destaque.
+  // Todas as colunas comparáveis são "quanto maior, melhor".
   const cols: Col[] = [
     { key: "pctMetaAnualVvrAcumulada", label: "% meta anual (acum.)", kind: "pctMeta", destacaMelhorPior: true },
     { key: "pctMetaVvrMes", label: "% meta do período", kind: "pctMeta", destacaMelhorPior: true },
     { key: "pctFeeDisponivel", label: "% FEE disp.", kind: "pctMeta", destacaMelhorPior: true },
     { key: "sobrevivenciaCaixaMeses", label: "Sobrev. caixa", kind: "months", destacaMelhorPior: true },
     { key: "margemMediaEventos", label: "Margem média", kind: "pct", destacaMelhorPior: true },
-    { key: "inadimplenciaAtual", label: "Inadimplência", kind: "money" },
   ];
 
   // Índices da MELHOR (maior valor → verde) e da PIOR (menor valor → vermelho)
@@ -2955,7 +2957,6 @@ function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
 
   const fmt = (v: number | null, kind: ColKind): string => {
     if (v === null || v === undefined) return "—";
-    if (kind === "money") return fmtMoneyInt(v);
     if (kind === "pctMeta") return fmtPctMeta(v);
     if (kind === "pct") return fmtPctPtBr(v);
     return `${v} ${v === 1 ? "mês" : "meses"}`;
@@ -3028,7 +3029,7 @@ function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
                 {cols.map((c, colIdx) => {
                   const v = e[c.key] as number | null;
                   // Destaca só a MELHOR (verde) e a PIOR (vermelho) franquia da
-                  // coluna. Inadimplência e valores nulos nunca são destacados.
+                  // coluna. Valores nulos nunca são destacados.
                   const { best, worst } = destaqueByCol[colIdx];
                   const tone =
                     rowIdx === best

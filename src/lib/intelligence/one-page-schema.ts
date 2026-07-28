@@ -205,10 +205,15 @@ export const FeatContasReceberAbertoSchema = z.object({
 //   - `pct_meta_anual_vvr_acumulada`: % acumulado Jan→mês de referência.
 //   - `pct_meta_vvr_mes`: % do mês de referência.
 // Os demais indicadores seguem o relatório individual (FEE disponível,
-// sobrevivência de caixa em meses, margem média dos eventos %, inadimplência
-// atual R$). Valores null quando o dado/meta não existe para a empresa. A IA usa
-// este bloco para analisar a Hero Holding como PORTFÓLIO, comparando a
-// performance RELATIVA entre as unidades — nunca como franquia individual.
+// sobrevivência de caixa em meses, margem média dos eventos %). Valores null
+// quando o dado/meta não existe para a empresa. A IA usa este bloco para
+// analisar a Hero Holding como PORTFÓLIO, comparando a performance RELATIVA
+// entre as unidades — nunca como franquia individual.
+//
+// INADIMPLÊNCIA fica FORA deste bloco por decisão de produto: nenhuma
+// inadimplência das franquias entra no relatório da holding (nem no quadro nem
+// no input da IA). O indicador segue existindo no relatório INDIVIDUAL de cada
+// unidade Viva (campo `inadimplencia_atual` de OnePageInputSchema).
 export const HoldingEmpresaIndicadoresSchema = z.object({
   empresa: z.string().min(1).max(120),
   pct_meta_anual_vvr_acumulada: z.number().nullable(),
@@ -217,7 +222,6 @@ export const HoldingEmpresaIndicadoresSchema = z.object({
   pct_fee_disponivel: z.number().nullable(),
   sobrevivencia_caixa_meses: z.number().nullable(),
   margem_media_eventos: z.number().nullable(),
-  inadimplencia_atual: z.number().nullable(),
 });
 
 export const HoldingComparativoSchema = z.object({

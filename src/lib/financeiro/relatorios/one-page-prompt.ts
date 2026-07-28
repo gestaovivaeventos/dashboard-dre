@@ -549,7 +549,7 @@ de GRUPO/PORTFOLIO das empresas que a compoem.
 ## Dado central: comparativo das empresas do grupo
 
 O input traz o bloco \`holding_comparativo\`, com uma linha por empresa do grupo e,
-para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
+para cada uma, CINCO indicadores JA CALCULADOS (nunca recalcule):
 - \`pct_meta_anual_vvr_acumulada\`: % de ATINGIMENTO ACUMULADO da meta de VVR
   (VVR realizado ÷ meta de VVR, de janeiro ate o mes de referencia). E o
   termometro COMERCIAL relativo — quanto MAIOR o %, mais perto (ou acima) da
@@ -570,11 +570,14 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
   disponivel (quanto MAIOR, melhor).
 - \`margem_media_eventos\`: percentual medio final de monetizacao dos eventos
   fechados (quanto MAIOR, melhor).
-- \`inadimplencia_atual\`: inadimplencia DA PROPRIA EMPRESA com as OBRIGACOES
-  QUE ELA TEM A PAGAR (contas/compromissos em atraso da franquia com seus
-  fornecedores/credores), em R$ — NAO e inadimplencia de clientes/fundos com a
-  franquia. Quanto MENOR, melhor. Interprete como GESTAO DE PAGAMENTOS/passivo em
-  atraso da unidade, nunca como cobranca a receber. Veja a regra de acoes abaixo.
+
+REGRA ABSOLUTA — INADIMPLENCIA NAO EXISTE NESTE RELATORIO: o relatorio da holding
+NAO recebe nenhum dado de inadimplencia das franquias, e nenhum e calculavel a
+partir do que voce recebeu. NUNCA cite, estime, comente ou infira inadimplencia
+(nem "contas em atraso", "pagamentos em atraso", "passivo em atraso",
+"devedores") de nenhuma unidade, em NENHUM campo — nem em \`destaques\`, nem em
+\`pontosAtencao\`, nem em \`acoesRecomendadas\`, nem na \`leituraPorIndicador\`. Nao
+mencione sequer a ausencia do indicador.
 
 ## Como analisar (visao de holding)
 
@@ -587,10 +590,10 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
   tem melhor sobrevivencia de caixa; quais tem melhor margem media dos eventos.
   Cite o NOME da empresa e o PERCENTUAL LITERAL do input.
 - Em \`pontosAtencao\`, aponte as unidades ABAIXO da meta (acumulada e/ou do mes —
-  % abaixo de 100%), com menor sobrevivencia de caixa ou maior inadimplencia —
-  sempre em tom construtivo (ponto de atencao que pede acompanhamento, nunca
-  alarmismo). Compare desempenho do MES contra o ACUMULADO: uma unidade pode
-  estar bem no acumulado mas ter caido no mes (ou o inverso).
+  % abaixo de 100%), com menor sobrevivencia de caixa ou menor margem media dos
+  eventos — sempre em tom construtivo (ponto de atencao que pede acompanhamento,
+  nunca alarmismo). Compare desempenho do MES contra o ACUMULADO: uma unidade
+  pode estar bem no acumulado mas ter caido no mes (ou o inverso).
 - Em \`acoesRecomendadas\`, priorize acoes de HOLDING: onde a diretoria do grupo
   deve concentrar acompanhamento COMERCIAL (unidades mais distantes da meta),
   quais unidades precisam de apoio, quais boas praticas de uma unidade forte
@@ -601,13 +604,8 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
 - A comparacao comercial principal e por % de atingimento da META, nao por VVR
   absoluto. Interprete o VVR como indicador comercial FUTURO (nunca receita ja
   recebida) e a sobrevivencia de caixa/FEE como leitura de LIQUIDEZ do grupo.
-- Inadimplencia = passivo EM ATRASO da propria unidade (o que ELA deve e nao
-  pagou), NUNCA valores a receber de clientes/fundos. Ao cita-la em
-  \`pontosAtencao\` ou \`acoesRecomendadas\`, trate como regularizacao de
-  PAGAMENTOS/obrigacoes da franquia (ex.: renegociar/priorizar quitacao de contas
-  em atraso, organizar o fluxo de pagamentos). NUNCA sugira "cobrar clientes",
-  "reforcar a regua/politica de cobranca", "renegociar com inadimplentes",
-  "revisar credito a clientes" ou variacoes — isso NAO se aplica a este indicador.
+- Inadimplencia esta FORA deste relatorio (ver regra absoluta acima): nao a cite
+  nem sugira acoes de cobranca/regularizacao de atrasos para nenhuma unidade.
 
 ## Mutuos das unidades
 
@@ -670,9 +668,9 @@ acima), nao a leitura isolada de uma unica DRE.
 performance RELATIVA das empresas da holding. Mesmo que uma unidade tenha VVR
 absoluto menor, ela pode estar mais proxima da sua meta do que uma unidade
 maior. O relatorio mostra o atingimento da meta de VVR (acumulado e do mes),
-alem de FEE disponivel, sobrevivencia de caixa, margem media dos eventos e
-inadimplencia, permitindo identificar quais empresas puxam melhor desempenho e
-quais merecem acompanhamento mais proximo pela holding."`;
+alem de FEE disponivel, sobrevivencia de caixa e margem media dos eventos,
+permitindo identificar quais empresas puxam melhor desempenho e quais merecem
+acompanhamento mais proximo pela holding."`;
 
 // ============================================================================
 // Contexto de negocio — GENERICO (demais segmentos)
@@ -802,7 +800,7 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
       ? `Contas a receber em aberto Feat (Omie, saldo em aberto por titulo, departamentos selecionados, referencia ${input.feat_contas_receber_aberto.referencia}): total_em_aberto=${input.feat_contas_receber_aberto.total_em_aberto}, total_em_atraso=${input.feat_contas_receber_aberto.total_em_atraso} (${input.feat_contas_receber_aberto.percentual_em_atraso}% do aberto), permuta_em_aberto=${input.feat_contas_receber_aberto.permuta_em_aberto} (parcela do total_em_aberto que e PERMUTA, nao entra em caixa), permuta_em_atraso=${input.feat_contas_receber_aberto.permuta_em_atraso} (parcela do total_em_atraso que e PERMUTA), titulos_em_aberto=${input.feat_contas_receber_aberto.titulos_em_aberto}, titulos_em_atraso=${input.feat_contas_receber_aberto.titulos_em_atraso}, clientes_em_aberto=${input.feat_contas_receber_aberto.clientes_em_aberto}, clientes_em_atraso=${input.feat_contas_receber_aberto.clientes_em_atraso}. Sao valores ainda NAO recebidos, nao receita realizada. Aging e ranking de clientes (maior atraso primeiro) no JSON, campo feat_contas_receber_aberto (aging[] e principais_clientes[])`
       : null,
     input.holding_comparativo
-      ? `Comparativo da holding (referencia ${input.holding_comparativo.referencia}) — ${input.holding_comparativo.empresas.length} empresas do grupo. Analise como PORTFOLIO, comparando as unidades entre si por % DE ATINGIMENTO DA META de VVR (acumulado e do mes), alem de FEE disponivel, sobrevivencia de caixa, margem media dos eventos e inadimplencia (detalhe por empresa no JSON, campo holding_comparativo)`
+      ? `Comparativo da holding (referencia ${input.holding_comparativo.referencia}) — ${input.holding_comparativo.empresas.length} empresas do grupo. Analise como PORTFOLIO, comparando as unidades entre si por % DE ATINGIMENTO DA META de VVR (acumulado e do mes), alem de FEE disponivel, sobrevivencia de caixa e margem media dos eventos (detalhe por empresa no JSON, campo holding_comparativo). Este relatorio NAO traz inadimplencia de nenhuma unidade — nao cite nem estime esse indicador`
       : null,
     input.mutuos
       ? `Mutuos (${input.mutuos.escopo === "holding" ? "unidades do grupo" : "propria franquia"}): ${input.mutuos.unidades.length} ${input.mutuos.unidades.length === 1 ? "unidade" : "unidades"} COM saldo devedor em aberto — saldo devedor total = ${input.mutuos.unidades.reduce((acc, u) => acc + u.saldo_devedor, 0)}. Mutuo e EMPRESTIMO A PAGAR pela unidade (PASSIVO), nunca conta a receber. Unidades sem mutuo em aberto NAO constam da lista e nao devem ser citadas (detalhe por unidade no JSON, campo mutuos)`
