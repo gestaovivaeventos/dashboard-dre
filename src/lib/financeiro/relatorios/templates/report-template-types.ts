@@ -426,15 +426,15 @@ export interface TemplateReportConfig {
   };
   /**
    * Quadro de DIVIDENDOS RECEBIDOS por unidade (Hero Holding). Quebra por
-   * FORNECEDOR (`supplier_customer`) a conta de Fluxo de Caixa "Dividendos
-   * Recebidos" da própria empresa analisada, no PERÍODO DE REFERÊNCIA escolhido
-   * na geração do relatório — usando a mesma RPC de drill-down da tela de Fluxo
-   * de Caixa. Leitura sempre atualizada da Omie; nenhum valor manual.
+   * FORNECEDOR (`supplier_customer`) a conta DRE "Dividendos Recebidos" da
+   * própria empresa analisada, no PERÍODO DE REFERÊNCIA escolhido na geração do
+   * relatório — usando a mesma RPC de drill-down da tela de DRE gerencial.
+   * Leitura sempre atualizada da Omie; nenhum valor manual.
    *
-   * `accountCode` (default "4.1") e `accountName` (default "Dividendos
-   * Recebidos") resolvem a conta no plano de fluxo escopado na empresa (custom
-   * quando existe, senão o global). Unidade sem dividendo no período não entra;
-   * sem nenhuma linha, o quadro não é renderizado. Gated por `key`.
+   * `accountCode` (default "1.3") e `accountName` (default "Dividendos
+   * Recebidos") resolvem a conta dentro do plano DRE já escopado na empresa.
+   * Unidade sem dividendo no período não entra; sem nenhuma linha, o quadro não
+   * é renderizado. Gated por `key`.
    */
   dividendosUnidades?: {
     key: ReportBlockKey;

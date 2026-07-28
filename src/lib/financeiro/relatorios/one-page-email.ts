@@ -475,7 +475,7 @@ export function renderOnePageEmail({
       </tr>`
         : "";
 
-    const nota = `Período de ${dividendos.periodoLabel}. Valores em R$ efetivamente recebidos pela holding (linha "Dividendos Recebidos" do Fluxo de Caixa). Unidades sem dividendo no período não são listadas.`;
+    const nota = `Período de ${dividendos.periodoLabel}. Valores em R$ efetivamente recebidos pela holding (linha "Dividendos Recebidos" do DRE gerencial), abertos pela unidade que distribuiu. Unidades sem dividendo no período não são listadas.`;
 
     return `
     ${sectionTitle(dividendos.title)}

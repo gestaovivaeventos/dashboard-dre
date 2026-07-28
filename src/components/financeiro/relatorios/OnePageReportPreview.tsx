@@ -3219,7 +3219,7 @@ function QuadroMutuos({ data }: { data: MutuosBlock }) {
 // Quadro de DIVIDENDOS RECEBIDOS das unidades (EXCLUSIVO da Hero Holding).
 // Uma linha por unidade que distribuiu dividendo à holding no período de
 // referência, com o valor recebido e a participação no total. Os dados vêm da
-// linha "Dividendos Recebidos" do Fluxo de Caixa (fornecedor = unidade que
+// linha "Dividendos Recebidos" do DRE gerencial (fornecedor = unidade que
 // distribuiu), então acompanham a Omie a cada geração do relatório. Unidades sem
 // dividendo no período já vêm filtradas do payload.
 function QuadroDividendosUnidades({

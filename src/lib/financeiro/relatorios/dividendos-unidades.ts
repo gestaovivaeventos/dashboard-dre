@@ -7,15 +7,16 @@ import { normalizeCompanyName } from "./templates/hero-holding-template";
 // ============================================================================
 // Quadro de DIVIDENDOS RECEBIDOS POR UNIDADE — EXCLUSIVO da Hero Holding.
 // ============================================================================
-// De onde vem o número: da MESMA fonte da tela de Fluxo de Caixa. A linha
-// "Dividendos Recebidos" do Fluxo é alimentada pelos lançamentos da Omie
-// mapeados para aquela conta de fluxo; no drill-down da tela, a unidade que
+// De onde vem o número: da linha "Dividendos Recebidos" do DRE GERENCIAL da
+// holding (conta 1.3 no plano da Hero). Essa linha vivia no Fluxo de Caixa e foi
+// deslocada para o DRE para compor o resultado — é a MESMA categoria da Omie e o
+// MESMO valor; só mudou a tela que a apresenta. No drill-down, a unidade que
 // distribuiu o dividendo aparece no campo FORNECEDOR (`supplier_customer`).
 //
 // Este módulo apenas AGRUPA esse mesmo drill-down por fornecedor, no período de
 // referência escolhido pelo usuário na geração do relatório — via a RPC
-// `cash_flow_drilldown`, a mesma que a tela usa. Nenhum cálculo paralelo, nenhum
-// valor manual: mudou na Omie, muda aqui na próxima geração do relatório.
+// `dashboard_dre_drilldown`, a mesma que a tela usa. Nenhum cálculo paralelo,
+// nenhum valor manual: mudou na Omie, muda aqui na próxima geração do relatório.
 //
 // Nome exibido: o fornecedor vem da Omie com a razão social ("VIVA VOLTA
 // REDONDA EVENTOS LTDA"). Quando o nome do fornecedor CONTÉM o nome de uma
@@ -28,14 +29,23 @@ import { normalizeCompanyName } from "./templates/hero-holding-template";
 // Sem nenhuma linha, o builder devolve `undefined` e o quadro não aparece.
 // ============================================================================
 
-/** Code padrão da conta de Fluxo de Caixa "Dividendos Recebidos" (plano global). */
-const DEFAULT_ACCOUNT_CODE = "4.1";
-/** Fallback por nome, caso a empresa tenha plano custom com outro code. */
+/** Code padrão da conta DRE "Dividendos Recebidos" no plano da Hero Holding. */
+const DEFAULT_ACCOUNT_CODE = "1.3";
+/** Fallback por nome, caso o code mude no plano da empresa. */
 const DEFAULT_ACCOUNT_NAME = "Dividendos Recebidos";
 
 /** Página do drill-down. O cap do PostgREST é 1000 — pagina até esgotar. */
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 20;
+
+// As RPCs de drill-down resolvem o mapeamento lançamento a lançamento, então o
+// custo cresce com a LARGURA do intervalo — medido nesta base, um intervalo de 5
+// anos ESTOUROU o statement_timeout do Postgres (8s), e uma chamada de 6 meses
+// com cache frio também estourou. Por isso o período é quebrado em MESES (a mesma
+// granularidade que as telas usam nas células), mantendo cada statement pequeno
+// independentemente do período pedido no relatório.
+const CHUNK_CONCURRENCY = 6;
+const MAX_CHUNKS = 120;
 
 export interface DividendoUnidadeRow {
   /** Nome da unidade (empresa cadastrada) ou o fornecedor cru da Omie. */
@@ -56,6 +66,13 @@ export interface DividendosUnidadesResult {
   total: number;
 }
 
+/** Conta DRE já escopada no plano da empresa (custom quando existe, senão global). */
+export interface ScopedDreAccount {
+  id: string;
+  code: string;
+  name: string;
+}
+
 interface BuildArgs {
   key: string;
   title: string;
@@ -63,19 +80,17 @@ interface BuildArgs {
   companyId: string;
   /** Segmento da empresa — usado só para resolver os nomes das unidades. */
   segmentId: string | null;
+  /**
+   * Plano DRE JÁ ESCOPADO na empresa (o mesmo que o restante do relatório usa).
+   * Recebido pronto para não duplicar a regra de escopo custom/global aqui.
+   */
+  accounts: ScopedDreAccount[];
   dateFrom: string;
   dateTo: string;
-  /** Code da conta de Fluxo (default "4.1"). */
+  /** Code da conta DRE (default "1.3"). */
   accountCode?: string;
-  /** Nome da conta de Fluxo p/ fallback (default "Dividendos Recebidos"). */
+  /** Nome da conta DRE p/ fallback (default "Dividendos Recebidos"). */
   accountName?: string;
-}
-
-interface CashFlowAccountRow {
-  id: string;
-  code: string;
-  name: string;
-  company_id: string | null;
 }
 
 interface DrilldownRow {
@@ -92,52 +107,71 @@ function formatIsoDate(iso: string): string {
 }
 
 /**
- * Resolve a conta "Dividendos Recebidos" no plano de Fluxo de Caixa da empresa.
- * Mesmo critério de escopo da tela: plano custom da empresa quando existe, senão
- * o global. Casa por CODE e, se não achar, por NOME normalizado.
+ * Resolve a conta "Dividendos Recebidos" dentro do plano DRE JÁ ESCOPADO na
+ * empresa. Casa por CODE e, se não achar, por NOME normalizado — assim a linha
+ * continua sendo encontrada se o code mudar de posição no plano.
  */
-async function resolveDividendosAccountId(
-  supabase: SupabaseClient,
-  companyId: string,
+function resolveDividendosAccountId(
+  accounts: ScopedDreAccount[],
   accountCode: string,
   accountName: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("cash_flow_accounts")
-    .select("id,code,name,company_id")
-    .eq("active", true)
-    .or(`company_id.is.null,company_id.eq.${companyId}`);
-  if (error) return null;
-
-  const all = (data ?? []) as CashFlowAccountRow[];
-  const hasCustomPlan = all.some((a) => a.company_id === companyId);
-  const scoped = all.filter((a) =>
-    hasCustomPlan ? a.company_id === companyId : a.company_id === null,
-  );
-
-  const byCode = scoped.find((a) => a.code === accountCode);
+): string | null {
+  const byCode = accounts.find((a) => a.code === accountCode);
   if (byCode) return byCode.id;
 
   const wantedName = normalizeCompanyName(accountName);
-  const byName = scoped.find((a) => normalizeCompanyName(a.name) === wantedName);
+  const byName = accounts.find((a) => normalizeCompanyName(a.name) === wantedName);
   return byName?.id ?? null;
 }
 
+/** Último dia do mês (1-based) em "YYYY-MM-DD". */
+function lastDayOfMonth(year: number, month: number): string {
+  const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Quebra [dateFrom..dateTo] em intervalos MENSAIS, recortados nas pontas. */
+function monthChunks(dateFrom: string, dateTo: string): Array<[string, string]> {
+  const chunks: Array<[string, string]> = [];
+  let year = Number(dateFrom.slice(0, 4));
+  let month = Number(dateFrom.slice(5, 7));
+  const endYear = Number(dateTo.slice(0, 4));
+  const endMonth = Number(dateTo.slice(5, 7));
+  if (!year || !month || !endYear || !endMonth) return [[dateFrom, dateTo]];
+
+  while (
+    (year < endYear || (year === endYear && month <= endMonth)) &&
+    chunks.length < MAX_CHUNKS
+  ) {
+    const first = `${year}-${String(month).padStart(2, "0")}-01`;
+    const last = lastDayOfMonth(year, month);
+    chunks.push([first < dateFrom ? dateFrom : first, last > dateTo ? dateTo : last]);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return chunks;
+}
+
 /**
- * Lê TODOS os lançamentos da conta no período, paginando a RPC do drill-down
- * (a mesma da tela de Fluxo de Caixa) até esgotar o `total_count`.
+ * Lê os lançamentos da conta em UM mês, paginando até esgotar o `total_count`.
+ * Devolve null quando a RPC falha (ex.: statement timeout) — o chamador precisa
+ * distinguir "mês sem dividendo" de "mês que não pôde ser lido", para nunca
+ * exibir um total parcial como se fosse o total do período.
  */
-async function fetchAllDrilldownRows(
+async function fetchChunkRows(
   supabase: SupabaseClient,
   accountId: string,
   companyId: string,
   dateFrom: string,
   dateTo: string,
-): Promise<DrilldownRow[]> {
+): Promise<DrilldownRow[] | null> {
   const rows: DrilldownRow[] = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const { data, error } = await supabase.rpc("cash_flow_drilldown", {
-      p_cash_flow_account_id: accountId,
+    const { data, error } = await supabase.rpc("dashboard_dre_drilldown", {
+      p_dre_account_id: accountId,
       p_company_ids: [companyId],
       p_date_from: dateFrom,
       p_date_to: dateTo,
@@ -145,11 +179,47 @@ async function fetchAllDrilldownRows(
       p_limit: PAGE_SIZE,
       p_offset: page * PAGE_SIZE,
     });
-    if (error) return rows;
+    if (error) {
+      console.warn(
+        `[dividendos-unidades] dashboard_dre_drilldown falhou em ${dateFrom}..${dateTo}: ${error.message}`,
+      );
+      return null;
+    }
     const batch = (data ?? []) as DrilldownRow[];
     rows.push(...batch);
     const total = Number(batch[0]?.total_count ?? 0);
     if (batch.length < PAGE_SIZE || rows.length >= total) break;
+  }
+  return rows;
+}
+
+/**
+ * Lê TODOS os lançamentos da conta no período, mês a mês (ver CHUNK_*), com uma
+ * retentativa por mês. Devolve null se algum mês não puder ser lido nem na
+ * retentativa — melhor não exibir o quadro do que exibir um total incompleto.
+ */
+async function fetchAllDrilldownRows(
+  supabase: SupabaseClient,
+  accountId: string,
+  companyId: string,
+  dateFrom: string,
+  dateTo: string,
+): Promise<DrilldownRow[] | null> {
+  const chunks = monthChunks(dateFrom, dateTo);
+  const rows: DrilldownRow[] = [];
+
+  for (let i = 0; i < chunks.length; i += CHUNK_CONCURRENCY) {
+    const batch = chunks.slice(i, i + CHUNK_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async ([from, to]) => {
+        const first = await fetchChunkRows(supabase, accountId, companyId, from, to);
+        if (first !== null) return first;
+        // Retentativa única: o timeout observado foi transitório (cache frio).
+        return fetchChunkRows(supabase, accountId, companyId, from, to);
+      }),
+    );
+    if (results.some((r) => r === null)) return null;
+    results.forEach((r) => rows.push(...(r as DrilldownRow[])));
   }
   return rows;
 }
@@ -168,35 +238,49 @@ export async function buildDividendosUnidadesBlock(
     title,
     companyId,
     segmentId,
+    accounts,
     dateFrom,
     dateTo,
     accountCode = DEFAULT_ACCOUNT_CODE,
     accountName = DEFAULT_ACCOUNT_NAME,
   } = args;
 
-  const accountId = await resolveDividendosAccountId(
-    supabase,
-    companyId,
-    accountCode,
-    accountName,
-  );
-  if (!accountId) return undefined;
+  // Leitura com admin client (quando disponível), pelo mesmo motivo do
+  // comparativo e dos mútuos da holding: tira a RLS do caminho de uma consulta
+  // já pesada (a RPC mapeia lançamento a lançamento) e mantém o custo previsível.
+  // Estritamente LEITURA, e da PRÓPRIA empresa analisada — o relatório dela já
+  // foi autorizado na rota. Sem service key, cai para o client da sessão.
+  const db = createAdminClientIfAvailable() ?? supabase;
+
+  const accountId = resolveDividendosAccountId(accounts, accountCode, accountName);
+  if (!accountId) {
+    console.warn(
+      `[dividendos-unidades] conta "${accountName}" (code ${accountCode}) nao encontrada no plano DRE da empresa ${companyId}`,
+    );
+    return undefined;
+  }
 
   const entries = await fetchAllDrilldownRows(
-    supabase,
+    db,
     accountId,
     companyId,
     dateFrom,
     dateTo,
   );
+  // null = algum mês nao pôde ser lido. Some o quadro (nunca um total parcial),
+  // mas com registro no log — antes esta falha era invisível.
+  if (entries === null) {
+    console.warn(
+      `[dividendos-unidades] periodo ${dateFrom}..${dateTo} incompleto para a empresa ${companyId}; quadro omitido`,
+    );
+    return undefined;
+  }
   if (entries.length === 0) return undefined;
 
   // Nomes das unidades do mesmo segmento, para exibir "Viva Volta Redonda" no
-  // lugar da razão social crua da Omie. Leitura com admin client (quando
-  // disponível) pelo mesmo motivo do comparativo/mútuos da holding: quem gera o
-  // relatório da holding não tem, necessariamente, acesso a cada unidade.
-  // Estritamente LEITURA de nome — nenhum dado financeiro vem daqui.
-  const db = createAdminClientIfAvailable() ?? supabase;
+  // lugar da razão social crua da Omie — quem gera o relatório da holding não
+  // tem, necessariamente, acesso a cada unidade. Estritamente LEITURA de nome:
+  // nenhum dado financeiro vem daqui.
   let unitNames: string[] = [];
   if (segmentId) {
     const { data: siblings } = await db

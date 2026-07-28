@@ -142,9 +142,10 @@ export const heroHoldingTemplate: ReportTemplate = {
       companyNames: HERO_HOLDING_MUTUOS_COMPANY_NAMES,
     },
     // Dividendos que a holding RECEBEU de cada unidade no período de referência.
-    // Vem da linha "Dividendos Recebidos" do Fluxo de Caixa, quebrada pelo
-    // FORNECEDOR de cada lançamento (a unidade que distribuiu) — leitura direta
-    // da Omie, sempre atualizada pelo período escolhido no relatório.
+    // Vem da linha "Dividendos Recebidos" do DRE gerencial da Hero (conta 1.3 —
+    // a mesma linha que antes ficava no Fluxo de Caixa), quebrada pelo FORNECEDOR
+    // de cada lançamento (a unidade que distribuiu). Leitura direta da Omie,
+    // sempre atualizada pelo período escolhido no relatório.
     dividendosUnidades: {
       key: "dividendosUnidades",
       title: "Dividendos recebidos das unidades",

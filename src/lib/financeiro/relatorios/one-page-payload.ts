@@ -1945,11 +1945,12 @@ export async function buildOnePagePayload(
   // 11e. Dividendos recebidos por unidade — EXCLUSIVO da Hero Holding.
   //
   // Só é montado quando o template define `report.dividendosUnidades`. Agrupa
-  // por FORNECEDOR o drill-down da conta "Dividendos Recebidos" do Fluxo de
-  // Caixa (mesma RPC da tela), no período [dateFrom..dateTo] escolhido pelo
-  // usuário — leitura direta da Omie, sem valor manual. Sem dividendo no período
-  // o builder devolve undefined e o quadro não aparece. Inerte nos demais
-  // templates.
+  // por FORNECEDOR o drill-down da conta DRE "Dividendos Recebidos" (mesma RPC
+  // da tela de DRE gerencial), no período [dateFrom..dateTo] escolhido pelo
+  // usuário — leitura direta da Omie, sem valor manual. `scopedAccounts` é o
+  // plano DRE já escopado na empresa, o mesmo usado pelo resto do relatório.
+  // Sem dividendo no período o builder devolve undefined e o quadro não aparece.
+  // Inerte nos demais templates.
   // -------------------------------------------------------------------------
   const dividendosCfg = template.report?.dividendosUnidades;
   const dividendosUnidades: DividendosUnidadesResult | undefined = dividendosCfg
@@ -1958,6 +1959,7 @@ export async function buildOnePagePayload(
         title: dividendosCfg.title,
         companyId,
         segmentId: company.segment_id,
+        accounts: scopedAccounts,
         dateFrom,
         dateTo,
         accountCode: dividendosCfg.accountCode,

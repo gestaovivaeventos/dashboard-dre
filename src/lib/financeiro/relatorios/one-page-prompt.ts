@@ -634,11 +634,13 @@ informados pela administracao — NAO recalcule e NAO os misture com o DRE.
 O input pode trazer o bloco \`dividendos_unidades\`: quanto CADA unidade distribuiu
 de dividendos PARA A HOLDING no periodo de referencia (\`periodo\`), com \`valor\`
 por empresa, \`pct_do_total\` e o \`total\` do periodo. Vem da linha "Dividendos
-Recebidos" do Fluxo de Caixa, identificada pelo fornecedor de cada lancamento na
-Omie — e dinheiro JA RECEBIDO no periodo (regime de caixa), NAO previsao, NAO meta
-e NAO receita operacional da holding.
+Recebidos" do DRE gerencial da holding, identificada pelo fornecedor de cada
+lancamento na Omie — e dinheiro JA RECEBIDO no periodo (regime de caixa), NAO
+previsao, NAO meta.
 - Use os valores COMO ESTAO. Nao recalcule, nao anualize, nao projete e nao os
-  some ao DRE nem ao VVR.
+  some ao VVR. Eles JA ESTAO dentro do DRE da holding (linha "Dividendos
+  Recebidos"), entao NAO os some de novo ao resultado nem os trate como uma
+  receita extra fora do DRE: aqui eles aparecem apenas ABERTOS POR UNIDADE.
 - E o RETORNO do portfolio para a holding: mostra quais unidades efetivamente
   remuneraram o acionista no periodo e qual a CONCENTRACAO dessa remuneracao
   (\`pct_do_total\`). Concentracao alta em poucas unidades e um ponto de atencao
@@ -808,7 +810,7 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
     input.dividendos_unidades
       ? `Dividendos recebidos das unidades (periodo ${input.dividendos_unidades.periodo}): total = ${input.dividendos_unidades.total} distribuido por ${input.dividendos_unidades.unidades.length} ${input.dividendos_unidades.unidades.length === 1 ? "unidade" : "unidades"} — ${input.dividendos_unidades.unidades
           .map((u) => `${u.empresa} = ${u.valor}`)
-          .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie), nunca previsao nem receita operacional. Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
+          .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie, linha "Dividendos Recebidos" do proprio DRE da holding — NAO some de novo ao resultado). Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
       : null,
   ]
     .filter((line): line is string => line !== null)
