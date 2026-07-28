@@ -27,6 +27,10 @@ import {
   type HoldingComparativoResult,
 } from "./hero-holding";
 import {
+  buildDividendosSociosBlock,
+  type DividendosSociosResult,
+} from "./dividendos-socios";
+import {
   buildDividendosUnidadesBlock,
   type DividendosUnidadesResult,
 } from "./dividendos-unidades";
@@ -254,6 +258,11 @@ export interface OnePagePayload {
   // distribuiu), no período de referência. Ausente (undefined) quando não houve
   // dividendo no período ou a conta não existe no plano da empresa.
   dividendosUnidades?: DividendosUnidadesResult;
+  // Dividendos pagos aos sócios — EXCLUSIVO da Hero Holding. Quebra da linha
+  // "Dividendos Pagos" do Fluxo de Caixa pelos sócios configurados no template,
+  // no período de referência. Ausente (undefined) quando a conta não existe no
+  // plano da empresa ou o período não pôde ser lido por completo.
+  dividendosSocios?: DividendosSociosResult;
   // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
   // Ausência = não renderiza (só templates com `report.indicadoresDre`).
   indicadoresDre?: DreIndicatorsPayload;
@@ -1967,6 +1976,42 @@ export async function buildOnePagePayload(
       })
     : undefined;
 
+  // -------------------------------------------------------------------------
+  // 11f. Dividendos PAGOS AOS SÓCIOS — EXCLUSIVO da Hero Holding.
+  //
+  // Só é montado quando o template define `report.dividendosSocios`. Agrupa por
+  // FORNECEDOR o drill-down da conta de Fluxo "Dividendos Pagos" (mesma RPC da
+  // tela de Fluxo de Caixa), restrito aos sócios configurados. Inerte nos demais
+  // templates.
+  // -------------------------------------------------------------------------
+  const dividendosSociosCfg = template.report?.dividendosSocios;
+  const dividendosSocios: DividendosSociosResult | undefined = dividendosSociosCfg
+    ? await buildDividendosSociosBlock(supabase, {
+        key: dividendosSociosCfg.key,
+        title: dividendosSociosCfg.title,
+        companyId,
+        partnerNames: dividendosSociosCfg.partnerNames,
+        dateFrom,
+        dateTo,
+        accountCode: dividendosSociosCfg.accountCode,
+        accountName: dividendosSociosCfg.accountName,
+      })
+    : undefined;
+
+  // Resumo dos dividendos pagos para a IA. Inclui os sócios com 0 no período —
+  // a ausência de pagamento é informação, não lacuna.
+  const dividendosSociosInput = dividendosSocios
+    ? {
+        periodo: dividendosSocios.periodoLabel,
+        total: dividendosSocios.total,
+        socios: dividendosSocios.rows.map((r) => ({
+          socio: r.socio,
+          valor: r.valor,
+          pct_do_total: r.pct,
+        })),
+      }
+    : null;
+
   // Resumo dos dividendos para a IA (snake_case, alinhado ao schema do input).
   // Mesmas linhas do quadro — a IA lê exatamente o que o relatório mostra.
   const dividendosInput = dividendosUnidades
@@ -2121,6 +2166,8 @@ export async function buildOnePagePayload(
         // Dividendos recebidos das unidades — só presente para a Hero Holding e
         // apenas quando houve dividendo no período de referência.
         dividendos_unidades: dividendosInput,
+        // Dividendos pagos aos sócios configurados — só presente p/ Hero Holding.
+        dividendos_socios: dividendosSociosInput,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -2153,6 +2200,8 @@ export async function buildOnePagePayload(
       // Dividendos recebidos das unidades — só presente para a Hero Holding e
       // apenas quando houve dividendo no período de referência.
       dividendosUnidades,
+      // Dividendos pagos aos sócios configurados — só presente p/ Hero Holding.
+      dividendosSocios,
       // Quadro de indicadores por conta DRE — só presente p/ templates que o
       // configuram (ex.: Terrazzo — "Locação de Espaço").
       indicadoresDre,

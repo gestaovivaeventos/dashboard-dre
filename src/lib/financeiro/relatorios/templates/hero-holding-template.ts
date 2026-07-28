@@ -119,8 +119,11 @@ export const heroHoldingTemplate: ReportTemplate = {
       "diagnostico",
       "holdingComparativo",
       "mutuos",
-      "dividendosUnidades",
       "previstoRealizado",
+      // Os dois quadros de dividendos vêm LOGO ABAIXO do "Desempenho do período
+      // vs orçamento" (ver ordem de render no OnePageReportPreview).
+      "dividendosUnidades",
+      "dividendosSocios",
       "composicao",
       "acumuladoAno",
       "historico",
@@ -149,6 +152,16 @@ export const heroHoldingTemplate: ReportTemplate = {
     dividendosUnidades: {
       key: "dividendosUnidades",
       title: "Dividendos recebidos das unidades",
+    },
+    // Dividendos que a holding PAGOU aos sócios no período. Vem da linha
+    // "Dividendos Pagos" do Fluxo de Caixa (conta 4.2), quebrada pelo FORNECEDOR
+    // de cada lançamento. A Hero tem mais sócios cadastrados (Douglas, Lúcio),
+    // mas SÓ estes três interessam ao relatório — os demais são ignorados e não
+    // entram no total. Sócio sem pagamento no período aparece com 0,00.
+    dividendosSocios: {
+      key: "dividendosSocios",
+      title: "Dividendos pagos aos sócios",
+      partnerNames: ["Renan", "Jefferson", "V Company"],
     },
   },
 };

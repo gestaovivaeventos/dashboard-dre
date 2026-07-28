@@ -655,6 +655,27 @@ previsao, NAO meta.
 - Ao citar valores em \`destaques\`/\`pontosAtencao\`, use o NOME da unidade e o
   VALOR LITERAL do input, sempre amarrado ao periodo de referencia.
 
+## Dividendos pagos aos socios
+
+O input pode trazer o bloco \`dividendos_socios\`: quanto a holding PAGOU a cada
+socio no periodo (\`valor\`, \`pct_do_total\` e o \`total\`). Vem da linha "Dividendos
+Pagos" do Fluxo de Caixa — e SAIDA DE CAIXA ja ocorrida, nunca previsao.
+- Use os valores COMO ESTAO. Nao recalcule, nao projete e nao os trate como
+  despesa operacional: distribuicao de lucro NAO e custo do negocio e NAO entra
+  na leitura de margem nem de controle de despesas.
+- A lista de socios e FIXA (a definida para o relatorio). Socio com \`valor\` 0 NAO
+  recebeu no periodo — diga exatamente isso, sem supor atraso, bloqueio ou
+  qualquer motivo. A empresa tem OUTROS socios que nao constam da lista: nunca
+  afirme que os listados sao todos os socios, nem que o \`total\` e tudo o que a
+  holding distribuiu.
+- Leitura util: confronte o que a holding RECEBEU das unidades
+  (\`dividendos_unidades\`) com o que DISTRIBUIU aos socios — quanto do retorno do
+  portfolio ficou na holding e quanto foi para os socios. Se so um dos dois
+  blocos vier, comente apenas o que veio.
+- NAO opine sobre a divisao entre socios, sobre acordo societario, nem
+  recomende alterar valores ou politica de distribuicao — nao ha dado no input
+  que sustente isso.
+
 ## Sobre o DRE consolidado da holding
 
 O input tambem traz indicadores de DRE (\`dre\`) da propria holding (numeros
@@ -809,6 +830,11 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
       ? `Dividendos recebidos das unidades (periodo ${input.dividendos_unidades.periodo}): total = ${input.dividendos_unidades.total} distribuido por ${input.dividendos_unidades.unidades.length} ${input.dividendos_unidades.unidades.length === 1 ? "unidade" : "unidades"} — ${input.dividendos_unidades.unidades
           .map((u) => `${u.empresa} = ${u.valor}`)
           .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie, linha "Dividendos Recebidos" do proprio DRE da holding — NAO some de novo ao resultado). Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
+      : null,
+    input.dividendos_socios
+      ? `Dividendos pagos aos socios (periodo ${input.dividendos_socios.periodo}): total = ${input.dividendos_socios.total} — ${input.dividendos_socios.socios
+          .map((s) => `${s.socio} = ${s.valor}`)
+          .join("; ")}. SAIDA DE CAIXA ja ocorrida (linha "Dividendos Pagos" do Fluxo de Caixa), NAO e despesa operacional. Lista FIXA de socios: valor 0 significa que o socio nao recebeu no periodo, e a empresa tem OUTROS socios fora desta lista (nao afirme que sao todos)`
       : null,
   ]
     .filter((line): line is string => line !== null)

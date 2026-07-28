@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
+import { DRE_DRILLDOWN, fetchDrilldownRowsByMonth } from "./drilldown-chunked";
 import { normalizeCompanyName } from "./templates/hero-holding-template";
 
 // ============================================================================
@@ -15,15 +16,16 @@ import { normalizeCompanyName } from "./templates/hero-holding-template";
 //
 // Este módulo apenas AGRUPA esse mesmo drill-down por fornecedor, no período de
 // referência escolhido pelo usuário na geração do relatório — via a RPC
-// `dashboard_dre_drilldown`, a mesma que a tela usa. Nenhum cálculo paralelo,
-// nenhum valor manual: mudou na Omie, muda aqui na próxima geração do relatório.
+// `dashboard_dre_drilldown`, a mesma que a tela usa (lida mês a mês, ver
+// drilldown-chunked.ts). Nenhum cálculo paralelo, nenhum valor manual: mudou na
+// Omie, muda aqui na próxima geração do relatório.
 //
-// Nome exibido: o fornecedor vem da Omie com a razão social ("VIVA VOLTA
-// REDONDA EVENTOS LTDA"). Quando o nome do fornecedor CONTÉM o nome de uma
-// empresa cadastrada no mesmo segmento (comparação normalizada — sem acento,
-// minúscula), exibimos o nome da empresa cadastrada ("Viva Volta Redonda") e
-// somamos as grafias diferentes numa linha só. Sem casamento, mantemos o nome
-// cru do fornecedor — nunca inventamos nem escondemos valor.
+// Nome exibido: o fornecedor vem da Omie com a razão social ("VIVA CAMPO GRANDE
+// - BB CC 123852-3"). Quando o nome do fornecedor CONTÉM o nome de uma empresa
+// cadastrada no mesmo segmento (comparação normalizada — sem acento, minúscula),
+// exibimos o nome da empresa cadastrada ("Viva Campo Grande") e somamos as
+// grafias diferentes numa linha só. Sem casamento, mantemos o nome cru do
+// fornecedor — nunca inventamos nem escondemos valor.
 //
 // REGRA DE EXIBIÇÃO: só entram unidades com dividendo no período (total ≠ 0).
 // Sem nenhuma linha, o builder devolve `undefined` e o quadro não aparece.
@@ -34,18 +36,7 @@ const DEFAULT_ACCOUNT_CODE = "1.3";
 /** Fallback por nome, caso o code mude no plano da empresa. */
 const DEFAULT_ACCOUNT_NAME = "Dividendos Recebidos";
 
-/** Página do drill-down. O cap do PostgREST é 1000 — pagina até esgotar. */
-const PAGE_SIZE = 1000;
-const MAX_PAGES = 20;
-
-// As RPCs de drill-down resolvem o mapeamento lançamento a lançamento, então o
-// custo cresce com a LARGURA do intervalo — medido nesta base, um intervalo de 5
-// anos ESTOUROU o statement_timeout do Postgres (8s), e uma chamada de 6 meses
-// com cache frio também estourou. Por isso o período é quebrado em MESES (a mesma
-// granularidade que as telas usam nas células), mantendo cada statement pequeno
-// independentemente do período pedido no relatório.
-const CHUNK_CONCURRENCY = 6;
-const MAX_CHUNKS = 120;
+const LOG_LABEL = "dividendos-unidades";
 
 export interface DividendoUnidadeRow {
   /** Nome da unidade (empresa cadastrada) ou o fornecedor cru da Omie. */
@@ -93,14 +84,8 @@ interface BuildArgs {
   accountName?: string;
 }
 
-interface DrilldownRow {
-  supplier_customer: string | null;
-  value: number | string | null;
-  total_count: number | string | null;
-}
-
 /** "2026-01-01" → "01/01/2026". Entrada inválida volta como veio. */
-function formatIsoDate(iso: string): string {
+export function formatIsoDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return iso;
   return `${m[3]}/${m[2]}/${m[1]}`;
@@ -122,106 +107,6 @@ function resolveDividendosAccountId(
   const wantedName = normalizeCompanyName(accountName);
   const byName = accounts.find((a) => normalizeCompanyName(a.name) === wantedName);
   return byName?.id ?? null;
-}
-
-/** Último dia do mês (1-based) em "YYYY-MM-DD". */
-function lastDayOfMonth(year: number, month: number): string {
-  const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-/** Quebra [dateFrom..dateTo] em intervalos MENSAIS, recortados nas pontas. */
-function monthChunks(dateFrom: string, dateTo: string): Array<[string, string]> {
-  const chunks: Array<[string, string]> = [];
-  let year = Number(dateFrom.slice(0, 4));
-  let month = Number(dateFrom.slice(5, 7));
-  const endYear = Number(dateTo.slice(0, 4));
-  const endMonth = Number(dateTo.slice(5, 7));
-  if (!year || !month || !endYear || !endMonth) return [[dateFrom, dateTo]];
-
-  while (
-    (year < endYear || (year === endYear && month <= endMonth)) &&
-    chunks.length < MAX_CHUNKS
-  ) {
-    const first = `${year}-${String(month).padStart(2, "0")}-01`;
-    const last = lastDayOfMonth(year, month);
-    chunks.push([first < dateFrom ? dateFrom : first, last > dateTo ? dateTo : last]);
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-  return chunks;
-}
-
-/**
- * Lê os lançamentos da conta em UM mês, paginando até esgotar o `total_count`.
- * Devolve null quando a RPC falha (ex.: statement timeout) — o chamador precisa
- * distinguir "mês sem dividendo" de "mês que não pôde ser lido", para nunca
- * exibir um total parcial como se fosse o total do período.
- */
-async function fetchChunkRows(
-  supabase: SupabaseClient,
-  accountId: string,
-  companyId: string,
-  dateFrom: string,
-  dateTo: string,
-): Promise<DrilldownRow[] | null> {
-  const rows: DrilldownRow[] = [];
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const { data, error } = await supabase.rpc("dashboard_dre_drilldown", {
-      p_dre_account_id: accountId,
-      p_company_ids: [companyId],
-      p_date_from: dateFrom,
-      p_date_to: dateTo,
-      p_search: "",
-      p_limit: PAGE_SIZE,
-      p_offset: page * PAGE_SIZE,
-    });
-    if (error) {
-      console.warn(
-        `[dividendos-unidades] dashboard_dre_drilldown falhou em ${dateFrom}..${dateTo}: ${error.message}`,
-      );
-      return null;
-    }
-    const batch = (data ?? []) as DrilldownRow[];
-    rows.push(...batch);
-    const total = Number(batch[0]?.total_count ?? 0);
-    if (batch.length < PAGE_SIZE || rows.length >= total) break;
-  }
-  return rows;
-}
-
-/**
- * Lê TODOS os lançamentos da conta no período, mês a mês (ver CHUNK_*), com uma
- * retentativa por mês. Devolve null se algum mês não puder ser lido nem na
- * retentativa — melhor não exibir o quadro do que exibir um total incompleto.
- */
-async function fetchAllDrilldownRows(
-  supabase: SupabaseClient,
-  accountId: string,
-  companyId: string,
-  dateFrom: string,
-  dateTo: string,
-): Promise<DrilldownRow[] | null> {
-  const chunks = monthChunks(dateFrom, dateTo);
-  const rows: DrilldownRow[] = [];
-
-  for (let i = 0; i < chunks.length; i += CHUNK_CONCURRENCY) {
-    const batch = chunks.slice(i, i + CHUNK_CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(async ([from, to]) => {
-        const first = await fetchChunkRows(supabase, accountId, companyId, from, to);
-        if (first !== null) return first;
-        // Retentativa única: o timeout observado foi transitório (cache frio).
-        return fetchChunkRows(supabase, accountId, companyId, from, to);
-      }),
-    );
-    if (results.some((r) => r === null)) return null;
-    results.forEach((r) => rows.push(...(r as DrilldownRow[])));
-  }
-  return rows;
 }
 
 /**
@@ -255,23 +140,24 @@ export async function buildDividendosUnidadesBlock(
   const accountId = resolveDividendosAccountId(accounts, accountCode, accountName);
   if (!accountId) {
     console.warn(
-      `[dividendos-unidades] conta "${accountName}" (code ${accountCode}) nao encontrada no plano DRE da empresa ${companyId}`,
+      `[${LOG_LABEL}] conta "${accountName}" (code ${accountCode}) nao encontrada no plano DRE da empresa ${companyId}`,
     );
     return undefined;
   }
 
-  const entries = await fetchAllDrilldownRows(
-    db,
+  const entries = await fetchDrilldownRowsByMonth(db, {
+    source: DRE_DRILLDOWN,
     accountId,
     companyId,
     dateFrom,
     dateTo,
-  );
+    logLabel: LOG_LABEL,
+  });
   // null = algum mês nao pôde ser lido. Some o quadro (nunca um total parcial),
   // mas com registro no log — antes esta falha era invisível.
   if (entries === null) {
     console.warn(
-      `[dividendos-unidades] periodo ${dateFrom}..${dateTo} incompleto para a empresa ${companyId}; quadro omitido`,
+      `[${LOG_LABEL}] periodo ${dateFrom}..${dateTo} incompleto para a empresa ${companyId}; quadro omitido`,
     );
     return undefined;
   }

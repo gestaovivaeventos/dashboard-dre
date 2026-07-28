@@ -253,6 +253,25 @@ export interface DividendosUnidadesBlock {
   total: number;
 }
 
+// Dividendos PAGOS AOS SÓCIOS (Hero Holding) — quebra da linha "Dividendos
+// Pagos" do Fluxo de Caixa pelos sócios configurados no template. Ao contrário
+// do quadro de recebidos, sócio configurado SEM pagamento no período vem com
+// valor 0 (e é exibido): a ausência de pagamento é informação.
+export interface DividendoSocioRow {
+  socio: string;
+  valor: number;
+  /** % sobre o total pago aos sócios listados (null quando o total é 0). */
+  pct: number | null;
+}
+export interface DividendosSociosBlock {
+  /** ReportBlockKey p/ gating ("dividendosSocios"). */
+  key: string;
+  title: string;
+  periodoLabel: string;
+  rows: DividendoSocioRow[];
+  total: number;
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -298,6 +317,8 @@ export interface OnePageReportPreviewData {
   mutuos?: MutuosBlock;
   /** Dividendos recebidos das unidades (Hero Holding). Ausência = não renderiza. */
   dividendosUnidades?: DividendosUnidadesBlock;
+  /** Dividendos pagos aos sócios (Hero Holding). Ausência = não renderiza. */
+  dividendosSocios?: DividendosSociosBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -3217,19 +3238,39 @@ function QuadroMutuos({ data }: { data: MutuosBlock }) {
   );
 }
 
-// Quadro de DIVIDENDOS RECEBIDOS das unidades (EXCLUSIVO da Hero Holding).
-// Uma linha por unidade que distribuiu dividendo à holding no período de
-// referência, com o valor recebido e a participação no total. Os dados vêm da
-// linha "Dividendos Recebidos" do DRE gerencial (fornecedor = unidade que
-// distribuiu), então acompanham a Omie a cada geração do relatório. Unidades sem
-// dividendo no período já vêm filtradas do payload.
-function QuadroDividendosUnidades({
-  data,
+// Quadro de DIVIDENDOS (EXCLUSIVO da Hero Holding) — serve aos DOIS blocos:
+//
+//   "Dividendos recebidos das unidades" → uma linha por unidade Viva que
+//     distribuiu dividendo à holding (linha "Dividendos Recebidos" do DRE
+//     gerencial, fornecedor = unidade que distribuiu). Unidades sem dividendo já
+//     vêm filtradas do payload.
+//   "Dividendos pagos aos sócios" → uma linha por sócio configurado (linha
+//     "Dividendos Pagos" do Fluxo de Caixa, fornecedor = sócio). Sócio sem
+//     pagamento no período aparece com 0,00 — não é filtrado.
+//
+// Os dois acompanham a Omie a cada geração do relatório. `firstColLabel` nomeia
+// a primeira coluna ("Unidade"/"Sócio") e `caption` é a legenda acima da tabela.
+interface QuadroDividendosRow {
+  label: string;
+  valor: number;
+  pct: number | null;
+}
+function QuadroDividendos({
+  title,
+  firstColLabel,
+  caption,
+  rows: dataRows,
+  total: dataTotal,
   accent,
 }: {
-  data: DividendosUnidadesBlock;
+  title: string;
+  firstColLabel: string;
+  caption: React.ReactNode;
+  rows: QuadroDividendosRow[];
+  total: number;
   accent: string;
 }) {
+  const data = { title, rows: dataRows, total: dataTotal };
   const th: CSSProperties = {
     fontSize: 9,
     letterSpacing: "0.04em",
@@ -3255,10 +3296,7 @@ function QuadroDividendosUnidades({
     <section style={{ breakInside: "avoid" }}>
       <SectionTitle>{data.title}</SectionTitle>
       <div style={{ fontSize: 10, color: C.sub, marginTop: -4, marginBottom: 8 }}>
-        No período de {data.periodoLabel}, {data.rows.length}{" "}
-        {data.rows.length === 1 ? "unidade distribuiu" : "unidades distribuíram"}{" "}
-        {fmtMoneyFull(data.total)} em dividendos para a holding · unidades sem
-        dividendo no período não são listadas
+        {caption}
       </div>
       <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
         <table
@@ -3266,7 +3304,7 @@ function QuadroDividendosUnidades({
         >
           <thead>
             <tr>
-              <th style={{ ...th, textAlign: "left", width: "32%" }}>Unidade</th>
+              <th style={{ ...th, textAlign: "left", width: "32%" }}>{firstColLabel}</th>
               <th style={{ ...th, textAlign: "left" }}>Participação</th>
               <th style={{ ...th, textAlign: "right", width: "16%" }}>% do total</th>
               <th style={{ ...th, textAlign: "right", width: "24%" }}>
@@ -3276,7 +3314,7 @@ function QuadroDividendosUnidades({
           </thead>
           <tbody>
             {data.rows.map((r) => (
-              <tr key={r.unidade}>
+              <tr key={r.label}>
                 <td
                   style={{
                     fontSize: 10.5,
@@ -3290,7 +3328,7 @@ function QuadroDividendosUnidades({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {r.unidade}
+                  {r.label}
                 </td>
                 {/* Barra de participação: proporcional ao MAIOR valor da lista.
                     É leitura visual de concentração — o número exato está nas
@@ -3341,8 +3379,10 @@ function QuadroDividendosUnidades({
                   Total
                 </td>
                 <td style={{ padding: "6px 8px" }} />
+                {/* Total zerado (ex.: nenhum sócio recebeu no período) não tem
+                    100% para exibir. */}
                 <td style={{ ...td, borderBottom: "none", fontWeight: 700 }}>
-                  100,0%
+                  {data.total === 0 ? "—" : "100,0%"}
                 </td>
                 <td
                   style={{
@@ -3602,21 +3642,66 @@ export function OnePageReportPreview({
           <QuadroMutuos data={data.mutuos} />
         ) : null}
 
-        {/* Dividendos recebidos das unidades — exclusivo da Hero Holding, na
-            sequência da leitura de portfólio (comparativo → mútuos →
-            dividendos). Ausente quando nenhuma unidade distribuiu dividendo no
-            período de referência. */}
-        {data.dividendosUnidades && show(data.dividendosUnidades.key) ? (
-          <QuadroDividendosUnidades
-            data={data.dividendosUnidades}
-            accent={accentColor}
-          />
-        ) : null}
-
         {show("previstoRealizado") ? (
           <TabelaDesempenho
             items={data.previstoRealizado}
             semaforo={showSemaforo ? data.semaforo : []}
+          />
+        ) : null}
+
+        {/* Dividendos RECEBIDOS das unidades — exclusivo da Hero Holding, logo
+            abaixo do "Desempenho do período vs orçamento": essa receita compõe o
+            resultado do exercício mostrado ali em cima, então a abertura por
+            unidade vem na sequência. Ausente quando nenhuma unidade distribuiu
+            dividendo no período de referência. */}
+        {data.dividendosUnidades && show(data.dividendosUnidades.key) ? (
+          <QuadroDividendos
+            title={data.dividendosUnidades.title}
+            firstColLabel="Unidade"
+            rows={data.dividendosUnidades.rows.map((r) => ({
+              label: r.unidade,
+              valor: r.valor,
+              pct: r.pct,
+            }))}
+            total={data.dividendosUnidades.total}
+            accent={accentColor}
+            caption={
+              <>
+                No período de {data.dividendosUnidades.periodoLabel},{" "}
+                {data.dividendosUnidades.rows.length}{" "}
+                {data.dividendosUnidades.rows.length === 1
+                  ? "unidade distribuiu"
+                  : "unidades distribuíram"}{" "}
+                {fmtMoneyFull(data.dividendosUnidades.total)} em dividendos para a
+                holding · esta receita de dividendos compõe o resultado do
+                exercício · unidades sem dividendo no período não são listadas
+              </>
+            }
+          />
+        ) : null}
+
+        {/* Dividendos PAGOS aos sócios — logo abaixo dos recebidos. Só os sócios
+            configurados no template entram; sócio sem pagamento no período
+            aparece com 0,00. */}
+        {data.dividendosSocios && show(data.dividendosSocios.key) ? (
+          <QuadroDividendos
+            title={data.dividendosSocios.title}
+            firstColLabel="Sócio"
+            rows={data.dividendosSocios.rows.map((r) => ({
+              label: r.socio,
+              valor: r.valor,
+              pct: r.pct,
+            }))}
+            total={data.dividendosSocios.total}
+            accent={accentColor}
+            caption={
+              <>
+                No período de {data.dividendosSocios.periodoLabel}, a holding
+                pagou {fmtMoneyFull(data.dividendosSocios.total)} em dividendos
+                aos sócios abaixo · sócio sem pagamento no período aparece com
+                valor zerado
+              </>
+            }
           />
         ) : null}
         <KpisSaude kpis={saudeKpis} columns={data.kpiColumns} title={data.kpiSectionTitle} />

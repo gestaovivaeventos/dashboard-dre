@@ -442,23 +442,27 @@ export function renderOnePageEmail({
     </table>`;
   })();
 
-  // 4c. Dividendos recebidos das unidades — EXCLUSIVO da Hero Holding, logo
-  // após os mútuos (mesma sequência da tela). Uma linha por unidade que
-  // distribuiu dividendo no período de referência + total. Valores em R$ cheios
-  // (é dinheiro efetivamente recebido, arredondar para milhar tiraria a
-  // precisão). String vazia = nenhuma distribuição no período → a seção some.
-  const dividendos = payload.dividendosUnidades;
-  const dividendosBlock = (() => {
-    if (!dividendos || dividendos.rows.length === 0) return "";
+  // 4c. Quadros de DIVIDENDOS — EXCLUSIVOS da Hero Holding: recebidos das
+  // unidades e pagos aos sócios, nesta ordem (mesma sequência da tela). Valores
+  // em R$ cheios: é dinheiro efetivamente movimentado, arredondar para milhar
+  // tiraria a precisão. String vazia = bloco ausente no payload → a seção some.
+  const renderDividendosTable = (args: {
+    title: string;
+    firstColLabel: string;
+    periodoLabel: string;
+    rows: Array<{ label: string; valor: number; pct: number | null }>;
+    total: number;
+    nota: string;
+  }): string => {
     const dThStyle = `font-family:${FF};font-size:9px;letter-spacing:0.1em;text-transform:uppercase;font-weight:700;color:${C.sub};padding:0 10px 8px;border-bottom:1px solid ${C.rule};`;
     const pctStyle = `font-family:${FM};font-size:12px;color:${C.body};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
     const valorStyle = `font-family:${FM};font-size:12px;font-weight:700;color:${C.ink};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
 
-    const bodyRows = dividendos.rows
+    const bodyRows = args.rows
       .map(
         (r) => `
       <tr>
-        <td style="font-family:${FF};font-size:13px;font-weight:600;color:${C.ink};padding:9px 10px;border-bottom:1px solid ${C.grid};">${esc(r.unidade)}</td>
+        <td style="font-family:${FF};font-size:13px;font-weight:600;color:${C.ink};padding:9px 10px;border-bottom:1px solid ${C.grid};">${esc(r.label)}</td>
         <td style="${pctStyle}">${r.pct === null ? "—" : `${fmt1(r.pct)}%`}</td>
         <td style="${valorStyle}">${fmtMoneyFull(r.valor)}</td>
       </tr>`,
@@ -466,30 +470,62 @@ export function renderOnePageEmail({
       .join("");
 
     const totalRow =
-      dividendos.rows.length > 1
+      args.rows.length > 1
         ? `
       <tr>
         <td style="font-family:${FF};font-size:13px;font-weight:700;color:${C.ink};padding:9px 10px;">Total</td>
-        <td style="${pctStyle}border-bottom:none;font-weight:700;">100%</td>
-        <td style="${valorStyle}border-bottom:none;">${fmtMoneyFull(dividendos.total)}</td>
+        <td style="${pctStyle}border-bottom:none;font-weight:700;">${args.total === 0 ? "—" : "100%"}</td>
+        <td style="${valorStyle}border-bottom:none;">${fmtMoneyFull(args.total)}</td>
       </tr>`
         : "";
 
-    const nota = `Período de ${dividendos.periodoLabel}. Valores em R$ efetivamente recebidos pela holding (linha "Dividendos Recebidos" do DRE gerencial), abertos pela unidade que distribuiu. Unidades sem dividendo no período não são listadas.`;
-
     return `
-    ${sectionTitle(dividendos.title)}
+    ${sectionTitle(args.title)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px 16px;border-collapse:separate;">
       <tr>
-        <td style="${dThStyle}text-align:left;">Unidade</td>
+        <td style="${dThStyle}text-align:left;">${esc(args.firstColLabel)}</td>
         <td style="${dThStyle}text-align:right;">% do total</td>
         <td style="${dThStyle}text-align:right;">Dividendos no período</td>
       </tr>
       ${bodyRows}
       ${totalRow}
-      <tr><td colspan="3" style="font-family:${FF};font-size:10px;color:${C.tertiary};padding-top:10px;line-height:1.5;">${esc(nota)}</td></tr>
+      <tr><td colspan="3" style="font-family:${FF};font-size:10px;color:${C.tertiary};padding-top:10px;line-height:1.5;">${esc(args.nota)}</td></tr>
     </table>`;
-  })();
+  };
+
+  const dividendos = payload.dividendosUnidades;
+  const dividendosBlock =
+    !dividendos || dividendos.rows.length === 0
+      ? ""
+      : renderDividendosTable({
+          title: dividendos.title,
+          firstColLabel: "Unidade",
+          periodoLabel: dividendos.periodoLabel,
+          rows: dividendos.rows.map((r) => ({
+            label: r.unidade,
+            valor: r.valor,
+            pct: r.pct,
+          })),
+          total: dividendos.total,
+          nota: `Período de ${dividendos.periodoLabel}. Valores em R$ efetivamente recebidos pela holding (linha "Dividendos Recebidos" do DRE gerencial), abertos pela unidade que distribuiu. Esta receita de dividendos compõe o resultado do exercício. Unidades sem dividendo no período não são listadas.`,
+        });
+
+  const dividendosSocios = payload.dividendosSocios;
+  const dividendosSociosBlock =
+    !dividendosSocios || dividendosSocios.rows.length === 0
+      ? ""
+      : renderDividendosTable({
+          title: dividendosSocios.title,
+          firstColLabel: "Sócio",
+          periodoLabel: dividendosSocios.periodoLabel,
+          rows: dividendosSocios.rows.map((r) => ({
+            label: r.socio,
+            valor: r.valor,
+            pct: r.pct,
+          })),
+          total: dividendosSocios.total,
+          nota: `Período de ${dividendosSocios.periodoLabel}. Valores em R$ pagos pela holding (linha "Dividendos Pagos" do Fluxo de Caixa). Sócio sem pagamento no período aparece com valor zerado.`,
+        });
 
   // 5a. Acumulado do ano (barras horizontais Previsto × Realizado).
   const acumItems = payload.acumuladoAno.filter((i) => i.unidade === "currency");
@@ -720,6 +756,7 @@ export function renderOnePageEmail({
           ${saude}
           ${mutuosBlock}
           ${dividendosBlock}
+          ${dividendosSociosBlock}
           ${tendencia}
           ${alertasBlock}
           ${acoesBlock}

@@ -3,6 +3,7 @@ import type {
   AlertaCard,
   ComposicaoStep,
   CustodyClosingBlock,
+  DividendosSociosBlock,
   DividendosUnidadesBlock,
   DreIndicatorsBlock,
   FeatContasReceberAbertoBlock,
@@ -150,6 +151,9 @@ export interface OnePageApiResponse {
   // componente (R$ cheios, só unidades com dividendo no período). Ausente =
   // nenhuma distribuição no período.
   dividendosUnidades?: DividendosUnidadesBlock;
+  // Dividendos pagos aos sócios (Hero Holding). Já vem no shape do componente
+  // (R$ cheios, só os sócios configurados — inclusive os zerados).
+  dividendosSocios?: DividendosSociosBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -855,6 +859,8 @@ export function mapOnePageApiResponseToPreviewData(
     // Dividendos recebidos das unidades (Hero Holding) — passa direto (R$
     // cheios, já filtrado por dividendo no período). undefined nas demais.
     dividendosUnidades: response.dividendosUnidades,
+    // Dividendos pagos aos sócios (Hero Holding) — passa direto (R$ cheios).
+    dividendosSocios: response.dividendosSocios,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

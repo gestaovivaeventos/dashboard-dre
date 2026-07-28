@@ -266,6 +266,23 @@ export const DividendosUnidadesInputSchema = z.object({
   unidades: z.array(DividendoUnidadeSchema).min(1).max(40),
 });
 
+// DIVIDENDOS PAGOS AOS SÓCIOS (Hero Holding). Vem da linha "Dividendos Pagos" do
+// Fluxo de Caixa, quebrada pelo sócio que recebeu, no período de referência.
+// Lista FIXA de sócios (configurada no template): sócio sem pagamento no período
+// vem com `valor` 0 — é informação, não lacuna. A empresa tem outros sócios
+// cadastrados que NÃO entram nesta lista nem no `total`.
+export const DividendoSocioSchema = z.object({
+  socio: z.string().min(1).max(120),
+  valor: z.number(),
+  pct_do_total: z.number().nullable(),
+});
+
+export const DividendosSociosInputSchema = z.object({
+  periodo: z.string().min(1).max(80),
+  total: z.number(),
+  socios: z.array(DividendoSocioSchema).min(1).max(20),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -332,6 +349,9 @@ export const OnePageInputSchema = z.object({
   // Presente APENAS para a Hero Holding e apenas quando houve dividendo no
   // periodo de referencia; null/ausente em todos os demais casos.
   dividendos_unidades: DividendosUnidadesInputSchema.nullable().optional(),
+  // Dividendos pagos aos socios (ver DividendosSociosInputSchema). Presente
+  // APENAS para a Hero Holding; null/ausente em todos os demais casos.
+  dividendos_socios: DividendosSociosInputSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
@@ -344,4 +364,6 @@ export type MutuoUnidade = z.infer<typeof MutuoUnidadeSchema>;
 export type MutuosInput = z.infer<typeof MutuosInputSchema>;
 export type DividendoUnidade = z.infer<typeof DividendoUnidadeSchema>;
 export type DividendosUnidadesInput = z.infer<typeof DividendosUnidadesInputSchema>;
+export type DividendoSocio = z.infer<typeof DividendoSocioSchema>;
+export type DividendosSociosInput = z.infer<typeof DividendosSociosInputSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

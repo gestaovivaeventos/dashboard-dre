@@ -250,9 +250,13 @@ export type ReportBlockKey =
   // grupo; nas demais Franquias Viva mostra só a própria unidade.
   | "mutuos"
   // Quadro de DIVIDENDOS RECEBIDOS por unidade EXCLUSIVO da Hero Holding
-  // (quebra da linha "Dividendos Recebidos" do Fluxo de Caixa por fornecedor, no
+  // (quebra da linha "Dividendos Recebidos" do DRE por fornecedor, no período de
+  // referência). Só o template hero-holding o habilita.
+  | "dividendosUnidades"
+  // Quadro de DIVIDENDOS PAGOS AOS SÓCIOS EXCLUSIVO da Hero Holding (quebra da
+  // linha "Dividendos Pagos" do Fluxo de Caixa pelos sócios configurados, no
   // período de referência). Só o template hero-holding o habilita.
-  | "dividendosUnidades";
+  | "dividendosSocios";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -441,6 +445,28 @@ export interface TemplateReportConfig {
   dividendosUnidades?: {
     key: ReportBlockKey;
     title: string;
+    accountCode?: string;
+    accountName?: string;
+  };
+  /**
+   * Quadro de DIVIDENDOS PAGOS AOS SÓCIOS (Hero Holding). Quebra por FORNECEDOR
+   * (`supplier_customer`) a conta de Fluxo de Caixa "Dividendos Pagos" da
+   * própria empresa analisada, no PERÍODO DE REFERÊNCIA do relatório — usando a
+   * mesma RPC de drill-down da tela de Fluxo de Caixa.
+   *
+   * `partnerNames` é a lista FIXA e ORDENADA de sócios que interessam ao
+   * relatório: a empresa pode ter mais sócios cadastrados, e os demais são
+   * ignorados (não entram nem no total). Sócio configurado SEM pagamento no
+   * período aparece com 0,00 — não some do quadro.
+   *
+   * `accountCode` (default "4.2") e `accountName` (default "Dividendos Pagos")
+   * resolvem a conta no plano de fluxo escopado na empresa (custom quando
+   * existe, senão o global). Gated por `key` (allowlist enabledBlocks).
+   */
+  dividendosSocios?: {
+    key: ReportBlockKey;
+    title: string;
+    partnerNames: string[];
     accountCode?: string;
     accountName?: string;
   };
