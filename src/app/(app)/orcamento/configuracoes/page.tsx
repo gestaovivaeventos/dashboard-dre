@@ -3,11 +3,11 @@ import Link from "next/link";
 import {
   Building2,
   ChevronRight,
-  MapPinned,
   Percent,
   SlidersHorizontal,
   Tags,
   Users,
+  Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -50,10 +50,11 @@ const CARDS: ConfigCard[] = [
     href: "/orcamento/configuracoes/indices",
   },
   {
-    title: "Estrutura DRE",
+    title: "Método de orçamento por categoria",
     description:
-      "Reaproveita a estrutura de DRE já cadastrada de cada empresa. A linha do orçamento é derivada da categoria pelo mapeamento existente.",
-    icon: MapPinned,
+      "Define, por empresa, por qual método cada categoria de despesa é orçada (pessoal, média, valor fixo, planejamento dos sócios ou VE).",
+    icon: Workflow,
+    href: "/orcamento/configuracoes/categoria-metodo",
   },
   {
     title: "Plano de cargos e salários",
