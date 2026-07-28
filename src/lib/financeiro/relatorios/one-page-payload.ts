@@ -26,6 +26,10 @@ import {
   buildHeroHoldingComparativo,
   type HoldingComparativoResult,
 } from "./hero-holding";
+import {
+  buildDividendosUnidadesBlock,
+  type DividendosUnidadesResult,
+} from "./dividendos-unidades";
 import { buildMutuosBlock, type MutuosResult } from "./mutuos";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
@@ -245,6 +249,11 @@ export interface OnePagePayload {
   // grupo; nas demais Viva, só a própria unidade. Ausente (undefined) quando
   // nenhuma unidade do escopo tem saldo devedor em aberto.
   mutuos?: MutuosResult;
+  // Dividendos recebidos por unidade — EXCLUSIVO da Hero Holding. Quebra da
+  // linha "Dividendos Recebidos" do Fluxo de Caixa por fornecedor (a unidade que
+  // distribuiu), no período de referência. Ausente (undefined) quando não houve
+  // dividendo no período ou a conta não existe no plano da empresa.
+  dividendosUnidades?: DividendosUnidadesResult;
   // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
   // Ausência = não renderiza (só templates com `report.indicadoresDre`).
   indicadoresDre?: DreIndicatorsPayload;
@@ -1932,6 +1941,44 @@ export async function buildOnePagePayload(
       })
     : undefined;
 
+  // -------------------------------------------------------------------------
+  // 11e. Dividendos recebidos por unidade — EXCLUSIVO da Hero Holding.
+  //
+  // Só é montado quando o template define `report.dividendosUnidades`. Agrupa
+  // por FORNECEDOR o drill-down da conta "Dividendos Recebidos" do Fluxo de
+  // Caixa (mesma RPC da tela), no período [dateFrom..dateTo] escolhido pelo
+  // usuário — leitura direta da Omie, sem valor manual. Sem dividendo no período
+  // o builder devolve undefined e o quadro não aparece. Inerte nos demais
+  // templates.
+  // -------------------------------------------------------------------------
+  const dividendosCfg = template.report?.dividendosUnidades;
+  const dividendosUnidades: DividendosUnidadesResult | undefined = dividendosCfg
+    ? await buildDividendosUnidadesBlock(supabase, {
+        key: dividendosCfg.key,
+        title: dividendosCfg.title,
+        companyId,
+        segmentId: company.segment_id,
+        dateFrom,
+        dateTo,
+        accountCode: dividendosCfg.accountCode,
+        accountName: dividendosCfg.accountName,
+      })
+    : undefined;
+
+  // Resumo dos dividendos para a IA (snake_case, alinhado ao schema do input).
+  // Mesmas linhas do quadro — a IA lê exatamente o que o relatório mostra.
+  const dividendosInput = dividendosUnidades
+    ? {
+        periodo: dividendosUnidades.periodoLabel,
+        total: dividendosUnidades.total,
+        unidades: dividendosUnidades.rows.map((r) => ({
+          empresa: r.unidade,
+          valor: r.valor,
+          pct_do_total: r.pct,
+        })),
+      }
+    : null;
+
   // Resumo do mútuo para a IA (snake_case, alinhado ao schema do input). Mesmas
   // linhas do quadro do relatório — já filtradas por saldo devedor em aberto —,
   // então a IA nunca comenta mútuo de unidade que não tem dívida.
@@ -2068,6 +2115,9 @@ export async function buildOnePagePayload(
         // Situação de mútuo — só presente no segmento Franquias Viva e apenas
         // quando há saldo devedor em aberto no escopo do template.
         mutuos: mutuosInput,
+        // Dividendos recebidos das unidades — só presente para a Hero Holding e
+        // apenas quando houve dividendo no período de referência.
+        dividendos_unidades: dividendosInput,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -2097,6 +2147,9 @@ export async function buildOnePagePayload(
       // Quadro de mútuos — só presente no segmento Franquias Viva e apenas
       // quando há saldo devedor em aberto no escopo do template.
       mutuos,
+      // Dividendos recebidos das unidades — só presente para a Hero Holding e
+      // apenas quando houve dividendo no período de referência.
+      dividendosUnidades,
       // Quadro de indicadores por conta DRE — só presente p/ templates que o
       // configuram (ex.: Terrazzo — "Locação de Espaço").
       indicadoresDre,

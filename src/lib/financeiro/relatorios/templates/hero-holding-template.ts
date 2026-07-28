@@ -119,6 +119,7 @@ export const heroHoldingTemplate: ReportTemplate = {
       "diagnostico",
       "holdingComparativo",
       "mutuos",
+      "dividendosUnidades",
       "previstoRealizado",
       "composicao",
       "acumuladoAno",
@@ -139,6 +140,14 @@ export const heroHoldingTemplate: ReportTemplate = {
       title: "Mútuos das unidades",
       scope: "holding",
       companyNames: HERO_HOLDING_MUTUOS_COMPANY_NAMES,
+    },
+    // Dividendos que a holding RECEBEU de cada unidade no período de referência.
+    // Vem da linha "Dividendos Recebidos" do Fluxo de Caixa, quebrada pelo
+    // FORNECEDOR de cada lançamento (a unidade que distribuiu) — leitura direta
+    // da Omie, sempre atualizada pelo período escolhido no relatório.
+    dividendosUnidades: {
+      key: "dividendosUnidades",
+      title: "Dividendos recebidos das unidades",
     },
   },
 };

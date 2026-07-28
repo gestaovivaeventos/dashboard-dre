@@ -244,6 +244,24 @@ export const MutuosInputSchema = z.object({
   unidades: z.array(MutuoUnidadeSchema).min(1).max(30),
 });
 
+// DIVIDENDOS RECEBIDOS das unidades (Hero Holding). Vem da linha "Dividendos
+// Recebidos" do Fluxo de Caixa, quebrada pelo FORNECEDOR de cada lançamento — a
+// unidade que distribuiu o dividendo —, no período de referência do relatório.
+// É dinheiro que a holding JÁ RECEBEU (regime de caixa, dado da Omie), nunca
+// previsão. Unidades sem dividendo no período não constam da lista.
+export const DividendoUnidadeSchema = z.object({
+  empresa: z.string().min(1).max(160),
+  valor: z.number(),
+  pct_do_total: z.number().nullable(),
+});
+
+export const DividendosUnidadesInputSchema = z.object({
+  /** Período de referência já formatado (ex.: "01/01/2026 a 30/04/2026"). */
+  periodo: z.string().min(1).max(80),
+  total: z.number(),
+  unidades: z.array(DividendoUnidadeSchema).min(1).max(40),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -306,6 +324,10 @@ export const OnePageInputSchema = z.object({
   // Franquias Viva E quando ha saldo devedor em aberto; null/ausente nos demais
   // casos — inclusive nas proprias franquias Viva sem mutuo.
   mutuos: MutuosInputSchema.nullable().optional(),
+  // Dividendos recebidos das unidades (ver DividendosUnidadesInputSchema).
+  // Presente APENAS para a Hero Holding e apenas quando houve dividendo no
+  // periodo de referencia; null/ausente em todos os demais casos.
+  dividendos_unidades: DividendosUnidadesInputSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
@@ -316,4 +338,6 @@ export type HoldingEmpresaIndicadores = z.infer<typeof HoldingEmpresaIndicadores
 export type HoldingComparativo = z.infer<typeof HoldingComparativoSchema>;
 export type MutuoUnidade = z.infer<typeof MutuoUnidadeSchema>;
 export type MutuosInput = z.infer<typeof MutuosInputSchema>;
+export type DividendoUnidade = z.infer<typeof DividendoUnidadeSchema>;
+export type DividendosUnidadesInput = z.infer<typeof DividendosUnidadesInputSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

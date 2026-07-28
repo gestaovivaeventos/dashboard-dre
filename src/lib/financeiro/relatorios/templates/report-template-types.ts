@@ -248,7 +248,11 @@ export type ReportBlockKey =
   // Quadro de MÚTUOS do segmento Franquias Viva (valores manuais do painel
   // "Mútuos" em Configurações > Empresas). Na Hero Holding lista as unidades do
   // grupo; nas demais Franquias Viva mostra só a própria unidade.
-  | "mutuos";
+  | "mutuos"
+  // Quadro de DIVIDENDOS RECEBIDOS por unidade EXCLUSIVO da Hero Holding
+  // (quebra da linha "Dividendos Recebidos" do Fluxo de Caixa por fornecedor, no
+  // período de referência). Só o template hero-holding o habilita.
+  | "dividendosUnidades";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -419,6 +423,24 @@ export interface TemplateReportConfig {
     scope: "holding" | "company";
     /** Só no escopo "holding": unidades do grupo, na ordem de exibição. */
     companyNames?: string[];
+  };
+  /**
+   * Quadro de DIVIDENDOS RECEBIDOS por unidade (Hero Holding). Quebra por
+   * FORNECEDOR (`supplier_customer`) a conta de Fluxo de Caixa "Dividendos
+   * Recebidos" da própria empresa analisada, no PERÍODO DE REFERÊNCIA escolhido
+   * na geração do relatório — usando a mesma RPC de drill-down da tela de Fluxo
+   * de Caixa. Leitura sempre atualizada da Omie; nenhum valor manual.
+   *
+   * `accountCode` (default "4.1") e `accountName` (default "Dividendos
+   * Recebidos") resolvem a conta no plano de fluxo escopado na empresa (custom
+   * quando existe, senão o global). Unidade sem dividendo no período não entra;
+   * sem nenhuma linha, o quadro não é renderizado. Gated por `key`.
+   */
+  dividendosUnidades?: {
+    key: ReportBlockKey;
+    title: string;
+    accountCode?: string;
+    accountName?: string;
   };
 }
 

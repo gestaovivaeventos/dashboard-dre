@@ -629,6 +629,32 @@ informados pela administracao — NAO recalcule e NAO os misture com o DRE.
 - Acoes ligadas a mutuo sao de PLANEJAMENTO DE AMORTIZACAO/acompanhamento pela
   holding, nunca de cobranca a clientes.
 
+## Dividendos recebidos das unidades
+
+O input pode trazer o bloco \`dividendos_unidades\`: quanto CADA unidade distribuiu
+de dividendos PARA A HOLDING no periodo de referencia (\`periodo\`), com \`valor\`
+por empresa, \`pct_do_total\` e o \`total\` do periodo. Vem da linha "Dividendos
+Recebidos" do Fluxo de Caixa, identificada pelo fornecedor de cada lancamento na
+Omie — e dinheiro JA RECEBIDO no periodo (regime de caixa), NAO previsao, NAO meta
+e NAO receita operacional da holding.
+- Use os valores COMO ESTAO. Nao recalcule, nao anualize, nao projete e nao os
+  some ao DRE nem ao VVR.
+- E o RETORNO do portfolio para a holding: mostra quais unidades efetivamente
+  remuneraram o acionista no periodo e qual a CONCENTRACAO dessa remuneracao
+  (\`pct_do_total\`). Concentracao alta em poucas unidades e um ponto de atencao
+  de dependencia, nao um erro.
+- SO aparecem no bloco as unidades que distribuiram dividendo no periodo. Uma
+  unidade ausente NAO distribuiu dividendo neste periodo — nunca afirme que ela
+  distribuiu, nem trate a ausencia como inadimplencia ou falha: pode ser apenas
+  calendario de distribuicao. Se o bloco inteiro nao vier, NAO mencione
+  dividendos em campo nenhum.
+- Cruze o dividendo distribuido com os demais indicadores DAQUELA unidade
+  (atingimento de meta de VVR, FEE disponivel, sobrevivencia de caixa, saldo de
+  mutuo). Distribuir dividendo com liquidez apertada, ou nao distribuir tendo
+  performance forte, sao leituras uteis para a holding.
+- Ao citar valores em \`destaques\`/\`pontosAtencao\`, use o NOME da unidade e o
+  VALOR LITERAL do input, sempre amarrado ao periodo de referencia.
+
 ## Sobre o DRE consolidado da holding
 
 O input tambem traz indicadores de DRE (\`dre\`) da propria holding (numeros
@@ -778,6 +804,11 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
       : null,
     input.mutuos
       ? `Mutuos (${input.mutuos.escopo === "holding" ? "unidades do grupo" : "propria franquia"}): ${input.mutuos.unidades.length} ${input.mutuos.unidades.length === 1 ? "unidade" : "unidades"} COM saldo devedor em aberto — saldo devedor total = ${input.mutuos.unidades.reduce((acc, u) => acc + u.saldo_devedor, 0)}. Mutuo e EMPRESTIMO A PAGAR pela unidade (PASSIVO), nunca conta a receber. Unidades sem mutuo em aberto NAO constam da lista e nao devem ser citadas (detalhe por unidade no JSON, campo mutuos)`
+      : null,
+    input.dividendos_unidades
+      ? `Dividendos recebidos das unidades (periodo ${input.dividendos_unidades.periodo}): total = ${input.dividendos_unidades.total} distribuido por ${input.dividendos_unidades.unidades.length} ${input.dividendos_unidades.unidades.length === 1 ? "unidade" : "unidades"} — ${input.dividendos_unidades.unidades
+          .map((u) => `${u.empresa} = ${u.valor}`)
+          .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie), nunca previsao nem receita operacional. Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
       : null,
   ]
     .filter((line): line is string => line !== null)

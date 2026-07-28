@@ -232,6 +232,26 @@ export interface MutuosBlock {
   rows: MutuoRow[];
 }
 
+// Dividendos recebidos das unidades (Hero Holding) — quebra da linha
+// "Dividendos Recebidos" do Fluxo de Caixa por fornecedor (a unidade que
+// distribuiu), no período de referência. Valores em R$ cheios, já filtrados:
+// unidade sem dividendo no período não chega aqui.
+export interface DividendoUnidadeRow {
+  unidade: string;
+  valor: number;
+  /** % sobre o total distribuído no período (null quando o total é 0). */
+  pct: number | null;
+}
+export interface DividendosUnidadesBlock {
+  /** ReportBlockKey p/ gating ("dividendosUnidades"). */
+  key: string;
+  title: string;
+  /** Período de referência ("01/01/2026 a 30/04/2026"). */
+  periodoLabel: string;
+  rows: DividendoUnidadeRow[];
+  total: number;
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -275,6 +295,8 @@ export interface OnePageReportPreviewData {
   holdingComparativo?: HoldingComparativoBlock;
   /** Quadro de mútuos (Franquias Viva). Ausência = sem mútuo em aberto → não renderiza. */
   mutuos?: MutuosBlock;
+  /** Dividendos recebidos das unidades (Hero Holding). Ausência = não renderiza. */
+  dividendosUnidades?: DividendosUnidadesBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -3194,6 +3216,152 @@ function QuadroMutuos({ data }: { data: MutuosBlock }) {
   );
 }
 
+// Quadro de DIVIDENDOS RECEBIDOS das unidades (EXCLUSIVO da Hero Holding).
+// Uma linha por unidade que distribuiu dividendo à holding no período de
+// referência, com o valor recebido e a participação no total. Os dados vêm da
+// linha "Dividendos Recebidos" do Fluxo de Caixa (fornecedor = unidade que
+// distribuiu), então acompanham a Omie a cada geração do relatório. Unidades sem
+// dividendo no período já vêm filtradas do payload.
+function QuadroDividendosUnidades({
+  data,
+  accent,
+}: {
+  data: DividendosUnidadesBlock;
+  accent: string;
+}) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    fontWeight: 600,
+    color: C.sub,
+    padding: "6px 8px",
+    borderBottom: `1px solid ${C.cardBorder}`,
+    whiteSpace: "nowrap",
+  };
+  const td: CSSProperties = {
+    fontSize: 10.5,
+    fontFamily: FONT_MONO,
+    color: C.body,
+    padding: "6px 8px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+    borderBottom: `1px solid ${C.grid}`,
+  };
+  const maxValor = Math.max(...data.rows.map((r) => Math.abs(r.valor)), 1);
+
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ fontSize: 10, color: C.sub, marginTop: -4, marginBottom: 8 }}>
+        No período de {data.periodoLabel}, {data.rows.length}{" "}
+        {data.rows.length === 1 ? "unidade distribuiu" : "unidades distribuíram"}{" "}
+        {fmtMoneyFull(data.total)} em dividendos para a holding · unidades sem
+        dividendo no período não são listadas
+      </div>
+      <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+        <table
+          style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}
+        >
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left", width: "32%" }}>Unidade</th>
+              <th style={{ ...th, textAlign: "left" }}>Participação</th>
+              <th style={{ ...th, textAlign: "right", width: "16%" }}>% do total</th>
+              <th style={{ ...th, textAlign: "right", width: "24%" }}>
+                Dividendos no período
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.unidade}>
+                <td
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: C.ink,
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    borderBottom: `1px solid ${C.grid}`,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {r.unidade}
+                </td>
+                {/* Barra de participação: proporcional ao MAIOR valor da lista.
+                    É leitura visual de concentração — o número exato está nas
+                    duas colunas seguintes. */}
+                <td
+                  style={{
+                    padding: "6px 8px",
+                    borderBottom: `1px solid ${C.grid}`,
+                    verticalAlign: "middle",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: 6,
+                      borderRadius: 3,
+                      background: C.grid,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.max(2, (Math.abs(r.valor) / maxValor) * 100)}%`,
+                        borderRadius: 3,
+                        background: accent,
+                      }}
+                    />
+                  </div>
+                </td>
+                <td style={td}>{r.pct === null ? "—" : fmtPctPtBr(r.pct)}</td>
+                <td style={{ ...td, fontWeight: 700, color: C.ink }}>
+                  {fmtMoneyFull(r.valor)}
+                </td>
+              </tr>
+            ))}
+            {data.rows.length > 1 ? (
+              <tr>
+                <td
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: C.ink,
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Total
+                </td>
+                <td style={{ padding: "6px 8px" }} />
+                <td style={{ ...td, borderBottom: "none", fontWeight: 700 }}>
+                  100,0%
+                </td>
+                <td
+                  style={{
+                    ...td,
+                    borderBottom: "none",
+                    fontWeight: 700,
+                    color: C.ink,
+                  }}
+                >
+                  {fmtMoneyFull(data.total)}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // Quadro de indicadores por conta DRE (EXCLUSIVO de templates que o configuram,
 // ex.: Terrazzo — "Locação de Espaço": Formaturas / Shows-Palestras). Mostra o
 // realizado de cada conta no mês de referência. Valores em R$ cheios.
@@ -3431,6 +3599,17 @@ export function OnePageReportPreview({
             aberto chegam aqui; sem nenhuma, o bloco nem é montado. */}
         {data.mutuos && data.mutuos.scope === "holding" && show(data.mutuos.key) ? (
           <QuadroMutuos data={data.mutuos} />
+        ) : null}
+
+        {/* Dividendos recebidos das unidades — exclusivo da Hero Holding, na
+            sequência da leitura de portfólio (comparativo → mútuos →
+            dividendos). Ausente quando nenhuma unidade distribuiu dividendo no
+            período de referência. */}
+        {data.dividendosUnidades && show(data.dividendosUnidades.key) ? (
+          <QuadroDividendosUnidades
+            data={data.dividendosUnidades}
+            accent={accentColor}
+          />
         ) : null}
 
         {show("previstoRealizado") ? (

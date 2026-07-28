@@ -3,6 +3,7 @@ import type {
   AlertaCard,
   ComposicaoStep,
   CustodyClosingBlock,
+  DividendosUnidadesBlock,
   DreIndicatorsBlock,
   FeatContasReceberAbertoBlock,
   FeatEventosBlock,
@@ -146,6 +147,10 @@ export interface OnePageApiResponse {
   // Quadro de mútuos (Franquias Viva). Já vem no shape do componente (R$
   // cheios, linhas sem saldo devedor filtradas). Ausente = sem mútuo em aberto.
   mutuos?: MutuosBlock;
+  // Dividendos recebidos das unidades (Hero Holding). Já vem no shape do
+  // componente (R$ cheios, só unidades com dividendo no período). Ausente =
+  // nenhuma distribuição no período.
+  dividendosUnidades?: DividendosUnidadesBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -849,6 +854,9 @@ export function mapOnePageApiResponseToPreviewData(
     // Quadro de mútuos (Franquias Viva) — passa direto (R$ cheios, já filtrado
     // por saldo devedor em aberto). undefined nas demais empresas.
     mutuos: response.mutuos,
+    // Dividendos recebidos das unidades (Hero Holding) — passa direto (R$
+    // cheios, já filtrado por dividendo no período). undefined nas demais.
+    dividendosUnidades: response.dividendosUnidades,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

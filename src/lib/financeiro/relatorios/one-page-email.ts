@@ -442,6 +442,55 @@ export function renderOnePageEmail({
     </table>`;
   })();
 
+  // 4c. Dividendos recebidos das unidades — EXCLUSIVO da Hero Holding, logo
+  // após os mútuos (mesma sequência da tela). Uma linha por unidade que
+  // distribuiu dividendo no período de referência + total. Valores em R$ cheios
+  // (é dinheiro efetivamente recebido, arredondar para milhar tiraria a
+  // precisão). String vazia = nenhuma distribuição no período → a seção some.
+  const dividendos = payload.dividendosUnidades;
+  const dividendosBlock = (() => {
+    if (!dividendos || dividendos.rows.length === 0) return "";
+    const dThStyle = `font-family:${FF};font-size:9px;letter-spacing:0.1em;text-transform:uppercase;font-weight:700;color:${C.sub};padding:0 10px 8px;border-bottom:1px solid ${C.rule};`;
+    const pctStyle = `font-family:${FM};font-size:12px;color:${C.body};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
+    const valorStyle = `font-family:${FM};font-size:12px;font-weight:700;color:${C.ink};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
+
+    const bodyRows = dividendos.rows
+      .map(
+        (r) => `
+      <tr>
+        <td style="font-family:${FF};font-size:13px;font-weight:600;color:${C.ink};padding:9px 10px;border-bottom:1px solid ${C.grid};">${esc(r.unidade)}</td>
+        <td style="${pctStyle}">${r.pct === null ? "—" : `${fmt1(r.pct)}%`}</td>
+        <td style="${valorStyle}">${fmtMoneyFull(r.valor)}</td>
+      </tr>`,
+      )
+      .join("");
+
+    const totalRow =
+      dividendos.rows.length > 1
+        ? `
+      <tr>
+        <td style="font-family:${FF};font-size:13px;font-weight:700;color:${C.ink};padding:9px 10px;">Total</td>
+        <td style="${pctStyle}border-bottom:none;font-weight:700;">100%</td>
+        <td style="${valorStyle}border-bottom:none;">${fmtMoneyFull(dividendos.total)}</td>
+      </tr>`
+        : "";
+
+    const nota = `Período de ${dividendos.periodoLabel}. Valores em R$ efetivamente recebidos pela holding (linha "Dividendos Recebidos" do Fluxo de Caixa). Unidades sem dividendo no período não são listadas.`;
+
+    return `
+    ${sectionTitle(dividendos.title)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px 16px;border-collapse:separate;">
+      <tr>
+        <td style="${dThStyle}text-align:left;">Unidade</td>
+        <td style="${dThStyle}text-align:right;">% do total</td>
+        <td style="${dThStyle}text-align:right;">Dividendos no período</td>
+      </tr>
+      ${bodyRows}
+      ${totalRow}
+      <tr><td colspan="3" style="font-family:${FF};font-size:10px;color:${C.tertiary};padding-top:10px;line-height:1.5;">${esc(nota)}</td></tr>
+    </table>`;
+  })();
+
   // 5a. Acumulado do ano (barras horizontais Previsto × Realizado).
   const acumItems = payload.acumuladoAno.filter((i) => i.unidade === "currency");
   const acumMargem = payload.acumuladoAno.find((i) => i.unidade === "percent");
@@ -670,6 +719,7 @@ export function renderOnePageEmail({
           ${desempenho}
           ${saude}
           ${mutuosBlock}
+          ${dividendosBlock}
           ${tendencia}
           ${alertasBlock}
           ${acoesBlock}
