@@ -142,6 +142,7 @@ export function ManualEntriesManager({
       value: number;
       observation: string;
     }> = [];
+    const droppedRows: EntryRow[] = [];
     for (const row of filled) {
       const categoryName = row.categoryName.trim();
       const entryDate = row.entryDate.trim();
@@ -154,9 +155,10 @@ export function ManualEntriesManager({
         Number.isFinite(value)
       ) {
         entries.push({ categoryName, entryDate, value, observation: row.observation.trim() });
+      } else {
+        droppedRows.push(row);
       }
     }
-    const dropped = filled.length - entries.length;
 
     setSaving(true);
     const response = await fetch("/api/manual-entries", {
@@ -175,15 +177,19 @@ export function ManualEntriesManager({
       return;
     }
     await loadRows();
+    // Mantém no grid as linhas incompletas — não descarta o que você digitou.
+    if (droppedRows.length > 0) {
+      setRows((previous) => [...previous, ...droppedRows.map((r) => ({ ...r, key: nextKey() }))]);
+    }
     setSaving(false);
     showToast({
-      title: dropped > 0 ? "Salvo, mas com linhas ignoradas" : "Lancamentos salvos",
+      title: droppedRows.length > 0 ? "Salvo, mas há linhas incompletas" : "Lancamentos salvos",
       description:
         `${payload.saved ?? 0} linha(s) gravada(s).` +
-        (dropped > 0
-          ? ` ${dropped} linha(s) incompleta(s) foram ignoradas — cada linha precisa de Categoria, Data e Valor.`
+        (droppedRows.length > 0
+          ? ` ${droppedRows.length} linha(s) continuam no grid por faltar Categoria, Data ou Valor — complete e salve de novo.`
           : ""),
-      variant: dropped > 0 ? "destructive" : "success",
+      variant: droppedRows.length > 0 ? "destructive" : "success",
     });
   };
 
