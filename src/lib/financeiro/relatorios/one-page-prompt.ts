@@ -396,6 +396,24 @@ atraso).
   qualquer variacao — nada disso se aplica, porque a inadimplencia aqui e da
   EMPRESA com o que ELA deve, nao dos clientes com a empresa.
 
+### Situacao de mutuo
+O input pode trazer o bloco \`mutuos\` (escopo "empresa"), com a divida de MUTUO
+da propria franquia: \`principal\` (valor contratado), \`amortizado\` (ja pago) e
+\`saldo_devedor\` (o que falta pagar). Sao valores de REGISTRO informados pela
+administracao — NAO recalcule, NAO os some ao DRE e NAO os trate como despesa do
+periodo.
+- Mutuo e um EMPRESTIMO que a unidade tomou e tem A PAGAR ao grupo: e PASSIVO da
+  franquia (obrigacao futura), NUNCA valor a receber de clientes ou fundos.
+- Quando o bloco NAO vem no input, a franquia NAO tem mutuo em aberto: nesse caso
+  NAO mencione mutuo em nenhum campo da resposta (nem para dizer que nao ha).
+- Quando vier, comente-o como COMPROMISSO FINANCEIRO a honrar, lendo o saldo
+  devedor em conjunto com o FEE Disponivel e a sobrevivencia de caixa: um saldo
+  devedor alto diante de pouca cobertura de caixa e ponto de atencao; um saldo ja
+  bastante amortizado e leitura positiva de desalavancagem.
+- Se gerar acao, trate como planejamento de PAGAMENTO/amortizacao (ex.: prever a
+  amortizacao no fluxo de caixa, avaliar ritmo de quitacao). E PROIBIDO sugerir
+  cobranca de clientes por causa deste indicador.
+
 ## Classificacao de saude financeira
 
 Use o input \`fee_disponivel\` (saldo atual da franquia, em R$) combinado com
@@ -591,6 +609,26 @@ para cada uma, SEIS indicadores JA CALCULADOS (nunca recalcule):
   "reforcar a regua/politica de cobranca", "renegociar com inadimplentes",
   "revisar credito a clientes" ou variacoes — isso NAO se aplica a este indicador.
 
+## Mutuos das unidades
+
+O input pode trazer o bloco \`mutuos\` (escopo "holding"), com as unidades do grupo
+que tem MUTUO EM ABERTO — para cada uma: \`principal\` (contratado), \`amortizado\`
+(ja pago) e \`saldo_devedor\` (o que falta pagar). Sao valores de REGISTRO
+informados pela administracao — NAO recalcule e NAO os misture com o DRE.
+- Mutuo e um EMPRESTIMO que a unidade tomou e tem A PAGAR ao grupo: PASSIVO da
+  franquia e CREDITO da holding. Nunca leia como conta a receber de clientes.
+- SO aparecem no bloco as unidades COM saldo devedor. Uma unidade ausente do
+  bloco NAO tem mutuo em aberto — nunca a cite como devedora, e nao afirme que
+  ela quitou nada. Se o bloco inteiro nao vier, nenhuma unidade tem mutuo aberto:
+  NAO mencione mutuo em campo nenhum.
+- Analise como exposicao do portfolio: quais unidades concentram o maior saldo
+  devedor e quanto ja foi amortizado em cada uma. Cruze o saldo devedor com a
+  sobrevivencia de caixa e o % de FEE disponivel DAQUELA unidade — saldo alto com
+  liquidez baixa merece acompanhamento mais proximo; saldo bem amortizado e
+  leitura positiva de desalavancagem.
+- Acoes ligadas a mutuo sao de PLANEJAMENTO DE AMORTIZACAO/acompanhamento pela
+  holding, nunca de cobranca a clientes.
+
 ## Sobre o DRE consolidado da holding
 
 O input tambem traz indicadores de DRE (\`dre\`) da propria holding (numeros
@@ -737,6 +775,9 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
       : null,
     input.holding_comparativo
       ? `Comparativo da holding (referencia ${input.holding_comparativo.referencia}) — ${input.holding_comparativo.empresas.length} empresas do grupo. Analise como PORTFOLIO, comparando as unidades entre si por % DE ATINGIMENTO DA META de VVR (acumulado e do mes), alem de FEE disponivel, sobrevivencia de caixa, margem media dos eventos e inadimplencia (detalhe por empresa no JSON, campo holding_comparativo)`
+      : null,
+    input.mutuos
+      ? `Mutuos (${input.mutuos.escopo === "holding" ? "unidades do grupo" : "propria franquia"}): ${input.mutuos.unidades.length} ${input.mutuos.unidades.length === 1 ? "unidade" : "unidades"} COM saldo devedor em aberto — saldo devedor total = ${input.mutuos.unidades.reduce((acc, u) => acc + u.saldo_devedor, 0)}. Mutuo e EMPRESTIMO A PAGAR pela unidade (PASSIVO), nunca conta a receber. Unidades sem mutuo em aberto NAO constam da lista e nao devem ser citadas (detalhe por unidade no JSON, campo mutuos)`
       : null,
   ]
     .filter((line): line is string => line !== null)

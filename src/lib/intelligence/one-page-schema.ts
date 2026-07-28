@@ -225,6 +225,25 @@ export const HoldingComparativoSchema = z.object({
   empresas: z.array(HoldingEmpresaIndicadoresSchema).min(1).max(20),
 });
 
+// Situação de MÚTUO (segmento Franquias Viva). Valores de REGISTRO MANUAL do
+// painel "Mútuos" em Configurações > Empresas — nunca derivados do DRE. Mútuo é
+// um EMPRÉSTIMO que a unidade tem A PAGAR ao grupo: é PASSIVO da franquia, não
+// conta a receber. Só chegam aqui unidades com `saldo_devedor` > 0 (as demais
+// não têm mútuo em aberto e são omitidas na montagem do input).
+//   escopo "holding" → uma linha por unidade do grupo (Hero Holding).
+//   escopo "empresa" → uma única linha, da própria franquia analisada.
+export const MutuoUnidadeSchema = z.object({
+  empresa: z.string().min(1).max(120),
+  principal: z.number().nullable(),
+  amortizado: z.number().nullable(),
+  saldo_devedor: z.number(),
+});
+
+export const MutuosInputSchema = z.object({
+  escopo: z.enum(["holding", "empresa"]),
+  unidades: z.array(MutuoUnidadeSchema).min(1).max(30),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -283,6 +302,10 @@ export const OnePageInputSchema = z.object({
   // Comparativo das empresas da holding (ver HoldingComparativoSchema).
   // Presente APENAS para a Hero Holding; null/ausente para todas as demais.
   holding_comparativo: HoldingComparativoSchema.nullable().optional(),
+  // Situacao de mutuo (ver MutuosInputSchema). Presente APENAS no segmento
+  // Franquias Viva E quando ha saldo devedor em aberto; null/ausente nos demais
+  // casos — inclusive nas proprias franquias Viva sem mutuo.
+  mutuos: MutuosInputSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
@@ -291,4 +314,6 @@ export type FeatEventosResumo = z.infer<typeof FeatEventosResumoSchema>;
 export type FeatContasReceberAberto = z.infer<typeof FeatContasReceberAbertoSchema>;
 export type HoldingEmpresaIndicadores = z.infer<typeof HoldingEmpresaIndicadoresSchema>;
 export type HoldingComparativo = z.infer<typeof HoldingComparativoSchema>;
+export type MutuoUnidade = z.infer<typeof MutuoUnidadeSchema>;
+export type MutuosInput = z.infer<typeof MutuosInputSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

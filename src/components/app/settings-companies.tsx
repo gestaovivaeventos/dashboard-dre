@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, FileUp, KeyRound, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Table2, Trash2 } from "lucide-react";
+import { ChevronDown, FileUp, KeyRound, Landmark, Loader2, Pencil, Plus, RefreshCcw, ShieldCheck, Table2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/toaster";
 import { SettingsFeeVvrTable } from "@/components/app/settings-fee-vvr-table";
 import { SettingsFeatProjetosTable } from "@/components/app/settings-feat-projetos-table";
+import { SettingsMutuosPanel } from "@/components/app/settings-mutuos-panel";
 import { cn } from "@/lib/utils";
 
 // Identifica a empresa Feat Produções por nome normalizado (sem acento/caixa).
@@ -136,6 +137,10 @@ export function SettingsCompanies({
 
   // FEE/VVR panel state (somente para segmento franquias-viva)
   const [feeVvrOpen, setFeeVvrOpen] = useState<string | null>(null);
+
+  // Mutuos panel state (somente para segmento franquias-viva) — situacao de
+  // mutuo da unidade: principal, amortizado e saldo devedor.
+  const [mutuosOpen, setMutuosOpen] = useState<string | null>(null);
 
   // Controle de Projetos — painel exclusivo da empresa Feat Produções.
   const [featProjetosOpen, setFeatProjetosOpen] = useState<string | null>(null);
@@ -701,10 +706,32 @@ export function SettingsCompanies({
                           setConfirmingDelete(null);
                           setBudgetOpen(null);
                           setFeatProjetosOpen(null);
+                          setMutuosOpen(null);
                         }}
                       >
                         <Table2 className="mr-2 h-4 w-4" />
                         FEE / VVR
+                      </Button>
+                    ) : null}
+                    {showFeeVvr ? (
+                      <Button
+                        type="button"
+                        variant={mutuosOpen === company.id ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setMutuosOpen(
+                            mutuosOpen === company.id ? null : company.id,
+                          );
+                          setEditingName(null);
+                          setEditingCredentials(null);
+                          setConfirmingDelete(null);
+                          setBudgetOpen(null);
+                          setFeeVvrOpen(null);
+                          setFeatProjetosOpen(null);
+                        }}
+                      >
+                        <Landmark className="mr-2 h-4 w-4" />
+                        Mútuos
                       </Button>
                     ) : null}
                     {showFeatProjetos ? (
@@ -721,6 +748,7 @@ export function SettingsCompanies({
                           setConfirmingDelete(null);
                           setBudgetOpen(null);
                           setFeeVvrOpen(null);
+                          setMutuosOpen(null);
                         }}
                       >
                         <Table2 className="mr-2 h-4 w-4" />
@@ -739,6 +767,7 @@ export function SettingsCompanies({
                         setBudgetOpen(null);
                         setFeeVvrOpen(null);
                         setFeatProjetosOpen(null);
+                        setMutuosOpen(null);
                       }}
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
@@ -967,6 +996,31 @@ export function SettingsCompanies({
                       companyId={company.id}
                       companyName={company.name}
                     />
+                  </div>
+                )}
+
+                {/* Mútuos — segmento franquias-viva */}
+                {showFeeVvr && mutuosOpen === company.id && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">
+                          Mútuos — {company.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Situação de mútuo desta unidade (preenchimento manual).
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMutuosOpen(null)}
+                      >
+                        Fechar
+                      </Button>
+                    </div>
+                    <SettingsMutuosPanel companyId={company.id} />
                   </div>
                 )}
 

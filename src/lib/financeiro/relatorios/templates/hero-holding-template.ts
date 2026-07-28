@@ -46,6 +46,23 @@ export const HERO_HOLDING_COMPANY_NAMES = [
   "Viva Volta Redonda",
 ];
 
+// Unidades consideradas no QUADRO DE MÚTUOS da holding. Lista PRÓPRIA (e maior
+// que a do comparativo): além das 7 do comparativo, inclui Viva Cuiabá e Viva
+// Uberaba, que têm contrato de mútuo com o grupo. O casamento é por nome
+// NORMALIZADO (sem acento, minúsculo). Unidades sem saldo devedor em aberto são
+// omitidas em tempo de montagem (ver `buildMutuosBlock`).
+export const HERO_HOLDING_MUTUOS_COMPANY_NAMES = [
+  "Viva Barbacena",
+  "Viva Campo Grande",
+  "Viva Curitiba",
+  "Viva Juiz de Fora",
+  "Viva Petrópolis",
+  "Viva Go",
+  "Viva Volta Redonda",
+  "Viva Cuiabá",
+  "Viva Uberaba",
+];
+
 // Normaliza um nome de empresa: trim + minúsculo + remove acentos. Mesma ideia
 // da normalização usada em company-period-limits.ts (regras single-company).
 export function normalizeCompanyName(name: string): string {
@@ -101,6 +118,7 @@ export const heroHoldingTemplate: ReportTemplate = {
     enabledBlocks: [
       "diagnostico",
       "holdingComparativo",
+      "mutuos",
       "previstoRealizado",
       "composicao",
       "acumuladoAno",
@@ -113,6 +131,14 @@ export const heroHoldingTemplate: ReportTemplate = {
       key: "holdingComparativo",
       title: "Comparativo das empresas da holding",
       companyNames: HERO_HOLDING_COMPANY_NAMES,
+    },
+    // Quadro de mútuos das unidades do grupo, logo abaixo do comparativo. Só
+    // entram as unidades com saldo devedor em aberto.
+    mutuos: {
+      key: "mutuos",
+      title: "Mútuos das unidades",
+      scope: "holding",
+      companyNames: HERO_HOLDING_MUTUOS_COMPANY_NAMES,
     },
   },
 };

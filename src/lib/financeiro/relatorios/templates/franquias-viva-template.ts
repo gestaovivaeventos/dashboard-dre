@@ -52,4 +52,16 @@ export const franquiasVivaTemplate: ReportTemplate = {
     despesas: { label: "Despesas Operacionais", codes: ["7"], status: "confirmed" },
     resultado: { label: "Resultado do Exercício", codes: ["11"], status: "confirmed" },
   },
+
+  // ÚNICA configuração de `report` deste template: o quadro de mútuos DA PRÓPRIA
+  // unidade, abaixo de "Saúde financeira & caixa". Sem `enabledBlocks` — a Viva
+  // continua exibindo TODOS os blocos, exatamente como antes. Unidade sem saldo
+  // devedor em aberto não renderiza o quadro (ver `buildMutuosBlock`).
+  report: {
+    mutuos: {
+      key: "mutuos",
+      title: "Situação de mútuo",
+      scope: "company",
+    },
+  },
 };

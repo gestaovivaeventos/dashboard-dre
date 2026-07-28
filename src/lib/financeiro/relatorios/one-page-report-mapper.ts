@@ -9,6 +9,7 @@ import type {
   HistoricoPoint,
   HoldingComparativoBlock,
   KpiCard,
+  MutuosBlock,
   OnePageReportPreviewData,
   PrevistoRealizadoItem,
   SemaforoItem,
@@ -142,6 +143,9 @@ export interface OnePageApiResponse {
       inadimplenciaAtual: number | null;
     }>;
   };
+  // Quadro de mútuos (Franquias Viva). Já vem no shape do componente (R$
+  // cheios, linhas sem saldo devedor filtradas). Ausente = sem mútuo em aberto.
+  mutuos?: MutuosBlock;
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -842,6 +846,9 @@ export function mapOnePageApiResponseToPreviewData(
     indicadoresDre: response.indicadoresDre,
     // Comparativo das empresas da holding (Hero Holding) — undefined nas demais.
     holdingComparativo: mapHoldingComparativo(response.holdingComparativo),
+    // Quadro de mútuos (Franquias Viva) — passa direto (R$ cheios, já filtrado
+    // por saldo devedor em aberto). undefined nas demais empresas.
+    mutuos: response.mutuos,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

@@ -115,6 +115,12 @@ function fmtItemValue(item: PrevistoRealizadoPayload, v: number | null): string 
   return new Intl.NumberFormat("pt-BR").format(v);
 }
 
+// Mútuo é exibido em R$ CHEIOS (não em milhares como o restante do e-mail):
+// é um saldo contratual, e arredondar para milhar tiraria a leitura exata.
+function fmtMoneyFull(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function formatGeradoEm(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -370,6 +376,72 @@ export function renderOnePageEmail({
     ${sectionTitle("Saúde financeira & caixa")}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${saudeRows.join("")}</table>`;
 
+  // 4b. Mútuos — segmento Franquias Viva, logo abaixo de "Saúde financeira &
+  // caixa" (mesma posição da tela web). Escopo "holding" = uma linha por unidade
+  // do grupo + total; escopo "company" = só a própria unidade (sem a coluna
+  // Unidade, que seria redundante). O bloco só existe quando há saldo devedor em
+  // aberto — unidades sem mútuo já vêm filtradas do payload —, então string
+  // vazia = nenhuma dívida de mútuo e a seção some do e-mail.
+  const mutuos = payload.mutuos;
+  const mutuosBlock = (() => {
+    if (!mutuos || mutuos.rows.length === 0) return "";
+    const isHolding = mutuos.scope === "holding";
+    const mThStyle = `font-family:${FF};font-size:9px;letter-spacing:0.1em;text-transform:uppercase;font-weight:700;color:${C.sub};padding:0 10px 8px;border-bottom:1px solid ${C.rule};`;
+    const cellStyle = `font-family:${FM};font-size:12px;color:${C.body};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
+    const saldoStyle = `font-family:${FM};font-size:12px;font-weight:700;color:${C.ink};text-align:right;padding:9px 10px;border-bottom:1px solid ${C.grid};white-space:nowrap;`;
+
+    const bodyRows = mutuos.rows
+      .map(
+        (r) => `
+      <tr>
+        ${
+          isHolding
+            ? `<td style="font-family:${FF};font-size:13px;font-weight:600;color:${C.ink};padding:9px 10px;border-bottom:1px solid ${C.grid};">${esc(r.empresa)}</td>`
+            : ""
+        }
+        <td style="${cellStyle}">${r.principal === null ? "—" : fmtMoneyFull(r.principal)}</td>
+        <td style="${cellStyle}">${r.amortizado === null ? "—" : fmtMoneyFull(r.amortizado)}</td>
+        <td style="${saldoStyle}">${fmtMoneyFull(r.saldoDevedor)}</td>
+      </tr>`,
+      )
+      .join("");
+
+    const totalRow =
+      isHolding && mutuos.rows.length > 1
+        ? `
+      <tr>
+        <td style="font-family:${FF};font-size:13px;font-weight:700;color:${C.ink};padding:9px 10px;">Total</td>
+        <td style="${cellStyle}border-bottom:none;font-weight:700;">${fmtMoneyFull(
+          mutuos.rows.reduce((acc, r) => acc + (r.principal ?? 0), 0),
+        )}</td>
+        <td style="${cellStyle}border-bottom:none;font-weight:700;">${fmtMoneyFull(
+          mutuos.rows.reduce((acc, r) => acc + (r.amortizado ?? 0), 0),
+        )}</td>
+        <td style="${saldoStyle}border-bottom:none;">${fmtMoneyFull(
+          mutuos.rows.reduce((acc, r) => acc + r.saldoDevedor, 0),
+        )}</td>
+      </tr>`
+        : "";
+
+    const nota = isHolding
+      ? "Valores em R$. Unidades sem saldo devedor não são listadas."
+      : "Valores em R$.";
+
+    return `
+    ${sectionTitle(mutuos.title)}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:9px;padding:14px 16px;border-collapse:separate;">
+      <tr>
+        ${isHolding ? `<td style="${mThStyle}text-align:left;">Unidade</td>` : ""}
+        <td style="${mThStyle}text-align:right;">Valor do principal</td>
+        <td style="${mThStyle}text-align:right;">Valor amortizado</td>
+        <td style="${mThStyle}text-align:right;">Saldo devedor</td>
+      </tr>
+      ${bodyRows}
+      ${totalRow}
+      <tr><td colspan="${isHolding ? 4 : 3}" style="font-family:${FF};font-size:10px;color:${C.tertiary};padding-top:10px;line-height:1.5;">${nota}</td></tr>
+    </table>`;
+  })();
+
   // 5a. Acumulado do ano (barras horizontais Previsto × Realizado).
   const acumItems = payload.acumuladoAno.filter((i) => i.unidade === "currency");
   const acumMargem = payload.acumuladoAno.find((i) => i.unidade === "percent");
@@ -597,6 +669,7 @@ export function renderOnePageEmail({
           ${resumo}
           ${desempenho}
           ${saude}
+          ${mutuosBlock}
           ${tendencia}
           ${alertasBlock}
           ${acoesBlock}

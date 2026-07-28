@@ -244,7 +244,11 @@ export type ReportBlockKey =
   // (uma linha por unidade Viva vinculada; colunas = VVR acumulado, VVR do mês
   // de referência, FEE disponível, sobrevivência de caixa, margem média dos
   // eventos, inadimplência atual). Só o template hero-holding o habilita.
-  | "holdingComparativo";
+  | "holdingComparativo"
+  // Quadro de MÚTUOS do segmento Franquias Viva (valores manuais do painel
+  // "Mútuos" em Configurações > Empresas). Na Hero Holding lista as unidades do
+  // grupo; nas demais Franquias Viva mostra só a própria unidade.
+  | "mutuos";
 
 export interface TemplateReportConfig {
   /** KPIs por conta DRE (substituem o conjunto fixo). */
@@ -394,6 +398,27 @@ export interface TemplateReportConfig {
     key: ReportBlockKey;
     title: string;
     companyNames: string[];
+  };
+  /**
+   * Quadro de MÚTUOS (segmento Franquias Viva). Lê os valores MANUAIS gravados
+   * no painel "Mútuos" de Configurações > Empresas — principal, amortizado e
+   * saldo devedor —, sem nenhum cálculo derivado de DRE/Fluxo/Omie.
+   *
+   *   scope "holding" → uma linha por unidade listada em `companyNames` (ordem
+   *     da lista). Usado pela Hero Holding.
+   *   scope "company" → uma única linha, da própria empresa analisada. Usado
+   *     pelas demais Franquias Viva.
+   *
+   * Em ambos os escopos, unidade com saldo devedor nulo/zero é OMITIDA (não tem
+   * mútuo em aberto); sem nenhuma linha, o quadro não é renderizado. Gated por
+   * `key` (allowlist enabledBlocks).
+   */
+  mutuos?: {
+    key: ReportBlockKey;
+    title: string;
+    scope: "holding" | "company";
+    /** Só no escopo "holding": unidades do grupo, na ordem de exibição. */
+    companyNames?: string[];
   };
 }
 

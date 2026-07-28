@@ -213,6 +213,25 @@ export interface HoldingComparativoBlock {
   empresas: HoldingComparativoRow[];
 }
 
+// Quadro de MÚTUOS (segmento Franquias Viva) — valores manuais do painel
+// "Mútuos" em Configurações > Empresas. `scope: "holding"` = uma linha por
+// unidade do grupo (Hero Holding); `scope: "company"` = só a própria unidade.
+// Só chega aqui quando há saldo devedor em aberto (linhas zeradas são filtradas
+// na montagem do payload) — bloco ausente = nada renderiza.
+export interface MutuoRow {
+  empresa: string;
+  principal: number | null;
+  amortizado: number | null;
+  saldoDevedor: number;
+}
+export interface MutuosBlock {
+  /** ReportBlockKey p/ gating ("mutuos"). */
+  key: string;
+  title: string;
+  scope: "holding" | "company";
+  rows: MutuoRow[];
+}
+
 export interface OnePageReportPreviewData {
   cabecalho: {
     empresa: string;
@@ -254,6 +273,8 @@ export interface OnePageReportPreviewData {
   indicadoresDre?: DreIndicatorsBlock;
   /** Comparativo das empresas da holding (Hero Holding). Ausência = não renderiza. */
   holdingComparativo?: HoldingComparativoBlock;
+  /** Quadro de mútuos (Franquias Viva). Ausência = sem mútuo em aberto → não renderiza. */
+  mutuos?: MutuosBlock;
   // ── Gráficos extras por template (ex.: Village) ────────────────────────────
   /** Colunas verticais — acumulado do ano, só realizado (ex.: Gap por mês). */
   barsSerie?: BarPoint[];
@@ -3020,6 +3041,159 @@ function QuadroComparativoHolding({ data }: { data: HoldingComparativoBlock }) {
   );
 }
 
+// Quadro de MÚTUOS (segmento Franquias Viva). Valores MANUAIS do painel
+// "Mútuos" em Configurações > Empresas — principal, amortizado e saldo devedor.
+//
+//   scope "holding" → tabela com uma linha por unidade do grupo + total (Hero
+//     Holding), logo abaixo do comparativo das empresas da holding.
+//   scope "company" → três cards da própria unidade, abaixo de "Saúde
+//     financeira & caixa".
+//
+// Unidades sem saldo devedor em aberto já vêm filtradas do payload; bloco
+// ausente = nenhuma dívida de mútuo → nada é renderizado.
+function QuadroMutuos({ data }: { data: MutuosBlock }) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    fontWeight: 600,
+    color: C.sub,
+    padding: "6px 8px",
+    borderBottom: `1px solid ${C.cardBorder}`,
+    whiteSpace: "nowrap",
+  };
+  const td: CSSProperties = {
+    fontSize: 10.5,
+    fontFamily: FONT_MONO,
+    color: C.body,
+    padding: "6px 8px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+    borderBottom: `1px solid ${C.grid}`,
+  };
+
+  // Escopo da própria unidade: três cards, no mesmo padrão dos indicadores.
+  if (data.scope === "company") {
+    const row = data.rows[0];
+    if (!row) return null;
+    const itens: Array<{ label: string; value: number | null }> = [
+      { label: "Valor do principal", value: row.principal },
+      { label: "Valor amortizado", value: row.amortizado },
+      { label: "Saldo devedor", value: row.saldoDevedor },
+    ];
+    return (
+      <section style={{ breakInside: "avoid" }}>
+        <SectionTitle>{data.title}</SectionTitle>
+        <div
+          className="opr-cards-2"
+          style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}
+        >
+          {itens.map((item) => (
+            <FeatIndicador
+              key={item.label}
+              label={item.label}
+              valueLabel={item.value === null ? "—" : fmtMoneyFull(item.value)}
+              hint="Mútuo em aberto · valor informado"
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  // Escopo da holding: uma linha por unidade com mútuo em aberto + total.
+  const totalPrincipal = data.rows.reduce((acc, r) => acc + (r.principal ?? 0), 0);
+  const totalAmortizado = data.rows.reduce((acc, r) => acc + (r.amortizado ?? 0), 0);
+  const totalSaldo = data.rows.reduce((acc, r) => acc + r.saldoDevedor, 0);
+
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ fontSize: 10, color: C.sub, marginTop: -4, marginBottom: 8 }}>
+        {data.rows.length}{" "}
+        {data.rows.length === 1 ? "unidade com mútuo" : "unidades com mútuo"} em
+        aberto · unidades sem saldo devedor não são listadas
+      </div>
+      <div style={{ ...panelStyle, padding: 0, overflow: "hidden" }}>
+        <table
+          style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}
+        >
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left", width: "34%" }}>Unidade</th>
+              <th style={{ ...th, textAlign: "right" }}>Valor do principal</th>
+              <th style={{ ...th, textAlign: "right" }}>Valor amortizado</th>
+              <th style={{ ...th, textAlign: "right" }}>Saldo devedor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.empresa}>
+                <td
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: C.ink,
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    borderBottom: `1px solid ${C.grid}`,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {r.empresa}
+                </td>
+                <td style={td}>
+                  {r.principal === null ? "—" : fmtMoneyFull(r.principal)}
+                </td>
+                <td style={td}>
+                  {r.amortizado === null ? "—" : fmtMoneyFull(r.amortizado)}
+                </td>
+                <td style={{ ...td, fontWeight: 700, color: C.ink }}>
+                  {fmtMoneyFull(r.saldoDevedor)}
+                </td>
+              </tr>
+            ))}
+            {data.rows.length > 1 ? (
+              <tr>
+                <td
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: C.ink,
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Total
+                </td>
+                <td style={{ ...td, borderBottom: "none", fontWeight: 700 }}>
+                  {fmtMoneyFull(totalPrincipal)}
+                </td>
+                <td style={{ ...td, borderBottom: "none", fontWeight: 700 }}>
+                  {fmtMoneyFull(totalAmortizado)}
+                </td>
+                <td
+                  style={{
+                    ...td,
+                    borderBottom: "none",
+                    fontWeight: 700,
+                    color: C.ink,
+                  }}
+                >
+                  {fmtMoneyFull(totalSaldo)}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // Quadro de indicadores por conta DRE (EXCLUSIVO de templates que o configuram,
 // ex.: Terrazzo — "Locação de Espaço": Formaturas / Shows-Palestras). Mostra o
 // realizado de cada conta no mês de referência. Valores em R$ cheios.
@@ -3252,6 +3426,13 @@ export function OnePageReportPreview({
           <QuadroComparativoHolding data={data.holdingComparativo} />
         ) : null}
 
+        {/* Mútuos das unidades da holding — logo abaixo do comparativo (gated
+            por bloco + presença de dados). Só as unidades com saldo devedor em
+            aberto chegam aqui; sem nenhuma, o bloco nem é montado. */}
+        {data.mutuos && data.mutuos.scope === "holding" && show(data.mutuos.key) ? (
+          <QuadroMutuos data={data.mutuos} />
+        ) : null}
+
         {show("previstoRealizado") ? (
           <TabelaDesempenho
             items={data.previstoRealizado}
@@ -3259,6 +3440,13 @@ export function OnePageReportPreview({
           />
         ) : null}
         <KpisSaude kpis={saudeKpis} columns={data.kpiColumns} title={data.kpiSectionTitle} />
+
+        {/* Situação de mútuo DA PRÓPRIA unidade — logo abaixo de "Saúde
+            financeira & caixa" (demais Franquias Viva). Ausente quando a
+            unidade não tem saldo devedor de mútuo em aberto. */}
+        {data.mutuos && data.mutuos.scope === "company" && show(data.mutuos.key) ? (
+          <QuadroMutuos data={data.mutuos} />
+        ) : null}
 
         {/* Quadro de eventos — exclusivo da Feat Produções (gated por bloco +
             presença de dados). Eventos são a principal fonte de receita da Feat,

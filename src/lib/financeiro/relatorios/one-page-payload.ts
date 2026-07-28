@@ -26,6 +26,7 @@ import {
   buildHeroHoldingComparativo,
   type HoldingComparativoResult,
 } from "./hero-holding";
+import { buildMutuosBlock, type MutuosResult } from "./mutuos";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
 
@@ -239,6 +240,11 @@ export interface OnePagePayload {
   // por unidade Viva do grupo com os indicadores já validados no relatório
   // individual. Ausente (undefined) para todas as demais empresas.
   holdingComparativo?: HoldingComparativoResult;
+  // Quadro de MÚTUOS (segmento Franquias Viva) — valores manuais do painel
+  // "Mútuos" em Configurações > Empresas. Na Hero Holding traz as unidades do
+  // grupo; nas demais Viva, só a própria unidade. Ausente (undefined) quando
+  // nenhuma unidade do escopo tem saldo devedor em aberto.
+  mutuos?: MutuosResult;
   // Quadro de indicadores por conta DRE (ex.: Terrazzo — "Locação de Espaço").
   // Ausência = não renderiza (só templates com `report.indicadoresDre`).
   indicadoresDre?: DreIndicatorsPayload;
@@ -1905,6 +1911,42 @@ export async function buildOnePagePayload(
     });
   }
 
+  // -------------------------------------------------------------------------
+  // 11d. Quadro de MÚTUOS — segmento Franquias Viva.
+  //
+  // Só é montado quando o template define `report.mutuos`: escopo "holding"
+  // (Hero Holding, unidades do grupo) ou "company" (demais Franquias Viva, só a
+  // própria unidade). Lê exclusivamente os valores MANUAIS gravados no painel
+  // "Mútuos" de Configurações > Empresas — nenhum cálculo derivado do DRE.
+  // Unidade sem saldo devedor em aberto é omitida; sem nenhuma linha o builder
+  // devolve undefined e o quadro não aparece. Inerte para os demais templates.
+  // -------------------------------------------------------------------------
+  const mutuosCfg = template.report?.mutuos;
+  const mutuos: MutuosResult | undefined = mutuosCfg
+    ? await buildMutuosBlock(supabase, {
+        key: mutuosCfg.key,
+        title: mutuosCfg.title,
+        scope: mutuosCfg.scope,
+        companyId,
+        companyNames: mutuosCfg.companyNames,
+      })
+    : undefined;
+
+  // Resumo do mútuo para a IA (snake_case, alinhado ao schema do input). Mesmas
+  // linhas do quadro do relatório — já filtradas por saldo devedor em aberto —,
+  // então a IA nunca comenta mútuo de unidade que não tem dívida.
+  const mutuosInput = mutuos
+    ? {
+        escopo: mutuos.scope === "holding" ? ("holding" as const) : ("empresa" as const),
+        unidades: mutuos.rows.map((r) => ({
+          empresa: r.empresa,
+          principal: r.principal,
+          amortizado: r.amortizado,
+          saldo_devedor: r.saldoDevedor,
+        })),
+      }
+    : null;
+
   // Resumo do comparativo para a IA (snake_case, alinhado ao schema do input).
   const holdingComparativoInput =
     holdingComparativo && holdingComparativo.empresas.length > 0
@@ -2023,6 +2065,9 @@ export async function buildOnePagePayload(
           featContasReceberAbertoResult?.resumoIA ?? null,
         // Comparativo da holding — só presente para a Hero Holding.
         holding_comparativo: holdingComparativoInput,
+        // Situação de mútuo — só presente no segmento Franquias Viva e apenas
+        // quando há saldo devedor em aberto no escopo do template.
+        mutuos: mutuosInput,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -2049,6 +2094,9 @@ export async function buildOnePagePayload(
       custodyClosing: custodyClosing ?? undefined,
       // Comparativo das empresas da holding — só presente para a Hero Holding.
       holdingComparativo,
+      // Quadro de mútuos — só presente no segmento Franquias Viva e apenas
+      // quando há saldo devedor em aberto no escopo do template.
+      mutuos,
       // Quadro de indicadores por conta DRE — só presente p/ templates que o
       // configuram (ex.: Terrazzo — "Locação de Espaço").
       indicadoresDre,
