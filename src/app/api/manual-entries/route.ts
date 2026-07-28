@@ -13,6 +13,7 @@ interface ManualEntryItem {
   categoryName?: string;
   entryDate?: string;
   value?: number | string;
+  observation?: string;
 }
 
 export async function GET(request: Request) {
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await db
     .from("manual_entries")
-    .select("id, category_code, category_name, entry_date, value")
+    .select("id, category_code, category_name, entry_date, value, observation")
     .eq("company_id", companyId)
     .order("entry_date", { ascending: true })
     .order("category_name", { ascending: true });
@@ -48,6 +49,7 @@ export async function GET(request: Request) {
     categoryName: (row.category_name as string) ?? (row.category_code as string),
     entryDate: row.entry_date as string,
     value: Number(row.value ?? 0),
+    observation: (row.observation as string | null) ?? "",
   }));
 
   return NextResponse.json({ entries });
@@ -80,7 +82,8 @@ export async function POST(request: Request) {
       const entryDate = item.entryDate?.trim() ?? "";
       const value =
         typeof item.value === "number" ? item.value : Number(item.value);
-      return { categoryName, entryDate, value };
+      const observation = item.observation?.trim() ?? "";
+      return { categoryName, entryDate, value, observation };
     })
     .filter(
       (r) =>
@@ -94,6 +97,7 @@ export async function POST(request: Request) {
       category_name: r.categoryName,
       entry_date: r.entryDate,
       value: r.value,
+      observation: r.observation || null,
       created_by: user.id,
     }));
 

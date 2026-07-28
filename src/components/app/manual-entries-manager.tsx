@@ -26,6 +26,7 @@ interface EntryRow {
   categoryName: string;
   entryDate: string;
   value: string;
+  observation: string;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -68,7 +69,13 @@ export function ManualEntriesManager({
       cache: "no-store",
     });
     const payload = await safeJson<{
-      entries?: Array<{ id: string; categoryName: string; entryDate: string; value: number }>;
+      entries?: Array<{
+        id: string;
+        categoryName: string;
+        entryDate: string;
+        value: number;
+        observation?: string;
+      }>;
       error?: string;
     }>(response);
     if (!response.ok || !payload?.entries) {
@@ -87,6 +94,7 @@ export function ManualEntriesManager({
         categoryName: e.categoryName,
         entryDate: e.entryDate,
         value: String(e.value),
+        observation: e.observation ?? "",
       })),
     );
     setLoading(false);
@@ -105,7 +113,7 @@ export function ManualEntriesManager({
   const addRow = () => {
     setRows((previous) => [
       ...previous,
-      { key: nextKey(), categoryName: "", entryDate: "", value: "" },
+      { key: nextKey(), categoryName: "", entryDate: "", value: "", observation: "" },
     ]);
   };
 
@@ -123,18 +131,34 @@ export function ManualEntriesManager({
   );
 
   const saveAll = async () => {
-    const entries = rows
-      .map((row) => ({
-        categoryName: row.categoryName.trim(),
-        entryDate: row.entryDate.trim(),
-        value: Number(row.value.replace(",", ".")),
-      }))
-      .filter(
-        (e) =>
-          e.categoryName !== "" &&
-          /^\d{4}-\d{2}-\d{2}$/.test(e.entryDate) &&
-          Number.isFinite(e.value),
-      );
+    // "Preenchida" = tem algo digitado em qualquer campo. Só gravamos as que
+    // tiverem Categoria + Data + Valor válidos; as demais são incompletas.
+    const filled = rows.filter(
+      (r) => r.categoryName.trim() !== "" || r.entryDate.trim() !== "" || r.value.trim() !== "",
+    );
+    const entries: Array<{
+      categoryName: string;
+      entryDate: string;
+      value: number;
+      observation: string;
+    }> = [];
+    const droppedRows: EntryRow[] = [];
+    for (const row of filled) {
+      const categoryName = row.categoryName.trim();
+      const entryDate = row.entryDate.trim();
+      const valueStr = row.value.trim();
+      const value = Number(valueStr.replace(",", "."));
+      if (
+        categoryName !== "" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(entryDate) &&
+        valueStr !== "" &&
+        Number.isFinite(value)
+      ) {
+        entries.push({ categoryName, entryDate, value, observation: row.observation.trim() });
+      } else {
+        droppedRows.push(row);
+      }
+    }
 
     setSaving(true);
     const response = await fetch("/api/manual-entries", {
@@ -153,11 +177,19 @@ export function ManualEntriesManager({
       return;
     }
     await loadRows();
+    // Mantém no grid as linhas incompletas — não descarta o que você digitou.
+    if (droppedRows.length > 0) {
+      setRows((previous) => [...previous, ...droppedRows.map((r) => ({ ...r, key: nextKey() }))]);
+    }
     setSaving(false);
     showToast({
-      title: "Lancamentos salvos",
-      description: `${payload.saved ?? 0} linha(s) gravada(s).`,
-      variant: "success",
+      title: droppedRows.length > 0 ? "Salvo, mas há linhas incompletas" : "Lancamentos salvos",
+      description:
+        `${payload.saved ?? 0} linha(s) gravada(s).` +
+        (droppedRows.length > 0
+          ? ` ${droppedRows.length} linha(s) continuam no grid por faltar Categoria, Data ou Valor — complete e salve de novo.`
+          : ""),
+      variant: droppedRows.length > 0 ? "destructive" : "success",
     });
   };
 
@@ -168,7 +200,8 @@ export function ManualEntriesManager({
         <p className="text-sm text-muted-foreground">
           Insira valores que nao vem da Omie (Categoria, Data, Valor). As categorias
           digitadas aparecem na tela de Mapeamento para voce vincular a uma conta DRE,
-          e os valores entram no DRE seguindo as datas.
+          e os valores entram no DRE seguindo as datas. A Observacao (opcional) aparece
+          como descricao no drill-down.
         </p>
       </div>
 
@@ -226,20 +259,21 @@ export function ManualEntriesManager({
                   <th className="px-4 py-3 text-left">Categoria DRE</th>
                   <th className="px-4 py-3 text-left w-44">Data</th>
                   <th className="px-4 py-3 text-left w-44">Valor</th>
+                  <th className="px-4 py-3 text-left">Observacao</th>
                   <th className="px-4 py-3 text-center w-16"></th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="py-10 text-center text-muted-foreground">
+                    <td colSpan={5} className="py-10 text-center text-muted-foreground">
                       <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
                       Carregando lancamentos...
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-10 text-center text-muted-foreground">
+                    <td colSpan={5} className="py-10 text-center text-muted-foreground">
                       Nenhum lancamento. Clique em &quot;Adicionar linha&quot; para comecar.
                     </td>
                   </tr>
@@ -268,12 +302,19 @@ export function ManualEntriesManager({
                       </td>
                       <td className="px-4 py-2">
                         <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0,00"
+                          inputMode="decimal"
+                          placeholder="0,00 (use - para subtrair)"
                           value={row.value}
                           disabled={saving}
                           onChange={(event) => updateRow(row.key, "value", event.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          placeholder="Descricao para o drill-down (opcional)"
+                          value={row.observation}
+                          disabled={saving}
+                          onChange={(event) => updateRow(row.key, "observation", event.target.value)}
                         />
                       </td>
                       <td className="px-4 py-2 text-center">
