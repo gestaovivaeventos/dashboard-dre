@@ -240,6 +240,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     id: "orcamento",
     label: "ORÇAMENTO",
     items: [
+      { key: "orc-pessoal", title: "Despesas com pessoal", icon: Users, scope: "global", href: "/orcamento/despesas/pessoal", dreRoles: ["admin"] },
       { key: "orc-config", title: "Configurações", icon: Cog, scope: "global", href: "/orcamento/configuracoes", dreRoles: ["admin"] },
     ],
   },
