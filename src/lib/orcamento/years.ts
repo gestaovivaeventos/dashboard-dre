@@ -8,8 +8,11 @@
 // o mesmo princípio, mas são chaveados por ano-base (tabela própria).
 // =============================================================================
 
-/** Primeiro ano que o módulo aceita (piso histórico). */
-export const ORCAMENTO_MIN_YEAR = 2025;
+/**
+ * Primeiro ano de orçamento CONSTRUÍDO no sistema. 2025 e 2026 foram orçados
+ * fora do sistema (não há o que editar aqui), então o módulo começa em 2027.
+ */
+export const ORCAMENTO_MIN_YEAR = 2027;
 
 /**
  * Ano do orçamento padrão: normalmente planejamos o PRÓXIMO ano civil.
@@ -20,12 +23,12 @@ export function defaultBudgetYear(): number {
 }
 
 /**
- * Faixa de anos selecionáveis, do mais recente para o mais antigo
- * (do piso histórico até o próximo ano + 1, dando folga para adiantar o
- * planejamento).
+ * Faixa de anos selecionáveis, do mais recente para o mais antigo. Começa no
+ * piso (2027) e sempre mostra anos à frente: no mínimo até 2030, estendendo-se
+ * conforme o tempo passa (currentYear + 4) para nunca faltar horizonte futuro.
  */
 export function orcamentoYears(): number[] {
-  const max = new Date().getFullYear() + 2;
+  const max = Math.max(2030, new Date().getFullYear() + 4);
   const years: number[] = [];
   for (let y = max; y >= ORCAMENTO_MIN_YEAR; y--) years.push(y);
   return years;
