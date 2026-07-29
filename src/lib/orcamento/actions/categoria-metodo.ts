@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isOrcamentoMetodo, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { isValidBudgetYear } from "@/lib/orcamento/years";
 
 export interface CategoriaMetodoItem {
   categoryCode: string;
@@ -28,9 +29,11 @@ interface MappingRow {
 /**
  * Lista as categorias de DESPESA de uma empresa (do mapeamento efetivo:
  * mapeamento global + override específico da empresa, filtrado às categorias
- * cuja linha DRE é de despesa) já com o método de orçamento salvo, se houver.
+ * cuja linha DRE é de despesa) já com o método de orçamento salvo NO ANO, se
+ * houver. A lista de categorias vem do mapeamento (estrutural, não versionada);
+ * só o vínculo categoria→método é por ano.
  */
-export async function getCategoriaMetodo(companyId: string): Promise<{
+export async function getCategoriaMetodo(companyId: string, year: number): Promise<{
   items?: CategoriaMetodoItem[];
   error?: string;
   needsMigration?: boolean;
@@ -38,6 +41,7 @@ export async function getCategoriaMetodo(companyId: string): Promise<{
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { items: [] };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -83,11 +87,12 @@ export async function getCategoriaMetodo(companyId: string): Promise<{
     }
   }
 
-  // 3) Métodos já salvos para a empresa.
+  // 3) Métodos já salvos para a empresa NO ANO.
   const { data: saved, error: savedError } = await supabase
     .from("orcamento_categoria_metodo")
     .select("category_code, metodo")
-    .eq("company_id", companyId);
+    .eq("company_id", companyId)
+    .eq("year", year);
   if (savedError) {
     if (isSchemaMissing(savedError.message)) return { needsMigration: true };
     return { error: savedError.message };
@@ -128,6 +133,7 @@ export async function getCategoriaMetodo(companyId: string): Promise<{
  */
 export async function setCategoriaMetodo(
   companyId: string,
+  year: number,
   categoryCode: string,
   categoryName: string,
   metodo: OrcamentoMetodo | null,
@@ -135,6 +141,7 @@ export async function setCategoriaMetodo(
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -143,6 +150,7 @@ export async function setCategoriaMetodo(
       .from("orcamento_categoria_metodo")
       .delete()
       .eq("company_id", companyId)
+      .eq("year", year)
       .eq("category_code", categoryCode);
     if (error) return { error: error.message };
     revalidatePath(PATH);
@@ -154,12 +162,13 @@ export async function setCategoriaMetodo(
   const { error } = await supabase.from("orcamento_categoria_metodo").upsert(
     {
       company_id: companyId,
+      year,
       category_code: categoryCode,
       category_name: categoryName,
       metodo,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,category_code" },
+    { onConflict: "company_id,year,category_code" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) {
@@ -169,4 +178,63 @@ export async function setCategoriaMetodo(
   }
   revalidatePath(PATH);
   return { ok: true as const };
+}
+
+/**
+ * Clona os vínculos categoria→método de uma empresa de um ano para outro. Não
+ * sobrescreve categorias que já tenham método definido no ano de destino.
+ * Retorna quantos vínculos foram copiados.
+ */
+export async function cloneCategoriaMetodo(
+  companyId: string,
+  fromYear: number,
+  toYear: number,
+) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Selecione uma empresa." };
+  if (!isValidBudgetYear(fromYear) || !isValidBudgetYear(toYear)) {
+    return { error: "Ano do orçamento inválido." };
+  }
+  if (fromYear === toYear) return { error: "Escolha anos de origem e destino diferentes." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { data: source, error: srcError } = await supabase
+    .from("orcamento_categoria_metodo")
+    .select("category_code, category_name, metodo")
+    .eq("company_id", companyId)
+    .eq("year", fromYear);
+  if (srcError) {
+    if (isSchemaMissing(srcError.message)) return { needsMigration: true };
+    return { error: srcError.message };
+  }
+  if (!source || source.length === 0) return { ok: true as const, copied: 0 };
+
+  const { data: existing, error: existError } = await supabase
+    .from("orcamento_categoria_metodo")
+    .select("category_code")
+    .eq("company_id", companyId)
+    .eq("year", toYear);
+  if (existError) return { error: existError.message };
+  const taken = new Set((existing ?? []).map((r) => r.category_code as string));
+
+  const rows = source
+    .filter((r) => !taken.has(r.category_code as string))
+    .map((r) => ({
+      company_id: companyId,
+      year: toYear,
+      category_code: r.category_code as string,
+      category_name: (r.category_name as string) ?? null,
+      metodo: r.metodo as string,
+      updated_by: admin.userId,
+    }));
+  if (rows.length === 0) return { ok: true as const, copied: 0 };
+
+  const { error: insError } = await supabase
+    .from("orcamento_categoria_metodo")
+    .insert(rows);
+  if (insError) return { error: insError.message };
+  revalidatePath(PATH);
+  return { ok: true as const, copied: rows.length };
 }

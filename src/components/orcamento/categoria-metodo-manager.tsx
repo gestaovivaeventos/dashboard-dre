@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Loader2, Search } from "lucide-react";
+import { Copy, Loader2, Search } from "lucide-react";
 
 import {
+  cloneCategoriaMetodo,
   getCategoriaMetodo,
   setCategoriaMetodo,
   type CategoriaMetodoItem,
 } from "@/lib/orcamento/actions/categoria-metodo";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -24,16 +27,18 @@ const VE_METODOS = METODOS.filter((m) => m.ve);
 
 export function CategoriaMetodoManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
   const [items, setItems] = useState<CategoriaMetodoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
   const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
   const [, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [search, setSearch] = useState("");
 
-  async function reload(id: string) {
+  async function reload(id: string, y: number) {
     if (!id) {
       setItems([]);
       return;
@@ -41,7 +46,7 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getCategoriaMetodo(id);
+    const res = await getCategoriaMetodo(id, y);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -57,11 +62,33 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
   }
 
   useEffect(() => {
-    void reload(companyId);
+    void reload(companyId, year);
     setSearch("");
     setFeedback(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [companyId, year]);
+
+  function handleClone() {
+    if (!companyId) return;
+    const from = year - 1;
+    setCloning(true);
+    setFeedback(null);
+    startTransition(async () => {
+      const res = await cloneCategoriaMetodo(companyId, from, year);
+      setCloning(false);
+      if (res?.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      await reload(companyId, year);
+      setFeedback({
+        ok: true,
+        msg: res.copied
+          ? `${res.copied} vínculo(s) copiado(s) de ${from} para ${year}.`
+          : `Nada a copiar de ${from} (sem vínculos ou já preenchido).`,
+      });
+    });
+  }
 
   function handleChange(item: CategoriaMetodoItem, next: OrcamentoMetodo | null) {
     const previous = item.metodo;
@@ -76,6 +103,7 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
     startTransition(async () => {
       const res = await setCategoriaMetodo(
         companyId,
+        year,
         item.categoryCode,
         item.categoryName,
         next,
@@ -116,9 +144,9 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
 
   return (
     <div className="space-y-4">
-      {/* Seletor de empresa + busca */}
+      {/* Seletor de empresa + ano + clonar + busca */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-72 space-y-1.5">
+        <div className="w-64 space-y-1.5">
           <label className="text-sm font-medium">Empresa</label>
           <select
             value={companyId}
@@ -132,6 +160,16 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
             ))}
           </select>
         </div>
+        <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+        <button
+          type="button"
+          onClick={handleClone}
+          disabled={loading || cloning || !companyId}
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
+        >
+          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+          Clonar de {year - 1}
+        </button>
         <div className="min-w-[220px] flex-1 space-y-1.5">
           <label className="text-sm font-medium">Buscar categoria</label>
           <div className="relative">

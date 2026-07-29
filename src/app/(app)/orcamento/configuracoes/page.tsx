@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Percent,
   SlidersHorizontal,
-  Tags,
   Users,
   Workflow,
 } from "lucide-react";
@@ -62,12 +61,6 @@ const CARDS: ConfigCard[] = [
       "Cargos e seus níveis (Jr/Pl/Sr), cada um com salário-base, usados no orçamento de despesas com pessoal.",
     icon: Users,
     href: "/orcamento/configuracoes/plano-cargos",
-  },
-  {
-    title: "Categorias do planejamento dos sócios",
-    description:
-      "Categorias que dependem do planejamento dos sócios, usadas na entrevista guiada por IA.",
-    icon: Tags,
   },
 ];
 

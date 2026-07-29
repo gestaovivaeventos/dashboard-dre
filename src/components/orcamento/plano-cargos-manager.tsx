@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import {
   Ban,
   Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 
 import {
+  cloneCargos,
   createCargo,
   createNivel,
   deleteNivel,
@@ -24,6 +26,8 @@ import {
   type CargoWithNiveis,
 } from "@/lib/orcamento/actions/cargos";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -54,10 +58,12 @@ function readSalario(input: string): number | null {
 
 export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
   const [cargos, setCargos] = useState<CargoWithNiveis[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -71,7 +77,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   const [editingNivelId, setEditingNivelId] = useState<string | null>(null);
   const [editNivel, setEditNivel] = useState<NivelDraft>(EMPTY_DRAFT);
 
-  async function reload(id: string) {
+  async function reload(id: string, y: number) {
     if (!id) {
       setCargos([]);
       return;
@@ -79,7 +85,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getCargos(id);
+    const res = await getCargos(id, y);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -95,14 +101,14 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   }
 
   useEffect(() => {
-    void reload(companyId);
+    void reload(companyId, year);
     setEditingCargoId(null);
     setEditingNivelId(null);
     setNewCargoName("");
     setNivelDrafts({});
     setFeedback(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [companyId, year]);
 
   function run(
     action: () => Promise<{ error?: string; ok?: true }>,
@@ -118,7 +124,29 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
       }
       setFeedback({ ok: true, msg: successMsg });
       onDone?.();
-      await reload(companyId);
+      await reload(companyId, year);
+    });
+  }
+
+  function handleClone() {
+    if (!companyId) return;
+    const from = year - 1;
+    setCloning(true);
+    setFeedback(null);
+    startTransition(async () => {
+      const res = await cloneCargos(companyId, from, year);
+      setCloning(false);
+      if (res?.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      await reload(companyId, year);
+      setFeedback({
+        ok: true,
+        msg: res.copied
+          ? `${res.copied} cargo(s) copiado(s) de ${from} para ${year} (com níveis e salários).`
+          : `Nada a copiar de ${from} (sem cargos ativos ou já cadastrados).`,
+      });
     });
   }
 
@@ -133,7 +161,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   function handleAddCargo() {
     const name = newCargoName.trim();
     if (!name || !companyId) return;
-    run(() => createCargo(companyId, name), "Cargo criado.", () => setNewCargoName(""));
+    run(() => createCargo(companyId, year, name), "Cargo criado.", () => setNewCargoName(""));
   }
 
   function handleRenameCargo(id: string) {
@@ -204,20 +232,34 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
 
   return (
     <div className="space-y-5">
-      {/* Seletor de empresa */}
-      <div className="max-w-sm space-y-1.5">
-        <label className="text-sm font-medium">Empresa</label>
-        <select
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          className={INPUT_CLS}
+      {/* Seletor de empresa + ano + clonar */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-64 space-y-1.5">
+            <label className="text-sm font-medium">Empresa</label>
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              className={INPUT_CLS}
+            >
+              {companies.map((c) => (
+                <option key={c.companyId} value={c.companyId}>
+                  {c.companyName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+        </div>
+        <button
+          type="button"
+          onClick={handleClone}
+          disabled={loading || cloning || isPending || !companyId}
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
         >
-          {companies.map((c) => (
-            <option key={c.companyId} value={c.companyId}>
-              {c.companyName}
-            </option>
-          ))}
-        </select>
+          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+          Clonar de {year - 1}
+        </button>
       </div>
 
       {/* Novo cargo */}
@@ -275,7 +317,8 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
         <p className="text-sm text-destructive">{loadError}</p>
       ) : cargos.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nenhum cargo cadastrado para esta empresa.
+          Nenhum cargo cadastrado para esta empresa em {year}. Cadastre acima ou
+          use <strong>Clonar de {year - 1}</strong>.
         </div>
       ) : (
         <div className="space-y-4">
