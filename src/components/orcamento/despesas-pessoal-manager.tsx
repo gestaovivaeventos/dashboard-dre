@@ -1,0 +1,883 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Loader2, Trash2, UserPlus } from "lucide-react";
+
+import {
+  createColaborador,
+  deleteColaborador,
+  getColaboradores,
+  getPessoalSetup,
+  updateColaborador,
+  updateColaboradorBeneficios,
+  type CargoOption,
+  type Colaborador,
+  type ColaboradorInput,
+  type Movimentacao,
+  type PessoalSetup,
+} from "@/lib/orcamento/actions/pessoal";
+import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
+import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import {
+  MOV_TIPOS,
+  VINCULOS,
+  vinculoLabel,
+  type MovTipo,
+  type VinculoKey,
+} from "@/lib/orcamento/vinculos";
+import { YearSelect } from "@/components/orcamento/year-select";
+import { cn } from "@/lib/utils";
+
+const INPUT_CLS =
+  "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+const CELL =
+  "w-full rounded border bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-40 disabled:bg-muted/40";
+
+function readSalario(input: string): number | null {
+  const v = parseBrNumber(input);
+  if (v == null || Number.isNaN(v)) return null;
+  return v;
+}
+// Meses (o ano é sempre o ano do orçamento, então fica subentendido).
+const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const MES_OPTIONS = MESES.map((label, i) => ({ value: String(i + 1).padStart(2, "0"), label }));
+
+/** "MM" + ano do orçamento → "YYYY-MM-01" para gravar. */
+function mesToIso(mes: string, year: number): string | null {
+  return mes ? `${year}-${mes}-01` : null;
+}
+/** "YYYY-MM-01" → "MM" para o seletor de mês. */
+function isoToMes(iso: string | null): string {
+  return iso ? iso.slice(5, 7) : "";
+}
+function buildMov(
+  tipo: "" | MovTipo,
+  mes: string,
+  cargo: string,
+  salario: string,
+  year: number,
+): Movimentacao | null {
+  if (!tipo) return null;
+  if (tipo === "desligamento") {
+    return { tipo: "desligamento", data: mesToIso(mes, year), cargo: null, salario: null };
+  }
+  return {
+    tipo: "movimentacao",
+    data: mesToIso(mes, year),
+    cargo: cargo.trim() || null,
+    salario: readSalario(salario),
+  };
+}
+
+/** Célula de salário: mostra "R$ 3.000,00" quando não está em foco; ao focar,
+ * exibe o valor cru para edição; ao sair, reformata. */
+function CurrencyCell({
+  value,
+  onChange,
+  onBlur,
+  disabled,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onBlur: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  const num = parseBrNumber(value);
+  const display = focused || num == null || Number.isNaN(num) ? value : formatBRL(num);
+  return (
+    <input
+      value={display}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={(e) => {
+        setFocused(true);
+        const el = e.target;
+        requestAnimationFrame(() => el.select());
+      }}
+      onBlur={() => {
+        setFocused(false);
+        onBlur();
+      }}
+      inputMode="decimal"
+      placeholder="R$ 0,00"
+      disabled={disabled}
+      className={className}
+    />
+  );
+}
+
+interface Company {
+  companyId: string;
+  companyName: string;
+}
+
+const EMPTY_SETUP: PessoalSetup = { orcarPorSetor: false, setores: [], cargoOptions: [] };
+
+export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
+  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
+  const [tab, setTab] = useState<"quadro" | "beneficios">("quadro");
+  const [setorId, setSetorId] = useState<string | null>(null);
+  const [setup, setSetup] = useState<PessoalSetup>(EMPTY_SETUP);
+  const [items, setItems] = useState<Colaborador[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function loadColabs(cid: string, y: number, sid: string | null) {
+    const res = await getColaboradores(cid, y, sid);
+    if (res?.needsMigration) {
+      setNeedsMigration(true);
+      setItems([]);
+      return;
+    }
+    if (res?.error) {
+      setLoadError(res.error);
+      setItems([]);
+      return;
+    }
+    setItems(res.items ?? []);
+  }
+
+  async function init(cid: string, y: number) {
+    setLoading(true);
+    setLoadError(null);
+    setNeedsMigration(false);
+    setFeedback(null);
+    if (!cid) {
+      setLoading(false);
+      return;
+    }
+    const res = await getPessoalSetup(cid, y);
+    if (res?.error) {
+      setLoadError(res.error);
+      setSetup(EMPTY_SETUP);
+      setLoading(false);
+      return;
+    }
+    const s = res.setup ?? EMPTY_SETUP;
+    setSetup(s);
+    const defaultSetor = s.orcarPorSetor ? s.setores[0]?.id ?? null : null;
+    setSetorId(defaultSetor);
+    if (!s.orcarPorSetor || defaultSetor) {
+      await loadColabs(cid, y, defaultSetor);
+    } else {
+      setItems([]);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void init(companyId, year);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, year]);
+
+  function handleSetorChange(sid: string) {
+    setSetorId(sid);
+    setFeedback(null);
+    setLoading(true);
+    void loadColabs(companyId, year, sid).finally(() => setLoading(false));
+  }
+
+  async function handleAdd() {
+    setAdding(true);
+    setFeedback(null);
+    const res = await createColaborador(companyId, year, {
+      setorId,
+      nome: null,
+      vinculo: "clt",
+      cargoAtual: null,
+      salarioAtual: null,
+      mov1: null,
+      mov2: null,
+      justificativa: null,
+    });
+    if (res?.error) setFeedback({ ok: false, msg: res.error });
+    else await loadColabs(companyId, year, setorId);
+    setAdding(false);
+  }
+
+  async function handleDelete(colab: Colaborador) {
+    if (!window.confirm(`Excluir ${colab.nome ?? "este colaborador"} do quadro?`)) return;
+    setFeedback(null);
+    const res = await deleteColaborador(colab.id);
+    if (res?.error) {
+      setFeedback({ ok: false, msg: res.error });
+      return;
+    }
+    await loadColabs(companyId, year, setorId);
+  }
+
+  const needsSetor = setup.orcarPorSetor && !setorId;
+  const canAdd = !loading && !adding && !!companyId && !needsSetor && !needsMigration;
+  // Cargos oferecidos: os do setor selecionado (quando orça por setor) ou os sem
+  // setor (plano único). Assim a lista fica direcionada ao setor.
+  const cargoOptionsForSetor = setup.orcarPorSetor
+    ? setup.cargoOptions.filter((o) => o.setorId === setorId)
+    : setup.cargoOptions.filter((o) => o.setorId == null);
+
+  if (companies.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+        Nenhuma empresa ativa encontrada.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Empresa + ano + setor */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-64 space-y-1.5">
+          <label className="text-sm font-medium">Empresa</label>
+          <select
+            value={companyId}
+            onChange={(e) => setCompanyId(e.target.value)}
+            disabled={loading}
+            className={INPUT_CLS}
+          >
+            {companies.map((c) => (
+              <option key={c.companyId} value={c.companyId}>
+                {c.companyName}
+              </option>
+            ))}
+          </select>
+        </div>
+        <YearSelect value={year} onChange={setYear} disabled={loading} />
+        {setup.orcarPorSetor && setup.setores.length > 0 && (
+          <div className="w-56 space-y-1.5">
+            <label className="text-sm font-medium">Setor</label>
+            <select
+              value={setorId ?? ""}
+              onChange={(e) => handleSetorChange(e.target.value)}
+              disabled={loading}
+              className={INPUT_CLS}
+            >
+              {setup.setores.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {feedback && (
+        <div
+          className={cn(
+            "rounded-md px-4 py-2 text-sm",
+            feedback.ok ? "bg-green-500/10 text-green-700" : "bg-destructive/10 text-destructive",
+          )}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 rounded-lg border p-12 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Carregando quadro…
+        </div>
+      ) : needsMigration ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <p className="font-medium">Migration pendente</p>
+          <p className="mt-1 text-muted-foreground">
+            Rode o <code className="rounded bg-muted px-1 py-0.5">db push</code> da migration{" "}
+            <code className="rounded bg-muted px-1 py-0.5">20260729140000_orcamento_pessoal_quadro</code>{" "}
+            para habilitar esta tela.
+          </p>
+        </div>
+      ) : loadError ? (
+        <p className="text-sm text-destructive">{loadError}</p>
+      ) : setup.orcarPorSetor && setup.setores.length === 0 ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm text-muted-foreground">
+          Esta empresa orça <strong>por setor</strong> em {year}, mas não há setores cadastrados.
+          Cadastre-os em <strong>Configurações → Setores</strong> para montar o quadro de cada um.
+        </div>
+      ) : (
+        <>
+          {/* Abas: Quadro (azul) | Benefícios (verde) */}
+          <div className="flex gap-1 border-b">
+            {(["quadro", "beneficios"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={cn(
+                  "-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                  tab === t
+                    ? "border-emerald-600 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t === "quadro" ? "Quadro" : "Benefícios"}
+              </button>
+            ))}
+          </div>
+
+          {tab === "quadro" ? (
+            <>
+              {cargoOptionsForSetor.length === 0 && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
+                  Nenhum cargo/nível no <strong>Plano de Cargos</strong>
+                  {setup.orcarPorSetor ? " deste setor" : ""} em {year}. Cadastre-os para que o
+                  salário seja preenchido automaticamente ao escolher o cargo.
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {items.length} colaborador(es){setup.orcarPorSetor ? " neste setor" : ""}. Edite
+                  direto na tabela — cada alteração é salva automaticamente.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  disabled={!canAdd}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {adding ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="h-4 w-4" />
+                  )}
+                  Adicionar colaborador
+                </button>
+              </div>
+
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                  Nenhum colaborador no quadro. Use <strong>Adicionar colaborador</strong> para
+                  começar.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="min-w-[1040px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="border-r px-2 py-2 text-left" colSpan={2}>
+                          Colaborador
+                        </th>
+                        <th className="border-r px-2 py-2 text-left" colSpan={2}>
+                          Situação atual
+                        </th>
+                        <th className="border-r bg-sky-500/10 px-2 py-2 text-left" colSpan={4}>
+                          Movimentação 1
+                        </th>
+                        <th
+                          className="border-r border-l-2 border-l-violet-400/50 bg-violet-500/10 px-2 py-2 text-left"
+                          colSpan={4}
+                        >
+                          Movimentação 2
+                        </th>
+                        <th className="border-r px-2 py-2 text-left">Justificativa</th>
+                        <th className="px-2 py-2" />
+                      </tr>
+                      <tr className="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground">
+                        <th className="border-r px-2 py-1.5 text-left">Nome</th>
+                        <th className="border-r px-2 py-1.5 text-left">Vínculo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Cargo atual</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Tipo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Mês</th>
+                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Tipo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Mês</th>
+                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Motivo</th>
+                        <th className="px-2 py-1.5" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {items.map((colab) => (
+                        <ColaboradorRow
+                          key={colab.id}
+                          colab={colab}
+                          setorId={setorId}
+                          year={year}
+                          cargoOptions={cargoOptionsForSetor}
+                          onError={(msg) => setFeedback({ ok: false, msg })}
+                          onDelete={() => handleDelete(colab)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            /* Aba Benefícios (parte verde) — valores mensais por colaborador */
+            <>
+              <p className="text-sm text-muted-foreground">
+                Valores <strong>mensais</strong> por colaborador. O admin pré-preenche e o gestor
+                ajusta — cada alteração é salva automaticamente. Adicione/remova pessoas na aba{" "}
+                <strong>Quadro</strong>. <em>Seguro de vida</em> só se aplica a colaboradores com
+                vínculo <strong>Estágio</strong>.
+              </p>
+
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                  Nenhum colaborador. Cadastre-os na aba <strong>Quadro</strong> primeiro.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="min-w-[820px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b bg-emerald-500/10 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <th className="border-r px-3 py-2 text-left">Colaborador</th>
+                        {BENEFICIOS.map((b) => (
+                          <th key={b.key} className="border-r px-3 py-2 text-left">
+                            {b.label}
+                          </th>
+                        ))}
+                        <th className="px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {items.map((colab) => (
+                        <BeneficioRow
+                          key={colab.id}
+                          colab={colab}
+                          onError={(msg) => setFeedback({ ok: false, msg })}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Linha editável (auto-save) ──────────────────────────────────────────────
+
+interface RowDraft {
+  nome: string;
+  vinculo: VinculoKey;
+  cargoAtual: string;
+  salarioAtual: string;
+  mov1Tipo: "" | MovTipo;
+  mov1Mes: string;
+  mov1Cargo: string;
+  mov1Salario: string;
+  mov2Tipo: "" | MovTipo;
+  mov2Mes: string;
+  mov2Cargo: string;
+  mov2Salario: string;
+  justificativa: string;
+}
+
+function toDraft(c: Colaborador): RowDraft {
+  return {
+    nome: c.nome ?? "",
+    vinculo: c.vinculo,
+    cargoAtual: c.cargoAtual ?? "",
+    salarioAtual: numberToInput(c.salarioAtual),
+    mov1Tipo: c.mov1?.tipo ?? "",
+    mov1Mes: isoToMes(c.mov1?.data ?? null),
+    mov1Cargo: c.mov1?.cargo ?? "",
+    mov1Salario: numberToInput(c.mov1?.salario ?? null),
+    mov2Tipo: c.mov2?.tipo ?? "",
+    mov2Mes: isoToMes(c.mov2?.data ?? null),
+    mov2Cargo: c.mov2?.cargo ?? "",
+    mov2Salario: numberToInput(c.mov2?.salario ?? null),
+    justificativa: c.justificativa ?? "",
+  };
+}
+
+function draftToInput(d: RowDraft, setorId: string | null, year: number): ColaboradorInput {
+  return {
+    setorId,
+    nome: d.nome.trim() || null,
+    vinculo: d.vinculo,
+    cargoAtual: d.cargoAtual.trim() || null,
+    salarioAtual: readSalario(d.salarioAtual),
+    mov1: buildMov(d.mov1Tipo, d.mov1Mes, d.mov1Cargo, d.mov1Salario, year),
+    mov2: buildMov(d.mov2Tipo, d.mov2Mes, d.mov2Cargo, d.mov2Salario, year),
+    justificativa: d.justificativa.trim() || null,
+  };
+}
+
+interface RowProps {
+  colab: Colaborador;
+  setorId: string | null;
+  year: number;
+  cargoOptions: CargoOption[];
+  onError: (msg: string) => void;
+  onDelete: () => void;
+}
+
+function ColaboradorRow({ colab, setorId, year, cargoOptions, onError, onDelete }: RowProps) {
+  const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
+  const [saving, setSaving] = useState(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const dirtyRef = useRef(false);
+
+  async function persist(next: RowDraft) {
+    setSaving(true);
+    const res = await updateColaborador(colab.id, draftToInput(next, setorId, year));
+    setSaving(false);
+    if (res?.error) onError(res.error);
+  }
+
+  // Edita localmente sem gravar (para digitação); grava no blur.
+  function edit(patch: Partial<RowDraft>) {
+    dirtyRef.current = true;
+    setDraft((prev) => ({ ...prev, ...patch }));
+  }
+  // Grava imediatamente (para selects e auto-preenchimentos).
+  function commit(patch: Partial<RowDraft>) {
+    const next = { ...draftRef.current, ...patch };
+    dirtyRef.current = false;
+    setDraft(next);
+    void persist(next);
+  }
+  function blurCommit() {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    void persist(draftRef.current);
+  }
+
+  const cargoValue = (v: string) => (cargoOptions.some((o) => o.label === v) ? v : "");
+
+  function movCargoChange(field: "mov1" | "mov2", label: string) {
+    const opt = cargoOptions.find((o) => o.label === label);
+    commit(
+      field === "mov1"
+        ? { mov1Cargo: label, mov1Salario: opt ? numberToInput(opt.salario) : draftRef.current.mov1Salario }
+        : { mov2Cargo: label, mov2Salario: opt ? numberToInput(opt.salario) : draftRef.current.mov2Salario },
+    );
+  }
+
+  /** PJ/Estágio preenchem o cargo atual com o próprio vínculo (não têm cargo do
+   * plano). Ao voltar para CLT, limpa esse cargo automático para escolher do plano. */
+  function vinculoChange(v: VinculoKey) {
+    if (v === "pj" || v === "estagio") {
+      commit({ vinculo: v, cargoAtual: v === "pj" ? "PJ" : "Estágio" });
+    } else {
+      const cur = draftRef.current.cargoAtual;
+      commit({ vinculo: v, cargoAtual: cur === "PJ" || cur === "Estágio" ? "" : cur });
+    }
+  }
+
+  function movTipoChange(field: "mov1" | "mov2", value: string) {
+    const tipo = (value as "" | MovTipo) || "";
+    if (field === "mov1") {
+      commit(
+        tipo === ""
+          ? { mov1Tipo: "", mov1Mes: "", mov1Cargo: "", mov1Salario: "" }
+          : tipo === "desligamento"
+            ? { mov1Tipo: "desligamento", mov1Cargo: "", mov1Salario: "" }
+            : { mov1Tipo: "movimentacao" },
+      );
+    } else {
+      commit(
+        tipo === ""
+          ? { mov2Tipo: "", mov2Mes: "", mov2Cargo: "", mov2Salario: "" }
+          : tipo === "desligamento"
+            ? { mov2Tipo: "desligamento", mov2Cargo: "", mov2Salario: "" }
+            : { mov2Tipo: "movimentacao" },
+      );
+    }
+  }
+
+  const mov1IsMov = draft.mov1Tipo === "movimentacao";
+  const mov2IsMov = draft.mov2Tipo === "movimentacao";
+  // PJ e Estágio não escolhem cargo do plano: o cargo atual é o próprio vínculo.
+  const cargoIsAuto = draft.vinculo === "pj" || draft.vinculo === "estagio";
+
+  return (
+    <tr className="align-top hover:bg-muted/20">
+      {/* Nome */}
+      <td className="border-r px-1.5 py-1">
+        <input
+          value={draft.nome}
+          onChange={(e) => edit({ nome: e.target.value })}
+          onBlur={blurCommit}
+          placeholder="Nome"
+          className={cn(CELL, "min-w-[9rem]")}
+        />
+      </td>
+      {/* Vínculo */}
+      <td className="border-r px-1.5 py-1">
+        <select
+          value={draft.vinculo}
+          onChange={(e) => vinculoChange(e.target.value as VinculoKey)}
+          className={cn(CELL, "min-w-[5rem]")}
+        >
+          {VINCULOS.map((v) => (
+            <option key={v.key} value={v.key}>
+              {v.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      {/* Cargo atual — PJ/Estágio ficam travados no próprio vínculo */}
+      <td className="border-r px-1.5 py-1">
+        {cargoIsAuto ? (
+          <input
+            value={draft.cargoAtual}
+            readOnly
+            disabled
+            className={cn(CELL, "min-w-[11rem] italic")}
+          />
+        ) : (
+          <select
+            value={cargoValue(draft.cargoAtual)}
+            onChange={(e) => {
+              const label = e.target.value;
+              const opt = cargoOptions.find((o) => o.label === label);
+              commit({
+                cargoAtual: label,
+                salarioAtual: opt ? numberToInput(opt.salario) : draftRef.current.salarioAtual,
+              });
+            }}
+            className={cn(CELL, "min-w-[11rem]")}
+          >
+            <option value="">— cargo —</option>
+            {cargoOptions.map((o) => (
+              <option key={o.label} value={o.label}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </td>
+      {/* Salário atual */}
+      <td className="border-r px-1.5 py-1">
+        <CurrencyCell
+          value={draft.salarioAtual}
+          onChange={(v) => edit({ salarioAtual: v })}
+          onBlur={blurCommit}
+          className={cn(CELL, "min-w-[7rem] text-right tabular-nums")}
+        />
+      </td>
+
+      {/* Movimentação 1 */}
+      <td className="border-r bg-sky-500/[0.04] px-1.5 py-1">
+        <select
+          value={draft.mov1Tipo}
+          onChange={(e) => movTipoChange("mov1", e.target.value)}
+          className={cn(CELL, "min-w-[7rem]")}
+        >
+          <option value="">—</option>
+          {MOV_TIPOS.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-sky-500/[0.04] px-1.5 py-1">
+        <select
+          value={draft.mov1Mes}
+          onChange={(e) => commit({ mov1Mes: e.target.value })}
+          disabled={!draft.mov1Tipo}
+          className={cn(CELL, "min-w-[4.5rem]")}
+        >
+          <option value="">—</option>
+          {MES_OPTIONS.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-sky-500/[0.04] px-1.5 py-1">
+        <select
+          value={cargoValue(draft.mov1Cargo)}
+          onChange={(e) => movCargoChange("mov1", e.target.value)}
+          disabled={!mov1IsMov}
+          className={cn(CELL, "min-w-[11rem]")}
+        >
+          <option value="">— cargo —</option>
+          {cargoOptions.map((o) => (
+            <option key={o.label} value={o.label}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-sky-500/[0.04] px-1.5 py-1">
+        <CurrencyCell
+          value={draft.mov1Salario}
+          onChange={(v) => edit({ mov1Salario: v })}
+          onBlur={blurCommit}
+          disabled={!mov1IsMov}
+          className={cn(CELL, "min-w-[7rem] text-right tabular-nums")}
+        />
+      </td>
+
+      {/* Movimentação 2 (cor distinta para marcar a divisão) */}
+      <td className="border-r border-l-2 border-l-violet-400/50 bg-violet-500/[0.06] px-1.5 py-1">
+        <select
+          value={draft.mov2Tipo}
+          onChange={(e) => movTipoChange("mov2", e.target.value)}
+          className={cn(CELL, "min-w-[7rem]")}
+        >
+          <option value="">—</option>
+          {MOV_TIPOS.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-violet-500/[0.06] px-1.5 py-1">
+        <select
+          value={draft.mov2Mes}
+          onChange={(e) => commit({ mov2Mes: e.target.value })}
+          disabled={!draft.mov2Tipo}
+          className={cn(CELL, "min-w-[4.5rem]")}
+        >
+          <option value="">—</option>
+          {MES_OPTIONS.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-violet-500/[0.06] px-1.5 py-1">
+        <select
+          value={cargoValue(draft.mov2Cargo)}
+          onChange={(e) => movCargoChange("mov2", e.target.value)}
+          disabled={!mov2IsMov}
+          className={cn(CELL, "min-w-[11rem]")}
+        >
+          <option value="">— cargo —</option>
+          {cargoOptions.map((o) => (
+            <option key={o.label} value={o.label}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="border-r bg-violet-500/[0.06] px-1.5 py-1">
+        <CurrencyCell
+          value={draft.mov2Salario}
+          onChange={(v) => edit({ mov2Salario: v })}
+          onBlur={blurCommit}
+          disabled={!mov2IsMov}
+          className={cn(CELL, "min-w-[7rem] text-right tabular-nums")}
+        />
+      </td>
+
+      {/* Justificativa */}
+      <td className="border-r px-1.5 py-1">
+        <input
+          value={draft.justificativa}
+          onChange={(e) => edit({ justificativa: e.target.value })}
+          onBlur={blurCommit}
+          placeholder="Motivo"
+          className={cn(CELL, "min-w-[12rem]")}
+        />
+      </td>
+
+      {/* Ações */}
+      <td className="px-1.5 py-1 text-center">
+        <div className="flex items-center justify-center gap-1">
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : (
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Excluir colaborador"
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Linha de benefícios (parte verde, auto-save) ────────────────────────────
+
+function initBenef(colab: Colaborador): Record<string, string> {
+  const d: Record<string, string> = {};
+  for (const b of BENEFICIOS) d[b.key] = numberToInput(colab.beneficios[b.key]);
+  return d;
+}
+
+function BeneficioRow({
+  colab,
+  onError,
+}: {
+  colab: Colaborador;
+  onError: (msg: string) => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, string>>(() => initBenef(colab));
+  const [saving, setSaving] = useState(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const dirtyRef = useRef(false);
+
+  // Benefício aplicável ao colaborador (ex.: seguro de vida só para Estágio).
+  const enabledFor = (b: (typeof BENEFICIOS)[number]) =>
+    !b.onlyVinculo || colab.vinculo === b.onlyVinculo;
+
+  async function persist() {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    setSaving(true);
+    const values = {} as Beneficios;
+    for (const b of BENEFICIOS) {
+      values[b.key] = enabledFor(b) ? readSalario(draftRef.current[b.key] ?? "") : null;
+    }
+    const res = await updateColaboradorBeneficios(colab.id, values);
+    setSaving(false);
+    if (res?.error) onError(res.error);
+  }
+
+  return (
+    <tr className="align-middle hover:bg-muted/20">
+      <td className="border-r px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{colab.nome ?? "Sem nome"}</span>
+          <span className="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {vinculoLabel(colab.vinculo)}
+          </span>
+        </div>
+      </td>
+      {BENEFICIOS.map((b) =>
+        enabledFor(b) ? (
+          <td key={b.key} className="border-r px-2 py-1">
+            <CurrencyCell
+              value={draft[b.key] ?? ""}
+              onChange={(v) => {
+                dirtyRef.current = true;
+                setDraft((prev) => ({ ...prev, [b.key]: v }));
+              }}
+              onBlur={persist}
+              className={cn(CELL, "min-w-[7rem] text-right tabular-nums")}
+            />
+          </td>
+        ) : (
+          <td key={b.key} className="border-r px-2 py-1 text-center text-xs text-muted-foreground">
+            —
+          </td>
+        ),
+      )}
+      <td className="px-2 py-1 text-center">
+        {saving && <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />}
+      </td>
+    </tr>
+  );
+}

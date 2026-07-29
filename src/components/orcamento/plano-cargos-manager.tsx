@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import {
   Ban,
   Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 
 import {
+  cloneCargos,
   createCargo,
   createNivel,
   deleteNivel,
@@ -23,7 +25,10 @@ import {
   type CargoNivel,
   type CargoWithNiveis,
 } from "@/lib/orcamento/actions/cargos";
+import { getSetores } from "@/lib/orcamento/actions/setores";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -54,10 +59,15 @@ function readSalario(input: string): number | null {
 
 export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
+  const [orcarPorSetor, setOrcarPorSetor] = useState(false);
+  const [setores, setSetores] = useState<{ id: string; name: string }[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [cargos, setCargos] = useState<CargoWithNiveis[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -71,7 +81,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   const [editingNivelId, setEditingNivelId] = useState<string | null>(null);
   const [editNivel, setEditNivel] = useState<NivelDraft>(EMPTY_DRAFT);
 
-  async function reload(id: string) {
+  async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
       setCargos([]);
       return;
@@ -79,7 +89,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getCargos(id);
+    const res = await getCargos(id, y, sid);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -94,15 +104,47 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
     setCargos(res.items ?? []);
   }
 
-  useEffect(() => {
-    void reload(companyId);
+  async function init(id: string, y: number) {
     setEditingCargoId(null);
     setEditingNivelId(null);
     setNewCargoName("");
     setNivelDrafts({});
     setFeedback(null);
+    if (!id) {
+      setCargos([]);
+      return;
+    }
+    setLoading(true);
+    const res = await getSetores(id, y);
+    const isPorSetor = Boolean(res?.orcarPorSetor);
+    const list = (res?.items ?? []).filter((s) => s.active).map((s) => ({ id: s.id, name: s.name }));
+    setOrcarPorSetor(isPorSetor);
+    setSetores(list);
+    const defaultSetor = isPorSetor ? list[0]?.id ?? null : null;
+    setSetorId(defaultSetor);
+    if (isPorSetor && !defaultSetor) {
+      // Orça por setor mas não há setores: nada a listar até cadastrá-los.
+      setCargos([]);
+      setLoading(false);
+      return;
+    }
+    await reload(id, y, defaultSetor);
+  }
+
+  useEffect(() => {
+    void init(companyId, year);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [companyId, year]);
+
+  function handleSetorChange(sid: string) {
+    setSetorId(sid);
+    setEditingCargoId(null);
+    setEditingNivelId(null);
+    setNewCargoName("");
+    setNivelDrafts({});
+    setFeedback(null);
+    void reload(companyId, year, sid);
+  }
 
   function run(
     action: () => Promise<{ error?: string; ok?: true }>,
@@ -118,7 +160,29 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
       }
       setFeedback({ ok: true, msg: successMsg });
       onDone?.();
-      await reload(companyId);
+      await reload(companyId, year, setorId);
+    });
+  }
+
+  function handleClone() {
+    if (!companyId) return;
+    const from = year - 1;
+    setCloning(true);
+    setFeedback(null);
+    startTransition(async () => {
+      const res = await cloneCargos(companyId, from, year);
+      setCloning(false);
+      if (res?.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      await reload(companyId, year, setorId);
+      setFeedback({
+        ok: true,
+        msg: res.copied
+          ? `${res.copied} cargo(s) copiado(s) de ${from} para ${year} (com níveis e salários).`
+          : `Nada a copiar de ${from} (sem cargos ativos ou já cadastrados).`,
+      });
     });
   }
 
@@ -133,7 +197,7 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   function handleAddCargo() {
     const name = newCargoName.trim();
     if (!name || !companyId) return;
-    run(() => createCargo(companyId, name), "Cargo criado.", () => setNewCargoName(""));
+    run(() => createCargo(companyId, year, name, setorId), "Cargo criado.", () => setNewCargoName(""));
   }
 
   function handleRenameCargo(id: string) {
@@ -204,44 +268,90 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
 
   return (
     <div className="space-y-5">
-      {/* Seletor de empresa */}
-      <div className="max-w-sm space-y-1.5">
-        <label className="text-sm font-medium">Empresa</label>
-        <select
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          className={INPUT_CLS}
-        >
-          {companies.map((c) => (
-            <option key={c.companyId} value={c.companyId}>
-              {c.companyName}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Novo cargo */}
-      <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-4">
-        <div className="min-w-[220px] flex-1 space-y-1.5">
-          <label className="text-sm font-medium">Novo cargo</label>
-          <input
-            value={newCargoName}
-            onChange={(e) => setNewCargoName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddCargo()}
-            placeholder="Ex.: Analista Financeiro"
-            disabled={isPending || !companyId}
-            className={INPUT_CLS}
-          />
+      {/* Seletor de empresa + ano + clonar */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-64 space-y-1.5">
+            <label className="text-sm font-medium">Empresa</label>
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              className={INPUT_CLS}
+            >
+              {companies.map((c) => (
+                <option key={c.companyId} value={c.companyId}>
+                  {c.companyName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+          {orcarPorSetor && setores.length > 0 && (
+            <div className="w-56 space-y-1.5">
+              <label className="text-sm font-medium">Setor</label>
+              <select
+                value={setorId ?? ""}
+                onChange={(e) => handleSetorChange(e.target.value)}
+                disabled={loading || cloning}
+                className={INPUT_CLS}
+              >
+                {setores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <button
-          onClick={handleAddCargo}
-          disabled={isPending || !newCargoName.trim() || !companyId}
-          className={BTN_PRIMARY}
+          type="button"
+          onClick={handleClone}
+          disabled={loading || cloning || isPending || !companyId}
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
         >
-          <Plus className="h-4 w-4" />
-          Adicionar cargo
+          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+          Clonar de {year - 1}
         </button>
       </div>
+
+      {orcarPorSetor && setores.length === 0 ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm text-muted-foreground">
+          Esta empresa orça <strong>por setor</strong> em {year}, mas não há setores cadastrados.
+          Cadastre-os em <strong>Configurações → Setores</strong> para montar o plano de cargos de
+          cada setor.
+        </div>
+      ) : (
+        /* Novo cargo */
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-4">
+          <div className="min-w-[220px] flex-1 space-y-1.5">
+            <label className="text-sm font-medium">
+              Novo cargo
+              {orcarPorSetor && setorId && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · setor {setores.find((s) => s.id === setorId)?.name}
+                </span>
+              )}
+            </label>
+            <input
+              value={newCargoName}
+              onChange={(e) => setNewCargoName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddCargo()}
+              placeholder="Ex.: Analista Financeiro"
+              disabled={isPending || !companyId}
+              className={INPUT_CLS}
+            />
+          </div>
+          <button
+            onClick={handleAddCargo}
+            disabled={isPending || !newCargoName.trim() || !companyId}
+            className={BTN_PRIMARY}
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar cargo
+          </button>
+        </div>
+      )}
 
       {feedback && (
         <div
@@ -275,7 +385,8 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
         <p className="text-sm text-destructive">{loadError}</p>
       ) : cargos.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nenhum cargo cadastrado para esta empresa.
+          Nenhum cargo cadastrado para esta empresa em {year}. Cadastre acima ou
+          use <strong>Clonar de {year - 1}</strong>.
         </div>
       ) : (
         <div className="space-y-4">

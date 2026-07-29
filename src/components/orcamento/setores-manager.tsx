@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Ban, Check, Loader2, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import { Ban, Check, Copy, Loader2, Pencil, Plus, RotateCcw, X } from "lucide-react";
 
 import type { CompanyBudgetConfig } from "@/lib/orcamento/actions/config";
 import {
+  cloneSetores,
   createSetor,
   getSetores,
   renameSetor,
   setSetorActive,
   type OrcamentoSetor,
 } from "@/lib/orcamento/actions/setores";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -26,9 +29,12 @@ interface Props {
 
 export function SetoresManager({ companies }: Props) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
   const [items, setItems] = useState<OrcamentoSetor[]>([]);
+  const [orcarPorSetor, setOrcarPorSetor] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -36,16 +42,14 @@ export function SetoresManager({ companies }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
-  const selected = companies.find((c) => c.companyId === companyId) ?? null;
-
-  async function reload(id: string) {
+  async function reload(id: string, y: number) {
     if (!id) {
       setItems([]);
       return;
     }
     setLoading(true);
     setLoadError(null);
-    const res = await getSetores(id);
+    const res = await getSetores(id, y);
     setLoading(false);
     if (res?.error) {
       setLoadError(res.error);
@@ -53,16 +57,17 @@ export function SetoresManager({ companies }: Props) {
       return;
     }
     setItems(res.items ?? []);
+    setOrcarPorSetor(Boolean(res.orcarPorSetor));
   }
 
-  // Carrega os setores sempre que a empresa selecionada muda.
+  // Carrega os setores sempre que a empresa ou o ano mudam.
   useEffect(() => {
-    void reload(companyId);
+    void reload(companyId, year);
     setEditingId(null);
     setNewName("");
     setFeedback(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
+  }, [companyId, year]);
 
   function run(
     action: () => Promise<{ error?: string; ok?: true }>,
@@ -78,14 +83,36 @@ export function SetoresManager({ companies }: Props) {
       }
       setFeedback({ ok: true, msg: successMsg });
       onDone?.();
-      await reload(companyId);
+      await reload(companyId, year);
     });
   }
 
   function handleCreate() {
     const name = newName.trim();
     if (!name || !companyId) return;
-    run(() => createSetor(companyId, name), "Setor criado.", () => setNewName(""));
+    run(() => createSetor(companyId, year, name), "Setor criado.", () => setNewName(""));
+  }
+
+  function handleClone() {
+    if (!companyId) return;
+    const from = year - 1;
+    setCloning(true);
+    setFeedback(null);
+    startTransition(async () => {
+      const res = await cloneSetores(companyId, from, year);
+      setCloning(false);
+      if (res?.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      await reload(companyId, year);
+      setFeedback({
+        ok: true,
+        msg: res.copied
+          ? `${res.copied} setor(es) copiado(s) de ${from} para ${year}.`
+          : `Nada a copiar de ${from} (sem setores ativos ou já cadastrados).`,
+      });
+    });
   }
 
   function handleRename(id: string) {
@@ -114,28 +141,41 @@ export function SetoresManager({ companies }: Props) {
 
   return (
     <div className="space-y-5">
-      {/* Seletor de empresa */}
-      <div className="max-w-sm space-y-1.5">
-        <label className="text-sm font-medium">Empresa</label>
-        <select
-          value={companyId}
-          onChange={(e) => setCompanyId(e.target.value)}
-          className={INPUT_CLS}
+      {/* Seletor de empresa + ano + clonar */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-64 space-y-1.5">
+            <label className="text-sm font-medium">Empresa</label>
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              className={INPUT_CLS}
+            >
+              {companies.map((c) => (
+                <option key={c.companyId} value={c.companyId}>
+                  {c.companyName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+        </div>
+        <button
+          type="button"
+          onClick={handleClone}
+          disabled={loading || cloning || isPending || !companyId}
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
         >
-          {companies.map((c) => (
-            <option key={c.companyId} value={c.companyId}>
-              {c.companyName}
-              {c.orcarPorSetor ? "" : " (orça só por categoria)"}
-            </option>
-          ))}
-        </select>
+          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+          Clonar de {year - 1}
+        </button>
       </div>
 
-      {selected && !selected.orcarPorSetor && (
+      {!loading && !orcarPorSetor && companyId && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
-          Esta empresa está configurada para orçar <strong>só por categoria</strong>.
+          Esta empresa está configurada para orçar <strong>só por categoria</strong> em {year}.
           Você pode pré-cadastrar setores aqui, mas eles só entram no orçamento
-          quando <strong>Orçar por setor</strong> estiver ligado para ela.
+          quando <strong>Orçar por setor</strong> estiver ligado para ela neste ano.
         </div>
       )}
 
@@ -185,7 +225,8 @@ export function SetoresManager({ companies }: Props) {
         <p className="text-sm text-destructive">{loadError}</p>
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nenhum setor cadastrado para esta empresa.
+          Nenhum setor cadastrado para esta empresa em {year}. Cadastre acima ou
+          use <strong>Clonar de {year - 1}</strong>.
         </div>
       ) : (
         <div className="rounded-lg border divide-y">

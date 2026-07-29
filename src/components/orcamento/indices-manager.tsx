@@ -14,6 +14,7 @@ import {
   indiceToInput,
   parseBrNumber,
   type IndiceKey,
+  type IndiceValues,
   type IndiceYear,
 } from "@/lib/orcamento/indices";
 import { cn } from "@/lib/utils";
@@ -27,7 +28,10 @@ const BTN_GHOST =
 
 type ValueInputs = Record<IndiceKey, string>;
 
-const EMPTY_INPUTS: ValueInputs = { ipca: "", igpm: "", salario_minimo: "" };
+// Derivado do catálogo para não precisar listar cada chave à mão.
+const EMPTY_INPUTS: ValueInputs = Object.fromEntries(
+  INDICES.map((m) => [m.key, ""]),
+) as ValueInputs;
 
 interface Props {
   initialItems: IndiceYear[];
@@ -53,16 +57,14 @@ export function IndicesManager({ initialItems }: Props) {
     if (!res?.error && res.items) setItems(res.items);
   }
 
-  function collect(inputs: ValueInputs): { values?: { ipca: number | null; igpm: number | null; salarioMinimo: number | null }; error?: string } {
-    const parsed: Record<IndiceKey, number | null> = { ipca: null, igpm: null, salario_minimo: null };
+  function collect(inputs: ValueInputs): { values?: IndiceValues; error?: string } {
+    const parsed = {} as IndiceValues;
     for (const meta of INDICES) {
       const p = parseBrNumber(inputs[meta.key] ?? "");
       if (p != null && Number.isNaN(p)) return { error: `Valor inválido em ${meta.label}.` };
       parsed[meta.key] = p;
     }
-    return {
-      values: { ipca: parsed.ipca, igpm: parsed.igpm, salarioMinimo: parsed.salario_minimo },
-    };
+    return { values: parsed };
   }
 
   function run(
@@ -106,11 +108,11 @@ export function IndicesManager({ initialItems }: Props) {
 
   function startEdit(row: IndiceYear) {
     setEditingYear(row.year);
-    setEditValues({
-      ipca: indiceToInput(row.ipca),
-      igpm: indiceToInput(row.igpm),
-      salario_minimo: indiceToInput(row.salario_minimo),
-    });
+    setEditValues(
+      Object.fromEntries(
+        INDICES.map((m) => [m.key, indiceToInput(row[m.key])]),
+      ) as ValueInputs,
+    );
     setFeedback(null);
   }
 

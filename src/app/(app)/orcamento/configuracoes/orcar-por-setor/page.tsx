@@ -13,7 +13,7 @@ export default async function OrcarPorSetorPage() {
   if (!user) redirect("/login");
   if (!profile || profile.profile !== "admin") redirect("/dashboard");
 
-  const { items, error, needsMigration } = await getCompaniesBudgetConfig();
+  const { items, year, error, needsMigration } = await getCompaniesBudgetConfig();
 
   return (
     <div className="space-y-6">
@@ -39,7 +39,7 @@ export default async function OrcarPorSetorPage() {
       ) : error ? (
         <p className="text-sm text-destructive">{error}</p>
       ) : (
-        <OrcarPorSetorManager companies={items ?? []} />
+        <OrcarPorSetorManager companies={items ?? []} initialYear={year ?? 0} />
       )}
     </div>
   );

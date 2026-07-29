@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
-import type { IndiceYear } from "@/lib/orcamento/indices";
+import { INDICES, type IndiceValues, type IndiceYear } from "@/lib/orcamento/indices";
 
 const PATH = "/orcamento/configuracoes/indices";
 
@@ -22,7 +22,7 @@ export async function getIndices(): Promise<{
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { data, error } = await supabase
     .from("orcamento_indices")
-    .select("year, ipca, igpm, salario_minimo")
+    .select("year, ipca, igpm, salario_minimo, ist, aneel, inpc, ans")
     .order("year", { ascending: false });
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
@@ -31,13 +31,9 @@ export async function getIndices(): Promise<{
   return { items: (data ?? []) as IndiceYear[] };
 }
 
-interface IndiceValues {
-  ipca: number | null;
-  igpm: number | null;
-  salarioMinimo: number | null;
-}
-
-/** Cria ou atualiza os índices de um ano. */
+/** Cria ou atualiza os índices de um ano. `values` é indexado pela chave do
+ * índice (que casa 1:1 com as colunas da tabela), então novos índices não
+ * exigem mudança aqui — basta adicioná-los ao catálogo INDICES e à migration. */
 export async function upsertIndiceYear(year: number, values: IndiceValues) {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -45,9 +41,10 @@ export async function upsertIndiceYear(year: number, values: IndiceValues) {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) {
     return { error: "Informe um ano válido (2000–2100)." };
   }
-  for (const v of [values.ipca, values.igpm, values.salarioMinimo]) {
+  for (const meta of INDICES) {
+    const v = values[meta.key];
     if (v != null && !Number.isFinite(v)) {
-      return { error: "Valor de índice inválido." };
+      return { error: `Valor de índice inválido em ${meta.label}.` };
     }
   }
 
@@ -55,9 +52,7 @@ export async function upsertIndiceYear(year: number, values: IndiceValues) {
   const { error } = await supabase.from("orcamento_indices").upsert(
     {
       year,
-      ipca: values.ipca,
-      igpm: values.igpm,
-      salario_minimo: values.salarioMinimo,
+      ...values,
       updated_by: admin.userId,
     },
     { onConflict: "year" },
