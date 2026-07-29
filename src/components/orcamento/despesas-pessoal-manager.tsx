@@ -9,15 +9,23 @@ import {
   getColaboradores,
   getPessoalSetup,
   updateColaborador,
+  updateColaboradorBeneficios,
   type CargoOption,
   type Colaborador,
   type ColaboradorInput,
   type Movimentacao,
   type PessoalSetup,
 } from "@/lib/orcamento/actions/pessoal";
+import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
-import { MOV_TIPOS, VINCULOS, type MovTipo, type VinculoKey } from "@/lib/orcamento/vinculos";
+import {
+  MOV_TIPOS,
+  VINCULOS,
+  vinculoLabel,
+  type MovTipo,
+  type VinculoKey,
+} from "@/lib/orcamento/vinculos";
 import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
@@ -111,6 +119,7 @@ const EMPTY_SETUP: PessoalSetup = { orcarPorSetor: false, setores: [], cargoOpti
 export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
   const [year, setYear] = useState<number>(defaultBudgetYear());
+  const [tab, setTab] = useState<"quadro" | "beneficios">("quadro");
   const [setorId, setSetorId] = useState<string | null>(null);
   const [setup, setSetup] = useState<PessoalSetup>(EMPTY_SETUP);
   const [items, setItems] = useState<Colaborador[]>([]);
@@ -293,89 +302,158 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
         </div>
       ) : (
         <>
-          {cargoOptionsForSetor.length === 0 && (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
-              Nenhum cargo/nível no <strong>Plano de Cargos</strong>
-              {setup.orcarPorSetor ? " deste setor" : ""} em {year}. Cadastre-os para que o salário
-              seja preenchido automaticamente ao escolher o cargo.
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted-foreground">
-              {items.length} colaborador(es){setup.orcarPorSetor ? " neste setor" : ""}. Edite direto
-              na tabela — cada alteração é salva automaticamente.
-            </p>
-            <button
-              type="button"
-              onClick={handleAdd}
-              disabled={!canAdd}
-              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-            >
-              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-              Adicionar colaborador
-            </button>
+          {/* Abas: Quadro (azul) | Benefícios (verde) */}
+          <div className="flex gap-1 border-b">
+            {(["quadro", "beneficios"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={cn(
+                  "-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                  tab === t
+                    ? "border-emerald-600 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t === "quadro" ? "Quadro" : "Benefícios"}
+              </button>
+            ))}
           </div>
 
-          {items.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-              Nenhum colaborador no quadro. Use <strong>Adicionar colaborador</strong> para começar.
-            </div>
+          {tab === "quadro" ? (
+            <>
+              {cargoOptionsForSetor.length === 0 && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
+                  Nenhum cargo/nível no <strong>Plano de Cargos</strong>
+                  {setup.orcarPorSetor ? " deste setor" : ""} em {year}. Cadastre-os para que o
+                  salário seja preenchido automaticamente ao escolher o cargo.
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {items.length} colaborador(es){setup.orcarPorSetor ? " neste setor" : ""}. Edite
+                  direto na tabela — cada alteração é salva automaticamente.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  disabled={!canAdd}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {adding ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="h-4 w-4" />
+                  )}
+                  Adicionar colaborador
+                </button>
+              </div>
+
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                  Nenhum colaborador no quadro. Use <strong>Adicionar colaborador</strong> para
+                  começar.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="min-w-[1040px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="border-r px-2 py-2 text-left" colSpan={2}>
+                          Colaborador
+                        </th>
+                        <th className="border-r px-2 py-2 text-left" colSpan={2}>
+                          Situação atual
+                        </th>
+                        <th className="border-r bg-sky-500/10 px-2 py-2 text-left" colSpan={4}>
+                          Movimentação 1
+                        </th>
+                        <th
+                          className="border-r border-l-2 border-l-violet-400/50 bg-violet-500/10 px-2 py-2 text-left"
+                          colSpan={4}
+                        >
+                          Movimentação 2
+                        </th>
+                        <th className="border-r px-2 py-2 text-left">Justificativa</th>
+                        <th className="px-2 py-2" />
+                      </tr>
+                      <tr className="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground">
+                        <th className="border-r px-2 py-1.5 text-left">Nome</th>
+                        <th className="border-r px-2 py-1.5 text-left">Vínculo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Cargo atual</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Tipo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Mês</th>
+                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Tipo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Mês</th>
+                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Salário</th>
+                        <th className="border-r px-2 py-1.5 text-left">Motivo</th>
+                        <th className="px-2 py-1.5" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {items.map((colab) => (
+                        <ColaboradorRow
+                          key={colab.id}
+                          colab={colab}
+                          setorId={setorId}
+                          year={year}
+                          cargoOptions={cargoOptionsForSetor}
+                          onError={(msg) => setFeedback({ ok: false, msg })}
+                          onDelete={() => handleDelete(colab)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="min-w-[1040px] w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <th className="border-r px-2 py-2 text-left" colSpan={2}>
-                      Colaborador
-                    </th>
-                    <th className="border-r px-2 py-2 text-left" colSpan={2}>
-                      Situação atual
-                    </th>
-                    <th className="border-r bg-sky-500/10 px-2 py-2 text-left" colSpan={4}>
-                      Movimentação 1
-                    </th>
-                    <th
-                      className="border-r border-l-2 border-l-violet-400/50 bg-violet-500/10 px-2 py-2 text-left"
-                      colSpan={4}
-                    >
-                      Movimentação 2
-                    </th>
-                    <th className="border-r px-2 py-2 text-left">Justificativa</th>
-                    <th className="px-2 py-2" />
-                  </tr>
-                  <tr className="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground">
-                    <th className="border-r px-2 py-1.5 text-left">Nome</th>
-                    <th className="border-r px-2 py-1.5 text-left">Vínculo</th>
-                    <th className="border-r px-2 py-1.5 text-left">Cargo atual</th>
-                    <th className="border-r px-2 py-1.5 text-left">Salário</th>
-                    <th className="border-r px-2 py-1.5 text-left">Tipo</th>
-                    <th className="border-r px-2 py-1.5 text-left">Mês</th>
-                    <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
-                    <th className="border-r px-2 py-1.5 text-left">Salário</th>
-                    <th className="border-r px-2 py-1.5 text-left">Tipo</th>
-                    <th className="border-r px-2 py-1.5 text-left">Mês</th>
-                    <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
-                    <th className="border-r px-2 py-1.5 text-left">Salário</th>
-                    <th className="border-r px-2 py-1.5 text-left">Motivo</th>
-                    <th className="px-2 py-1.5" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {items.map((colab) => (
-                    <ColaboradorRow
-                      key={colab.id}
-                      colab={colab}
-                      setorId={setorId}
-                      year={year}
-                      cargoOptions={cargoOptionsForSetor}
-                      onError={(msg) => setFeedback({ ok: false, msg })}
-                      onDelete={() => handleDelete(colab)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            /* Aba Benefícios (parte verde) — valores mensais por colaborador */
+            <>
+              <p className="text-sm text-muted-foreground">
+                Valores <strong>mensais</strong> por colaborador. O admin pré-preenche e o gestor
+                ajusta — cada alteração é salva automaticamente. Adicione/remova pessoas na aba{" "}
+                <strong>Quadro</strong>. <em>Seguro de vida</em> só se aplica a colaboradores com
+                vínculo <strong>Estágio</strong>.
+              </p>
+
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+                  Nenhum colaborador. Cadastre-os na aba <strong>Quadro</strong> primeiro.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="min-w-[820px] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b bg-emerald-500/10 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <th className="border-r px-3 py-2 text-left">Colaborador</th>
+                        {BENEFICIOS.map((b) => (
+                          <th key={b.key} className="border-r px-3 py-2 text-left">
+                            {b.label}
+                          </th>
+                        ))}
+                        <th className="px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {items.map((colab) => (
+                        <BeneficioRow
+                          key={colab.id}
+                          colab={colab}
+                          onError={(msg) => setFeedback({ ok: false, msg })}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -725,6 +803,80 @@ function ColaboradorRow({ colab, setorId, year, cargoOptions, onError, onDelete 
             </button>
           )}
         </div>
+      </td>
+    </tr>
+  );
+}
+
+// ─── Linha de benefícios (parte verde, auto-save) ────────────────────────────
+
+function initBenef(colab: Colaborador): Record<string, string> {
+  const d: Record<string, string> = {};
+  for (const b of BENEFICIOS) d[b.key] = numberToInput(colab.beneficios[b.key]);
+  return d;
+}
+
+function BeneficioRow({
+  colab,
+  onError,
+}: {
+  colab: Colaborador;
+  onError: (msg: string) => void;
+}) {
+  const [draft, setDraft] = useState<Record<string, string>>(() => initBenef(colab));
+  const [saving, setSaving] = useState(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const dirtyRef = useRef(false);
+
+  // Benefício aplicável ao colaborador (ex.: seguro de vida só para Estágio).
+  const enabledFor = (b: (typeof BENEFICIOS)[number]) =>
+    !b.onlyVinculo || colab.vinculo === b.onlyVinculo;
+
+  async function persist() {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    setSaving(true);
+    const values = {} as Beneficios;
+    for (const b of BENEFICIOS) {
+      values[b.key] = enabledFor(b) ? readSalario(draftRef.current[b.key] ?? "") : null;
+    }
+    const res = await updateColaboradorBeneficios(colab.id, values);
+    setSaving(false);
+    if (res?.error) onError(res.error);
+  }
+
+  return (
+    <tr className="align-middle hover:bg-muted/20">
+      <td className="border-r px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{colab.nome ?? "Sem nome"}</span>
+          <span className="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {vinculoLabel(colab.vinculo)}
+          </span>
+        </div>
+      </td>
+      {BENEFICIOS.map((b) =>
+        enabledFor(b) ? (
+          <td key={b.key} className="border-r px-2 py-1">
+            <CurrencyCell
+              value={draft[b.key] ?? ""}
+              onChange={(v) => {
+                dirtyRef.current = true;
+                setDraft((prev) => ({ ...prev, [b.key]: v }));
+              }}
+              onBlur={persist}
+              className={cn(CELL, "min-w-[7rem] text-right tabular-nums")}
+            />
+          </td>
+        ) : (
+          <td key={b.key} className="border-r px-2 py-1 text-center text-xs text-muted-foreground">
+            —
+          </td>
+        ),
+      )}
+      <td className="px-2 py-1 text-center">
+        {saving && <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />}
       </td>
     </tr>
   );

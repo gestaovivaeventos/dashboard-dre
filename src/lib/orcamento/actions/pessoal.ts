@@ -8,6 +8,7 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isMovTipo, isVinculo, type MovTipo, type VinculoKey } from "@/lib/orcamento/vinculos";
+import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
 
 const PATH = "/orcamento/despesas/pessoal";
 
@@ -30,6 +31,7 @@ export interface Colaborador {
   mov1: Movimentacao | null;
   mov2: Movimentacao | null;
   justificativa: string | null;
+  beneficios: Beneficios;
 }
 
 export interface ColaboradorInput {
@@ -197,7 +199,17 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
 // ─── Quadro de colaboradores ────────────────────────────────────────────────────
 
 const COLAB_COLS =
-  "id, setor_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa";
+  "id, setor_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, assistencia_medica, auxilio_home_office";
+
+/** Lê os valores de benefício de uma linha crua. */
+function readBeneficios(r: Record<string, unknown>): Beneficios {
+  const b = {} as Beneficios;
+  for (const meta of BENEFICIOS) {
+    const v = r[meta.key];
+    b[meta.key] = v == null ? null : Number(v);
+  }
+  return b;
+}
 
 /** Lista os colaboradores de uma empresa/ano/setor. `setorId` null = quadro único
  * (empresa que não orça por setor). */
@@ -237,6 +249,7 @@ export async function getColaboradores(
     mov1: readMov(r.mov1_tipo, r.mov1_data, r.mov1_cargo, r.mov1_salario),
     mov2: readMov(r.mov2_tipo, r.mov2_data, r.mov2_cargo, r.mov2_salario),
     justificativa: (r.justificativa as string) ?? null,
+    beneficios: readBeneficios(r as Record<string, unknown>),
   }));
   return { items };
 }
@@ -300,6 +313,30 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
     .update(toRow(input, admin.userId))
+    .eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(PATH);
+  return { ok: true as const };
+}
+
+/** Atualiza só os benefícios (parte verde) de um colaborador. Não toca nos
+ * campos do quadro (parte azul). */
+export async function updateColaboradorBeneficios(id: string, beneficios: Beneficios) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!id) return { error: "Colaborador inválido." };
+
+  const row: Record<string, number | null> = {};
+  for (const meta of BENEFICIOS) {
+    const v = beneficios[meta.key];
+    if (v != null && (!Number.isFinite(v) || v < 0)) return { error: "Valor de benefício inválido." };
+    row[meta.key] = v ?? null;
+  }
+
+  const supabase = db() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_pessoal_colaboradores")
+    .update({ ...row, updated_by: admin.userId })
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath(PATH);
