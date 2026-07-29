@@ -128,9 +128,10 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/aprovacoes")) {
       return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
     }
-    // Contas a pagar: fora do alcance do gerente/solicitante.
+    // Contas a Pagar: exclusivo do perfil Contas a Pagar (+ admin, que já
+    // retornou true no topo). Diretor/gerente/solicitante não acessam.
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
-      return ["diretor", "contas_a_pagar"].includes(profile);
+      return profile === "contas_a_pagar";
     }
     // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
     // ANTES da regra geral /ctrl/orcamento abaixo, senão gerente/diretor/csc

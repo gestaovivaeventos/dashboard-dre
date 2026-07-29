@@ -8,6 +8,7 @@ import {
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
 import { syncCasePagamentosFromOmie } from "@/lib/case/sync-pagamentos";
+import { reconcilePaidRequests } from "@/lib/ctrl/reconcile-payments";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
 import { syncSirenaSheetsToManualValues } from "@/lib/sheets/sirena-sync";
@@ -304,6 +305,31 @@ export async function GET(request: Request) {
     failures.push({ companyId: "case-pagamentos", companyName: "Case Shows (status pagamentos Omie)", error: message });
   }
 
+  // Reconcilia o status de pagamento das requisições do Compras (CTRL): marca
+  // como "Pago" as que já foram efetivamente baixadas no Omie. Best-effort —
+  // falha aqui não impede o restante do cron.
+  let ctrlPagamentosSync: {
+    ok: boolean;
+    checked?: number;
+    paid?: number;
+    companies?: number;
+    error?: string;
+  } | null = null;
+  try {
+    const r = await reconcilePaidRequests(supabase);
+    ctrlPagamentosSync = {
+      ok: true,
+      checked: r.checked,
+      paid: r.paid,
+      companies: r.companies,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Falha desconhecida na reconciliação de pagamentos do Compras.";
+    ctrlPagamentosSync = { ok: false, error: message };
+    failures.push({ companyId: "ctrl-pagamentos", companyName: "Compras (status pagamentos Omie)", error: message });
+  }
+
   await Promise.all([
     sendSyncFailureEmail(failures),
     sendUnmappedCategoriesEmail(unmappedCategories),
@@ -322,5 +348,6 @@ export async function GET(request: Request) {
     sirenaSheetsSync,
     caseCadastrosSync,
     casePagamentosSync,
+    ctrlPagamentosSync,
   });
 }

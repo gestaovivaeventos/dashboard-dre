@@ -14,6 +14,7 @@ import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
+import { excluirContaPagar } from "@/lib/omie/contapagar";
 import type { CtrlRequestStatus } from "@/lib/supabase/types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -24,7 +25,8 @@ export type PaymentMethod =
   | "transferencia"
   | "cartao_credito"
   | "dinheiro"
-  | "pix_copia_cola";
+  | "pix_copia_cola"
+  | "cartao_prepago";
 
 export type ApprovalTier = "nivel_2" | "nivel_3";
 
@@ -87,6 +89,13 @@ export interface CreateRequestInput {
   // to receive the physical card to make the purchase? Only meaningful
   // when payment_method === 'cartao_credito'.
   needs_credit_card?: boolean;
+  // Compra em dólar: quando currency === 'USD', o valor efetivo (amount, BRL) é
+  // recalculado no servidor a partir de usd_amount × usd_brl_rate × (1 + IOF).
+  // Guardamos a origem (USD/câmbio/IOF) só para auditoria/exibição.
+  currency?: "BRL" | "USD";
+  usd_amount?: number;
+  usd_brl_rate?: number;
+  iof_rate?: number;
 }
 
 // ─── Budget Verification ──────────────────────────────────────────────────────
@@ -199,21 +208,20 @@ async function performBudgetVerification(
 // ─── Installment date calculation ────────────────────────────────────────────
 
 function calculateInstallmentDates(
-  purchaseDate: string,
+  firstInvoiceDate: string,
   total: number
 ): { installment: number; dueDate: string; month: number; year: number }[] {
-  // Ciclo da fatura do cartão: fecha no dia 23 e vence no dia 05.
-  //   • compra até o dia 23 (inclusive) → entra na fatura que vence dia 05 do
-  //     mês seguinte (offset 1);
-  //   • compra a partir do dia 24 → só entra na fatura do mês subsequente
-  //     (offset 2).
-  const purchase = new Date(purchaseDate + "T00:00:00");
-  const monthOffset = purchase.getDate() > 23 ? 2 : 1;
+  // `firstInvoiceDate` já é o vencimento da 1ª fatura (dia 05), calculado no
+  // formulário pelo ciclo do cartão (fecha dia 23, vence dia 05). Aqui só
+  // desdobramos as parcelas: cada parcela seguinte vence no dia 05 do mês
+  // seguinte. (Antes esta função recebia a data da compra e aplicava o ciclo;
+  // agora o cálculo do ciclo vive no cliente e a data já chega pronta.)
+  const base = new Date(firstInvoiceDate + "T00:00:00");
   const results = [];
   for (let i = 0; i < total; i++) {
-    const totalOffset = purchase.getMonth() + monthOffset + i;
-    const dueMonth = totalOffset % 12;
-    const dueYear = purchase.getFullYear() + Math.floor(totalOffset / 12);
+    const totalOffset = base.getMonth() + i;
+    const dueMonth = ((totalOffset % 12) + 12) % 12;
+    const dueYear = base.getFullYear() + Math.floor(totalOffset / 12);
     results.push({
       installment: i + 1,
       dueDate: `${dueYear}-${String(dueMonth + 1).padStart(2, "0")}-05`,
@@ -252,6 +260,22 @@ export async function createRequest(data: CreateRequestInput) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
+  // Compra em dólar: o valor efetivo (amount, em BRL) é RECALCULADO no servidor a
+  // partir de USD × câmbio × (1 + IOF). A partir daqui o BRL é a fonte de verdade
+  // (orçamento, Omie, tudo); a origem em dólar fica só para auditoria/exibição.
+  const isUsdPurchase =
+    data.currency === "USD" && Number(data.usd_amount) > 0 && Number(data.usd_brl_rate) > 0;
+  if (isUsdPurchase) {
+    const iof = Number(data.iof_rate) || 0;
+    data.amount =
+      Math.round(Number(data.usd_amount) * Number(data.usd_brl_rate) * (1 + iof / 100) * 100) / 100;
+  }
+  const usdFields = {
+    usd_amount: isUsdPurchase ? Number(data.usd_amount) : null,
+    usd_brl_rate: isUsdPurchase ? Number(data.usd_brl_rate) : null,
+    iof_rate: isUsdPurchase ? Number(data.iof_rate) || 0 : null,
+  };
+
   // Basic validation
   if (!data.sector_id || data.amount <= 0) {
     return { error: "Preencha todos os campos obrigatórios." };
@@ -278,6 +302,7 @@ export async function createRequest(data: CreateRequestInput) {
           expense_type_id: data.expense_type_id ?? null,
           supplier_id: data.supplier_id,
           amount: data.amount,
+          ...usdFields,
           due_date: data.due_date ?? null,
           reference_month: data.reference_month,
           reference_year: data.reference_year,
@@ -445,6 +470,7 @@ export async function createRequest(data: CreateRequestInput) {
     pix_key_type: data.pix_key_type ?? null,
     favorecido: data.favorecido ?? null,
     barcode: data.barcode ?? null,
+    ...usdFields,
     attachment_path: data.attachment_path ?? null,
     invoice_attachment_path: data.invoice_attachment_path ?? null,
     extra_attachment_paths: data.extra_attachment_paths ?? [],
@@ -2206,12 +2232,18 @@ export async function inactivateRequests(requestIds: string[], reason: string) {
 
   const { data: reqs } = await supabase
     .from("ctrl_requests")
-    .select("id, request_number, created_by, status")
+    .select("id, request_number, created_by, status, omie_paid_at")
     .in("id", requestIds);
 
   for (const req of reqs ?? []) {
     if (req.status !== "agendado" && req.status !== "aprovado") {
       results.push({ id: req.id, ok: false, error: `Status: ${req.status}` });
+      continue;
+    }
+    // Título já pago (baixado) no Omie: inativar aqui não estorna o pagamento e
+    // criaria divergência. Bloqueia — o acerto tem que ser feito no Omie.
+    if (req.omie_paid_at) {
+      results.push({ id: req.id, ok: false, error: "Já paga no Omie" });
       continue;
     }
 
@@ -2253,6 +2285,144 @@ export async function inactivateRequests(requestIds: string[], reason: string) {
     failed: results.filter((r) => !r.ok).length,
     results,
   };
+}
+
+// ─── Devolver para requisições (Contas a Pagar → volta à aprovação) ──────────
+//
+// Traz uma requisição de Contas a Pagar de volta ao fluxo de aprovação para ser
+// editada, reaprovada ou excluída. Se já foi lançada no Omie, EXCLUI o título lá
+// (só se ainda não estiver pago) para manter Control Hub e Omie em sincronia.
+// O orçamento se ajusta sozinho — a soma de realizado/pendente é dinâmica
+// (ver /ctrl/orcamento): a requisição sai de "realizado" e volta a "pendente";
+// se depois for rejeitada/excluída, o valor é totalmente liberado.
+export async function returnRequestToRequisicoes(requestId: string, reason: string) {
+  const ctx = await requireCtrlRole("contas_a_pagar", "csc", "admin");
+  if (!reason?.trim()) return { error: "Informe o motivo da devolução." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { data: req, error: fetchErr } = await supabase
+    .from("ctrl_requests")
+    .select(
+      "id, request_number, status, deleted_at, created_by, sector_id, approval_tier, paying_company_id, omie_contapagar_codigo, omie_paid_at",
+    )
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (fetchErr || !req) return { error: "Requisição não encontrada." };
+  if (req.deleted_at) return { error: "Requisição excluída." };
+
+  const RETURNABLE = ["aprovado", "info_pagamento_pendente", "agendado"];
+  if (!RETURNABLE.includes(req.status as string)) {
+    return {
+      error:
+        "Só é possível devolver requisições em Aguardando Envio, Info Pendente ou Enviados.",
+    };
+  }
+  if (req.omie_paid_at) {
+    return {
+      error:
+        "Requisição já paga no Omie — não pode ser devolvida. Faça o acerto no Omie primeiro.",
+    };
+  }
+
+  // Já lançada no Omie: exclui o título antes de devolver (mantém sincronia).
+  if (req.omie_contapagar_codigo != null) {
+    if (!req.paying_company_id) {
+      return {
+        error:
+          "Requisição lançada no Omie mas sem empresa pagadora registrada — faça o acerto no Omie manualmente.",
+      };
+    }
+    const { data: company } = await supabase
+      .from("companies")
+      .select("omie_app_key, omie_app_secret")
+      .eq("id", req.paying_company_id)
+      .maybeSingle();
+    if (!company?.omie_app_key || !company?.omie_app_secret) {
+      return { error: "Empresa pagadora sem conexão Omie — não foi possível excluir o título." };
+    }
+    try {
+      const appKey = decryptSecret(company.omie_app_key as string);
+      const appSecret = decryptSecret(company.omie_app_secret as string);
+      await excluirContaPagar(appKey, appSecret, Number(req.omie_contapagar_codigo));
+    } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+      // Título já inexistente no Omie → segue (o estado desejado já é esse).
+      const jaSumiu = /n[ãa]o encontrad|not found|n[ãa]o cadastrad|inexistente/.test(msg);
+      if (!jaSumiu) {
+        return {
+          error: `Não foi possível excluir o título no Omie (código ${req.omie_contapagar_codigo}): ${
+            e instanceof Error ? e.message : String(e)
+          }. Se ele já foi pago/baixado, faça o acerto no Omie.`,
+        };
+      }
+    }
+  }
+
+  // Volta ao fluxo de aprovação. Nível preservado: nivel_3 (ou setor/solicitante
+  // forçado ao diretor) → pendente_diretor; senão pendente.
+  const forceDirector =
+    req.created_by === APPROVAL_ROUTING.directorOnly.requesterId ||
+    req.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+  const newStatus: CtrlRequestStatus =
+    forceDirector || req.approval_tier === "nivel_3" ? "pendente_diretor" : "pendente";
+
+  const now = new Date().toISOString();
+  const { error: updErr } = await supabase
+    .from("ctrl_requests")
+    .update({
+      status: newStatus,
+      approved_by: null,
+      approved_at: null,
+      complement_return_status: null,
+      // Limpa todo o vínculo de pagamento/Omie — a requisição volta "limpa" e
+      // pode ser editada (a edição é bloqueada enquanto há título no Omie).
+      paying_company: null,
+      paying_company_id: null,
+      sent_to_payment_at: null,
+      sent_to_payment_by: null,
+      omie_contapagar_codigo: null,
+      omie_launch_status: null,
+      omie_launch_error: null,
+      omie_launched_at: null,
+      omie_paid_at: null,
+      updated_at: now,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .eq("id", requestId)
+    .in("status", RETURNABLE); // guarda contra corrida
+
+  if (updErr) return { error: updErr.message };
+
+  await supabase.from("ctrl_history").insert({
+    request_id: requestId,
+    user_id: ctx.id,
+    // Reaproveita a ação 'editado' (não há enum próprio); o metadata distingue.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    action: "editado" as any,
+    comment: `Devolvida para requisições. Motivo: ${reason.trim()}`,
+    metadata: {
+      kind: "devolucao",
+      from_status: req.status,
+      omie_titulo_excluido: req.omie_contapagar_codigo ?? null,
+    },
+  });
+
+  await notifyRequester({
+    userId: req.created_by as string,
+    requestId,
+    requestNumber: req.request_number as number,
+    title: "Requisição devolvida",
+    message: `Sua requisição #${req.request_number} foi devolvida e voltou à aprovação. Motivo: ${reason.trim()}`,
+    type: "devolucao",
+  });
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  revalidatePath("/ctrl/requisicoes");
+  revalidatePath("/ctrl/aprovacoes");
+  revalidatePath("/ctrl/orcamento");
+  return { ok: true as const, status: newStatus };
 }
 
 // ─── Editar setor/tipo em Contas a Pagar (retorna à aprovação) ───────────────

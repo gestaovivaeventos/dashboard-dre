@@ -15,6 +15,7 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
   pix: "PIX",
   transferencia: "Transferência",
   cartao_credito: "Cartão de Crédito",
+  cartao_prepago: "Cartão Pré-Pago",
   dinheiro: "Dinheiro",
 };
 

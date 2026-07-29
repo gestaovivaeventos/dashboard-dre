@@ -45,6 +45,12 @@ export type RequestDetail = {
   omie_contapagar_codigo?: number | null;
   omie_launch_error?: string | null;
   sent_to_payment_at?: string | null;
+  // Preenchido quando o título foi efetivamente PAGO (baixado) no Omie.
+  omie_paid_at?: string | null;
+  // Compra em dólar: origem em USD + câmbio + IOF (amount continua em BRL).
+  usd_amount?: number | null;
+  usd_brl_rate?: number | null;
+  iof_rate?: number | null;
   inactivation_reason?: string | null;
   inactivated_at?: string | null;
   payment_method?: string | null;
@@ -109,6 +115,7 @@ export const PAYMENT_METHOD_LABEL: Record<string, string> = {
   pix_copia_cola: "PIX Copia e Cola",
   transferencia: "Transferência",
   cartao_credito: "Cartão de Crédito",
+  cartao_prepago: "Cartão Pré-Pago",
   dinheiro: "Dinheiro",
 };
 
@@ -221,6 +228,15 @@ export function RequestDetailModal({
           {/* Resumo */}
           <Section title="Resumo">
             <DetailField label="Valor" value={fmt.format(Number(req.amount))} />
+            {req.usd_amount != null && (
+              <DetailField
+                label="Compra em dólar"
+                value={`US$ ${fmt.format(Number(req.usd_amount))} · câmbio R$ ${fmt.format(
+                  Number(req.usd_brl_rate ?? 0),
+                )} · IOF ${String(req.iof_rate ?? 0).replace(".", ",")}%`}
+                fullWidth
+              />
+            )}
             <DetailField
               label="Vencimento"
               value={
@@ -329,6 +345,13 @@ export function RequestDetailModal({
                   new Date(req.sent_to_payment_at).toLocaleString("pt-BR") +
                   (req.paying_company ? ` · ${req.paying_company}` : "")
                 }
+                fullWidth
+              />
+            )}
+            {req.omie_paid_at && (
+              <DetailField
+                label="Pago no Omie"
+                value={new Date(req.omie_paid_at).toLocaleString("pt-BR")}
                 fullWidth
               />
             )}

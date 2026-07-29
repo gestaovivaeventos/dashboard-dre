@@ -81,7 +81,7 @@ export function OmieMapeamentoClient({ companies }: Props) {
 
   function handleContaCorrente(
     codigo: string,
-    tipo: "padrao" | "caixa" | "cartao" = "padrao",
+    tipo: "padrao" | "caixa" | "cartao" | "cartao_prepago" = "padrao",
   ) {
     if (!companyId || !data) return;
     const campo =
@@ -89,6 +89,8 @@ export function OmieMapeamentoClient({ companies }: Props) {
         ? "contaCorrenteCaixa"
         : tipo === "cartao"
         ? "contaCorrenteCartao"
+        : tipo === "cartao_prepago"
+        ? "contaCorrenteCartaoPrepago"
         : "contaCorrente";
     const feedbackId = `cc_${tipo}`;
     const prev = data[campo];
@@ -336,6 +338,33 @@ export function OmieMapeamentoClient({ companies }: Props) {
                       </span>
                     )}
                   </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Cartão pré-pago</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={data.contaCorrenteCartaoPrepago ?? ""}
+                      onChange={(e) => handleContaCorrente(e.target.value, "cartao_prepago")}
+                      disabled={isPending}
+                      className={INPUT_CLS + " max-w-sm"}
+                    >
+                      <option value="">— não mapeado —</option>
+                      {data.contasCorrentes.map((cc) => (
+                        <option key={cc.codigo} value={cc.codigo}>
+                          {cc.descricao}
+                        </option>
+                      ))}
+                    </select>
+                    {saveFeedback?.id === "cc_cartao_prepago" && (
+                      <span className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                        {saveFeedback.msg}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Conta usada quando o método de pagamento é &quot;Cartão Pré-Pago&quot; (ex.: Pré-Pago Azulzinho).
+                  </p>
                 </div>
 
                 {/* Empresas cuja conta no Omie não emite remessa de pagamento. */}

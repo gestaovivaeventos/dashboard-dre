@@ -5,6 +5,7 @@ import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getExpenseTypes } from "@/lib/ctrl/actions/expense-types";
 import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { getSuppliers } from "@/lib/ctrl/actions/suppliers";
+import { getUsdConversion } from "@/lib/ai/usd";
 import { createClient } from "@/lib/supabase/server";
 
 async function getActiveEvents() {
@@ -25,12 +26,13 @@ export default async function NovaRequisicaoPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const [sectorsSettled, expenseTypesSettled, suppliersSettled, eventsSettled] =
+  const [sectorsSettled, expenseTypesSettled, suppliersSettled, eventsSettled, usdSettled] =
     await Promise.allSettled([
       getSectors(),
       getExpenseTypes(),
       getSuppliers("aprovado"),
       getActiveEvents(),
+      getUsdConversion(),
     ]);
 
   const sectors =
@@ -46,6 +48,9 @@ export default async function NovaRequisicaoPage() {
       ? suppliersSettled.value.suppliers ?? []
       : [];
   const events = eventsSettled.status === "fulfilled" ? eventsSettled.value : [];
+  // Câmbio + IOF para compras em dólar (fallback defensivo se a config falhar).
+  const usd =
+    usdSettled.status === "fulfilled" ? usdSettled.value : { rate: 5, iofRate: 3.5 };
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -62,6 +67,8 @@ export default async function NovaRequisicaoPage() {
           expenseTypes={expenseTypes}
           suppliers={suppliers}
           events={events}
+          usdBrlRate={usd.rate}
+          usdIofRate={usd.iofRate}
         />
       </div>
     </div>

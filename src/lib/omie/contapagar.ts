@@ -117,6 +117,9 @@ export interface ContaPagarPayload {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   distribuicao: any[];
   id_conta_corrente: number;
+  // "Tipo de Documento" (aba Diversos). Código da tabela de tipos de documento
+  // do Omie (ex.: PIX, BOL, CRC, DIN). Omitido = Omie usa o padrão da conta.
+  codigo_tipo_documento?: string;
   // Código numérico do projeto Omie (nCodProj). Vinculado a partir do evento da
   // requisição quando há projeto homônimo na Omie da empresa.
   codigo_projeto?: number;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, FileText, Loader2, MessageCircle, Pencil, Receipt, Trash2, X } from "lucide-react";
+import { Eye, FileText, Loader2, MessageCircle, Pencil, Receipt, RefreshCw, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -20,12 +20,22 @@ import {
   getRequestComprovantes,
   type RequestComprovante,
 } from "@/lib/ctrl/actions/requests";
+import { refreshPaymentStatuses } from "@/lib/ctrl/actions/payment-status";
+import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 
 interface Props {
   requests: RequestDetail[];
   isAdmin?: boolean;
+  canReconcile?: boolean;
   sectors?: CadastroOption[];
   expenseTypes?: CadastroOption[];
+}
+
+// Uma requisição só é considerada "Paga" quando o título foi efetivamente
+// baixado no Omie (omie_paid_at preenchido pela reconciliação) — não apenas
+// enviada/agendada.
+function isPaid(req: RequestDetail): boolean {
+  return Boolean(req.omie_paid_at);
 }
 
 // Requisição já lançada no Omie (agendada ou com título) não pode ser
@@ -37,11 +47,42 @@ function isOmieLaunched(req: RequestDetail): boolean {
 export function RequisicoesTable({
   requests,
   isAdmin = false,
+  canReconcile = false,
   sectors = [],
   expenseTypes = [],
 }: Props) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileMsg, setReconcileMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  async function handleRefreshPayments() {
+    setReconciling(true);
+    setReconcileMsg(null);
+    try {
+      const res = await refreshPaymentStatuses();
+      if ("error" in res && res.error) {
+        setReconcileMsg({ text: res.error, ok: false });
+      } else if ("ok" in res) {
+        setReconcileMsg({
+          text:
+            res.paid > 0
+              ? `${res.paid} requisição(ões) atualizada(s) para Pago.`
+              : `Nenhum novo pagamento confirmado no Omie (${res.checked} verificada${res.checked === 1 ? "" : "s"}).`,
+          ok: true,
+        });
+        router.refresh();
+      }
+    } catch (e) {
+      setReconcileMsg({
+        text: e instanceof Error ? e.message : "Falha ao atualizar pagamentos.",
+        ok: false,
+      });
+    } finally {
+      setReconciling(false);
+      setTimeout(() => setReconcileMsg(null), 6000);
+    }
+  }
   const [detail, setDetail] = useState<RequestDetail | null>(null);
   const [attachmentLoading, setAttachmentLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -94,11 +135,42 @@ export function RequisicoesTable({
     return requests.filter((r) => {
       if (termDigits && String(r.request_number).startsWith(termDigits)) return true;
       if (r.title.toLowerCase().includes(term)) return true;
-      const statusLabel = STATUS_LABEL[r.status] ?? r.status;
+      // "Pago" tem precedência sobre o rótulo do status (a requisição paga
+      // continua com status 'agendado' por baixo).
+      const statusLabel = isPaid(r) ? "Pago" : STATUS_LABEL[r.status] ?? r.status;
       if (statusLabel.toLowerCase().includes(term)) return true;
       return false;
     });
   }, [requests, search]);
+
+  // Colunas para o cabeçalho estilo Excel (ordenar + filtrar por valores).
+  const columns = useMemo<ExcelColumn<RequestDetail>[]>(
+    () => [
+      { key: "numero", type: "number", getValue: (r) => r.request_number, label: (r) => `#${r.request_number}` },
+      { key: "titulo", type: "text", getValue: (r) => r.title },
+      { key: "valor", type: "number", getValue: (r) => r.amount, label: (r) => fmt.format(r.amount) },
+      {
+        key: "vencimento",
+        type: "date",
+        getValue: (r) => r.due_date ?? null,
+        label: (r) => (r.due_date ? new Date(r.due_date + "T00:00:00").toLocaleDateString("pt-BR") : "—"),
+      },
+      {
+        key: "status",
+        type: "text",
+        getValue: (r) => (isPaid(r) ? "Pago" : STATUS_LABEL[r.status] ?? r.status),
+      },
+      {
+        key: "criado",
+        type: "date",
+        getValue: (r) => r.created_at ?? null,
+        label: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString("pt-BR") : "—"),
+      },
+    ],
+    [],
+  );
+
+  const { rows: displayed, headerProps, hasFilters, clearAll } = useExcelTable(filtered, columns);
 
   if (requests.length === 0) {
     return (
@@ -135,31 +207,71 @@ export function RequisicoesTable({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          {filtered.length} de {requests.length} requisição{requests.length === 1 ? "" : "ões"}
+          {displayed.length} de {requests.length} requisição{requests.length === 1 ? "" : "ões"}
         </p>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Limpar filtros
+          </button>
+        )}
+        {canReconcile && (
+          <button
+            type="button"
+            onClick={handleRefreshPayments}
+            disabled={reconciling}
+            title="Consulta no Omie quais títulos já foram efetivamente pagos (baixados) e atualiza o status para Pago."
+            className="ml-auto inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {reconciling ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Atualizar pagamentos
+          </button>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
+      {reconcileMsg && (
+        <div
+          className={`rounded-md border px-3 py-2 text-xs ${
+            reconcileMsg.ok
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
+              : "border-destructive/40 bg-destructive/10 text-destructive"
+          }`}
+        >
+          {reconcileMsg.text}
+        </div>
+      )}
+
+      {displayed.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Nenhuma requisição encontrada para &quot;{search}&quot;.
+          {search.trim() || hasFilters
+            ? "Nenhuma requisição encontrada para a busca/filtros atuais."
+            : "Nenhuma requisição."}
         </div>
       ) : (
         <div className="rounded-lg border">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">Título</th>
-                <th className="px-4 py-3">Valor</th>
-                <th className="px-4 py-3">Vencimento</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Anexos</th>
-                <th className="px-4 py-3">Criado em</th>
-                <th className="px-4 py-3 text-right">Ações</th>
+              <tr className="border-b bg-muted/50 text-left text-xs font-semibold">
+                <th className="px-4 py-3"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Título" {...headerProps("titulo")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Valor" {...headerProps("valor")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Status" {...headerProps("status")} /></th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Anexos</th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Criado em" menuSide="right" {...headerProps("criado")} /></th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((req) => {
+              {displayed.map((req) => {
                 const hasPaymentInfo = req.status === "info_pagamento_pendente";
                 const needsComplement = req.status === "aguardando_complementacao";
                 return (
@@ -175,7 +287,7 @@ export function RequisicoesTable({
                         : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={req.status} />
+                      <StatusBadge status={req.status} paid={isPaid(req)} />
                     </td>
                     <td className="px-4 py-3">
                       {req.omie_contapagar_codigo ? (
@@ -482,7 +594,16 @@ const STATUS_LABEL: Record<string, string> = {
   info_pagamento_pendente: "Info pendente",
 };
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, paid }: { status: string; paid?: boolean }) {
+  // "Pago" (título baixado no Omie) sobrepõe o rótulo do status subjacente
+  // (a requisição segue com status 'agendado' internamente).
+  if (paid) {
+    return (
+      <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+        Pago
+      </span>
+    );
+  }
   const map: Record<string, { label: string; className: string }> = {
     pendente: { label: "Aguardando Gerente", className: "bg-yellow-100 text-yellow-800" },
     pendente_diretor: { label: "Aguardando Diretor", className: "bg-orange-100 text-orange-800" },

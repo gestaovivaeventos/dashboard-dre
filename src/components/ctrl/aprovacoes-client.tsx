@@ -63,7 +63,7 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 
 const PAYMENT_LABELS: Record<string, string> = {
   boleto: "Boleto", pix: "PIX", transferencia: "Transferência",
-  cartao_credito: "Cartão de Crédito", dinheiro: "Dinheiro",
+  cartao_credito: "Cartão de Crédito", cartao_prepago: "Cartão Pré-Pago", dinheiro: "Dinheiro",
 };
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });

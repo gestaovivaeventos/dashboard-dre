@@ -58,14 +58,46 @@ function earliestDueDateBRT(): string {
   return isAfterNoonBRT() ? addOneDayISO(ymd) : ymd;
 }
 
+// Vencimento da PRÓXIMA fatura do cartão a partir de hoje (Brasília). A fatura
+// fecha no dia 23 e vence no dia 05: compra até o dia 23 → vence dia 05 do mês
+// seguinte; a partir do dia 24 → dia 05 do mês subsequente. Mesmo ciclo aplicado
+// no servidor para desdobrar parcelas.
+function nextFaturaDueDate(): string {
+  const { ymd } = brasiliaNowParts();
+  const [y, m, d] = ymd.split("-").map(Number); // m: 1-based
+  const monthOffset = d > 23 ? 2 : 1;
+  const totalOffset = m - 1 + monthOffset; // base 0
+  const dueMonth = ((totalOffset % 12) + 12) % 12;
+  const dueYear = y + Math.floor(totalOffset / 12);
+  return `${dueYear}-${String(dueMonth + 1).padStart(2, "0")}-05`;
+}
+
 interface Props {
   sectors: CtrlSector[];
   expenseTypes: CtrlExpenseType[];
   suppliers: CtrlSupplier[];
   events?: CtrlEvent[];
+  /** Câmbio USD→BRL (dólar comercial do painel de IA) para compras em dólar. */
+  usdBrlRate?: number;
+  /** Alíquota de IOF (%) somada nas compras em dólar. */
+  usdIofRate?: number;
 }
 
-export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = [] }: Props) {
+// Converte USD → BRL somando o IOF (mesma fórmula do servidor). O valor em reais
+// é o que vale para orçamento, Omie e todo o resto; o dólar é só de entrada.
+function usdToBrl(usd: number, rate: number, iofPct: number): number {
+  if (!Number.isFinite(usd) || usd <= 0) return 0;
+  return Math.round(usd * rate * (1 + iofPct / 100) * 100) / 100;
+}
+
+export function NovaRequisicaoForm({
+  sectors,
+  expenseTypes,
+  suppliers,
+  events = [],
+  usdBrlRate = 5,
+  usdIofRate = 3.5,
+}: Props) {
   const router = useRouter();
   const now = new Date();
 
@@ -77,6 +109,10 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   const [sectorId, setSectorId] = useState("");
   const [expenseTypeId, setExpenseTypeId] = useState("");
   const [amountStr, setAmountStr] = useState("");
+  // Compra em dólar (US$): o usuário digita em dólar e o sistema converte para
+  // BRL (câmbio + IOF). O valor efetivo continua em reais. Indisponível no PIX.
+  const [isUsd, setIsUsd] = useState(false);
+  const [usdAmountStr, setUsdAmountStr] = useState("");
   const [refMonth, setRefMonth] = useState(now.getMonth() + 1);
   const [refYear, setRefYear] = useState(now.getFullYear());
 
@@ -357,12 +393,22 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     return `${intWithSep},${decPart}`;
   }
 
+  // Valor em USD digitado (formato BR: 1.234,56).
+  const parsedUsd = useMemo(() => {
+    const cleaned = usdAmountStr.replace(/\./g, "").replace(",", ".");
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  }, [usdAmountStr]);
+
+  // Valor EFETIVO em reais — é o que vale para orçamento, Omie e todo o trâmite.
+  // Compra em dólar: converte (USD × câmbio × (1 + IOF)). Senão, o valor digitado.
   const parsedAmount = useMemo(() => {
+    if (isUsd) return usdToBrl(parsedUsd, usdBrlRate, usdIofRate);
     // amountStr is in BR format (1.234,56) — strip thousand sep, swap decimal.
     const cleaned = amountStr.replace(/\./g, "").replace(",", ".");
     const n = parseFloat(cleaned);
     return isNaN(n) ? 0 : n;
-  }, [amountStr]);
+  }, [isUsd, parsedUsd, usdBrlRate, usdIofRate, amountStr]);
 
   // Vencimento mínimo (horário de Brasília): mesmo dia até 12:00; após 12:00,
   // só a partir do dia seguinte. Calculado no fuso America/Sao_Paulo, então não
@@ -380,7 +426,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
   }, [dueDate]);
 
   const availableMethods = useMemo(() => {
-    const avail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
+    const avail = new Set(["boleto", "cartao_credito", "cartao_prepago", "dinheiro", "pix_copia_cola"]);
     if (!selectedSupplier || selectedSupplier.chave_pix) avail.add("pix");
     if (!selectedSupplier || (selectedSupplier.banco && selectedSupplier.conta_corrente)) avail.add("transferencia");
     return avail;
@@ -414,11 +460,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
-  // Reset verification whenever budget-relevant fields change
+  // Reset verification whenever budget-relevant fields change (inclui o valor em
+  // dólar/câmbio, que altera o valor efetivo em reais verificado no orçamento).
   useEffect(() => {
     setVerification(null);
     setVerifyError(null);
-  }, [sectorId, expenseTypeId, amountStr, refMonth, refYear]);
+  }, [sectorId, expenseTypeId, amountStr, isUsd, usdAmountStr, refMonth, refYear]);
 
   // Clear recurrence when incompatible with installments
   useEffect(() => {
@@ -434,6 +481,24 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       setRecurMonths((prev) => prev.filter((m) => m > dueDateMonth));
     }
   }, [dueDateMonth]);
+
+  // Cartão de crédito: o vencimento é sempre o da PRÓXIMA fatura (dia 05) e fica
+  // travado. Ao entrar no cartão, preenche/trava; ao trocar para outro método,
+  // limpa a data travada da fatura (o usuário volta a escolher normalmente).
+  const prevPaymentMethodRef = useRef(paymentMethod);
+  useEffect(() => {
+    const prev = prevPaymentMethodRef.current;
+    if (paymentMethod === "cartao_credito") {
+      setDueDate(nextFaturaDueDate());
+    } else if (prev === "cartao_credito") {
+      setDueDate("");
+    }
+    // PIX não tem compra em dólar — desliga o modo dólar se estava ligado.
+    if (paymentMethod === "pix" || paymentMethod === "pix_copia_cola") {
+      setIsUsd(false);
+    }
+    prevPaymentMethodRef.current = paymentMethod;
+  }, [paymentMethod]);
 
   // Boleto: ao ter uma linha digitável bancária válida (lida do anexo ou colada
   // manualmente), preenche Valor e Vencimento a partir dela — só quando os
@@ -475,7 +540,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
     setPixKey(sup.chave_pix ?? "");
     setPixKeyType(sup.pix_key_type ?? "");
 
-    const newAvail = new Set(["boleto", "cartao_credito", "dinheiro", "pix_copia_cola"]);
+    const newAvail = new Set(["boleto", "cartao_credito", "cartao_prepago", "dinheiro", "pix_copia_cola"]);
     if (sup.chave_pix) newAvail.add("pix");
     if (sup.banco && sup.conta_corrente) newAvail.add("transferencia");
     if (!newAvail.has(paymentMethod)) { setPaymentMethod("boleto"); setInstallments(1); }
@@ -579,10 +644,16 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
       amount: parsedAmount,
+      // Compra em dólar: manda a origem em USD + câmbio + IOF (o servidor
+      // recalcula o BRL a partir disso). O valor efetivo continua em reais.
+      currency: isUsd ? "USD" : undefined,
+      usd_amount: isUsd ? parsedUsd : undefined,
+      usd_brl_rate: isUsd ? usdBrlRate : undefined,
+      iof_rate: isUsd ? usdIofRate : undefined,
       due_date: dueDate || undefined,
       reference_month: refMonth,
       reference_year: refYear,
-      payment_method: paymentMethod as "boleto" | "pix" | "transferencia" | "cartao_credito" | "dinheiro" | "pix_copia_cola",
+      payment_method: paymentMethod as "boleto" | "pix" | "transferencia" | "cartao_credito" | "dinheiro" | "pix_copia_cola" | "cartao_prepago",
       justification: (form.get("justification") as string) || undefined,
       observations: (form.get("observations") as string) || undefined,
       event_id: eventId && eventId !== "none" ? eventId : undefined,
@@ -867,6 +938,7 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             { value: "pix", label: "PIX" },
             { value: "transferencia", label: "Transferência" },
             { value: "cartao_credito", label: "Cartão de Crédito" },
+            { value: "cartao_prepago", label: "Cartão Pré-Pago" },
             { value: "dinheiro", label: "Dinheiro" },
             { value: "pix_copia_cola", label: "PIX Copia e Cola" },
           ].map((opt) => {
@@ -1102,9 +1174,23 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
       {/* Valor + Vencimento */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label htmlFor="amount" className={LABEL_CLS}>
-            Valor (R$) <span className="text-destructive">*</span>
-          </label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label htmlFor="amount" className={LABEL_CLS}>
+              {isUsd ? "Valor (US$)" : "Valor (R$)"} <span className="text-destructive">*</span>
+            </label>
+            {/* Compra em dólar — indisponível no PIX. */}
+            {paymentMethod !== "pix" && paymentMethod !== "pix_copia_cola" && (
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={isUsd}
+                  onChange={(e) => setIsUsd(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-gray-300"
+                />
+                Compra em dólar (US$)
+              </label>
+            )}
+          </div>
           <input
             id="amount"
             name="amount"
@@ -1112,18 +1198,36 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             inputMode="numeric"
             required
             placeholder="0,00"
-            value={amountStr}
+            value={isUsd ? usdAmountStr : amountStr}
             onChange={(e) => {
               const digits = e.target.value.replace(/\D/g, "");
-              setAmountStr(formatBRL(digits));
+              if (isUsd) setUsdAmountStr(formatBRL(digits));
+              else setAmountStr(formatBRL(digits));
             }}
             className={INPUT_CLS}
           />
+          {isUsd && (
+            <p className="text-xs text-muted-foreground">
+              {parsedUsd > 0 ? (
+                <>
+                  ={" "}
+                  <strong className="text-foreground">R$ {fmt.format(parsedAmount)}</strong>{" "}
+                  (câmbio R$ {fmt.format(usdBrlRate)} · IOF{" "}
+                  {String(usdIofRate).replace(".", ",")}%)
+                </>
+              ) : (
+                <>
+                  Digite o valor em dólar. Câmbio R$ {fmt.format(usdBrlRate)} · IOF{" "}
+                  {String(usdIofRate).replace(".", ",")}%. O valor em reais é o que vale
+                  para orçamento e pagamento.
+                </>
+              )}
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <label htmlFor="due_date" className={LABEL_CLS}>
-            {paymentMethod === "cartao_credito" ? "Data da Compra" : "Data de Vencimento"}{" "}
-            <span className="text-destructive">*</span>
+            Data de Vencimento <span className="text-destructive">*</span>
           </label>
           <input
             id="due_date"
@@ -1132,8 +1236,12 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
             required
             min={minDueDate}
             value={dueDate}
+            // No cartão de crédito a data é a da próxima fatura (dia 05) e não é
+            // editável — preenchida automaticamente ao escolher o método.
+            disabled={paymentMethod === "cartao_credito"}
             onChange={(e) => setDueDate(e.target.value)}
             onClick={(e) => {
+              if (paymentMethod === "cartao_credito") return;
               // Abre o calendario nativo ao clicar em qualquer parte do campo
               // (Chrome/Edge so abrem via icone por padrao).
               const el = e.currentTarget as HTMLInputElement & {
@@ -1145,13 +1253,14 @@ export function NovaRequisicaoForm({ sectors, expenseTypes, suppliers, events = 
                 // showPicker pode lancar se chamado sem gesto do usuario ou em browser incompativel.
               }
             }}
-            className={`${INPUT_CLS} cursor-pointer`}
+            className={`${INPUT_CLS} ${
+              paymentMethod === "cartao_credito"
+                ? "cursor-not-allowed opacity-70"
+                : "cursor-pointer"
+            }`}
           />
           {paymentMethod === "cartao_credito" && (
-            <p className="text-xs text-muted-foreground">
-              O vencimento é calculado pela fatura: vence dia 05. Compra até o dia 23
-              entra na fatura do mês seguinte; a partir do dia 24, na fatura subsequente.
-            </p>
+            <p className="text-xs text-muted-foreground">Data do vencimento da fatura.</p>
           )}
         </div>
       </div>

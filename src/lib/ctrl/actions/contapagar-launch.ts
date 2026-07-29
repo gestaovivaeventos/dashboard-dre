@@ -62,6 +62,30 @@ function onlyDigits(s: string | null | undefined): string {
   return (s ?? "").replace(/\D/g, "");
 }
 
+// Mapeia o método de pagamento do ControlHub para o "Tipo de Documento" do Omie
+// (aba Diversos → codigo_tipo_documento). Os códigos são da tabela padrão de
+// tipos de documento do Omie (PesquisarTipoDocumento), iguais para toda conta:
+//   PIX = Pix · BOL = Boleto · CRC = Cartão de Crédito · CRP = Cartão Pré-Pago ·
+//   DIN = Dinheiro.
+// Transferência e demais métodos ficam sem tipo (o Omie mantém o padrão da conta).
+function tipoDocumentoOmie(paymentMethod: string | null | undefined): string | null {
+  switch (paymentMethod) {
+    case "pix":
+    case "pix_copia_cola":
+      return "PIX";
+    case "boleto":
+      return "BOL";
+    case "cartao_credito":
+      return "CRC";
+    case "cartao_prepago":
+      return "CRP"; // Cartão Pré-Pago
+    case "dinheiro":
+      return "DIN";
+    default:
+      return null;
+  }
+}
+
 interface IntegracaoRequest {
   payment_method: string | null;
   barcode: string | null;
@@ -88,6 +112,43 @@ const FINALIDADE_TRANSFERENCIA = {
   poupanca: "01.41", // "Transferência PIX por Dados Bancários (Conta Poupança)".
 } as const;
 
+// PIX por CHAVE: no Omie é uma transferência (TRA) com finalidade "01.3"
+// (Transferência por Chave PIX) e a chave no campo pix_qrcode. Usado pelo método
+// "pix" e também pelo "pix_copia_cola" quando o conteúdo colado não é um BR Code
+// EMV, mas uma chave avulsa (ex.: CPF) — a Omie rejeita chave no campo de
+// QR-Code copia-e-cola ("Este Código QR-Code não parece válido").
+function buildPixPorChave(
+  chave: string,
+  supplier: IntegracaoSupplier,
+): Record<string, unknown> | null {
+  const key = chave.trim();
+  if (!key) return null;
+  const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+  const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
+  const banco = parseBanco(supplier.banco)?.codigo ?? "";
+  const agencia = onlyDigits(supplier.agencia);
+  const conta = (supplier.conta_corrente ?? "").trim();
+  return {
+    codigo_forma_pagamento: "TRA",
+    finalidade_transferencia: "01.3", // Transferência por Chave PIX
+    pix_qrcode: key,
+    ...(doc ? { cpf_cnpj_transferencia: doc } : {}),
+    ...(nome ? { nome_transferencia: nome } : {}),
+    // PIX por chave dispensa banco/agência/conta (a chave resolve o destino);
+    // só enviamos quando o fornecedor os tem cadastrados.
+    ...(banco ? { banco_transferencia: banco } : {}),
+    ...(agencia ? { agencia_transferencia: agencia } : {}),
+    ...(conta ? { conta_corrente_transferencia: conta } : {}),
+  };
+}
+
+// Um BR Code (PIX copia-e-cola) válido é um payload EMV que SEMPRE começa com
+// "000201" (Payload Format Indicator). Serve para distinguir um copia-e-cola de
+// verdade de uma chave PIX avulsa digitada por engano nesse campo.
+function isBrCodeEmv(s: string): boolean {
+  return s.replace(/\s+/g, "").startsWith("000201");
+}
+
 // Monta o bloco cnab_integracao_bancaria conforme o método de pagamento. Antes
 // só boleto era enviado; PIX, PIX copia-e-cola e transferência ficavam sem
 // instrução de pagamento no Omie. Retorna null quando não há dados suficientes.
@@ -102,36 +163,22 @@ function buildIntegracaoBancaria(
     return barcode ? { codigo_forma_pagamento: "BOL", codigo_barras_boleto: barcode } : null;
   }
 
-  // PIX copia-e-cola: o código EMV (copia-e-cola) vai em pix_qrcode com a forma
-  // "PIX". É o ÚNICO caso que usa forma "PIX".
+  // PIX copia-e-cola: o BR Code EMV vai em pix_qrcode com a forma "PIX". Se o que
+  // foi colado NÃO é um BR Code (ex.: digitaram uma chave PIX como CPF no campo
+  // de copia-e-cola), a Omie recusa o QR-Code — então tratamos como PIX por chave.
   if (pm === "pix_copia_cola") {
-    const qr = (request.pix_key ?? "").trim();
-    return qr ? { codigo_forma_pagamento: "PIX", pix_qrcode: qr } : null;
+    const raw = (request.pix_key ?? "").trim();
+    if (!raw) return null;
+    if (isBrCodeEmv(raw)) {
+      return { codigo_forma_pagamento: "PIX", pix_qrcode: raw };
+    }
+    return buildPixPorChave(raw, supplier);
   }
 
-  // PIX por CHAVE: no Omie é uma transferência (TRA) com finalidade "01.3"
-  // (Transferência por Chave PIX) e a chave no campo pix_qrcode. Mandar a chave
-  // como forma "PIX" faria o Omie tratá-la como copia-e-cola (era o bug).
+  // PIX por CHAVE. Mandar a chave como forma "PIX" faria o Omie tratá-la como
+  // copia-e-cola (era o bug).
   if (pm === "pix") {
-    const chave = (request.pix_key ?? supplier.chave_pix ?? "").trim();
-    if (!chave) return null;
-    const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
-    const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
-    const banco = parseBanco(supplier.banco)?.codigo ?? "";
-    const agencia = onlyDigits(supplier.agencia);
-    const conta = (supplier.conta_corrente ?? "").trim();
-    return {
-      codigo_forma_pagamento: "TRA",
-      finalidade_transferencia: "01.3", // Transferência por Chave PIX
-      pix_qrcode: chave,
-      ...(doc ? { cpf_cnpj_transferencia: doc } : {}),
-      ...(nome ? { nome_transferencia: nome } : {}),
-      // PIX por chave dispensa banco/agência/conta (a chave resolve o destino);
-      // só enviamos quando o fornecedor os tem cadastrados.
-      ...(banco ? { banco_transferencia: banco } : {}),
-      ...(agencia ? { agencia_transferencia: agencia } : {}),
-      ...(conta ? { conta_corrente_transferencia: conta } : {}),
-    };
+    return buildPixPorChave(request.pix_key ?? supplier.chave_pix ?? "", supplier);
   }
 
   if (pm === "transferencia") {
@@ -187,13 +234,18 @@ export async function launchRequestToOmie(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
     )
     .eq("id", request.supplier_id)
     .maybeSingle();
 
   if (supErr || !supplier) return { error: "Fornecedor não encontrado." };
-  if (!supplier.cnpj_cpf) return { error: "Fornecedor sem CNPJ/CPF." };
+  // Fornecedor estrangeiro não tem CNPJ/CPF: a Omie o cadastra com estado="EX"
+  // (exibindo "Estrangeiro" no campo de documento). Só bloqueamos quando o
+  // fornecedor brasileiro está sem documento.
+  if (!supplier.cnpj_cpf && !supplier.estrangeiro) {
+    return { error: "Fornecedor sem CNPJ/CPF." };
+  }
 
   // 1. Fetch company
   const { data: company, error: compErr } = await supabase
@@ -230,7 +282,9 @@ export async function launchRequestToOmie(
 
   const { data: ccRow } = await supabase
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, skip_cnab_remessa")
+    .select(
+      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa",
+    )
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -239,16 +293,21 @@ export async function launchRequestToOmie(
   // 20260723120000. O pagamento é feito manualmente no Omie.
   const skipCnabRemessa = Boolean(ccRow?.skip_cnab_remessa);
 
-  // Conta corrente por método: dinheiro→caixa físico, cartão→cartão; ambos com
-  // fallback para a conta padrão. Demais métodos usam a padrão.
+  // Conta corrente por método: dinheiro→caixa físico, cartão→cartão, cartão
+  // pré-pago→conta do pré-pago; todos com fallback para a conta padrão. Demais
+  // métodos usam a padrão.
   const ccPadrao = (ccRow?.codigo_conta_corrente as string | number | null) ?? null;
   const ccCaixa = (ccRow?.codigo_conta_corrente_caixa as string | number | null) ?? null;
   const ccCartao = (ccRow?.codigo_conta_corrente_cartao as string | number | null) ?? null;
+  const ccCartaoPrepago =
+    (ccRow?.codigo_conta_corrente_cartao_prepago as string | number | null) ?? null;
   const codigoContaCorrenteResolved =
     request.payment_method === "dinheiro"
       ? (ccCaixa ?? ccPadrao)
       : request.payment_method === "cartao_credito"
       ? (ccCartao ?? ccPadrao)
+      : request.payment_method === "cartao_prepago"
+      ? (ccCartaoPrepago ?? ccPadrao)
       : ccPadrao;
 
   const missing: string[] = [];
@@ -298,6 +357,15 @@ export async function launchRequestToOmie(
         titular_banco: supplier.titular_banco as string | null,
         doc_titular: supplier.doc_titular as string | null,
         chave_pix: supplier.chave_pix as string | null,
+        // Estrangeiro: sem CNPJ, a Omie usa estado="EX" + codigo_pais (BACEN).
+        // Sem estes campos o syncSupplierToOmieUnit rejeitaria por falta de documento.
+        estrangeiro: Boolean(supplier.estrangeiro),
+        codigo_pais: supplier.codigo_pais as string | null,
+        estado: supplier.estado as string | null,
+        cidade: supplier.cidade as string | null,
+        endereco: supplier.endereco as string | null,
+        endereco_numero: supplier.endereco_numero as string | null,
+        complemento: supplier.complemento as string | null,
       };
       const { codigoCliente } = await syncSupplierToOmieUnit(appKey, appSecret, supplierData);
       codigoClienteFornecedor = codigoCliente;
@@ -379,6 +447,9 @@ export async function launchRequestToOmie(
     }
   }
 
+  // Tipo de Documento (aba Diversos do Omie) a partir do método de pagamento.
+  const codigoTipoDocumento = tipoDocumentoOmie(request.payment_method);
+
   // Payload base compartilhado por incluir e alterar (a alteração só acrescenta
   // codigo_lancamento_omie e remove codigo_lancamento_integracao).
   const basePayload = {
@@ -390,6 +461,7 @@ export async function launchRequestToOmie(
     codigo_categoria: codigoCategoria,
     distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
     id_conta_corrente: Number(codigoContaCorrente),
+    ...(codigoTipoDocumento ? { codigo_tipo_documento: codigoTipoDocumento } : {}),
     ...(codigoProjeto ? { codigo_projeto: codigoProjeto } : {}),
     ...(numeroPedido ? { numero_pedido: numeroPedido } : {}),
     ...(numeroDocumentoFiscal ? { numero_documento_fiscal: numeroDocumentoFiscal } : {}),
@@ -411,6 +483,7 @@ export async function launchRequestToOmie(
       msg.includes("pix") ||
       msg.includes("qrcode") ||
       msg.includes("qr code") ||
+      msg.includes("qr-code") ||
       msg.includes("transfer") ||
       msg.includes("agência") ||
       msg.includes("agencia") ||
@@ -490,12 +563,16 @@ export async function launchRequestToOmie(
       omieStatus = "previsao_editada";
       omieCode = novoCodigo;
     } else {
-      const found = await findContaPagarByCnpjValor(
-        appKey,
-        appSecret,
-        supplier.cnpj_cpf as string,
-        Number(request.amount),
-      );
+      // O matching de título existente é por CNPJ+valor. Fornecedor estrangeiro
+      // não tem documento — pula o matching e vai direto para a inclusão.
+      const found = supplier.cnpj_cpf
+        ? await findContaPagarByCnpjValor(
+            appKey,
+            appSecret,
+            supplier.cnpj_cpf as string,
+            Number(request.amount),
+          )
+        : null;
 
       if (found) {
         await alterarContaPagarCategoria(

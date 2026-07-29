@@ -43,14 +43,26 @@ async function paginate(
   return out;
 }
 
-export async function listCategorias(appKey: string, appSecret: string): Promise<OmieOption[]> {
+export async function listCategorias(
+  appKey: string,
+  appSecret: string,
+  opts: { tipo?: "despesa" | "receita" } = {},
+): Promise<OmieOption[]> {
   return paginate(
     CATEGORIAS_URL, "ListarCategorias", appKey, appSecret,
     { filtrar_apenas_ativo: "S" }, "categoria_cadastro",
-    (it) =>
-      it.totalizadora === "S" || it.conta_inativa === "S"
-        ? null
-        : { codigo: String(it.codigo ?? ""), descricao: String(it.descricao ?? "") },
+    (it) => {
+      // Totalizadoras e inativas não recebem lançamento.
+      if (it.totalizadora === "S" || it.conta_inativa === "S") return null;
+      // Filtro por tipo, quando pedido: contas a pagar exigem categoria de
+      // DESPESA (conta_despesa="S"); contas a receber, de RECEITA. Uma categoria
+      // de receita usada numa conta a pagar é recusada pela Omie ("Categoria não
+      // cadastrada para o Código"). Sem `tipo`, devolve todas (comportamento
+      // antigo — usado pelo Case, que mapeia receita e despesa).
+      if (opts.tipo === "despesa" && it.conta_despesa !== "S") return null;
+      if (opts.tipo === "receita" && it.conta_receita !== "S") return null;
+      return { codigo: String(it.codigo ?? ""), descricao: String(it.descricao ?? "") };
+    },
   );
 }
 

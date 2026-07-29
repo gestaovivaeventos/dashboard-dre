@@ -41,7 +41,9 @@ export async function syncOmieOptions(companyId: string): Promise<
   let contasCorrentes: OmieOption[];
 
   try {
-    categorias = await listCategorias(appKey, appSecret);
+    // Compras = contas a pagar → só categorias de DESPESA. Categorias de receita
+    // (ex.: "... (*)") não são aceitas num título de conta a pagar pela Omie.
+    categorias = await listCategorias(appKey, appSecret, { tipo: "despesa" });
   } catch (e) {
     return { error: `Erro ao buscar categorias: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -115,6 +117,7 @@ export interface OmieMappingData {
   contaCorrente: string | null;
   contaCorrenteCaixa: string | null;
   contaCorrenteCartao: string | null;
+  contaCorrenteCartaoPrepago: string | null;
   // Empresa cuja conta no Omie não emite remessa de pagamento: o lançamento
   // cria o título sem o bloco CNAB (pagamento manual no Omie).
   skipCnabRemessa: boolean;
@@ -188,7 +191,9 @@ export async function getOmieMappingData(
   // Conta corrente config
   const { data: ccConfig, error: ccErr } = await db
     .from("ctrl_company_omie_config")
-    .select("codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, skip_cnab_remessa")
+    .select(
+      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa",
+    )
     .eq("company_id", companyId)
     .maybeSingle();
 
@@ -219,6 +224,7 @@ export async function getOmieMappingData(
     contaCorrente: ccConfig?.codigo_conta_corrente ?? null,
     contaCorrenteCaixa: ccConfig?.codigo_conta_corrente_caixa ?? null,
     contaCorrenteCartao: ccConfig?.codigo_conta_corrente_cartao ?? null,
+    contaCorrenteCartaoPrepago: ccConfig?.codigo_conta_corrente_cartao_prepago ?? null,
     skipCnabRemessa: ccConfig?.skip_cnab_remessa ?? false,
     lastSyncedAt,
   };
@@ -329,7 +335,7 @@ export async function saveSectorDepartamento(
 export async function saveContaCorrente(
   companyId: string,
   codigo: string | null,
-  tipo: "padrao" | "caixa" | "cartao" = "padrao",
+  tipo: "padrao" | "caixa" | "cartao" | "cartao_prepago" = "padrao",
 ): Promise<{ ok: true } | { error: string }> {
   await requireCtrlRole("admin", "csc", "contas_a_pagar");
   const db = createAdminClient();
@@ -339,6 +345,8 @@ export async function saveContaCorrente(
       ? "codigo_conta_corrente_caixa"
       : tipo === "cartao"
       ? "codigo_conta_corrente_cartao"
+      : tipo === "cartao_prepago"
+      ? "codigo_conta_corrente_cartao_prepago"
       : "codigo_conta_corrente";
 
   const { error } = await db

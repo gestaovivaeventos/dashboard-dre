@@ -37,7 +37,7 @@ const STATUS_CLS: Record<string, string> = {
 
 const PAYMENT_LABELS: Record<string, string> = {
   boleto: "Boleto", pix: "PIX", transferencia: "Transferência",
-  cartao_credito: "Cartão", dinheiro: "Dinheiro",
+  cartao_credito: "Cartão", cartao_prepago: "Cartão Pré-Pago", dinheiro: "Dinheiro",
 };
 
 type Person = { name: string | null; email: string } | null;

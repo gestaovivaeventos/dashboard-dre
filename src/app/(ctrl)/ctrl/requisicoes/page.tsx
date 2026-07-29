@@ -35,6 +35,10 @@ export default async function RequisicoesPage() {
     "admin",
   );
 
+  // Quem opera pagamentos pode disparar a reconciliação manual (consulta o Omie
+  // e marca como "Pago" os títulos já baixados).
+  const canReconcile = hasCtrlRole(ctx, "contas_a_pagar", "csc", "diretor", "admin");
+
   // Edição/exclusão administrativa (a princípio) só para admin. Carrega os
   // cadastros de setor/tipo só nesse caso, para alimentar o form de edição.
   const isAdmin = hasCtrlRole(ctx, "admin");
@@ -86,6 +90,10 @@ export default async function RequisicoesPage() {
       paying_company: (r.paying_company as string | null) ?? null,
       omie_contapagar_codigo: (r.omie_contapagar_codigo as number | null) ?? null,
       sent_to_payment_at: (r.sent_to_payment_at as string | null) ?? null,
+      omie_paid_at: (r.omie_paid_at as string | null) ?? null,
+      usd_amount: (r.usd_amount as number | null) ?? null,
+      usd_brl_rate: (r.usd_brl_rate as number | null) ?? null,
+      iof_rate: (r.iof_rate as number | null) ?? null,
       inactivated_at: (r.inactivated_at as string | null) ?? null,
       inactivation_reason: (r.inactivation_reason as string | null) ?? null,
       created_at: (r.created_at as string | null) ?? null,
@@ -126,6 +134,7 @@ export default async function RequisicoesPage() {
         <RequisicoesTable
           requests={rows}
           isAdmin={isAdmin}
+          canReconcile={canReconcile}
           sectors={sectors}
           expenseTypes={expenseTypes}
         />

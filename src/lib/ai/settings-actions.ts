@@ -177,6 +177,8 @@ export interface AiPanelData {
   usdBrlRate: number;
   usdBrlAuto: boolean;
   usdBrlUpdatedAt: string | null;
+  /** Alíquota de IOF (%) para compras em dólar (requisições de Compras). */
+  usdIofRate: number;
   modelPrices: Record<string, ModelPrice>;
   providers: AiProviderView[];
   usage: UsageSummary;
@@ -350,7 +352,7 @@ export async function getAiPanelData(): Promise<AiPanelData> {
   const [{ data: cfg }, { data: provRows }] = await Promise.all([
     db
       .from("ai_config")
-      .select("active_provider, usd_brl_rate, usd_brl_auto, usd_brl_updated_at, model_prices")
+      .select("active_provider, usd_brl_rate, usd_brl_auto, usd_brl_updated_at, usd_iof_rate, model_prices")
       .eq("id", 1)
       .maybeSingle(),
     db.from("ai_provider_settings").select("provider, label, base_url, enabled, api_key_encrypted, model"),
@@ -438,6 +440,7 @@ export async function getAiPanelData(): Promise<AiPanelData> {
     usdBrlRate,
     usdBrlAuto,
     usdBrlUpdatedAt,
+    usdIofRate: cfg?.usd_iof_rate != null ? Number(cfg.usd_iof_rate) : 3.5,
     modelPrices,
     providers,
     usage,
@@ -589,6 +592,20 @@ export async function deleteProvider(provider: string): Promise<{ ok: true } | {
 }
 
 // ─── Câmbio USD→BRL ──────────────────────────────────────────────────────────
+
+// Alíquota de IOF (%) para compras em dólar das requisições de Compras.
+export async function saveUsdIofRate(rate: number): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  if (!Number.isFinite(rate) || rate < 0 || rate > 100) return { error: "IOF inválido (0 a 100%)." };
+  const db = createAdminClient();
+  const { error } = await db
+    .from("ai_config")
+    .update({ usd_iof_rate: rate, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/ia");
+  return { ok: true };
+}
 
 // Câmbio manual: grava o valor e DESLIGA o automático.
 export async function saveUsdBrlRate(rate: number): Promise<{ ok: true } | { error: string }> {

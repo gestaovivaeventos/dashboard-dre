@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
+import { CornerUpLeft, Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
 
 import {
   sendToPayment,
   previewPrevisaoMatches,
   inactivateRequests,
+  returnRequestToRequisicoes,
   getRequestAttachmentUrl,
   type PrevisaoMatch,
 } from "@/lib/ctrl/actions/requests";
@@ -20,6 +21,7 @@ import {
   type Supplier,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
+import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 import { useRouter } from "next/navigation";
 
 export type ContasRequest = RequestDetail;
@@ -100,6 +102,34 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 
   const canAskInfo = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
 
+  // Devolver p/ requisições (volta à aprovação; exclui o título no Omie se já enviada).
+  const canReturn = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
+  const [returnModal, setReturnModal] = useState<ContasRequest | null>(null);
+  const [returnReason, setReturnReason] = useState("");
+
+  function handleDevolver() {
+    if (!returnModal || !returnReason.trim()) return;
+    const num = returnModal.request_number;
+    startTransition(async () => {
+      const result = await returnRequestToRequisicoes(returnModal.id, returnReason);
+      if (result && "error" in result) {
+        notify(String((result as { error: string }).error), false);
+      } else {
+        setReturnModal(null);
+        setReturnReason("");
+        setSelected(new Set());
+        notify(`Requisição #${num} devolvida para requisições.`);
+        router.refresh();
+      }
+    });
+  }
+
+  // Só faz sentido devolver o que ainda está no fluxo de pagamento e não foi pago.
+  const canReturnRow = (r: ContasRequest) =>
+    canReturn &&
+    !r.omie_paid_at &&
+    ["aprovado", "info_pagamento_pendente", "agendado"].includes(r.status);
+
   async function openAttachment(requestId: string) {
     setAttachmentLoading(true);
     try {
@@ -137,8 +167,50 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       .sort((a, b) => b.request_number - a.request_number);
   }, [requests, activeTab, search]);
 
-  const aprovadas = tabRequests.filter((r) => r.status === "aprovado");
-  const allSelected = aprovadas.length > 0 && selected.size === aprovadas.length;
+  // Colunas do cabeçalho estilo Excel (ordenar + filtrar por valores). A última
+  // coluna muda conforme a aba (vencimento / empresa pagadora / inativação).
+  const columns = useMemo<ExcelColumn<ContasRequest>[]>(() => {
+    const base: ExcelColumn<ContasRequest>[] = [
+      { key: "requisicao", type: "text", getValue: (r) => r.title },
+      {
+        key: "fornecedor",
+        type: "text",
+        getValue: (r) => resolveSupplier(r.ctrl_suppliers)?.name ?? "",
+      },
+      {
+        key: "valor",
+        type: "number",
+        getValue: (r) => Number(r.amount),
+        label: (r) => fmt.format(Number(r.amount)),
+      },
+    ];
+    if (activeTab === "agendado") {
+      base.push({ key: "empresa", type: "text", getValue: (r) => r.paying_company ?? "" });
+    } else if (activeTab === "inativado_csc") {
+      base.push({
+        key: "inativado",
+        type: "date",
+        getValue: (r) => r.inactivated_at ?? null,
+        label: (r) =>
+          r.inactivated_at ? new Intl.DateTimeFormat("pt-BR").format(new Date(r.inactivated_at)) : "—",
+      });
+    } else {
+      base.push({
+        key: "vencimento",
+        type: "date",
+        getValue: (r) => r.due_date ?? null,
+        label: (r) =>
+          r.due_date
+            ? new Intl.DateTimeFormat("pt-BR").format(new Date(r.due_date + "T00:00:00"))
+            : "—",
+      });
+    }
+    return base;
+  }, [activeTab]);
+
+  const { rows: displayed, headerProps, hasFilters, clearAll } = useExcelTable(tabRequests, columns);
+
+  const allSelected = displayed.length > 0 && displayed.every((r) => selected.has(r.id));
 
   const counts: Record<Tab, number> = {
     aprovado: requests.filter((r) => r.status === "aprovado").length,
@@ -148,7 +220,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   };
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(tabRequests.map((r) => r.id)));
+    setSelected(allSelected ? new Set() : new Set(displayed.map((r) => r.id)));
   }
 
   function toggle(id: string) {
@@ -263,17 +335,27 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             </button>
           )}
         </div>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Limpar filtros
+          </button>
+        )}
       </div>
 
       {/* Content */}
-      {tabRequests.length === 0 ? (
+      {displayed.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-          {search.trim()
-            ? `Nenhuma requisição encontrada para "${search.trim()}".`
+          {search.trim() || hasFilters
+            ? "Nenhuma requisição encontrada para a busca/filtros atuais."
             : "Nenhuma requisição nesta categoria."}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
@@ -286,30 +368,30 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                   <th className="w-10 px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={tabRequests.length > 0 && selected.size === tabRequests.length}
-                      onChange={() => setSelected(selected.size === tabRequests.length ? new Set() : new Set(tabRequests.map((r) => r.id)))}
+                      checked={allSelected}
+                      onChange={toggleAll}
                       className="h-4 w-4 rounded border-gray-300"
                     />
                   </th>
                 )}
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Requisição</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Fornecedor</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Dados de Pagamento</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Valor</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  {activeTab === "aprovado"
-                    ? "Vencimento"
-                    : activeTab === "info_pagamento_pendente"
-                    ? "Vencimento"
-                    : activeTab === "agendado"
-                    ? "Empresa / Enviado em"
-                    : "Inativado em"}
+                <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-4 py-3">
+                  {activeTab === "agendado" ? (
+                    <ExcelHeaderCell label="Empresa / Enviado em" menuSide="right" {...headerProps("empresa")} />
+                  ) : activeTab === "inativado_csc" ? (
+                    <ExcelHeaderCell label="Inativado em" menuSide="right" {...headerProps("inativado")} />
+                  ) : (
+                    <ExcelHeaderCell label="Vencimento" menuSide="right" {...headerProps("vencimento")} />
+                  )}
                 </th>
                 <th className="w-20 px-4 py-3 text-right font-medium text-muted-foreground"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {tabRequests.map((req) => {
+              {displayed.map((req) => {
                 const sup = resolveSupplier(req.ctrl_suppliers);
                 const isSelected = selected.has(req.id);
                 const clickable = activeTab === "aprovado" || (activeTab === "agendado" && canInactivate);
@@ -405,6 +487,20 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         {activeTab === "agendado" && req.omie_launch_status === "erro" && ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r)) && (
                           <ResyncButton requestId={req.id} onDone={() => router.refresh()} />
                         )}
+                        {canReturnRow(req) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReturnReason("");
+                              setReturnModal(req);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+                            title="Devolver para requisições (volta à aprovação; edição/exclusão liberadas)"
+                          >
+                            <CornerUpLeft className="h-3.5 w-3.5" />
+                            Devolver
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -416,7 +512,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       )}
 
       {/* Action bar — Aprovadas */}
-      {activeTab === "aprovado" && tabRequests.length > 0 && (
+      {activeTab === "aprovado" && displayed.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           {selected.size > 0 ? (
             <span className="text-sm text-muted-foreground">{selected.size} selecionada(s) · {fmt.format(totalSelected)}</span>
@@ -611,6 +707,63 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {isPending ? "Inativando..." : "Confirmar Inativação"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Devolver para requisições modal */}
+      {returnModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl border bg-background shadow-lg">
+            <div className="border-b px-6 py-4">
+              <h3 className="font-semibold">
+                Devolver requisição #{returnModal.request_number} para requisições
+              </h3>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                A requisição volta para a aprovação e poderá ser editada, reaprovada
+                ou excluída. O valor deixa de contar como realizado no orçamento.
+              </p>
+              {returnModal.omie_contapagar_codigo != null && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                  Esta requisição já foi enviada ao Omie. Ao devolver, o título será
+                  <strong> excluído do Omie</strong> (se ainda não estiver pago).
+                </div>
+              )}
+              <div className="space-y-1">
+                <label className="text-sm font-medium">
+                  Motivo da devolução <span className="text-destructive">*</span>
+                </label>
+                <textarea
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  rows={3}
+                  placeholder="Ex: valor incorreto, precisa reaprovar..."
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+              </div>
+            </div>
+            <div className="border-t px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setReturnModal(null);
+                  setReturnReason("");
+                }}
+                disabled={isPending}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDevolver}
+                disabled={isPending || !returnReason.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CornerUpLeft className="h-4 w-4" />}
+                Devolver
               </button>
             </div>
           </div>

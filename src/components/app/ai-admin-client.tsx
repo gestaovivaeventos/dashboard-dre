@@ -47,6 +47,7 @@ import {
   saveProviderKey,
   saveProviderSettings,
   saveUsdBrlRate,
+  saveUsdIofRate,
   setActiveProvider,
   setUsdRateAuto,
   testProviderConnection,
@@ -196,6 +197,7 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
   const [data, setData] = useState<AiPanelData>(initial);
   const [drafts, setDrafts] = useState<Record<string, ProviderDraft>>(() => draftsFrom(initial));
   const [rate, setRate] = useState<string>(String(initial.usdBrlRate));
+  const [iof, setIof] = useState<string>(String(initial.usdIofRate));
   const [prices, setPrices] = useState<Record<string, { input: string; output: string; cachedInput: string }>>(() =>
     pricesToStrings(initial.modelPrices),
   );
@@ -351,6 +353,16 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
       if ("error" in res) return toast(false, res.error);
       setData((prev) => ({ ...prev, usdBrlRate: parsed, usdBrlAuto: false }));
       toast(true, "Câmbio manual salvo.");
+    });
+  }
+
+  function handleSaveIof() {
+    const parsed = Number(iof.replace(",", "."));
+    startTransition(async () => {
+      const res = await saveUsdIofRate(parsed);
+      if ("error" in res) return toast(false, res.error);
+      setData((prev) => ({ ...prev, usdIofRate: parsed }));
+      toast(true, "IOF salvo.");
     });
   }
 
@@ -855,6 +867,27 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
                 </Button>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">IOF — compras em dólar</CardTitle>
+            <CardDescription>
+              Alíquota de IOF (%) somada na conversão das compras em dólar das requisições de Compras
+              (US$ × câmbio × (1 + IOF)). O câmbio acima é o mesmo usado na conversão.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-end gap-3">
+              <div className="w-40 space-y-1.5">
+                <Label htmlFor="iof">IOF (%)</Label>
+                <Input id="iof" inputMode="decimal" value={iof} onChange={(e) => setIof(e.target.value)} />
+              </div>
+              <Button size="sm" onClick={handleSaveIof} disabled={pending}>
+                Salvar IOF
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

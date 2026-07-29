@@ -51,6 +51,10 @@ async function getContasAPagar() {
       omie_contapagar_codigo,
       omie_launch_error,
       sent_to_payment_at,
+      omie_paid_at,
+      usd_amount,
+      usd_brl_rate,
+      iof_rate,
       inactivation_reason,
       inactivated_at,
       payment_method,
@@ -115,7 +119,9 @@ export default async function ContasAPagarPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "gerente", "diretor", "csc", "contas_a_pagar", "admin")) {
+  // Contas a Pagar é exclusivo do perfil Contas a Pagar (+ admin). Demais
+  // perfis (gerente/diretor/solicitante) não veem nem acessam o menu.
+  if (!hasCtrlRole(ctx, "contas_a_pagar", "admin")) {
     redirect("/ctrl/requisicoes");
   }
 
