@@ -2492,7 +2492,16 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
 // ctrl_history (action 'editado', com o de/para e o motivo).
 export async function editExpenseRoutingFromContasAPagar(
   requestId: string,
-  input: { sector_id: string; expense_type_id: string | null; reason: string },
+  input: {
+    sector_id: string;
+    expense_type_id: string | null;
+    reason: string;
+    // Método de pagamento (opcional). Alterar só o método não devolve à aprovação.
+    payment_method?: string;
+    barcode?: string | null; // boleto
+    pix_key?: string | null; // pix copia-e-cola
+    due_date?: string; // cartão de crédito → vencimento da fatura (dia 05)
+  },
 ) {
   const ctx = await requireCtrlRole("contas_a_pagar", "admin");
 
@@ -2507,6 +2516,7 @@ export async function editExpenseRoutingFromContasAPagar(
     .select(
       `id, status, deleted_at, omie_contapagar_codigo, request_number,
        sector_id, expense_type_id, amount, due_date, reference_month, reference_year, created_by,
+       payment_method, barcode, pix_key,
        ctrl_sectors(name), ctrl_expense_types(name)`,
     )
     .eq("id", requestId)
@@ -2529,9 +2539,64 @@ export async function editExpenseRoutingFromContasAPagar(
 
   const sectorChanged = newSectorId !== oldSectorId;
   const expenseChanged = newExpenseTypeId !== oldExpenseTypeId;
-  if (!sectorChanged && !expenseChanged) {
-    return { error: "Altere o setor e/ou o tipo de despesa." };
+  const routingChanged = sectorChanged || expenseChanged;
+
+  // Método de pagamento (opcional). Alterar o método NÃO afeta o orçamento, então
+  // não força reaprovação — só a mudança de setor/tipo devolve à aprovação. Os
+  // campos de código (boleto / PIX copia-e-cola) acompanham o método escolhido.
+  const oldPaymentMethod = (req.payment_method as string | null) ?? null;
+  const newPaymentMethod = input.payment_method != null ? input.payment_method : oldPaymentMethod;
+  const paymentChanged = input.payment_method != null && input.payment_method !== oldPaymentMethod;
+  const barcodeChanged =
+    input.barcode !== undefined && (input.barcode || null) !== ((req.barcode as string | null) ?? null);
+  const pixKeyChanged =
+    input.pix_key !== undefined && (input.pix_key || null) !== ((req.pix_key as string | null) ?? null);
+  const dueDateChanged =
+    input.due_date !== undefined && (input.due_date || null) !== ((req.due_date as string | null) ?? null);
+
+  if (!routingChanged && !paymentChanged && !barcodeChanged && !pixKeyChanged && !dueDateChanged) {
+    return { error: "Nada foi alterado — ajuste o setor, o tipo de despesa ou o método de pagamento." };
   }
+
+  // Campos de pagamento a atualizar (aplicados nos dois caminhos).
+  const paymentPatch: Record<string, unknown> = {};
+  if (input.payment_method != null) paymentPatch.payment_method = input.payment_method;
+  if (input.barcode !== undefined) paymentPatch.barcode = input.barcode || null;
+  if (input.pix_key !== undefined) paymentPatch.pix_key = input.pix_key || null;
+  if (input.due_date !== undefined) paymentPatch.due_date = input.due_date || null;
+
+  // ── Caminho 1: só o pagamento mudou → atualiza no lugar, SEM reaprovação. ──
+  if (!routingChanged) {
+    const nowIso = new Date().toISOString();
+    const { error: updErr } = await supabase
+      .from("ctrl_requests")
+      .update({ ...paymentPatch, updated_at: nowIso })
+      .eq("id", requestId)
+      .eq("status", "aprovado"); // guarda contra corrida (só antes do envio)
+    if (updErr) return { error: updErr.message };
+
+    await supabase.from("ctrl_history").insert({
+      request_id: requestId,
+      user_id: ctx.id,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      action: "editado" as any,
+      comment: input.reason.trim(),
+      metadata: {
+        source: "contas_a_pagar",
+        changes: { metodo_pagamento: [oldPaymentMethod, newPaymentMethod] },
+        reason: input.reason.trim(),
+        stayed: "aprovado",
+        edited_by_roles: ctx.ctrlRoles,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    revalidatePath("/ctrl/contas-a-pagar");
+    revalidatePath("/ctrl/requisicoes");
+    return { ok: true as const, status: "aprovado" as const };
+  }
+
+  // ── Caminho 2: setor/tipo mudou → recalcula orçamento e volta à aprovação. ──
 
   // Nomes (para o histórico legível): atuais via join, novos via consulta.
   const resolveName = (v: unknown): string | null => {
@@ -2595,6 +2660,7 @@ export async function editExpenseRoutingFromContasAPagar(
       approved_by: null,
       approved_at: null,
       complement_return_status: null,
+      ...paymentPatch,
       updated_at: now,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)

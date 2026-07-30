@@ -106,7 +106,7 @@ export async function cloneOrcarPorSetorFromYear(fromYear: number, toYear: numbe
 
   const { data: source, error: srcError } = await supabase
     .from("orcamento_company_config")
-    .select("company_id, orcar_por_setor")
+    .select("company_id, orcar_por_setor, regime_apuracao")
     .eq("year", fromYear);
   if (srcError) {
     if (isSchemaMissing(srcError.message)) return { needsMigration: true };
@@ -127,6 +127,7 @@ export async function cloneOrcarPorSetorFromYear(fromYear: number, toYear: numbe
       company_id: r.company_id as string,
       year: toYear,
       orcar_por_setor: Boolean(r.orcar_por_setor),
+      regime_apuracao: (r.regime_apuracao as string | null) ?? null,
       updated_by: admin.userId,
     }));
   if (rows.length === 0) return { ok: true as const, copied: 0 };

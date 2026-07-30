@@ -585,10 +585,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                             type="button"
                             onClick={() => setEditRouting(req)}
                             className="inline-flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300"
-                            title="Corrigir setor/tipo de despesa (retorna à aprovação)"
+                            title="Corrigir setor, tipo de despesa ou método de pagamento antes do envio"
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                            Editar setor/tipo
+                            Editar
                           </button>
                         )}
                         {canAskInfo && (req.status === "aprovado" || req.status === "info_pagamento_pendente") && (
@@ -920,7 +920,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         />
       )}
 
-      {/* Editar setor/tipo (retorna à aprovação) */}
+      {/* Editar setor/tipo/método (setor|tipo retorna à aprovação; só método fica) */}
       {editRouting && (
         <EditExpenseRoutingModal
           req={editRouting}
@@ -929,7 +929,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
           onClose={() => setEditRouting(null)}
           onSaved={() => {
             setEditRouting(null);
-            notify("Requisição atualizada e retornada à aprovação para nova validação.");
+            notify("Requisição atualizada.");
             router.refresh();
           }}
         />

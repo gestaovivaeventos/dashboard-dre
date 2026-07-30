@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/toaster";
 import { SettingsFeeVvrTable } from "@/components/app/settings-fee-vvr-table";
 import { SettingsFeatProjetosTable } from "@/components/app/settings-feat-projetos-table";
 import { SettingsMutuosPanel } from "@/components/app/settings-mutuos-panel";
+import { REGIMES_TRIBUTARIOS, regimeTributarioLabel } from "@/lib/companies/regime-tributario";
 import { cn } from "@/lib/utils";
 
 // Identifica a empresa Feat Produções por nome normalizado (sem acento/caixa).
@@ -67,6 +68,8 @@ interface CompanyItem {
   active: boolean;
   created_at: string;
   has_credentials: boolean;
+  /** null = ainda nao definido. */
+  regime_tributario: string | null;
 }
 
 interface SettingsCompaniesProps {
@@ -118,6 +121,9 @@ export function SettingsCompanies({
   // Delete state
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Regime tributário — grava assim que o select muda (id da empresa em voo).
+  const [savingRegime, setSavingRegime] = useState<string | null>(null);
 
   // Manual sync menu state
   const [openSyncMenuId, setOpenSyncMenuId] = useState<string | null>(null);
@@ -324,6 +330,49 @@ export function SettingsCompanies({
     showToast({
       title: "Empresa renomeada",
       description: `Nome atualizado para "${trimmed}".`,
+      variant: "success",
+    });
+  };
+
+  // Regime tributário da empresa — define a regra de encargos sobre a folha no
+  // módulo Orçamento. Vazio grava null ("não definido").
+  const saveRegime = async (companyId: string, value: string) => {
+    const regime = value || null;
+    const previous = companies.find((c) => c.id === companyId)?.regime_tributario ?? null;
+    if (regime === previous) return;
+
+    setSavingRegime(companyId);
+    // Otimista: o select já mostra a escolha enquanto grava; volta atrás em erro.
+    setCompanies((prev) =>
+      prev.map((c) => (c.id === companyId ? { ...c, regime_tributario: regime } : c)),
+    );
+
+    const response = await fetch(`/api/companies/${companyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regimeTributario: regime }),
+    });
+    const payload = await safeJson<{ ok?: boolean; error?: string }>(response);
+    setSavingRegime(null);
+
+    if (!response.ok || !payload?.ok) {
+      setCompanies((prev) =>
+        prev.map((c) => (c.id === companyId ? { ...c, regime_tributario: previous } : c)),
+      );
+      showToast({
+        title: "Falha ao salvar regime tributário",
+        description: payload?.error ?? "Nao foi possivel atualizar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    router.refresh();
+    showToast({
+      title: "Regime tributário salvo",
+      description: regime
+        ? `${regimeTributarioLabel(regime)} definido para esta empresa.`
+        : "Regime removido.",
       variant: "success",
     });
   };
@@ -614,6 +663,32 @@ export function SettingsCompanies({
                         {company.has_credentials ? "configuradas" : "pendentes"}
                       </span>
                     </p>
+                    {/* Regime tributário — usado pelo Orçamento para os encargos da folha. */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <label
+                        htmlFor={`regime-${company.id}`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        Regime tributário
+                      </label>
+                      <select
+                        id={`regime-${company.id}`}
+                        value={company.regime_tributario ?? ""}
+                        onChange={(event) => void saveRegime(company.id, event.target.value)}
+                        disabled={savingRegime === company.id}
+                        className="h-8 rounded-md border border-input bg-background px-2 text-xs disabled:opacity-50"
+                      >
+                        <option value="">— não definido —</option>
+                        {REGIMES_TRIBUTARIOS.map((regime) => (
+                          <option key={regime.key} value={regime.key}>
+                            {regime.label}
+                          </option>
+                        ))}
+                      </select>
+                      {savingRegime === company.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                      ) : null}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button

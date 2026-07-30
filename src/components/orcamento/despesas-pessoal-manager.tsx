@@ -8,6 +8,7 @@ import {
   deleteColaborador,
   getColaboradores,
   getPessoalSetup,
+  setRegimeApuracao,
   updateColaborador,
   updateColaboradorBeneficios,
   type CargoOption,
@@ -16,6 +17,11 @@ import {
   type Movimentacao,
   type PessoalSetup,
 } from "@/lib/orcamento/actions/pessoal";
+import {
+  REGIMES_APURACAO,
+  REGIME_APURACAO_PADRAO,
+  type RegimeApuracao,
+} from "@/lib/orcamento/regime-apuracao";
 import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
@@ -114,7 +120,12 @@ interface Company {
   companyName: string;
 }
 
-const EMPTY_SETUP: PessoalSetup = { orcarPorSetor: false, setores: [], cargoOptions: [] };
+const EMPTY_SETUP: PessoalSetup = {
+  orcarPorSetor: false,
+  regimeApuracao: REGIME_APURACAO_PADRAO,
+  setores: [],
+  cargoOptions: [],
+};
 
 export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
@@ -127,6 +138,7 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
   const [adding, setAdding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
+  const [savingRegime, setSavingRegime] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
   async function loadColabs(cid: string, y: number, sid: string | null) {
@@ -176,6 +188,24 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
     void init(companyId, year);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  /** Caixa x competência do ano — só muda como o 13º será distribuído na
+   * prévia; não mexe no quadro, então não recarrega os colaboradores. */
+  async function handleRegimeChange(value: string) {
+    const regime = value as RegimeApuracao;
+    const previous = setup.regimeApuracao;
+    if (regime === previous) return;
+
+    setFeedback(null);
+    setSavingRegime(true);
+    setSetup((prev) => ({ ...prev, regimeApuracao: regime }));
+    const res = await setRegimeApuracao(companyId, year, regime);
+    setSavingRegime(false);
+    if (res?.error) {
+      setSetup((prev) => ({ ...prev, regimeApuracao: previous }));
+      setFeedback({ ok: false, msg: res.error });
+    }
+  }
 
   function handleSetorChange(sid: string) {
     setSetorId(sid);
@@ -244,6 +274,22 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
             {companies.map((c) => (
               <option key={c.companyId} value={c.companyId}>
                 {c.companyName}
+              </option>
+            ))}
+          </select>
+        </div>
+        {/* Regime de apuração — distribui o 13º (caixa: nov/dez; competência: 1/12). */}
+        <div className="w-48 space-y-1.5">
+          <label className="text-sm font-medium">Regime de apuração</label>
+          <select
+            value={setup.regimeApuracao}
+            onChange={(e) => void handleRegimeChange(e.target.value)}
+            disabled={loading || savingRegime || !companyId || needsMigration}
+            className={INPUT_CLS}
+          >
+            {REGIMES_APURACAO.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.label}
               </option>
             ))}
           </select>

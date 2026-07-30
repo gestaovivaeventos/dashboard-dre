@@ -9,6 +9,12 @@ import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isMovTipo, isVinculo, type MovTipo, type VinculoKey } from "@/lib/orcamento/vinculos";
 import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
+import {
+  isRegimeApuracao,
+  REGIME_APURACAO_PADRAO,
+  toRegimeApuracao,
+  type RegimeApuracao,
+} from "@/lib/orcamento/regime-apuracao";
 
 const PATH = "/orcamento/despesas/pessoal";
 
@@ -61,6 +67,8 @@ export interface SetorOption {
 
 export interface PessoalSetup {
   orcarPorSetor: boolean;
+  /** Caixa x competência — distribui o 13º na prévia do orçamento. */
+  regimeApuracao: RegimeApuracao;
   setores: SetorOption[];
   cargoOptions: CargoOption[];
 }
@@ -129,19 +137,29 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
 }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
-  if (!companyId) return { setup: { orcarPorSetor: false, setores: [], cargoOptions: [] } };
+  if (!companyId) {
+    return {
+      setup: {
+        orcarPorSetor: false,
+        regimeApuracao: REGIME_APURACAO_PADRAO,
+        setores: [],
+        cargoOptions: [],
+      },
+    };
+  }
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
 
-  // Orça por setor? (config do ano)
+  // Config do ano: orça por setor? regime de apuração?
   const { data: cfg } = await supabase
     .from("orcamento_company_config")
-    .select("orcar_por_setor")
+    .select("orcar_por_setor, regime_apuracao")
     .eq("company_id", companyId)
     .eq("year", year)
     .maybeSingle();
   const orcarPorSetor = Boolean(cfg?.orcar_por_setor);
+  const regimeApuracao = toRegimeApuracao(cfg?.regime_apuracao);
 
   // Setores ativos do ano.
   const { data: setoresData, error: setErr } = await supabase
@@ -193,7 +211,38 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
     cargoOptions.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }
 
-  return { setup: { orcarPorSetor, setores, cargoOptions } };
+  return { setup: { orcarPorSetor, regimeApuracao, setores, cargoOptions } };
+}
+
+/** Define o regime de apuração (caixa x competência) da empresa NAQUELE ANO.
+ * O upsert só toca esta coluna — as demais premissas da linha ficam intactas. */
+export async function setRegimeApuracao(
+  companyId: string,
+  year: number,
+  regime: RegimeApuracao,
+) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Selecione uma empresa." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!isRegimeApuracao(regime)) return { error: "Regime de apuração inválido." };
+
+  const supabase = db() ?? (await createClient());
+  const { error } = await supabase.from("orcamento_company_config").upsert(
+    {
+      company_id: companyId,
+      year,
+      regime_apuracao: regime,
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year" },
+  );
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true as const };
 }
 
 // ─── Quadro de colaboradores ────────────────────────────────────────────────────
