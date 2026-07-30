@@ -198,8 +198,11 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
 
 // ─── Quadro de colaboradores ────────────────────────────────────────────────────
 
+// Precisa ser um literal (o supabase-js infere o tipo da linha a partir dele).
+// A cauda são as colunas de benefício: ao acrescentar um item em BENEFICIOS,
+// acrescente a coluna aqui também, senão o valor é gravado mas nunca lido.
 const COLAB_COLS =
-  "id, setor_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, assistencia_medica, auxilio_home_office";
+  "id, setor_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida";
 
 /** Lê os valores de benefício de uma linha crua. */
 function readBeneficios(r: Record<string, unknown>): Beneficios {
