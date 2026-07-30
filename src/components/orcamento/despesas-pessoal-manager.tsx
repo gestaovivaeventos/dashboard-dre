@@ -25,14 +25,18 @@ import {
 import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import {
   MOV_TIPOS,
   VINCULOS,
+  movTemCargo,
   vinculoLabel,
   type MovTipo,
   type VinculoKey,
 } from "@/lib/orcamento/vinculos";
 import { YearSelect } from "@/components/orcamento/year-select";
+import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
+import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -65,11 +69,11 @@ function buildMov(
   year: number,
 ): Movimentacao | null {
   if (!tipo) return null;
-  if (tipo === "desligamento") {
-    return { tipo: "desligamento", data: mesToIso(mes, year), cargo: null, salario: null };
+  if (!movTemCargo(tipo)) {
+    return { tipo, data: mesToIso(mes, year), cargo: null, salario: null };
   }
   return {
-    tipo: "movimentacao",
+    tipo,
     data: mesToIso(mes, year),
     cargo: cargo.trim() || null,
     salario: readSalario(salario),
@@ -120,6 +124,15 @@ interface Company {
   companyName: string;
 }
 
+type TabKey = "quadro" | "beneficios" | "colaborador" | "previa";
+
+const TABS: readonly { key: TabKey; label: string }[] = [
+  { key: "quadro", label: "Quadro" },
+  { key: "beneficios", label: "Benefícios" },
+  { key: "colaborador", label: "Colaborador" },
+  { key: "previa", label: "Prévia" },
+] as const;
+
 const EMPTY_SETUP: PessoalSetup = {
   orcarPorSetor: false,
   regimeApuracao: REGIME_APURACAO_PADRAO,
@@ -130,7 +143,7 @@ const EMPTY_SETUP: PessoalSetup = {
 export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
   const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
   const [year, setYear] = useState<number>(defaultBudgetYear());
-  const [tab, setTab] = useState<"quadro" | "beneficios">("quadro");
+  const [tab, setTab] = useState<TabKey>("quadro");
   const [setorId, setSetorId] = useState<string | null>(null);
   const [setup, setSetup] = useState<PessoalSetup>(EMPTY_SETUP);
   const [items, setItems] = useState<Colaborador[]>([]);
@@ -218,7 +231,7 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
     setAdding(true);
     setFeedback(null);
     const res = await createColaborador(companyId, year, {
-      setorId,
+      setorId: setorEspecifico(setorId),
       nome: null,
       vinculo: "clt",
       cargoAtual: null,
@@ -243,13 +256,28 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
     await loadColabs(companyId, year, setorId);
   }
 
+  // Setor concreto da tela: null quando é quadro único OU "Todos os setores".
+  const setorAtual = setorEspecifico(setorId);
+  const todosSetores = isTodosSetores(setorId);
   const needsSetor = setup.orcarPorSetor && !setorId;
-  const canAdd = !loading && !adding && !!companyId && !needsSetor && !needsMigration;
+  // Em "Todos os setores" o quadro é só de leitura: um colaborador novo não
+  // teria setor a que pertencer.
+  const canAdd =
+    !loading && !adding && !!companyId && !needsSetor && !needsMigration && !todosSetores;
   // Cargos oferecidos: os do setor selecionado (quando orça por setor) ou os sem
-  // setor (plano único). Assim a lista fica direcionada ao setor.
-  const cargoOptionsForSetor = setup.orcarPorSetor
-    ? setup.cargoOptions.filter((o) => o.setorId === setorId)
-    : setup.cargoOptions.filter((o) => o.setorId == null);
+  // setor (plano único). No consolidado, todos, já que as linhas vêm de setores
+  // diferentes.
+  const cargoOptionsForSetor = !setup.orcarPorSetor
+    ? setup.cargoOptions.filter((o) => o.setorId == null)
+    : todosSetores
+      ? setup.cargoOptions
+      : setup.cargoOptions.filter((o) => o.setorId === setorAtual);
+  // Como descrever o escopo nas abas de cálculo.
+  const escopoLabel = !setup.orcarPorSetor
+    ? "esta empresa"
+    : todosSetores
+      ? "todos os setores"
+      : `setor ${setup.setores.find((s) => s.id === setorAtual)?.name ?? ""}`.trim();
 
   if (companies.length === 0) {
     return (
@@ -309,6 +337,7 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                   {s.name}
                 </option>
               ))}
+              <option value={SETOR_TODOS}>Todos os setores</option>
             </select>
           </div>
         )}
@@ -348,26 +377,40 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
         </div>
       ) : (
         <>
-          {/* Abas: Quadro (azul) | Benefícios (verde) */}
+          {/* Abas: Quadro (azul) | Benefícios (verde) | Colaborador | Prévia */}
           <div className="flex gap-1 border-b">
-            {(["quadro", "beneficios"] as const).map((t) => (
+            {TABS.map((t) => (
               <button
-                key={t}
+                key={t.key}
                 type="button"
-                onClick={() => setTab(t)}
+                onClick={() => setTab(t.key)}
                 className={cn(
                   "-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-                  tab === t
+                  tab === t.key
                     ? "border-emerald-600 text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t === "quadro" ? "Quadro" : "Benefícios"}
+                {t.label}
               </button>
             ))}
           </div>
 
-          {tab === "quadro" ? (
+          {tab === "previa" ? (
+            <PreviaPessoal
+              companyId={companyId}
+              year={year}
+              setorId={setorId}
+              escopoLabel={escopoLabel}
+            />
+          ) : tab === "colaborador" ? (
+            <ColaboradorDetalhe
+              companyId={companyId}
+              year={year}
+              setorId={setorId}
+              escopoLabel={escopoLabel}
+            />
+          ) : tab === "quadro" ? (
             <>
               {cargoOptionsForSetor.length === 0 && (
                 <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
@@ -379,8 +422,10 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-muted-foreground">
-                  {items.length} colaborador(es){setup.orcarPorSetor ? " neste setor" : ""}. Edite
-                  direto na tabela — cada alteração é salva automaticamente.
+                  {items.length} colaborador(es)
+                  {setup.orcarPorSetor ? (todosSetores ? " na empresa" : " neste setor") : ""}.
+                  Edite direto na tabela — cada alteração é salva automaticamente.
+                  {todosSetores && " Escolha um setor para adicionar alguém."}
                 </p>
                 <button
                   type="button"
@@ -432,11 +477,11 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                         <th className="border-r px-2 py-1.5 text-left">Salário</th>
                         <th className="border-r px-2 py-1.5 text-left">Tipo</th>
                         <th className="border-r px-2 py-1.5 text-left">Mês</th>
-                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Cargo</th>
                         <th className="border-r px-2 py-1.5 text-left">Salário</th>
                         <th className="border-r px-2 py-1.5 text-left">Tipo</th>
                         <th className="border-r px-2 py-1.5 text-left">Mês</th>
-                        <th className="border-r px-2 py-1.5 text-left">Novo cargo</th>
+                        <th className="border-r px-2 py-1.5 text-left">Cargo</th>
                         <th className="border-r px-2 py-1.5 text-left">Salário</th>
                         <th className="border-r px-2 py-1.5 text-left">Motivo</th>
                         <th className="px-2 py-1.5" />
@@ -447,7 +492,6 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                         <ColaboradorRow
                           key={colab.id}
                           colab={colab}
-                          setorId={setorId}
                           year={year}
                           cargoOptions={cargoOptionsForSetor}
                           onError={(msg) => setFeedback({ ok: false, msg })}
@@ -558,14 +602,13 @@ function draftToInput(d: RowDraft, setorId: string | null, year: number): Colabo
 
 interface RowProps {
   colab: Colaborador;
-  setorId: string | null;
   year: number;
   cargoOptions: CargoOption[];
   onError: (msg: string) => void;
   onDelete: () => void;
 }
 
-function ColaboradorRow({ colab, setorId, year, cargoOptions, onError, onDelete }: RowProps) {
+function ColaboradorRow({ colab, year, cargoOptions, onError, onDelete }: RowProps) {
   const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
   const [saving, setSaving] = useState(false);
   const draftRef = useRef(draft);
@@ -574,7 +617,9 @@ function ColaboradorRow({ colab, setorId, year, cargoOptions, onError, onDelete 
 
   async function persist(next: RowDraft) {
     setSaving(true);
-    const res = await updateColaborador(colab.id, draftToInput(next, setorId, year));
+    // O setor gravado é o DA LINHA, não o do filtro da tela — em "Todos os
+    // setores" o filtro não é um setor, e editar não deve mover ninguém.
+    const res = await updateColaborador(colab.id, draftToInput(next, colab.setorId, year));
     setSaving(false);
     if (res?.error) onError(res.error);
   }
@@ -619,29 +664,22 @@ function ColaboradorRow({ colab, setorId, year, cargoOptions, onError, onDelete 
     }
   }
 
+  /** Troca o tipo da movimentação. Sem tipo, limpa a faixa inteira; no
+   * desligamento, zera cargo e salário (que não se aplicam). Admissão e
+   * movimentação de cargo mantêm as duas células liberadas. */
   function movTipoChange(field: "mov1" | "mov2", value: string) {
     const tipo = (value as "" | MovTipo) || "";
-    if (field === "mov1") {
-      commit(
-        tipo === ""
-          ? { mov1Tipo: "", mov1Mes: "", mov1Cargo: "", mov1Salario: "" }
-          : tipo === "desligamento"
-            ? { mov1Tipo: "desligamento", mov1Cargo: "", mov1Salario: "" }
-            : { mov1Tipo: "movimentacao" },
-      );
-    } else {
-      commit(
-        tipo === ""
-          ? { mov2Tipo: "", mov2Mes: "", mov2Cargo: "", mov2Salario: "" }
-          : tipo === "desligamento"
-            ? { mov2Tipo: "desligamento", mov2Cargo: "", mov2Salario: "" }
-            : { mov2Tipo: "movimentacao" },
-      );
-    }
+    const patch: Partial<RowDraft> =
+      tipo === ""
+        ? { [`${field}Tipo`]: "", [`${field}Mes`]: "", [`${field}Cargo`]: "", [`${field}Salario`]: "" }
+        : movTemCargo(tipo)
+          ? { [`${field}Tipo`]: tipo }
+          : { [`${field}Tipo`]: tipo, [`${field}Cargo`]: "", [`${field}Salario`]: "" };
+    commit(patch);
   }
 
-  const mov1IsMov = draft.mov1Tipo === "movimentacao";
-  const mov2IsMov = draft.mov2Tipo === "movimentacao";
+  const mov1IsMov = Boolean(draft.mov1Tipo) && movTemCargo(draft.mov1Tipo as MovTipo);
+  const mov2IsMov = Boolean(draft.mov2Tipo) && movTemCargo(draft.mov2Tipo as MovTipo);
   // PJ e Estágio não escolhem cargo do plano: o cargo atual é o próprio vínculo.
   const cargoIsAuto = draft.vinculo === "pj" || draft.vinculo === "estagio";
 

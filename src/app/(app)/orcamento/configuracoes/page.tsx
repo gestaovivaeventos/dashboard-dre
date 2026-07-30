@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   Building2,
   ChevronRight,
+  Landmark,
   Percent,
   SlidersHorizontal,
   Users,
@@ -61,6 +62,13 @@ const CARDS: ConfigCard[] = [
       "Cargos e seus níveis (Jr/Pl/Sr), cada um com salário-base, usados no orçamento de despesas com pessoal.",
     icon: Users,
     href: "/orcamento/configuracoes/plano-cargos",
+  },
+  {
+    title: "Encargos sobre a folha",
+    description:
+      "INSS patronal, RAT×FAP, terceiros e FGTS por empresa. Cada uma começa com o padrão do seu regime tributário e pode ser ajustada.",
+    icon: Landmark,
+    href: "/orcamento/configuracoes/encargos",
   },
 ];
 

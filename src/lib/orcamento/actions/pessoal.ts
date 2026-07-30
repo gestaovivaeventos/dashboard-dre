@@ -7,7 +7,13 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import { isMovTipo, isVinculo, type MovTipo, type VinculoKey } from "@/lib/orcamento/vinculos";
+import {
+  isMovTipo,
+  isVinculo,
+  movTemCargo,
+  type MovTipo,
+  type VinculoKey,
+} from "@/lib/orcamento/vinculos";
 import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
 import {
   isRegimeApuracao,
@@ -15,6 +21,10 @@ import {
   toRegimeApuracao,
   type RegimeApuracao,
 } from "@/lib/orcamento/regime-apuracao";
+import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { getEncargos } from "@/lib/orcamento/actions/encargos";
+import type { EncargoValues } from "@/lib/orcamento/encargos";
+import { calcularPrevia, type PreviaResultado } from "@/lib/orcamento/pessoal-calc";
 
 const PATH = "/orcamento/despesas/pessoal";
 
@@ -105,11 +115,11 @@ function cleanMov(mov: Movimentacao | null): {
   if (!mov || !isMovTipo(mov.tipo)) {
     return { tipo: null, data: null, cargo: null, salario: null };
   }
-  if (mov.tipo === "desligamento") {
-    return { tipo: "desligamento", data: mov.data ?? null, cargo: null, salario: null };
+  if (!movTemCargo(mov.tipo)) {
+    return { tipo: mov.tipo, data: mov.data ?? null, cargo: null, salario: null };
   }
   return {
-    tipo: "movimentacao",
+    tipo: mov.tipo,
     data: mov.data ?? null,
     cargo: mov.cargo?.trim() || null,
     salario: mov.salario ?? null,
@@ -264,7 +274,7 @@ function readBeneficios(r: Record<string, unknown>): Beneficios {
 }
 
 /** Lista os colaboradores de uma empresa/ano/setor. `setorId` null = quadro único
- * (empresa que não orça por setor). */
+ * (empresa que não orça por setor); SETOR_TODOS = consolidado da empresa. */
 export async function getColaboradores(
   companyId: string,
   year: number,
@@ -281,7 +291,9 @@ export async function getColaboradores(
     .select(COLAB_COLS)
     .eq("company_id", companyId)
     .eq("year", year);
-  query = setorId ? query.eq("setor_id", setorId) : query.is("setor_id", null);
+  if (!isTodosSetores(setorId)) {
+    query = setorId ? query.eq("setor_id", setorId) : query.is("setor_id", null);
+  }
 
   const { data, error } = await query
     .order("nome", { ascending: true, nullsFirst: false })
@@ -393,6 +405,119 @@ export async function updateColaboradorBeneficios(id: string, beneficios: Benefi
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { ok: true as const };
+}
+
+// ─── Prévia mensal ──────────────────────────────────────────────────────────
+
+/** Item do seletor de colaborador da aba de detalhe. */
+export interface ColaboradorResumo {
+  id: string;
+  nome: string | null;
+  vinculo: VinculoKey;
+  cargoAtual: string | null;
+}
+
+export interface PreviaPayload {
+  previa: PreviaResultado;
+  regimeApuracao: RegimeApuracao;
+  encargos: EncargoValues;
+  /** Total de colaboradores no quadro da empresa (todos os setores). */
+  totalColaboradores: number;
+  /** Quadro inteiro da empresa, para o seletor da aba Colaborador. */
+  roster: ColaboradorResumo[];
+}
+
+export interface PreviaFiltro {
+  /** Restringe a uma pessoa (aba Colaborador). */
+  colaboradorId?: string | null;
+  /** Setor da tela: null = quadro único, SETOR_TODOS = consolidado da empresa. */
+  setorId?: string | null;
+}
+
+/**
+ * Prévia mensal do orçamento de pessoal. Por padrão soma a empresa inteira —
+ * é o número que vai para a DRE —, mas respeita o filtro de setor da tela. O
+ * cálculo em si vive em pessoal-calc.ts (função pura); aqui só se busca o
+ * insumo.
+ *
+ * O roster devolvido segue o mesmo filtro de setor, para o seletor da aba
+ * Colaborador listar só quem está no setor escolhido.
+ */
+export async function getPrevia(
+  companyId: string,
+  year: number,
+  filtro?: PreviaFiltro,
+): Promise<{ payload?: PreviaPayload; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Selecione uma empresa." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = db() ?? (await createClient());
+
+  const { data: cfg } = await supabase
+    .from("orcamento_company_config")
+    .select("regime_apuracao")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .maybeSingle();
+  const regimeApuracao = toRegimeApuracao(cfg?.regime_apuracao);
+
+  let query = supabase
+    .from("orcamento_pessoal_colaboradores")
+    .select(COLAB_COLS)
+    .eq("company_id", companyId)
+    .eq("year", year);
+  // Mesma semântica de getColaboradores: null = quadro único, TODOS = empresa.
+  const setorFiltro = filtro?.setorId ?? null;
+  if (!isTodosSetores(setorFiltro)) {
+    const especifico = setorEspecifico(setorFiltro);
+    query = especifico ? query.eq("setor_id", especifico) : query.is("setor_id", null);
+  }
+
+  const { data, error } = await query.order("nome", { ascending: true, nullsFirst: false });
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+
+  const colaboradores: Colaborador[] = (data ?? []).map((r) => ({
+    id: r.id as string,
+    setorId: (r.setor_id as string) ?? null,
+    nome: (r.nome as string) ?? null,
+    vinculo: r.vinculo as VinculoKey,
+    cargoAtual: (r.cargo_atual as string) ?? null,
+    salarioAtual: r.salario_atual == null ? null : Number(r.salario_atual),
+    mov1: readMov(r.mov1_tipo, r.mov1_data, r.mov1_cargo, r.mov1_salario),
+    mov2: readMov(r.mov2_tipo, r.mov2_data, r.mov2_cargo, r.mov2_salario),
+    justificativa: (r.justificativa as string) ?? null,
+    beneficios: readBeneficios(r as Record<string, unknown>),
+  }));
+
+  const enc = await getEncargos(companyId, year);
+  if (enc.needsMigration) return { needsMigration: true };
+  if (enc.error || !enc.values) return { error: enc.error ?? "Falha ao ler os encargos." };
+
+  const roster: ColaboradorResumo[] = colaboradores.map((c) => ({
+    id: c.id,
+    nome: c.nome,
+    vinculo: c.vinculo,
+    cargoAtual: c.cargoAtual,
+  }));
+
+  const alvo = filtro?.colaboradorId
+    ? colaboradores.filter((c) => c.id === filtro.colaboradorId)
+    : colaboradores;
+
+  return {
+    payload: {
+      previa: calcularPrevia({ colaboradores: alvo, encargos: enc.values, regimeApuracao }),
+      regimeApuracao,
+      encargos: enc.values,
+      totalColaboradores: colaboradores.length,
+      roster,
+    },
+  };
 }
 
 export async function deleteColaborador(id: string) {

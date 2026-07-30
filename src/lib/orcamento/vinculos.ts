@@ -24,7 +24,12 @@ export function vinculoLabel(key: string): string {
 
 // ─── Movimentações previstas ─────────────────────────────────────────────────
 
-export type MovTipo = "movimentacao" | "desligamento";
+// 'admissao'     — o colaborador só passa a existir a partir do mês informado
+//                  (contratação prevista para o meio do ano).
+// 'movimentacao' — muda de cargo/salário a partir do mês.
+// 'desligamento' — sai do quadro depois do mês (a folha do próprio mês ainda
+//                  é contada por inteiro).
+export type MovTipo = "admissao" | "movimentacao" | "desligamento";
 
 export interface MovTipoMeta {
   key: MovTipo;
@@ -32,12 +37,18 @@ export interface MovTipoMeta {
 }
 
 export const MOV_TIPOS: readonly MovTipoMeta[] = [
+  { key: "admissao", label: "Admissão" },
   { key: "movimentacao", label: "Movimentação de cargo" },
   { key: "desligamento", label: "Desligamento" },
 ] as const;
 
 export function isMovTipo(v: unknown): v is MovTipo {
-  return v === "movimentacao" || v === "desligamento";
+  return v === "admissao" || v === "movimentacao" || v === "desligamento";
+}
+
+/** Tipos que trazem cargo e salário próprios (desligamento não traz). */
+export function movTemCargo(tipo: MovTipo): boolean {
+  return tipo === "admissao" || tipo === "movimentacao";
 }
 
 export function movTipoLabel(key: string): string {
