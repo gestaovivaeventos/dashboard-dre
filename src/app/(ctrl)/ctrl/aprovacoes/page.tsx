@@ -30,7 +30,7 @@ export default async function AprovacoesPage() {
   }
 
   const { requests = [], error } = await getRequests({
-    statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado", "estornado"],
+    statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado"],
     approvalScope: true,
   });
 

@@ -1934,60 +1934,12 @@ export async function getPaymentInfoThread(
   return { messages };
 }
 
-// ─── Reverse (estorno) ────────────────────────────────────────────────────────
-
-export async function reverseRequest(requestId: string, reason: string) {
-  const ctx = await requireCtrlRole("diretor", "admin");
-  if (!reason.trim()) return { error: "Motivo do estorno é obrigatório." };
-
-  const adminClient = createAdminClientIfAvailable();
-  const supabase = adminClient ?? (await createClient());
-
-  const { data: req } = await supabase
-    .from("ctrl_requests")
-    .select("id, status, created_by, request_number, amount")
-    .eq("id", requestId)
-    .single();
-
-  if (!req) return { error: "Requisição não encontrada." };
-  if (req.status !== "aprovado")
-    return { error: "Apenas requisições aprovadas podem ser estornadas." };
-
-  await supabase
-    .from("ctrl_requests")
-    .update({
-      status: "estornado",
-      reversed_at: new Date().toISOString(),
-      reversal_reason: reason.trim(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", requestId);
-
-  await supabase.from("ctrl_history").insert({
-    request_id: requestId,
-    user_id: ctx.id,
-    action: "estornado",
-    comment: reason.trim(),
-    metadata: {
-      reversed_by_roles: ctx.ctrlRoles,
-      amount: req.amount,
-      reason: reason.trim(),
-    },
-  });
-
-  await notifyRequester({
-    userId: req.created_by,
-    requestId,
-    requestNumber: req.request_number,
-    title: "Requisição Estornada",
-    message: `Sua requisição #${req.request_number} foi estornada por ${ctx.name ?? ctx.email}. Motivo: ${reason.trim()}`,
-    type: "estorno",
-  });
-
-  revalidatePath("/ctrl/requisicoes");
-  revalidatePath("/ctrl/aprovacoes");
-  return { ok: true };
-}
+// ─── Estorno (removido) ───────────────────────────────────────────────────────
+// O estorno de requisição aprovada foi descontinuado: a correção de uma
+// requisição já aprovada é feita pela edição em Contas a Pagar, que recalcula o
+// orçamento do setor. Registros antigos com status `estornado` continuam
+// existindo (e seguem fora do consumo de orçamento), mas não há mais como criar
+// novos. O status permanece no enum apenas para leitura desse histórico.
 
 // ─── Batch Approve ────────────────────────────────────────────────────────────
 
@@ -2740,7 +2692,8 @@ export async function updateRequestStatus(
 ) {
   if (newStatus === "aprovado") return approveRequest(requestId, comment);
   if (newStatus === "rejeitado") return rejectRequest(requestId, comment ?? "");
-  if (newStatus === "estornado") return reverseRequest(requestId, comment ?? "");
+  if (newStatus === "estornado")
+    return { error: "Estorno descontinuado — corrija a requisição em Contas a Pagar." };
 
   await requireCtrlRole("gerente", "diretor", "csc", "admin");
   const adminClient = createAdminClientIfAvailable();
