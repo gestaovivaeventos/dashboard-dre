@@ -57,8 +57,15 @@ export function EditExpenseRoutingModal({
   const [sectorId, setSectorId] = useState(req.sector_id ?? "");
   const [expenseTypeId, setExpenseTypeId] = useState(req.expense_type_id ?? "");
   const [paymentMethod, setPaymentMethod] = useState(req.payment_method ?? "");
-  const [barcode, setBarcode] = useState(req.barcode ?? "");
-  const [pixKey, setPixKey] = useState(req.pix_key ?? "");
+  // Só reaproveita o código salvo quando a requisição JÁ era desse método. Ao
+  // TROCAR para boleto / PIX copia-e-cola, o campo vem VAZIO (o valor salvo pode
+  // ser a chave PIX do fornecedor, que não é um copia-e-cola).
+  const [barcode, setBarcode] = useState(
+    req.payment_method === "boleto" ? req.barcode ?? "" : "",
+  );
+  const [pixKey, setPixKey] = useState(
+    req.payment_method === "pix_copia_cola" ? req.pix_key ?? "" : "",
+  );
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
