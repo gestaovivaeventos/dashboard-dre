@@ -126,7 +126,7 @@ export function canAccessPathByProfile(
     if (!canCompras) return false;
     // Aprovações: gerente/diretor/contas_a_pagar/admin
     if (pathname.startsWith("/ctrl/aprovacoes")) {
-      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+      return ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile);
     }
     // Contas a Pagar: exclusivo do perfil Contas a Pagar (+ admin, que já
     // retornou true no topo). Diretor/gerente/solicitante não acessam.
@@ -139,9 +139,11 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/orcamento/editar")) {
       return false;
     }
-    // Orcamento (visualizacao): gerente + diretor + contas_a_pagar (csc).
+    // Orcamento (visualizacao): gerente + gerente_setor + diretor +
+    // contas_a_pagar (csc). O gerente_setor entra na tela, mas só enxerga os
+    // setores vinculados a ele (filtro na própria página).
     if (pathname.startsWith("/ctrl/orcamento")) {
-      return ["gerente", "diretor", "contas_a_pagar"].includes(profile);
+      return ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile);
     }
     // Relatorios: diretor + contas_a_pagar (csc); escondido do gerente/solicitante.
     if (pathname.startsWith("/ctrl/relatorios")) {
@@ -151,7 +153,9 @@ export function canAccessPathByProfile(
     // A aprovação em si fica restrita ao CSC/admin (gate no client + server
     // action), mas a tela é colaborativa.
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
-      return ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar"].includes(profile);
+      return ["solicitante", "gerente", "gerente_setor", "diretor", "csc", "contas_a_pagar"].includes(
+        profile,
+      );
     }
     // Configurações do módulo Compras (admin-only): o hub /ctrl/configuracoes e
     // as demais áreas administrativas — Eventos, Mapeamento Omie, Setores e

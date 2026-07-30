@@ -34,13 +34,20 @@ export interface ModuleAccess {
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
-// Six profiles cover all cases. Each user has exactly one. Module visibility
-// is independent (can_financeiro, can_compras). Plataforma is implicit when
-// profile === 'admin'.
+// Each user has exactly one. Module visibility is independent
+// (can_financeiro, can_compras). Plataforma is implicit when profile === 'admin'.
+//
+// NOTA sobre gerente vs gerente_setor: os dois têm exatamente as MESMAS
+// permissões (ambos derivam o CtrlRole 'gerente' — ver deriveCtrlRoles em
+// session.ts e get_ctrl_role() no banco). A única diferença é a tela
+// /ctrl/orcamento: 'gerente' (exibido como "Gerente Sócio") vê todos os
+// setores; 'gerente_setor' (exibido como "Gerente") vê apenas os setores
+// vinculados ao próprio usuário.
 export type UserProfileType =
   | "admin"
   | "contas_a_pagar"
   | "gerente"
+  | "gerente_setor"
   | "diretor"
   | "validador_contrato"
   | "solicitante"

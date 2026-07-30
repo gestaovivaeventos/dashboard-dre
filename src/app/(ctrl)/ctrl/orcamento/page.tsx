@@ -6,22 +6,39 @@ import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
 import { OrcamentoTable, type OrcamentoRow } from "@/components/ctrl/orcamento-table";
 
-async function getOrcamentoData(year: number) {
+/**
+ * @param sectorFilter lista de setores a que a visão está restrita, ou null
+ *   para ver tudo. Usado pelo perfil "Gerente" (gerente_setor), que enxerga
+ *   apenas as despesas dos setores vinculados a ele.
+ */
+async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
   const supabase = await createClient();
 
+  let budgetQuery = supabase
+    .from("ctrl_budget")
+    .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
+    .eq("period_year", year);
+  let requestsQuery = supabase
+    .from("ctrl_requests")
+    .select("expense_type_id, sector_id, status, amount, due_date, created_at")
+    .not("status", "in", '("rejeitado","estornado","inativado_csc")')
+    .is("deleted_at", null) // exclui requisições excluídas logicamente
+    .eq("reference_year", year);
+  let sectorsQuery = supabase.from("ctrl_sectors").select("id, name");
+
+  // Escopo por setor: linhas sem setor ("Sem setor") também ficam de fora,
+  // já que não pertencem a nenhum setor do usuário.
+  if (sectorFilter) {
+    budgetQuery = budgetQuery.in("sector_id", sectorFilter);
+    requestsQuery = requestsQuery.in("sector_id", sectorFilter);
+    sectorsQuery = sectorsQuery.in("id", sectorFilter);
+  }
+
   const [budgetRes, requestsRes, typesRes, sectorsRes] = await Promise.all([
-    supabase
-      .from("ctrl_budget")
-      .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
-      .eq("period_year", year),
-    supabase
-      .from("ctrl_requests")
-      .select("expense_type_id, sector_id, status, amount, due_date, created_at")
-      .not("status", "in", '("rejeitado","estornado","inativado_csc")')
-      .is("deleted_at", null) // exclui requisições excluídas logicamente
-      .eq("reference_year", year),
+    budgetQuery,
+    requestsQuery,
     supabase.from("ctrl_expense_types").select("id, name").order("name"),
-    supabase.from("ctrl_sectors").select("id, name"),
+    sectorsQuery,
   ]);
 
   if (budgetRes.error) return { error: budgetRes.error.message };
@@ -97,6 +114,14 @@ async function getOrcamentoData(year: number) {
   return { rows };
 }
 
+/** Nomes dos setores do usuário — só pra legenda da visão restrita. */
+async function getSectorNames(sectorIds: string[]): Promise<string[]> {
+  if (sectorIds.length === 0) return [];
+  const supabase = await createClient();
+  const { data } = await supabase.from("ctrl_sectors").select("name").in("id", sectorIds);
+  return (data ?? []).map((s) => s.name);
+}
+
 export default async function OrcamentoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
@@ -107,7 +132,18 @@ export default async function OrcamentoPage() {
 
   const year = new Date().getFullYear();
   const canEditBudget = hasCtrlRole(ctx, "csc", "admin");
-  const { rows = [], error } = await getOrcamentoData(year);
+
+  // Perfil "Gerente" (gerente_setor): vê apenas os setores vinculados a ele.
+  // Sem setor vinculado não há nada a exibir — não caímos no fallback de ver
+  // tudo. Os demais perfis (inclusive "Gerente Sócio") seguem vendo todos.
+  const sectorScoped = ctx.profile === "gerente_setor";
+  const sectorFilter = sectorScoped ? ctx.sectorIds : null;
+  const sectorNames = sectorScoped ? await getSectorNames(ctx.sectorIds) : [];
+
+  const { rows = [], error } =
+    sectorScoped && ctx.sectorIds.length === 0
+      ? { rows: [] as OrcamentoRow[], error: undefined }
+      : await getOrcamentoData(year, sectorFilter);
 
   const grandOrcado = rows.reduce((s, r) => s + r.orcado, 0);
   const grandRealizado = rows.reduce((s, r) => s + r.realizado, 0);
@@ -122,6 +158,9 @@ export default async function OrcamentoPage() {
         <h1 className="text-2xl font-bold tracking-tight">Orçamento {year}</h1>
         <p className="text-muted-foreground">
           Orçado vs realizado por tipo de despesa
+          {sectorScoped && sectorNames.length > 0
+            ? ` — ${sectorNames.join(", ")}`
+            : ""}
         </p>
       </div>
 
@@ -157,7 +196,9 @@ export default async function OrcamentoPage() {
       {rows.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center">
           <p className="text-sm text-muted-foreground">
-            Nenhum dado de orçamento ou requisição encontrado para {year}.
+            {sectorScoped && ctx.sectorIds.length === 0
+              ? "Seu usuário não está vinculado a nenhum setor. Peça ao administrador para vincular um setor em Usuários."
+              : `Nenhum dado de orçamento ou requisição encontrado para ${year}.`}
           </p>
         </div>
       ) : (

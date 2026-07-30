@@ -28,8 +28,6 @@ const TYPE_STYLES: Record<string, string> = {
   info_solicitada:            "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
   info_pagamento_solicitada:  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
   info_pagamento_respondida:  "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
-  estorno:                    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
-  inativacao:                 "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   fornecedor_pendente:        "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300",
 };
 

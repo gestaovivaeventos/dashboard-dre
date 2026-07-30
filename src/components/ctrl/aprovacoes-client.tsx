@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   approveRequest,
   rejectRequest,
-  reverseRequest,
   batchApproveRequests,
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
@@ -41,14 +40,13 @@ type Req = {
   approver?: { name: string | null } | null;
 };
 
-type Tab = "pendente" | "aguardando_complementacao" | "aprovado" | "rejeitado" | "estornado";
+type Tab = "pendente" | "aguardando_complementacao" | "aprovado" | "rejeitado";
 
 const TAB_LABELS: Record<Tab, string> = {
   pendente: "Pendentes",
   aguardando_complementacao: "Complementação",
   aprovado: "Aprovadas",
   rejeitado: "Rejeitadas",
-  estornado: "Estornadas",
 };
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
@@ -57,7 +55,6 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   aprovado:                    { label: "Aprovado",        cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   rejeitado:                   { label: "Rejeitado",       cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   aguardando_complementacao:   { label: "Complementação",  cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
-  estornado:                   { label: "Estornado",       cls: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400" },
   agendado:                    { label: "Enviado Pgto",    cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
 };
 
@@ -98,7 +95,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   const [sortField, setSortField] = useState<SortField>("data");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "reverse" | "detail" } | null>(null);
+  const [modal, setModal] = useState<{ req: Req; mode: "reject" | "detail" } | null>(null);
   // Conversa de complementação (pedir info / responder) — thread completa.
   const [threadModal, setThreadModal] = useState<{ req: Req; mode: "ask" | "answer" } | null>(null);
   const [textInput, setTextInput] = useState("");
@@ -107,7 +104,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
 
   const hasRole = (...roles: string[]) => ctrlRoles.some((r) => roles.includes(r));
   const canApprove = hasRole("gerente", "diretor", "csc", "admin");
-  const canReverse = hasRole("diretor", "admin");
 
   const awaitingSet = new Set(awaitingApproverIds);
 
@@ -187,7 +183,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
     aguardando_complementacao: requests.filter((r) => r.status === "aguardando_complementacao").length,
     aprovado: requests.filter((r) => r.status === "aprovado").length,
     rejeitado: requests.filter((r) => r.status === "rejeitado").length,
-    estornado: requests.filter((r) => r.status === "estornado").length,
   };
 
   function notify(msg: string, ok = true) {
@@ -199,7 +194,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
     setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  function openModal(req: Req, mode: "reject" | "reverse" | "detail") {
+  function openModal(req: Req, mode: "reject" | "detail") {
     setTextInput("");
     setModal({ req, mode });
   }
@@ -422,16 +417,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                             Responder
                           </button>
                         )}
-
-                        {/* Director/admin reversal */}
-                        {canReverse && req.status === "aprovado" && (
-                          <button
-                            onClick={() => openModal(req, "reverse")}
-                            className="rounded-md border border-amber-500 text-amber-600 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-colors"
-                          >
-                            Estornar
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -477,7 +462,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                 <h3 className="font-semibold">
                   {modal.mode === "detail" && `Requisição #${modal.req.request_number}`}
                   {modal.mode === "reject" && "Rejeitar Requisição"}
-                  {modal.mode === "reverse" && "Estornar Requisição"}
                 </h3>
                 <p className="text-sm text-muted-foreground">{modal.req.title}</p>
               </div>
@@ -531,22 +515,17 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                 </div>
               )}
 
-              {/* Reject / Reverse */}
-              {modal.mode !== "detail" && (
+              {/* Reject */}
+              {modal.mode === "reject" && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    {modal.mode === "reject" && "Informe o motivo da rejeição (obrigatório):"}
-                    {modal.mode === "reverse" && "Informe o motivo do estorno (obrigatório):"}
+                    Informe o motivo da rejeição (obrigatório):
                   </p>
                   <textarea
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     rows={4}
-                    placeholder={
-                      modal.mode === "reject"
-                        ? "Ex: Despesa não autorizada no orçamento..."
-                        : "Ex: Pagamento duplicado..."
-                    }
+                    placeholder="Ex: Despesa não autorizada no orçamento..."
                     className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2 resize-none"
                   />
                 </div>
@@ -565,15 +544,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                   className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
                 >
                   {isPending ? "Rejeitando..." : "Confirmar Rejeição"}
-                </button>
-              )}
-              {modal.mode === "reverse" && (
-                <button
-                  onClick={() => handleAction(() => reverseRequest(modal.req.id, textInput))}
-                  disabled={isPending || !textInput.trim()}
-                  className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? "Estornando..." : "Confirmar Estorno"}
                 </button>
               )}
             </div>

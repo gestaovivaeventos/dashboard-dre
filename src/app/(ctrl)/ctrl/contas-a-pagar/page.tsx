@@ -55,8 +55,6 @@ async function getContasAPagar() {
       usd_amount,
       usd_brl_rate,
       iof_rate,
-      inactivation_reason,
-      inactivated_at,
       payment_method,
       installment_number,
       installment_total,
@@ -92,7 +90,7 @@ async function getContasAPagar() {
       creator:users!ctrl_requests_created_by_fkey(name, email),
       approver:users!ctrl_requests_approved_by_fkey(name, email)
     `)
-    .in("status", ["aprovado", "agendado", "inativado_csc", "info_pagamento_pendente"])
+    .in("status", ["aprovado", "agendado", "info_pagamento_pendente"])
     .is("deleted_at", null) // exclui requisições excluídas logicamente
     .order("due_date", { ascending: true, nullsFirst: false });
 
@@ -155,7 +153,7 @@ export default async function ContasAPagarPage() {
           <p className="text-xs font-medium uppercase text-muted-foreground">Total pendente</p>
           <p className="text-xl font-bold">{fmt.format(totalAprovado + totalAgendado)}</p>
           <p className="text-xs text-muted-foreground">
-            {requests.filter((r) => r.status !== "inativado_csc").length} requisição(ões)
+            {requests.length} requisição(ões)
           </p>
         </div>
         <div className="rounded-lg border p-4 space-y-1">

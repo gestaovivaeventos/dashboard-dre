@@ -1,11 +1,18 @@
 import { getSessionContext } from "@/lib/auth/session";
-import type { CtrlRole } from "@/lib/supabase/types";
+import type { CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 export interface CtrlUserContext {
   id: string;
   name: string | null;
   email: string;
   dreRole: "admin" | "gestor_hero" | "gestor_unidade";
+  /**
+   * Perfil unificado (users.profile). Use apenas quando dois perfis compartilham
+   * o mesmo CtrlRole e a tela precisa distinguí-los — hoje só o par
+   * gerente ("Gerente Sócio") vs gerente_setor ("Gerente") na tela de Orçamento.
+   * Para permissão, continue usando hasCtrlRole/requireCtrlRole.
+   */
+  profile: UserProfileType;
   /** Conjunto de permissoes no modulo Controladoria. Nunca vazio quando o contexto existe. */
   ctrlRoles: CtrlRole[];
   /** Setores aos quais o usuario esta vinculado (user_sectors). Vazio = sem vinculo. */
@@ -24,6 +31,7 @@ export async function getCtrlUser(): Promise<CtrlUserContext | null> {
     name: ctx.profile.name,
     email: ctx.profile.email,
     dreRole: ctx.profile.role,
+    profile: ctx.profile.profile,
     ctrlRoles: ctx.modules.ctrl.roles,
     sectorIds: ctx.profile.sector_ids ?? [],
   };

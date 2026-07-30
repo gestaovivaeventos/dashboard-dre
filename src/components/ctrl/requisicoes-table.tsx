@@ -587,9 +587,7 @@ const STATUS_LABEL: Record<string, string> = {
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
-  estornado: "Estornado",
   agendado: "Enviado Pgto",
-  inativado_csc: "Inativado CSC",
   aguardando_aprovacao_fornecedor: "Homologação fornec. pendente",
   info_pagamento_pendente: "Info pendente",
 };
@@ -610,9 +608,7 @@ function StatusBadge({ status, paid }: { status: string; paid?: boolean }) {
     aprovado: { label: "Aprovado", className: "bg-green-100 text-green-800" },
     rejeitado: { label: "Rejeitado", className: "bg-red-100 text-red-800" },
     aguardando_complementacao: { label: "Complementação", className: "bg-blue-100 text-blue-800" },
-    estornado: { label: "Estornado", className: "bg-gray-100 text-gray-800" },
     agendado: { label: "Enviado Pgto", className: "bg-purple-100 text-purple-800" },
-    inativado_csc: { label: "Inativado CSC", className: "bg-gray-100 text-gray-500" },
     aguardando_aprovacao_fornecedor: {
       label: "Homologação fornec. pendente",
       className: "bg-indigo-100 text-indigo-800",
