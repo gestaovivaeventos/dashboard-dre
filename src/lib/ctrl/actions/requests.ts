@@ -2180,6 +2180,24 @@ export async function enqueueSendToPayment(
   const now = new Date().toISOString();
   const companyName = company.name as string;
 
+  // Previsão escolhida no diálogo: o lançamento acontece minutos depois, então o
+  // código precisa ficar guardado até o worker consumir. Gravado ANTES de
+  // enfileirar — se falhar (migration 20260730120000 não aplicada), nada entra
+  // na fila e o usuário recebe o erro em vez de um lote lançando errado.
+  for (const [id, decisao] of Object.entries(decisoes ?? {})) {
+    if (!requestIds.includes(id)) continue;
+    // "novo" limpa uma escolha anterior — senão um reenvio depois de trocar de
+    // ideia ainda editaria a previsão antiga.
+    const valor = typeof decisao === "number" ? decisao : null;
+    const { error: prevErr } = await supabase
+      .from("ctrl_requests")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ omie_previsao_codigo: valor } as any)
+      .eq("id", id)
+      .eq("status", "aprovado");
+    if (prevErr) return { error: `Falha ao guardar a previsão escolhida: ${prevErr.message}` };
+  }
+
   const { data: enfileiradas, error } = await supabase
     .from("ctrl_requests")
     .update({
@@ -2202,19 +2220,6 @@ export async function enqueueSendToPayment(
   const ids = (enfileiradas ?? []).map((r) => r.id as string);
   if (ids.length === 0) {
     return { error: "Nenhuma requisição aprovada disponível para envio." };
-  }
-
-  // Previsão escolhida no diálogo: o lançamento acontece minutos depois, então
-  // o código precisa ficar guardado até o worker consumir.
-  for (const id of ids) {
-    const decisao = decisoes?.[id];
-    if (typeof decisao !== "number") continue;
-    const { error: prevErr } = await supabase
-      .from("ctrl_requests")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({ omie_previsao_codigo: decisao } as any)
-      .eq("id", id);
-    if (prevErr) return { error: `Falha ao guardar a previsão escolhida: ${prevErr.message}` };
   }
 
   await supabase.from("ctrl_history").insert(

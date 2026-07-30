@@ -29,7 +29,8 @@ export interface DrainResult {
 interface QueuedRow {
   id: string;
   paying_company_id: string;
-  omie_previsao_codigo: number | null;
+  /** `undefined` enquanto a migration 20260730120000 não tiver sido aplicada. */
+  omie_previsao_codigo?: number | null;
 }
 
 /**
@@ -53,9 +54,12 @@ export async function drainOmieLaunchQueue(db: DB): Promise<DrainResult> {
     .lt("omie_launched_at", orphanCutoff);
 
   // Fila: aprovadas, marcadas como 'pendente' e ainda não reservadas.
+  // `select("*")` de propósito: listar `omie_previsao_codigo` explicitamente
+  // derrubaria a leitura inteira (42703) enquanto a migration 20260730120000
+  // não estiver aplicada, e a fila pararia por causa de um campo opcional.
   const { data: fila, error: filaErr } = await db
     .from("ctrl_requests")
-    .select("id, paying_company_id, omie_previsao_codigo")
+    .select("*")
     .eq("status", "aprovado")
     .eq("omie_launch_status", "pendente")
     .is("omie_launched_at", null)
@@ -128,14 +132,15 @@ export async function drainOmieLaunchQueue(db: DB): Promise<DrainResult> {
       }
 
       // Lançou: sai de "Aguardando Envio" e vai para "Enviados".
-      await db
-        .from("ctrl_requests")
-        .update({
-          status: "agendado",
-          omie_previsao_codigo: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", row.id);
+      // A previsão só é limpa se estava preenchida — assim o update não depende
+      // da migration 20260730120000 quando ninguém usou essa opção.
+      const conclusao: Record<string, unknown> = {
+        status: "agendado",
+        updated_at: new Date().toISOString(),
+      };
+      if (row.omie_previsao_codigo != null) conclusao.omie_previsao_codigo = null;
+
+      await db.from("ctrl_requests").update(conclusao).eq("id", row.id);
       launched++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
