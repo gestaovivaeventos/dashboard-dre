@@ -234,7 +234,7 @@ export async function launchRequestToOmie(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
+      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
     )
     .eq("id", request.supplier_id)
     .maybeSingle();
@@ -365,7 +365,9 @@ export async function launchRequestToOmie(
         cidade: supplier.cidade as string | null,
         endereco: supplier.endereco as string | null,
         endereco_numero: supplier.endereco_numero as string | null,
+        bairro: supplier.bairro as string | null,
         complemento: supplier.complemento as string | null,
+        cep: supplier.cep as string | null,
       };
       const { codigoCliente } = await syncSupplierToOmieUnit(appKey, appSecret, supplierData);
       codigoClienteFornecedor = codigoCliente;

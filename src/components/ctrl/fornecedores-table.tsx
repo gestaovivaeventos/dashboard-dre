@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, Truck, X, XCircle } from "lucide-react";
 
 import { approveSupplier, rejectSupplier, updateSupplier, resyncSupplierOmie } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
+import {
+  UFS_BR,
+  cepDigits,
+  enderecoMissing,
+  hasAnyEndereco,
+  lookupCep,
+  maskCep,
+} from "@/lib/ctrl/endereco";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
 import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL, paisNomeByCodigo } from "@/lib/ctrl/paises";
 import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
@@ -35,7 +43,9 @@ interface SupplierRow {
   cidade: string | null;
   endereco: string | null;
   endereco_numero: string | null;
+  bairro: string | null;
   complemento: string | null;
+  cep: string | null;
   status: string;
   rejection_reason: string | null;
   created_at: string;
@@ -91,6 +101,36 @@ export function FornecedoresTable({
   const [editForm, setEditForm] = useState<EditFormState>(emptyEditForm());
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [cepLoading, setCepLoading] = useState(false);
+  const [cepMsg, setCepMsg] = useState<string | null>(null);
+  // Último CEP consultado — descarta resposta atrasada de um CEP já trocado.
+  const cepRequestRef = useRef("");
+
+  // Mesma conveniência da tela da Omie: o CEP preenche o resto do endereço.
+  async function handleCepChange(raw: string) {
+    const masked = maskCep(raw);
+    setEditForm((prev) => ({ ...prev, cep: masked }));
+    setCepMsg(null);
+    const digits = cepDigits(masked);
+    cepRequestRef.current = digits;
+    if (digits.length !== 8) return;
+    setCepLoading(true);
+    const found = await lookupCep(digits);
+    if (cepRequestRef.current !== digits) return;
+    setCepLoading(false);
+    if (!found) {
+      setCepMsg("CEP não encontrado — preencha o endereço manualmente.");
+      return;
+    }
+    setEditForm((prev) => ({
+      ...prev,
+      endereco: found.endereco || prev.endereco,
+      bairro: found.bairro || prev.bairro,
+      cidade: found.cidade || prev.cidade,
+      estado: found.estado || prev.estado,
+      complemento: prev.complemento || found.complemento,
+    }));
+  }
 
   // History modal — opened via the "Histórico" button on a row.
   const [historySupplier, setHistorySupplier] = useState<SupplierRow | null>(null);
@@ -113,6 +153,7 @@ export function FornecedoresTable({
     setDetailSupplier(null);
     setEditMode(false);
     setEditError(null);
+    setCepMsg(null);
   }
 
   function startEdit() {
@@ -142,6 +183,19 @@ export function FornecedoresTable({
       setEditError("Selecione o País do fornecedor estrangeiro.");
       return;
     }
+    // Endereço nacional: a Omie exige completo. Cadastros antigos ficaram sem
+    // endereço — só cobramos de quem já tem um gravado ou começou a preencher
+    // (mesma regra da server action, pra não travar o ajuste de um legado).
+    if (!editForm.estrangeiro) {
+      const faltando = enderecoMissing(editForm);
+      const jaTinha = hasAnyEndereco(detailSupplier);
+      if (faltando.length && (jaTinha || hasAnyEndereco(editForm))) {
+        setEditError(
+          `A Omie exige o endereço completo do fornecedor. Preencha: ${faltando.join(", ")}.`,
+        );
+        return;
+      }
+    }
     setEditSaving(true);
     setEditError(null);
     const paisNome = editForm.estrangeiro
@@ -155,11 +209,13 @@ export function FornecedoresTable({
       estrangeiro: editForm.estrangeiro,
       pais: editForm.estrangeiro ? paisNome ?? null : null,
       codigo_pais: editForm.estrangeiro ? editForm.codigo_pais || null : null,
-      estado: editForm.estrangeiro ? ESTADO_EXTERIOR : null,
-      cidade: editForm.estrangeiro ? editForm.cidade || null : null,
-      endereco: editForm.estrangeiro ? editForm.endereco || null : null,
-      endereco_numero: editForm.estrangeiro ? editForm.endereco_numero || null : null,
-      complemento: editForm.estrangeiro ? editForm.complemento || null : null,
+      estado: editForm.estrangeiro ? ESTADO_EXTERIOR : editForm.estado || null,
+      cep: editForm.estrangeiro ? null : editForm.cep || null,
+      cidade: editForm.cidade || null,
+      endereco: editForm.endereco || null,
+      endereco_numero: editForm.endereco_numero || null,
+      bairro: editForm.estrangeiro ? null : editForm.bairro || null,
+      complemento: editForm.complemento || null,
       email: editForm.email,
       phone: editForm.phone,
       chave_pix: editForm.chave_pix,
@@ -730,6 +786,48 @@ export function FornecedoresTable({
                         <EditField label="Complemento" value={editForm.complemento} onChange={(v) => setEditForm({ ...editForm, complemento: v })} />
                       </>
                     )}
+                    {/* Endereço nacional — obrigatório para o cadastro na Omie. */}
+                    {!editForm.estrangeiro && (
+                      <>
+                        <p className="text-xs text-muted-foreground sm:col-span-2">
+                          Endereço (obrigatório na Omie): informe o CEP e o número —
+                          o restante é preenchido automaticamente.
+                        </p>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            CEP *
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={editForm.cep}
+                              onChange={(e) => handleCepChange(e.target.value)}
+                              placeholder="00000-000"
+                              className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+                            />
+                            {cepLoading && (
+                              <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                            )}
+                          </div>
+                          {cepMsg && <p className="text-xs text-amber-600">{cepMsg}</p>}
+                        </div>
+                        <EditField label="Número *" value={editForm.endereco_numero} onChange={(v) => setEditForm({ ...editForm, endereco_numero: v })} />
+                        <EditField label="Endereço *" value={editForm.endereco} onChange={(v) => setEditForm({ ...editForm, endereco: v })} fullWidth />
+                        <EditField label="Bairro *" value={editForm.bairro} onChange={(v) => setEditForm({ ...editForm, bairro: v })} />
+                        <EditField label="Complemento" value={editForm.complemento} onChange={(v) => setEditForm({ ...editForm, complemento: v })} />
+                        <EditField label="Cidade *" value={editForm.cidade} onChange={(v) => setEditForm({ ...editForm, cidade: v })} />
+                        <EditSelect
+                          label="Estado (UF) *"
+                          value={editForm.estado}
+                          onChange={(v) => setEditForm({ ...editForm, estado: v })}
+                          options={[
+                            { value: "", label: "Selecione" },
+                            ...UFS_BR.map((uf) => ({ value: uf, label: uf })),
+                          ]}
+                        />
+                      </>
+                    )}
                   </div>
                 ) : (
                   <dl className="grid grid-cols-1 gap-x-4 gap-y-3 p-4 sm:grid-cols-2 text-sm">
@@ -750,6 +848,29 @@ export function FornecedoresTable({
                         <DataField label="Endereço" value={detailSupplier.endereco} />
                         <DataField label="Número" value={detailSupplier.endereco_numero} />
                         <DataField label="Complemento" value={detailSupplier.complemento} />
+                      </>
+                    )}
+                    {!detailSupplier.estrangeiro && (
+                      <>
+                        <DataField label="CEP" value={detailSupplier.cep} mono />
+                        <DataField
+                          label="Endereço"
+                          value={
+                            detailSupplier.endereco
+                              ? `${detailSupplier.endereco}, ${detailSupplier.endereco_numero ?? "s/n"}`
+                              : null
+                          }
+                        />
+                        <DataField label="Bairro" value={detailSupplier.bairro} />
+                        <DataField label="Complemento" value={detailSupplier.complemento} />
+                        <DataField
+                          label="Cidade / UF"
+                          value={
+                            detailSupplier.cidade
+                              ? `${detailSupplier.cidade}${detailSupplier.estado ? ` / ${detailSupplier.estado}` : ""}`
+                              : null
+                          }
+                        />
                       </>
                     )}
                     <DataField label="E-mail" value={detailSupplier.email} />
@@ -1009,6 +1130,27 @@ export function FornecedoresTable({
                       value={approveModal.pais ?? paisNomeByCodigo(approveModal.codigo_pais)}
                     />
                   )}
+                  {/* Endereço vai junto no cadastro da Omie — o aprovador confere aqui. */}
+                  <DataField
+                    label="Endereço"
+                    value={
+                      approveModal.endereco
+                        ? `${approveModal.endereco}, ${approveModal.endereco_numero ?? "s/n"}${
+                            approveModal.bairro ? ` — ${approveModal.bairro}` : ""
+                          }`
+                        : null
+                    }
+                  />
+                  <DataField
+                    label="Cidade / UF · CEP"
+                    value={
+                      approveModal.cidade
+                        ? `${approveModal.cidade}${approveModal.estado ? ` / ${approveModal.estado}` : ""}${
+                            approveModal.cep ? ` · ${approveModal.cep}` : ""
+                          }`
+                        : null
+                    }
+                  />
                   <DataField label="E-mail" value={approveModal.email} />
                   <DataField label="Telefone" value={approveModal.phone} />
                   <DataField
@@ -1211,9 +1353,12 @@ interface EditFormState {
   cnpj_cpf: string;
   estrangeiro: boolean;
   codigo_pais: string;
+  cep: string;
   cidade: string;
+  estado: string;
   endereco: string;
   endereco_numero: string;
+  bairro: string;
   complemento: string;
   email: string;
   phone: string;
@@ -1236,9 +1381,12 @@ function emptyEditForm(): EditFormState {
     cnpj_cpf: "",
     estrangeiro: false,
     codigo_pais: "",
+    cep: "",
     cidade: "",
+    estado: "",
     endereco: "",
     endereco_numero: "",
+    bairro: "",
     complemento: "",
     email: "",
     phone: "",
@@ -1262,9 +1410,13 @@ function toEditForm(s: SupplierRow): EditFormState {
     cnpj_cpf: s.cnpj_cpf ?? "",
     estrangeiro: !!s.estrangeiro,
     codigo_pais: s.codigo_pais ?? "",
+    cep: s.cep ?? "",
     cidade: s.cidade ?? "",
+    // O estrangeiro tem estado fixo "EX" — no formulário nacional a UF é livre.
+    estado: s.estrangeiro ? "" : s.estado ?? "",
     endereco: s.endereco ?? "",
     endereco_numero: s.endereco_numero ?? "",
+    bairro: s.bairro ?? "",
     complemento: s.complemento ?? "",
     email: s.email ?? "",
     phone: s.phone ?? "",

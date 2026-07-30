@@ -185,7 +185,9 @@ export interface CtrlSupplier {
   cidade: string | null;
   endereco: string | null;
   endereco_numero: string | null;
+  bairro: string | null;
   complemento: string | null;
+  cep: string | null;
 }
 
 export interface CtrlSupplierOmieLink {

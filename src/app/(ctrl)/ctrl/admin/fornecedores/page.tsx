@@ -7,9 +7,15 @@ import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
 import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
 
-const SUPPLIERS_SELECT = `id, name, nome_fantasia, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
+// `cep` e `bairro` chegaram na migration 20260730120000. Enquanto ela não é
+// aplicada, uma coluna inexistente derruba o SELECT inteiro (42703) e a tela
+// fica vazia — como se os fornecedores tivessem sumido. Por isso o select é
+// montado com e sem essas duas colunas, com fallback automático.
+const suppliersSelect = (comEndereco: boolean) =>
+  `id, name, nome_fantasia, cnpj_cpf, email, phone, omie_id, from_omie, omie_sync_required,
    chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, transf_tipo_conta, pix_padrao,
    estrangeiro, pais, codigo_pais, estado, cidade, endereco, endereco_numero, complemento,
+   ${comEndereco ? "bairro, cep," : ""}
    status, rejection_reason, created_at, approved_at,
    approver:users!ctrl_suppliers_approved_by_fkey(name, email),
    ctrl_supplier_expense_types(expense_type_id)`;
@@ -18,17 +24,22 @@ const SUPPLIERS_SELECT = `id, name, nome_fantasia, cnpj_cpf, email, phone, omie_
 // mais de 1000 fornecedores, paginamos em blocos para não cortar a cauda da
 // lista (ex.: nomes com "T" em diante sumiam da tela e da busca).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAllSuppliers(supabase: any) {
+async function fetchAllSuppliers(supabase: any, comEndereco = true) {
   const pageSize = 1000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: any[] = [];
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("ctrl_suppliers")
-      .select(SUPPLIERS_SELECT)
+      .select(suppliersSelect(comEndereco))
       .order("name")
       .range(from, from + pageSize - 1);
-    if (error) return { data: all, error };
+    if (error) {
+      // 42703 = coluna inexistente: migration 20260730120000 ainda não aplicada.
+      // Recarrega sem cep/bairro para a tela continuar de pé.
+      if (comEndereco && error.code === "42703") return fetchAllSuppliers(supabase, false);
+      return { data: all, error };
+    }
     all.push(...(data ?? []));
     if (!data || data.length < pageSize) break;
   }
@@ -90,7 +101,9 @@ async function getData() {
       cidade: string | null;
       endereco: string | null;
       endereco_numero: string | null;
+      bairro: string | null;
       complemento: string | null;
+      cep: string | null;
       status: string;
       rejection_reason: string | null;
       created_at: string;
@@ -176,7 +189,9 @@ export default async function FornecedoresPage() {
               cidade: s.cidade,
               endereco: s.endereco,
               endereco_numero: s.endereco_numero,
+              bairro: s.bairro ?? null,
               complemento: s.complemento,
+              cep: s.cep ?? null,
               status: s.status,
               rejection_reason: s.rejection_reason,
               created_at: s.created_at,

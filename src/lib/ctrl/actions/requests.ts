@@ -2137,7 +2137,22 @@ export async function previewPrevisaoMatches(
 
 // ─── Send to Payment ──────────────────────────────────────────────────────────
 
-export async function sendToPayment(
+/**
+ * Enfileira o lote para lançamento no Omie. NÃO chama a Omie aqui.
+ *
+ * A Omie bloqueia por "consumo redundante" (proteção contra duplicidade)
+ * chamadas equivalentes repetidas dentro de ~40s. Um laço serial no servidor
+ * disparava isso a partir do 2º item (e ainda estourava o tempo da server
+ * action em lotes grandes). O lançamento passou a ser drenado pelo cron
+ * `/api/cron/omie-launch-queue`, uma requisição por empresa pagadora por
+ * minuto — assim o usuário não precisa ficar com a tela aberta.
+ *
+ * Enfileirada = `status` continua `aprovado` (a requisição permanece na aba
+ * "Aguardando Envio", marcada como "Enviando ao Omie") e
+ * `omie_launch_status = 'pendente'`. Quem move para `agendado` é o worker,
+ * depois do lançamento dar certo.
+ */
+export async function enqueueSendToPayment(
   requestIds: string[],
   payingCompanyId: string,
   decisoes?: Record<string, number | "novo">,
@@ -2145,6 +2160,7 @@ export async function sendToPayment(
   const ctx = await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
 
   if (!payingCompanyId) return { error: "Empresa pagadora é obrigatória." };
+  if (requestIds.length === 0) return { error: "Nenhuma requisição selecionada." };
 
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
@@ -2164,10 +2180,12 @@ export async function sendToPayment(
   const now = new Date().toISOString();
   const companyName = company.name as string;
 
-  const { error } = await supabase
+  const { data: enfileiradas, error } = await supabase
     .from("ctrl_requests")
     .update({
-      status: "agendado",
+      omie_launch_status: "pendente",
+      omie_launch_error: null,
+      omie_launched_at: null,
       sent_to_payment_at: now,
       sent_to_payment_by: ctx.id,
       paying_company_id: payingCompanyId,
@@ -2176,12 +2194,31 @@ export async function sendToPayment(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)
     .in("id", requestIds)
-    .eq("status", "aprovado");
+    .eq("status", "aprovado")
+    .select("id");
 
   if (error) return { error: error.message };
 
+  const ids = (enfileiradas ?? []).map((r) => r.id as string);
+  if (ids.length === 0) {
+    return { error: "Nenhuma requisição aprovada disponível para envio." };
+  }
+
+  // Previsão escolhida no diálogo: o lançamento acontece minutos depois, então
+  // o código precisa ficar guardado até o worker consumir.
+  for (const id of ids) {
+    const decisao = decisoes?.[id];
+    if (typeof decisao !== "number") continue;
+    const { error: prevErr } = await supabase
+      .from("ctrl_requests")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ omie_previsao_codigo: decisao } as any)
+      .eq("id", id);
+    if (prevErr) return { error: `Falha ao guardar a previsão escolhida: ${prevErr.message}` };
+  }
+
   await supabase.from("ctrl_history").insert(
-    requestIds.map((id) => ({
+    ids.map((id) => ({
       request_id: id,
       user_id: ctx.id,
       action: "enviado_pagamento" as const,
@@ -2189,33 +2226,46 @@ export async function sendToPayment(
     }))
   );
 
-  // Launch each request to Omie
-  const { launchRequestToOmie } = await import("@/lib/ctrl/actions/contapagar-launch");
-  const results: { id: string; ok?: boolean; status?: string; error?: string }[] = [];
-
-  for (const id of requestIds) {
-    const decisao = decisoes?.[id];
-    const previsaoCodigo = typeof decisao === "number" ? decisao : undefined;
-    const res = await launchRequestToOmie(supabase, id, payingCompanyId, previsaoCodigo);
-    if ("error" in res) {
-      // Persist error on the request (covers mapping-incomplete and other pre-launch errors)
-      await supabase
-        .from("ctrl_requests")
-        .update({
-          omie_launch_status: "erro",
-          omie_launch_error: res.error,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id);
-      results.push({ id, error: res.error });
-    } else {
-      results.push({ id, ok: true, status: res.status });
-    }
-  }
-
   revalidatePath("/ctrl/contas-a-pagar");
   revalidatePath("/ctrl/requisicoes");
-  return { ok: true as const, results };
+  return { ok: true as const, enfileiradas: ids.length, companyName };
+}
+
+/**
+ * Recoloca na fila uma requisição que falhou no lançamento (continua
+ * `aprovado`, com `omie_launch_status = 'erro'`).
+ */
+export async function requeueRequestToOmie(requestId: string) {
+  await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select("id, status, paying_company_id")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (!req) return { error: "Requisição não encontrada." };
+  if (req.status !== "aprovado") return { error: "Requisição não está aguardando envio." };
+  if (!req.paying_company_id) return { error: "Requisição sem empresa pagadora definida." };
+
+  const { error } = await supabase
+    .from("ctrl_requests")
+    .update({
+      omie_launch_status: "pendente",
+      omie_launch_error: null,
+      omie_launched_at: null,
+      updated_at: new Date().toISOString(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .eq("id", requestId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  return { ok: true as const };
 }
 
 // ─── Inactivate ───────────────────────────────────────────────────────────────
