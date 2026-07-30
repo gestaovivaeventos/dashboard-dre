@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { CornerUpLeft, Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
 
 import {
-  sendToPayment,
+  enqueueSendToPayment,
+  requeueRequestToOmie,
   previewPrevisaoMatches,
   inactivateRequests,
   returnRequestToRequisicoes,
@@ -34,6 +35,31 @@ const TAB_LABELS: Record<Tab, string> = {
   agendado: "Enviados",
   inativado_csc: "Inativados",
 };
+
+// O envio ao Omie é assíncrono: `enqueueSendToPayment` só enfileira e o cron
+// `/api/cron/omie-launch-queue` lança uma requisição por empresa pagadora por
+// minuto (a Omie bloqueia por duplicidade chamadas repetidas dentro de ~40s).
+// Enquanto está na fila, a requisição continua nesta aba marcada como
+// "Enviando ao Omie".
+const RITMO_ENVIO_MINUTOS = 1;
+/** Enquanto houver requisições na fila, recarrega a lista para acompanhar. */
+const POLL_FILA_MS = 20_000;
+
+/** Requisição aprovada aguardando o worker lançar no Omie. */
+const naFila = (r: ContasRequest) =>
+  r.status === "aprovado" && r.omie_launch_status === "pendente";
+
+/** Requisição aprovada cujo lançamento falhou — dá para recolocar na fila. */
+const falhouNoEnvio = (r: ContasRequest) =>
+  r.status === "aprovado" && r.omie_launch_status === "erro";
+
+function formatarDuracao(minutos: number) {
+  if (minutos < 1) return "menos de 1 min";
+  if (minutos < 60) return `${minutos} min`;
+  const h = Math.floor(minutos / 60);
+  const m = minutos % 60;
+  return m > 0 ? `${h}h${String(m).padStart(2, "0")}` : `${h}h`;
+}
 
 interface Props {
   requests: ContasRequest[];
@@ -86,6 +112,17 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const [search, setSearch] = useState("");
   const [isPending, startTransition] = useTransition();
 
+  // Requisições que o worker ainda vai lançar no Omie.
+  const fila = useMemo(() => requests.filter(naFila), [requests]);
+
+  // Enquanto houver fila, recarrega sozinho para o usuário ver o lote andando.
+  // Não precisa manter a tela aberta — é só acompanhamento.
+  useEffect(() => {
+    if (fila.length === 0) return;
+    const t = setInterval(() => router.refresh(), POLL_FILA_MS);
+    return () => clearInterval(t);
+  }, [fila.length, router]);
+
   // Detail modal — opened by "Detalhes" button in any row.
   const [detail, setDetail] = useState<ContasRequest | null>(null);
   const [attachmentLoading, setAttachmentLoading] = useState(false);
@@ -124,10 +161,17 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     });
   }
 
-  // Só faz sentido devolver o que ainda está no fluxo de pagamento e não foi pago.
+  const canSendToPayment = ctrlRoles.some((r) =>
+    ["gerente", "diretor", "csc", "contas_a_pagar", "admin"].includes(r),
+  );
+
+  // Só faz sentido devolver o que ainda está no fluxo de pagamento, não foi pago
+  // e não está na fila (devolver no meio deixaria o worker lançando algo que já
+  // voltou para aprovação).
   const canReturnRow = (r: ContasRequest) =>
     canReturn &&
     !r.omie_paid_at &&
+    !naFila(r) &&
     ["aprovado", "info_pagamento_pendente", "agendado"].includes(r.status);
 
   async function openAttachment(requestId: string) {
@@ -210,7 +254,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 
   const { rows: displayed, headerProps, hasFilters, clearAll } = useExcelTable(tabRequests, columns);
 
-  const allSelected = displayed.length > 0 && displayed.every((r) => selected.has(r.id));
+  const selecionaveis = displayed.filter((r) => !naFila(r));
+  const allSelected = selecionaveis.length > 0 && selecionaveis.every((r) => selected.has(r.id));
 
   const counts: Record<Tab, number> = {
     aprovado: requests.filter((r) => r.status === "aprovado").length,
@@ -220,36 +265,52 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   };
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(displayed.map((r) => r.id)));
+    // "Selecionar todas" ignora o que já está na fila do Omie.
+    setSelected(
+      allSelected ? new Set() : new Set(displayed.filter((r) => !naFila(r)).map((r) => r.id)),
+    );
   }
 
   function toggle(id: string) {
     setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  function notify(msg: string, ok = true) {
+  function notify(msg: string, ok = true, ms = 4000) {
     if (ok) setSuccess(msg); else setError(msg);
-    setTimeout(() => { setSuccess(null); setError(null); }, 4000);
+    setTimeout(() => { setSuccess(null); setError(null); }, ms);
   }
 
+  /**
+   * Só ENFILEIRA o lote — o lançamento no Omie fica com o cron
+   * (`/api/cron/omie-launch-queue`), que solta uma requisição por empresa
+   * pagadora por minuto. O usuário pode fechar a tela: as requisições ficam
+   * nesta aba marcadas como "Enviando ao Omie" até o worker lançar.
+   */
   function executarEnvio(decisoes?: Record<string, number | "novo">) {
+    const ids = Array.from(selected);
+    const companyId = payingCompanyId;
+    if (ids.length === 0 || !companyId) return;
+
     startTransition(async () => {
-      const result = await sendToPayment(Array.from(selected), payingCompanyId, decisoes);
-      if (result && "error" in result) {
-        notify((result as { error: string }).error, false);
-      } else if (result && "results" in result) {
-        const failCount = result.results.filter((r) => r.error).length;
-        setSelected(new Set());
-        setPayingCompanyId("");
-        setShowEnviarModal(false);
-        setPrevisaoPreview(null);
-        setPrevisaoDecisoes({});
-        if (failCount > 0) {
-          notify(`Enviado; ${failCount} falharam no Omie (mapeamento ou erro). Use Reenviar.`, false);
-        } else {
-          notify(`${result.results.length} requisição(ões) enviadas e lançadas no Omie.`);
-        }
+      const result = await enqueueSendToPayment(ids, companyId, decisoes);
+      if ("error" in result) {
+        notify(String(result.error), false, 10000);
+        return;
       }
+
+      setSelected(new Set());
+      setPayingCompanyId("");
+      setShowEnviarModal(false);
+      setPrevisaoPreview(null);
+      setPrevisaoDecisoes({});
+      router.refresh();
+      notify(
+        `${result.enfileiradas} requisição(ões) na fila de envio ao Omie. ` +
+          `O envio acontece em segundo plano (cerca de 1 por minuto) — ` +
+          `você pode fechar esta tela.`,
+        true,
+        10000,
+      );
     });
   }
 
@@ -292,6 +353,30 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       {/* Feedback */}
       {error && <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{error}</div>}
       {success && <div className="rounded-md bg-green-50 px-4 py-2 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-300">{success}</div>}
+
+      {/* Fila de envio ao Omie — drenada pelo cron, não depende desta tela */}
+      {fila.length > 0 && (
+        <div className="flex items-start gap-3 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30">
+          <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-violet-600 dark:text-violet-400" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-violet-900 dark:text-violet-200">
+              Enviando {fila.length} requisição(ões) ao Omie...
+            </p>
+            <p className="mt-0.5 text-xs text-violet-700 dark:text-violet-300">
+              O envio roda em segundo plano, cerca de 1 por minuto (a Omie bloqueia lançamentos
+              muito próximos). Previsão de término: ~{formatarDuracao(fila.length * RITMO_ENVIO_MINUTOS)}.
+              Você pode fechar esta tela — a lista se atualiza sozinha enquanto estiver aberta.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.refresh()}
+            className="shrink-0 rounded-md border border-violet-300 bg-background px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950"
+          >
+            Atualizar
+          </button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border bg-muted/40 p-1">
@@ -394,7 +479,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
               {displayed.map((req) => {
                 const sup = resolveSupplier(req.ctrl_suppliers);
                 const isSelected = selected.has(req.id);
-                const clickable = activeTab === "aprovado" || (activeTab === "agendado" && canInactivate);
+                // Na fila do Omie: não pode ser reenviada nem mexida até o worker concluir.
+                const enfileirada = naFila(req);
+                const clickable =
+                  (activeTab === "aprovado" && !enfileirada) ||
+                  (activeTab === "agendado" && canInactivate);
 
                 return (
                   <tr
@@ -404,7 +493,13 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                   >
                     {(activeTab === "aprovado" || (activeTab === "agendado" && canInactivate)) && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggle(req.id)} className="h-4 w-4 rounded border-gray-300" />
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={enfileirada}
+                          onChange={() => toggle(req.id)}
+                          className="h-4 w-4 rounded border-gray-300 disabled:opacity-40"
+                        />
                       </td>
                     )}
                     <td className="px-4 py-3">
@@ -423,7 +518,26 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     <td className="px-4 py-3 text-right font-medium">{fmt.format(Number(req.amount))}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {activeTab === "aprovado" && (
-                        req.due_date ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00")) : "—"
+                        <div className="space-y-1">
+                          <p>
+                            {req.due_date
+                              ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))
+                              : "—"}
+                          </p>
+                          {enfileirada && (
+                            <span className="inline-flex w-fit items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+                              <Loader2 className="h-3 w-3 animate-spin" /> Enviando ao Omie
+                            </span>
+                          )}
+                          {falhouNoEnvio(req) && (
+                            <span
+                              title={req.omie_launch_error ?? undefined}
+                              className="inline-flex w-fit cursor-help items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800 dark:bg-red-950/40 dark:text-red-300"
+                            >
+                              Falha no envio ao Omie
+                            </span>
+                          )}
+                        </div>
                       )}
                       {activeTab === "info_pagamento_pendente" && (
                         <div className="flex flex-col gap-1">
@@ -439,7 +553,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         <div className="space-y-1">
                           {req.paying_company && <p className="font-medium text-sky-600">{req.paying_company}</p>}
                           {req.sent_to_payment_at && <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.sent_to_payment_at))}</p>}
-                          <OmieLaunchBadge status={req.omie_launch_status} error={req.omie_launch_error} />
+                          <OmieLaunchBadge
+                            status={req.omie_launch_status}
+                            error={req.omie_launch_error}
+                            lancado={Boolean(req.omie_contapagar_codigo)}
+                          />
                         </div>
                       )}
                       {activeTab === "inativado_csc" && (
@@ -462,7 +580,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                           <Eye className="h-3.5 w-3.5" />
                           Detalhes
                         </button>
-                        {canEditRouting && req.status === "aprovado" && !req.omie_contapagar_codigo && (
+                        {canEditRouting && req.status === "aprovado" && !enfileirada && !req.omie_contapagar_codigo && (
                           <button
                             type="button"
                             onClick={() => setEditRouting(req)}
@@ -484,7 +602,14 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                             {req.status === "info_pagamento_pendente" ? "Continuar" : "Pedir info"}
                           </button>
                         )}
-                        {activeTab === "agendado" && req.omie_launch_status === "erro" && ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r)) && (
+                        {/* Falhou na fila: volta para a fila, mantendo o espaçamento. */}
+                        {falhouNoEnvio(req) && canSendToPayment && (
+                          <RequeueButton requestId={req.id} onDone={() => router.refresh()} />
+                        )}
+                        {/* Falha no Omie ou lote antigo que ficou sem lançamento. */}
+                        {activeTab === "agendado" &&
+                          (req.omie_launch_status === "erro" || !req.omie_contapagar_codigo) &&
+                          ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r)) && (
                           <ResyncButton requestId={req.id} onDone={() => router.refresh()} />
                         )}
                         {canReturnRow(req) && (
@@ -521,7 +646,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
           )}
           <button
             onClick={() => setShowEnviarModal(true)}
-            disabled={selected.size === 0}
+            disabled={selected.size === 0 || isPending}
             className="ml-auto rounded-md bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {`Enviar para Pagamento${selected.size > 0 ? ` (${selected.size})` : ""}`}
@@ -547,7 +672,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                   <span className="text-muted-foreground">Total:</span>
                   <span className="font-bold text-violet-600">{fmt.format(totalSelected)}</span>
                 </div>
+                {selected.size > 1 && (
+                  <div className="flex justify-between mt-1">
+                    <span className="text-muted-foreground">Envio concluído em:</span>
+                    <span className="font-medium">
+                      ~{formatarDuracao(selected.size * RITMO_ENVIO_MINUTOS)}
+                    </span>
+                  </div>
+                )}
               </div>
+
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                O lançamento no Omie roda em segundo plano, cerca de 1 requisição por minuto (a
+                Omie bloqueia lançamentos muito próximos). Você não precisa deixar a tela aberta —
+                as requisições ficam marcadas como &quot;Enviando ao Omie&quot; até serem lançadas.
+              </p>
 
               {/* Select empresa pagadora */}
               <div className="space-y-1.5">
@@ -582,7 +721,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 disabled={isPending || !payingCompanyId}
                 className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isPending ? "Enviando..." : "Confirmar Envio"}
+                {isPending ? "Verificando previsões..." : "Confirmar Envio"}
               </button>
             </div>
           </div>
@@ -662,7 +801,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 disabled={isPending}
                 className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
               >
-                {isPending ? "Enviando..." : "Confirmar e enviar"}
+                {isPending ? "Enfileirando..." : "Confirmar e enviar"}
               </button>
             </div>
           </div>
@@ -816,11 +955,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 function OmieLaunchBadge({
   status,
   error,
+  lancado,
 }: {
   status?: string | null;
   error?: string | null;
+  /** Já tem título no Omie. Sem status e sem título = lote interrompido antes desta. */
+  lancado?: boolean;
 }) {
-  if (!status) return null;
+  if (!status) {
+    if (lancado) return null;
+    return (
+      <span className="inline-flex w-fit items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+        Aguardando envio ao Omie
+      </span>
+    );
+  }
   if (status === "recebido") {
     return (
       <span className="inline-flex w-fit items-center rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-800 dark:bg-green-950/40 dark:text-green-300">
@@ -853,6 +1002,45 @@ function OmieLaunchBadge({
     );
   }
   return null;
+}
+
+// ── Requeue button ────────────────────────────────────────────────────────────
+// Requisição que falhou no lançamento volta para a fila (não chama a Omie aqui:
+// quem lança é o cron, respeitando o espaçamento anti-duplicidade).
+
+function RequeueButton({ requestId, onDone }: { requestId: string; onDone: () => void }) {
+  const [isPending, startTransition] = useTransition();
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  function handleRequeue(e: React.MouseEvent) {
+    e.stopPropagation();
+    startTransition(async () => {
+      const result = await requeueRequestToOmie(requestId);
+      if ("error" in result) {
+        setFeedback(`Erro: ${result.error}`);
+      } else {
+        setFeedback("Na fila");
+        onDone();
+      }
+      setTimeout(() => setFeedback(null), 4000);
+    });
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        type="button"
+        onClick={handleRequeue}
+        disabled={isPending}
+        className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300"
+        title="Recolocar na fila de envio ao Omie"
+      >
+        {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        Tentar enviar de novo
+      </button>
+      {feedback && <p className="text-[10px] text-muted-foreground">{feedback}</p>}
+    </div>
+  );
 }
 
 // ── Resync button ─────────────────────────────────────────────────────────────

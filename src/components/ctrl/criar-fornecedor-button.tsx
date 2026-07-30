@@ -1,11 +1,18 @@
 "use client";
 
-import { Banknote, Building2, Contact, Globe, KeyRound, MapPin, Plus, Tags, User } from "lucide-react";
+import { Banknote, Building2, Contact, Globe, KeyRound, Loader2, MapPin, Plus, Tags, User } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
+import {
+  UFS_BR,
+  cepDigits,
+  enderecoMissing,
+  lookupCep,
+  maskCep,
+} from "@/lib/ctrl/endereco";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
 import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL } from "@/lib/ctrl/paises";
 
@@ -24,11 +31,15 @@ interface FormState {
   name: string;
   nome_fantasia: string;
   cnpj_cpf: string;
-  // Endereço internacional (só usado quando estrangeiro).
+  // País só é usado quando estrangeiro; os demais campos de endereço valem
+  // para os dois fluxos (a Omie exige endereço em qualquer cadastro).
   codigo_pais: string;
+  cep: string;
   cidade: string;
+  estado: string;
   endereco: string;
   endereco_numero: string;
+  bairro: string;
   complemento: string;
   email: string;
   phone: string;
@@ -53,9 +64,12 @@ const emptyForm: FormState = {
   nome_fantasia: "",
   cnpj_cpf: "",
   codigo_pais: "",
+  cep: "",
   cidade: "",
+  estado: "",
   endereco: "",
   endereco_numero: "",
+  bairro: "",
   complemento: "",
   email: "",
   phone: "",
@@ -109,10 +123,43 @@ export function CriarFornecedorButton({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
+  const [cepMsg, setCepMsg] = useState<string | null>(null);
+  // Guarda o último CEP pedido: se o usuário continuar digitando, a resposta
+  // de uma busca antiga não pode sobrescrever o endereço da busca nova.
+  const cepRequestRef = useRef("");
   const [, startTransition] = useTransition();
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // Mesma mecânica da tela da Omie: informado o CEP, o endereço vem sozinho e
+  // o usuário só completa número e complemento. Falha na busca não trava nada
+  // — os campos continuam editáveis.
+  async function handleCepChange(raw: string) {
+    const masked = maskCep(raw);
+    update("cep", masked);
+    setCepMsg(null);
+    const digits = cepDigits(masked);
+    cepRequestRef.current = digits;
+    if (digits.length !== 8) return;
+    setCepLoading(true);
+    const found = await lookupCep(digits);
+    if (cepRequestRef.current !== digits) return; // resposta obsoleta
+    setCepLoading(false);
+    if (!found) {
+      setCepMsg("CEP não encontrado — preencha o endereço manualmente.");
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      endereco: found.endereco || prev.endereco,
+      bairro: found.bairro || prev.bairro,
+      cidade: found.cidade || prev.cidade,
+      estado: found.estado || prev.estado,
+      complemento: prev.complemento || found.complemento,
+    }));
   }
 
   function toggleExpenseType(id: string) {
@@ -168,6 +215,28 @@ export function CriarFornecedorButton({
     form.doc_titular,
   ]);
 
+  // Endereço é obrigatório no cadastro da Omie — sem ele o fornecedor não é
+  // aceito lá. Estrangeiro segue a regra própria (País + endereço livre).
+  const enderecoFaltando = useMemo(() => {
+    if (form.estrangeiro) return [] as string[];
+    return enderecoMissing({
+      cep: form.cep,
+      endereco: form.endereco,
+      endereco_numero: form.endereco_numero,
+      bairro: form.bairro,
+      cidade: form.cidade,
+      estado: form.estado,
+    });
+  }, [
+    form.estrangeiro,
+    form.cep,
+    form.endereco,
+    form.endereco_numero,
+    form.bairro,
+    form.cidade,
+    form.estado,
+  ]);
+
   // Só pinta o campo de vermelho depois que o usuário tentou salvar.
   function invalidCls(isMissing: boolean) {
     return submitAttempted && isMissing ? ` ${INVALID_CLS}` : "";
@@ -215,6 +284,12 @@ export function CriarFornecedorButton({
       setError(form.personType === "pf" ? "Informe o CPF." : "Informe o CNPJ.");
       return;
     }
+    if (enderecoFaltando.length) {
+      setError(
+        `A Omie exige o endereço completo do fornecedor. Preencha: ${enderecoFaltando.join(", ")}.`,
+      );
+      return;
+    }
     // Se preencheu chave PIX, exige tipo (e vice-versa).
     if (form.chave_pix.trim() && !form.pix_key_type) {
       setError("Selecione o tipo da chave PIX.");
@@ -247,11 +322,15 @@ export function CriarFornecedorButton({
       estrangeiro: form.estrangeiro || undefined,
       pais: form.estrangeiro ? paisNome : undefined,
       codigo_pais: form.estrangeiro ? form.codigo_pais || undefined : undefined,
-      estado: form.estrangeiro ? ESTADO_EXTERIOR : undefined,
-      cidade: form.estrangeiro ? form.cidade || undefined : undefined,
-      endereco: form.estrangeiro ? form.endereco || undefined : undefined,
-      endereco_numero: form.estrangeiro ? form.endereco_numero || undefined : undefined,
-      complemento: form.estrangeiro ? form.complemento || undefined : undefined,
+      // Endereço: o estrangeiro vai com estado "EX" (exigência da Omie) e sem
+      // CEP/bairro brasileiros; o nacional vai completo.
+      estado: form.estrangeiro ? ESTADO_EXTERIOR : form.estado || undefined,
+      cep: form.estrangeiro ? undefined : form.cep || undefined,
+      bairro: form.estrangeiro ? undefined : form.bairro || undefined,
+      cidade: form.cidade || undefined,
+      endereco: form.endereco || undefined,
+      endereco_numero: form.endereco_numero || undefined,
+      complemento: form.complemento || undefined,
       email: form.email || undefined,
       phone: form.phone || undefined,
       chave_pix: form.chave_pix || undefined,
@@ -494,6 +573,148 @@ export function CriarFornecedorButton({
                     </div>
                   </div>
                 </section>
+
+                {/* Endereço (Brasil) — obrigatório: a Omie não cadastra o
+                    fornecedor sem ele. Estrangeiro usa a seção abaixo. */}
+                {!form.estrangeiro && (
+                  <section className="rounded-lg border bg-background shadow-sm">
+                    <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <h3 className="text-sm font-semibold">Endereço</h3>
+                      <span className="ml-auto text-xs font-medium text-destructive">
+                        obrigatório
+                      </span>
+                    </header>
+                    <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+                      <p className="text-xs text-muted-foreground sm:col-span-2">
+                        Informe o CEP e o número — o restante do endereço é
+                        preenchido automaticamente. A Omie exige esses dados para
+                        cadastrar o fornecedor.
+                      </p>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-cep" className={LABEL_CLS}>
+                          CEP <span className="text-destructive">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            id="new-supplier-cep"
+                            type="text"
+                            inputMode="numeric"
+                            required
+                            value={form.cep}
+                            onChange={(e) => handleCepChange(e.target.value)}
+                            placeholder="00000-000"
+                            className={`${INPUT_CLS} font-mono${invalidCls(
+                              enderecoFaltando.includes("CEP"),
+                            )}`}
+                          />
+                          {cepLoading && (
+                            <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
+                        {cepMsg && <p className="text-xs text-amber-600">{cepMsg}</p>}
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-endereco-numero" className={LABEL_CLS}>
+                          Número <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="new-supplier-endereco-numero"
+                          type="text"
+                          required
+                          value={form.endereco_numero}
+                          onChange={(e) => update("endereco_numero", e.target.value)}
+                          placeholder="Ex: 115"
+                          className={`${INPUT_CLS}${invalidCls(
+                            enderecoFaltando.includes("Número"),
+                          )}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label htmlFor="new-supplier-endereco-br" className={LABEL_CLS}>
+                          Endereço <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="new-supplier-endereco-br"
+                          type="text"
+                          required
+                          value={form.endereco}
+                          onChange={(e) => update("endereco", e.target.value)}
+                          placeholder="Ex: RUA ALMIRANTE BARROSO"
+                          className={`${INPUT_CLS}${invalidCls(
+                            enderecoFaltando.includes("Endereço"),
+                          )}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-bairro" className={LABEL_CLS}>
+                          Bairro <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="new-supplier-bairro"
+                          type="text"
+                          required
+                          value={form.bairro}
+                          onChange={(e) => update("bairro", e.target.value)}
+                          placeholder="Ex: PAINEIRAS"
+                          className={`${INPUT_CLS}${invalidCls(
+                            enderecoFaltando.includes("Bairro"),
+                          )}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-complemento-br" className={LABEL_CLS}>
+                          Complemento
+                        </label>
+                        <input
+                          id="new-supplier-complemento-br"
+                          type="text"
+                          value={form.complemento}
+                          onChange={(e) => update("complemento", e.target.value)}
+                          placeholder="Ex: APT 101"
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-cidade-br" className={LABEL_CLS}>
+                          Cidade <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="new-supplier-cidade-br"
+                          type="text"
+                          required
+                          value={form.cidade}
+                          onChange={(e) => update("cidade", e.target.value)}
+                          placeholder="Ex: Juiz de Fora"
+                          className={`${INPUT_CLS}${invalidCls(
+                            enderecoFaltando.includes("Cidade"),
+                          )}`}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="new-supplier-estado-br" className={LABEL_CLS}>
+                          Estado (UF) <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          id="new-supplier-estado-br"
+                          value={form.estado}
+                          onChange={(e) => update("estado", e.target.value)}
+                          required
+                          className={`${INPUT_CLS}${invalidCls(
+                            enderecoFaltando.includes("Estado"),
+                          )}`}
+                        >
+                          <option value="">Selecione</option>
+                          {UFS_BR.map((uf) => (
+                            <option key={uf} value={uf}>
+                              {uf}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </section>
+                )}
 
                 {/* Tipos de despesa — pré-seleção que já vem marcada na aprovação */}
                 <section className="rounded-lg border bg-background shadow-sm">

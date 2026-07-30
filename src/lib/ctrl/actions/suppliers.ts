@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
+import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
 import type { CtrlSupplier } from "@/lib/supabase/types";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -53,7 +54,7 @@ export async function approveSupplier(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -121,7 +122,9 @@ export async function approveSupplier(
       cidade: supplier.cidade,
       endereco: supplier.endereco,
       endereco_numero: supplier.endereco_numero,
+      bairro: supplier.bairro,
       complemento: supplier.complemento,
+      cep: supplier.cep,
     };
 
     for (const companyId of companyIds) {
@@ -195,7 +198,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
   const { data: supplier } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, complemento",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -295,11 +298,14 @@ export async function updateSupplier(
     estrangeiro?: boolean;
     pais?: string | null;
     codigo_pais?: string | null;
+    // Endereço (comum aos dois fluxos; CEP/bairro só no brasileiro).
     estado?: string | null;
     cidade?: string | null;
     endereco?: string | null;
     endereco_numero?: string | null;
+    bairro?: string | null;
     complemento?: string | null;
+    cep?: string | null;
   },
 ) {
   // Any user in CTRL can edit a supplier they can see. The act of editing
@@ -314,7 +320,7 @@ export async function updateSupplier(
   const { data: current } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "name, nome_fantasia, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, transf_tipo_conta, pix_padrao",
+      "name, nome_fantasia, cnpj_cpf, email, phone, chave_pix, pix_key_type, banco, agencia, conta_corrente, titular_banco, doc_titular, transf_padrao, transf_tipo_conta, pix_padrao, cep, endereco, endereco_numero, bairro, cidade, estado, complemento",
     )
     .eq("id", supplierId)
     .maybeSingle();
@@ -415,14 +421,42 @@ export async function updateSupplier(
       payload.endereco = data.endereco?.trim() || null;
       payload.endereco_numero = data.endereco_numero?.trim() || null;
       payload.complemento = data.complemento?.trim() || null;
+      // CEP/bairro são do endereço nacional — não se aplicam ao exterior.
+      payload.bairro = null;
+      payload.cep = null;
     } else {
+      // Fluxo brasileiro: a Omie exige endereço completo. Os cadastros
+      // anteriores a esta regra ficaram sem endereço, então na edição só
+      // cobramos quando o fornecedor já tem um endereço gravado (não deixa
+      // apagar) ou quando o usuário começa a preencher (não deixa salvar pela
+      // metade) — editar só o banco de um cadastro legado segue possível.
+      const endereco = {
+        cep: maskCep(data.cep ?? ""),
+        endereco: data.endereco?.trim() ?? "",
+        endereco_numero: data.endereco_numero?.trim() ?? "",
+        bairro: data.bairro?.trim() ?? "",
+        cidade: data.cidade?.trim() ?? "",
+        estado: (data.estado ?? "").trim().toUpperCase(),
+        complemento: data.complemento?.trim() ?? "",
+      };
+      const jaTinhaEndereco = hasAnyEndereco(
+        (current ?? {}) as unknown as Record<string, string | null>,
+      );
+      const faltando = enderecoMissing(endereco);
+      if (faltando.length && (jaTinhaEndereco || hasAnyEndereco(endereco))) {
+        return {
+          error: `A Omie exige o endereço completo do fornecedor. Preencha: ${faltando.join(", ")}.`,
+        };
+      }
       payload.pais = null;
       payload.codigo_pais = null;
-      payload.estado = null;
-      payload.cidade = null;
-      payload.endereco = null;
-      payload.endereco_numero = null;
-      payload.complemento = null;
+      payload.estado = endereco.estado || null;
+      payload.cidade = endereco.cidade || null;
+      payload.endereco = endereco.endereco || null;
+      payload.endereco_numero = endereco.endereco_numero || null;
+      payload.bairro = endereco.bairro || null;
+      payload.complemento = endereco.complemento || null;
+      payload.cep = endereco.cep || null;
     }
   }
 
@@ -456,6 +490,13 @@ export async function updateSupplier(
     "transf_padrao",
     "transf_tipo_conta",
     "pix_padrao",
+    "cep",
+    "endereco",
+    "endereco_numero",
+    "bairro",
+    "cidade",
+    "estado",
+    "complemento",
   ] as const;
   const changes: Record<string, [unknown, unknown]> = {};
   if (current) {
@@ -503,11 +544,14 @@ export async function createSupplier(data: {
   estrangeiro?: boolean;
   pais?: string;
   codigo_pais?: string;
+  // Endereço — obrigatório no fluxo brasileiro (exigência da Omie).
   estado?: string;
   cidade?: string;
   endereco?: string;
   endereco_numero?: string;
+  bairro?: string;
   complemento?: string;
+  cep?: string;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
 
@@ -522,10 +566,20 @@ export async function createSupplier(data: {
     if (!data.estado?.trim()) {
       return { error: "Informe o Estado do fornecedor estrangeiro." };
     }
-  } else if (!data.cnpj_cpf?.trim()) {
-    // CNPJ ou CPF é obrigatório — sem documento, fornecedor nao pode ser
-    // identificado de forma unica e cria duplicatas no Omie.
-    return { error: "Informe o CNPJ ou CPF do fornecedor." };
+  } else {
+    if (!data.cnpj_cpf?.trim()) {
+      // CNPJ ou CPF é obrigatório — sem documento, fornecedor nao pode ser
+      // identificado de forma unica e cria duplicatas no Omie.
+      return { error: "Informe o CNPJ ou CPF do fornecedor." };
+    }
+    // Endereço completo é exigência da Omie no cadastro de fornecedor — sem
+    // ele o IncluirCliente é recusado lá.
+    const faltaEndereco = enderecoMissing(data);
+    if (faltaEndereco.length) {
+      return {
+        error: `A Omie exige o endereço completo do fornecedor. Preencha: ${faltaEndereco.join(", ")}.`,
+      };
+    }
   }
 
   // Método marcado como padrão = o pagamento sai por ele sem ninguém perguntar
@@ -628,11 +682,15 @@ export async function createSupplier(data: {
       estrangeiro: isEstrangeiro,
       pais: isEstrangeiro ? data.pais?.trim() || null : null,
       codigo_pais: isEstrangeiro ? data.codigo_pais?.trim() || null : null,
-      estado: isEstrangeiro ? data.estado?.trim() || null : null,
-      cidade: isEstrangeiro ? data.cidade?.trim() || null : null,
-      endereco: isEstrangeiro ? data.endereco?.trim() || null : null,
-      endereco_numero: isEstrangeiro ? data.endereco_numero?.trim() || null : null,
-      complemento: isEstrangeiro ? data.complemento?.trim() || null : null,
+      // Endereço vale para os dois fluxos; CEP/bairro só existem no brasileiro
+      // (no exterior o Estado é sempre "EX").
+      estado: data.estado?.trim().toUpperCase() || null,
+      cidade: data.cidade?.trim() || null,
+      endereco: data.endereco?.trim() || null,
+      endereco_numero: data.endereco_numero?.trim() || null,
+      bairro: isEstrangeiro ? null : data.bairro?.trim() || null,
+      complemento: data.complemento?.trim() || null,
+      cep: isEstrangeiro ? null : maskCep(data.cep ?? "") || null,
       status: "pendente",
       omie_sync_required: true,
       created_by: ctx.id,

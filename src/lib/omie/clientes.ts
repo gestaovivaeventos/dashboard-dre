@@ -1,5 +1,6 @@
 import { omieCall, OMIE_CLIENTES_URL } from "@/lib/omie/client";
 import { parseBanco } from "@/lib/ctrl/bancos";
+import { cidadeParaOmie } from "@/lib/ctrl/endereco";
 import { ESTADO_EXTERIOR } from "@/lib/ctrl/paises";
 
 /** Cadastro do Omie normalizado (usado no pull Omie → banco local do Case). */
@@ -108,11 +109,14 @@ export interface OmieSupplierData {
   // (tabela BACEN) e o campo cnpj_cpf vazio (a interface mostra "Estrangeiro").
   estrangeiro?: boolean;
   codigo_pais?: string | null;
+  // Endereço — obrigatório no cadastro brasileiro (a Omie recusa sem ele).
   estado?: string | null;
   cidade?: string | null;
   endereco?: string | null;
   endereco_numero?: string | null;
+  bairro?: string | null;
   complemento?: string | null;
+  cep?: string | null;
 }
 
 function onlyDigits(s: string | null | undefined): string {
@@ -138,6 +142,19 @@ function buildClientePayload(
   };
   if (!supplier.estrangeiro) {
     payload.cnpj_cpf = doc;
+    // Endereço nacional. Só mandamos campo preenchido: cadastro legado sem
+    // endereço não pode apagar o que já existe na Omie num AlterarCliente.
+    const cep = onlyDigits(supplier.cep);
+    if (cep.length === 8) payload.cep = `${cep.slice(0, 5)}-${cep.slice(5)}`;
+    if (supplier.endereco?.trim()) payload.endereco = supplier.endereco.trim();
+    if (supplier.endereco_numero?.trim()) payload.endereco_numero = supplier.endereco_numero.trim();
+    if (supplier.bairro?.trim()) payload.bairro = supplier.bairro.trim();
+    if (supplier.complemento?.trim()) payload.complemento = supplier.complemento.trim();
+    const uf = (supplier.estado ?? "").trim().toUpperCase();
+    if (uf) payload.estado = uf;
+    // A Omie grava a cidade com a UF entre parênteses ("Juiz de Fora (MG)").
+    const cidade = cidadeParaOmie(supplier.cidade, uf);
+    if (cidade) payload.cidade = cidade;
   } else {
     // A Omie trata o cadastro como do exterior quando estado="EX". O país vem
     // no codigo_pais (BACEN); cidade/endereço são texto livre do exterior.

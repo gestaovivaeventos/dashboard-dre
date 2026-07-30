@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/process-viagens",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/omie-launch-queue",
+      "schedule": "* * * * *"
     }
   ]
 }
