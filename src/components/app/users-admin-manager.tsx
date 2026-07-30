@@ -45,6 +45,7 @@ type Profile =
   | "admin"
   | "contas_a_pagar"
   | "gerente"
+  | "gerente_setor"
   | "diretor"
   | "validador_contrato"
   | "solicitante"
@@ -95,8 +96,15 @@ const PROFILES: Array<{
   },
   {
     value: "gerente",
+    label: "Gerente Sócio",
+    description:
+      "Aprova requisições dos setores vinculados. Em Orçamento, vê o detalhamento de todos os setores.",
+  },
+  {
+    value: "gerente_setor",
     label: "Gerente",
-    description: "Aprova requisições dos setores vinculados.",
+    description:
+      "Mesmas permissões do Gerente Sócio, mas em Orçamento vê apenas as despesas dos setores vinculados a ele.",
   },
   {
     value: "diretor",
@@ -130,6 +138,7 @@ const PROFILE_BADGE_CLASS: Record<string, string> = {
   admin: "bg-violet-100 text-violet-800 border-transparent",
   contas_a_pagar: "bg-sky-100 text-sky-800 border-transparent",
   gerente: "bg-blue-100 text-blue-800 border-transparent",
+  gerente_setor: "bg-indigo-100 text-indigo-800 border-transparent",
   diretor: "bg-emerald-100 text-emerald-800 border-transparent",
   validador_contrato: "bg-orange-100 text-orange-800 border-transparent",
   solicitante: "bg-slate-100 text-slate-800 border-transparent",
@@ -137,8 +146,10 @@ const PROFILE_BADGE_CLASS: Record<string, string> = {
 };
 
 // Whether the profile REQUIRES at least one sector (blocks save when empty).
+// gerente_setor ("Gerente") depende do setor pra filtrar o Orçamento — sem
+// setor ele não veria nada.
 function profileNeedsSectors(p: Profile): boolean {
-  return p === "gerente" || p === "solicitante";
+  return p === "gerente" || p === "gerente_setor" || p === "solicitante";
 }
 
 // Whether the sector picker is shown. Diretor pode selecionar setores

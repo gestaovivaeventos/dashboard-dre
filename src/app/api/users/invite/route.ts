@@ -8,6 +8,7 @@ const VALID_PROFILES: UserProfileType[] = [
   "admin",
   "contas_a_pagar",
   "gerente",
+  "gerente_setor",
   "diretor",
   "validador_contrato",
   "solicitante",
@@ -93,9 +94,11 @@ export async function POST(request: Request) {
       : body.sector_ids ?? [];
   const companyIds = userProfile === "validador_contrato" ? [] : body.company_ids ?? [];
 
-  // Gerente e Solicitante precisam de pelo menos um setor.
+  // Gerente (sócio e de setor) e Solicitante precisam de pelo menos um setor.
   if (
-    (userProfile === "gerente" || userProfile === "solicitante") &&
+    (userProfile === "gerente" ||
+      userProfile === "gerente_setor" ||
+      userProfile === "solicitante") &&
     sectorIds.length === 0
   ) {
     return NextResponse.json(

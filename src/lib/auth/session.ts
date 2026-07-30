@@ -1,7 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
-import type { DreRole, CtrlRole, ModuleAccess, UnifiedProfile } from "@/lib/supabase/types";
+import type {
+  DreRole,
+  CtrlRole,
+  ModuleAccess,
+  UnifiedProfile,
+  UserProfileType,
+} from "@/lib/supabase/types";
 
 export type { ModuleAccess, UnifiedProfile };
 
@@ -109,15 +115,7 @@ export async function getSessionContext(): Promise<SessionContext> {
   }
 
   // ── New unified model ────────────────────────────────────────────────────
-  const userProfile = (profileRow.profile ?? null) as
-    | "admin"
-    | "contas_a_pagar"
-    | "gerente"
-    | "diretor"
-    | "validador_contrato"
-    | "solicitante"
-    | "franqueado"
-    | null;
+  const userProfile = (profileRow.profile ?? null) as UserProfileEnum | null;
   const canFinanceiro = Boolean(profileRow.can_financeiro);
   const canCompras = Boolean(profileRow.can_compras);
   // Admin sempre enxerga o Case (espelha has_case_access() no banco).
@@ -192,6 +190,7 @@ function deriveDreRole(
     case "contas_a_pagar":
       return "gestor_hero";
     case "gerente":
+    case "gerente_setor":
       return "gestor_unidade";
     case "solicitante":
       return "gestor_unidade";
@@ -206,14 +205,7 @@ function deriveDreRole(
   }
 }
 
-type UserProfileEnum =
-  | "admin"
-  | "contas_a_pagar"
-  | "gerente"
-  | "diretor"
-  | "validador_contrato"
-  | "solicitante"
-  | "franqueado";
+type UserProfileEnum = UserProfileType;
 
 function deriveCtrlRoles(
   profile: UserProfileEnum | null,
@@ -240,6 +232,10 @@ function deriveCtrlRoles(
     case "diretor":
       return ["diretor"];
     case "gerente":
+    // "Gerente" (gerente_setor) tem as MESMAS permissões do "Gerente Sócio".
+    // A restrição por setor dele vive só na tela /ctrl/orcamento, que lê
+    // profile.profile — não passa por CtrlRole.
+    case "gerente_setor":
       return ["gerente"];
     case "solicitante":
       return ["solicitante"];

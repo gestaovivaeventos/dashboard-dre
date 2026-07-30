@@ -8,6 +8,7 @@ const ASSIGNABLE_PROFILES: ReadonlyArray<UserProfileType> = [
   "admin",
   "contas_a_pagar",
   "gerente",
+  "gerente_setor",
   "diretor",
   "validador_contrato",
   "solicitante",
@@ -173,6 +174,6 @@ export async function DELETE(_: Request, { params }: Params) {
 function deriveLegacyDreRole(p: UserProfileType): "admin" | "gestor_hero" | "gestor_unidade" {
   if (p === "admin") return "admin";
   if (p === "diretor" || p === "contas_a_pagar") return "gestor_hero";
-  // franqueado, gerente, solicitante, validador_contrato → gestor_unidade
+  // franqueado, gerente, gerente_setor, solicitante, validador_contrato → gestor_unidade
   return "gestor_unidade";
 }
