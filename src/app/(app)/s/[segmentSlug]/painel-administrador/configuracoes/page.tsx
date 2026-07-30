@@ -37,7 +37,7 @@ export default async function PainelConfiguracoesPage({ params }: PageProps) {
 
   let companiesQuery = supabase
     .from("companies")
-    .select("id,name,active,created_at,omie_app_key,omie_app_secret");
+    .select("id,name,active,created_at,omie_app_key,omie_app_secret,regime_tributario");
   if (segmentId) {
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
@@ -49,6 +49,7 @@ export default async function PainelConfiguracoesPage({ params }: PageProps) {
     active: company.active as boolean,
     created_at: company.created_at as string,
     has_credentials: Boolean(company.omie_app_key && company.omie_app_secret),
+    regime_tributario: (company.regime_tributario as string | null) ?? null,
   }));
 
   return (

@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
 import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
+import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
@@ -58,19 +59,8 @@ function earliestDueDateBRT(): string {
   return isAfterNoonBRT() ? addOneDayISO(ymd) : ymd;
 }
 
-// Vencimento da PRÓXIMA fatura do cartão a partir de hoje (Brasília). A fatura
-// fecha no dia 23 e vence no dia 05: compra até o dia 23 → vence dia 05 do mês
-// seguinte; a partir do dia 24 → dia 05 do mês subsequente. Mesmo ciclo aplicado
-// no servidor para desdobrar parcelas.
-function nextFaturaDueDate(): string {
-  const { ymd } = brasiliaNowParts();
-  const [y, m, d] = ymd.split("-").map(Number); // m: 1-based
-  const monthOffset = d > 23 ? 2 : 1;
-  const totalOffset = m - 1 + monthOffset; // base 0
-  const dueMonth = ((totalOffset % 12) + 12) % 12;
-  const dueYear = y + Math.floor(totalOffset / 12);
-  return `${dueYear}-${String(dueMonth + 1).padStart(2, "0")}-05`;
-}
+// Vencimento da próxima fatura do cartão vive em @/lib/ctrl/fatura-cartao
+// (compartilhado com a edição em Contas a Pagar) — ver nextFaturaDueDate.
 
 interface Props {
   sectors: CtrlSector[];

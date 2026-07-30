@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const db = createAdminClientIfAvailable() ?? supabase;
   let query = db
     .from("companies")
-    .select("id,name,active,created_at,omie_app_key,omie_app_secret");
+    .select("id,name,active,created_at,omie_app_key,omie_app_secret,regime_tributario");
   if (segmentId) {
     query = query.eq("segment_id", segmentId);
   }
@@ -35,6 +35,7 @@ export async function GET(request: Request) {
     active: company.active as boolean,
     created_at: company.created_at as string,
     has_credentials: Boolean(company.omie_app_key && company.omie_app_secret),
+    regime_tributario: (company.regime_tributario as string | null) ?? null,
   }));
 
   return NextResponse.json({ companies });
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
     const { data, error } = await db
       .from("companies")
       .insert(insertData)
-      .select("id,name,active,created_at")
+      .select("id,name,active,created_at,regime_tributario")
       .single();
 
     if (error) {

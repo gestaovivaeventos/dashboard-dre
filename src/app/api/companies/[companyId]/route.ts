@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { isRegimeTributario } from "@/lib/companies/regime-tributario";
 import { encryptSecret } from "@/lib/security/encryption";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
@@ -24,6 +25,7 @@ export async function PATCH(request: Request, { params }: Params) {
     appKey?: string;
     appSecret?: string;
     segmentId?: string | null;
+    regimeTributario?: string | null;
   };
 
   const db = createAdminClientIfAvailable() ?? supabase;
@@ -38,6 +40,15 @@ export async function PATCH(request: Request, { params }: Params) {
   // Segment
   if ("segmentId" in body) {
     updates.segment_id = body.segmentId || null;
+  }
+
+  // Regime tributario (vazio = nao definido).
+  if ("regimeTributario" in body) {
+    const regime = body.regimeTributario || null;
+    if (regime !== null && !isRegimeTributario(regime)) {
+      return NextResponse.json({ error: "Regime tributario invalido." }, { status: 400 });
+    }
+    updates.regime_tributario = regime;
   }
 
   // Credentials
