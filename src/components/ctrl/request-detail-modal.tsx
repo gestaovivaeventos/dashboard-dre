@@ -51,8 +51,6 @@ export type RequestDetail = {
   usd_amount?: number | null;
   usd_brl_rate?: number | null;
   iof_rate?: number | null;
-  inactivation_reason?: string | null;
-  inactivated_at?: string | null;
   payment_method?: string | null;
   installment_number?: number | null;
   installment_total?: number | null;
@@ -352,16 +350,6 @@ export function RequestDetailModal({
               <DetailField
                 label="Pago no Omie"
                 value={new Date(req.omie_paid_at).toLocaleString("pt-BR")}
-                fullWidth
-              />
-            )}
-            {req.inactivated_at && (
-              <DetailField
-                label="Inativado"
-                value={
-                  new Date(req.inactivated_at).toLocaleString("pt-BR") +
-                  (req.inactivation_reason ? ` · ${req.inactivation_reason}` : "")
-                }
                 fullWidth
               />
             )}

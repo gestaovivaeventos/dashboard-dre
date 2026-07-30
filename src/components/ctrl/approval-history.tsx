@@ -125,8 +125,6 @@ function ApprovalHistoryItem({ entry }: { entry: ApprovalHistoryEntry }) {
       ? STAGE_LABEL[entry.stage]
       : entry.action === "rejeitado"
       ? "Rejeição"
-      : entry.action === "estornado"
-      ? "Estorno"
       : "Aprovação";
 
   const accent =
@@ -174,16 +172,9 @@ function ApprovalHistoryItem({ entry }: { entry: ApprovalHistoryEntry }) {
         </>
       ) : entry.action === "aprovado" ? (
         <p className="text-sm">Aprovado por: {actor}</p>
-      ) : entry.action === "rejeitado" ? (
-        <>
-          <p className="text-sm">Rejeitado por: {actor}</p>
-          {entry.comment && (
-            <p className="text-xs text-muted-foreground">Motivo: {entry.comment}</p>
-          )}
-        </>
       ) : (
         <>
-          <p className="text-sm">Estornado por: {actor}</p>
+          <p className="text-sm">Rejeitado por: {actor}</p>
           {entry.comment && (
             <p className="text-xs text-muted-foreground">Motivo: {entry.comment}</p>
           )}

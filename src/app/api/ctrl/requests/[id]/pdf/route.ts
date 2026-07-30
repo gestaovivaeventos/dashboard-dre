@@ -25,7 +25,6 @@ const STATUS_LABEL: Record<string, string> = {
   aprovado: "Aprovado — aguardando envio",
   info_pagamento_pendente: "Aguardando info do solicitante",
   agendado: "Enviado para pagamento",
-  inativado_csc: "Inativado pelo CSC",
   recusado: "Recusado",
 };
 
@@ -212,12 +211,6 @@ export async function GET(
     field(
       "Enviado para pagamento",
       `${fmtDateTime(req.sent_to_payment_at as string | null)}${req.paying_company ? ` · ${req.paying_company}` : ""}`,
-    );
-  }
-  if (req.inactivated_at) {
-    field(
-      "Inativado em",
-      `${fmtDateTime(req.inactivated_at as string | null)}${req.inactivation_reason ? ` · ${req.inactivation_reason}` : ""}`,
     );
   }
 

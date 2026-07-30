@@ -15,9 +15,7 @@ const STATUS_LABELS: Record<string, string> = {
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
   aguardando_complementacao: "Complementação",
-  estornado: "Estornado",
   agendado: "Enviado Pgto",
-  inativado_csc: "Inativado CSC",
   aguardando_aprovacao_fornecedor: "Homologação fornec. pendente",
   info_pagamento_pendente: "Info pendente",
 };
@@ -28,9 +26,7 @@ const STATUS_CLS: Record<string, string> = {
   aprovado: "bg-green-100 text-green-800",
   rejeitado: "bg-red-100 text-red-800",
   aguardando_complementacao: "bg-blue-100 text-blue-800",
-  estornado: "bg-gray-100 text-gray-700",
   agendado: "bg-purple-100 text-purple-800",
-  inativado_csc: "bg-gray-100 text-gray-500",
   aguardando_aprovacao_fornecedor: "bg-indigo-100 text-indigo-800",
   info_pagamento_pendente: "bg-amber-100 text-amber-800",
 };

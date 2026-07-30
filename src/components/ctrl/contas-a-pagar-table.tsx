@@ -7,7 +7,6 @@ import {
   enqueueSendToPayment,
   requeueRequestToOmie,
   previewPrevisaoMatches,
-  inactivateRequests,
   returnRequestToRequisicoes,
   getRequestAttachmentUrl,
   type PrevisaoMatch,
@@ -27,13 +26,12 @@ import { useRouter } from "next/navigation";
 
 export type ContasRequest = RequestDetail;
 
-type Tab = "aprovado" | "info_pagamento_pendente" | "agendado" | "inativado_csc";
+type Tab = "aprovado" | "info_pagamento_pendente" | "agendado";
 
 const TAB_LABELS: Record<Tab, string> = {
   aprovado: "Aguardando Envio",
   info_pagamento_pendente: "Info Pendente",
   agendado: "Enviados",
-  inativado_csc: "Inativados",
 };
 
 // O envio ao Omie é assíncrono: `enqueueSendToPayment` só enfileira e o cron
@@ -105,8 +103,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const [previsaoPreview, setPrevisaoPreview] = useState<PrevisaoMatch[] | null>(null);
   // requestId -> decisão escolhida no diálogo
   const [previsaoDecisoes, setPrevisaoDecisoes] = useState<Record<string, number | "novo">>({});
-  const [inactivateReason, setInactivateReason] = useState("");
-  const [showInactivateModal, setShowInactivateModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -191,8 +187,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     }
   }
 
-  const canInactivate = ctrlRoles.some((r) => ["csc", "admin"].includes(r));
-
   // Sempre ordenado pelo nº da requisição, do maior para o menor. A busca filtra
   // por nome do fornecedor, título ou nº da requisição (case-insensitive).
   const tabRequests = useMemo(() => {
@@ -230,14 +224,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     ];
     if (activeTab === "agendado") {
       base.push({ key: "empresa", type: "text", getValue: (r) => r.paying_company ?? "" });
-    } else if (activeTab === "inativado_csc") {
-      base.push({
-        key: "inativado",
-        type: "date",
-        getValue: (r) => r.inactivated_at ?? null,
-        label: (r) =>
-          r.inactivated_at ? new Intl.DateTimeFormat("pt-BR").format(new Date(r.inactivated_at)) : "—",
-      });
     } else {
       base.push({
         key: "vencimento",
@@ -261,7 +247,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     aprovado: requests.filter((r) => r.status === "aprovado").length,
     info_pagamento_pendente: requests.filter((r) => r.status === "info_pagamento_pendente").length,
     agendado: requests.filter((r) => r.status === "agendado").length,
-    inativado_csc: requests.filter((r) => r.status === "inativado_csc").length,
   };
 
   function toggleAll() {
@@ -332,15 +317,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       setPrevisaoDecisoes(iniciais);
       setPrevisaoPreview(comPrevisao);
       setShowEnviarModal(false);
-    });
-  }
-
-  function handleInativar() {
-    if (selected.size === 0 || !inactivateReason.trim()) return;
-    startTransition(async () => {
-      const result = await inactivateRequests(Array.from(selected), inactivateReason);
-      if (result && "error" in result) { notify(String((result as { error: string }).error), false); }
-      else { setSelected(new Set()); setInactivateReason(""); setShowInactivateModal(false); notify(`${(result as { processed: number }).processed} inativada(s).`); }
     });
   }
 
@@ -449,16 +425,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-gray-300" />
                   </th>
                 )}
-                {activeTab === "agendado" && canInactivate && (
-                  <th className="w-10 px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      className="h-4 w-4 rounded border-gray-300"
-                    />
-                  </th>
-                )}
                 <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
@@ -466,8 +432,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 <th className="px-4 py-3">
                   {activeTab === "agendado" ? (
                     <ExcelHeaderCell label="Empresa / Enviado em" menuSide="right" {...headerProps("empresa")} />
-                  ) : activeTab === "inativado_csc" ? (
-                    <ExcelHeaderCell label="Inativado em" menuSide="right" {...headerProps("inativado")} />
                   ) : (
                     <ExcelHeaderCell label="Vencimento" menuSide="right" {...headerProps("vencimento")} />
                   )}
@@ -481,9 +445,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 const isSelected = selected.has(req.id);
                 // Na fila do Omie: não pode ser reenviada nem mexida até o worker concluir.
                 const enfileirada = naFila(req);
-                const clickable =
-                  (activeTab === "aprovado" && !enfileirada) ||
-                  (activeTab === "agendado" && canInactivate);
+                const clickable = activeTab === "aprovado" && !enfileirada;
 
                 return (
                   <tr
@@ -491,7 +453,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     onClick={clickable ? () => toggle(req.id) : undefined}
                     className={`transition-colors ${clickable ? "cursor-pointer" : ""} ${isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-muted/20"}`}
                   >
-                    {(activeTab === "aprovado" || (activeTab === "agendado" && canInactivate)) && (
+                    {activeTab === "aprovado" && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -558,12 +520,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                             error={req.omie_launch_error}
                             lancado={Boolean(req.omie_contapagar_codigo)}
                           />
-                        </div>
-                      )}
-                      {activeTab === "inativado_csc" && (
-                        <div>
-                          {req.inactivated_at && <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.inactivated_at))}</p>}
-                          {req.inactivation_reason && <p className="text-muted-foreground line-clamp-2">{req.inactivation_reason}</p>}
                         </div>
                       )}
                     </td>
@@ -802,50 +758,6 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
               >
                 {isPending ? "Enfileirando..." : "Confirmar e enviar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Action bar — Enviados (inativar) */}
-      {activeTab === "agendado" && canInactivate && selected.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-          <span className="text-sm text-muted-foreground">{selected.size} selecionada(s)</span>
-          <button
-            onClick={() => setShowInactivateModal(true)}
-            className="ml-auto rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors"
-          >
-            Inativar selecionadas
-          </button>
-        </div>
-      )}
-
-      {/* Inativar modal */}
-      {showInactivateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border bg-background shadow-lg">
-            <div className="border-b px-6 py-4">
-              <h3 className="font-semibold">Inativar {selected.size} Requisição(ões)</h3>
-            </div>
-            <div className="px-6 py-4 space-y-2">
-              <p className="text-sm text-muted-foreground">Informe o motivo da inativação (obrigatório):</p>
-              <textarea
-                value={inactivateReason}
-                onChange={(e) => setInactivateReason(e.target.value)}
-                rows={3}
-                placeholder="Ex: Pagamento cancelado..."
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-            </div>
-            <div className="border-t px-6 py-4 flex justify-end gap-3">
-              <button onClick={() => { setShowInactivateModal(false); setInactivateReason(""); }} className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Cancelar</button>
-              <button
-                onClick={handleInativar}
-                disabled={isPending || !inactivateReason.trim()}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {isPending ? "Inativando..." : "Confirmar Inativação"}
               </button>
             </div>
           </div>

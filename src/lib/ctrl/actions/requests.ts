@@ -1582,17 +1582,17 @@ export async function getComplementThread(
 //
 // Reconstrói o histórico persistente das DECISÕES de aprovação de uma requisição
 // a partir de `ctrl_history` — a mesma tabela onde approveRequest /
-// applyApprovalStep / batchApproveRequests / rejectRequest / reverseRequest e a
-// auto-aprovação gerencial já gravam cada ação. Não altera nada do fluxo: só LÊ.
+// applyApprovalStep / batchApproveRequests / rejectRequest e a auto-aprovação
+// gerencial já gravam cada ação. Não altera nada do fluxo: só LÊ.
 //
 // Considera apenas as ações de decisão de aprovação (aprovado / rejeitado /
-// estornado); a conversa de complementação tem sua própria thread. A etapa
+// editado); a conversa de complementação tem sua própria thread. A etapa
 // (gerente/diretor) e sinais de auto-aprovação vêm do `metadata` gravado na
 // origem. Nomes dos autores são resolvidos via admin client porque a RLS de
 // `users` não expõe o registro de outro usuário ao aprovador (mesma técnica de
 // getComplementThread); a autorização é por papel + dono.
 
-export type ApprovalHistoryAction = "aprovado" | "rejeitado" | "estornado" | "editado";
+export type ApprovalHistoryAction = "aprovado" | "rejeitado" | "editado";
 
 /** De/para de um campo alterado (evento 'editado'). */
 export interface ApprovalHistoryChange {
@@ -1610,7 +1610,7 @@ export interface ApprovalHistoryEntry {
   autoApproved: boolean;
   actorName: string | null;
   actorEmail: string | null;
-  /** Comentário/motivo gravado no evento (motivo da rejeição/estorno, etc.). */
+  /** Comentário/motivo gravado no evento (motivo da rejeição, da edição, etc.). */
   comment: string | null;
   /** Campos alterados (só em 'editado'): lista de de/para legível. */
   changes?: ApprovalHistoryChange[];
@@ -1654,7 +1654,7 @@ export async function getApprovalHistory(
        user:users!ctrl_history_user_id_fkey(name, email)`,
     )
     .eq("request_id", requestId)
-    .in("action", ["aprovado", "rejeitado", "estornado", "editado"])
+    .in("action", ["aprovado", "rejeitado", "editado"])
     .order("created_at", { ascending: true });
 
   if (error) return { error: error.message };
@@ -2225,74 +2225,12 @@ export async function requeueRequestToOmie(requestId: string) {
   return { ok: true as const };
 }
 
-// ─── Inactivate ───────────────────────────────────────────────────────────────
-
-export async function inactivateRequests(requestIds: string[], reason: string) {
-  const ctx = await requireCtrlRole("csc", "admin");
-  if (!reason.trim()) return { error: "Motivo é obrigatório." };
-
-  const adminClient = createAdminClientIfAvailable();
-  const supabase = adminClient ?? (await createClient());
-
-  const now = new Date().toISOString();
-  const results: { id: string; ok: boolean; error?: string }[] = [];
-
-  const { data: reqs } = await supabase
-    .from("ctrl_requests")
-    .select("id, request_number, created_by, status, omie_paid_at")
-    .in("id", requestIds);
-
-  for (const req of reqs ?? []) {
-    if (req.status !== "agendado" && req.status !== "aprovado") {
-      results.push({ id: req.id, ok: false, error: `Status: ${req.status}` });
-      continue;
-    }
-    // Título já pago (baixado) no Omie: inativar aqui não estorna o pagamento e
-    // criaria divergência. Bloqueia — o acerto tem que ser feito no Omie.
-    if (req.omie_paid_at) {
-      results.push({ id: req.id, ok: false, error: "Já paga no Omie" });
-      continue;
-    }
-
-    await supabase
-      .from("ctrl_requests")
-      .update({
-        status: "inativado_csc",
-        inactivated_at: now,
-        inactivated_by: ctx.id,
-        inactivation_reason: reason.trim(),
-        updated_at: now,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
-      .eq("id", req.id);
-
-    await supabase.from("ctrl_history").insert({
-      request_id: req.id,
-      user_id: ctx.id,
-      action: "inativado_csc" as const,
-      comment: reason.trim(),
-      metadata: { inactivated_by_roles: ctx.ctrlRoles },
-    });
-
-    await notifyRequester({
-      userId: req.created_by,
-      requestId: req.id,
-      requestNumber: req.request_number,
-      title: "Requisição Inativada pelo CSC",
-      message: `Sua requisição #${req.request_number} foi inativada. Motivo: ${reason.trim()}`,
-      type: "inativacao",
-    });
-
-    results.push({ id: req.id, ok: true });
-  }
-
-  revalidatePath("/ctrl/contas-a-pagar");
-  return {
-    processed: results.filter((r) => r.ok).length,
-    failed: results.filter((r) => !r.ok).length,
-    results,
-  };
-}
+// ─── Inativação pelo CSC (removida) ──────────────────────────────────────────
+// A inativação em lote de requisições já enviadas foi descontinuada: ela só
+// mudava o status aqui e deixava o título vivo no Omie (além de tirar a
+// requisição da reconciliação de pagamentos). O caminho correto é "Devolver
+// para requisições", que exclui o título no Omie antes de voltar ao fluxo.
+// O status `inativado_csc` permanece no enum apenas por compatibilidade.
 
 // ─── Devolver para requisições (Contas a Pagar → volta à aprovação) ──────────
 //

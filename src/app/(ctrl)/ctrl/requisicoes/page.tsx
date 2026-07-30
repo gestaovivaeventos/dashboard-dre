@@ -94,8 +94,6 @@ export default async function RequisicoesPage() {
       usd_amount: (r.usd_amount as number | null) ?? null,
       usd_brl_rate: (r.usd_brl_rate as number | null) ?? null,
       iof_rate: (r.iof_rate as number | null) ?? null,
-      inactivated_at: (r.inactivated_at as string | null) ?? null,
-      inactivation_reason: (r.inactivation_reason as string | null) ?? null,
       created_at: (r.created_at as string | null) ?? null,
       approved_at: (r.approved_at as string | null) ?? null,
       ctrl_suppliers: (r.ctrl_suppliers as RequestDetail["ctrl_suppliers"]) ?? null,
