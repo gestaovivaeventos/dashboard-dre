@@ -17,6 +17,7 @@ import { EditExpenseRoutingModal } from "@/components/ctrl/edit-expense-routing-
 import {
   RequestDetailModal,
   resolveSupplier,
+  resolveNamed,
   fmt,
   type Supplier,
   type RequestDetail,
@@ -214,6 +215,26 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         key: "fornecedor",
         type: "text",
         getValue: (r) => resolveSupplier(r.ctrl_suppliers)?.name ?? "",
+      },
+      {
+        key: "tipo_despesa",
+        type: "text",
+        getValue: (r) => resolveNamed(r.ctrl_expense_types) ?? "",
+      },
+      {
+        key: "categoria",
+        type: "text",
+        getValue: (r) => r.categoria ?? "",
+      },
+      {
+        key: "setor",
+        type: "text",
+        getValue: (r) => resolveNamed(r.ctrl_sectors ?? null) ?? "",
+      },
+      {
+        key: "descricao",
+        type: "text",
+        getValue: (r) => r.description ?? "",
       },
       {
         key: "valor",
@@ -427,6 +448,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 )}
                 <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Tipo de despesa" {...headerProps("tipo_despesa")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Categoria" {...headerProps("categoria")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Descrição" {...headerProps("descricao")} /></th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
                 <th className="px-4 py-3">
@@ -475,6 +500,22 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                           {sup.cnpj_cpf && <p className="text-xs text-muted-foreground">{sup.cnpj_cpf}</p>}
                         </div>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {resolveNamed(req.ctrl_expense_types) ?? <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {req.categoria ?? <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {req.description ? (
+                        <p className="line-clamp-2 max-w-[16rem]" title={req.description}>{req.description}</p>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3"><PaymentInfo supplier={sup} /></td>
                     <td className="px-4 py-3 text-right font-medium">{fmt.format(Number(req.amount))}</td>

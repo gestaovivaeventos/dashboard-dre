@@ -51,6 +51,9 @@ export type RequestDetail = {
   usd_amount?: number | null;
   usd_brl_rate?: number | null;
   iof_rate?: number | null;
+  // Categoria Omie (prévia do mapeamento do tipo de despesa) — resolvida no
+  // servidor para exibição no Contas a Pagar. Não é coluna da tabela.
+  categoria?: string | null;
   payment_method?: string | null;
   installment_number?: number | null;
   installment_total?: number | null;

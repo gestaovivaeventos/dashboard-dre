@@ -95,7 +95,65 @@ async function getContasAPagar() {
     .order("due_date", { ascending: true, nullsFirst: false });
 
   if (error) return { error: error.message };
-  return { requests: (data ?? []) as ContasRequest[] };
+
+  // ── Prévia da Categoria Omie (mapeamento tipo de despesa → categoria) ──────
+  // O mapeamento é por empresa pagadora. Antes do envio não há empresa, então
+  // usamos como PRÉVIA a empresa com mais mapeamentos (a pagadora principal);
+  // nas Enviadas usamos a empresa que de fato pagou. Sem mapeamento → "—".
+  const [{ data: mapRows }, { data: optRows }] = await Promise.all([
+    supabase
+      .from("ctrl_expense_type_omie_categoria")
+      .select("expense_type_id, company_id, codigo_categoria, codigo_categoria_sem_nota"),
+    supabase
+      .from("ctrl_omie_options")
+      .select("company_id, codigo, descricao")
+      .eq("kind", "categoria"),
+  ]);
+
+  // Empresa de prévia = a que tem mais mapeamentos de categoria.
+  const mapCount = new Map<string, number>();
+  for (const m of mapRows ?? []) {
+    const cid = m.company_id as string;
+    mapCount.set(cid, (mapCount.get(cid) ?? 0) + 1);
+  }
+  let previewCompanyId: string | null = null;
+  let best = -1;
+  for (const [cid, n] of Array.from(mapCount.entries())) {
+    if (n > best) { best = n; previewCompanyId = cid; }
+  }
+
+  // `${company}:${expense_type}` → { com, sem } | `${company}:${codigo}` → descricao
+  const mapByKey = new Map<string, { com: string | null; sem: string | null }>();
+  for (const m of mapRows ?? []) {
+    mapByKey.set(`${m.company_id}:${m.expense_type_id}`, {
+      com: (m.codigo_categoria as string | null) ?? null,
+      sem: (m.codigo_categoria_sem_nota as string | null) ?? null,
+    });
+  }
+  const optByKey = new Map<string, string>();
+  for (const o of optRows ?? []) optByKey.set(`${o.company_id}:${o.codigo}`, o.descricao as string);
+
+  const resolveCategoria = (r: {
+    expense_type_id?: string | null;
+    paying_company_id?: string | null;
+    supplier_issues_invoice?: string | null;
+  }): string | null => {
+    if (!r.expense_type_id) return null;
+    const company = r.paying_company_id ?? previewCompanyId;
+    if (!company) return null;
+    const m = mapByKey.get(`${company}:${r.expense_type_id}`);
+    if (!m) return null;
+    const codigo = r.supplier_issues_invoice === "nao" ? m.sem ?? m.com : m.com;
+    if (!codigo) return null;
+    return optByKey.get(`${company}:${codigo}`) ?? codigo;
+  };
+
+  const requests = (data ?? []).map((r) => ({
+    ...r,
+    categoria: resolveCategoria(r as Parameters<typeof resolveCategoria>[0]),
+  })) as ContasRequest[];
+
+  return { requests };
 }
 
 // Cadastros para o modal de correção de setor/tipo. Busca TODOS os ativos via
