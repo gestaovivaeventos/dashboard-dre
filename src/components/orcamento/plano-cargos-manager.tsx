@@ -29,6 +29,7 @@ import { getSetores } from "@/lib/orcamento/actions/setores";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { YearSelect } from "@/components/orcamento/year-select";
+import { PlanoCargosUpload } from "@/components/orcamento/plano-cargos-upload";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -304,15 +305,26 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={handleClone}
-          disabled={loading || cloning || isPending || !companyId}
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
-        >
-          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-          Clonar de {year - 1}
-        </button>
+        <div className="flex flex-wrap items-end gap-2">
+          {/* A planilha traz a empresa em cada linha, então o import não depende
+              da empresa selecionada — só do ano. */}
+          <PlanoCargosUpload
+            year={year}
+            onImported={() => {
+              setFeedback(null);
+              void init(companyId, year);
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleClone}
+            disabled={loading || cloning || isPending || !companyId}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
+          >
+            {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+            Clonar de {year - 1}
+          </button>
+        </div>
       </div>
 
       {orcarPorSetor && setores.length === 0 ? (
