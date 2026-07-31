@@ -64,6 +64,13 @@ const CARDS: ConfigCard[] = [
     href: "/orcamento/configuracoes/plano-cargos",
   },
   {
+    title: "Empresa dos encargos",
+    description:
+      "Liga a coluna Empresa no quadro de pessoal, para quem tem colaborador registrado em outro CNPJ do grupo. Desligado, todo o quadro usa o regime da própria empresa.",
+    icon: Building2,
+    href: "/orcamento/configuracoes/empresa-encargos",
+  },
+  {
     title: "Encargos sobre a folha",
     description:
       "INSS patronal, RAT×FAP, terceiros e FGTS por empresa. Cada uma começa com o padrão do seu regime tributário e pode ser ajustada.",

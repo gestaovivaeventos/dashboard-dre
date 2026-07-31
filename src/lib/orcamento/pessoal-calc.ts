@@ -214,6 +214,13 @@ export interface PreviaInput {
    * agrupados, o comportamento padrão.
    */
   beneficiosSeparados?: BeneficioKey[];
+  /**
+   * Alíquotas por empresa, para o colaborador que é registrado em OUTRA empresa
+   * do grupo (`empresaEncargosId`): os encargos dele seguem o regime tributário
+   * dessa empresa, embora o custo componha o orçamento da empresa do quadro.
+   * Quem não tem empresa própria usa `encargos`.
+   */
+  encargosPorEmpresa?: Record<string, EncargoValues>;
 }
 
 export function calcularPrevia({
@@ -221,16 +228,20 @@ export function calcularPrevia({
   encargos,
   regimeApuracao,
   beneficiosSeparados = [],
+  encargosPorEmpresa = {},
 }: PreviaInput): PreviaResultado {
   const avisos: string[] = [];
-  const i = fatorInss(encargos);
-  const f = fatorFgts(encargos);
-  const comEncargos = 1 + fatorEncargos(encargos);
   const caixa = regimeApuracao === "caixa";
 
   const salCLT = zeros();
   const outrosVinculos = zeros();
   const headcountClt = zeros();
+  // INSS e FGTS são ACUMULADOS em reais, e não uma alíquota aplicada no fim,
+  // porque cada colaborador pode ter a sua: quem é registrado em outra empresa
+  // do grupo segue o regime tributário DELA. As provisões, pela mesma razão, já
+  // saem daqui com os encargos embutidos.
+  const folhaInss = zeros();
+  const folhaFgts = zeros();
   // Benefícios acumulados por chave, para poder abrir a linha um a um. A linha
   // de Benefícios é a soma destas séries.
   const beneficiosPorKey = new Map<BeneficioKey, number[]>(
@@ -252,6 +263,14 @@ export function calcularPrevia({
     const { salarios } = linhaDoTempo(colab, avisos);
     const ehClt = colab.vinculo === "clt";
 
+    // Alíquotas DESTE colaborador: as da empresa em que ele é registrado,
+    // quando houver, senão as da empresa do quadro.
+    const meusEncargos =
+      (colab.empresaEncargosId ? encargosPorEmpresa[colab.empresaEncargosId] : null) ?? encargos;
+    const i = fatorInss(meusEncargos);
+    const f = fatorFgts(meusEncargos);
+    const comEncargos = 1 + fatorEncargos(meusEncargos);
+
     // Média corrida: acumula mês a mês só o que já passou. A janela legal é de
     // 12 meses para trás, o que dentro de um ano de orçamento significa "desde
     // janeiro" — ou desde a admissão, para quem entra no meio do ano.
@@ -268,8 +287,10 @@ export function calcularPrevia({
       if (ehClt) {
         salCLT[m] += salario;
         headcountClt[m] += 1;
-        decimoMensal[m] += mediaCorrida * FRACAO_DECIMO_MES;
-        feriasMensal[m] += mediaCorrida * FRACAO_FERIAS_MES;
+        folhaInss[m] += salario * i;
+        folhaFgts[m] += salario * f;
+        decimoMensal[m] += mediaCorrida * FRACAO_DECIMO_MES * comEncargos;
+        feriasMensal[m] += mediaCorrida * FRACAO_FERIAS_MES * comEncargos;
       } else {
         outrosVinculos[m] += salario;
       }
@@ -316,10 +337,10 @@ export function calcularPrevia({
   });
 
   // Séries da folha, na competência do trabalho (antes de qualquer defasagem).
+  // folhaInss, folhaFgts e as provisões já vieram acumuladas com a alíquota de
+  // cada colaborador.
   const folhaSalarios = salCLT.map((v, m) => v + outrosVinculos[m]);
-  const folhaInss = salCLT.map((v) => v * i);
-  const folhaFgts = salCLT.map((v) => v * f);
-  const provisaoFerias = feriasMensal.map((v) => v * comEncargos);
+  const provisaoFerias = feriasMensal;
 
   // ─── O REGIME DE APURAÇÃO decide o resto ──────────────────────────────────
   // Ele vem primeiro: cada regime monta as 6 linhas à sua maneira, e nada é
@@ -335,7 +356,7 @@ export function calcularPrevia({
     //    desconhecido, deslocar a provisão não significaria nada.
     //  • 13º: as duas parcelas do ano saem sempre em novembro e dezembro.
     const decimo = zeros();
-    const metade = somar(decimoMensal) * 0.5 * comEncargos;
+    const metade = somar(decimoMensal) * 0.5;
     decimo[10] = metade;
     decimo[11] = metade;
 
@@ -355,7 +376,7 @@ export function calcularPrevia({
       salarios: folhaSalarios,
       beneficios,
       ferias: provisaoFerias,
-      decimo: decimoMensal.map((v) => v * comEncargos),
+      decimo: decimoMensal,
       inss: folhaInss,
       fgts: folhaFgts,
     };

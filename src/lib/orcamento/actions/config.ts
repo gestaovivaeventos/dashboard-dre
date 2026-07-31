@@ -12,6 +12,8 @@ export interface CompanyBudgetConfig {
   companyId: string;
   companyName: string;
   orcarPorSetor: boolean;
+  /** Mostra a coluna "Empresa" no quadro de pessoal (regime dos encargos). */
+  usarEmpresaEncargos: boolean;
 }
 
 /**
@@ -40,22 +42,32 @@ export async function getCompaniesBudgetConfig(year?: number): Promise<{
 
   const { data: configs, error: configError } = await supabase
     .from("orcamento_company_config")
-    .select("company_id, orcar_por_setor")
+    .select("company_id, orcar_por_setor, usar_empresa_encargos")
     .eq("year", y);
   if (configError) {
     if (isSchemaMissing(configError.message)) return { needsMigration: true };
     return { error: configError.message };
   }
 
-  const flagByCompany = new Map(
-    (configs ?? []).map((c) => [c.company_id as string, Boolean(c.orcar_por_setor)]),
+  const configByCompany = new Map(
+    (configs ?? []).map((c) => [
+      c.company_id as string,
+      {
+        orcarPorSetor: Boolean(c.orcar_por_setor),
+        usarEmpresaEncargos: Boolean(c.usar_empresa_encargos),
+      },
+    ]),
   );
 
-  const items: CompanyBudgetConfig[] = (companies ?? []).map((c) => ({
-    companyId: c.id as string,
-    companyName: c.name as string,
-    orcarPorSetor: flagByCompany.get(c.id as string) ?? false,
-  }));
+  const items: CompanyBudgetConfig[] = (companies ?? []).map((c) => {
+    const cfg = configByCompany.get(c.id as string);
+    return {
+      companyId: c.id as string,
+      companyName: c.name as string,
+      orcarPorSetor: cfg?.orcarPorSetor ?? false,
+      usarEmpresaEncargos: cfg?.usarEmpresaEncargos ?? false,
+    };
+  });
 
   return { items, year: y };
 }
@@ -90,6 +102,39 @@ export async function setOrcarPorSetor(companyId: string, year: number, value: b
 }
 
 /**
+ * Liga/desliga a coluna "Empresa" no quadro de pessoal da empresa, no ano.
+ *
+ * Desligado, a coluna some E os encargos de todo o quadro passam a seguir o
+ * regime da própria empresa orçada — o toggle governa o comportamento, não só a
+ * exibição, para não sobrar regra invisível mexendo em número de orçamento.
+ */
+export async function setUsarEmpresaEncargos(companyId: string, year: number, value: boolean) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Empresa inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase.from("orcamento_company_config").upsert(
+    {
+      company_id: companyId,
+      year,
+      usar_empresa_encargos: value,
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year" },
+  );
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+
+  revalidatePath("/orcamento/configuracoes/empresa-encargos");
+  revalidatePath("/orcamento/despesas/pessoal");
+  return { ok: true as const };
+}
+
+/**
  * Copia a configuração "orçar por setor" de todas as empresas de um ano para
  * outro (ex.: começar 2028 a partir de 2027). Não sobrescreve empresas que já
  * tenham configuração no ano de destino. Retorna quantas foram copiadas.
@@ -106,7 +151,7 @@ export async function cloneOrcarPorSetorFromYear(fromYear: number, toYear: numbe
 
   const { data: source, error: srcError } = await supabase
     .from("orcamento_company_config")
-    .select("company_id, orcar_por_setor, regime_apuracao")
+    .select("company_id, orcar_por_setor, regime_apuracao, usar_empresa_encargos")
     .eq("year", fromYear);
   if (srcError) {
     if (isSchemaMissing(srcError.message)) return { needsMigration: true };
@@ -128,6 +173,7 @@ export async function cloneOrcarPorSetorFromYear(fromYear: number, toYear: numbe
       year: toYear,
       orcar_por_setor: Boolean(r.orcar_por_setor),
       regime_apuracao: (r.regime_apuracao as string | null) ?? null,
+      usar_empresa_encargos: Boolean(r.usar_empresa_encargos),
       updated_by: admin.userId,
     }));
   if (rows.length === 0) return { ok: true as const, copied: 0 };

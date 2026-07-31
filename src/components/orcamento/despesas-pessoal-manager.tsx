@@ -15,6 +15,7 @@ import {
   type CargoOption,
   type Colaborador,
   type ColaboradorInput,
+  type EmpresaEncargosOption,
   type Movimentacao,
   type PessoalSetup,
 } from "@/lib/orcamento/actions/pessoal";
@@ -140,6 +141,8 @@ const EMPTY_SETUP: PessoalSetup = {
   setores: [],
   cargoOptions: [],
   beneficiosSeparados: [],
+  empresas: [],
+  usarEmpresaEncargos: false,
 };
 
 export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
@@ -261,6 +264,7 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
     setFeedback(null);
     const res = await createColaborador(companyId, year, {
       setorId: setorEspecifico(setorId),
+      empresaEncargosId: null,
       nome: null,
       vinculo: "clt",
       cargoAtual: null,
@@ -481,7 +485,10 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                   <table className="min-w-[1040px] w-full border-collapse text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        <th className="border-r px-2 py-2 text-left" colSpan={2}>
+                        <th
+                          className="border-r px-2 py-2 text-left"
+                          colSpan={setup.usarEmpresaEncargos ? 3 : 2}
+                        >
                           Colaborador
                         </th>
                         <th className="border-r px-2 py-2 text-left" colSpan={2}>
@@ -500,6 +507,14 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                         <th className="px-2 py-2" />
                       </tr>
                       <tr className="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground">
+                        {setup.usarEmpresaEncargos && (
+                          <th
+                            className="border-r px-2 py-1.5 text-left"
+                            title="Empresa em que o colaborador é registrado — define o regime tributário dos encargos dele. O custo continua indo para a empresa filtrada."
+                          >
+                            Empresa
+                          </th>
+                        )}
                         <th className="border-r px-2 py-1.5 text-left">Nome</th>
                         <th className="border-r px-2 py-1.5 text-left">Vínculo</th>
                         <th className="border-r px-2 py-1.5 text-left">Cargo atual</th>
@@ -523,6 +538,8 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                           colab={colab}
                           year={year}
                           cargoOptions={cargoOptionsForSetor}
+                          empresas={setup.empresas}
+                          mostrarEmpresa={setup.usarEmpresaEncargos}
                           onError={(msg) => setFeedback({ ok: false, msg })}
                           onDelete={() => handleDelete(colab)}
                         />
@@ -605,7 +622,16 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
 
 // ─── Linha editável (auto-save) ──────────────────────────────────────────────
 
+/** Rótulo curto do regime, para caber no <option> da coluna Empresa. */
+function regimeCurto(regime: string): string {
+  if (regime === "simples_nacional") return "Simples";
+  if (regime === "lucro_presumido") return "Presumido";
+  if (regime === "lucro_real") return "Real";
+  return regime;
+}
+
 interface RowDraft {
+  empresaEncargosId: string;
   nome: string;
   vinculo: VinculoKey;
   cargoAtual: string;
@@ -623,6 +649,7 @@ interface RowDraft {
 
 function toDraft(c: Colaborador): RowDraft {
   return {
+    empresaEncargosId: c.empresaEncargosId ?? "",
     nome: c.nome ?? "",
     vinculo: c.vinculo,
     cargoAtual: c.cargoAtual ?? "",
@@ -642,6 +669,7 @@ function toDraft(c: Colaborador): RowDraft {
 function draftToInput(d: RowDraft, setorId: string | null, year: number): ColaboradorInput {
   return {
     setorId,
+    empresaEncargosId: d.empresaEncargosId || null,
     nome: d.nome.trim() || null,
     vinculo: d.vinculo,
     cargoAtual: d.cargoAtual.trim() || null,
@@ -656,11 +684,21 @@ interface RowProps {
   colab: Colaborador;
   year: number;
   cargoOptions: CargoOption[];
+  empresas: EmpresaEncargosOption[];
+  mostrarEmpresa: boolean;
   onError: (msg: string) => void;
   onDelete: () => void;
 }
 
-function ColaboradorRow({ colab, year, cargoOptions, onError, onDelete }: RowProps) {
+function ColaboradorRow({
+  colab,
+  year,
+  cargoOptions,
+  empresas,
+  mostrarEmpresa,
+  onError,
+  onDelete,
+}: RowProps) {
   const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
   const [saving, setSaving] = useState(false);
   const draftRef = useRef(draft);
@@ -737,6 +775,26 @@ function ColaboradorRow({ colab, year, cargoOptions, onError, onDelete }: RowPro
 
   return (
     <tr className="align-top hover:bg-muted/20">
+      {/* Empresa dos encargos — só aparece quando habilitada na configuração.
+          Vazio significa a empresa do quadro. */}
+      {mostrarEmpresa && (
+        <td className="border-r px-1.5 py-1">
+          <select
+            value={draft.empresaEncargosId}
+            onChange={(e) => commit({ empresaEncargosId: e.target.value })}
+            className={cn(CELL, "min-w-[10rem]")}
+            title="Regime tributário usado nos encargos deste colaborador"
+          >
+            <option value="">— esta empresa —</option>
+            {empresas.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.regimeTributario ? ` (${regimeCurto(e.regimeTributario)})` : ""}
+              </option>
+            ))}
+          </select>
+        </td>
+      )}
       {/* Nome */}
       <td className="border-r px-1.5 py-1">
         <input

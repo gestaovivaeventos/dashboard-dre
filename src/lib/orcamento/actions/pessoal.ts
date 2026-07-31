@@ -22,7 +22,7 @@ import {
   type RegimeApuracao,
 } from "@/lib/orcamento/regime-apuracao";
 import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
-import { getEncargos } from "@/lib/orcamento/actions/encargos";
+import { getEncargos, getEncargosPorEmpresa } from "@/lib/orcamento/actions/encargos";
 import type { EncargoValues } from "@/lib/orcamento/encargos";
 import { calcularPrevia, type PreviaResultado } from "@/lib/orcamento/pessoal-calc";
 
@@ -40,6 +40,9 @@ export interface Movimentacao {
 export interface Colaborador {
   id: string;
   setorId: string | null;
+  /** Empresa em que ele é registrado — define o REGIME dos encargos dele.
+   * null = a própria empresa do quadro. Não muda o destino do valor. */
+  empresaEncargosId: string | null;
   nome: string | null;
   vinculo: VinculoKey;
   cargoAtual: string | null;
@@ -52,6 +55,7 @@ export interface Colaborador {
 
 export interface ColaboradorInput {
   setorId: string | null;
+  empresaEncargosId: string | null;
   nome: string | null;
   vinculo: VinculoKey;
   cargoAtual: string | null;
@@ -83,6 +87,16 @@ export interface PessoalSetup {
   cargoOptions: CargoOption[];
   /** Benefícios com linha própria na prévia (os demais somam em "Benefícios"). */
   beneficiosSeparados: BeneficioKey[];
+  /** Empresas do grupo, para a coluna "Empresa" do quadro (regime dos encargos). */
+  empresas: EmpresaEncargosOption[];
+  /** A coluna "Empresa" está habilitada nesta empresa/ano? */
+  usarEmpresaEncargos: boolean;
+}
+
+export interface EmpresaEncargosOption {
+  id: string;
+  name: string;
+  regimeTributario: string | null;
 }
 
 /** Lê as exceções de agrupamento de benefícios da empresa/ano. Sem linha na
@@ -177,6 +191,8 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
         setores: [],
         cargoOptions: [],
         beneficiosSeparados: [],
+        empresas: [],
+        usarEmpresaEncargos: false,
       },
     };
   }
@@ -187,12 +203,13 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
   // Config do ano: orça por setor? regime de apuração?
   const { data: cfg } = await supabase
     .from("orcamento_company_config")
-    .select("orcar_por_setor, regime_apuracao")
+    .select("orcar_por_setor, regime_apuracao, usar_empresa_encargos")
     .eq("company_id", companyId)
     .eq("year", year)
     .maybeSingle();
   const orcarPorSetor = Boolean(cfg?.orcar_por_setor);
   const regimeApuracao = toRegimeApuracao(cfg?.regime_apuracao);
+  const usarEmpresaEncargos = Boolean(cfg?.usar_empresa_encargos);
 
   // Setores ativos do ano.
   const { data: setoresData, error: setErr } = await supabase
@@ -246,8 +263,27 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
 
   const beneficiosSeparados = await lerBeneficiosSeparados(supabase, companyId, year);
 
+  const { data: empresasData } = await supabase
+    .from("companies")
+    .select("id, name, regime_tributario")
+    .eq("active", true)
+    .order("name");
+  const empresas: EmpresaEncargosOption[] = (empresasData ?? []).map((c) => ({
+    id: c.id as string,
+    name: c.name as string,
+    regimeTributario: (c.regime_tributario as string | null) ?? null,
+  }));
+
   return {
-    setup: { orcarPorSetor, regimeApuracao, setores, cargoOptions, beneficiosSeparados },
+    setup: {
+      orcarPorSetor,
+      regimeApuracao,
+      setores,
+      cargoOptions,
+      beneficiosSeparados,
+      empresas,
+      usarEmpresaEncargos,
+    },
   };
 }
 
@@ -316,7 +352,7 @@ export async function setRegimeApuracao(
 // A cauda são as colunas de benefício: ao acrescentar um item em BENEFICIOS,
 // acrescente a coluna aqui também, senão o valor é gravado mas nunca lido.
 const COLAB_COLS =
-  "id, setor_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida";
+  "id, setor_id, empresa_encargos_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida";
 
 /** Lê os valores de benefício de uma linha crua. */
 function readBeneficios(r: Record<string, unknown>): Beneficios {
@@ -361,6 +397,7 @@ export async function getColaboradores(
   const items: Colaborador[] = (data ?? []).map((r) => ({
     id: r.id as string,
     setorId: (r.setor_id as string) ?? null,
+    empresaEncargosId: (r.empresa_encargos_id as string) ?? null,
     nome: (r.nome as string) ?? null,
     vinculo: r.vinculo as VinculoKey,
     cargoAtual: (r.cargo_atual as string) ?? null,
@@ -378,6 +415,7 @@ function toRow(input: ColaboradorInput, adminId: string) {
   const m2 = cleanMov(input.mov2);
   return {
     setor_id: input.setorId ?? null,
+    empresa_encargos_id: input.empresaEncargosId ?? null,
     nome: input.nome?.trim() || null,
     vinculo: input.vinculo,
     cargo_atual: input.cargoAtual?.trim() || null,
@@ -512,11 +550,12 @@ export async function getPrevia(
 
   const { data: cfg } = await supabase
     .from("orcamento_company_config")
-    .select("regime_apuracao")
+    .select("regime_apuracao, usar_empresa_encargos")
     .eq("company_id", companyId)
     .eq("year", year)
     .maybeSingle();
   const regimeApuracao = toRegimeApuracao(cfg?.regime_apuracao);
+  const usarEmpresaEncargos = Boolean(cfg?.usar_empresa_encargos);
 
   let query = supabase
     .from("orcamento_pessoal_colaboradores")
@@ -542,6 +581,7 @@ export async function getPrevia(
   const colaboradores: Colaborador[] = (data ?? []).map((r) => ({
     id: r.id as string,
     setorId: (r.setor_id as string) ?? null,
+    empresaEncargosId: (r.empresa_encargos_id as string) ?? null,
     nome: (r.nome as string) ?? null,
     vinculo: r.vinculo as VinculoKey,
     cargoAtual: (r.cargo_atual as string) ?? null,
@@ -557,6 +597,25 @@ export async function getPrevia(
   if (enc.error || !enc.values) return { error: enc.error ?? "Falha ao ler os encargos." };
 
   const beneficiosSeparados = await lerBeneficiosSeparados(supabase, companyId, year);
+
+  // Colaborador registrado em outra empresa usa as alíquotas DELA. Uma consulta
+  // em lote resolve todas as empresas citadas no quadro. Com a coluna desligada
+  // na configuração, o que estiver gravado é IGNORADO e todo o quadro usa o
+  // regime da empresa orçada — nada de regra invisível mexendo no orçamento.
+  const outrasEmpresas = usarEmpresaEncargos
+    ? Array.from(
+        new Set(
+          colaboradores
+            .map((c) => c.empresaEncargosId)
+            .filter((id): id is string => Boolean(id) && id !== companyId),
+        ),
+      )
+    : [];
+  let encargosPorEmpresa: Record<string, EncargoValues> = {};
+  if (outrasEmpresas.length > 0) {
+    const res = await getEncargosPorEmpresa(outrasEmpresas, year);
+    encargosPorEmpresa = res.values ?? {};
+  }
 
   const roster: ColaboradorResumo[] = colaboradores.map((c) => ({
     id: c.id,
@@ -576,6 +635,7 @@ export async function getPrevia(
         encargos: enc.values,
         regimeApuracao,
         beneficiosSeparados,
+        encargosPorEmpresa,
       }),
       regimeApuracao,
       encargos: enc.values,

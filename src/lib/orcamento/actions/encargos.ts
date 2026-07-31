@@ -130,6 +130,51 @@ export async function getEncargos(
   return { values };
 }
 
+/**
+ * Alíquotas de VÁRIAS empresas de uma vez, resolvidas contra o padrão do regime
+ * tributário de cada uma. Usado pela prévia quando o quadro tem colaboradores
+ * registrados em empresas diferentes: duas consultas, não duas por empresa.
+ */
+export async function getEncargosPorEmpresa(
+  companyIds: string[],
+  year: number,
+): Promise<{ values?: Record<string, EncargoValues>; error?: string }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const ids = Array.from(new Set(companyIds.filter(Boolean)));
+  if (ids.length === 0) return { values: {} };
+
+  const supabase = db() ?? (await createClient());
+
+  const { data: companies, error: compErr } = await supabase
+    .from("companies")
+    .select("id, regime_tributario")
+    .in("id", ids);
+  if (compErr) return { error: compErr.message };
+
+  const { data: rows, error: rowsErr } = await supabase
+    .from("orcamento_encargos")
+    .select(ENCARGO_COLS)
+    .eq("year", year)
+    .in("company_id", ids);
+  // Sem a tabela de encargos, cada empresa cai no padrão do seu regime.
+  const byCompany = new Map(
+    rowsErr
+      ? []
+      : (rows ?? []).map((r) => [r.company_id as string, r as Record<string, unknown>]),
+  );
+
+  const values: Record<string, EncargoValues> = {};
+  for (const c of companies ?? []) {
+    const id = c.id as string;
+    values[id] = readValues(byCompany.get(id), (c.regime_tributario as string | null) ?? null)
+      .values;
+  }
+  return { values };
+}
+
 /** Grava as alíquotas de uma empresa no ano. */
 export async function setEncargos(companyId: string, year: number, values: EncargoValues) {
   const admin = await getOrcamentoAdmin();
