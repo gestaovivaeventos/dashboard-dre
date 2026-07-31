@@ -8,6 +8,7 @@ import {
   deleteColaborador,
   getColaboradores,
   getPessoalSetup,
+  setBeneficioAgrupar,
   setRegimeApuracao,
   updateColaborador,
   updateColaboradorBeneficios,
@@ -22,7 +23,7 @@ import {
   REGIME_APURACAO_PADRAO,
   type RegimeApuracao,
 } from "@/lib/orcamento/regime-apuracao";
-import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
+import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
@@ -138,6 +139,7 @@ const EMPTY_SETUP: PessoalSetup = {
   regimeApuracao: REGIME_APURACAO_PADRAO,
   setores: [],
   cargoOptions: [],
+  beneficiosSeparados: [],
 };
 
 export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
@@ -152,6 +154,7 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
   const [savingRegime, setSavingRegime] = useState(false);
+  const [savingAgrupar, setSavingAgrupar] = useState<BeneficioKey | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
   async function loadColabs(cid: string, y: number, sid: string | null) {
@@ -201,6 +204,32 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
     void init(companyId, year);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  /** Agrupar/separar um benefício. Só muda como a prévia monta as linhas — o
+   * quadro e os valores digitados ficam intactos. */
+  async function handleAgrupar(key: BeneficioKey, agrupar: boolean) {
+    const anterior = setup.beneficiosSeparados;
+    setFeedback(null);
+    setSavingAgrupar(key);
+    setSetup((prev) => ({
+      ...prev,
+      beneficiosSeparados: agrupar
+        ? prev.beneficiosSeparados.filter((k) => k !== key)
+        : [...prev.beneficiosSeparados, key],
+    }));
+
+    const res = await setBeneficioAgrupar(companyId, year, key, agrupar);
+    setSavingAgrupar(null);
+    if (res?.error || res?.needsMigration) {
+      setSetup((prev) => ({ ...prev, beneficiosSeparados: anterior }));
+      setFeedback({
+        ok: false,
+        msg: res.needsMigration
+          ? "Migration 20260731140000_orcamento_beneficio_agrupar ainda não aplicada."
+          : (res.error as string),
+      });
+    }
+  }
 
   /** Caixa x competência do ano — só muda como o 13º será distribuído na
    * prévia; não mexe no quadro, então não recarrega os colaboradores. */
@@ -510,7 +539,9 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                 Valores <strong>mensais</strong> por colaborador. O admin pré-preenche e o gestor
                 ajusta — cada alteração é salva automaticamente. Adicione/remova pessoas na aba{" "}
                 <strong>Quadro</strong>. <em>Seguro de vida</em> só se aplica a colaboradores com
-                vínculo <strong>Estágio</strong>.
+                vínculo <strong>Estágio</strong>. O check <strong>Agrupar</strong> no topo de cada
+                coluna decide se o benefício soma na linha “Benefícios” da prévia ou vira uma linha
+                própria, com conta própria no orçamento.
               </p>
 
               {items.length === 0 ? (
@@ -523,11 +554,32 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
                     <thead>
                       <tr className="border-b bg-emerald-500/10 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         <th className="border-r px-3 py-2 text-left">Colaborador</th>
-                        {BENEFICIOS.map((b) => (
-                          <th key={b.key} className="border-r px-3 py-2 text-left">
-                            {b.label}
-                          </th>
-                        ))}
+                        {BENEFICIOS.map((b) => {
+                          const agrupado = !setup.beneficiosSeparados.includes(b.key);
+                          return (
+                            <th key={b.key} className="border-r px-3 py-2 text-left align-top">
+                              <div className="space-y-1">
+                                <div>{b.label}</div>
+                                <label
+                                  className="flex cursor-pointer items-center gap-1 text-[10px] font-normal normal-case"
+                                  title="Agrupado soma na linha “Benefícios” da prévia; desmarcado vira uma linha própria, com conta própria no orçamento."
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={agrupado}
+                                    disabled={savingAgrupar === b.key}
+                                    onChange={(e) => void handleAgrupar(b.key, e.target.checked)}
+                                    className="h-3 w-3 accent-emerald-600"
+                                  />
+                                  Agrupar
+                                  {savingAgrupar === b.key && (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  )}
+                                </label>
+                              </div>
+                            </th>
+                          );
+                        })}
                         <th className="px-2 py-2" />
                       </tr>
                     </thead>

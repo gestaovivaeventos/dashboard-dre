@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Loader2 } from "lucide-react";
 
 import { getPrevia, type PreviaPayload } from "@/lib/orcamento/actions/pessoal";
+import {
+  enviarPreviaParaOrcamento,
+  type EnvioBudgetResultado,
+} from "@/lib/orcamento/actions/previa-budget";
 import { ENCARGOS } from "@/lib/orcamento/encargos";
 import { regimeApuracaoLabel } from "@/lib/orcamento/regime-apuracao";
 import { PreviaTabela } from "@/components/orcamento/previa-tabela";
@@ -127,10 +131,13 @@ export function PreviaPessoal({ companyId, year, setorId, escopoLabel }: Props) 
 
       <PreviaTabela previa={previa} />
 
-      <p className="text-sm">
-        Custo total do ano:{" "}
-        <strong className="tabular-nums">{formatBRL(previa.totalAno)}</strong>
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm">
+          Custo total do ano:{" "}
+          <strong className="tabular-nums">{formatBRL(previa.totalAno)}</strong>
+        </p>
+        <EnviarParaOrcamento companyId={companyId} year={year} />
+      </div>
 
       <details className="rounded-lg border bg-muted/20 px-4 py-3 text-sm">
         <summary className="cursor-pointer font-medium">Como cada linha é calculada</summary>
@@ -190,6 +197,102 @@ export function PreviaPessoal({ companyId, year, setorId, escopoLabel }: Props) 
           </li>
         </ul>
       </details>
+    </div>
+  );
+}
+
+/**
+ * Publica a prévia no orçamento (Budget e Forecast). Sempre a empresa inteira,
+ * mesmo que a tela esteja filtrada por setor — o orçamento não pode sair pela
+ * metade. Por isso o botão fica fora do escopo do filtro e avisa disso.
+ */
+function EnviarParaOrcamento({ companyId, year }: { companyId: string; year: number }) {
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState<EnvioBudgetResultado | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function enviar() {
+    if (
+      !window.confirm(
+        `Enviar a prévia de ${year} para o Budget e Forecast? Todos os setores da empresa entram somados, substituindo o envio anterior deste ano.`,
+      )
+    ) {
+      return;
+    }
+    setEnviando(true);
+    setErro(null);
+    setResultado(null);
+    const res = await enviarPreviaParaOrcamento(companyId, year);
+    setEnviando(false);
+    if (res?.needsMigration) {
+      setErro("Migration 20260731130000_budget_uploads_raw_source ainda não aplicada.");
+      return;
+    }
+    if (res?.error) {
+      setErro(res.error);
+      return;
+    }
+    setResultado(res.resultado ?? null);
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <button
+        type="button"
+        onClick={() => void enviar()}
+        disabled={enviando}
+        className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+      >
+        {enviando ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <ArrowUpRight className="h-4 w-4" />
+        )}
+        Enviar para Budget e Forecast
+      </button>
+
+      {erro && <p className="text-sm text-destructive">{erro}</p>}
+
+      {resultado && (
+        <div
+          className={cn(
+            "w-full max-w-xl space-y-1 rounded-md border p-3 text-sm",
+            resultado.naoMapeados.length > 0
+              ? "border-amber-500/40 bg-amber-500/5"
+              : "border-emerald-500/40 bg-emerald-500/5",
+          )}
+        >
+          <p className="font-medium">
+            {resultado.linhasGravadas} linha(s) publicada(s) — {formatBRL(resultado.totalAno)} no
+            ano.
+          </p>
+          {resultado.naoMapeados.length > 0 ? (
+            <div className="text-muted-foreground">
+              <p>
+                Estas linhas ainda não têm conta da DRE e por isso{" "}
+                <strong>não entraram no orçamento</strong>. Ligue cada uma em{" "}
+                <Link href="/mapeamento" className="underline hover:text-foreground">
+                  Mapeamento → Linhas do Orçamento
+                </Link>
+                . Salvar o mapeamento já aplica os valores — não precisa voltar aqui.
+              </p>
+              <ul className="mt-1 list-inside list-disc">
+                {resultado.naoMapeados.map((label) => (
+                  <li key={label}>{label}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">
+              {resultado.celulasOrcamento} célula(s) no orçamento do ano. Confira em{" "}
+              <Link href="/budget-forecast" className="underline hover:text-foreground">
+                Budget e Forecast
+              </Link>
+              .
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

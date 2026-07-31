@@ -68,8 +68,12 @@ export type PreviaLinhaKey =
   | "inss"
   | "fgts";
 
+/** Prefixo da chave de um benefício que foi SEPARADO em linha própria. */
+export const LINHA_BENEFICIO_PREFIXO = "beneficio:";
+
 export interface PreviaLinha {
-  key: PreviaLinhaKey;
+  /** Uma PreviaLinhaKey, ou "beneficio:<chave>" quando é benefício separado. */
+  key: string;
   label: string;
   /** 12 posições, índice 0 = janeiro. */
   meses: number[];
@@ -204,12 +208,19 @@ export interface PreviaInput {
   colaboradores: Colaborador[];
   encargos: EncargoValues;
   regimeApuracao: RegimeApuracao;
+  /**
+   * Benefícios que NÃO entram na linha "Benefícios": cada um vira uma linha
+   * própria da prévia (e um rótulo próprio no orçamento). Ausente = todos
+   * agrupados, o comportamento padrão.
+   */
+  beneficiosSeparados?: BeneficioKey[];
 }
 
 export function calcularPrevia({
   colaboradores,
   encargos,
   regimeApuracao,
+  beneficiosSeparados = [],
 }: PreviaInput): PreviaResultado {
   const avisos: string[] = [];
   const i = fatorInss(encargos);
@@ -269,15 +280,38 @@ export function calcularPrevia({
     }
   }
 
+  // Benefícios separados saem da linha "Benefícios" e viram linhas próprias.
+  const separados = new Set<BeneficioKey>(beneficiosSeparados);
+
   // Só os benefícios que têm valor entram na abertura — a tela não precisa de
-  // sete linhas zeradas.
-  const beneficiosDetalhe: PreviaSubLinha[] = BENEFICIOS.map((meta) => {
-    const meses = beneficiosPorKey.get(meta.key) ?? zeros();
-    return { key: meta.key, label: meta.label, meses, total: somar(meses) };
-  }).filter((linha) => linha.total > 0);
+  // sete linhas zeradas. A abertura mostra o que está DENTRO de "Benefícios",
+  // então os separados ficam de fora dela.
+  const beneficiosDetalhe: PreviaSubLinha[] = BENEFICIOS.filter(
+    (meta) => !separados.has(meta.key),
+  )
+    .map((meta) => {
+      const meses = beneficiosPorKey.get(meta.key) ?? zeros();
+      return { key: meta.key, label: meta.label, meses, total: somar(meses) };
+    })
+    .filter((linha) => linha.total > 0);
+
+  const linhasBeneficioSeparado: PreviaLinha[] = BENEFICIOS.filter((meta) =>
+    separados.has(meta.key),
+  )
+    .map((meta) => {
+      const meses = beneficiosPorKey.get(meta.key) ?? zeros();
+      return {
+        key: `${LINHA_BENEFICIO_PREFIXO}${meta.key}`,
+        label: meta.label,
+        meses,
+        total: somar(meses),
+      };
+    })
+    .filter((linha) => linha.total > 0);
 
   const beneficios = zeros();
-  beneficiosPorKey.forEach((serie) => {
+  beneficiosPorKey.forEach((serie, key) => {
+    if (separados.has(key)) return;
     for (let m = 0; m < 12; m += 1) beneficios[m] += serie[m];
   });
 
@@ -327,20 +361,24 @@ export function calcularPrevia({
     };
   }
 
-  const ordem: PreviaLinhaKey[] = [
-    "salarios",
-    "beneficios",
-    "ferias",
-    "decimo",
-    "inss",
-    "fgts",
-  ];
-  const linhas: PreviaLinha[] = ordem.map((key) => ({
+  const linhaBase = (key: PreviaLinhaKey): PreviaLinha => ({
     key,
     label: LINHA_LABELS[key],
     meses: series[key],
     total: somar(series[key]),
-  }));
+  });
+
+  // Os benefícios separados vêm logo depois da linha de Benefícios, para ficar
+  // claro que saíram dela.
+  const linhas: PreviaLinha[] = [
+    linhaBase("salarios"),
+    linhaBase("beneficios"),
+    ...linhasBeneficioSeparado,
+    linhaBase("ferias"),
+    linhaBase("decimo"),
+    linhaBase("inss"),
+    linhaBase("fgts"),
+  ];
 
   const totalMeses = zeros();
   for (const linha of linhas) {

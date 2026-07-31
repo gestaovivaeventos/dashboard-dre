@@ -14,14 +14,14 @@ import {
   type MovTipo,
   type VinculoKey,
 } from "@/lib/orcamento/vinculos";
-import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
+import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
 import {
   isRegimeApuracao,
   REGIME_APURACAO_PADRAO,
   toRegimeApuracao,
   type RegimeApuracao,
 } from "@/lib/orcamento/regime-apuracao";
-import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { getEncargos } from "@/lib/orcamento/actions/encargos";
 import type { EncargoValues } from "@/lib/orcamento/encargos";
 import { calcularPrevia, type PreviaResultado } from "@/lib/orcamento/pessoal-calc";
@@ -81,6 +81,28 @@ export interface PessoalSetup {
   regimeApuracao: RegimeApuracao;
   setores: SetorOption[];
   cargoOptions: CargoOption[];
+  /** Benefícios com linha própria na prévia (os demais somam em "Benefícios"). */
+  beneficiosSeparados: BeneficioKey[];
+}
+
+/** Lê as exceções de agrupamento de benefícios da empresa/ano. Sem linha na
+ * tabela = agrupado, então só as exceções ficam gravadas. */
+async function lerBeneficiosSeparados(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  year: number,
+): Promise<BeneficioKey[]> {
+  const { data, error } = await supabase
+    .from("orcamento_beneficios_config")
+    .select("beneficio, agrupar")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  // Sem a migration aplicada, tudo agrupado — o comportamento anterior.
+  if (error) return [];
+  return (data ?? [])
+    .filter((r) => r.agrupar === false)
+    .map((r) => r.beneficio as BeneficioKey)
+    .filter((key) => BENEFICIOS.some((b) => b.key === key));
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,6 +176,7 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
         regimeApuracao: REGIME_APURACAO_PADRAO,
         setores: [],
         cargoOptions: [],
+        beneficiosSeparados: [],
       },
     };
   }
@@ -221,7 +244,39 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
     cargoOptions.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   }
 
-  return { setup: { orcarPorSetor, regimeApuracao, setores, cargoOptions } };
+  const beneficiosSeparados = await lerBeneficiosSeparados(supabase, companyId, year);
+
+  return {
+    setup: { orcarPorSetor, regimeApuracao, setores, cargoOptions, beneficiosSeparados },
+  };
+}
+
+/** Liga/desliga o agrupamento de um benefício na linha "Benefícios" da prévia.
+ * `agrupar = false` faz o benefício virar linha própria (e rótulo próprio no
+ * envio ao Budget e Forecast). */
+export async function setBeneficioAgrupar(
+  companyId: string,
+  year: number,
+  beneficio: BeneficioKey,
+  agrupar: boolean,
+) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Selecione uma empresa." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!BENEFICIOS.some((b) => b.key === beneficio)) return { error: "Benefício inválido." };
+
+  const supabase = db() ?? (await createClient());
+  const { error } = await supabase.from("orcamento_beneficios_config").upsert(
+    { company_id: companyId, year, beneficio, agrupar, updated_by: admin.userId },
+    { onConflict: "company_id,year,beneficio" },
+  );
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true as const };
 }
 
 /** Define o regime de apuração (caixa x competência) da empresa NAQUELE ANO.
@@ -469,7 +524,10 @@ export async function getPrevia(
     .eq("company_id", companyId)
     .eq("year", year);
   // Mesma semântica de getColaboradores: null = quadro único, TODOS = empresa.
-  const setorFiltro = filtro?.setorId ?? null;
+  // SEM filtro (ou setorId ausente) = empresa inteira: `null` só vale como
+  // "quadro único" quando vem EXPLÍCITO da tela, senão quem chama sem filtro
+  // receberia apenas os colaboradores sem setor.
+  const setorFiltro = filtro?.setorId === undefined ? SETOR_TODOS : filtro.setorId;
   if (!isTodosSetores(setorFiltro)) {
     const especifico = setorEspecifico(setorFiltro);
     query = especifico ? query.eq("setor_id", especifico) : query.is("setor_id", null);
@@ -498,6 +556,8 @@ export async function getPrevia(
   if (enc.needsMigration) return { needsMigration: true };
   if (enc.error || !enc.values) return { error: enc.error ?? "Falha ao ler os encargos." };
 
+  const beneficiosSeparados = await lerBeneficiosSeparados(supabase, companyId, year);
+
   const roster: ColaboradorResumo[] = colaboradores.map((c) => ({
     id: c.id,
     nome: c.nome,
@@ -511,7 +571,12 @@ export async function getPrevia(
 
   return {
     payload: {
-      previa: calcularPrevia({ colaboradores: alvo, encargos: enc.values, regimeApuracao }),
+      previa: calcularPrevia({
+        colaboradores: alvo,
+        encargos: enc.values,
+        regimeApuracao,
+        beneficiosSeparados,
+      }),
       regimeApuracao,
       encargos: enc.values,
       totalColaboradores: colaboradores.length,

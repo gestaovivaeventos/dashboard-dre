@@ -307,12 +307,16 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
-  // Replace any existing raw rows for this (company, year) to keep the upload idempotent.
+  // Replace any existing raw rows for this (company, year) to keep the upload
+  // idempotent. Restrito a source='planilha': as linhas geradas pela previsao
+  // de Despesas com pessoal (source='pessoal') tem ciclo de vida proprio e nao
+  // podem ser levadas embora por um upload de planilha.
   const { error: deleteErr } = await db
     .from("budget_uploads_raw")
     .delete()
     .eq("company_id", companyId)
-    .eq("year", year);
+    .eq("year", year)
+    .eq("source", "planilha");
   if (deleteErr) {
     return NextResponse.json(
       { error: `Falha ao limpar uploads anteriores: ${deleteErr.message}` },
@@ -326,7 +330,14 @@ export async function POST(request: Request, { params }: Params) {
   // por chave unica (company_id, year, month, label).
   const rawByKey = new Map<
     string,
-    { company_id: string; year: number; month: number; label: string; amount: number }
+    {
+      company_id: string;
+      year: number;
+      month: number;
+      label: string;
+      amount: number;
+      source: string;
+    }
   >();
   parsed.rows.forEach((row) => {
     Object.entries(row.values).forEach(([monthStr, amount]) => {
@@ -336,7 +347,14 @@ export async function POST(request: Request, { params }: Params) {
       if (existing) {
         existing.amount += amount;
       } else {
-        rawByKey.set(key, { company_id: companyId, year, month, label: row.label, amount });
+        rawByKey.set(key, {
+          company_id: companyId,
+          year,
+          month,
+          label: row.label,
+          amount,
+          source: "planilha",
+        });
       }
     });
   });
@@ -347,7 +365,7 @@ export async function POST(request: Request, { params }: Params) {
     const batch = rawInserts.slice(i, i + batchSize);
     const { error: insertErr } = await db
       .from("budget_uploads_raw")
-      .upsert(batch, { onConflict: "company_id,year,month,label" });
+      .upsert(batch, { onConflict: "company_id,year,month,label,source" });
     if (insertErr) {
       return NextResponse.json(
         { error: `Falha ao gravar uploads brutos: ${insertErr.message}` },
