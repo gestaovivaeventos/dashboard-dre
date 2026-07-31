@@ -11,7 +11,10 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 export interface CargoNivel {
   id: string;
   name: string;
+  /** Valor EFETIVO em uso (já com o reajuste, se houver). */
   salario: number;
+  /** Salário-base antes do reajuste. null = nenhum reajuste aplicado. */
+  salarioOriginal: number | null;
 }
 
 export interface CargoWithNiveis {
@@ -45,6 +48,8 @@ export async function getCargos(
   setorId: string | null = null,
 ): Promise<{
   items?: CargoWithNiveis[];
+  /** Reajuste em vigor na empresa/ano, em % (0 = nenhum). */
+  reajustePercent?: number;
   error?: string;
   needsMigration?: boolean;
 }> {
@@ -75,7 +80,7 @@ export async function getCargos(
   if (cargoIds.length > 0) {
     const { data: niveis, error: niveisError } = await supabase
       .from("orcamento_cargo_niveis")
-      .select("id, cargo_id, name, salario")
+      .select("id, cargo_id, name, salario, salario_original")
       .in("cargo_id", cargoIds)
       .order("salario", { ascending: true })
       .order("name");
@@ -83,11 +88,26 @@ export async function getCargos(
     niveisByCargoId = (niveis ?? []).reduce((map, n) => {
       const cargoId = n.cargo_id as string;
       const list = map.get(cargoId) ?? [];
-      list.push({ id: n.id as string, name: n.name as string, salario: Number(n.salario) });
+      list.push({
+        id: n.id as string,
+        name: n.name as string,
+        salario: Number(n.salario),
+        salarioOriginal: n.salario_original == null ? null : Number(n.salario_original),
+      });
       map.set(cargoId, list);
       return map;
     }, new Map<string, CargoNivel[]>());
   }
+
+  const { data: cfg } = await supabase
+    .from("orcamento_company_config")
+    .select("reajuste_cargos_percent")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .maybeSingle();
+  const reajustePercent = cfg?.reajuste_cargos_percent == null
+    ? 0
+    : Number(cfg.reajuste_cargos_percent);
 
   const items: CargoWithNiveis[] = (cargos ?? []).map((c) => ({
     id: c.id as string,
@@ -96,7 +116,96 @@ export async function getCargos(
     niveis: niveisByCargoId.get(c.id as string) ?? [],
   }));
 
-  return { items };
+  return { items, reajustePercent };
+}
+
+// ─── Reajuste salarial ──────────────────────────────────────────────────────
+
+/** Arredonda para centavos, para o reajuste não deixar dízima no salário. */
+function centavos(valor: number): number {
+  return Math.round(valor * 100) / 100;
+}
+
+/**
+ * Aplica um reajuste percentual a TODOS os níveis do plano de cargos de uma
+ * empresa no ano — todos os setores, cargos ativos e inativos.
+ *
+ * Sempre recalcula a partir de `salario_original`, nunca do salário já
+ * reajustado: trocar 5% por 8% dá 8% sobre a base, não 8% sobre os 5%. Zerar
+ * devolve o salário original e limpa o reajuste.
+ */
+export async function applyReajuste(companyId: string, year: number, percent: number) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId) return { error: "Selecione uma empresa." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!Number.isFinite(percent)) return { error: "Informe um percentual válido." };
+  if (percent < -100 || percent > 1000) {
+    return { error: "Percentual fora da faixa (-100% a 1000%)." };
+  }
+
+  const supabase = db() ?? (await createClient());
+
+  const { data: cargos, error: cargosError } = await supabase
+    .from("orcamento_cargos")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  if (cargosError) {
+    if (isSchemaMissing(cargosError.message)) return { needsMigration: true };
+    return { error: cargosError.message };
+  }
+  const cargoIds = (cargos ?? []).map((c) => c.id as string);
+
+  let afetados = 0;
+  if (cargoIds.length > 0) {
+    const { data: niveis, error: niveisError } = await supabase
+      .from("orcamento_cargo_niveis")
+      .select("id, cargo_id, name, salario, salario_original")
+      .in("cargo_id", cargoIds);
+    if (niveisError) {
+      if (isSchemaMissing(niveisError.message)) return { needsMigration: true };
+      return { error: niveisError.message };
+    }
+
+    const zerar = percent === 0;
+    const rows = (niveis ?? []).map((n) => {
+      // A base é o original quando já há reajuste; senão o salário atual, que
+      // vira o original a partir de agora.
+      const base = n.salario_original == null ? Number(n.salario) : Number(n.salario_original);
+      return {
+        id: n.id as string,
+        cargo_id: n.cargo_id as string,
+        name: n.name as string,
+        salario: zerar ? base : centavos(base * (1 + percent / 100)),
+        salario_original: zerar ? null : base,
+        updated_by: admin.userId,
+      };
+    });
+
+    if (rows.length > 0) {
+      // Upsert pela PK = update em lote, numa ida só ao banco.
+      const { error: upError } = await supabase
+        .from("orcamento_cargo_niveis")
+        .upsert(rows, { onConflict: "id" });
+      if (upError) return { error: upError.message };
+      afetados = rows.length;
+    }
+  }
+
+  const { error: cfgError } = await supabase.from("orcamento_company_config").upsert(
+    {
+      company_id: companyId,
+      year,
+      reajuste_cargos_percent: percent === 0 ? null : percent,
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year" },
+  );
+  if (cfgError) return { error: cfgError.message };
+
+  revalidatePath(PATH);
+  return { ok: true as const, afetados };
 }
 
 // ─── Cargo ──────────────────────────────────────────────────────────────────
@@ -155,6 +264,42 @@ export async function setCargoActive(id: string, active: boolean) {
 
 // ─── Nível ──────────────────────────────────────────────────────────────────
 
+/**
+ * Reajuste em vigor na empresa/ano a que o cargo pertence (0 = nenhum).
+ * Usado para manter a invariante `salario = salario_original × (1 + p/100)`
+ * também quando um nível é digitado à mão com o reajuste ligado.
+ */
+async function reajusteDoCargo(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  cargoId: string,
+): Promise<number> {
+  const { data: cargo } = await supabase
+    .from("orcamento_cargos")
+    .select("company_id, year")
+    .eq("id", cargoId)
+    .maybeSingle();
+  if (!cargo) return 0;
+
+  const { data: cfg } = await supabase
+    .from("orcamento_company_config")
+    .select("reajuste_cargos_percent")
+    .eq("company_id", cargo.company_id as string)
+    .eq("year", cargo.year as number)
+    .maybeSingle();
+  const percent = cfg?.reajuste_cargos_percent;
+  return percent == null ? 0 : Number(percent);
+}
+
+/**
+ * Campos de salário de um nível digitado à mão. O valor digitado é sempre o
+ * EFETIVO (o que aparece na tela); a base é obtida de volta pelo reajuste, de
+ * modo que zerar o reajuste depois remova o percentual também deste nível.
+ */
+function camposSalario(salario: number, percent: number) {
+  if (percent === 0) return { salario, salario_original: null };
+  return { salario, salario_original: centavos(salario / (1 + percent / 100)) };
+}
+
 function validateSalario(salario: number | null): string | null {
   if (salario == null || !Number.isFinite(salario)) return "Informe um salário válido.";
   if (salario < 0) return "O salário não pode ser negativo.";
@@ -171,9 +316,13 @@ export async function createNivel(cargoId: string, name: string, salario: number
   if (salErr) return { error: salErr };
 
   const supabase = db() ?? (await createClient());
-  const { error } = await supabase
-    .from("orcamento_cargo_niveis")
-    .insert({ cargo_id: cargoId, name: clean, salario, updated_by: admin.userId });
+  const percent = await reajusteDoCargo(supabase, cargoId);
+  const { error } = await supabase.from("orcamento_cargo_niveis").insert({
+    cargo_id: cargoId,
+    name: clean,
+    ...camposSalario(salario as number, percent),
+    updated_by: admin.userId,
+  });
   if (error) return { error: friendlyCargoError(error.message, "nível") };
   revalidatePath(PATH);
   return { ok: true as const };
@@ -188,9 +337,20 @@ export async function updateNivel(id: string, name: string, salario: number | nu
   if (salErr) return { error: salErr };
 
   const supabase = db() ?? (await createClient());
+  const { data: atual } = await supabase
+    .from("orcamento_cargo_niveis")
+    .select("cargo_id")
+    .eq("id", id)
+    .maybeSingle();
+  const percent = atual ? await reajusteDoCargo(supabase, atual.cargo_id as string) : 0;
+
   const { error } = await supabase
     .from("orcamento_cargo_niveis")
-    .update({ name: clean, salario, updated_by: admin.userId })
+    .update({
+      name: clean,
+      ...camposSalario(salario as number, percent),
+      updated_by: admin.userId,
+    })
     .eq("id", id);
   if (error) return { error: friendlyCargoError(error.message, "nível") };
   revalidatePath(PATH);

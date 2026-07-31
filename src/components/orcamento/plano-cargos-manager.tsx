@@ -10,10 +10,12 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  TrendingUp,
   X,
 } from "lucide-react";
 
 import {
+  applyReajuste,
   cloneCargos,
   createCargo,
   createNivel,
@@ -72,6 +74,11 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // Reajuste salarial da empresa/ano (percentual em vigor + rascunho do campo).
+  const [reajuste, setReajuste] = useState("");
+  const [reajusteSalvo, setReajusteSalvo] = useState(0);
+  const [aplicandoReajuste, setAplicandoReajuste] = useState(false);
+
   const [newCargoName, setNewCargoName] = useState("");
   const [editingCargoId, setEditingCargoId] = useState<string | null>(null);
   const [editCargoName, setEditCargoName] = useState("");
@@ -103,6 +110,10 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
       return;
     }
     setCargos(res.items ?? []);
+    // O reajuste é da empresa/ano — o filtro de setor não muda o valor.
+    const percent = res.reajustePercent ?? 0;
+    setReajusteSalvo(percent);
+    setReajuste(percent === 0 ? "" : numberToInput(percent));
   }
 
   async function init(id: string, y: number) {
@@ -162,6 +173,44 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
       setFeedback({ ok: true, msg: successMsg });
       onDone?.();
       await reload(companyId, year, setorId);
+    });
+  }
+
+  /** Aplica (ou remove, com 0) o reajuste em toda a empresa do ano. */
+  function handleReajuste() {
+    const valor = reajuste.trim() === "" ? 0 : parseBrNumber(reajuste);
+    if (valor == null || Number.isNaN(valor)) {
+      setFeedback({ ok: false, msg: "Informe um percentual válido (ex.: 5 ou 4,5)." });
+      return;
+    }
+    const empresa = companies.find((c) => c.companyId === companyId)?.companyName ?? "a empresa";
+    if (
+      valor === 0 &&
+      reajusteSalvo !== 0 &&
+      !window.confirm(
+        `Remover o reajuste de ${numberToInput(reajusteSalvo)}% de ${empresa} em ${year}? Os salários voltam ao valor original.`,
+      )
+    ) {
+      return;
+    }
+
+    setAplicandoReajuste(true);
+    setFeedback(null);
+    startTransition(async () => {
+      const res = await applyReajuste(companyId, year, valor);
+      setAplicandoReajuste(false);
+      if (res?.error) {
+        setFeedback({ ok: false, msg: res.error });
+        return;
+      }
+      await reload(companyId, year, setorId);
+      setFeedback({
+        ok: true,
+        msg:
+          valor === 0
+            ? `Reajuste removido — ${res.afetados ?? 0} nível(is) de ${empresa} voltaram ao salário original.`
+            : `Reajuste de ${numberToInput(valor)}% aplicado a ${res.afetados ?? 0} nível(is) de ${empresa} em ${year}.`,
+      });
     });
   }
 
@@ -306,6 +355,37 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
           )}
         </div>
         <div className="flex flex-wrap items-end gap-2">
+          {/* Reajuste: vale para a EMPRESA filtrada no ano, todos os setores. */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Reajuste (%)</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                value={reajuste}
+                onChange={(e) => setReajuste(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleReajuste();
+                }}
+                inputMode="decimal"
+                placeholder="0"
+                disabled={loading || aplicandoReajuste || !companyId}
+                className="w-20 rounded-md border bg-background px-3 py-2 text-right text-sm tabular-nums outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={handleReajuste}
+                disabled={loading || aplicandoReajuste || isPending || !companyId}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
+              >
+                {aplicandoReajuste ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <TrendingUp className="h-4 w-4" />
+                )}
+                Aplicar
+              </button>
+            </div>
+          </div>
+
           {/* A planilha traz a empresa em cada linha, então o import não depende
               da empresa selecionada — só do ano. */}
           <PlanoCargosUpload
@@ -326,6 +406,16 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
           </button>
         </div>
       </div>
+
+      {reajusteSalvo !== 0 && (
+        <div className="rounded-md border border-sky-500/40 bg-sky-500/5 px-4 py-2.5 text-sm text-muted-foreground">
+          Reajuste de <strong className="text-foreground">{numberToInput(reajusteSalvo)}%</strong>{" "}
+          aplicado a todos os setores desta empresa em {year} — os salários abaixo já são os
+          reajustados, com a base original ao lado. Trocar o percentual recalcula sempre sobre a
+          base (não acumula); zerar devolve os valores originais. Depois de importar uma planilha,
+          aplique o reajuste de novo para alcançar os cargos novos.
+        </div>
+      )}
 
       {orcarPorSetor && setores.length === 0 ? (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm text-muted-foreground">
@@ -565,6 +655,14 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
                                     <td className="px-3 py-2.5 font-medium">{nivel.name}</td>
                                     <td className="px-3 py-2.5 tabular-nums">
                                       {formatBRL(nivel.salario)}
+                                      {nivel.salarioOriginal != null && (
+                                        <span
+                                          className="ml-2 text-xs font-normal text-muted-foreground"
+                                          title="Salário-base antes do reajuste"
+                                        >
+                                          base {formatBRL(nivel.salarioOriginal)}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-3 py-2">
                                       <div className="flex items-center justify-end gap-1">
