@@ -3,17 +3,30 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 
-import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
+import {
+  resolveAiProvider,
+  logResolvedUsage,
+  logAiUsage,
+  generateJsonViaChat,
+} from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { isValidBoletoLinhaDigitavel, barcodeToLinhaDigitavel } from "@/lib/ctrl/boleto";
+import { findLinhaDigitavelInStrings } from "@/lib/ctrl/boleto-pdf";
+import { extractPdfText, type PdfText } from "@/lib/pdf/text";
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
 // gpt-4o (visão) lê o documento direto — boletos exigem OCR preciso da linha
 // digitável (47-48 dígitos), o que o pipeline LandingAI→markdown não entregava
 // bem. A validação (isValidBoletoLinhaDigitavel) ainda barra leitura ruim.
+//
+// A leitura de boleto e de nota fiscal é a ÚNICA parte do sistema que continua
+// no GPT: `resolveAiProvider({ capability: "vision" })` força a OpenAI mesmo
+// com o DeepSeek ativo no painel, porque a API do DeepSeek não aceita imagem
+// nem arquivo (o endpoint recusa o content part: "unknown variant `image_url`,
+// expected `text`"). O resto do sistema segue no provedor configurado.
 const OCR_MODEL = "gpt-4o";
 
 // Resultado da leitura. Campos por tipo de documento; ambos opcionais porque a
@@ -117,12 +130,8 @@ export async function extractAttachmentData(
 
   if (!attachmentPath) return { error: "Anexo não informado." };
 
-  // OCR usa visão — sempre OpenAI (o resolver força isso mesmo se o provedor
-  // ativo for outro). O consumo é registrado para aparecer no painel de IA.
-  const resolved = await resolveAiProvider({ capability: "vision" }).catch(() => null);
-  if (!resolved) return { error: "Leitura automática indisponível (sem OPENAI_API_KEY)." };
-
-  // Baixa os bytes do anexo (bucket privado) para mandar direto ao GPT visão.
+  // Baixa os bytes do anexo (bucket privado) para ler localmente e, se preciso,
+  // mandar ao GPT visão.
   const admin = createAdminClientIfAvailable() ?? (await createClient());
   const { data: blob, error: dlErr } = await admin.storage
     .from(ATTACHMENT_BUCKET)
@@ -137,6 +146,26 @@ export async function extractAttachmentData(
   }
 
   const bytes = Buffer.from(await blob.arrayBuffer());
+
+  // Boleto em PDF: a linha digitável está no TEXTO do arquivo (PDF de banco é
+  // vetorial). Ler dali é determinístico — os DVs conferem cada dígito — então
+  // esse valor tem precedência sobre o que o OCR enxergar, e ainda serve de rede
+  // quando o GPT está fora do ar.
+  const pdfText = mediaType === "application/pdf" ? safeExtractPdfText(bytes) : null;
+  const linhaDoPdf = kind === "boleto" && pdfText ? findLinhaDigitavelInStrings(pdfText.strings) : null;
+
+  // OCR usa visão — sempre OpenAI (o resolver força isso mesmo se o provedor
+  // ativo for outro). O consumo é registrado para aparecer no painel de IA.
+  const resolved = await resolveAiProvider({ capability: "vision" }).catch((e: unknown) =>
+    e instanceof Error ? e : new Error(String(e)),
+  );
+  if (resolved instanceof Error) {
+    // Sem GPT o boleto ainda sai: linha digitável do texto do PDF e, para
+    // favorecido/CNPJ, o provedor ativo lendo esse mesmo texto (sem visão).
+    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+    await logOcrFailure(null, `resolveAiProvider: ${resolved.message}`);
+    return { error: `Leitura automática indisponível — ${resolved.message}` };
+  }
   // Imagens vão com detalhe ALTO — a linha digitável tem dígitos pequenos e o
   // detalhe padrão downscaleia a imagem, derrubando a precisão do OCR.
   const docPart =
@@ -223,15 +252,126 @@ export async function extractAttachmentData(
     await logResolvedUsage(resolved, "ocr", usage, { modelName: OCR_MODEL });
     return {
       data: {
-        barcode: pickBarcode(object.linha_digitavel, object.codigo_barras),
+        // A linha lida do texto do PDF vem na frente: os DVs já conferiram cada
+        // dígito, enquanto o OCR pode trocar um.
+        barcode: linhaDoPdf ?? pickBarcode(object.linha_digitavel, object.codigo_barras),
         favorecido: emptyToNull(object.favorecido),
         cnpj_cpf: emptyToNull(object.cnpj_cpf),
       },
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Falha do GPT não derruba o boleto que o PDF já entregou.
+    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+    await logOcrFailure(resolved, msg);
     return { error: `Não consegui interpretar o documento: ${msg}` };
   }
+}
+
+// Leitura local nunca pode derrubar o fluxo: PDF corrompido/exótico só cai no OCR.
+function safeExtractPdfText(bytes: Buffer): PdfText | null {
+  try {
+    const t = extractPdfText(bytes);
+    return t.strings.length > 0 ? t : null;
+  } catch (e) {
+    console.warn("[ocr] leitura do texto do PDF falhou:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+// Favorecido/CNPJ quando o GPT não está disponível — ver readBoletoPartiesFromText.
+async function boletoParties(
+  pdfText: PdfText | null,
+): Promise<{ favorecido: string | null; cnpj_cpf: string | null }> {
+  const partes = pdfText ? await readBoletoPartiesFromText(pdfText.plain) : null;
+  return { favorecido: partes?.favorecido ?? null, cnpj_cpf: partes?.cnpj_cpf ?? null };
+}
+
+const PartesBoletoSchema = z.object({
+  favorecido: z.string().nullable(),
+  cnpj_cpf: z.string().nullable(),
+});
+
+const PARTES_SCHEMA_HINT = JSON.stringify({
+  type: "object",
+  properties: {
+    favorecido: { type: ["string", "null"] },
+    cnpj_cpf: { type: ["string", "null"] },
+  },
+  required: ["favorecido", "cnpj_cpf"],
+});
+
+/**
+ * Favorecido + CNPJ/CPF a partir do TEXTO do boleto, usando o provedor ATIVO do
+ * painel (DeepSeek hoje) — não precisa de visão, o texto já veio do PDF.
+ *
+ * REDE DE SEGURANÇA, não o caminho normal: a leitura de boleto roda no GPT
+ * (visão), e isto só entra em cena se o GPT estiver indisponível — chave
+ * ausente/expirada, cota estourada, API fora. Melhor devolver o boleto com
+ * favorecido preenchido do que uma tela vazia. Best-effort: qualquer falha
+ * devolve null e a linha digitável (validada pelos DVs) segue sozinha.
+ */
+async function readBoletoPartiesFromText(
+  text: string,
+): Promise<{ favorecido: string | null; cnpj_cpf: string | null } | null> {
+  if (text.length < 20) return null;
+
+  const resolved = await resolveAiProvider().catch(() => null);
+  if (!resolved) return null;
+
+  try {
+    const { object, usage } = await generateJsonViaChat(resolved, {
+      system:
+        "Você extrai dados de boletos bancários brasileiros a partir do texto bruto do PDF. " +
+        "Responda apenas com JSON.",
+      prompt:
+        "Abaixo está o texto extraído de um boleto (o layout se perdeu, os rótulos permaneceram). " +
+        "Identifique o BENEFICIÁRIO — quem RECEBE o pagamento, também chamado de cedente. " +
+        "NÃO confunda com o PAGADOR (também chamado de sacado), que é quem paga, nem com o " +
+        "SACADOR/AVALISTA. Devolva:\n" +
+        "- favorecido: a razão social do beneficiário, sem o CNPJ colado no nome.\n" +
+        "- cnpj_cpf: o CNPJ ou CPF DO BENEFICIÁRIO, só os números, sem pontos, barra ou hífen.\n" +
+        "Use null no campo que não conseguir identificar com segurança — não invente.\n\n" +
+        `TEXTO DO BOLETO:\n${text}`,
+      schemaHint: PARTES_SCHEMA_HINT,
+      maxTokens: 400,
+      temperature: 0,
+    });
+    await logResolvedUsage(resolved, "ocr", usage);
+
+    const parsed = PartesBoletoSchema.safeParse(object);
+    if (!parsed.success) return null;
+    const doc = (parsed.data.cnpj_cpf ?? "").replace(/\D/g, "");
+    return {
+      favorecido: emptyToNull(parsed.data.favorecido),
+      // CNPJ tem 14 dígitos, CPF 11 — fora disso é leitura errada.
+      cnpj_cpf: doc.length === 14 || doc.length === 11 ? doc : null,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[ocr] leitura de favorecido/CNPJ pelo texto falhou:", msg);
+    await logOcrFailure(resolved, `texto do boleto: ${msg}`);
+    return null;
+  }
+}
+
+// Registra a falha no painel de IA — sem isso, um OCR que nunca funciona (chave
+// ausente, modelo recusando o arquivo) fica invisível: o usuário só vê "não
+// consegui ler" e o log de consumo, que só grava sucesso, fica vazio.
+async function logOcrFailure(
+  resolved: Awaited<ReturnType<typeof resolveAiProvider>> | null,
+  message: string,
+): Promise<void> {
+  await logAiUsage({
+    module: "ocr",
+    providerName: resolved?.providerName ?? "openai",
+    modelName: resolved?.providerName === "openai" ? OCR_MODEL : resolved?.modelName ?? OCR_MODEL,
+    usage: null,
+    modelPrices: resolved?.modelPrices ?? {},
+    usdBrlRate: resolved?.usdBrlRate ?? 0,
+    success: false,
+    errorMessage: message.slice(0, 500),
+  });
 }
 
 function emptyToNull(s: string | null | undefined): string | null {

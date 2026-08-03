@@ -64,6 +64,10 @@ function validarBancario(linha: string): boolean {
 }
 
 function validarArrecadacao(linha: string): boolean {
+  // Febraban: arrecadação/concessionária SEMPRE começa com 8 (produto). Sem essa
+  // checagem, sequências repetitivas passam nos 4 DVs por coincidência — um
+  // "131313…" de 48 dígitos era aceito como boleto válido.
+  if (linha[0] !== "8") return false;
   const id = linha[2]; // identificador de valor: 6/7 → mod10 ; 8/9 → mod11
   const useMod10 = id === "6" || id === "7";
   for (let i = 0; i < 4; i++) {

@@ -199,7 +199,7 @@ export function NovaRequisicaoForm({
       const res = await extractAttachmentData(objectPath, "boleto");
       setAttachmentReading(false);
       if ("error" in res) {
-        setAttachmentReadMsg("Não consegui ler o boleto — preencha os campos manualmente.");
+        setAttachmentReadMsg(`Não consegui ler o boleto (${res.error}) — preencha os campos manualmente.`);
         return;
       }
       const d = res.data;
@@ -242,7 +242,7 @@ export function NovaRequisicaoForm({
     const res = await extractAttachmentData(attachmentPath, "boleto");
     setAttachmentReading(false);
     if ("error" in res) {
-      setAttachmentReadMsg("Não consegui ler o boleto — preencha manualmente.");
+      setAttachmentReadMsg(`Não consegui ler o boleto (${res.error}) — preencha manualmente.`);
       return;
     }
     const d = res.data;
@@ -290,7 +290,7 @@ export function NovaRequisicaoForm({
       const res = await extractAttachmentData(objectPath, "nota");
       setInvoiceReading(false);
       if ("error" in res) {
-        setInvoiceReadMsg("Não consegui ler a nota — preencha o número manualmente.");
+        setInvoiceReadMsg(`Não consegui ler a nota (${res.error}) — preencha o número manualmente.`);
         return;
       }
       if (res.data.invoice_number) {
@@ -1106,6 +1106,16 @@ export function NovaRequisicaoForm({
             )}
             {barcode && isValidBoletoLinhaDigitavel(barcode) && (
               <p className="text-xs text-green-600 dark:text-green-400">Código de barras válido.</p>
+            )}
+            {/* Leitura não achou nada: deixa tentar de novo sem reanexar o arquivo. */}
+            {!barcode && attachmentPath && !attachmentReading && (
+              <button
+                type="button"
+                onClick={rereadBoleto}
+                className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted"
+              >
+                Ler boleto novamente
+              </button>
             )}
           </div>
         </div>
