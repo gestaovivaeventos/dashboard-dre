@@ -110,9 +110,7 @@ export default async function RequisicoesPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Requisições</h1>
           <p className="text-muted-foreground">
-            {ctx.ctrlRoles.includes("solicitante") && ctx.ctrlRoles.length === 1
-              ? "Suas requisições de pagamento"
-              : "Todas as requisições"}
+            {isAdmin ? "Todas as requisições" : "Suas requisições de pagamento"}
           </p>
         </div>
         {canCreateRequest ? (

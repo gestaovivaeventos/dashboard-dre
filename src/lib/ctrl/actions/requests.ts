@@ -933,10 +933,11 @@ export async function getRequests(filters?: {
   status?: CtrlRequestStatus;
   sector_id?: string;
   statuses?: CtrlRequestStatus[];
-  // Escopo da tela de Aprovações: aplica a restrição de alçada de aprovação
-  // (APPROVER_SECTOR_RESTRICTIONS). Fora deste escopo (ex.: tela de Requisições)
-  // a restrição NÃO se aplica, para não esconder do gerente as requisições que
-  // ele mesmo criou em outros setores.
+  // Escopo da tela de Aprovações. Define DUAS coisas:
+  //  1. Liga a restrição de alçada de aprovação (APPROVER_SECTOR_RESTRICTIONS).
+  //  2. Liga a visibilidade operacional por perfil (global/por setor). Fora
+  //     deste escopo (tela de Requisições) cada um vê só as próprias, exceto
+  //     admin — ver o bloco de visibilidade abaixo.
   approvalScope?: boolean;
 }) {
   const ctx = await requireCtrlRole(
@@ -966,7 +967,16 @@ export async function getRequests(filters?: {
   if (filters?.statuses?.length) query = query.in("status", filters.statuses);
   if (filters?.sector_id) query = query.eq("sector_id", filters.sector_id);
 
-  // Visibilidade em tres niveis:
+  // Visibilidade — depende da TELA, não só do perfil:
+  //
+  // Tela de Requisições (sem approvalScope): cada usuário vê APENAS as
+  // requisições que ele mesmo solicitou. Única exceção é o perfil admin, que vê
+  // todas. Vale inclusive para gerente, diretor, csc e contas_a_pagar: quem
+  // precisa agir sobre requisições de terceiros faz isso nas telas próprias
+  // (Aprovações e Contas a Pagar), não nesta listagem.
+  //
+  // Tela de Aprovações (approvalScope): mantém a visibilidade operacional em
+  // tres niveis, senão o aprovador não enxerga o que precisa aprovar:
   //  - Global (diretor, admin, csc, contas_a_pagar): ve todas as requisicoes. O
   //    diretor tem visao geral da empresa; os setores vinculados a ele NAO
   //    filtram a visibilidade — servem apenas para destacar "seu setor" na tela
@@ -981,7 +991,12 @@ export async function getRequests(filters?: {
   const hasSectorVisibility = ctx.ctrlRoles.some((r) =>
     ["gerente"].includes(r),
   );
-  if (!hasGlobalVisibility) {
+
+  if (!filters?.approvalScope) {
+    if (!ctx.ctrlRoles.includes("admin")) {
+      query = query.eq("created_by", ctx.id);
+    }
+  } else if (!hasGlobalVisibility) {
     if (hasSectorVisibility) {
       if (ctx.sectorIds.length > 0) {
         query = query.in("sector_id", ctx.sectorIds);
