@@ -82,7 +82,12 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
   // Mapeamento CONFIRMADO pela auditoria (plano custom do Salvaterra Condomínio).
   dreAccountMapping: {
     receita_locacao: { label: "Receita com Locação de Imóveis", codes: ["1.1"], status: "confirmed" },
-    receitas_condominiais: { label: "Receitas de condominio", codes: ["2.3"], status: "confirmed", note: "filho de 2 Outras Receitas." },
+    receitas_condominiais: {
+      label: "Receitas de condominio + Repasse a Terceiros",
+      codes: ["2.3", "2.8"],
+      status: "confirmed",
+      note: "ambas filhas de 2 Outras Receitas. 2.8 e a conta de RECEITA 'Repasse a Terceiros' (nao confundir com a despesa 7.5.2, de mesmo nome).",
+    },
     reembolsos: { label: "Reembolso de Despesas", codes: ["2.6"], status: "confirmed", note: "AMBÍGUO: existe também 2.5 'Reembolsos de Tributos'. Usamos 2.6 (água/despesas, conforme contexto)." },
     receita_total: { label: "Receita Bruta (Operacional Bruta + Outras Receitas)", codes: ["1", "2"], status: "confirmed" },
     receita_liquida: { label: "Receita Liquida", codes: ["4"], status: "confirmed", note: "calculado f=1+2-3." },
@@ -95,7 +100,9 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
     // 5 cards executivos.
     kpiCards: [
       { label: "Receita com Locação", code: "1.1", kind: "receita" },
-      { label: "Receitas Condominiais", code: "2.3", kind: "receita" },
+      // Receitas Condominiais = 2.3 Receitas de condominio + 2.8 Repasse a
+      // Terceiros (a conta de RECEITA; a despesa homonima 7.5.2 fica de fora).
+      { label: "Receitas Condominiais", codes: ["2.3", "2.8"], kind: "receita" },
       { label: "Despesas Operacionais", code: "7", kind: "despesa" },
       { label: "Resultado do Condomínio", code: "11", kind: "resultado" },
       // Margem Líquida = Resultado do Exercício (11) ÷ Receita Líquida (4).
@@ -104,7 +111,8 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
     kpiColumns: 5,
     previstoRealizado: [
       { label: "Receita com Locação", code: "1.1", unidade: "currency" },
-      { label: "Receitas Condominiais", code: "2.3", unidade: "currency" },
+      // Mesma composicao do card: 2.3 + 2.8 (realizado e orcado).
+      { label: "Receitas Condominiais", codes: ["2.3", "2.8"], unidade: "currency" },
       { label: "Reembolsos", code: "2.6", unidade: "currency" },
       { label: "Receita Total", codes: ["1", "2"], unidade: "currency" },
       { label: "Despesas Operacionais", code: "7", unidade: "currency" },
