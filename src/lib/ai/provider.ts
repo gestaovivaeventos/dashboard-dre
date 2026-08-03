@@ -380,6 +380,14 @@ export async function logResolvedUsage(
 // etc.) suportam `response_format: json_object`. Este helper faz a chamada crua
 // de chat completions com json_object e devolve o JSON já parseado — o caller
 // valida com o próprio schema Zod. Use-o quando `providerName !== "openai"`.
+//
+// MODO RACIOCÍNIO (DeepSeek V4): os modelos v4 vêm com `thinking` LIGADO por
+// padrão, e o raciocínio (`reasoning_content`) consome o MESMO orçamento de
+// `max_tokens` da resposta. Se o raciocínio esgotar o teto, a API devolve
+// `finish_reason=length` com `content` VAZIO — nenhum JSON. Por isso, quando
+// isso acontece, refazemos a chamada UMA vez com o raciocínio desligado
+// (`thinking: {type: "disabled"}`), que gasta ~3x menos tokens de saída e
+// garante o JSON. Ver https://api-docs.deepseek.com/api/create-chat-completion/
 export async function generateJsonViaChat(
   resolved: ResolvedAiProvider,
   opts: {
@@ -402,7 +410,18 @@ export async function generateJsonViaChat(
     : opts.system;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
-  try {
+
+  interface ChatPayload {
+    choices?: Array<{
+      message?: { content?: string; reasoning_content?: string };
+      finish_reason?: string;
+    }>;
+    usage?: Record<string, number>;
+  }
+
+  // Uma chamada crua. `thinking` só vai no corpo quando informado, para não
+  // enviar um parâmetro desconhecido a provedores que não o suportam.
+  const call = async (thinking?: { type: "disabled" }): Promise<ChatPayload> => {
     const res = await fetch(resolved.chatCompletionsUrl, {
       method: "POST",
       headers: {
@@ -421,6 +440,7 @@ export async function generateJsonViaChat(
         temperature: opts.temperature ?? 0.2,
         max_tokens: opts.maxTokens ?? 8192,
         response_format: { type: "json_object" },
+        ...(thinking ? { thinking } : {}),
       }),
       signal: controller.signal,
     });
@@ -428,12 +448,30 @@ export async function generateJsonViaChat(
       const body = await res.text().catch(() => "");
       throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
     }
-    const payload = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
-      usage?: Record<string, number>;
-    };
-    const choice = payload.choices?.[0];
-    const text = choice?.message?.content;
+    return (await res.json()) as ChatPayload;
+  };
+
+  try {
+    let payload = await call();
+    let choice = payload.choices?.[0];
+    let text = choice?.message?.content;
+
+    // Raciocínio esgotou o orçamento e não sobrou espaço para o JSON: refaz uma
+    // única vez sem raciocínio, em vez de devolver erro ao usuário.
+    if (!text && choice?.finish_reason === "length" && choice?.message?.reasoning_content) {
+      console.warn(
+        `[ai] ${model}: raciocínio esgotou max_tokens (${opts.maxTokens ?? 8192}) sem gerar JSON — ` +
+          "refazendo com thinking desligado.",
+      );
+      const retry = await call({ type: "disabled" }).catch(() => null);
+      const retryText = retry?.choices?.[0]?.message?.content;
+      if (retryText) {
+        payload = retry!;
+        choice = retry!.choices?.[0];
+        text = retryText;
+      }
+    }
+
     if (!text) {
       // Diagnóstico: motivo do término e se o modelo gastou os tokens em
       // raciocínio (reasoning_content) sem sobrar espaço para o JSON.
