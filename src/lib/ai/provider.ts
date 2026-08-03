@@ -451,14 +451,27 @@ export async function generateJsonViaChat(
     return (await res.json()) as ChatPayload;
   };
 
+  // DeepSeek V4 vem com thinking LIGADO por default e gasta o max_tokens inteiro
+  // em reasoning_content antes de escrever o JSON (finish_reason=length com
+  // content vazio). Para saída JSON estruturada já desligamos na PRIMEIRA
+  // chamada — o retry abaixo fica como rede de segurança para os demais
+  // provedores, que não recebem o parâmetro `thinking`.
+  const thinkingOffDeStart = resolved.providerName === "deepseek";
+
   try {
-    let payload = await call();
+    let payload = await call(thinkingOffDeStart ? { type: "disabled" } : undefined);
     let choice = payload.choices?.[0];
     let text = choice?.message?.content;
 
     // Raciocínio esgotou o orçamento e não sobrou espaço para o JSON: refaz uma
-    // única vez sem raciocínio, em vez de devolver erro ao usuário.
-    if (!text && choice?.finish_reason === "length" && choice?.message?.reasoning_content) {
+    // única vez sem raciocínio, em vez de devolver erro ao usuário. Sem efeito
+    // quando o thinking já saiu desligado na primeira chamada.
+    if (
+      !text &&
+      !thinkingOffDeStart &&
+      choice?.finish_reason === "length" &&
+      choice?.message?.reasoning_content
+    ) {
       console.warn(
         `[ai] ${model}: raciocínio esgotou max_tokens (${opts.maxTokens ?? 8192}) sem gerar JSON — ` +
           "refazendo com thinking desligado.",
