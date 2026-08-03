@@ -61,12 +61,13 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
 }> = [
   {
     // Regis Adriano Da Costa — solicita em todos os setores, mas como gerente só
-    // aprova estes três.
+    // aprova estes quatro. "Despesas Gerais" entrou em 03/08/2026.
     email: "regis@vivaeventos.com.br",
     allowedSectorNames: [
       "Gestão de Pessoas",
       "Associação Bem Laranja",
       "Eventos Oficiais",
+      "Despesas Gerais",
     ],
   },
 ];
