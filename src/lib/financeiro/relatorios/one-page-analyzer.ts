@@ -65,7 +65,7 @@ const DEFAULT_OPTIONS: Required<Omit<AnalyzerOptions, "apiKey">> = {
   // Teto generoso: o relatorio cabe em ~2000 tokens na OpenAI (structured
   // output compacto), mas o DeepSeek em json_object gera mais tokens para o
   // mesmo conteudo — 6000 evita truncar o JSON. Cap, nao cobranca.
-  maxOutputTokens: 6000,
+  maxOutputTokens: 8000,
 };
 
 // JSON Schema textual do relatorio — injetado no prompt dos provedores que nao

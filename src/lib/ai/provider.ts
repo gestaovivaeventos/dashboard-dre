@@ -419,7 +419,7 @@ export async function generateJsonViaChat(
           },
         ],
         temperature: opts.temperature ?? 0.2,
-        max_tokens: opts.maxTokens ?? 4096,
+        max_tokens: opts.maxTokens ?? 8192,
         response_format: { type: "json_object" },
       }),
       signal: controller.signal,
@@ -429,11 +429,21 @@ export async function generateJsonViaChat(
       throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
     }
     const payload = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
       usage?: Record<string, number>;
     };
-    const text = payload.choices?.[0]?.message?.content;
-    if (!text) throw new Error("resposta vazia do provedor");
+    const choice = payload.choices?.[0];
+    const text = choice?.message?.content;
+    if (!text) {
+      // Diagnóstico: motivo do término e se o modelo gastou os tokens em
+      // raciocínio (reasoning_content) sem sobrar espaço para o JSON.
+      const fr = choice?.finish_reason ?? "sem choice";
+      const reasoning = choice?.message?.reasoning_content
+        ? " — modelo retornou raciocínio mas nenhum JSON (esgotou os tokens; aumente max_tokens)"
+        : "";
+      const raw = JSON.stringify(payload).slice(0, 300);
+      throw new Error(`resposta vazia do provedor [finish_reason=${fr}]${reasoning} · ${raw}`);
+    }
     return { object: JSON.parse(text), usage: normalizeUsage(payload.usage) };
   } finally {
     clearTimeout(timer);
