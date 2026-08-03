@@ -421,6 +421,12 @@ export async function generateJsonViaChat(
         temperature: opts.temperature ?? 0.2,
         max_tokens: opts.maxTokens ?? 8192,
         response_format: { type: "json_object" },
+        // DeepSeek V4 vem com thinking LIGADO por default e gasta o max_tokens
+        // inteiro em reasoning_content antes de escrever o JSON (finish_reason=
+        // length com content vazio). Para saída JSON estruturada, desligamos.
+        ...(resolved.providerName === "deepseek"
+          ? { thinking: { type: "disabled" } }
+          : {}),
       }),
       signal: controller.signal,
     });
