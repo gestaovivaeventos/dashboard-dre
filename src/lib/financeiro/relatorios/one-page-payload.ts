@@ -1592,10 +1592,14 @@ export async function buildOnePagePayload(
     const groupIds = groupList.map((c) => c.id);
     // Resultado (resultCode) das empresas `cids` num intervalo [df, dt].
     //  - perCompanyPlan: escopa CADA chamada no plano CUSTOM das próprias `cids`
-    //    (ex.: Spot+Express somam o code 15 custom de cada uma).
-    //  - default: escopa no GRUPO INTEIRO → plano CONSOLIDADO (global), igual ao
-    //    DRE consolidado do sistema multi-empresa (ex.: Salvaterra, code 11 =
-    //    8+9−10). NÃO mudar o default — Salvaterra depende dele.
+    //    (ex.: Spot+Express somam o code 15 custom de cada uma; Salvaterra soma
+    //    o code 11 de cada plano). É o único modo em que a linha de cada empresa
+    //    bate com o DRE Gerencial dela.
+    //  - default: escopa no GRUPO INTEIRO → plano UNIFICADO (união dos custom),
+    //    igual ao DRE consolidado do sistema multi-empresa. Só vale quando as
+    //    empresas do grupo têm a MESMA estrutura de totalizadores — se o mesmo
+    //    código tem fórmulas diferentes entre os planos, a união usa a de uma
+    //    empresa e distorce o resultado da outra (ver report-template-types.ts).
     const resultFor = async (
       cids: string[],
       df: string,

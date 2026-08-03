@@ -355,10 +355,18 @@ export interface TemplateReportConfig {
     matchNames?: string[];
     /**
      * Quando true, escopa CADA empresa no SEU plano custom (soma dos resultCode
-     * individuais — ex.: Spot+Express, "Resultado Final Spot + Express"). Quando
-     * false/ausente (default), escopa o GRUPO no plano global, igual ao DRE
-     * consolidado do sistema (ex.: Salvaterra). NÃO mudar o default — Salvaterra
-     * depende dele.
+     * individuais — ex.: Spot+Express, Salvaterra Condomínio+Estacionamento).
+     * Quando false/ausente (default), escopa o GRUPO no plano UNIFICADO (união
+     * dos planos custom das empresas, global só onde nenhuma tem o código),
+     * igual ao DRE consolidado multi-empresa do sistema.
+     *
+     * ATENÇÃO: o default só é seguro quando as empresas do grupo compartilham a
+     * MESMA estrutura de totalizadores. Se dois planos definem o mesmo código
+     * com fórmulas diferentes, a união fica com a de UMA delas e o resultado da
+     * outra sai errado — foi o que aconteceu no Salvaterra (code 8 = "4-7" do
+     * Condomínio aplicado ao Estacionamento, cujo 8 = "6-7" desconta os Custos
+     * com Freelancers). Grupos assim DEVEM usar `perCompanyPlan: true`, que é o
+     * único modo que reconcilia cada linha com o DRE Gerencial da empresa.
      */
     perCompanyPlan?: boolean;
     /** Rótulo da linha consolidada (default "Resultado Consolidado <grupo>"). */

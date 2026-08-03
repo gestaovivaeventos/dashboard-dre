@@ -133,6 +133,14 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
       title: "Resultado Consolidado Salvaterra — Previsto × Realizado",
       matchName: "salvaterra",
       resultCode: "11",
+      // Cada empresa no SEU plano custom (soma dos resultados) — obrigatorio
+      // aqui: os planos do Condominio e do Estacionamento divergem no code 8
+      // (Condominio "4-7", sem grupo de Custos; Estacionamento "6-7" com
+      // 6 = 4-5). No plano unificado do grupo o code 8 vinha do Condominio e os
+      // Custos com Freelancers (5) do Estacionamento NAO eram subtraidos — o
+      // bloco mostrava 107,8 mil realizado onde o DRE Gerencial mostra
+      // 68.333,81 (jan-jun/2026). Ver o template do Estacionamento (idem).
+      perCompanyPlan: true,
     },
     // Oculta VVR/FEE/sobrevivência (via capabilities) + acumulado/composição/
     // semáforo (via allowlist). Bloco consolidado e histórico aparecem.
