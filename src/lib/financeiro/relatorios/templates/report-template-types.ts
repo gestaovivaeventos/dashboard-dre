@@ -263,6 +263,16 @@ export interface TemplateReportConfig {
   kpiCards?: TemplateKpiCardSpec[];
   /** Linhas do Previsto x Realizado por conta DRE. */
   previstoRealizado?: TemplatePrevistoRealizadoSpec[];
+  /**
+   * Envia as linhas de `previstoRealizado` TAMBÉM para a IA (campo
+   * `indicadores_relatorio` do input), junto com a lista de contas que compõem
+   * cada linha. Necessário quando uma linha AGREGA mais de uma conta DRE (ex.:
+   * Salvaterra Condomínio — "Receitas Condominiais" = 2.3 + 2.8): sem isso a IA
+   * só enxerga as contas isoladas em `dre` e comenta uma parte do valor que o
+   * relatório exibe. Opt-in por template — ausência = comportamento atual
+   * (nenhuma outra empresa muda).
+   */
+  sendPrevistoRealizadoToAi?: boolean;
   /** Composição do resultado por conta DRE. */
   composicao?: TemplateComposicaoSpec[];
   /** Code do histórico principal (default "11" quando ausente). */

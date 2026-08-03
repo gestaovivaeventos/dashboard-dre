@@ -2116,6 +2116,66 @@ export async function buildOnePagePayload(
         })
       : previstoRealizado;
 
+  // Indicadores do QUADRO do relatório enviados à IA (opt-in por template via
+  // `report.sendPrevistoRealizadoToAi`). Motivo: linhas que AGREGAM contas (ex.:
+  // Salvaterra Condomínio — "Receitas Condominiais" = 2.3 + 2.8) só existem no
+  // quadro; em `dre` a IA vê as contas separadas e acabava comentando apenas uma
+  // delas (2.3 = 8.047,14) como se fosse o indicador inteiro (97.855,24).
+  // `composto_por` = codes somados/subtraídos da linha; `codes_componentes` =
+  // codes que só existem como PARTE de uma linha composta (a IA não pode
+  // citá-los como total). Ausente (null) nos demais templates → input idêntico.
+  const prSpecs = template.report?.previstoRealizado;
+  const indicadoresRelatorioInput =
+    template.report?.sendPrevistoRealizadoToAi && prSpecs
+      ? (() => {
+          const codesOf = (s: (typeof prSpecs)[number]): string[] =>
+            s.ratio
+              ? [...s.ratio.numerator, ...s.ratio.denominator]
+              : [...(s.codes ?? (s.code ? [s.code] : [])), ...(s.minus ?? [])];
+          const linhas = prSpecs.map((s, i) => {
+            // 1:1 com `previstoRealizadoFinal` (mesmo map, mesma ordem).
+            const row = previstoRealizadoFinal[i];
+            const realizado = row?.realizado ?? null;
+            const orcado = row?.previsto ?? null;
+            const varAbs =
+              realizado !== null && orcado !== null
+                ? Number((realizado - orcado).toFixed(2))
+                : null;
+            // Linha em % (margem): a variação é em PONTOS PERCENTUAIS
+            // (variacao_absoluta); % de % não faz sentido → null.
+            const varPct =
+              s.unidade !== "percent" &&
+              realizado !== null &&
+              orcado !== null &&
+              orcado !== 0
+                ? Number((((realizado - orcado) / Math.abs(orcado)) * 100).toFixed(2))
+                : null;
+            return {
+              indicador: s.label,
+              realizado: realizado !== null ? Number(realizado.toFixed(2)) : null,
+              orcado: orcado !== null ? Number(orcado.toFixed(2)) : null,
+              variacao_absoluta: varAbs,
+              variacao_percentual: varPct,
+              unidade: s.unidade,
+              composto_por: codesOf(s),
+            };
+          });
+          const componentes = new Set<string>();
+          prSpecs.forEach((s) => {
+            // Só linhas COMPOSTAS (2+ contas) geram códigos "parciais". Linha de
+            // conta única continua podendo ser comentada direto de `dre`.
+            if (s.ratio) return;
+            const codes = codesOf(s);
+            if (codes.length > 1) codes.forEach((c) => componentes.add(c));
+          });
+          return {
+            titulo: "Desempenho do período vs orçamento",
+            linhas,
+            codes_componentes: Array.from(componentes),
+          };
+        })()
+      : null;
+
   const composicaoResultadoFinal: ComposicaoPayload[] = template.report?.composicao
     ? template.report.composicao.map((s) => ({
         label: s.label,
@@ -2135,6 +2195,9 @@ export async function buildOnePagePayload(
       // Franquias Viva mantém todos (capacidades true) → input idêntico.
       input: {
         ...input,
+        // Linhas do quadro "Desempenho do período vs orçamento" — só nos
+        // templates que habilitam `sendPrevistoRealizadoToAi` (null nos demais).
+        indicadores_relatorio: indicadoresRelatorioInput,
         fee_vvr: template.capabilities.vvrFee ? input.fee_vvr : null,
         fee_disponivel: template.capabilities.vvrFee ? input.fee_disponivel : null,
         fee_disponivel_pct: template.capabilities.vvrFee ? feeDisponivelPct : null,

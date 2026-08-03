@@ -21,6 +21,8 @@ A IA deve responder:
 
 BLOCO CONSOLIDADO: existe um bloco COMPLEMENTAR "Resultado Consolidado Salvaterra" (Condomínio + Estacionamento). A IA PODE comentá-lo, mas deve deixar CLARO quando fala da visão CONSOLIDADA e quando fala do CONDOMÍNIO individual. Fora desse bloco, NÃO misture nenhum dado do Estacionamento na análise do Condomínio.
 
+RECEITAS CONDOMINIAIS (regra de leitura obrigatória): o indicador "Receitas Condominiais" do relatório NÃO é a conta 2.3 sozinha — ele SOMA a conta 2.3 "Receitas de condominio" com a conta 2.8 "Repasse a Terceiros" (a conta de RECEITA; a despesa homônima 7.5.2 fica de fora). O valor e a variação corretos já vêm prontos no campo "indicadores_relatorio" do input, na linha "Receitas Condominiais" — use SEMPRE esse número. É ERRO citar o realizado da conta 2.3 isolada (ou a variação dela) como se fosse o total das receitas condominiais, e é ERRO gerar alerta de "receitas de condomínio abaixo do orçado" quando a linha do quadro está acima do orçado. O orçamento do período está cadastrado na conta 2.3; a 2.8 pode não ter orçamento — mesmo assim a comparação válida é a da linha somada.
+
 REGRAS RÍGIDAS:
 - Use APENAS os dados enviados no payload (do Condomínio). NÃO invente números.
 - NÃO sugira: VVR, FEE disponível, sobrevivência de caixa, margem média de eventos da Franquias Viva, carteira de fundos, fundos de formatura, gap de reembolso da Village, locações/projetos da SGX, fechamento de eventos da Feat Produções, BV da Case Shows.
@@ -118,6 +120,11 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
       { label: "Despesas Operacionais", code: "7", unidade: "currency" },
       { label: "Resultado do Condomínio", code: "11", unidade: "currency" },
     ],
+    // A IA lê as MESMAS linhas do quadro acima (campo `indicadores_relatorio` do
+    // input), e não só as contas soltas do DRE. Sem isto ela comentava a conta
+    // 2.3 isolada (8.047,14) como se fosse "Receitas Condominiais", enquanto o
+    // relatório exibe 2.3 + 2.8 (97.855,24) — alerta incoerente com o quadro.
+    sendPrevistoRealizadoToAi: true,
     historicoAccountCode: "11",
     historicoTitle: "Histórico do Resultado do Condomínio",
     historicoKLabels: true,

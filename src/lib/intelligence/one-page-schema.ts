@@ -283,6 +283,36 @@ export const DividendosSociosInputSchema = z.object({
   socios: z.array(DividendoSocioSchema).min(1).max(20),
 });
 
+// INDICADORES DO QUADRO DO RELATORIO — as linhas EXATAS do quadro "Desempenho
+// do periodo vs orcamento" que o leitor ve na tela/no PDF. Existem porque
+// varias dessas linhas AGREGAM mais de uma conta do DRE (ex.: Salvaterra
+// Condominio — "Receitas Condominiais" = conta 2.3 + conta 2.8): lidas conta a
+// conta em `dre`, a IA comentava so uma das partes e o texto divergia do
+// numero exibido no relatorio. `composto_por` lista os codes somados
+// (`minus` incluso) e `codes_componentes` reune os codes que so existem como
+// PARTE de uma linha composta — a IA nao pode cita-los como se fossem o total.
+//
+// Bloco OPT-IN por template (`report.sendPrevistoRealizadoToAi`): ausente para
+// os templates que nao o habilitam, entao a leitura das demais empresas segue
+// exatamente como antes.
+export const IndicadorRelatorioSchema = z.object({
+  indicador: z.string().min(1).max(80),
+  realizado: z.number().nullable(),
+  orcado: z.number().nullable(),
+  // Em linhas de unidade "percent" a variacao absoluta esta em PONTOS
+  // PERCENTUAIS e `variacao_percentual` vem null (nao ha % de %).
+  variacao_absoluta: z.number().nullable(),
+  variacao_percentual: z.number().nullable(),
+  unidade: z.enum(["currency", "percent", "number"]),
+  composto_por: z.array(z.string().min(1).max(20)).max(12),
+});
+
+export const IndicadoresRelatorioInputSchema = z.object({
+  titulo: z.string().min(1).max(120),
+  linhas: z.array(IndicadorRelatorioSchema).min(1).max(20),
+  codes_componentes: z.array(z.string().min(1).max(20)).max(40),
+});
+
 export const OnePageInputSchema = z.object({
   empresa: z.object({
     id: z.string().uuid(),
@@ -294,6 +324,10 @@ export const OnePageInputSchema = z.object({
     label: z.string().min(1).max(80),
   }),
   dre: z.array(IndicadorDreSchema).min(1).max(30),
+  // Linhas do quadro "Desempenho do periodo vs orcamento" do proprio relatorio
+  // (ver IndicadoresRelatorioInputSchema). So presente nos templates que
+  // habilitam `report.sendPrevistoRealizadoToAi`; null/ausente nos demais.
+  indicadores_relatorio: IndicadoresRelatorioInputSchema.nullable().optional(),
   fee_vvr: FeeVvrInputSchema.nullable(),
   // Saldo atual de FEE Disponivel da franquia (snapshot no momento da
   // geracao, nao do periodo). Usado pela IA para calibrar a urgencia do
@@ -355,6 +389,8 @@ export const OnePageInputSchema = z.object({
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
+export type IndicadorRelatorio = z.infer<typeof IndicadorRelatorioSchema>;
+export type IndicadoresRelatorioInput = z.infer<typeof IndicadoresRelatorioInputSchema>;
 export type FeeVvrInput = z.infer<typeof FeeVvrInputSchema>;
 export type FeatEventosResumo = z.infer<typeof FeatEventosResumoSchema>;
 export type FeatContasReceberAberto = z.infer<typeof FeatContasReceberAbertoSchema>;

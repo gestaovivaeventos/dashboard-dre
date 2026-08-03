@@ -728,6 +728,42 @@ Gere recomendacoes praticas e conectadas aos indicadores observados no input
 receita, investigar quedas de margem). Evite acoes genericas sem relacao com
 os dados e cortes agressivos sem contextualizacao.`;
 
+// ============================================================================
+// Regra do bloco "indicadores_relatorio" (linhas do quadro do relatorio).
+//
+// Só é anexada quando o input TRAZ o campo — ou seja, apenas nos templates que
+// habilitam `report.sendPrevistoRealizadoToAi`. Existe porque algumas linhas do
+// quadro AGREGAM contas do DRE (ex.: Salvaterra Condominio — "Receitas
+// Condominiais" = conta 2.3 + conta 2.8): sem esta regra a IA lia a conta 2.3
+// isolada e escrevia um alerta com um valor que NAO e o exibido no relatorio.
+// ============================================================================
+const INDICADORES_RELATORIO_RULE = `# INDICADORES DO QUADRO DO RELATORIO (campo "indicadores_relatorio")
+
+O input traz o campo "indicadores_relatorio" com as linhas EXATAS do quadro que
+o leitor ve no relatorio ("Desempenho do periodo vs orcamento"). Essas linhas
+sao a leitura OFICIAL do periodo. Varias delas AGREGAM mais de uma conta do DRE
+— o campo "composto_por" lista as contas somadas em cada linha.
+
+REGRAS (obrigatorias, prevalecem sobre a leitura conta a conta):
+
+1. Ao comentar um indicador que existe em "indicadores_relatorio", use SEMPRE o
+   realizado, o orcado e a variacao DESSA linha. Nunca use os numeros de uma
+   conta isolada de "dre" para falar do mesmo indicador.
+2. As contas listadas em "codes_componentes" sao apenas PARTES de linhas
+   compostas. E PROIBIDO cita-las (valor, variacao ou %) como se fossem o total
+   do indicador, e PROIBIDO gerar destaque, ponto de atencao ou acao a partir
+   delas isoladamente. Exemplo de erro a NAO repetir: o indicador "Receitas
+   Condominiais" soma as contas 2.3 e 2.8; escrever um alerta com o valor so da
+   2.3 contradiz o numero que o relatorio exibe.
+3. Se a conta isolada e a linha do quadro apontarem direcoes opostas (ex.: conta
+   abaixo do orcado, indicador do quadro acima), a direcao correta e SEMPRE a da
+   linha do quadro.
+4. Em "leituraPorIndicador", prefira os nomes das linhas de
+   "indicadores_relatorio". Contas de "dre" que compoem essas linhas servem como
+   detalhe interno de composicao, nunca como indicador proprio.
+5. Continua valendo o restante: nao recalcule nada e copie os numeros
+   LITERALMENTE como estao no input.`;
+
 // ── Montagem dos prompts por segmento ───────────────────────────────────────
 export const FRANQUIAS_VIVA_SYSTEM_PROMPT = [
   ROLE_INTRO,
@@ -767,17 +803,24 @@ export function resolveOnePageSystemPrompt(input: OnePageInput): string {
     companyName: input.empresa.nome,
     segmentSlug: input.segmento?.slug ?? null,
   });
-  switch (template.prompt.kind) {
-    case "franquias-viva":
-      return FRANQUIAS_VIVA_SYSTEM_PROMPT;
-    case "hero-holding":
-      return HERO_HOLDING_SYSTEM_PROMPT;
-    case "custom":
-      return [ROLE_INTRO, template.prompt.systemContext, SHARED_TAIL].join("\n\n");
-    case "generic":
-    default:
-      return GENERIC_SYSTEM_PROMPT;
-  }
+  const base = (() => {
+    switch (template.prompt.kind) {
+      case "franquias-viva":
+        return FRANQUIAS_VIVA_SYSTEM_PROMPT;
+      case "hero-holding":
+        return HERO_HOLDING_SYSTEM_PROMPT;
+      case "custom":
+        return [ROLE_INTRO, template.prompt.systemContext, SHARED_TAIL].join("\n\n");
+      case "generic":
+      default:
+        return GENERIC_SYSTEM_PROMPT;
+    }
+  })();
+  // Regra extra SÓ quando o input traz as linhas do quadro do relatório (opt-in
+  // por template). Sem o campo, o prompt é byte a byte o de sempre.
+  return input.indicadores_relatorio
+    ? [base, INDICADORES_RELATORIO_RULE].join("\n\n")
+    : base;
 }
 
 // ============================================================================
@@ -792,6 +835,18 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
       : "Segmento/grupo: nao informado",
     `Periodo: ${input.periodo.label} (${input.periodo.date_from} a ${input.periodo.date_to})`,
     `Indicadores DRE recebidos: ${input.dre.length}`,
+    input.indicadores_relatorio
+      ? `Indicadores do QUADRO do relatorio ("${input.indicadores_relatorio.titulo}") — leitura OFICIAL do periodo, use estes numeros: ${input.indicadores_relatorio.linhas
+          .map(
+            (l) =>
+              `${l.indicador} = realizado ${l.realizado ?? "null"}, orcado ${l.orcado ?? "null"}, variacao ${
+                l.unidade === "percent"
+                  ? `${l.variacao_absoluta ?? "null"} p.p.`
+                  : `${l.variacao_percentual ?? "null"}%`
+              }${l.composto_por.length > 1 ? ` (soma das contas ${l.composto_por.join(" + ")})` : ""}`,
+          )
+          .join("; ")}. As contas ${input.indicadores_relatorio.codes_componentes.join(", ") || "(nenhuma)"} do array "dre" sao apenas PARTES dessas linhas compostas — NAO as cite isoladamente como se fossem o indicador (detalhe no JSON, campo indicadores_relatorio)`
+      : null,
     input.fee_vvr
       ? `FEE/VVR do periodo: fee=${input.fee_vvr.fee_mes ?? "null"}, vvr=${input.fee_vvr.vvr_mes ?? "null"}`
       : "FEE/VVR: nao informado para este escopo",
