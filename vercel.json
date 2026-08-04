@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/omie-launch-queue",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ctrl-approval-reminders",
+      "schedule": "0 13 * * *"
     }
   ]
 }

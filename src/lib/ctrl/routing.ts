@@ -84,6 +84,11 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
 // o mesmo destaque visual sem alterar seu perfil nem sua visibilidade (seguem
 // vendo TODAS as requisições). Setores casados por NOME (ctrl_sectors.name é
 // único), resiliente a acento/caixa, como no restante deste módulo.
+//
+// ATENÇÃO — esta lista tem DOIS efeitos hoje: além do destaque na tela, ela
+// coloca o usuário na etapa do DIRETOR do lembrete diário por e-mail
+// (src/lib/ctrl/approval-reminders/), restrito aos setores listados aqui. Ou
+// seja, incluir um e-mail nesta lista passa a gerar e-mail diário para ele.
 export const DIRECTOR_HIGHLIGHT_SECTORS: ReadonlyArray<{
   email: string;
   sectorNames: readonly string[];

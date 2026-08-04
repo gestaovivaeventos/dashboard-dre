@@ -128,7 +128,7 @@ Special profiles to remember:
 
 - **DRE**: `users`, `companies`, `segments`, `dre_accounts`, `financial_entries`, `category_mappings`, `kpi_definitions`, `sync_logs`, `dre_monthly_aggregates`, `cash_flow_*` (accounts, category mappings, monthly aggregates), `*_manual_entries`, `company_documents`, contract tables.
 - **Access**: `user_module_roles`, `user_company_access`, `user_segment_access`, `user_sectors`.
-- **CTRL** (prefixed `ctrl_*`): requests, suppliers, sectors, events, budgets, omie-mapping, notifications, contapagar launches. Note: `contas_a_pagar` absorbs the legacy `csc` concept in-app — RLS policies that list `csc` must also include `contas_a_pagar`.
+- **CTRL** (prefixed `ctrl_*`): requests, suppliers, sectors, events, budgets, omie-mapping, notifications, contapagar launches, `ctrl_approval_email_log` (rastro + trava de duplicidade do lembrete diário de aprovações). Note: `contas_a_pagar` absorbs the legacy `csc` concept in-app — RLS policies that list `csc` must also include `contas_a_pagar`.
 
 SQL functions: `get_dre_consolidated()` (account aggregation), `get_dre_drilldown()` (transaction detail), plus aggregate-refresh functions.
 
@@ -143,6 +143,7 @@ Vercel. Cron jobs (`vercel.json`):
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
 - `/api/cron/bi-monthly-validation` — `0 12 4 * *`. Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions`), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
 - `/api/cron/bi-monthly-autosend` — `0 12 10 * *`. Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead.
+- `/api/cron/ctrl-approval-reminders` — `0 13 * * *` (13:00 UTC / **10:00 BRT**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
 
 There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
@@ -154,6 +155,18 @@ There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct
 The e-mail is rendered from `OnePageReportPreviewData` — the *same* object the screen renders — by `one-page-email.ts`. That is what keeps the e-mail identical to the BI screen per company (block allowlist, template-exclusive blocks, hidden fields). Do not add a second renderer fed from the raw payload.
 
 Recipients are always resolved server-side from the validation row's `company_id`; the client only sends the row id.
+
+### Lembrete diário de aprovações (CTRL / Compras)
+
+`src/lib/ctrl/approval-reminders/` + `/api/cron/ctrl-approval-reminders`. Às 10h BRT envia, via Resend, **um e-mail por aprovador** com todas as requisições que dependem da aprovação dele. Quem não tem pendência não recebe nada.
+
+Quem recebe o quê é derivado da mesma fonte de verdade da tela de Aprovações — não replique a regra em outro lugar:
+- a **etapa vem do status**: `pendente` → gerente/gerente sócio; `pendente_diretor` → diretor. Como `applyApprovalStep` só move para `pendente_diretor` depois do aval do gerente, o diretor nunca é notificado antes da etapa gerencial;
+- **notificação é sempre limitada pelo setor, inclusive para o diretor**: ele *aprova* qualquer setor (`hasGlobalVisibility`), mas só *recebe e-mail* dos setores cadastrados para ele na tela de Usuários (`user_sectors`). Decisão de negócio — não confunda com a visibilidade da tela. Gerente segue o mesmo filtro, com o fallback "sem vínculo recebe tudo" do `getRequests`;
+- valem os overrides de `routing.ts`: `APPROVAL_ROUTING` (diretor/gerente fixo) e `approverSectorRestrictionFor` (alçada, falha fechada). **`DIRECTOR_HIGHLIGHT_SECTORS` agora tem dois efeitos**: além do destaque na tela, coloca o e-mail listado na etapa do diretor da rotina, restrito àqueles setores (é assim que `marcelo@quokka.net.br`, perfil admin, recebe TI / Financeiro Cash Out / Financeiro CSC);
+- o pool sai de `users.profile` (`gerente`, `gerente_setor`, `diretor` + `can_compras` + `active`), **não** de `user_module_roles` — a tabela legada ainda guarda papéis de quem hoje tem outro perfil. Admin não recebe por ser admin, só via `DIRECTOR_HIGHLIGHT_SECTORS`.
+
+`ctrl_approval_email_log` (unique `user_id` + `run_date` em BRT) é o rastro e a trava de duplicidade: reexecutar o endpoint no mesmo dia não reenvia. `?dryRun=1` monta sem enviar; `?force=1` reenvia conscientemente. Requisição pendente sem nenhum aprovador elegível não some: entra em `orphans` e vira alerta ao `ADMIN_EMAIL` — é o sintoma normal de setor sem gerente/diretor cadastrado, já que o filtro por setor não tem fallback global. A "mensagem do dia" é sorteada por hash de (usuário, dia) excluindo as últimas frases do log — determinística, então um reprocessamento repete a frase que o usuário viu.
 
 All cron endpoints require `Authorization: Bearer <CRON_SECRET>`.
 
