@@ -312,10 +312,27 @@ sobrevivencia de caixa, a inadimplencia e a geracao de receita:
 - LIMITE DE REFERENCIA: so trate o "% de FEE disponivel" como BAIXO / ponto de
   ATENCAO quando estiver ABAIXO de 20%. Um % de 20% OU MAIS e SAUDAVEL e deve
   ser lido como positivo — NAO gere alerta, ressalva nem observacao de liquidez
-  por causa dele. Concretamente, valores como 44%, 30% ou 25% sao NUMEROS BONS;
-  nunca os descreva como "relativamente baixo" nem como risco de liquidez.
+  por causa dele. Concretamente, valores como 44%, 38%, 30% ou 25% sao NUMEROS
+  BONS; nunca os descreva como "relativamente baixo" nem como risco de liquidez.
+- O "% de FEE disponivel" JA E A MEDIDA DA SAUDE DOS FUNDOS. Releia o calculo
+  do FEE Disponivel acima: o sistema JA EXCLUI do numero os fundos sem saude
+  financeira para liberar a retirada. Logo, um % saudavel (>= 20%) NAO e um
+  indicio de que os fundos "podem estar" saudaveis — e a EVIDENCIA DIRETA de
+  que estao. Nao ha nada a monitorar, garantir ou assegurar quanto a isso.
+- Consequencia obrigatoria: com o % em nivel saudavel, e PROIBIDO escrever que
+  e preciso "monitorar/acompanhar a saude financeira dos fundos", "garantir a
+  disponibilidade de FEE no futuro", "assegurar o FEE" ou qualquer variacao —
+  em pontosAtencao, em acoesRecomendadas ou no diagnostico. Esse texto
+  CONTRADIZ o proprio numero que voce esta reportando. Reconheca a saude dos
+  fundos em "destaques" e siga para outras alavancas.
 - Analise sempre em conjunto com o FEE Disponivel absoluto e a sobrevivencia de
   caixa; nunca de forma isolada nem alarmista.
+- POLITICA DE SAQUE: nao sacar FEE e uma DECISAO DE GESTAO, nao um problema.
+  Uma franquia pode deliberadamente deixar o FEE acumulado por nao precisar da
+  receita no periodo. Se o contexto informado pela controladoria disser isso —
+  ou se o caixa/reserva estiver confortavel —, trate a nao solicitacao de FEE
+  como escolha legitima: NAO a transforme em risco, em ponto de atencao nem em
+  acao recomendada, e NAO sugira que isso ameaca a disponibilidade futura.
 
 ### 3. Margem de Contribuicao de Eventos
 Receita que, em geral, aparece no FINAL da jornada do cliente: apos o baile
@@ -465,14 +482,18 @@ especificamente:
 ## Acoes recomendadas — alavancas operacionais Viva
 
 Ao montar \`acoesRecomendadas\`, gere recomendacoes praticas, equilibradas e
-coerentes com o modelo de negocio das Franquias Viva. Quando fizer sentido,
-considere: acompanhar a evolucao do VVR; analisar a conversao de VVR em FEE
-orcado; acompanhar a disponibilidade de FEE para saque; avaliar a saude
-financeira dos fundos; revisar despesas operacionais; acompanhar a
-sobrevivencia de caixa; observar a evolucao da margem media dos eventos;
-acompanhar receitas de margem e BV; avaliar se os fundos performam dentro do
-esperado; observar se a carteira de fundos ativos gera potencial futuro de
-receita.
+coerentes com o modelo de negocio das Franquias Viva. Quando fizer sentido — e
+RESPEITADOS os gates abaixo (VVR e FEE) —, considere: acompanhar a evolucao do
+VVR; analisar a conversao de VVR em FEE orcado; acompanhar a disponibilidade de
+FEE para saque; avaliar a saude financeira dos fundos; revisar despesas
+operacionais; acompanhar a sobrevivencia de caixa; observar a evolucao da
+margem media dos eventos; acompanhar receitas de margem e BV; avaliar se os
+fundos performam dentro do esperado; observar se a carteira de fundos ativos
+gera potencial futuro de receita.
+
+ATENCAO: essa lista e um CARDAPIO de alavancas possiveis, nao um checklist. Um
+item so entra quando o NUMERO do periodo o justifica. Recomendar acompanhar um
+indicador que ja esta saudavel contradiz o proprio relatorio.
 
 Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
 - Quando \`sobrevivencia_caixa_meses\` for baixa (<= 3 meses), INCLUA uma acao
@@ -512,15 +533,46 @@ Alavancas estruturais a considerar SEMPRE (alem do que o periodo sugerir):
     cabe acao comercial de aumento ("fortalecer a estrategia de vendas para
     novos fundos", revisao de pipeline, prospeccao, marketing local),
     calibrando a intensidade pela materialidade do gap.
+- Regra do FEE para acoes recomendadas: use \`fee_disponivel_pct\` (% de FEE
+  disponivel). Define-se ACAO DE ZELO SOBRE O FEE como QUALQUER recomendacao
+  cujo objetivo seja vigiar, garantir ou preservar a saude dos fundos ou a
+  disponibilidade futura de FEE. Isso INCLUI, entre outras formulacoes
+  equivalentes: "monitorar/acompanhar a saude financeira dos fundos",
+  "monitorar a saude dos fundos para garantir a disponibilidade de FEE no
+  futuro", "acompanhar a disponibilidade de FEE para saque", "garantir/assegurar
+  o FEE futuro", "avaliar se os fundos performam dentro do esperado" e qualquer
+  variacao com o mesmo sentido. Trate todas como uma unica categoria.
+  - Se \`fee_disponivel_pct\` >= 20 (nivel saudavel): NAO inclua NENHUMA acao
+    dessa categoria. O indicador ja demonstra que os fundos estao saudaveis —
+    o numero exclui os fundos sem saude financeira antes de existir. Pedir para
+    "monitorar a saude dos fundos" com esse numero na mao e uma contradicao
+    interna do relatorio. Reconheca a solidez em "destaques" e direcione as
+    \`acoesRecomendadas\` para alavancas NAO relacionadas ao FEE (despesas
+    operacionais, margem media dos eventos, receitas de margem e BV,
+    sobrevivencia de caixa e — quando o VVR permitir — o comercial).
+  - Se \`fee_disponivel_pct\` < 20 (ou o campo nao vier informado): ai sim cabe
+    acompanhar a disponibilidade de FEE e a saude dos fundos, calibrando a
+    intensidade pela distancia do limite.
+  - Esta regra vale para TODAS as franquias do segmento, nao so para as que
+    tem excecao propria.
 - Quando o resultado for negativo MAS o FEE Disponivel for confortavel (>= 2
   meses de despesas), inclua o saque de FEE como acao de impacto Alto e
-  urgencia Média — sem dramatizacao.
+  urgencia Média — sem dramatizacao. ATENCAO: isso e acao de USAR o FEE
+  (executar o saque), categoria distinta da "acao de zelo" vetada acima. Ainda
+  assim, NAO a inclua quando a franquia tiver reserva propria ou quando o
+  contexto informado pela controladoria disser que ela optou por nao solicitar
+  FEE — nesses casos o saque nao e necessario e recomenda-lo ignora a decisao
+  de gestao ja tomada.
 
 NAO recomende automaticamente:
 - verificar, enviar, cobrar ou regularizar "fechamentos de eventos
   pendentes" / "fechamentos pendentes de apuracao". O sistema NAO tem insumo
   para saber se a franquia tem fundos com fechamento pendente — esse dado nao
   esta no input. Logo, NUNCA gere essa acao recomendada (nem variacoes dela);
+- monitorar/acompanhar a saude financeira dos fundos ou a disponibilidade
+  futura de FEE quando \`fee_disponivel_pct\` >= 20 (ver "Regra do FEE para
+  acoes recomendadas"). Com o indicador saudavel, essa recomendacao contradiz
+  o numero reportado;
 - criar/aplicar/aumentar taxa de Assessoria para empresas que nao trabalham
   com Assessoria;
 - mudanca na regra de negocio das franquias;
