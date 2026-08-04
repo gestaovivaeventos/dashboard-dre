@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
 import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
+import { currentMonthBR, currentYearBR } from "@/lib/ctrl/datetime";
 import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
@@ -89,7 +90,9 @@ export function NovaRequisicaoForm({
   usdIofRate = 3.5,
 }: Props) {
   const router = useRouter();
-  const now = new Date();
+  // Competência default segue o calendário de Brasília, não o relógio do navegador.
+  const currentYear = currentYearBR();
+  const currentMonth = currentMonthBR();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,8 +106,8 @@ export function NovaRequisicaoForm({
   // BRL (câmbio + IOF). O valor efetivo continua em reais. Indisponível no PIX.
   const [isUsd, setIsUsd] = useState(false);
   const [usdAmountStr, setUsdAmountStr] = useState("");
-  const [refMonth, setRefMonth] = useState(now.getMonth() + 1);
-  const [refYear, setRefYear] = useState(now.getFullYear());
+  const [refMonth, setRefMonth] = useState(currentMonth);
+  const [refYear, setRefYear] = useState(currentYear);
 
   // ── Supplier selection ───────────────────────────────────────────────────────
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -1276,7 +1279,7 @@ export function NovaRequisicaoForm({
         <div className="space-y-1.5">
           <label className={LABEL_CLS}>Ano Competência <span className="text-destructive">*</span></label>
           <select value={refYear} onChange={(e) => setRefYear(Number(e.target.value))} className={INPUT_CLS}>
-            {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
+            {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>

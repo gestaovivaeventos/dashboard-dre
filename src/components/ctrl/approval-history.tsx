@@ -6,6 +6,7 @@ import {
   getApprovalHistory,
   type ApprovalHistoryEntry,
 } from "@/lib/ctrl/actions/requests";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 
 // Etapa que ainda aguarda decisão (quando aplicável). Passada pelo chamador, que
 // conhece o status atual da requisição — em telas onde a requisição já está
@@ -32,16 +33,6 @@ const CHANGE_FIELD_LABEL: Record<string, string> = {
   reference_month: "Mês de competência",
   reference_year: "Ano de competência",
 };
-
-function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // "Histórico de aprovações" — lê os eventos persistentes de decisão (ctrl_history
 // via getApprovalHistory) e os exibe em ordem cronológica. Como a fonte é o
@@ -182,7 +173,7 @@ function ApprovalHistoryItem({ entry }: { entry: ApprovalHistoryEntry }) {
       )}
 
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Data: {fmtDateTime(entry.createdAt)}
+        Data: {formatDateTimeBR(entry.createdAt)}
       </p>
     </div>
   );

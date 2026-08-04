@@ -13,6 +13,7 @@ import {
   lookupCep,
   maskCep,
 } from "@/lib/ctrl/endereco";
+import { formatDateBR, formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
 import { PAISES_EXTERIOR, ESTADO_EXTERIOR, ESTADO_EXTERIOR_LABEL, paisNomeByCodigo } from "@/lib/ctrl/paises";
 import { SupplierHistoryModal } from "@/components/ctrl/supplier-history-modal";
@@ -569,21 +570,13 @@ export function FornecedoresTable({
                           <p className="text-sm text-foreground">
                             {s.approver_name ?? "—"}
                           </p>
-                          <p className="text-xs">
-                            {new Date(s.approved_at).toLocaleDateString("pt-BR", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
+                          <p className="text-xs">{formatDateTimeBR(s.approved_at)}</p>
                         </div>
                       ) : (
                         "—"
                       )
                     ) : (
-                      new Date(s.created_at).toLocaleDateString("pt-BR")
+                      formatDateBR(s.created_at)
                     )}
                   </td>
                   <td
@@ -877,12 +870,12 @@ export function FornecedoresTable({
                     <DataField label="Telefone" value={detailSupplier.phone} />
                     <DataField
                       label="Cadastrado em"
-                      value={new Date(detailSupplier.created_at).toLocaleDateString("pt-BR")}
+                      value={formatDateBR(detailSupplier.created_at)}
                     />
                     {detailSupplier.status === "aprovado" && detailSupplier.approved_at && (
                       <DataField
                         label="Aprovado em"
-                        value={`${new Date(detailSupplier.approved_at).toLocaleDateString("pt-BR")} por ${detailSupplier.approver_name ?? "—"}`}
+                        value={`${formatDateBR(detailSupplier.approved_at)} por ${detailSupplier.approver_name ?? "—"}`}
                       />
                     )}
                     {detailSupplier.status === "rejeitado" && detailSupplier.rejection_reason && (
@@ -1159,7 +1152,7 @@ export function FornecedoresTable({
                   />
                   <DataField
                     label="Cadastrado em"
-                    value={new Date(approveModal.created_at).toLocaleDateString("pt-BR")}
+                    value={formatDateBR(approveModal.created_at)}
                   />
                 </dl>
               </section>

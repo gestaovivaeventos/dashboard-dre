@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { Calendar, Pencil } from "lucide-react";
 
+import { formatDateBR } from "@/lib/ctrl/datetime";
+
 type Ev = {
   id: string;
   name: string;
@@ -160,7 +162,7 @@ export function EventosClient({ events, createEvent, updateEvent, toggleActive }
                   </div>
                   {ev.description && <p className="text-xs text-muted-foreground mt-0.5">{ev.description}</p>}
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Criado em {new Date(ev.created_at).toLocaleDateString("pt-BR")}
+                    Criado em {formatDateBR(ev.created_at)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">

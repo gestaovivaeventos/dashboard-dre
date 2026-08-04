@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
+import { currentYearBR } from "@/lib/ctrl/datetime";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
-  const year = Number(new URL(request.url).searchParams.get("year")) || new Date().getFullYear();
+  const year = Number(new URL(request.url).searchParams.get("year")) || currentYearBR();
 
   const db = createAdminClientIfAvailable() ?? (await createClient());
   const [sectorsRes, typesRes] = await Promise.all([

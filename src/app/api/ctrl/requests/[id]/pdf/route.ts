@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { formatDateBR, formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -30,19 +31,11 @@ const STATUS_LABEL: Record<string, string> = {
 
 const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
+// Datas puras (yyyy-mm-dd) saem sem conversão; carimbos saem no fuso de Brasília
+// (este handler roda no servidor, que na Vercel está em UTC).
 function fmtDate(value: string | null | undefined): string {
   if (!value) return "—";
-  // Datas puras (yyyy-mm-dd) sem timezone: usa noon UTC pra evitar shift.
-  const d = value.length === 10 ? new Date(value + "T12:00:00Z") : new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return new Intl.DateTimeFormat("pt-BR").format(d);
-}
-
-function fmtDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("pt-BR");
+  return value.length === 10 ? formatDayBR(value) : formatDateBR(value);
 }
 
 function resolveOne<T extends Record<string, unknown>>(raw: T | T[] | null | undefined): T | null {
@@ -200,24 +193,24 @@ export async function GET(
   // ── Histórico ─────────────────────────────────────────────────────────────
   sectionTitle("Histórico");
   field("Criado por", creator?.name ?? creator?.email ?? "—");
-  field("Criado em", fmtDateTime(req.created_at as string | null));
+  field("Criado em", formatDateTimeBR(req.created_at as string | null));
   if (req.approved_at) {
     field(
       "Aprovado por",
-      `${approver?.name ?? approver?.email ?? "—"} · ${fmtDateTime(req.approved_at as string | null)}`,
+      `${approver?.name ?? approver?.email ?? "—"} · ${formatDateTimeBR(req.approved_at as string | null)}`,
     );
   }
   if (req.sent_to_payment_at) {
     field(
       "Enviado para pagamento",
-      `${fmtDateTime(req.sent_to_payment_at as string | null)}${req.paying_company ? ` · ${req.paying_company}` : ""}`,
+      `${formatDateTimeBR(req.sent_to_payment_at as string | null)}${req.paying_company ? ` · ${req.paying_company}` : ""}`,
     );
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────
   doc.moveDown(1.5);
   doc.font("Helvetica").fontSize(8).fillColor("#999")
-    .text(`Gerado em ${new Date().toLocaleString("pt-BR")} · Control Hub`, { align: "center" });
+    .text(`Gerado em ${formatDateTimeBR(new Date())} · Control Hub`, { align: "center" });
 
   doc.end();
   const buffer = await done;

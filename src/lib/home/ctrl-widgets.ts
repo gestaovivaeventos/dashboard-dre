@@ -1,3 +1,4 @@
+import { currentYearBR } from "@/lib/ctrl/datetime";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { CtrlRole } from "@/lib/supabase/types";
 
@@ -176,7 +177,7 @@ async function loadMyRequests(userId: string): Promise<HomeMyRequests | null> {
 async function loadBudget(sectorIds: string[]): Promise<HomeBudgetSector[] | null> {
   try {
     const db = createAdminClient();
-    const year = new Date().getFullYear();
+    const year = currentYearBR();
 
     const [{ data: budgets }, { data: reqs }, { data: sectors }] = await Promise.all([
       db

@@ -1,3 +1,5 @@
+import { dayKeyBR } from "@/lib/ctrl/datetime";
+
 // Virada única de meio de ano: o consumo/realizado de orçamento de 2026 passa a
 // considerar a DATA DE VENCIMENTO (due_date), não a data de lançamento. A
 // planilha-base cobre o realizado até 11/07/2026; ocorrências com vencimento a
@@ -18,14 +20,16 @@ export function getBudgetWindowDates(year: number) {
 /**
  * Uma ocorrência (requisição / parcela / recorrência) conta para o orçamento do
  * ano se o VENCIMENTO cai na janela [startDate, endDate). Sem vencimento, usa a
- * data de criação como fallback. Datas ISO (YYYY-MM-DD) comparam
- * lexicograficamente = cronologicamente.
+ * data de criação como fallback — o dia da criação é contado no fuso de
+ * Brasília (fatiar o ISO daria o dia em UTC e jogaria o que foi criado à noite
+ * para o dia seguinte, virando o ano do orçamento em 31/12). Datas ISO
+ * (YYYY-MM-DD) comparam lexicograficamente = cronologicamente.
  */
 export function countsTowardBudget(
   row: { due_date: string | null; created_at: string },
   year: number,
 ): boolean {
   const { startDate, endDate } = getBudgetWindowDates(year);
-  const eff = row.due_date ?? row.created_at.slice(0, 10);
+  const eff = row.due_date ?? dayKeyBR(row.created_at);
   return eff >= startDate && eff < endDate;
 }

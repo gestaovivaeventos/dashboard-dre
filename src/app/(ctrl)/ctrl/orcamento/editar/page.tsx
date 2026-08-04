@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getCadastros } from "@/lib/ctrl/actions/cadastros";
+import { currentYearBR } from "@/lib/ctrl/datetime";
 import { BudgetLineEditor } from "@/components/ctrl/budget-line-editor";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export default async function EditarOrcamentoPage() {
   const expenseTypes = typeItems
     .filter((t) => t.active)
     .map((t) => ({ id: t.id, name: t.name }));
-  const year = new Date().getFullYear();
+  const year = currentYearBR();
 
   return (
     <div className="space-y-6">

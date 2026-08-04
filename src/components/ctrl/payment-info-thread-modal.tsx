@@ -11,6 +11,7 @@ import {
   requestInfo,
   requestPaymentInfo,
 } from "@/lib/ctrl/actions/requests";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 
 // Conversa entre solicitante e o "outro lado" (Contas a Pagar na fase de
 // pagamento, ou Aprovador na fase de aprovação). Ambos os fluxos guardam cada
@@ -137,14 +138,7 @@ export function InfoThreadModal({
     });
   }
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const fmtDate = (iso: string) => formatDateTimeBR(iso);
 
   return (
     <div

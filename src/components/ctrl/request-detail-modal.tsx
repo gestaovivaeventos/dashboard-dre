@@ -8,6 +8,7 @@ import {
   getRequestExtraAttachments,
   type RequestExtraAttachment,
 } from "@/lib/ctrl/actions/requests";
+import { formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 
 // ── Tipos compartilhados ──────────────────────────────────────────────────────
 
@@ -240,11 +241,7 @@ export function RequestDetailModal({
             )}
             <DetailField
               label="Vencimento"
-              value={
-                req.due_date
-                  ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))
-                  : "—"
-              }
+              value={formatDayBR(req.due_date)}
             />
             <DetailField
               label="Competência"
@@ -322,11 +319,7 @@ export function RequestDetailModal({
             />
             <DetailField
               label="Criado em"
-              value={
-                req.created_at
-                  ? new Date(req.created_at).toLocaleString("pt-BR")
-                  : "—"
-              }
+              value={formatDateTimeBR(req.created_at)}
             />
             {req.approved_at && (
               <DetailField
@@ -334,7 +327,7 @@ export function RequestDetailModal({
                 value={
                   (approver?.name ?? approver?.email ?? "—") +
                   " · " +
-                  new Date(req.approved_at).toLocaleString("pt-BR")
+                  formatDateTimeBR(req.approved_at)
                 }
                 fullWidth
               />
@@ -343,7 +336,7 @@ export function RequestDetailModal({
               <DetailField
                 label="Enviado para pagamento"
                 value={
-                  new Date(req.sent_to_payment_at).toLocaleString("pt-BR") +
+                  formatDateTimeBR(req.sent_to_payment_at) +
                   (req.paying_company ? ` · ${req.paying_company}` : "")
                 }
                 fullWidth
@@ -352,7 +345,7 @@ export function RequestDetailModal({
             {req.omie_paid_at && (
               <DetailField
                 label="Pago no Omie"
-                value={new Date(req.omie_paid_at).toLocaleString("pt-BR")}
+                value={formatDateTimeBR(req.omie_paid_at)}
                 fullWidth
               />
             )}

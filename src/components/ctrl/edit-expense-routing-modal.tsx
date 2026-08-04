@@ -8,6 +8,7 @@ import {
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import { editExpenseRoutingFromContasAPagar } from "@/lib/ctrl/actions/requests";
+import { formatDayBR } from "@/lib/ctrl/datetime";
 import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
 
 export interface CadastroOption {
@@ -230,7 +231,7 @@ export function EditExpenseRoutingModal({
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Vencimento (fatura)</label>
               <input
-                value={new Date(faturaDueDate + "T00:00:00").toLocaleDateString("pt-BR")}
+                value={formatDayBR(faturaDueDate)}
                 disabled
                 className={inputCls + " cursor-not-allowed opacity-70"}
               />

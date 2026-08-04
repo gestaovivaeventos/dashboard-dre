@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download } from "lucide-react";
 
+import { dayKeyBR, formatDateBR, formatDayBR, todayBR } from "@/lib/ctrl/datetime";
+
 const MONTHS = [
   "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
   "Jul", "Ago", "Set", "Out", "Nov", "Dez",
@@ -69,12 +71,9 @@ function personName(p: Person): string {
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Dia de uma coluna DATE pura ('YYYY-MM-DD'): sem conversão de fuso.
 function dayPart(iso: string): string {
   return iso.slice(0, 10);
-}
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
-  return new Date(dayPart(iso) + "T00:00:00").toLocaleDateString("pt-BR");
 }
 function inRange(day: string, from: string, to: string): boolean {
   if (from && day < from) return false;
@@ -141,13 +140,13 @@ const COLUMNS: Column[] = [
   },
   {
     key: "created", label: "Criação", kind: "dateRange",
-    plain: (r) => formatDate(r.created_at),
-    sortVal: (r) => dayPart(r.created_at),
-    rawDate: (r) => dayPart(r.created_at),
+    plain: (r) => formatDateBR(r.created_at, { fallback: "" }),
+    sortVal: (r) => dayKeyBR(r.created_at),
+    rawDate: (r) => dayKeyBR(r.created_at) || null,
   },
   {
     key: "due", label: "Vencimento", kind: "dateRange",
-    plain: (r) => formatDate(r.due_date),
+    plain: (r) => formatDayBR(r.due_date, { fallback: "" }),
     sortVal: (r) => (r.due_date ? dayPart(r.due_date) : ""),
     rawDate: (r) => (r.due_date ? dayPart(r.due_date) : null),
   },
@@ -266,7 +265,7 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Requisições");
-      const stamp = new Date().toISOString().slice(0, 10);
+      const stamp = todayBR();
       XLSX.writeFile(wb, `relatorio-compras-${stamp}.xlsx`);
     } finally {
       setExporting(false);

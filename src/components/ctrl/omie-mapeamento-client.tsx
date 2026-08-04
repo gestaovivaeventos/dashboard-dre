@@ -12,6 +12,7 @@ import {
   saveSkipCnabRemessa,
   type OmieMappingData,
 } from "@/lib/ctrl/actions/omie-mapping";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 
 const INPUT_CLS =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
@@ -233,7 +234,7 @@ export function OmieMapeamentoClient({ companies }: Props) {
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3">
             <p className="text-sm text-muted-foreground">
               {data.lastSyncedAt
-                ? `Opções sincronizadas em ${new Date(data.lastSyncedAt).toLocaleString("pt-BR")}`
+                ? `Opções sincronizadas em ${formatDateTimeBR(data.lastSyncedAt)}`
                 : "Nunca sincronizado"}
             </p>
             <div className="flex items-center gap-3">

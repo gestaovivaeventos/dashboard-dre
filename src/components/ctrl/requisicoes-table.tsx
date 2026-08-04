@@ -21,6 +21,7 @@ import {
   type RequestComprovante,
 } from "@/lib/ctrl/actions/requests";
 import { refreshPaymentStatuses } from "@/lib/ctrl/actions/payment-status";
+import { formatDateBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 
 interface Props {
@@ -153,7 +154,7 @@ export function RequisicoesTable({
         key: "vencimento",
         type: "date",
         getValue: (r) => r.due_date ?? null,
-        label: (r) => (r.due_date ? new Date(r.due_date + "T00:00:00").toLocaleDateString("pt-BR") : "—"),
+        label: (r) => formatDayBR(r.due_date),
       },
       {
         key: "status",
@@ -164,7 +165,7 @@ export function RequisicoesTable({
         key: "criado",
         type: "date",
         getValue: (r) => r.created_at ?? null,
-        label: (r) => (r.created_at ? new Date(r.created_at).toLocaleDateString("pt-BR") : "—"),
+        label: (r) => formatDateBR(r.created_at),
       },
     ],
     [],
@@ -282,9 +283,7 @@ export function RequisicoesTable({
                     <td className="px-4 py-3 font-medium">{req.title}</td>
                     <td className="px-4 py-3">{fmt.format(req.amount)}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {req.due_date
-                        ? new Date(req.due_date + "T00:00:00").toLocaleDateString("pt-BR")
-                        : "—"}
+                      {formatDayBR(req.due_date)}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={req.status} paid={isPaid(req)} />
@@ -311,9 +310,7 @@ export function RequisicoesTable({
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {req.created_at
-                        ? new Date(req.created_at).toLocaleDateString("pt-BR")
-                        : "—"}
+                      {formatDateBR(req.created_at)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">

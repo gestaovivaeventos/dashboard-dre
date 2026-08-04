@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
+import { currentYearBR } from "@/lib/ctrl/datetime";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
 import { OrcamentoTable, type OrcamentoRow } from "@/components/ctrl/orcamento-table";
@@ -130,7 +131,7 @@ export default async function OrcamentoPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const year = new Date().getFullYear();
+  const year = currentYearBR();
   const canEditBudget = hasCtrlRole(ctx, "csc", "admin");
 
   // Perfil "Gerente" (gerente_setor): vê apenas os setores vinculados a ele.

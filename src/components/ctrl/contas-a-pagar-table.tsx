@@ -23,6 +23,7 @@ import {
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
+import { formatDateBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { useRouter } from "next/navigation";
 
 export type ContasRequest = RequestDetail;
@@ -250,10 +251,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         key: "vencimento",
         type: "date",
         getValue: (r) => r.due_date ?? null,
-        label: (r) =>
-          r.due_date
-            ? new Intl.DateTimeFormat("pt-BR").format(new Date(r.due_date + "T00:00:00"))
-            : "—",
+        label: (r) => formatDayBR(r.due_date),
       });
     }
     return base;
@@ -522,11 +520,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {activeTab === "aprovado" && (
                         <div className="space-y-1">
-                          <p>
-                            {req.due_date
-                              ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))
-                              : "—"}
-                          </p>
+                          <p>{formatDayBR(req.due_date)}</p>
                           {enfileirada && (
                             <span className="inline-flex w-fit items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
                               <Loader2 className="h-3 w-3 animate-spin" /> Enviando ao Omie
@@ -545,7 +539,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       {activeTab === "info_pagamento_pendente" && (
                         <div className="flex flex-col gap-1">
                           {req.due_date && (
-                            <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00"))}</p>
+                            <p>{formatDayBR(req.due_date)}</p>
                           )}
                           <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                             <MessageCircle className="h-3 w-3" /> Aguardando resposta
@@ -555,7 +549,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       {activeTab === "agendado" && (
                         <div className="space-y-1">
                           {req.paying_company && <p className="font-medium text-sky-600">{req.paying_company}</p>}
-                          {req.sent_to_payment_at && <p>{new Intl.DateTimeFormat("pt-BR").format(new Date(req.sent_to_payment_at))}</p>}
+                          {req.sent_to_payment_at && <p>{formatDateBR(req.sent_to_payment_at)}</p>}
                           <OmieLaunchBadge
                             status={req.omie_launch_status}
                             error={req.omie_launch_error}

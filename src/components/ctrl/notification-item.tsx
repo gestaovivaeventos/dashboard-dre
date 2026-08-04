@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { markNotificationRead } from "@/lib/ctrl/actions/notifications";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 
 interface NotificationItemProps {
   id: string;
@@ -107,7 +108,7 @@ export function NotificationItem({
         </div>
         <p className="mt-0.5 text-sm text-muted-foreground">{message}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {new Date(createdAt).toLocaleString("pt-BR")}
+          {formatDateTimeBR(createdAt)}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">

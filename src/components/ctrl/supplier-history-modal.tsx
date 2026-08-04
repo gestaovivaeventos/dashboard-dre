@@ -16,6 +16,7 @@ import {
   getSupplierHistory,
   type SupplierHistoryEntry,
 } from "@/lib/ctrl/actions/suppliers";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { PIX_KEY_TYPES } from "@/lib/ctrl/bancos";
 
 interface Props {
@@ -85,14 +86,7 @@ export function SupplierHistoryModal({ supplierId, supplierName, onClose }: Prop
     };
   }, [supplierId]);
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const fmtDate = (iso: string) => formatDateTimeBR(iso);
 
   return (
     <div

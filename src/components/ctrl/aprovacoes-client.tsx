@@ -12,6 +12,7 @@ import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
 import { ExtraAttachments } from "@/components/ctrl/request-detail-modal";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
+import { formatDateBR, formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 
 type Req = {
   id: string;
@@ -369,9 +370,9 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                     <td className="px-3 py-3 whitespace-nowrap">{sector?.name ?? "—"}</td>
                     <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
-                      {req.due_date ? new Intl.DateTimeFormat("pt-BR").format(new Date(req.due_date + "T00:00:00")) : "—"}
+                      {formatDayBR(req.due_date)}
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{new Date(req.created_at).toLocaleDateString("pt-BR")}</td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{formatDateBR(req.created_at)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{req.creator ? (req.creator.name ?? req.creator.email) : "—"}</td>
                     <td className="px-3 py-3">
                       <div className="flex shrink-0 flex-wrap justify-end gap-2">
@@ -480,7 +481,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                   <Row label="Evento" value={resolve(modal.req.ctrl_events)?.name ?? "Nenhum evento"} />
                   {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
                   {modal.req.payment_method && <Row label="Pagamento" value={PAYMENT_LABELS[modal.req.payment_method] ?? modal.req.payment_method} />}
-                  {modal.req.due_date && <Row label="Vencimento" value={new Intl.DateTimeFormat("pt-BR").format(new Date(modal.req.due_date + "T00:00:00"))} />}
+                  {modal.req.due_date && <Row label="Vencimento" value={formatDayBR(modal.req.due_date)} />}
                   {modal.req.approval_tier && (
                     <Row
                       label="Nível de aprovação"
@@ -500,7 +501,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                   {modal.req.description && <Row label="Descrição" value={modal.req.description} />}
                   {modal.req.justification && <Row label="Justificativa" value={modal.req.justification} />}
                   {modal.req.observations && <Row label="Observações" value={modal.req.observations} />}
-                  <Row label="Criado em" value={new Date(modal.req.created_at).toLocaleString("pt-BR")} />
+                  <Row label="Criado em" value={formatDateTimeBR(modal.req.created_at)} />
 
                   {/* Anexos diversos — para o aprovador conferir os documentos
                       antes de aprovar/enviar à Omie. */}
