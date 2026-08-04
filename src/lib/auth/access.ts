@@ -1,3 +1,7 @@
+import {
+  BI_VALIDATION_PATH,
+  canAccessBiValidationByProfile,
+} from "@/lib/auth/bi-validation";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
@@ -15,8 +19,9 @@ export function defaultLandingFor(
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
-  // Franqueado: mantém /dashboard até o Plano 2 entregar o widget Mini-DRE dele.
-  if (profile === "franqueado") return "/dashboard";
+  // Franqueado (e a cópia CSC): mantém /dashboard até o Plano 2 entregar o
+  // widget Mini-DRE dele.
+  if (profile === "franqueado" || profile === "csc") return "/dashboard";
   // Demais perfis com algum módulo → cockpit /home.
   if (canFinanceiro || canCompras || profile === "admin") return "/home";
   // Usuário só-Case cai direto nos contratos da Case.
@@ -65,10 +70,23 @@ export function canAccessPathByProfile(
   canCompras: boolean,
   canCase: boolean = false,
   canViagens: boolean = false,
+  /**
+   * E-mail do usuário. Só é usado pela tela "Validação Relatório", liberada
+   * nominalmente para marcela@/marcelo@quokka.net.br além de CSC/admin.
+   * Ausente = trata como não-nominal (a regra por perfil continua valendo).
+   */
+  email: string | null = null,
 ): boolean {
   // Validador de contrato: ilha. Só /contratos.
   if (profile === "validador_contrato") {
     return pathname === "/contratos" || pathname.startsWith("/contratos/");
+  }
+
+  // Tela "Validação Relatório": whitelist fechada (CSC + admin + e-mails
+  // nominais). Precisa vir ANTES das regras genéricas de /financeiro, que
+  // liberariam a tela para qualquer perfil com o módulo Financeiro.
+  if (pathname === BI_VALIDATION_PATH || pathname.startsWith(`${BI_VALIDATION_PATH}/`)) {
+    return canAccessBiValidationByProfile(profile, email);
   }
 
   // Módulo Case (Case Shows) — acesso binário via can_case (admin sempre pode).
@@ -83,10 +101,11 @@ export function canAccessPathByProfile(
     return canViagens || profile === "admin";
   }
 
-  // Franqueado: whitelist explícita de telas do Financeiro.
+  // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
   // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl,
-  // /contratos e qualquer página fora das 5 visualizações permitidas.
-  if (profile === "franqueado") {
+  // /contratos e qualquer página fora das visualizações permitidas. A tela
+  // "Validação Relatório" já foi liberada acima para o CSC.
+  if (profile === "franqueado" || profile === "csc") {
     if (FRANQUEADO_BASE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
       return true;
     }

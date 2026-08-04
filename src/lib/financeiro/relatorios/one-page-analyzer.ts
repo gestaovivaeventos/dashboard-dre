@@ -57,15 +57,28 @@ interface AnalyzerOptions {
   maxOutputTokens?: number;
   // API key opcional (sobrescreve OPENAI_API_KEY) — util em testes.
   apiKey?: string;
+  /**
+   * Contexto de negocio informado por um humano (tela Validacao Relatorio,
+   * acao "Adicionar contexto"). Entra APENAS na leitura textual: e anexado ao
+   * user prompt como informacao complementar, nunca substitui, corrige ou
+   * recalcula qualquer numero — os valores continuam vindo do payload.
+   */
+  businessContext?: string;
 }
 
-const DEFAULT_OPTIONS: Required<Omit<AnalyzerOptions, "apiKey">> = {
+const DEFAULT_OPTIONS: Required<
+  Omit<AnalyzerOptions, "apiKey" | "businessContext">
+> = {
   model: "gpt-4o-mini",
   temperature: 0.2,
   // Teto generoso: o relatorio cabe em ~2000 tokens na OpenAI (structured
   // output compacto), mas o DeepSeek em json_object gera mais tokens para o
-  // mesmo conteudo — 6000 evita truncar o JSON. Cap, nao cobranca.
-  maxOutputTokens: 8000,
+  // mesmo conteudo. Alem disso, nos modelos V4 o RACIOCINIO consome o mesmo
+  // orcamento: chamadas reais deste relatorio gastaram 2.6k-5.8k tokens de
+  // saida, e com 8000 o raciocinio esgotava o teto e voltava sem JSON. 16000
+  // da folga real (o modelo suporta bem mais). Cap, nao cobranca — so e gasto
+  // o que o modelo realmente gera.
+  maxOutputTokens: 16000,
 };
 
 // JSON Schema textual do relatorio — injetado no prompt dos provedores que nao
@@ -106,7 +119,28 @@ export async function analyzeOnePageReport(
   const resolved = options.apiKey ? null : await resolveAiProvider({ capability: "text" });
   const openaiTest = options.apiKey ? createOpenAI({ apiKey: options.apiKey }) : null;
   const modelName = options.model ?? resolved?.modelName ?? opts.model;
-  const userPrompt = buildOnePageReportUserPrompt(input);
+  const basePrompt = buildOnePageReportUserPrompt(input);
+  // Contexto de negocio do CSC: entra como bloco delimitado ao final do user
+  // prompt, com a regra explicita de que ele NAO altera nenhum numero. Assim a
+  // empresa/periodo do relatorio continuam sendo os do payload — o contexto
+  // nunca "vaza" para outra empresa porque e sempre passado junto da geracao
+  // daquele relatorio especifico.
+  const context = options.businessContext?.trim();
+  const userPrompt = context
+    ? `${basePrompt}
+
+CONTEXTO DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)
+-----------------------------------------------------
+${context}
+-----------------------------------------------------
+REGRAS PARA USAR ESTE CONTEXTO:
+- Ele explica/qualifica os numeros do periodo desta empresa. Incorpore-o ao
+  diagnostico, aos destaques, aos pontos de atencao e as acoes recomendadas.
+- NAO altere, recalcule, corrija ou substitua NENHUM valor financeiro: todos
+  os numeros continuam sendo exatamente os fornecidos acima.
+- NAO invente dados que nao estejam nos numeros nem neste contexto.
+- Reescreva o contexto com linguagem executiva; nao o copie literalmente.`
+    : basePrompt;
   // Seleciona o contexto de negocio conforme o segmento da empresa.
   const systemPrompt = resolveOnePageSystemPrompt(input);
 

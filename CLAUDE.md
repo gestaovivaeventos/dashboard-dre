@@ -114,7 +114,7 @@ Approval tier is computed from remaining annual balance at request time. Once `a
 
 The schema is transitioning from the old flat-role model to a **profile + per-module** model. Both exist; know which you're touching:
 
-- **New model (authoritative for pages)** — `canAccessPathByProfile(pathname, profile, canFinanceiro, canCompras)`. `profile` is a `UserProfileType`: `admin`, `franqueado`, `validador_contrato`, plus CTRL profiles `solicitante`, `gerente`, `diretor`, `csc`, `contas_a_pagar`. Module access is two booleans (`can_financeiro`, `can_compras`). `defaultLandingFor(...)` decides post-login redirect.
+- **New model (authoritative for pages)** — `canAccessPathByProfile(pathname, profile, canFinanceiro, canCompras, canCase, canViagens, email)`. `profile` is a `UserProfileType`: `admin`, `franqueado`, `csc`, `validador_contrato`, plus CTRL profiles `solicitante`, `gerente`, `gerente_setor`, `diretor`, `contas_a_pagar`. `csc` ("CSC") is a functional copy of `franqueado` ("Visão Financeira") plus the *Validação Relatório* screen — change one only after deciding whether the other follows. Module access is two booleans (`can_financeiro`, `can_compras`). `defaultLandingFor(...)` decides post-login redirect.
 - **Legacy model** — `canAccessPath(pathname, dreRole, ctrlRole)` with `DreRole` (`admin`/`gestor_hero`/`gestor_unidade`) and `CtrlRole`. Still called by older code; tables `DRE_RULES` / `CTRL_RULES` / `SEGMENT_SUB_RULES` back it. Will be removed once all callers migrate.
 
 Session helpers: `hasDreAccess(ctx, minRole?)` (hierarchy `gestor_unidade < gestor_hero < admin`), `hasCtrlAccess(ctx, roles?)`. In CTRL server actions use `requireCtrlRole(...allowed)` / `getCtrlUser()` from `src/lib/ctrl/auth.ts`.
@@ -139,9 +139,20 @@ Omie credentials (app_key/app_secret) are encrypted with AES-256-GCM before stor
 ## Deployment
 
 Vercel. Cron jobs (`vercel.json`):
-- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Full Omie sync; emails (Resend) on sync failures and unmapped categories.
+- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the 4th of each month (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
+- `/api/cron/bi-monthly-validation` — `0 12 4 * *`. Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions`), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
+- `/api/cron/bi-monthly-autosend` — `0 12 10 * *`. Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead.
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
+- `/api/cron/monthly-bi-report` — legacy direct send (bypasses validation). **Unscheduled on purpose** — manual contingency only.
+
+### BI report validation flow (CSC)
+
+`Financeiro > Validação Relatório` (`/financeiro/validacao-relatorio`) is the human gate between generation and delivery. Access whitelist lives in `src/lib/auth/bi-validation.ts` (profile `csc`, admin, and two named e-mails) and is mirrored by `public.can_validate_bi_reports()` in RLS. Actions: **Aceitar** (unlocks 1-click send), **Revisão** (blocks send, records who/when/why), **Adicionar contexto** (free text → re-runs the AI analysis with the context; numbers never change).
+
+The e-mail is rendered from `OnePageReportPreviewData` — the *same* object the screen renders — by `one-page-email.ts`. That is what keeps the e-mail identical to the BI screen per company (block allowlist, template-exclusive blocks, hidden fields). Do not add a second renderer fed from the raw payload.
+
+Recipients are always resolved server-side from the validation row's `company_id`; the client only sends the row id.
 
 All cron endpoints require `Authorization: Bearer <CRON_SECRET>`.
 

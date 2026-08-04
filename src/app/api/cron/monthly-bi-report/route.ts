@@ -11,9 +11,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // GET /api/cron/monthly-bi-report
 //
 // Envia o One Page Report (Business Intelligence) do MES ANTERIOR por email
-// para os gestores assinantes de cada unidade (tabela bi_report_subscriptions,
-// gerenciada em /admin/relatorios-bi). Agendado no vercel.json para o dia 5
-// de cada mes — margem para o fechamento do Omie ser sincronizado.
+// (Resend) para os gestores assinantes de cada unidade (tabela
+// bi_report_subscriptions, gerenciada em /admin/relatorios-bi).
+//
+// ATENCAO — NAO ESTA MAIS AGENDADO. O envio mensal passou a ser mediado pela
+// validacao do CSC:
+//   dia 4  → /api/cron/bi-monthly-validation gera e coloca em
+//            /financeiro/validacao-relatorio (nao envia)
+//   aceite → envio em 1 clique na tela
+//   dia 10 → /api/cron/bi-monthly-autosend envia o que nao foi aceito
+// Esta rota fica como disparo MANUAL de contingencia (envia sem passar pela
+// validacao) e por isso saiu do vercel.json — reagenda-la reintroduziria o
+// envio automatico do dia 5, atropelando o aceite do CSC.
 //
 // A geracao/envio em si vive em sendOnePageForCompany (compartilhado com o
 // envio manual "Enviar agora").

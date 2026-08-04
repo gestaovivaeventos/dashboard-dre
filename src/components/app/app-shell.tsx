@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
 import type { ActiveModule } from "@/lib/context/active-context";
 import type { ModuleDefinition } from "@/lib/context/modules";
 import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
@@ -33,6 +34,10 @@ interface AppShellProps {
   activeSegmentSlug: string | null;
   contractsOnly?: boolean;
   isFranqueado?: boolean;
+  /** Perfil 'csc' — cópia do franqueado + tela "Validação Relatório". */
+  isCsc?: boolean;
+  /** Pode acessar "Validação Relatório" (CSC, admin ou e-mail nominal). */
+  canBiValidation?: boolean;
   unreadNotifications?: number;
 }
 
@@ -53,6 +58,8 @@ export function AppShell({
   activeSegmentSlug,
   contractsOnly,
   isFranqueado,
+  isCsc,
+  canBiValidation,
   unreadNotifications = 0,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
@@ -74,6 +81,8 @@ export function AppShell({
       onNavigate={mobile ? () => setOpen(false) : undefined}
       contractsOnly={contractsOnly}
       isFranqueado={isFranqueado}
+      isCsc={isCsc}
+      canBiValidation={canBiValidation}
     />
   );
 
@@ -146,7 +155,14 @@ export function AppShell({
                 <p className="text-sm font-medium leading-none text-ink-primary">{userName}</p>
                 <p className="text-xs text-ink-muted">{userEmail}</p>
               </div>
-              <NotificationsLink visible={hasCtrl} unreadCount={unreadNotifications} />
+              {/* Sino: módulo Compras (padrão) ou, para quem só valida
+                  relatórios BI (perfil CSC, sem Compras), a própria tela de
+                  Validação Relatório — onde a pendência é resolvida. */}
+              <NotificationsLink
+                visible={hasCtrl || Boolean(canBiValidation)}
+                unreadCount={unreadNotifications}
+                href={hasCtrl ? "/ctrl/notificacoes" : BI_VALIDATION_PATH}
+              />
               <ThemeToggle />
               <Separator className="hidden h-8 w-px bg-white/10 sm:block" />
               <SignOutButton />

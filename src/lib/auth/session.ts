@@ -199,6 +199,8 @@ function deriveDreRole(
       // they don't really use DRE but we keep a value so old checks don't fail.
       return "gestor_unidade";
     case "franqueado":
+    // 'csc' é a cópia funcional do franqueado — mesmo DRE role restritivo.
+    case "csc":
       // Restricted financeiro user. 'gestor_unidade' is the most restrictive
       // legacy DRE role — keeps any legacy admin-only check denying access.
       return "gestor_unidade";
@@ -219,8 +221,8 @@ function deriveCtrlRoles(
       .map((r) => r.role as CtrlRole);
   }
   if (profile === "validador_contrato") return [];
-  // Franqueado nunca tem acesso ao módulo Compras.
-  if (profile === "franqueado") return [];
+  // Franqueado (e sua cópia CSC) nunca tem acesso ao módulo Compras.
+  if (profile === "franqueado" || profile === "csc") return [];
   if (!canCompras && profile !== "admin") return [];
 
   switch (profile) {

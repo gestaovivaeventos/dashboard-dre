@@ -13,6 +13,9 @@ const VALID_PROFILES: UserProfileType[] = [
   "validador_contrato",
   "solicitante",
   "franqueado",
+  // CSC: cópia funcional do "franqueado" (Visão Financeira) + tela Validação
+  // Relatório. As mesmas restrições de módulo/setor abaixo se aplicam.
+  "csc",
 ];
 
 // Resolve a URL canônica da aplicação, preferindo a URL de produção do Vercel
@@ -68,28 +71,30 @@ export async function POST(request: Request) {
   }
 
   // Validador de contrato: força sem módulos
-  // Franqueado: força só Financeiro, sem setores
+  // Franqueado e CSC (cópia funcional): força só Financeiro, sem setores
+  const isFinanceiroOnly =
+    userProfile === "franqueado" || userProfile === "csc";
   const canFinanceiro =
     userProfile === "validador_contrato"
       ? false
-      : userProfile === "franqueado"
+      : isFinanceiroOnly
       ? true
       : Boolean(body.can_financeiro);
   const canCompras =
-    userProfile === "validador_contrato" || userProfile === "franqueado"
+    userProfile === "validador_contrato" || isFinanceiroOnly
       ? false
       : Boolean(body.can_compras);
   const canCase =
-    userProfile === "validador_contrato" || userProfile === "franqueado"
+    userProfile === "validador_contrato" || isFinanceiroOnly
       ? false
       : Boolean(body.can_case);
   const canViagens =
-    userProfile === "validador_contrato" || userProfile === "franqueado"
+    userProfile === "validador_contrato" || isFinanceiroOnly
       ? false
       : Boolean(body.can_viagens);
   const canViagensAprovar = canViagens && Boolean(body.can_viagens_aprovar);
   const sectorIds =
-    userProfile === "validador_contrato" || userProfile === "franqueado"
+    userProfile === "validador_contrato" || isFinanceiroOnly
       ? []
       : body.sector_ids ?? [];
   const companyIds = userProfile === "validador_contrato" ? [] : body.company_ids ?? [];

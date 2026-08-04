@@ -10,14 +10,24 @@ interface NotificationsLinkProps {
   visible: boolean;
   /** Contagem de notificações não lidas. Renderiza badge quando > 0. */
   unreadCount?: number;
+  /**
+   * Destino do sino. Default `/ctrl/notificacoes` (módulo Compras). Usuários
+   * sem Compras — ex.: perfil CSC, que recebe a pendência de validação dos
+   * relatórios — apontam para a tela onde a pendência se resolve.
+   */
+  href?: string;
 }
 
-export function NotificationsLink({ visible, unreadCount = 0 }: NotificationsLinkProps) {
+export function NotificationsLink({
+  visible,
+  unreadCount = 0,
+  href = "/ctrl/notificacoes",
+}: NotificationsLinkProps) {
   if (!visible) return null;
   const display = unreadCount > 99 ? "99+" : String(unreadCount);
   return (
     <Link
-      href="/ctrl/notificacoes"
+      href={href}
       aria-label={
         unreadCount > 0
           ? `Notificações (${unreadCount} não lida${unreadCount === 1 ? "" : "s"})`

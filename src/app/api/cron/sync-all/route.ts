@@ -5,7 +5,7 @@ import {
   sendUnmappedCategoriesEmail,
   sendUnmappedEntriesAlertEmail,
 } from "@/lib/notifications/resend";
-import { runCompanySyncAsSystem } from "@/lib/omie/sync";
+import { runCompanyRangeSyncAsSystem, runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
 import { syncCasePagamentosFromOmie } from "@/lib/case/sync-pagamentos";
 import { reconcilePaidRequests } from "@/lib/ctrl/reconcile-payments";
@@ -38,6 +38,39 @@ const SYNC_CONCURRENCY = Math.max(
   1,
   Number(process.env.SYNC_CONCURRENCY ?? "4") || 4,
 );
+
+// ── Janela ampliada do dia 4 ────────────────────────────────────────────────
+// Todo dia 4 a sincronizacao diaria le os ULTIMOS 6 MESES (em vez da janela
+// "rolling" de 3 dias). Objetivo: garantir que lancamentos retroativos,
+// ajustes, baixas e correcoes feitos na Omie estejam refletidos ANTES da
+// geracao dos relatorios mensais (rotina /api/cron/bi-monthly-validation, que
+// roda algumas horas depois no mesmo dia). Nos demais dias nada muda.
+const DEEP_SYNC_DAY_OF_MONTH = 4;
+const DEEP_SYNC_MONTHS_BACK = 6;
+
+/** Data no fuso de Brasilia — o "dia 4" e o dia 4 no Brasil, nao em UTC. */
+function nowInBrasilia(): Date {
+  const utc = new Date();
+  return new Date(utc.getTime() - 3 * 60 * 60 * 1000);
+}
+
+function formatForOmie(date: Date): string {
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}-${mm}-${date.getUTCFullYear()}`;
+}
+
+/** Intervalo dos ultimos N meses (inclusive hoje), no formato da Omie. */
+function deepSyncRange(reference: Date): { dateFrom: string; dateTo: string } {
+  const from = new Date(
+    Date.UTC(
+      reference.getUTCFullYear(),
+      reference.getUTCMonth() - DEEP_SYNC_MONTHS_BACK,
+      1,
+    ),
+  );
+  return { dateFrom: formatForOmie(from), dateTo: formatForOmie(reference) };
+}
 
 // Pool de concorrencia: N workers consomem a fila de itens ate esvaziar.
 // Mantem no maximo `limit` execucoes simultaneas.
@@ -78,6 +111,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: companiesError.message }, { status: 400 });
   }
 
+  // Dia 4 (horario de Brasilia) → janela ampliada de 6 meses.
+  const reference = nowInBrasilia();
+  const isDeepSyncDay = reference.getUTCDate() === DEEP_SYNC_DAY_OF_MONTH;
+  const deepRange = isDeepSyncDay ? deepSyncRange(reference) : null;
+
   const failures: Array<{ companyId: string; companyName: string; error: string }> = [];
   const unmappedCategories: Array<{
     companyId: string;
@@ -103,7 +141,9 @@ export async function GET(request: Request) {
     const companyName = company.name as string;
 
     try {
-      const result = await runCompanySyncAsSystem(companyId, "rolling");
+      const result = deepRange
+        ? await runCompanyRangeSyncAsSystem(companyId, deepRange)
+        : await runCompanySyncAsSystem(companyId, "rolling");
       result.newUnmappedCategories.forEach((category) => {
         unmappedCategories.push({
           companyId,
@@ -338,6 +378,10 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     ok: failures.length === 0,
+    // Rastreabilidade da regra do dia 4 (janela de 6 meses).
+    syncWindow: deepRange
+      ? { mode: "deep-6-months", ...deepRange }
+      : { mode: "rolling" },
     processed: results.length,
     failed: failures.length,
     unmappedCategories: unmappedCategories.length,

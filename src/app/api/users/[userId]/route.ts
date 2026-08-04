@@ -13,6 +13,9 @@ const ASSIGNABLE_PROFILES: ReadonlyArray<UserProfileType> = [
   "validador_contrato",
   "solicitante",
   "franqueado",
+  // CSC: cópia funcional do "franqueado" (Visão Financeira) + tela Validação
+  // Relatório.
+  "csc",
 ];
 
 interface Params {
@@ -81,8 +84,8 @@ export async function PATCH(request: Request, { params }: Params) {
     patch.can_viagens = false;
     patch.can_viagens_aprovar = false;
   }
-  // Franqueado: forçado a só Financeiro
-  if (body.profile === "franqueado") {
+  // Franqueado e CSC (cópia funcional): forçados a só Financeiro
+  if (body.profile === "franqueado" || body.profile === "csc") {
     patch.can_financeiro = true;
     patch.can_compras = false;
     patch.can_case = false;
@@ -174,6 +177,6 @@ export async function DELETE(_: Request, { params }: Params) {
 function deriveLegacyDreRole(p: UserProfileType): "admin" | "gestor_hero" | "gestor_unidade" {
   if (p === "admin") return "admin";
   if (p === "diretor" || p === "contas_a_pagar") return "gestor_hero";
-  // franqueado, gerente, gerente_setor, solicitante, validador_contrato → gestor_unidade
+  // franqueado, csc, gerente, gerente_setor, solicitante, validador_contrato → gestor_unidade
   return "gestor_unidade";
 }

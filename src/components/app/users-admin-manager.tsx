@@ -49,7 +49,8 @@ type Profile =
   | "diretor"
   | "validador_contrato"
   | "solicitante"
-  | "franqueado";
+  | "franqueado"
+  | "csc";
 
 interface UserItem {
   id: string;
@@ -128,6 +129,12 @@ const PROFILES: Array<{
     description:
       "Visão restrita ao Financeiro (Dashboard, Fluxo de Caixa, Budget, KPIs, BI) das unidades atribuídas.",
   },
+  {
+    value: "csc",
+    label: "CSC",
+    description:
+      "Mesmos acessos da Visão Financeira, mais a tela Validação Relatório (aceite dos relatórios BI mensais antes do envio aos gestores).",
+  },
 ];
 
 const PROFILE_LABEL: Record<string, string> = Object.fromEntries(
@@ -143,6 +150,7 @@ const PROFILE_BADGE_CLASS: Record<string, string> = {
   validador_contrato: "bg-orange-100 text-orange-800 border-transparent",
   solicitante: "bg-slate-100 text-slate-800 border-transparent",
   franqueado: "bg-amber-100 text-amber-800 border-transparent",
+  csc: "bg-teal-100 text-teal-800 border-transparent",
 };
 
 // Whether the profile REQUIRES at least one sector (blocks save when empty).
@@ -343,8 +351,9 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_compras = true;
         next.company_ids = []; // admin vê tudo, não precisa restringir
       }
-      // Franqueado: só Financeiro, sem setores. Unidades obrigatórias.
-      if (key === "profile" && value === "franqueado") {
+      // Franqueado e CSC (cópia funcional): só Financeiro, sem setores.
+      // Unidades obrigatórias.
+      if (key === "profile" && (value === "franqueado" || value === "csc")) {
         next.can_financeiro = true;
         next.can_compras = false;
         next.can_case = false;
@@ -919,7 +928,7 @@ function UserForm({
         <p className="text-xs text-muted-foreground">{profileDescription}</p>
       </div>
 
-      {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && (
+      {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && form.profile !== "csc" && (
         <div className="space-y-1.5">
           <Label>Módulos visíveis</Label>
           <div className="flex gap-2">
@@ -1040,6 +1049,14 @@ function UserForm({
           O perfil Visão Financeira vê <strong>apenas</strong> o Financeiro das unidades selecionadas:
           Dashboard, Fluxo de Caixa, Budget e Forecast, KPIs e Business Intelligence.
           Sem acesso a Compras, Conexões, Mapeamento, Configurações ou Plataforma.
+        </p>
+      )}
+      {form.profile === "csc" && (
+        <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800 dark:border-teal-900/40 dark:bg-teal-950/30 dark:text-teal-300">
+          O perfil CSC tem <strong>exatamente os mesmos acessos</strong> da Visão Financeira
+          (Dashboard, Fluxo de Caixa, Budget e Forecast, KPIs e Business Intelligence das
+          unidades selecionadas) e, além deles, a tela <strong>Validação Relatório</strong>,
+          onde valida e envia os relatórios BI mensais aos gestores.
         </p>
       )}
     </form>

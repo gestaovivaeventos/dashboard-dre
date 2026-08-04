@@ -80,7 +80,19 @@ export async function updateSession(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = "/pendente";
       supabaseResponse = NextResponse.redirect(url);
-    } else if (!canAccessPathByProfile(pathname, userProfile, canFinanceiro, canCompras, canCase, canViagens)) {
+    } else if (
+      !canAccessPathByProfile(
+        pathname,
+        userProfile,
+        canFinanceiro,
+        canCompras,
+        canCase,
+        canViagens,
+        // Necessário para a tela "Validação Relatório", liberada nominalmente
+        // para dois e-mails além de CSC/admin.
+        user.email ?? null,
+      )
+    ) {
       const url = request.nextUrl.clone();
       url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras, canCase, canViagens);
       supabaseResponse = NextResponse.redirect(url);

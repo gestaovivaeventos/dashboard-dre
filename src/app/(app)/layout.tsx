@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
+import { canAccessBiValidation } from "@/lib/auth/bi-validation";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
@@ -30,6 +31,8 @@ export default async function ProtectedLayout({
   const canViagensAprovar = Boolean(modules?.viagens?.aprovador);
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
+  const isCsc = profile?.profile === "csc";
+  const canBiValidation = canAccessBiValidation(profile);
 
   // Fetch segments the user has access to. Fonte única compartilhada com as
   // páginas DRE (resolveUserSegments): admin vê todos; os demais recebem a
@@ -72,6 +75,8 @@ export default async function ProtectedLayout({
       activeSegmentSlug={activeSegmentSlug}
       contractsOnly={contractsOnly}
       isFranqueado={isFranqueado}
+      isCsc={isCsc}
+      canBiValidation={canBiValidation}
       unreadNotifications={unreadNotifications}
     >
       {children}

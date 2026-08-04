@@ -43,6 +43,12 @@ export interface ModuleAccess {
 // /ctrl/orcamento: 'gerente' (exibido como "Gerente Sócio") vê todos os
 // setores; 'gerente_setor' (exibido como "Gerente") vê apenas os setores
 // vinculados ao próprio usuário.
+//
+// NOTA sobre franqueado vs csc: 'csc' ("CSC") nasceu como CÓPIA FUNCIONAL de
+// 'franqueado' ("Visão Financeira") — mesmas telas, mesmas permissões, mesmo
+// escopo por empresa. A única diferença é a tela /financeiro/validacao-relatorio,
+// exclusiva de CSC/admin/e-mails nominais (ver src/lib/auth/bi-validation.ts).
+// Ao mexer nas permissões de um, decida conscientemente se o outro acompanha.
 export type UserProfileType =
   | "admin"
   | "contas_a_pagar"
@@ -51,7 +57,8 @@ export type UserProfileType =
   | "diretor"
   | "validador_contrato"
   | "solicitante"
-  | "franqueado";
+  | "franqueado"
+  | "csc";
 
 // ─── Perfil unificado ─────────────────────────────────────────────────────────
 export interface UnifiedProfile {

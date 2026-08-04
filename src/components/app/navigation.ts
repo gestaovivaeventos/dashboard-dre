@@ -4,6 +4,7 @@ import {
   Brain,
   Calendar,
   CheckSquare,
+  ClipboardCheck,
   Cog,
   DollarSign,
   FileCheck,
@@ -27,6 +28,10 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import {
+  BI_VALIDATION_NAV_KEY,
+  BI_VALIDATION_PATH,
+} from "@/lib/auth/bi-validation";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -202,6 +207,12 @@ export interface NavItem {
   viagensAccess?: boolean;
   /** Item restrito a aprovadores de Viagens (can_viagens_aprovar). */
   viagensAprovarOnly?: boolean;
+  /**
+   * Item da tela "Validação Relatório" — visível apenas para quem passa em
+   * canAccessBiValidation (CSC, admin, e-mails nominais). Independe de
+   * dreRoles/ctrlRoles.
+   */
+  biValidationAccess?: boolean;
 }
 
 export type NavGroupId = "financeiro" | "orcamento" | "compras" | "case" | "viagens" | "plataforma";
@@ -226,6 +237,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // Para reexibir: descomente a linha abaixo e a entrada "fin-kpis" em FRANQUEADO_NAV_KEYS.
       // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
       { key: "fin-bi", title: "Business Intelligence", icon: Sparkles, scope: "global", href: "/financeiro/business-intelligence", dreRoles: ALL_DRE_ROLES },
+      // Validação Relatório: NÃO segue dreRole/ctrlRole. Visível apenas para
+      // CSC, admin e os e-mails nominais (ver `biValidationAccess` abaixo e
+      // canAccessBiValidation em @/lib/auth/bi-validation).
+      { key: BI_VALIDATION_NAV_KEY, title: "Validação Relatório", icon: ClipboardCheck, scope: "global", href: BI_VALIDATION_PATH, biValidationAccess: true },
       { key: "fin-docs", title: "Documentos anexos", icon: Files, scope: "global", href: "/financeiro/documentos", dreRoles: ALL_DRE_ROLES },
       { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ALL_DRE_ROLES },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
@@ -307,3 +322,15 @@ export const FRANQUEADO_NAV_KEYS: ReadonlySet<string> = new Set([
   "fin-docs",
   "fin-comparativos",
 ]);
+
+/**
+ * Chaves visíveis ao perfil 'csc' ("CSC").
+ *
+ * CSC é a cópia funcional do 'franqueado' ("Visão Financeira") — mesmas telas —
+ * MAIS a tela "Validação Relatório", exclusiva do fluxo de aceite mensal.
+ * Ao liberar uma tela nova para o franqueado, ela entra aqui automaticamente
+ * (a lista é derivada), sem precisar editar dois lugares.
+ */
+export const CSC_NAV_KEYS: ReadonlySet<string> = new Set(
+  Array.from(FRANQUEADO_NAV_KEYS).concat(BI_VALIDATION_NAV_KEY),
+);

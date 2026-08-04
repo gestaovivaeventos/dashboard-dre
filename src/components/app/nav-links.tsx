@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import {
+  CSC_NAV_KEYS,
   FRANQUEADO_NAV_KEYS,
   NAV_GROUPS,
   type NavGroup,
@@ -31,6 +32,16 @@ interface NavLinksProps {
    * FRANQUEADO_NAV_KEYS em vez do dreRole.
    */
   isFranqueado?: boolean;
+  /**
+   * Perfil 'csc': mesma mecânica do franqueado (cai em 'gestor_unidade'), mas
+   * a whitelist inclui a tela "Validação Relatório".
+   */
+  isCsc?: boolean;
+  /**
+   * Libera o item "Validação Relatório" para quem NÃO é franqueado/CSC — ou
+   * seja, admin e os e-mails nominais. Ver canAccessBiValidation.
+   */
+  canBiValidation?: boolean;
 }
 
 interface RenderItem {
@@ -101,6 +112,8 @@ export function NavLinks({
   onNavigate,
   contractsOnly,
   isFranqueado,
+  isCsc,
+  canBiValidation,
 }: NavLinksProps) {
   const pathname = usePathname();
 
@@ -109,7 +122,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -246,6 +259,8 @@ interface BuildInput {
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
+  isCsc?: boolean;
+  canBiValidation?: boolean;
 }
 
 function buildContractsOnlyGroups(): RenderGroup[] {
@@ -276,6 +291,8 @@ function buildGroups({
   segments,
   activeSegmentSlug,
   isFranqueado,
+  isCsc,
+  canBiValidation,
 }: BuildInput): RenderGroup[] {
   const ctrlSet = new Set(ctrlRoles ?? []);
   const slug =
@@ -289,7 +306,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado, isCsc, canBiValidation)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -313,11 +330,18 @@ function isItemVisible(
   canViagens: boolean,
   canViagensAprovar: boolean,
   isFranqueado?: boolean,
+  isCsc?: boolean,
+  canBiValidation?: boolean,
 ): boolean {
+  // CSC: cópia do franqueado + a tela "Validação Relatório".
+  if (isCsc) return CSC_NAV_KEYS.has(item.key);
   // Franqueado: a visibilidade não segue o dreRole (cai em 'gestor_unidade',
   // que esconderia o Business Intelligence). Mostra exatamente as telas da
   // whitelist, espelhando FRANQUEADO_BASE_PATHS em access.ts.
   if (isFranqueado) return FRANQUEADO_NAV_KEYS.has(item.key);
+
+  // "Validação Relatório" não passa por dreRole/ctrlRole: whitelist própria.
+  if (item.biValidationAccess) return Boolean(canBiValidation);
 
   const dreOk =
     item.dreRoles && dreRole !== null
