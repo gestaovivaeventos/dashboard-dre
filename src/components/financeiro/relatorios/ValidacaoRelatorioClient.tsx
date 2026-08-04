@@ -389,6 +389,16 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                             “{item.reviewNote}”
                           </div>
                         ) : null}
+                        {/* A consequência de "Em revisão" é invisível sem isto:
+                            é o único estado que impede o envio automático do
+                            dia 10 — e, por isso, o único que exige ação do CSC
+                            antes dessa data para o gestor receber algo. */}
+                        {item.status === "em_revisao" ? (
+                          <div className="mt-1 max-w-[220px] text-xs text-orange-700">
+                            Não será enviado no dia 10. Corrija e clique em gerar
+                            novamente, ou aceite para liberar o envio.
+                          </div>
+                        ) : null}
                         {item.sendError ? (
                           <div className="mt-1 max-w-[220px] text-xs text-rose-700">
                             {item.sendError}
@@ -480,7 +490,7 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                                   setDialogMode("revisao");
                                 }}
                                 disabled={busy}
-                                title="Marcar como em revisão (bloqueia o envio automático de 1 clique)."
+                                title="Segura o relatório: além de bloquear o envio manual, impede o envio automático do dia 10. Use quando o relatório tem um problema conhecido que ainda não foi corrigido."
                               >
                                 <RotateCcw className="mr-1 h-3.5 w-3.5" />
                                 Revisão
@@ -579,8 +589,10 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
           <DialogHeader>
             <DialogTitle>Marcar como em revisão</DialogTitle>
             <DialogDescription>
-              {active?.companyName} — {active?.periodLabel}. O relatório fica bloqueado para
-              envio até ser regerado e aceito.
+              {active?.companyName} — {active?.periodLabel}. Segura o relatório: ele não é
+              enviado nem manualmente nem pela rotina automática do dia 10, até que seja
+              gerado novamente e aceito. Um relatório apenas <em>não aceito</em> continua
+              saindo no dia 10 — é este botão que impede isso.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">

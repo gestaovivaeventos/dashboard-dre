@@ -310,6 +310,13 @@ export async function generateValidationReport({
     // Regeracao invalida o aceite anterior: o CSC precisa validar a nova versao.
     accepted_by: null,
     accepted_at: null,
+    // ...e encerra a revisao: a nova versao SUPERA o motivo que a originou
+    // ("faltou lancar a nota X" deixa de valer depois do ajuste + regeracao).
+    // Manter o motivo aqui faria a versao nova nascer parecendo sinalizada.
+    // O historico segue em bi_report_validation_events.
+    review_by: null,
+    review_at: null,
+    review_note: null,
     send_error: null,
   };
 
@@ -498,8 +505,13 @@ export async function acceptValidation(
       status: "aceito",
       accepted_by: params.actor.id,
       accepted_at: nowIso,
-      // Aceitar encerra a revisão pendente, se houver.
+      // Aceitar ENCERRA a revisão pendente. Limpa também autor e motivo: um
+      // relatório aceito não pode continuar exibindo "o que precisa ser
+      // revisado" — isso o faria parecer ainda sinalizado. O histórico não se
+      // perde: o motivo fica em bi_report_validation_events (action=revisao).
+      review_by: null,
       review_at: null,
+      review_note: null,
     })
     .eq("id", params.validationId);
   if (error) return { ok: false, error: error.message };
