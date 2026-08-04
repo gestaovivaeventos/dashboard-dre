@@ -92,6 +92,13 @@ interface Props {
   items: ValidacaoRelatorioItem[];
   defaultPeriod: string;
   loadError: string | null;
+  /**
+   * Mensagem quando o canal de envio (Resend) NÃO está configurado; null
+   * quando está tudo certo. Avaliado no servidor — o browser não enxerga as
+   * variáveis de ambiente. Bloqueia o botão "Enviar" em vez de deixar o erro
+   * aparecer só depois do aceite.
+   */
+  envioIndisponivel?: string | null;
 }
 
 // NOTA: o valor gravado no banco continua 'em_revisao' (constraint CHECK em
@@ -132,7 +139,12 @@ function formatDateTime(iso: string | null): string {
 
 type DialogMode = "preview" | "revisao" | "contexto" | null;
 
-export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Props) {
+export function ValidacaoRelatorioClient({
+  items,
+  defaultPeriod,
+  loadError,
+  envioIndisponivel,
+}: Props) {
   const { showToast } = useToast();
   const router = useRouter();
 
@@ -337,6 +349,20 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
             </div>
           ) : null}
 
+          {envioIndisponivel ? (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-semibold">Envio por e-mail indisponível</div>
+                <div className="text-xs">{envioIndisponivel}</div>
+                <div className="mt-1 text-xs">
+                  Você ainda pode gerar, revisar, aceitar e bloquear relatórios — apenas o
+                  envio está suspenso. Isso vale também para a rotina automática do dia 10.
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <p className="text-xs text-muted-foreground">
             {visible.length} relatório(s) no período · {pendentes} aguardando envio.
           </p>
@@ -516,11 +542,20 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                                 onClick={() =>
                                   void runAction(item, { action: "enviar" }, "Relatório enviado")
                                 }
-                                disabled={busy || !accepted || item.recipients.length === 0}
+                                disabled={
+                                  busy ||
+                                  !accepted ||
+                                  item.recipients.length === 0 ||
+                                  Boolean(envioIndisponivel)
+                                }
                                 title={
-                                  accepted
-                                    ? "Enviar por e-mail aos destinatários desta empresa."
-                                    : "Aceite o relatório para liberar o envio."
+                                  envioIndisponivel
+                                    ? "Canal de envio (Resend) não configurado — veja o aviso no topo da tela."
+                                    : item.recipients.length === 0
+                                      ? "Nenhum destinatário cadastrado para esta empresa em Plataforma > Relatório BI."
+                                      : accepted
+                                        ? "Enviar por e-mail aos destinatários desta empresa."
+                                        : "Aceite o relatório para liberar o envio."
                                 }
                               >
                                 <Send className="mr-1 h-3.5 w-3.5" />

@@ -4,6 +4,7 @@ import { ValidacaoRelatorioClient } from "@/components/financeiro/relatorios/Val
 import type { ValidacaoRelatorioItem } from "@/components/financeiro/relatorios/ValidacaoRelatorioClient";
 import { canAccessBiValidation } from "@/lib/auth/bi-validation";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { resendConfigStatus } from "@/lib/email/resend";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
 import type { ValidationStatus } from "@/lib/financeiro/relatorios/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -155,12 +156,18 @@ export default async function ValidacaoRelatorioPage() {
   const defaultPeriod =
     items[0]?.periodLabel ?? getPreviousMonthRange(new Date()).periodLabel;
 
+  // Estado do canal de envio, avaliado no SERVIDOR (as variáveis de ambiente
+  // não existem no browser). Descobrir que o Resend não está configurado só ao
+  // clicar em "Enviar" é tarde: o CSC já aceitou e conta com o envio.
+  const envio = resendConfigStatus();
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 p-4 sm:p-6">
       <ValidacaoRelatorioClient
         items={items}
         defaultPeriod={defaultPeriod}
         loadError={error?.message ?? null}
+        envioIndisponivel={envio.ok ? null : envio.message}
       />
     </div>
   );

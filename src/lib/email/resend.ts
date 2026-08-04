@@ -53,6 +53,41 @@ export function isResendConfigured(): boolean {
   return Boolean(getClient() && resolveFrom());
 }
 
+export interface ResendConfigStatus {
+  ok: boolean;
+  hasApiKey: boolean;
+  hasFrom: boolean;
+  /** Nomes das variáveis que faltam, para a mensagem na tela. */
+  missing: string[];
+  /** Explicação pronta para o usuário (vazia quando está tudo certo). */
+  message: string | null;
+}
+
+/**
+ * Estado da configuração de envio. Serve para a tela avisar ANTES de o usuário
+ * aceitar e clicar em "Enviar" — descobrir que o canal não está configurado
+ * só no momento do envio é tarde demais no fluxo mensal.
+ */
+export function resendConfigStatus(): ResendConfigStatus {
+  const hasApiKey = Boolean(process.env.RESEND_API_KEY?.trim());
+  const hasFrom = Boolean(resolveFrom());
+  const missing: string[] = [];
+  if (!hasApiKey) missing.push("RESEND_API_KEY");
+  if (!hasFrom) missing.push("RESEND_FROM");
+
+  return {
+    ok: hasApiKey && hasFrom,
+    hasApiKey,
+    hasFrom,
+    missing,
+    message: missing.length
+      ? `Envio por e-mail indisponível: falta ${missing.join(" e ")} nas variáveis de ambiente. ` +
+        "Defina no projeto da Vercel e REIMPLANTE — variável nova só passa a valer em um deploy novo, " +
+        "não no que já está no ar. O remetente (RESEND_FROM) precisa ser de um domínio verificado no Resend."
+      : null,
+  };
+}
+
 /**
  * Envia um e-mail pelo Resend. NUNCA lança: devolve `{ ok, error }` para o
  * caller registrar o status/falha (exigência dos logs de envio do relatório).
@@ -77,7 +112,9 @@ export async function sendEmailViaResend({
     return {
       ok: false,
       error:
-        "RESEND_FROM não configurado — defina o remetente verificado no Resend (ex.: \"Control Hub <bi@empresa.com.br>\").",
+        'RESEND_FROM não configurado. Não basta a chave da API: o Resend exige um remetente de domínio verificado. ' +
+        'Defina RESEND_FROM (ex.: "Control Hub <bi@empresa.com.br>") nas variáveis de ambiente do projeto na Vercel ' +
+        "e REIMPLANTE — variável nova não vale para o deploy que já está no ar.",
     };
   }
 
