@@ -4,9 +4,12 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 
 // ============================================================================
 // /api/bi-subscriptions — gestao das assinaturas do relatorio BI mensal.
-// Admin-only. Cada assinatura vincula um usuario a uma empresa; o cron
-// /api/cron/monthly-bi-report envia o One Page Report do mes anterior para
-// os assinantes no dia 5.
+// Admin-only. Cada assinatura vincula um usuario a uma empresa e define
+// QUEM recebe o One Page Report do mes anterior.
+//
+// Quem envia e o fluxo de validacao do CSC (tela Validacao Relatorio):
+// dia 4 gera para as empresas com assinantes → aceite envia em 1 clique →
+// dia 10 envia o que sobrou. O disparo automatico do dia 5 nao existe mais.
 // ============================================================================
 
 async function requireAdmin() {

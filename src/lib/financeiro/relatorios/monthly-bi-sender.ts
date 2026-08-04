@@ -13,9 +13,12 @@ import {
 // Geracao + envio do One Page Report (Business Intelligence) por e-mail.
 //
 // Caminho UNICO de codigo compartilhado por:
-//   - cron mensal            (/api/cron/monthly-bi-report)
-//   - envio manual "Enviar agora" (/api/bi-subscriptions/send)
 //   - fluxo de validacao CSC (tela Validacao Relatorio + crons dos dias 4/10)
+//     — caminho OFICIAL de envio
+//   - envio manual "Enviar agora" (/api/bi-subscriptions/send) — contingencia
+//
+// O antigo cron do dia 5 (/api/cron/monthly-bi-report), que enviava direto aos
+// assinantes sem aceite do CSC, foi removido. Nao recriar.
 //
 // Pipeline: buildOnePagePayload → IA → mapper → HTML de e-mail → Resend →
 // registro em ai_reports.
@@ -130,7 +133,7 @@ export function reportEmailSubject(companyName: string, periodLabel: string): st
   return `[Control Hub] Relatório BI — ${companyName} — ${periodLabel}`;
 }
 
-// ─── Geracao + envio (caminho legado do cron mensal / "Enviar agora") ───────
+// ─── Geracao + envio direto (contingencia do "Enviar agora") ───────────────
 
 export interface SendOnePageArgs {
   /** Cliente service-role (bypassa RLS — escreve em ai_reports). */

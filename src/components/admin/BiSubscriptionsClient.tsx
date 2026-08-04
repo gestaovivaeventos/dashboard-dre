@@ -109,7 +109,10 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao salvar.");
-      showToast({ title: "Assinatura adicionada", description: "O gestor receberá o relatório no dia 5 de cada mês." });
+      showToast({
+        title: "Assinatura adicionada",
+        description: "O gestor entra na lista de destinatários do relatório mensal, enviado após a validação do CSC.",
+      });
       setSelectedCompanies(new Set());
       await load();
     } catch (err) {
@@ -174,7 +177,10 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
         <h1 className="text-2xl font-bold tracking-tight">Relatórios BI</h1>
         <p className="text-sm text-muted-foreground">
           Defina quais usuários recebem por email o relatório mensal de Business Intelligence de cada
-          unidade. O envio acontece automaticamente no dia 5, referente ao mês anterior.
+          unidade. Esta tela define <strong>quem recebe</strong> — o envio em si é regido pela tela{" "}
+          <strong>Financeiro &gt; Validação Relatório</strong>: no dia 4 o relatório do mês anterior é
+          gerado e fica aguardando o CSC; o aceite libera o envio em 1 clique e, sem aceite até o dia
+          10, o Control Hub envia automaticamente. Não existe mais disparo automático no dia 5.
         </p>
       </div>
 
@@ -244,6 +250,13 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
           <CardTitle className="text-base">Assinaturas ativas</CardTitle>
           <CardDescription>
             {loading ? "Carregando..." : `${subscriptions.length} assinatura(s) ativa(s).`}
+            {!loading && (
+              <>
+                {" "}
+                O botão <strong>Enviar agora</strong> é contingência: dispara na hora, para um único
+                gestor, sem passar pelo aceite do CSC.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -253,8 +266,8 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
             </div>
           ) : subscriptions.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
-              Nenhuma assinatura cadastrada. Ninguém receberá o relatório mensal até que uma assinatura
-              seja criada.
+              Nenhuma assinatura cadastrada. Sem destinatário, a unidade não entra na geração do dia 4
+              e ninguém recebe o relatório mensal.
             </p>
           ) : (
             <Table>
@@ -278,7 +291,7 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
                         size="sm"
                         onClick={() => void handleSendNow(s)}
                         disabled={sendingId !== null}
-                        title="Gera e envia agora o relatório do mês anterior para este gestor"
+                        title="Contingência: gera e envia agora o relatório do mês anterior para este gestor, sem passar pela validação do CSC"
                       >
                         {sendingId === s.id ? (
                           <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />

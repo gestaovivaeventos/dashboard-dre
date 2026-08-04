@@ -144,7 +144,8 @@ Vercel. Cron jobs (`vercel.json`):
 - `/api/cron/bi-monthly-validation` — `0 12 4 * *`. Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions`), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
 - `/api/cron/bi-monthly-autosend` — `0 12 10 * *`. Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead.
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
-- `/api/cron/monthly-bi-report` — legacy direct send (bypasses validation). **Unscheduled on purpose** — manual contingency only.
+
+There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
 
 ### BI report validation flow (CSC)
 

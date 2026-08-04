@@ -14,8 +14,10 @@ export const maxDuration = 300;
 // POST /api/bi-subscriptions/send  (admin)
 //
 // Envia AGORA o relatorio BI do mes anterior de uma assinatura especifica
-// (uma unidade → um gestor). Util para testar e para reenvio pontual. Usa o
-// mesmo pipeline do cron mensal (sendOnePageForCompany).
+// (uma unidade → um gestor). CONTINGENCIA: nao passa pela validacao do CSC
+// (nao cria nem consulta bi_report_validations), entao use so para teste e
+// reenvio pontual — o caminho oficial e a tela Validacao Relatorio.
+// Usa o mesmo pipeline de geracao/envio (sendOnePageForCompany).
 //
 // Body: { id }  — id da linha em bi_report_subscriptions.
 // ============================================================================

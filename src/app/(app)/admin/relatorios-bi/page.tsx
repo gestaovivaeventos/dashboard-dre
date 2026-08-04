@@ -7,8 +7,12 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 // /admin/relatorios-bi
 //
 // Gestao das assinaturas do relatorio mensal de Business Intelligence:
-// quais usuarios recebem o One Page Report de quais unidades. O envio
-// acontece no dia 5 de cada mes via /api/cron/monthly-bi-report.
+// quais usuarios recebem o One Page Report de quais unidades.
+//
+// Esta tela define APENAS os destinatarios. O envio e regido pela tela
+// Financeiro > Validacao Relatorio (dia 4 gera → aceite do CSC envia em 1
+// clique → dia 10 envia o que sobrou). O antigo disparo automatico do dia 5
+// (/api/cron/monthly-bi-report) foi REMOVIDO — nao reintroduzir.
 // ============================================================================
 
 export const dynamic = "force-dynamic";
