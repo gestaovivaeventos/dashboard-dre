@@ -4,12 +4,12 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
+  Ban,
   CheckCircle2,
   Eye,
   Loader2,
   MessageSquarePlus,
   RefreshCw,
-  RotateCcw,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -94,9 +94,12 @@ interface Props {
   loadError: string | null;
 }
 
+// NOTA: o valor gravado no banco continua 'em_revisao' (constraint CHECK em
+// bi_report_validations). Só o RÓTULO mudou, para dizer o que o estado de fato
+// faz: impedir o envio, inclusive o automático do dia 10.
 const STATUS_LABEL: Record<ValidacaoStatus, string> = {
   pendente_validacao: "Pendente de validação",
-  em_revisao: "Em revisão",
+  em_revisao: "Envio bloqueado",
   contexto_adicionado: "Contexto adicionado",
   aceito: "Aceito",
   enviado_manual: "Enviado manualmente",
@@ -107,7 +110,7 @@ const STATUS_LABEL: Record<ValidacaoStatus, string> = {
 
 const STATUS_CLASS: Record<ValidacaoStatus, string> = {
   pendente_validacao: "bg-amber-100 text-amber-800",
-  em_revisao: "bg-orange-100 text-orange-800",
+  em_revisao: "bg-orange-600 text-white",
   contexto_adicionado: "bg-sky-100 text-sky-800",
   aceito: "bg-emerald-100 text-emerald-800",
   enviado_manual: "bg-blue-100 text-blue-800",
@@ -486,21 +489,6 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                                 variant="outline"
                                 onClick={() => {
                                   setActive(item);
-                                  setNote(item.reviewNote ?? "");
-                                  setDialogMode("revisao");
-                                }}
-                                disabled={busy}
-                                title="Segura o relatório: além de bloquear o envio manual, impede o envio automático do dia 10. Use quando o relatório tem um problema conhecido que ainda não foi corrigido."
-                              >
-                                <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                                Revisão
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setActive(item);
                                   setContext("");
                                   setDialogMode("contexto");
                                 }}
@@ -537,6 +525,40 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                               >
                                 <Send className="mr-1 h-3.5 w-3.5" />
                                 Enviar
+                              </Button>
+
+                              {/* Ação de EXCEÇÃO — separada do fluxo de rotina
+                                  (aceitar / contexto / regerar / enviar) por um
+                                  divisor e com tratamento de alerta. É o único
+                                  freio do envio automático do dia 10, então
+                                  precisa saltar aos olhos; mas justamente por
+                                  parar o fluxo, não deve parecer um passo
+                                  normal do dia a dia. */}
+                              <span
+                                aria-hidden
+                                className="mx-1 h-6 w-px self-center bg-border"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setActive(item);
+                                  setNote(item.reviewNote ?? "");
+                                  setDialogMode("revisao");
+                                }}
+                                disabled={busy || item.status === "em_revisao"}
+                                className="border-orange-400 bg-orange-50 font-semibold text-orange-800 hover:bg-orange-100 hover:text-orange-900 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-300"
+                                title={
+                                  item.status === "em_revisao"
+                                    ? "O envio deste relatório já está bloqueado. Para liberar, gere novamente após o ajuste ou aceite."
+                                    : "EXCEÇÃO: impede o envio deste relatório, inclusive o automático do dia 10. Use apenas quando houver um problema conhecido que ainda não foi corrigido."
+                                }
+                              >
+                                <Ban className="mr-1 h-3.5 w-3.5" />
+                                {item.status === "em_revisao"
+                                  ? "Envio bloqueado"
+                                  : "Bloquear envio"}
                               </Button>
                             </>
                           ) : null}
@@ -587,17 +609,19 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Marcar como em revisão</DialogTitle>
+            <DialogTitle>Bloquear o envio deste relatório</DialogTitle>
             <DialogDescription>
-              {active?.companyName} — {active?.periodLabel}. Segura o relatório: ele não é
-              enviado nem manualmente nem pela rotina automática do dia 10, até que seja
-              gerado novamente e aceito. Um relatório apenas <em>não aceito</em> continua
-              saindo no dia 10 — é este botão que impede isso.
+              {active?.companyName} — {active?.periodLabel}. O relatório deixa de ser
+              enviado: nem manualmente, nem pela rotina automática do dia 10. Um relatório
+              apenas <em>não aceito</em> continua saindo no dia 10 — é este bloqueio que
+              impede isso. Use só quando houver um problema conhecido que ainda não foi
+              corrigido; para ajustes que você já vai fazer agora, basta corrigir e clicar
+              em gerar novamente.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
             <label htmlFor="revisao-motivo" className="text-xs font-medium text-muted-foreground">
-              O que precisa ser revisado? (opcional)
+              Por que o envio está sendo bloqueado? (opcional)
             </label>
             <textarea
               id="revisao-motivo"
@@ -605,7 +629,7 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
               onChange={(e) => setNote(e.target.value)}
               rows={4}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Ex.: faltou lançar a nota do fornecedor X; conferir a linha de despesas."
+              placeholder="Ex.: aguardando o fechamento do evento X; nota do fornecedor Y ainda não lançada."
             />
           </div>
           <DialogFooter>
@@ -619,14 +643,14 @@ export function ValidacaoRelatorioClient({ items, defaultPeriod, loadError }: Pr
                   ? void runAction(
                       active,
                       { action: "revisao", note },
-                      "Marcado como em revisão",
+                      "Envio bloqueado",
                     )
                   : undefined
               }
               disabled={busyId !== null}
             >
               {busyId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Confirmar revisão
+              Bloquear envio
             </Button>
           </DialogFooter>
         </DialogContent>

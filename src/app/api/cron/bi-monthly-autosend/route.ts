@@ -76,7 +76,8 @@ export async function GET(request: Request) {
 
   const sent: Array<{ companyId: string; recipients: string[] }> = [];
   const failed: Array<{ companyId: string; error: string }> = [];
-  // Casos que exigem olho humano: em revisão ou sem relatório gerado.
+  // Casos que exigem olho humano: envio bloqueado pelo CSC ('em_revisao') ou
+  // relatório sem conteúdo gerado.
   const blocked: Array<{ companyId: string; status: ValidationStatus }> = [];
 
   for (const row of rows) {

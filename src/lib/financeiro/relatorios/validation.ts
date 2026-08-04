@@ -43,9 +43,13 @@ export const VALIDATION_STATUSES = [
 
 export type ValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
+// NOTA: 'em_revisao' é o valor gravado (constraint CHECK da tabela). O RÓTULO
+// exibido é "Envio bloqueado" — foi renomeado para dizer o que o estado faz:
+// impedir o envio, inclusive o automático do dia 10. Mudar o valor exigiria
+// migration e não traria ganho.
 export const VALIDATION_STATUS_LABEL: Record<ValidationStatus, string> = {
   pendente_validacao: "Pendente de validação",
-  em_revisao: "Em revisão",
+  em_revisao: "Envio bloqueado",
   contexto_adicionado: "Contexto adicionado",
   aceito: "Aceito",
   enviado_manual: "Enviado manualmente",
@@ -526,7 +530,13 @@ export async function acceptValidation(
   return { ok: true };
 }
 
-/** Revisão: marca o relatorio como "em revisão" e registra quem/quando/por quê. */
+/**
+ * BLOQUEIO DE ENVIO (exibido como "Bloquear envio" / "Envio bloqueado"; valor
+ * gravado: 'em_revisao'). Registra quem/quando/por quê e — este é o ponto —
+ * impede o envio AUTOMATICO do dia 10 (ver bi-monthly-autosend). E o unico
+ * estado com esse efeito: um relatorio apenas nao-aceito continua saindo no
+ * dia 10. Sai do bloqueio ao ser gerado novamente ou aceito.
+ */
 export async function markValidationForReview(
   admin: SupabaseClient,
   params: { validationId: string; actor: ValidationActor; note?: string | null },
