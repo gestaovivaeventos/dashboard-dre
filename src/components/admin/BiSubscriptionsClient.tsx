@@ -180,7 +180,7 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
           unidade. Esta tela define <strong>quem recebe</strong> — o envio em si é regido pela tela{" "}
           <strong>Financeiro &gt; Validação Relatório</strong>: no dia 4 o relatório do mês anterior é
           gerado e fica aguardando o CSC; o aceite libera o envio em 1 clique e, sem aceite até o dia
-          10, o Control Hub envia automaticamente. Não existe mais disparo automático no dia 5.
+          10, o Control Hub envia automaticamente.
         </p>
       </div>
 
