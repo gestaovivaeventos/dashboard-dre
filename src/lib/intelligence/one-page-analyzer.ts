@@ -54,8 +54,9 @@ const DEFAULT_OPTIONS: Required<Omit<AnalyzerOptions, "apiKey">> = {
   model: "gpt-4o-mini",
   temperature: 0.2,
   // Teto generoso p/ nao truncar o JSON no DeepSeek (json_object gera mais
-  // tokens que o structured output da OpenAI). Cap, nao cobranca.
-  maxOutputTokens: 6000,
+  // tokens que o structured output da OpenAI) e para caber o RACIOCINIO dos
+  // modelos V4, que consome o mesmo orcamento da resposta. Cap, nao cobranca.
+  maxOutputTokens: 16000,
 };
 
 // JSON Schema textual da analise — injetado no prompt de provedores sem

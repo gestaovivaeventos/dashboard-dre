@@ -388,6 +388,14 @@ export async function logResolvedUsage(
 // isso acontece, refazemos a chamada UMA vez com o raciocínio desligado
 // (`thinking: {type: "disabled"}`), que gasta ~3x menos tokens de saída e
 // garante o JSON. Ver https://api-docs.deepseek.com/api/create-chat-completion/
+//
+// RESPOSTA VAZIA TRANSITÓRIA: o mesmo sintoma (HTTP 200 com `content` vazio)
+// também aparece por sobrecarga momentânea do provedor. Por isso a chamada é
+// tentada até 3x com espera progressiva antes de virar erro.
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function generateJsonViaChat(
   resolved: ResolvedAiProvider,
   opts: {
@@ -408,9 +416,6 @@ export async function generateJsonViaChat(
       "tipos e enums, sem campos a mais nem a menos:\n" +
       opts.schemaHint
     : opts.system;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120_000);
-
   interface ChatPayload {
     choices?: Array<{
       message?: { content?: string; reasoning_content?: string };
@@ -421,7 +426,24 @@ export async function generateJsonViaChat(
 
   // Uma chamada crua. `thinking` só vai no corpo quando informado, para não
   // enviar um parâmetro desconhecido a provedores que não o suportam.
+  //
+  // O timeout é POR TENTATIVA (antes o AbortController era criado uma vez para
+  // toda a função — com as retentativas abaixo, a 2ª/3ª chamada herdaria um
+  // orçamento de tempo já consumido e abortaria sem ter chance de responder).
   const call = async (thinking?: { type: "disabled" }): Promise<ChatPayload> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try {
+      return await doCall(controller, thinking);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const doCall = async (
+    controller: AbortController,
+    thinking?: { type: "disabled" },
+  ): Promise<ChatPayload> => {
     const res = await fetch(resolved.chatCompletionsUrl, {
       method: "POST",
       headers: {
@@ -454,49 +476,77 @@ export async function generateJsonViaChat(
   // DeepSeek V4 vem com thinking LIGADO por default e gasta o max_tokens inteiro
   // em reasoning_content antes de escrever o JSON (finish_reason=length com
   // content vazio). Para saída JSON estruturada já desligamos na PRIMEIRA
-  // chamada — o retry abaixo fica como rede de segurança para os demais
-  // provedores, que não recebem o parâmetro `thinking`.
+  // chamada. Provedores que não conhecem o parâmetro `thinking` não o recebem.
   const thinkingOffDeStart = resolved.providerName === "deepseek";
+  const baseThinking = thinkingOffDeStart ? ({ type: "disabled" } as const) : undefined;
 
-  try {
-    let payload = await call(thinkingOffDeStart ? { type: "disabled" } : undefined);
-    let choice = payload.choices?.[0];
-    let text = choice?.message?.content;
+  // Resposta vazia (content vazio com HTTP 200) NÃO é sempre "raciocínio
+  // estourou o teto": também acontece por sobrecarga momentânea do provedor —
+  // e é mais provável em lote (a rotina do dia 4 dispara uma chamada por
+  // empresa em sequência) do que na tela, onde o usuário gera um relatório por
+  // vez. Por isso tentamos de novo em QUALQUER caso de vazio, com um respiro
+  // entre as tentativas. (Antes o retry tinha `!thinkingOffDeStart` na
+  // condição, o que o desligava exatamente para o DeepSeek — o provedor que
+  // produz a falha —, e um vazio transitório virava erro na cara do usuário.)
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 1500;
 
-    // Raciocínio esgotou o orçamento e não sobrou espaço para o JSON: refaz uma
-    // única vez sem raciocínio, em vez de devolver erro ao usuário. Sem efeito
-    // quando o thinking já saiu desligado na primeira chamada.
-    if (
-      !text &&
-      !thinkingOffDeStart &&
-      choice?.finish_reason === "length" &&
-      choice?.message?.reasoning_content
-    ) {
-      console.warn(
-        `[ai] ${model}: raciocínio esgotou max_tokens (${opts.maxTokens ?? 8192}) sem gerar JSON — ` +
-          "refazendo com thinking desligado.",
-      );
-      const retry = await call({ type: "disabled" }).catch(() => null);
-      const retryText = retry?.choices?.[0]?.message?.content;
-      if (retryText) {
-        payload = retry!;
-        choice = retry!.choices?.[0];
-        text = retryText;
+  const describeEmpty = (payload: ChatPayload): string => {
+    const choice = payload.choices?.[0];
+    const fr = choice?.finish_reason ?? "sem choice";
+    const reasoningLen = choice?.message?.reasoning_content?.length ?? 0;
+    const usage = payload.usage
+      ? ` · usage=${JSON.stringify(payload.usage)}`
+      : "";
+    const reasoning = reasoningLen
+      ? ` — modelo devolveu ${reasoningLen} chars de raciocínio e nenhum JSON (esgotou os tokens; aumente max_tokens)`
+      : "";
+    return `[finish_reason=${fr}]${reasoning} · max_tokens=${opts.maxTokens ?? 8192}${usage}`;
+  };
+
+  {
+    let lastPayload: ChatPayload | null = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const payload = await call(baseThinking);
+      lastPayload = payload;
+      const choice = payload.choices?.[0];
+      const text = choice?.message?.content;
+
+      if (text) {
+        return { object: JSON.parse(text), usage: normalizeUsage(payload.usage) };
       }
+
+      // Provedor com thinking ligado (não-DeepSeek) que gastou tudo em
+      // raciocínio: a próxima tentativa vai explicitamente sem raciocínio.
+      const reasoningAteBudget =
+        choice?.finish_reason === "length" && Boolean(choice?.message?.reasoning_content);
+
+      console.warn(
+        `[ai] ${model}: resposta vazia na tentativa ${attempt}/${MAX_ATTEMPTS} ${describeEmpty(payload)}`,
+      );
+
+      if (attempt === MAX_ATTEMPTS) break;
+
+      if (reasoningAteBudget && !thinkingOffDeStart) {
+        // Refaz imediatamente sem raciocínio — a causa é conhecida, não é
+        // sobrecarga; esperar não ajudaria.
+        const retry = await call({ type: "disabled" }).catch(() => null);
+        const retryText = retry?.choices?.[0]?.message?.content;
+        if (retry) lastPayload = retry;
+        if (retryText) {
+          return { object: JSON.parse(retryText), usage: normalizeUsage(retry!.usage) };
+        }
+      }
+
+      await sleep(RETRY_DELAY_MS * attempt);
     }
 
-    if (!text) {
-      // Diagnóstico: motivo do término e se o modelo gastou os tokens em
-      // raciocínio (reasoning_content) sem sobrar espaço para o JSON.
-      const fr = choice?.finish_reason ?? "sem choice";
-      const reasoning = choice?.message?.reasoning_content
-        ? " — modelo retornou raciocínio mas nenhum JSON (esgotou os tokens; aumente max_tokens)"
-        : "";
-      const raw = JSON.stringify(payload).slice(0, 300);
-      throw new Error(`resposta vazia do provedor [finish_reason=${fr}]${reasoning} · ${raw}`);
-    }
-    return { object: JSON.parse(text), usage: normalizeUsage(payload.usage) };
-  } finally {
-    clearTimeout(timer);
+    const raw = JSON.stringify(lastPayload ?? {}).slice(0, 300);
+    throw new Error(
+      `resposta vazia do provedor apos ${MAX_ATTEMPTS} tentativas ${describeEmpty(
+        lastPayload ?? {},
+      )} · ${raw}`,
+    );
   }
 }
