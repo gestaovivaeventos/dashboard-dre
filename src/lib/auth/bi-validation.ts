@@ -38,6 +38,11 @@ export function canAccessBiValidationByProfile(
   profile: UserProfileType | null,
   email: string | null | undefined,
 ): boolean {
+  // Validador de contrato é perfil-ILHA: só /contratos, sem exceção nominal.
+  // Precisa ser negado aqui também — as rotas /api/* NÃO passam pelo guard de
+  // caminho do middleware (ver `isApiRoute` em lib/supabase/middleware.ts), de
+  // modo que elas dependem exclusivamente desta função.
+  if (profile === "validador_contrato") return false;
   if (profile === "admin" || profile === "csc") return true;
   return BI_VALIDATION_EXTRA_EMAILS.has(normalizeEmail(email));
 }
@@ -47,6 +52,8 @@ export function canAccessBiValidation(
   profile: Pick<UnifiedProfile, "profile" | "role" | "email"> | null,
 ): boolean {
   if (!profile) return false;
+  // A ilha do validador de contrato vence inclusive o `role` legado abaixo.
+  if (profile.profile === "validador_contrato") return false;
   // `role` legado ainda marca admins criados antes do modelo unificado.
   if (profile.role === "admin") return true;
   return canAccessBiValidationByProfile(profile.profile, profile.email);

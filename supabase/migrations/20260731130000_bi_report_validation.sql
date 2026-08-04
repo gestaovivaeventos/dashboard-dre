@@ -33,6 +33,9 @@ AS $$
     FROM public.users u
     WHERE u.id = auth.uid()
       AND u.active
+      -- Validador de contrato é perfil-ILHA (só /contratos): nem a exceção
+      -- nominal por e-mail o libera. Espelha canAccessBiValidation no app.
+      AND u.profile::text IS DISTINCT FROM 'validador_contrato'
       AND (
         u.role = 'admin'
         OR u.profile::text = 'admin'
