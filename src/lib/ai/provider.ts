@@ -178,7 +178,17 @@ function resolveKey(
  * provedor ativo não a suporta (visão / web search).
  */
 export async function resolveAiProvider(
-  opts: { capability?: AiCapability } = {},
+  opts: {
+    capability?: AiCapability;
+    /**
+     * Ignora o provedor ativo da config e resolve ESTE. Usado como último
+     * recurso quando o provedor ativo falha (ex.: o motor do relatório de BI
+     * refaz na OpenAI depois de esgotar as tentativas no DeepSeek). Toda a
+     * resolução de chave/baseURL/modelo abaixo continua valendo — se não
+     * houver chave para o provedor pedido, a função lança normalmente.
+     */
+    forceProvider?: AiProviderName;
+  } = {},
 ): Promise<ResolvedAiProvider> {
   const capability = opts.capability ?? "text";
 
@@ -203,8 +213,8 @@ export async function resolveAiProvider(
   const usdBrlRate = Number(cfg?.usd_brl_rate) || DEFAULT_USD_BRL_RATE;
   const rowFor = (name: AiProviderName) => rows.find((r) => r.provider === name) ?? null;
 
-  // 1. Provedor desejado (config), com override de capacidade.
-  let activeName: AiProviderName = cfg?.active_provider ?? "openai";
+  // 1. Provedor desejado (forçado > config), com override de capacidade.
+  let activeName: AiProviderName = opts.forceProvider ?? cfg?.active_provider ?? "openai";
   if (!providerSupports(activeName, capability)) activeName = "openai";
 
   // 2. Se o provedor ativo está desabilitado no painel, cai para OpenAI.

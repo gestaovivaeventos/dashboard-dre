@@ -2,7 +2,12 @@ import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
-import { resolveAiProvider, logResolvedUsage, generateJsonViaChat } from "@/lib/ai/provider";
+import {
+  resolveAiProvider,
+  logResolvedUsage,
+  generateJsonViaChat,
+  type ResolvedAiProvider,
+} from "@/lib/ai/provider";
 
 import {
   resolveOnePageSystemPrompt,
@@ -149,11 +154,20 @@ REGRAS PARA USAR ESTE CONTEXTO:
   // via generateJsonViaChat, validado pelo mesmo schema Zod.
   const isOpenAi = !resolved || resolved.providerName === "openai";
 
-  const runOnce = async (prompt: string): Promise<{ object: unknown; usage: unknown }> => {
-    if (isOpenAi) {
-      const provider = resolved ? resolved.provider : openaiTest!;
+  // Uma tentativa contra UM provedor. `target` null = OpenAI direto por
+  // options.apiKey (testes).
+  const runOnce = async (
+    target: ResolvedAiProvider | null,
+    prompt: string,
+  ): Promise<{ object: unknown; usage: unknown }> => {
+    const targetIsOpenAi = !target || target.providerName === "openai";
+    const targetModel =
+      target === resolved ? modelName : (target?.modelName ?? opts.model);
+
+    if (targetIsOpenAi) {
+      const provider = target ? target.provider : openaiTest!;
       const { object, usage } = await generateObject({
-        model: provider.chat(modelName),
+        model: provider.chat(targetModel),
         schema: OnePageReportSchema,
         system: systemPrompt,
         prompt,
@@ -162,19 +176,22 @@ REGRAS PARA USAR ESTE CONTEXTO:
       });
       return { object, usage };
     }
-    return generateJsonViaChat(resolved!, {
+    return generateJsonViaChat(target!, {
       system: systemPrompt,
       prompt,
       temperature: opts.temperature,
       maxTokens: opts.maxOutputTokens,
-      modelName,
+      modelName: targetModel,
       schemaHint: reportSchemaHint(),
     });
   };
 
   // Uma tentativa: gera, valida com o schema e loga o consumo. Lança em falha.
-  const attempt = async (prompt: string): Promise<OnePageReport> => {
-    const { object, usage } = await runOnce(prompt);
+  const attempt = async (
+    target: ResolvedAiProvider | null,
+    prompt: string,
+  ): Promise<OnePageReport> => {
+    const { object, usage } = await runOnce(target, prompt);
     const verified = OnePageReportSchema.safeParse(object);
     if (!verified.success) {
       throw new OnePageReportError(
@@ -182,21 +199,49 @@ REGRAS PARA USAR ESTE CONTEXTO:
         verified.error,
       );
     }
-    if (resolved) await logResolvedUsage(resolved, "bi", usage);
+    if (target) await logResolvedUsage(target, "bi", usage);
     return verified.data;
   };
 
+  const schemaNudge =
+    "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
+    "Refaca seguindo o schema EXATAMENTE — todos os campos com os tipos e enums corretos.";
+
   try {
-    return await attempt(userPrompt);
+    return await attempt(resolved, userPrompt);
   } catch {
-    // Retry unico com instrucao de correcao. Se falhar de novo, propaga.
+    // Retry unico com instrucao de correcao, no MESMO provedor.
     try {
-      return await attempt(
-        userPrompt +
-          "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
-          "Refaca seguindo o schema EXATAMENTE — todos os campos com os tipos e enums corretos.",
-      );
+      return await attempt(resolved, userPrompt + schemaNudge);
     } catch (retryErr) {
+      // Ultimo recurso: o provedor ativo nao e a OpenAI e falhou duas vezes.
+      // Refaz na OpenAI, que usa structured output NATIVO (json_schema) e nao
+      // passa pelo caminho de json_object cru — imune a classe de falha
+      // "resposta vazia do provedor" do DeepSeek V4 (raciocinio consumindo o
+      // orcamento de tokens ou vazio por sobrecarga).
+      //
+      // Sem chave da OpenAI configurada, resolveAiProvider lanca e o erro
+      // original e preservado abaixo — o fallback nunca mascara a causa real.
+      if (!isOpenAi && resolved) {
+        try {
+          const fallback = await resolveAiProvider({
+            capability: "text",
+            forceProvider: "openai",
+          });
+          console.warn(
+            `[one-page] ${resolved.providerName}/${modelName} falhou duas vezes ` +
+              `(${retryErr instanceof Error ? retryErr.message : "erro desconhecido"}) — ` +
+              `refazendo em openai/${fallback.modelName}.`,
+          );
+          return await attempt(fallback, userPrompt);
+        } catch (fallbackErr) {
+          console.error(
+            "[one-page] Fallback para OpenAI tambem falhou:",
+            fallbackErr instanceof Error ? fallbackErr.message : fallbackErr,
+          );
+        }
+      }
+
       if (retryErr instanceof OnePageReportError) throw retryErr;
       throw new OnePageReportError(
         `Falha ao gerar One Page Report: ${retryErr instanceof Error ? retryErr.message : "erro desconhecido"}`,
