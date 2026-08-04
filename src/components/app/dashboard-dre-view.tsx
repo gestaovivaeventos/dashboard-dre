@@ -510,15 +510,37 @@ export function DashboardDreView({
   const exportDrePdf = async () => {
     try {
       setExporting("pdf");
+      // O PDF recebe a árvore completa (não só as linhas expandidas na tela):
+      // o template recalcula grupos e subtotais a partir das contas analíticas.
+      const pdfRows = rows.map((row) => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        parent_id: row.parent_id,
+        level: row.level,
+        type: row.type,
+        is_summary: row.is_summary,
+        sort_order: row.sort_order,
+        valuesByBucket: row.valuesByBucket,
+      }));
+      const unidade =
+        selectedCompanyIds.length === companies.length
+          ? "Consolidado"
+          : companies
+              .filter((company) => selectedCompanyIds.includes(company.id))
+              .map((company) => company.name)
+              .join(", ");
+      const segmento =
+        segments.find((segment) => segment.slug === activeSegmentSlug)?.name ?? "Todos";
       const response = await fetch("/api/export/dre/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "DRE Gerencial",
-          periodLabel: range.label,
-          unitsLabel,
-          buckets: columns.map((item) => ({ key: item.key, label: item.label })),
-          rows: visibleRows,
+          unidade,
+          segmento,
+          periodo: range.label,
+          meses: columns.map((item) => ({ key: item.key, label: item.label })),
+          rows: pdfRows,
         }),
       });
       if (!response.ok) {

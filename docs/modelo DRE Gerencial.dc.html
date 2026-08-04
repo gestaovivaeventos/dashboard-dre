@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; font-family: "IBM Plex Sans", system-ui, sans-serif; color: #1c2024; }
+  doc-page:not(:defined) { visibility: hidden; }
+  a { color: #C2410C; }
+  a:hover { color: #9A3412; }
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+<doc-page orientation="landscape" size="a4" margin="0.5in">
+
+  <div slot="footer" style="display:flex; justify-content:space-between; align-items:center; gap:24px; padding-top:8px; border-top:1px solid #e3e5e8; font-size:8.5px; letter-spacing:0.04em; text-transform:uppercase; color:#8a9099;">
+    <span style="color:#B45309; font-weight:600;">Confidencial · uso interno da diretoria</span>
+    <span>Control Hub · DRE Gerencial · {{ unidade }}</span>
+    <span>Gerado em {{ geradoEm }} por {{ geradoPor }}</span>
+  </div>
+
+  <header style="display:flex; justify-content:space-between; align-items:flex-start; gap:40px; padding-bottom:14px; border-bottom:2px solid #1c2024;">
+    <div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+        <span style="display:inline-block; width:14px; height:14px; border-radius:3px; background:#EA580C;"></span>
+        <span style="font-size:11px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase; color:#4a5058;">Control Hub</span>
+      </div>
+      <h1 style="margin:0; font-size:30px; font-weight:600; letter-spacing:-0.02em; line-height:1;">Demonstração do Resultado do Exercício</h1>
+      <p style="margin:8px 0 0; font-size:12.5px; color:#6b7280;">Visão gerencial analítica · {{ periodo }}</p>
+    </div>
+    <div style="text-align:right; flex:none;">
+      <div style="font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Emissão</div>
+      <div style="font-size:12.5px; font-weight:500; margin-top:3px;">{{ geradoEm }}</div>
+    </div>
+  </header>
+
+  <div style="display:flex; gap:0; margin:0 0 18px; border-bottom:1px solid #e3e5e8;">
+    <div style="flex:1; padding:12px 18px 12px 0;">
+      <div style="font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Unidade</div>
+      <div style="font-size:13px; font-weight:600; margin-top:4px;">{{ unidade }}</div>
+    </div>
+    <div style="flex:1; padding:12px 18px; border-left:1px solid #e3e5e8;">
+      <div style="font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Segmento</div>
+      <div style="font-size:13px; font-weight:600; margin-top:4px;">{{ segmento }}</div>
+    </div>
+    <div style="flex:1; padding:12px 18px; border-left:1px solid #e3e5e8;">
+      <div style="font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Período de competência</div>
+      <div style="font-size:13px; font-weight:600; margin-top:4px;">{{ periodo }}</div>
+    </div>
+    <div style="flex:1; padding:12px 18px; border-left:1px solid #e3e5e8;">
+      <div style="font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Regime</div>
+      <div style="font-size:13px; font-weight:600; margin-top:4px;">Competência</div>
+    </div>
+    <div style="flex:1; padding:12px 0 12px 18px; border-left:1px solid #e3e5e8;">
+      <div style="font-size:8.5px; letter-spacing:0.14em; text-transform:uppercase; color:#8a9099;">Valores em</div>
+      <div style="font-size:13px; font-weight:600; margin-top:4px;">R$ (BRL)</div>
+    </div>
+  </div>
+
+  <table style="width:100%; border-collapse:collapse; font-size:10.5px; line-height:1.25;">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:7px 8px 7px 0; font-size:8.5px; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; color:#4a5058; border-bottom:1.5px solid #1c2024;">Plano de contas</th>
+        <sc-for list="{{ meses }}" as="m" hint-placeholder-count="6">
+          <th style="text-align:right; padding:7px 8px; font-size:8.5px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#4a5058; border-bottom:1.5px solid #1c2024; white-space:nowrap;">{{ m }}</th>
+        </sc-for>
+        <th style="text-align:right; padding:7px 8px; font-size:8.5px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#1c2024; border-bottom:1.5px solid #1c2024; background:#f6f7f8;">Total</th>
+        <th style="text-align:right; padding:7px 0 7px 8px; font-size:8.5px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#8a9099; border-bottom:1.5px solid #1c2024; white-space:nowrap;">% ROL</th>
+      </tr>
+    </thead>
+    <tbody>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="24">
+
+        <sc-if value="{{ r.isGroup }}" hint-placeholder-val="{{ true }}">
+          <tr style="background:#f1f2f4;">
+            <td style="padding:7px 8px 7px 0; font-weight:600; font-size:11px; border-top:1px solid #d8dbdf; border-bottom:1px solid #d8dbdf; padding-left:{{ r.pad }}px;">
+              <span style="display:inline-block; width:3px; height:11px; background:#EA580C; margin-right:8px; vertical-align:-1px;"></span>{{ r.name }}
+            </td>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+              <td style="padding:7px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; border-top:1px solid #d8dbdf; border-bottom:1px solid #d8dbdf; white-space:nowrap; color:{{ c.color }}; background:{{ c.bg }};">{{ c.t }}</td>
+            </sc-for>
+            <td style="padding:7px 0 7px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:500; color:#6b7280; border-top:1px solid #d8dbdf; border-bottom:1px solid #d8dbdf; white-space:nowrap;">{{ r.av }}</td>
+          </tr>
+        </sc-if>
+
+        <sc-if value="{{ r.isSub }}" hint-placeholder-val="{{ false }}">
+          <tr>
+            <td style="padding:6px 8px 6px 0; font-weight:600; color:#33383f; border-bottom:1px solid #eceef0; padding-left:{{ r.pad }}px;">{{ r.name }}</td>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+              <td style="padding:6px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:{{ c.color }}; background:{{ c.bg }}; border-bottom:1px solid #eceef0; white-space:nowrap;">{{ c.t }}</td>
+            </sc-for>
+            <td style="padding:6px 0 6px 8px; text-align:right; font-variant-numeric:tabular-nums; color:#8a9099; border-bottom:1px solid #eceef0; white-space:nowrap;">{{ r.av }}</td>
+          </tr>
+        </sc-if>
+
+        <sc-if value="{{ r.isLeaf }}" hint-placeholder-val="{{ true }}">
+          <tr>
+            <td style="padding:4.5px 8px 4.5px 0; color:#4a5058; border-bottom:1px solid #f2f3f5; padding-left:{{ r.pad }}px;">{{ r.name }}</td>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+              <td style="padding:4.5px 8px; text-align:right; font-variant-numeric:tabular-nums; color:{{ c.color }}; background:{{ c.bg }}; border-bottom:1px solid #f2f3f5; white-space:nowrap;">{{ c.t }}</td>
+            </sc-for>
+            <td style="padding:4.5px 0 4.5px 8px; text-align:right; font-variant-numeric:tabular-nums; color:#a3a8af; border-bottom:1px solid #f2f3f5; white-space:nowrap;">{{ r.av }}</td>
+          </tr>
+        </sc-if>
+
+        <sc-if value="{{ r.isSubtotal }}" hint-placeholder-val="{{ false }}">
+          <tr style="background:#fdf6f0;">
+            <td style="padding:9px 8px 9px 0; font-weight:700; font-size:11.5px; letter-spacing:-0.005em; border-top:1.5px solid #1c2024; border-bottom:1px solid #e3e5e8;">{{ r.name }}</td>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+              <td style="padding:9px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; font-size:11.5px; color:{{ c.color }}; border-top:1.5px solid #1c2024; border-bottom:1px solid #e3e5e8; white-space:nowrap;">{{ c.t }}</td>
+            </sc-for>
+            <td style="padding:9px 0 9px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:#4a5058; border-top:1.5px solid #1c2024; border-bottom:1px solid #e3e5e8; white-space:nowrap;">{{ r.av }}</td>
+          </tr>
+        </sc-if>
+
+        <sc-if value="{{ r.isFinal }}" hint-placeholder-val="{{ false }}">
+          <tr style="background:#1c2024;">
+            <td style="padding:11px 8px 11px 12px; font-weight:700; font-size:12px; color:#ffffff; letter-spacing:0.005em;">{{ r.name }}</td>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+              <td style="padding:11px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:700; font-size:12px; color:{{ c.colorDark }}; white-space:nowrap;">{{ c.t }}</td>
+            </sc-for>
+            <td style="padding:11px 12px 11px 8px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; font-size:12px; color:#b6bcc4; white-space:nowrap;">{{ r.av }}</td>
+          </tr>
+        </sc-if>
+
+      </sc-for>
+    </tbody>
+  </table>
+
+  <div style="margin-top:16px; display:flex; gap:28px; align-items:flex-start; font-size:9px; line-height:1.5; color:#8a9099;">
+    <p style="margin:0; flex:1;">Valores em reais, apurados pelo regime de competência. Percentuais calculados sobre a Receita Operacional Líquida acumulada do período. Despesas apresentadas em valores positivos e deduzidas nos subtotais.</p>
+    <p style="margin:0; flex:1;">Documento gerado automaticamente pelo Control Hub a partir dos lançamentos conciliados até a data de emissão. Reclassificações posteriores podem alterar os saldos aqui apresentados.</p>
+  </div>
+
+</doc-page>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;unidade&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Village&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;segmento&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Real Estate&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;periodo&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Jan/2026 a Jun/2026&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;geradoEm&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;04/08/2026 09:57&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;geradoPor&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;diretoria@controlhub.com.br&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;mostrarAV&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Exibição&quot;},&quot;esmaecerZeros&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Exibição&quot;}}">
+const RAW = {
+  rdir: ["Receitas Diretas", [
+    ["Clientes - Serviços Prestados", 77268.12, 85441.61, 68363.44, 28420.97, 18392.50, 114737.00],
+    ["Clientes - Receita com Serviços Vendidos", 103357.15, 218411.71, 38381.43, 67807.20, 65321.19, 71831.41],
+    ["Clientes - Venda de unidades", 0, 0, 0, 0, 0, 0]
+  ]],
+  rind: ["Receitas Indiretas", [
+    ["Rendimentos de Aplicações", 0, 4.37, 0.47, 0.45, 0.45, 0.45],
+    ["Reembolso de Despesas", 0, 0, 0, 0, 0, 0],
+    ["Seguros", 0, 0, 0, 0, 0, 0]
+  ]],
+  ded: ["Deduções da Receita", [
+    ["ISS", 5452.40, 8022.65, 7213.82, 2133.91, 2877.25, 3960.63],
+    ["COFINS", 5452.41, 8022.64, 7213.83, 2133.92, 4437.25, 3960.63],
+    ["PIS", 1181.35, 1738.24, 1563.00, 462.35, 961.40, 858.14],
+    ["Retenções Federais", 13.02, 13.02, 23.66, 0, 11.39, 21.53],
+    ["Devoluções de Vendas", 0, 0, 0, 0, 0, 0]
+  ]],
+  ddir: ["Despesas Diretas", [
+    ["Custos de Serviços e Produtos de Contratos Vendidos", 145751.46, 67755.86, 81590.22, 87455.08, 74808.42, 103157.85]
+  ]],
+  adm: ["Despesas Administrativas", [
+    ["Aluguel", 0, 0, 0, 0, 0, 0],
+    ["Condomínio", 0, 0, 0, 0, 0, 0],
+    ["Água e Esgoto", 0, 0, 0, 0, 0, 0],
+    ["Energia Elétrica", 0, 0, 0, 0, 0, 0],
+    ["Telefonia", 25.00, 330.00, 195.00, 195.00, 195.00, 265.00],
+    ["Manutenção de Imobilizado", 0, 0, 0, 0, 0, 0],
+    ["Seguros", 0, 0, 0, 0, 0, 0],
+    ["IPTU", 0, 0, 0, 0, 0, 0],
+    ["Contabilidade", 2593.00, 1168.00, 1168.00, 2718.00, 1168.00, 1168.00],
+    ["Advogados", 0, 0, 750.00, 750.00, 750.00, 750.00],
+    ["Segurança", 0, 0, 0, 0, 0, 0],
+    ["Outras Despesas Administrativas", 0, 0, 108.39, 455.66, 0, 1621.00],
+    ["Softwares, Sistemas e Servidores", 946.70, 766.70, 779.72, 2728.10, 2728.10, 3558.00],
+    ["Material Limpeza / Escritório / Mercado / Padaria", 0, 0, 0, 0, 0, 0],
+    ["Fretes e Transportes em Geral", 201.59, 57.01, 0, 407.19, 279.92, 395.00],
+    ["Assessoria Administrativa", 3242.00, 3242.00, 3242.00, 3242.00, 3242.00, 3242.00],
+    ["Taxas Diversas", 2364.68, 170.41, 14.06, 972.27, 285.59, 0]
+  ]],
+  pes: ["Despesas com Pessoal", [
+    ["Salários", 2245.19, 2245.19, 2334.17, 2314.17, 2334.17, 2374.00],
+    ["Férias", 0, 0, 0, 0, 0, 0],
+    ["Rescisões", 0, 0, 0, 3786.00, 8031.87, 0],
+    ["13º Salário", 0, 0, 0, 0, 0, 0],
+    ["INSS", 0, 0, 0, 0, 0, 0],
+    ["FGTS", 0, 0, 0, 0, 0, 0],
+    ["IRRF Sobre Folha", 0, 0, 0, 0, 0, 0],
+    ["Pensão Alimentícia", 0, 0, 0, 0, 0, 0],
+    ["Assistência Médica", 0, 0, 0, 0, 0, 0],
+    ["Vale Transporte / Mobilidade", 0, 0, 0, 0, 0, 0],
+    ["Benefícios Flexíveis", 0, 0, 0, 0, 0, 0],
+    ["Seguro de Vida", 293.58, 0, 587.72, 294.14, 294.14, 0],
+    ["Outros Benefícios", 0, 0, 0, 0, 0, 0],
+    ["Pró Labore Sócios", 0, 0, 0, 0, 0, 0],
+    ["Outros (Contribuição Sindical - PCMO, Exames...)", 197.99, 280.63, 197.99, 197.99, 531.85, 594.00],
+    ["Capacitação e Treinamentos", 0, 0, 0, 0, 0, 0],
+    ["Endomarketing", 3965.82, 0, 500.00, 279.89, 0, 0],
+    ["Salários PJ", 4620.25, 4620.25, 4705.37, 4705.37, 4705.37, 4705.00]
+  ]],
+  vm: ["Despesas de Vendas e Marketing", [
+    ["Comissões", 0, 0, 0, 0, 0, 0],
+    ["Marketing", 4018.00, 2500.00, 2500.00, 5036.00, 1300.00, 5025.00],
+    ["Despesa de Captação de Clientes", 165.00, 0, 5495.00, 5165.00, 5000.00, 165.00],
+    ["Despesas de Viagens", 0, 0, 0, 0, 0, 0],
+    ["Bonificações", 0, 0, 0, 0, 0, 0]
+  ]],
+  fin: ["Despesas Financeiras / Bancos", [
+    ["Juros sobre Empréstimos", 0, 0, 0, 0, 0, 0],
+    ["Multas", 0, 0, 0, 0, 0, 0],
+    ["Tarifas Bancárias", 138.89, 133.90, 136.40, 139.40, 206.00, 150.00],
+    ["IOF s/ Aplicação Financeira", 0, 0, 0, 0, 0, 0],
+    ["IR s/ Aplicação Financeira", 0, 0, 0, 0, 0, 0]
+  ]],
+  imp: [
+    ["IRPJ", 36523.40, 0, 0, 0, 40857.31, 0],
+    ["Contribuição Social", 15308.42, 0, 0, 0, 16897.35, 0]
+  ]
+};
+
+class Component extends DCLogic {
+  vals(rows) {
+    const out = [0, 0, 0, 0, 0, 0];
+    rows.forEach(r => { for (let i = 0; i < 6; i++) out[i] += r[i + 1]; });
+    return out;
+  }
+  comb(...pairs) {
+    const out = [0, 0, 0, 0, 0, 0];
+    for (let p = 0; p < pairs.length; p += 2) {
+      const sign = pairs[p], arr = pairs[p + 1];
+      for (let i = 0; i < 6; i++) out[i] += sign * arr[i];
+    }
+    return out;
+  }
+  fmt(v) {
+    const n = Math.abs(v) < 0.005 ? 0 : v;
+    const s = Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n < 0 ? "(" + s + ")" : s;
+  }
+  row(kind, name, v, rolTotal, pad) {
+    const total = v.reduce((a, b) => a + b, 0);
+    const dim = this.props.esmaecerZeros ?? true;
+    const neg = "#B42318";
+    const cells = v.map(x => ({
+      t: this.fmt(x),
+      color: x < -0.005 ? neg : (dim && Math.abs(x) < 0.005 ? "#c4c8ce" : "inherit"),
+      colorDark: x < -0.005 ? "#FCA5A5" : "#ffffff",
+      bg: "transparent"
+    }));
+    cells.push({
+      t: this.fmt(total),
+      color: total < -0.005 ? neg : (dim && Math.abs(total) < 0.005 ? "#c4c8ce" : "#1c2024"),
+      colorDark: total < -0.005 ? "#FCA5A5" : "#ffffff",
+      bg: kind === "final" ? "transparent" : "#f6f7f8"
+    });
+    const showAv = this.props.mostrarAV ?? true;
+    const av = !showAv || !rolTotal ? "" : (Math.abs(total) < 0.005 ? "—" : (total / rolTotal * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%");
+    return {
+      name, av, cells, pad: pad || 0,
+      isGroup: kind === "group", isSub: kind === "sub", isLeaf: kind === "leaf",
+      isSubtotal: kind === "subtotal", isFinal: kind === "final"
+    };
+  }
+  renderVals() {
+    const g = k => this.vals(RAW[k][1]);
+    const rdir = g("rdir"), rind = g("rind"), ded = g("ded"), ddir = g("ddir");
+    const adm = g("adm"), pes = g("pes"), vm = g("vm"), fin = g("fin");
+    const rol = this.comb(1, rdir, 1, rind, -1, ded);
+    const lob = this.comb(1, rol, -1, ddir);
+    const dop = this.comb(1, adm, 1, pes, 1, vm, 1, fin);
+    const rai = this.comb(1, lob, -1, dop);
+    const irpj = RAW.imp[0].slice(1), csll = RAW.imp[1].slice(1);
+    const res = this.comb(1, rai, -1, irpj, -1, csll);
+    const rolT = rol.reduce((a, b) => a + b, 0);
+
+    const rows = [];
+    const push = (kind, name, v, pad) => rows.push(this.row(kind, name, v, rolT, pad));
+    const block = (key, tot) => {
+      push("group", RAW[key][0], tot);
+      RAW[key][1].forEach(r => push("leaf", r[0], r.slice(1), 22));
+    };
+    const sub = (key, tot) => {
+      push("sub", RAW[key][0], tot, 16);
+      RAW[key][1].forEach(r => push("leaf", r[0], r.slice(1), 34));
+    };
+
+    block("rdir", rdir);
+    block("rind", rind);
+    block("ded", ded);
+    push("subtotal", "= Receita Operacional Líquida", rol);
+    block("ddir", ddir);
+    push("subtotal", "= Lucro Operacional Bruto", lob);
+    push("group", "Despesas Operacionais", dop);
+    sub("adm", adm);
+    sub("pes", pes);
+    sub("vm", vm);
+    sub("fin", fin);
+    push("subtotal", "= Resultado do Exercício Antes IR e CS", rai);
+    push("leaf", "IRPJ", irpj, 22);
+    push("leaf", "Contribuição Social", csll, 22);
+    push("final", "= Resultado Após IR e CS", res);
+
+    return {
+      rows,
+      meses: ["Jan/26", "Fev/26", "Mar/26", "Abr/26", "Mai/26", "Jun/26"],
+      unidade: this.props.unidade ?? "Village",
+      segmento: this.props.segmento ?? "Real Estate",
+      periodo: this.props.periodo ?? "Jan/2026 a Jun/2026",
+      geradoEm: this.props.geradoEm ?? "04/08/2026 09:57",
+      geradoPor: this.props.geradoPor ?? "diretoria@controlhub.com.br"
+    };
+  }
+}
+</script>
+</body>
+</html>

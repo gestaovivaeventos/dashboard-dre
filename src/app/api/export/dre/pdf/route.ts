@@ -1,133 +1,82 @@
-import PDFDocument from "pdfkit";
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import {
+  buildDreGerencialPdf,
+  type DreGerencialInput,
+  type DreGerencialInputRow,
+  type DreGerencialMonth,
+} from "@/lib/pdf/dre-gerencial";
 
-interface PdfRow {
-  code: string;
-  name: string;
-  level: number;
-  valuesByBucket: Record<string, number>;
-  accumulatedValue: number;
-  variationPercentage: number;
-}
+export const maxDuration = 60;
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-}
-
-function formatPercent(value: number) {
-  return `${value.toFixed(1)}%`;
+interface ExportBody {
+  unidade?: string;
+  segmento?: string;
+  periodo?: string;
+  meses?: DreGerencialMonth[];
+  rows?: DreGerencialInputRow[];
 }
 
 export async function POST(request: Request) {
-  const { user } = await getCurrentSessionContext();
+  const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
   }
 
-  const body = (await request.json()) as {
-    title?: string;
-    periodLabel?: string;
-    unitsLabel?: string;
-    buckets?: Array<{ key: string; label: string }>;
-    rows?: PdfRow[];
-  };
-  const buckets = body.buckets ?? [];
+  const body = (await request.json()) as ExportBody;
+  const meses = body.meses ?? [];
   const rows = body.rows ?? [];
+  if (meses.length === 0 || rows.length === 0) {
+    return NextResponse.json({ error: "Sem dados para exportar." }, { status: 400 });
+  }
 
-  const doc = new PDFDocument({ margin: 36, size: "A4", layout: "landscape" });
-  const chunks: Buffer[] = [];
-  doc.on("data", (chunk) => chunks.push(chunk as Buffer));
-
-  doc.fontSize(16).text("Control Hub", { continued: false });
-  doc.moveDown(0.2);
-  doc.fontSize(11).text(body.title ?? "DRE Gerencial");
-  doc.fontSize(9).fillColor("#555").text(`Periodo: ${body.periodLabel ?? "-"}`);
-  doc.fontSize(9).fillColor("#555").text(`Unidade: ${body.unitsLabel ?? "-"}`);
-  doc.moveDown(0.8);
-
-  const startX = doc.x;
-  let y = doc.y;
-  const accountWidth = 280;
-  const colWidth = Math.max(90, Math.floor((770 - accountWidth) / (buckets.length + 2)));
-
-  doc.fillColor("#000").fontSize(8).font("Helvetica-Bold");
-  doc.text("Conta", startX, y, { width: accountWidth });
-  buckets.forEach((bucket, index) => {
-    doc.text(bucket.label, startX + accountWidth + index * colWidth, y, {
-      width: colWidth,
-      align: "right",
+  // Fórmulas das contas calculadas — o template reavalia os subtotais a partir
+  // dos grupos recalculados para o documento sempre fechar.
+  const calculadoIds = rows.filter((row) => row.type === "calculado").map((row) => row.id);
+  const formulasById: Record<string, string> = {};
+  if (calculadoIds.length > 0) {
+    const { data } = await supabase
+      .from("dre_accounts")
+      .select("id, formula")
+      .in("id", calculadoIds);
+    (data ?? []).forEach((account) => {
+      if (account.formula) formulasById[account.id] = account.formula;
     });
-  });
-  doc.text("Acumulado", startX + accountWidth + buckets.length * colWidth, y, {
-    width: colWidth,
-    align: "right",
-  });
-  doc.text("Var %", startX + accountWidth + (buckets.length + 1) * colWidth, y, {
-    width: colWidth,
-    align: "right",
-  });
-  y += 18;
+  }
 
-  doc.font("Helvetica").fontSize(8);
-  rows.forEach((row) => {
-    if (y > 540) {
-      doc.addPage({ size: "A4", layout: "landscape", margin: 36 });
-      y = 40;
-    }
+  const geradoEm = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(new Date())
+    .replace(",", "");
 
-    const indent = (row.level - 1) * 8;
-    doc.fillColor("#111").text(row.name, startX + indent, y, {
-      width: accountWidth - indent,
-    });
-    buckets.forEach((bucket, index) => {
-      doc.text(
-        formatCurrency(Number(row.valuesByBucket[bucket.key] ?? 0)),
-        startX + accountWidth + index * colWidth,
-        y,
-        {
-          width: colWidth,
-          align: "right",
-        },
-      );
-    });
-    doc.text(
-      formatCurrency(Number(row.accumulatedValue ?? 0)),
-      startX + accountWidth + buckets.length * colWidth,
-      y,
-      {
-        width: colWidth,
-        align: "right",
+  const input: DreGerencialInput = {
+    unidade: body.unidade?.trim() || "Consolidado",
+    segmento: body.segmento?.trim() || "—",
+    periodo: body.periodo?.trim() || "—",
+    geradoEm,
+    geradoPor: profile?.name?.trim() || user.email || "—",
+    meses,
+    rows,
+  };
+
+  try {
+    const pdf = await buildDreGerencialPdf(input, formulasById);
+    return new NextResponse(new Uint8Array(pdf), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="DRE_Gerencial.pdf"',
       },
-    );
-    doc.text(
-      formatPercent(Number(row.variationPercentage ?? 0)),
-      startX + accountWidth + (buckets.length + 1) * colWidth,
-      y,
-      {
-        width: colWidth,
-        align: "right",
-      },
-    );
-
-    y += 14;
-  });
-
-  doc.end();
-  await new Promise<void>((resolve) => {
-    doc.on("end", () => resolve());
-  });
-  const pdf = Buffer.concat(chunks);
-
-  return new NextResponse(pdf, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": 'attachment; filename="DRE_Hero.pdf"',
-    },
-  });
+    });
+  } catch (error) {
+    console.error("[export/dre/pdf] render failed:", error);
+    return NextResponse.json({ error: "Falha ao gerar o PDF do DRE." }, { status: 500 });
+  }
 }
