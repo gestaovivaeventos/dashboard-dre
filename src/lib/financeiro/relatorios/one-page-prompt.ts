@@ -890,6 +890,68 @@ REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
 7. NAO extrapole alem do que o bloco diz. Onde ele nao explica um indicador,
    siga a leitura normal dos numeros.
 
+# O CONTEXTO TAMBEM CORRIGE — nao e so informacao extra
+
+O contexto pode chegar para CONSERTAR uma leitura, nao apenas para
+complementa-la. Antes de fechar a resposta, releia CADA "pontosAtencao",
+"destaques", "acoesRecomendadas" e "leituraPorIndicador" que voce escreveu e
+pergunte: "isto continua de pe depois do que a controladoria informou?".
+
+A. ALERTA/PONTO DE ATENCAO QUE O CONTEXTO DESMONTA → REMOVA.
+   Se o contexto explica que a variacao e esperada, planejada, ja resolvida ou
+   simplesmente nao e problema (ex.: nao havia evento previsto para o mes; o
+   orcamento foi rateado de forma linear por convencao; a receita entra no mes
+   seguinte por competencia), NAO gere o ponto de atencao. Um alerta que o
+   proprio fechamento ja explicou faz o leitor perder tempo com um falso
+   problema e tira a credibilidade do relatorio.
+
+B. ALERTA QUE CONTINUA VALENDO, MAS COM RESSALVA → REESCREVA.
+   Se o ponto ainda importa, porem de forma diferente da leitura puramente
+   numerica, mantenha-o com o adendo do contexto NO PROPRIO TEXTO — nao deixe a
+   ressalva so no bloco de contexto. O leitor tem de entender o alerta sem
+   precisar cruzar informacoes.
+B.1. VALE TAMBEM PARA O ALERTA AGREGADO. Se um ponto de atencao sobre um total
+   (receita liquida, receita total, resultado, despesas) CITAR entre suas causas
+   um item que o contexto ja explicou, a ressalva TEM de vir junto, na mesma
+   frase em que a causa aparece. Nao basta ter removido o alerta especifico
+   daquele item: repetir a causa "crua" dentro do agregado devolve ao leitor o
+   falso problema que voce acabou de retirar.
+   Errado: "Receita liquida 53% abaixo do orcado, impactada pela ausencia de
+   receita de formaturas (R$ 85.000 orcados) e por shows 11% abaixo".
+   Certo: "Receita liquida 53% abaixo do orcado; R$ 85.000 desse desvio vem do
+   rateio linear do orcamento de formaturas em um mes sem evento previsto, e o
+   restante, de shows/palestras 11% abaixo do orcado".
+B.2. RECALIBRE A SEVERIDADE. O campo "risco" (e a leitura de "classificacao")
+   deve refletir o quadro DEPOIS do contexto. Quando o contexto explica a maior
+   parte de um desvio como premissa orcamentaria, sazonalidade prevista ou
+   efeito ja resolvido, o item deixa de ser "Alto" — normalmente vira "Médio"
+   ou "Baixo". Manter risco Alto num desvio ja explicado contradiz o proprio
+   texto do alerta.
+
+C. ACAO QUE O CONTEXTO TORNA DESNECESSARIA OU JA FEITA → NAO RECOMENDE.
+   Se o contexto diz que a providencia ja foi tomada, esta em andamento ou nao
+   se aplica (ex.: ja existe acao judicial em curso; a decisao foi da
+   diretoria; o valor sera regularizado no mes seguinte), corte a acao. Quando
+   fizer sentido, substitua-a pelo PROXIMO passo real (acompanhar o desfecho,
+   revisar a premissa do orcamento, reprogramar a reserva) em vez de repetir
+   uma recomendacao ja superada.
+
+D. CONTEXTO QUE APONTA ERRO DE PREMISSA → LEIA O ORCAMENTO, NAO SO O REALIZADO.
+   Quando o contexto indicar que o desvio vem da forma como o ORCAMENTO foi
+   montado (rateio linear, valor previsto que nao se confirmou, reserva que nao
+   seria usada), diga isso: o problema esta na premissa orcamentaria, nao
+   necessariamente na operacao. Nesse caso a acao correta e revisar a premissa.
+
+E. EM CONFLITO, O CONTEXTO PREVALECE sobre a leitura numerica isolada — mas
+   NUNCA sobre os numeros em si (regra 4). Voce muda o julgamento e o texto;
+   nunca o valor.
+
+F. NAO ANUNCIE A CORRECAO. Escreva o relatorio ja corrigido, como se aquela
+   sempre tivesse sido a leitura. E PROIBIDO escrever "ao contrario do que foi
+   apontado antes", "corrigindo a versao anterior", "o alerta anterior nao
+   procede" ou qualquer referencia a versoes passadas do relatorio: o leitor
+   recebe UMA versao e nao viu as anteriores.
+
 # CAMPO "contextoControladoria" — COMO ESCREVER
 
 Publico: socios e diretoria, que NAO leram o texto da controladoria. Escreva

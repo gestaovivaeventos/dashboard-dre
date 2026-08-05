@@ -19,6 +19,14 @@ import zlib from "node:zlib";
 // Tetos de segurança: PDF gigante não pode travar a requisição.
 const MAX_SCAN_CHARS = 4_000_000;
 const MAX_PLAIN_TEXT = 20_000;
+// Teto do rebobinamento em streamDict — dicionário de stream não passa disso.
+const MAX_DICT_CHARS = 4_000;
+
+// Streams que nunca contêm texto: imagem e programa de fonte embutida
+// (/Length1 é o comprimento do Type1/TrueType). Pulá-los evita jogar binário
+// no texto que vai ao modelo.
+const NON_TEXT_STREAM =
+  /\/Subtype\s*\/Image|DCTDecode|JPXDecode|CCITTFaxDecode|\/Length1\b/;
 
 export interface PdfText {
   /** Cada pedaço de texto do PDF, na ordem — para varredura de dígitos. */
@@ -40,8 +48,42 @@ function inflate(raw: Buffer): string | null {
   }
 }
 
+/**
+ * Dicionário de um stream: o "<< … >>" imediatamente antes da palavra `stream`.
+ *
+ * Precisa ser o dicionário EXATO, não uma janela de N bytes para trás: os
+ * objetos de imagem vêm colados no content stream da página, então uma janela
+ * fixa enxergava o "/Subtype/Image" do objeto ANTERIOR e o filtro de imagem
+ * descartava o texto da página inteira (o boleto do IUGU/55PBX saía com zero
+ * strings, e a linha digitável só podia vir do OCR).
+ *
+ * Retorna "" quando não dá para delimitar com segurança — aí o stream NÃO é
+ * descartado: perder texto é o defeito; ruído binário a varredura de dígitos
+ * (com DV) e o modelo já toleram.
+ */
+function streamDict(latin: string, streamIdx: number): string {
+  const close = latin.lastIndexOf(">>", streamIdx);
+  // Entre o fim do dicionário e `stream` só pode haver espaço em branco.
+  if (close < 0 || /\S/.test(latin.slice(close + 2, streamIdx))) return "";
+
+  // Rebobina até o "<<" correspondente, contando aninhamento — dicionário
+  // interno é comum (/DecodeParms<< … >>).
+  let depth = 0;
+  for (let i = close + 1; i >= 1 && close - i < MAX_DICT_CHARS; i -= 1) {
+    if (latin[i] === ">" && latin[i - 1] === ">") {
+      depth += 1;
+      i -= 1;
+    } else if (latin[i] === "<" && latin[i - 1] === "<") {
+      depth -= 1;
+      if (depth === 0) return latin.slice(i - 1, close + 2);
+      i -= 1;
+    }
+  }
+  return "";
+}
+
 // Conteúdo de cada stream do PDF (descomprimido quando for Flate). Streams de
-// imagem são pulados: só produziriam ruído binário.
+// imagem e de fonte são pulados: só produziriam ruído binário.
 function pdfContentChunks(bytes: Buffer): string[] {
   const latin = bytes.toString("latin1");
   const chunks: string[] = [];
@@ -52,13 +94,13 @@ function pdfContentChunks(bytes: Buffer): string[] {
       i += 6;
       continue;
     }
-    const dict = latin.slice(Math.max(0, i - 400), i);
+    const dict = streamDict(latin, i);
     let p = i + 6;
     if (latin[p] === "\r") p += 1;
     if (latin[p] === "\n") p += 1;
     const end = latin.indexOf("endstream", p);
     if (end < 0) break;
-    if (!/\/Subtype\s*\/Image|DCTDecode|JPXDecode|CCITTFaxDecode/.test(dict)) {
+    if (!NON_TEXT_STREAM.test(dict)) {
       const raw = bytes.subarray(p, end);
       const text = inflate(raw) ?? raw.toString("latin1");
       if (text) chunks.push(text);

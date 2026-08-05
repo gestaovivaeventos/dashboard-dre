@@ -84,6 +84,26 @@ function chatUrlFor(baseURL: string | undefined): string {
   return `${baseURL ?? OPENAI_BASE_URL}/chat/completions`;
 }
 
+/**
+ * base_url só vale se for URL absoluta http(s). O campo "Base URL" do painel é
+ * texto livre e um valor qualquer ali (já entrou um e-mail) vira endpoint: toda
+ * chamada do provedor morre em "Failed to parse URL from …" — foi o que quebrou
+ * o OCR de boleto/nota. Valor inválido é ignorado e o provedor volta ao endpoint
+ * padrão, em vez de derrubar o recurso inteiro.
+ */
+function sanitizeBaseURL(raw: string | null | undefined, provider: string): string | undefined {
+  const v = (raw ?? "").trim();
+  if (!v) return undefined;
+  try {
+    const u = new URL(v);
+    if (u.protocol === "http:" || u.protocol === "https:") return v.replace(/\/+$/, "");
+  } catch {
+    // Não é URL absoluta — cai no aviso abaixo.
+  }
+  console.warn(`[ai] base_url inválida para "${provider}" (${v}) — ignorada; usando o endpoint padrão.`);
+  return undefined;
+}
+
 // Preço padrão por modelo, em USD por 1 milhão de tokens (input / output).
 // São editáveis no painel (persistidos em ai_config.model_prices, que
 // sobrescreve este mapa). Valores aproximados de mercado — ajuste na tela.
@@ -241,7 +261,7 @@ export async function resolveAiProvider(
   const builtin = BUILTIN_DEFAULTS[activeName];
   // baseURL: primeiro a do painel (base_url da linha), senão o default do
   // provedor embutido, senão OpenAI (undefined = default do AI SDK).
-  const baseURL = finalRow?.base_url || builtin?.baseURL || undefined;
+  const baseURL = sanitizeBaseURL(finalRow?.base_url, activeName) || builtin?.baseURL || undefined;
   const modelName = finalRow?.model || builtin?.model || "gpt-4o-mini";
 
   const provider = createOpenAI(baseURL ? { apiKey: key.apiKey, baseURL } : { apiKey: key.apiKey });

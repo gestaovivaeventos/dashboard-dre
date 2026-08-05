@@ -146,6 +146,10 @@ DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
 - USA-LO E OBRIGATORIO: onde ele explicar a variacao de um indicador, essa
   explicacao tem de aparecer no diagnostico/resumo E no destaque, ponto de
   atencao ou leitura por indicador correspondente.
+- Ele tambem CORRIGE a leitura: alerta que o contexto desmonta NAO deve ser
+  gerado; alerta que sobrevive vem com a ressalva no proprio texto; acao que o
+  contexto torna desnecessaria ou ja tomada sai da lista (troque pelo proximo
+  passo real). Escreva o relatorio ja corrigido, sem citar versoes anteriores.
 - NAO altere, recalcule, corrija ou substitua NENHUM valor financeiro: todos
   os numeros continuam sendo exatamente os fornecidos acima.
 - Se o contexto mostrar que uma variacao favoravel e pontual ou nao recorrente,

@@ -494,6 +494,12 @@ export async function saveProviderSettings(
   };
   if (settings.baseUrl !== undefined) {
     const b = (settings.baseUrl ?? "").trim();
+    // Mesma exigência de addProvider: sem isto, um valor qualquer digitado aqui
+    // (já entrou um e-mail no campo) vira endpoint e derruba TODAS as chamadas
+    // do provedor com "Failed to parse URL from …" — inclusive o OCR do boleto.
+    if (b && !/^https?:\/\//i.test(b)) {
+      return { error: "Base URL deve começar com http(s):// — deixe em branco para usar o padrão." };
+    }
     patch.base_url = b || null;
   }
   const { error } = await db.from("ai_provider_settings").upsert(patch, { onConflict: "provider" });
@@ -714,6 +720,12 @@ export async function testProviderConnection(input: {
 
   if (!apiKey) {
     return { error: "Sem chave de API para testar (informe a chave ou salve o provedor)." };
+  }
+
+  // Base inválida (digitada ou já salva no banco): erro claro, em vez do
+  // obscuro "Failed to parse URL from …" que o fetch devolveria.
+  if (baseUrl && !/^https?:\/\//i.test(baseUrl)) {
+    return { error: `Base URL inválida ("${baseUrl}") — deve começar com http(s):// ou ficar em branco.` };
   }
 
   const url = chatUrlFromBase(baseUrl);
