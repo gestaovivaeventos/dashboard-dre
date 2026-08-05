@@ -138,16 +138,27 @@ CONTEXTO DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)
 -----------------------------------------------------
 ${context}
 -----------------------------------------------------
-REGRAS PARA USAR ESTE CONTEXTO:
-- Ele explica/qualifica os numeros do periodo desta empresa. Incorpore-o ao
-  diagnostico, aos destaques, aos pontos de atencao e as acoes recomendadas.
+REGRAS PARA USAR ESTE CONTEXTO (detalhadas no system prompt, secao "CONTEXTO
+DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
+- Ele explica/qualifica os numeros do periodo desta empresa e e FONTE OFICIAL:
+  os fatos, causas e nomes citados aqui NAO sao "dados inventados" — a regra
+  inviolavel de nao citar o que nao esta no JSON nao vale para este bloco.
+- USA-LO E OBRIGATORIO: onde ele explicar a variacao de um indicador, essa
+  explicacao tem de aparecer no diagnostico/resumo E no destaque, ponto de
+  atencao ou leitura por indicador correspondente.
 - NAO altere, recalcule, corrija ou substitua NENHUM valor financeiro: todos
   os numeros continuam sendo exatamente os fornecidos acima.
+- Se o contexto mostrar que uma variacao favoravel e pontual ou nao recorrente,
+  diga isso — nao a apresente como ganho estrutural.
 - NAO invente dados que nao estejam nos numeros nem neste contexto.
 - Reescreva o contexto com linguagem executiva; nao o copie literalmente.`
     : basePrompt;
-  // Seleciona o contexto de negocio conforme o segmento da empresa.
-  const systemPrompt = resolveOnePageSystemPrompt(input);
+  // Seleciona o contexto de negocio conforme o segmento da empresa. Com
+  // contexto do CSC, o system prompt ganha a secao que autoriza e obriga o uso
+  // dele (sem ela, as "REGRAS INVIOLAVEIS" faziam o modelo descarta-lo).
+  const systemPrompt = resolveOnePageSystemPrompt(input, {
+    hasBusinessContext: Boolean(context),
+  });
 
   // OpenAI (nativo) usa generateObject com structured outputs (json_schema).
   // Provedores compatíveis (DeepSeek etc.) só aceitam json_object → caminho cru

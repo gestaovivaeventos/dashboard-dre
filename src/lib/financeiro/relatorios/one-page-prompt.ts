@@ -816,6 +816,58 @@ REGRAS (obrigatorias, prevalecem sobre a leitura conta a conta):
 5. Continua valendo o restante: nao recalcule nada e copie os numeros
    LITERALMENTE como estao no input.`;
 
+// ============================================================================
+// Regra do CONTEXTO DE NEGOCIO informado pela controladoria (tela Validação
+// Relatório > "Adicionar contexto"). Anexada ao system prompt SOMENTE quando
+// existe contexto — sem ele o prompt e byte a byte o de sempre.
+//
+// POR QUE EXISTE: o contexto era anexado apenas ao USER prompt, enquanto o
+// system prompt manda, em "REGRAS INVIOLAVEIS", NUNCA citar eventos ou nomes
+// que nao estejam no JSON e justificar toda acao apenas nos indicadores, "sem
+// invocar conhecimento externo". Diante do conflito, o modelo obedecia a regra
+// inviolavel e DESCARTAVA o contexto: o CSC explicava, por exemplo, que o IPTU
+// nao foi desembolsado por contestacao judicial, e o relatorio saia sem uma
+// linha sobre isso. Esta regra abre a excecao explicitamente e torna o uso do
+// contexto obrigatorio.
+// ============================================================================
+const CONTEXTO_CONTROLADORIA_RULE = `# CONTEXTO DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)
+
+O user prompt traz, ao final, um bloco "CONTEXTO DE NEGOCIO INFORMADO PELA
+CONTROLADORIA (CSC)". Ele foi escrito por uma pessoa da controladoria que
+acompanhou o fechamento DESTA empresa NESTE periodo e explica POR QUE os
+numeros ficaram como ficaram (ex.: um tributo que nao foi desembolsado por
+contestacao judicial; uma reserva orcada que nao foi utilizada).
+
+Esse bloco e FONTE OFICIAL, no mesmo nivel do JSON. NAO e conhecimento externo,
+NAO e suposicao sua e NAO e opcional.
+
+REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
+
+1. A regra inviolavel "NUNCA invente numeros, indicadores, eventos ou nomes que
+   nao estejam no JSON" NAO se aplica ao conteudo desse bloco. Fatos, causas,
+   tributos, contratos, obras, processos e decisoes citados ali sao DADOS
+   AUTORIZADOS — use-os com naturalidade no texto.
+2. Incorporar o contexto e OBRIGATORIO. Quando ele explicar a variacao de um
+   indicador, a explicacao TEM de aparecer no "diagnosticoPrincipal" ou no
+   "resumoExecutivo" E no item correspondente de "destaques", "pontosAtencao"
+   ou "leituraPorIndicador". Relatorio que ignora o contexto informado esta
+   ERRADO.
+3. Uma acao recomendada PODE ser justificada pelo contexto: a exigencia de
+   "conectar a acao a um dado do input" fica atendida quando a justificativa
+   cita o que a controladoria informou.
+4. O contexto NAO altera NENHUM numero. Realizado, orcado, variacao absoluta e
+   percentual continuam sendo exatamente os do JSON — ele muda a LEITURA dos
+   valores, nunca os valores.
+5. Se o contexto indicar que uma variacao favoravel e PONTUAL ou NAO
+   RECORRENTE (ex.: despesa que apenas deixou de ser desembolsada no periodo,
+   valor ainda em discussao, reserva nao utilizada), diga isso de forma
+   explicita: NAO apresente o efeito como ganho estrutural de eficiencia, e
+   sinalize quando o desembolso puder voltar a ocorrer.
+6. NAO contradiga o contexto e NAO o copie literalmente — reescreva em
+   linguagem executiva.
+7. NAO extrapole alem do que o bloco diz. Onde ele nao explica um indicador,
+   siga a leitura normal dos numeros.`;
+
 // ── Montagem dos prompts por segmento ───────────────────────────────────────
 export const FRANQUIAS_VIVA_SYSTEM_PROMPT = [
   ROLE_INTRO,
@@ -849,7 +901,17 @@ export const ONE_PAGE_REPORT_SYSTEM_PROMPT = FRANQUIAS_VIVA_SYSTEM_PROMPT;
 //  - "generic"/fallback → GENERIC_SYSTEM_PROMPT.
 // O template de Franquias Viva tem prioridade máxima, então empresas desse
 // segmento sempre recaem no prompt da Viva — comportamento atual preservado.
-export function resolveOnePageSystemPrompt(input: OnePageInput): string {
+export function resolveOnePageSystemPrompt(
+  input: OnePageInput,
+  opts: {
+    /**
+     * true quando o user prompt levara o bloco de contexto da controladoria.
+     * Anexa CONTEXTO_CONTROLADORIA_RULE — sem contexto, o prompt continua
+     * exatamente o de antes.
+     */
+    hasBusinessContext?: boolean;
+  } = {},
+): string {
   const template = resolveReportTemplate({
     companyId: input.empresa.id,
     companyName: input.empresa.nome,
@@ -868,11 +930,14 @@ export function resolveOnePageSystemPrompt(input: OnePageInput): string {
         return GENERIC_SYSTEM_PROMPT;
     }
   })();
-  // Regra extra SÓ quando o input traz as linhas do quadro do relatório (opt-in
-  // por template). Sem o campo, o prompt é byte a byte o de sempre.
-  return input.indicadores_relatorio
-    ? [base, INDICADORES_RELATORIO_RULE].join("\n\n")
-    : base;
+  // Regras extras, cada uma só quando o caso ocorre. Sem elas o prompt é byte a
+  // byte o de sempre — nenhuma empresa muda de comportamento sem o gatilho.
+  const extras = [
+    input.indicadores_relatorio ? INDICADORES_RELATORIO_RULE : null,
+    opts.hasBusinessContext ? CONTEXTO_CONTROLADORIA_RULE : null,
+  ].filter((rule): rule is string => rule !== null);
+
+  return extras.length > 0 ? [base, ...extras].join("\n\n") : base;
 }
 
 // ============================================================================

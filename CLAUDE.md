@@ -152,9 +152,13 @@ There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct
 
 `Financeiro > Validação Relatório` (`/financeiro/validacao-relatorio`) is the human gate between generation and delivery. Access whitelist lives in `src/lib/auth/bi-validation.ts` (profile `csc`, admin, and two named e-mails) and is mirrored by `public.can_validate_bi_reports()` in RLS. Actions: **Aceitar** (unlocks 1-click send), **Revisão** (blocks send, records who/when/why), **Adicionar contexto** (free text → re-runs the AI analysis with the context; numbers never change), **Histórico de contexto** (read-only list of every context ever added to that company × month — text, author, timestamp, and the report version it was applied to; served by `GET /api/bi-validation/[id]/contextos` from `bi_report_validation_contexts`). Context **accumulates**: each new text is appended to `extra_context`, so the history is what tells the CSC what is already in the prompt. The history stays available after the send and when generation failed.
 
+**O contexto precisa ser autorizado no system prompt, não só anexado ao user prompt.** O `SHARED_TAIL` de `one-page-prompt.ts` manda, em "REGRAS INVIOLÁVEIS", nunca citar eventos/nomes fora do JSON e justificar ações só nos indicadores — diante do conflito o modelo obedecia a regra inviolável e **descartava** o texto do CSC (Terrazzo, jul/2026: IPTU contestado judicialmente não saiu no relatório). Por isso `resolveOnePageSystemPrompt(input, { hasBusinessContext })` anexa `CONTEXTO_CONTROLADORIA_RULE`, que abre a exceção e torna o uso obrigatório. Segue o padrão do `INDICADORES_RELATORIO_RULE`: só entra quando há contexto, então o prompt de todo relatório sem contexto continua byte a byte o mesmo. Ao endurecer as regras invioláveis, cheque se a nova regra não volta a proibir o contexto.
+
 The e-mail is rendered from `OnePageReportPreviewData` — the *same* object the screen renders — by `one-page-email.ts`. That is what keeps the e-mail identical to the BI screen per company (block allowlist, template-exclusive blocks, hidden fields). Do not add a second renderer fed from the raw payload.
 
 Recipients are always resolved server-side from the validation row's `company_id`; the client only sends the row id.
+
+O **PDF** da prévia (botão "Baixar PDF", no topo do diálogo do olho) e o da tela de Business Intelligence saem do mesmo lugar: `exportOnePageReportPdf` em `src/lib/financeiro/relatorios/export-one-page-pdf.ts` — html2canvas sobre a folha `.one-page-report` já renderizada + jsPDF, com as libs em import dinâmico (ficam fora do bundle inicial). As duas telas capturam o mesmo componente, então o arquivo é idêntico; não crie um segundo exportador.
 
 ### Lembrete diário de aprovações (CTRL / Compras)
 

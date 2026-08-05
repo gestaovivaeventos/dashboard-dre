@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Ban,
   CheckCircle2,
+  Download,
   Eye,
   History,
   Loader2,
@@ -37,6 +38,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toaster";
 import { formatDateTimeBR } from "@/lib/ctrl/datetime";
+import { exportOnePageReportPdf } from "@/lib/financeiro/relatorios/export-one-page-pdf";
 import {
   mapOnePageApiResponseToPreviewData,
   type OnePageApiResponse,
@@ -257,6 +259,9 @@ export function ValidacaoRelatorioClient({
   const [active, setActive] = useState<ValidacaoRelatorioItem | null>(null);
   const [previewData, setPreviewData] = useState<OnePageReportPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  // Container do relatório dentro do dialog — é dele que sai a captura do PDF.
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [note, setNote] = useState("");
   const [context, setContext] = useState("");
 
@@ -372,6 +377,32 @@ export function ValidacaoRelatorioClient({
       closeDialog();
     } finally {
       setPreviewLoading(false);
+    }
+  };
+
+  /**
+   * Baixa em PDF o relatório aberto na prévia. Usa o MESMO exportador da tela
+   * de Business Intelligence, capturando o mesmo componente — o arquivo sai
+   * igual ao de lá e igual ao que o gestor recebe por e-mail.
+   */
+  const handleDownloadPdf = async () => {
+    if (!previewRef.current || !previewData) return;
+    setExportingPdf(true);
+    try {
+      const filename = await exportOnePageReportPdf({
+        container: previewRef.current,
+        empresa: previewData.cabecalho.empresa || (active?.companyName ?? "relatorio"),
+        periodo: previewData.cabecalho.periodo || (active?.periodLabel ?? ""),
+      });
+      showToast({ title: "PDF gerado", description: filename, variant: "success" });
+    } catch (err) {
+      showToast({
+        title: "Falha ao exportar PDF",
+        description: err instanceof Error ? err.message : "Erro inesperado.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
     }
   };
 
@@ -765,21 +796,51 @@ export function ValidacaoRelatorioClient({
         }}
       >
         <DialogContent className="max-h-[90vh] max-w-[min(1000px,95vw)] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {active?.companyName} — {active?.periodLabel}
-            </DialogTitle>
-            <DialogDescription>
-              Mesma geração exibida no Business Intelligence e enviada por e-mail.
-            </DialogDescription>
-          </DialogHeader>
+          {/* Cabeçalho com a ação de download à direita. Fica no TOPO (e não no
+              rodapé) porque o relatório é longo: no rodapé o botão só apareceria
+              depois de rolar a prévia inteira. */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <DialogHeader className="flex-1">
+              <DialogTitle>
+                {active?.companyName} — {active?.periodLabel}
+              </DialogTitle>
+              <DialogDescription>
+                Mesma geração exibida no Business Intelligence e enviada por e-mail.
+              </DialogDescription>
+            </DialogHeader>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleDownloadPdf()}
+              disabled={exportingPdf || !previewData}
+              // Espaço para o "X" de fechar do dialog, que fica no canto direito.
+              className="mr-6 shrink-0"
+              title="Baixar este relatório em PDF (mesmo arquivo gerado no Business Intelligence)."
+            >
+              {exportingPdf ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Gerando PDF...
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" />
+                  Baixar PDF
+                </>
+              )}
+            </Button>
+          </div>
           {previewLoading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Carregando relatório...
             </div>
           ) : previewData ? (
-            <OnePageReportPreview data={previewData} />
+            // O ref envolve a prévia: a captura do PDF sai deste nó.
+            <div ref={previewRef}>
+              <OnePageReportPreview data={previewData} />
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>

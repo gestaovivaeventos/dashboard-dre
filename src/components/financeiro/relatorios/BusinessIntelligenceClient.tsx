@@ -15,6 +15,7 @@ import type { OnePageReportPreviewData } from "@/components/financeiro/relatorio
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toaster";
+import { exportOnePageReportPdf } from "@/lib/financeiro/relatorios/export-one-page-pdf";
 import {
   mapOnePageApiResponseToPreviewData,
   type OnePageApiResponse,
@@ -402,99 +403,18 @@ export function BusinessIntelligenceClient({
 
   // ─── Export PDF ───────────────────────────────────────────────────────────
   //
-  // Captura o DOM do relatorio com html2canvas (alta resolucao via scale=2)
-  // e embute como imagem unica em PDF A4 paisagem via jsPDF. As bibliotecas
-  // sao carregadas DINAMICAMENTE — saem do bundle inicial e so chegam ao
-  // navegador na hora do clique. Custo do clique: ~250kb gz baixados +
-  // ~1-2s para renderizar capture e gerar PDF.
-  //
-  // Single-page: a imagem capturada e escalada para caber inteira em UMA
-  // pagina A4 paisagem. Escolhe entre fit-by-width ou fit-by-height de
-  // forma que tudo fique visivel sem quebra de pagina.
-  const sanitizeFilename = (s: string) =>
-    s.replace(/[/\\?%*:|"<>\s]+/g, "_").replace(/_+/g, "_");
-
+  // A captura em si vive em @/lib/financeiro/relatorios/export-one-page-pdf —
+  // a tela de Validação Relatório exporta o MESMO relatório pelo mesmo caminho,
+  // então manter a lógica em um lugar só garante PDFs idênticos nas duas.
   const handleExportPdf = async () => {
     if (!reportRef.current) return;
     setExporting(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas"),
-        import("jspdf"),
-      ]);
-
-      // Captura apenas a FOLHA branca (.one-page-report), nao o fundo cinza
-      // "de mesa" (.opr-page) que existe so para a previa na tela — assim o PDF
-      // sai como folha branca limpa, sem a moldura cinza ao redor.
-      const captureTarget =
-        reportRef.current.querySelector<HTMLElement>(".one-page-report") ??
-        reportRef.current;
-      const canvas = await html2canvas(captureTarget, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-        useCORS: true,
-        logging: false,
-        // `onclone` roda no DOM clonado que o html2canvas usa para captura.
-        // Forca `overflow: visible` em wrappers do recharts e SVGs internos —
-        // sem isso os LabelList posicionados fora do plot area (position
-        // "right" nas barras horizontais e "top" nas barras verticais) sao
-        // clipados e nao aparecem no PDF.
-        onclone: (clonedDoc) => {
-          const selectors = [
-            ".recharts-wrapper",
-            ".recharts-surface",
-            ".recharts-responsive-container",
-            "svg",
-          ];
-          clonedDoc
-            .querySelectorAll<HTMLElement | SVGElement>(selectors.join(","))
-            .forEach((el) => {
-              (el as HTMLElement).style.overflow = "visible";
-              if ("setAttribute" in el) {
-                el.setAttribute("overflow", "visible");
-              }
-            });
-          // Elementos interativos (ex.: botão de exportar planilha) não fazem
-          // parte do documento impresso — remove-os do clone capturado.
-          clonedDoc
-            .querySelectorAll<HTMLElement>("[data-export-hide]")
-            .forEach((el) => {
-              el.style.display = "none";
-            });
-          // Folha branca plana no PDF: remove sombra, cantos arredondados e
-          // margem do card (a moldura cinza vem do pai, que nao e capturado).
-          const art = clonedDoc.querySelector<HTMLElement>(".one-page-report");
-          if (art) {
-            art.style.boxShadow = "none";
-            art.style.borderRadius = "0";
-            art.style.margin = "0";
-          }
-        },
+      const filename = await exportOnePageReportPdf({
+        container: reportRef.current,
+        empresa: data?.cabecalho.empresa ?? "preview",
+        periodo: data?.cabecalho.periodo ?? "preview",
       });
-
-      const imgData = canvas.toDataURL("image/png");
-
-      // Página com o formato EXATO do relatório: largura fixa de 210 mm (A4
-      // retrato) e altura proporcional ao conteúdo. Assim o relatório preenche a
-      // folha inteira na largura — sem margens laterais sobrando — e sai em UMA
-      // única página, sem distorção. (Antes: A4 fixo + fit-to-page, que em
-      // relatórios altos deixava o conteúdo estreito e centralizado na folha.)
-      const pageWidth = 210;
-      const pageHeight = Math.max(1, Math.round((canvas.height / canvas.width) * pageWidth));
-      const pdf = new jsPDF({
-        orientation: pageHeight >= pageWidth ? "portrait" : "landscape",
-        unit: "mm",
-        format: [pageWidth, pageHeight],
-        compress: true,
-      });
-      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
-
-      const empresa = data?.cabecalho.empresa ?? "preview";
-      const periodo = data?.cabecalho.periodo ?? "preview";
-      const filename = sanitizeFilename(
-        `OnePageReport_${empresa}_${periodo}.pdf`,
-      );
-      pdf.save(filename);
 
       showToast({
         title: "PDF gerado",
