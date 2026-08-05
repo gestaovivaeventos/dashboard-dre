@@ -19,12 +19,23 @@ async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
     .from("ctrl_budget")
     .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
     .eq("period_year", year);
+  // Requisições de 1 setor (is_rateio = false). As rateadas entram pelas suas
+  // parcelas (rateioQuery), cada uma no orçamento do SEU setor.
   let requestsQuery = supabase
     .from("ctrl_requests")
     .select("expense_type_id, sector_id, status, amount, due_date, created_at")
     .not("status", "in", '("rejeitado","estornado","inativado_csc")')
     .is("deleted_at", null) // exclui requisições excluídas logicamente
+    .eq("is_rateio", false)
     .eq("reference_year", year);
+  // Parcelas dos rateios, filtradas pelo SETOR da parcela (não o setor primário
+  // da requisição) — assim o gerente escopado vê a parte que cai no setor dele.
+  let rateioQuery = supabase
+    .from("ctrl_request_sectors")
+    .select("sector_id, amount, ctrl_requests!inner(expense_type_id, status, due_date, created_at, reference_year, deleted_at)")
+    .not("ctrl_requests.status", "in", '("rejeitado","estornado","inativado_csc")')
+    .is("ctrl_requests.deleted_at", null)
+    .eq("ctrl_requests.reference_year", year);
   let sectorsQuery = supabase.from("ctrl_sectors").select("id, name");
 
   // Escopo por setor: linhas sem setor ("Sem setor") também ficam de fora,
@@ -32,18 +43,21 @@ async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
   if (sectorFilter) {
     budgetQuery = budgetQuery.in("sector_id", sectorFilter);
     requestsQuery = requestsQuery.in("sector_id", sectorFilter);
+    rateioQuery = rateioQuery.in("sector_id", sectorFilter);
     sectorsQuery = sectorsQuery.in("id", sectorFilter);
   }
 
-  const [budgetRes, requestsRes, typesRes, sectorsRes] = await Promise.all([
+  const [budgetRes, requestsRes, rateioRes, typesRes, sectorsRes] = await Promise.all([
     budgetQuery,
     requestsQuery,
+    rateioQuery,
     supabase.from("ctrl_expense_types").select("id, name").order("name"),
     sectorsQuery,
   ]);
 
   if (budgetRes.error) return { error: budgetRes.error.message };
   if (requestsRes.error) return { error: requestsRes.error.message };
+  if (rateioRes.error) return { error: rateioRes.error.message };
 
   const typeName = new Map<string, string>((typesRes.data ?? []).map((t) => [t.id, t.name]));
   typeName.set("__none__", "Sem categoria");
@@ -88,6 +102,21 @@ async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
     const sectorKey = r.sector_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
     bump(typeKey, sectorKey, isApproved ? "realizado" : "pendente", Number(r.amount));
+  }
+
+  // Parcelas dos rateios: cada uma no orçamento do SEU setor. A classificação
+  // (realizado/pendente) segue o status da requisição-mãe (só vira realizado
+  // quando a requisição inteira é aprovada/enviada).
+  for (const row of rateioRes.data ?? []) {
+    const req = (Array.isArray(row.ctrl_requests) ? row.ctrl_requests[0] : row.ctrl_requests) as
+      | { expense_type_id: string | null; status: string; due_date: string | null; created_at: string }
+      | null;
+    if (!req) continue;
+    if (!countsTowardBudget(req, year)) continue;
+    const typeKey = req.expense_type_id ?? "__none__";
+    const sectorKey = (row.sector_id as string | null) ?? "__none__";
+    const isApproved = req.status === "aprovado" || req.status === "agendado";
+    bump(typeKey, sectorKey, isApproved ? "realizado" : "pendente", Number(row.amount));
   }
 
   const rows: OrcamentoRow[] = Array.from(typeAgg.entries())

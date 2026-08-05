@@ -158,6 +158,8 @@ async function performBudgetVerification(
   // A planilha-base já incorpora o realizado até 07/07/2026. Para 2026, o saldo
   // dinâmico conta só ocorrências com VENCIMENTO a partir de 08/07/2026 — assim
   // parcelas/recorrências já lançadas seguem descontando pelas datas futuras.
+  // Requisições de 1 setor aprovadas neste setor (exclui as rateadas, que são
+  // contadas pelas suas parcelas logo abaixo). Ignora excluídas logicamente.
   const { data: approved } = await supabase
     .from("ctrl_requests")
     .select("amount, due_date, created_at")
@@ -165,13 +167,35 @@ async function performBudgetVerification(
     .eq("expense_type_id", expenseTypeId)
     .eq("reference_year", referenceYear)
     .eq("status", "aprovado")
-    // Ignora requisições excluídas logicamente (soft delete) — devolvem o valor
-    // ao orçamento automaticamente por saírem desta soma.
+    .eq("is_rateio", false)
     .is("deleted_at", null);
 
-  const totalApproved = (approved ?? [])
-    .filter((r) => countsTowardBudget(r, referenceYear))
-    .reduce((s, r) => s + Number(r.amount), 0);
+  // Parcelas de RATEIOS aprovados que caem NESTE setor (a parcela do setor, não o
+  // total da requisição). O join filtra pela requisição-mãe (tipo/ano/status).
+  const { data: approvedRateio } = await supabase
+    .from("ctrl_request_sectors")
+    .select("amount, ctrl_requests!inner(due_date, created_at, expense_type_id, reference_year, status, deleted_at)")
+    .eq("sector_id", sectorId)
+    .eq("ctrl_requests.expense_type_id", expenseTypeId)
+    .eq("ctrl_requests.reference_year", referenceYear)
+    .eq("ctrl_requests.status", "aprovado")
+    .is("ctrl_requests.deleted_at", null);
+
+  const embeddedReq = (row: { ctrl_requests: unknown }) => {
+    const r = row.ctrl_requests;
+    return (Array.isArray(r) ? r[0] : r) as { due_date: string | null; created_at: string } | null;
+  };
+
+  const totalApproved =
+    (approved ?? [])
+      .filter((r) => countsTowardBudget(r, referenceYear))
+      .reduce((s, r) => s + Number(r.amount), 0) +
+    (approvedRateio ?? [])
+      .filter((row) => {
+        const req = embeddedReq(row as { ctrl_requests: unknown });
+        return req ? countsTowardBudget(req, referenceYear) : false;
+      })
+      .reduce((s, row) => s + Number((row as { amount: number }).amount), 0);
 
   // Realizado total = importado da planilha + requisições já aprovadas.
   const currentBalance = budgetedUpToMonth - realizedUpToMonth - totalApproved;
