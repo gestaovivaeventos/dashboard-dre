@@ -288,15 +288,12 @@ export interface OnePageReportPreviewData {
   vvrSerieAnual: VvrSerieAnualPoint[];
   alertas: AlertaCard[];
   semaforo: SemaforoItem[];
-  diagnosticoPrincipal: string;
   /**
-   * Leitura executiva do contexto informado pela controladoria (tela Validação
-   * Relatório > "Adicionar contexto"). undefined na esmagadora maioria dos
-   * relatórios — o bloco só aparece quando o CSC escreveu algo. Renderizado
-   * SEMPRE que presente, em qualquer template: é a garantia de que o ponto
-   * levantado chega ao leitor (os demais campos passam por prioridade e corte).
+   * Leitura central do período. Quando o CSC adiciona contexto na tela
+   * Validação Relatório, a explicação dele vem AQUI, no mesmo texto — não há
+   * bloco separado de contexto (evita repetir a mesma informação duas vezes).
    */
-  contextoControladoria?: string;
+  diagnosticoPrincipal: string;
   acoes: AcaoCard[];
   // ── Extensões por template (Fase 2) ───────────────────────────────────────
   // Ausência de todas = comportamento Franquias Viva (mostra todos os blocos,
@@ -868,44 +865,6 @@ function ResumoExecutivo({
         </div>
       </div>
 
-      {/* Contexto da controladoria — faixa de largura total logo abaixo do
-          diagnóstico. Só existe quando o CSC adicionou contexto na tela de
-          Validação Relatório; nos demais relatórios nada é renderizado.
-          Fica AQUI, e não dentro de alertas/destaques, porque aqueles blocos
-          priorizam riscos e cortam em 3 cards — o ponto levantado pelo CSC
-          precisa chegar ao leitor sempre. */}
-      {data.contextoControladoria ? (
-        <div
-          style={{
-            ...panelStyle,
-            marginTop: 12,
-            borderLeft: `3px solid ${accent}`,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              fontWeight: 600,
-              color: accent,
-            }}
-          >
-            Contexto do período
-          </div>
-          <p
-            style={{
-              margin: "8px 0 0",
-              fontSize: 12.5,
-              lineHeight: 1.55,
-              color: C.body,
-              textWrap: "pretty",
-            }}
-          >
-            {data.contextoControladoria}
-          </p>
-        </div>
-      ) : null}
     </section>
   );
 }

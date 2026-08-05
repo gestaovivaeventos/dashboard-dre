@@ -847,14 +847,16 @@ REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
    nao estejam no JSON" NAO se aplica ao conteudo desse bloco. Fatos, causas,
    tributos, contratos, obras, processos e decisoes citados ali sao DADOS
    AUTORIZADOS — use-os com naturalidade no texto.
-2. Incorporar o contexto e OBRIGATORIO, em DOIS lugares no minimo:
-   a) o campo "contextoControladoria" (2 a 4 frases) — obrigatorio, nunca null
-      quando o bloco existir; e
-   b) o "diagnosticoPrincipal" — a explicacao TEM de aparecer na leitura
-      central do periodo, porque e o texto que o leitor sempre ve.
-   Alem desses, use tambem "destaques", "pontosAtencao", "acoesRecomendadas" e
-   "leituraPorIndicador" onde couber. Relatorio que ignora o contexto informado
-   esta ERRADO.
+2. Incorporar o contexto e OBRIGATORIO, e o lugar dele e o
+   "diagnosticoPrincipal" — o unico texto que TODO relatorio exibe ao leitor.
+   Com contexto, esse campo deixa de ser 1-2 frases: escreva de 3 a 5 frases,
+   costurando a leitura central do periodo COM a explicacao da controladoria
+   num texto unico e continuo. Nao existe secao separada de contexto no
+   relatorio: o que nao estiver aqui (ou nos alertas e acoes) nao chega ao
+   leitor.
+   Alem dele, use tambem "destaques", "pontosAtencao", "acoesRecomendadas" e
+   "leituraPorIndicador" onde couber — sem REPETIR as mesmas frases: cada campo
+   acrescenta algo. Relatorio que ignora o contexto informado esta ERRADO.
 2.1. NOMEIE OS FATOS. E PROIBIDO resumir o contexto em generalidades como
    "fatores pontuais", "efeitos nao recorrentes", "questoes especificas do
    periodo", "eventos extraordinarios" SEM dizer QUAIS sao. Cite o fato
@@ -945,19 +947,20 @@ F. NAO ANUNCIE A CORRECAO. Escreva o relatorio ja corrigido, como se aquela
    procede" ou qualquer referencia a versoes passadas do relatorio: o leitor
    recebe UMA versao e nao viu as anteriores.
 
-# CAMPO "contextoControladoria" — COMO ESCREVER
+# DIAGNOSTICO PRINCIPAL COM CONTEXTO — COMO ESCREVER
 
-Publico: socios e diretoria, que NAO leram o texto da controladoria. Escreva
-como quem explica o mes: qual indicador o contexto explica, QUAIS sao os
-fatores (nomeados, com valores quando informados) e o que isso significa para
-a leitura do periodo (pontual x estrutural). 2 a 4 frases, sem repetir o
-diagnostico palavra por palavra e sem citar "a controladoria informou" mais de
-uma vez.
+Publico: socios e diretoria, que NAO leram o texto da controladoria. Um texto
+so, corrido, que responda: o que aconteceu no periodo, POR QUE (com os fatores
+nomeados e os valores que o contexto informar) e o que isso significa para a
+leitura do mes (pontual x estrutural). Nao use titulo, marcador nem a
+expressao "a controladoria informou" — o leitor nao precisa saber a origem da
+informacao, so a explicacao.
 
-Exemplo de conteudo esperado (adapte ao contexto real, nunca copie): "A queda
-de 70,7% nas despesas operacionais frente ao orcamento tem duas causas
-identificadas: o IPTU de 2026 nao foi desembolsado, por contestacao judicial
-do valor — hoje se paga apenas o parcelamento de 2024 —, e a reserva de
+Exemplo de conteudo esperado (adapte ao contexto real, nunca copie): "A receita
+ficou 53,2% abaixo do orcado, puxada pela ausencia de eventos de formatura no
+mes. A forte queda das despesas operacionais (-70,7%) tem duas causas
+identificadas: o IPTU de 2026 nao foi desembolsado, por contestacao judicial do
+valor — hoje se paga apenas o parcelamento de 2024 —, e a reserva de
 R$ 8.000/mes prevista para investimentos nao foi utilizada. Sao efeitos
 pontuais: o desembolso do IPTU pode voltar a ocorrer conforme o desfecho da
 discussao judicial, de modo que a economia do periodo nao deve ser lida como
