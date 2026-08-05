@@ -373,7 +373,17 @@ function renderResumo(data: OnePageReportPreviewData, showSemaforo: boolean): st
       </tr></table>`
     : diagnosticoPanel;
 
-  return `${sectionTitle("Resumo Executivo")}${body}`;
+  // Contexto da controladoria — mesmo bloco da tela (largura total, abaixo do
+  // diagnóstico). Só sai quando o CSC adicionou contexto.
+  const contextoPanel = data.contextoControladoria
+    ? `<div style="margin-top:12px;">${panel(`
+        <div style="font-family:${FF};font-size:10px;letter-spacing:0.14em;text-transform:uppercase;font-weight:600;color:${C.accent};">Contexto do período</div>
+        <p style="font-family:${FF};margin:8px 0 0;font-size:12.5px;line-height:1.55;color:${C.body};">${esc(
+          data.contextoControladoria,
+        )}</p>`)}</div>`
+    : "";
+
+  return `${sectionTitle("Resumo Executivo")}${body}${contextoPanel}`;
 }
 
 function renderTabelaDesempenho(data: OnePageReportPreviewData, showSemaforo: boolean): string {

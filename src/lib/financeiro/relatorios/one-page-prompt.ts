@@ -217,7 +217,14 @@ Comente os indicadores estruturais presentes no input. Use o "nome" EXATO do ind
   - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em deducao de receita, despesa ou custo — caso favoravel).
   - "Neutro": variacao dentro de +/- 5% versus orcamento, OU sem orcamento informado.
   - "Atenção": variacao desfavoravel mas controlavel.
-  - "Crítico": variacao significativa que ameaca o resultado consolidado.`;
+  - "Crítico": variacao significativa que ameaca o resultado consolidado.
+
+## "contextoControladoria" (texto ou null)
+Preencha SOMENTE quando o user prompt trouxer o bloco "CONTEXTO DE NEGOCIO
+INFORMADO PELA CONTROLADORIA (CSC)". Sem esse bloco, o valor e null.
+Quando houver, escreva 2 a 4 frases explicando ao leitor o que a controladoria
+informou e como isso explica os numeros do periodo — regras detalhadas na
+secao especifica ao final deste prompt.`;
 
 // ============================================================================
 // Contexto de negocio — FRANQUIAS VIVA
@@ -847,11 +854,26 @@ REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
    nao estejam no JSON" NAO se aplica ao conteudo desse bloco. Fatos, causas,
    tributos, contratos, obras, processos e decisoes citados ali sao DADOS
    AUTORIZADOS — use-os com naturalidade no texto.
-2. Incorporar o contexto e OBRIGATORIO. Quando ele explicar a variacao de um
-   indicador, a explicacao TEM de aparecer no "diagnosticoPrincipal" ou no
-   "resumoExecutivo" E no item correspondente de "destaques", "pontosAtencao"
-   ou "leituraPorIndicador". Relatorio que ignora o contexto informado esta
-   ERRADO.
+2. Incorporar o contexto e OBRIGATORIO, em DOIS lugares no minimo:
+   a) o campo "contextoControladoria" (2 a 4 frases) — obrigatorio, nunca null
+      quando o bloco existir; e
+   b) o "diagnosticoPrincipal" — a explicacao TEM de aparecer na leitura
+      central do periodo, porque e o texto que o leitor sempre ve.
+   Alem desses, use tambem "destaques", "pontosAtencao", "acoesRecomendadas" e
+   "leituraPorIndicador" onde couber. Relatorio que ignora o contexto informado
+   esta ERRADO.
+2.1. NOMEIE OS FATOS. E PROIBIDO resumir o contexto em generalidades como
+   "fatores pontuais", "efeitos nao recorrentes", "questoes especificas do
+   periodo", "eventos extraordinarios" SEM dizer QUAIS sao. Cite o fato
+   concreto que a controladoria informou — o tributo, o processo, a obra, o
+   contrato, a reserva, o cliente, a decisao — com o nome e, quando o contexto
+   informar, o valor e o ano. Frase errada: "as despesas ficaram abaixo do
+   orcado por fatores pontuais". Frase certa: "as despesas ficaram abaixo do
+   orcado porque o IPTU de 2026 nao foi desembolsado (contestacao judicial do
+   valor, pagando-se apenas o parcelamento de 2024) e porque a reserva de
+   R$ 8.000/mes para investimentos nao foi utilizada".
+2.2. Se o contexto trouxer MAIS DE UM fator, cite TODOS. Escolher so o mais
+   facil de escrever deixa o leitor com uma explicacao incompleta.
 3. Uma acao recomendada PODE ser justificada pelo contexto: a exigencia de
    "conectar a acao a um dado do input" fica atendida quando a justificativa
    cita o que a controladoria informou.
@@ -864,9 +886,27 @@ REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
    explicita: NAO apresente o efeito como ganho estrutural de eficiencia, e
    sinalize quando o desembolso puder voltar a ocorrer.
 6. NAO contradiga o contexto e NAO o copie literalmente — reescreva em
-   linguagem executiva.
+   linguagem executiva, corrigindo erros de digitacao do texto original.
 7. NAO extrapole alem do que o bloco diz. Onde ele nao explica um indicador,
-   siga a leitura normal dos numeros.`;
+   siga a leitura normal dos numeros.
+
+# CAMPO "contextoControladoria" — COMO ESCREVER
+
+Publico: socios e diretoria, que NAO leram o texto da controladoria. Escreva
+como quem explica o mes: qual indicador o contexto explica, QUAIS sao os
+fatores (nomeados, com valores quando informados) e o que isso significa para
+a leitura do periodo (pontual x estrutural). 2 a 4 frases, sem repetir o
+diagnostico palavra por palavra e sem citar "a controladoria informou" mais de
+uma vez.
+
+Exemplo de conteudo esperado (adapte ao contexto real, nunca copie): "A queda
+de 70,7% nas despesas operacionais frente ao orcamento tem duas causas
+identificadas: o IPTU de 2026 nao foi desembolsado, por contestacao judicial
+do valor — hoje se paga apenas o parcelamento de 2024 —, e a reserva de
+R$ 8.000/mes prevista para investimentos nao foi utilizada. Sao efeitos
+pontuais: o desembolso do IPTU pode voltar a ocorrer conforme o desfecho da
+discussao judicial, de modo que a economia do periodo nao deve ser lida como
+ganho estrutural de eficiencia."`;
 
 // ── Montagem dos prompts por segmento ───────────────────────────────────────
 export const FRANQUIAS_VIVA_SYSTEM_PROMPT = [

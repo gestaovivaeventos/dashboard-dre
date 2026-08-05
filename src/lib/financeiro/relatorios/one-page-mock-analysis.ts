@@ -25,6 +25,9 @@ import type { ReportTemplateId } from "@/lib/financeiro/relatorios/templates/rep
 const RAW_MOCK: OnePageReport = {
   statusGeral: "Boa",
   notaGeral: 78,
+  // Mock nunca tem contexto do CSC: o bloco "Contexto do período" só existe em
+  // relatório real com contexto adicionado na tela de Validação Relatório.
+  contextoControladoria: null,
   resumoExecutivo:
     "Relatório de teste gerado sem IA, usando dados financeiros reais e análise mockada para validação visual.",
   diagnosticoPrincipal:
@@ -157,6 +160,7 @@ function buildCoreMock(args: {
   return {
     statusGeral: "Boa",
     notaGeral: 75,
+    contextoControladoria: null,
     resumoExecutivo: args.resumo,
     diagnosticoPrincipal: args.diagnostico,
     destaques: [
@@ -227,6 +231,7 @@ const GENERIC_MOCK = buildCoreMock({
 const RAW_MOCK_VILLAGE: OnePageReport = {
   statusGeral: "Atenção",
   notaGeral: 62,
+  contextoControladoria: null,
   resumoExecutivo:
     "Análise de teste (sem IA) no contexto da Village — construtora com custos reembolsáveis e reembolsos de obra. No período, a receita de serviços ficou dentro do esperado, mas o gap de reembolso foi negativo: parte dos custos reembolsáveis ainda não foi compensada pelos reembolsos do mês (descasamento típico M/M+1). O resultado ajustado, que remove o efeito do gap, indica uma operação mais saudável do que o resultado operacional contábil isolado.",
   diagnosticoPrincipal:

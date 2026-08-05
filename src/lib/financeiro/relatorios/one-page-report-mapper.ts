@@ -829,6 +829,11 @@ export function mapOnePageApiResponseToPreviewData(
       ? mapSemaforoFromList(response.analysis, customKpis)
       : mapSemaforo(response.analysis, response.kpis, response.previstoRealizado),
     diagnosticoPrincipal: mapDiagnostico(response.analysis),
+    // Leitura do contexto informado pela controladoria. Passa direto: quando a
+    // IA devolve null (relatório sem contexto — a regra), o bloco não existe e
+    // nada muda no relatório. Não é filtrado por `enabledBlocks`: se o CSC
+    // escreveu um contexto, ele vale para QUALQUER empresa/template.
+    contextoControladoria: response.analysis?.contextoControladoria?.trim() || undefined,
     acoes: mapAcoes(response.analysis),
     // Allowlist de blocos visíveis (undefined = todos — comportamento Viva).
     blocks: response.enabledBlocks,

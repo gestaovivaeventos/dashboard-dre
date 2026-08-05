@@ -75,6 +75,22 @@ export const OnePageReportSchema = z.object({
   // Sem limite minimo de leituras, mas cap em 12 para preservar o formato
   // One Page (mesmo limite usado em outras telas executivas do projeto).
   leituraPorIndicador: z.array(LeituraIndicadorSchema).min(0).max(12),
+  // Leitura executiva do CONTEXTO informado pela controladoria na tela
+  // Validação Relatório. `null` quando o user prompt NAO traz bloco de
+  // contexto — que e o caso da esmagadora maioria dos relatorios.
+  //
+  // Existe como campo PROPRIO porque os demais campos nao garantem que o
+  // contexto chegue ao leitor: "destaques" so aparece no relatorio via bloco
+  // de alertas, que prioriza riscos e corta em 3 cards, e "leituraPorIndicador"
+  // /"justificativa" nem sao renderizados. Este campo tem bloco fixo no
+  // relatorio e no e-mail — se o CSC escreveu, o gestor le.
+  contextoControladoria: z
+    .string()
+    .max(600)
+    .nullable()
+    .describe(
+      "Explicacao executiva (2 a 4 frases) do contexto informado pela controladoria, NOMEANDO os fatos concretos que explicam as variacoes do periodo. null quando nao houver contexto informado.",
+    ),
 });
 
 // ─── Tipos TS derivados ────────────────────────────────────────────────────
