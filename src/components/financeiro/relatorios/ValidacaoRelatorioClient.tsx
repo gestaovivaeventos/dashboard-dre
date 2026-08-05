@@ -7,6 +7,7 @@ import {
   Ban,
   CheckCircle2,
   Eye,
+  History,
   Loader2,
   MessageSquarePlus,
   RefreshCw,
@@ -35,6 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toaster";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import {
   mapOnePageApiResponseToPreviewData,
   type OnePageApiResponse,
@@ -137,7 +139,98 @@ function formatDateTime(iso: string | null): string {
   return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
 }
 
-type DialogMode = "preview" | "revisao" | "contexto" | null;
+type DialogMode = "preview" | "revisao" | "contexto" | "historico" | null;
+
+/** Um contexto de negócio registrado — vem de bi_report_validation_contexts. */
+interface ContextHistoryEntry {
+  id: string;
+  text: string;
+  /**
+   * Versão do relatório gerada COM este texto. `null` = o texto ficou gravado
+   * mas a regeração falhou, então ele ainda não influenciou nenhuma análise.
+   */
+  appliedVersion: number | null;
+  createdAt: string;
+  authorLabel: string;
+}
+
+/**
+ * Lista de contextos já registrados, do mais recente para o mais antigo.
+ * Usada no dialog "Histórico de contexto" e, em versão compacta, dentro do
+ * dialog "Adicionar contexto".
+ */
+function ContextHistoryList({
+  entries,
+  loading,
+  error,
+  emptyMessage,
+  compact = false,
+}: {
+  entries: ContextHistoryEntry[];
+  loading: boolean;
+  error: string | null;
+  emptyMessage: string;
+  compact?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Carregando histórico...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <div className="font-semibold">Falha ao carregar o histórico</div>
+          <div className="text-xs">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return <p className="py-4 text-sm text-muted-foreground">{emptyMessage}</p>;
+  }
+
+  return (
+    <ol className={compact ? "space-y-2" : "space-y-3"}>
+      {entries.map((entry) => (
+        <li
+          key={entry.id}
+          className="rounded-md border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40"
+        >
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="font-semibold text-ink-primary">{entry.authorLabel}</span>
+            <span aria-hidden>·</span>
+            <span>{formatDateTimeBR(entry.createdAt)}</span>
+            <span aria-hidden>·</span>
+            {entry.appliedVersion ? (
+              <span className="rounded-full bg-sky-100 px-2 py-0.5 font-semibold text-sky-800">
+                aplicado na versão {entry.appliedVersion}
+              </span>
+            ) : (
+              // Texto gravado sem regeração bem-sucedida: registrado, porém
+              // ainda não considerado por nenhuma análise.
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">
+                não aplicado
+              </span>
+            )}
+          </div>
+          <p
+            className={`mt-1.5 whitespace-pre-wrap text-ink-primary ${compact ? "text-xs" : "text-sm"}`}
+          >
+            {entry.text}
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function ValidacaoRelatorioClient({
   items,
@@ -167,6 +260,12 @@ export function ValidacaoRelatorioClient({
   const [note, setNote] = useState("");
   const [context, setContext] = useState("");
 
+  // Histórico de contextos do relatório aberto (dialog "historico" e também o
+  // resumo dentro do dialog "contexto").
+  const [history, setHistory] = useState<ContextHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
   const visible = useMemo(
     () => items.filter((i) => i.periodLabel === period),
     [items, period],
@@ -180,6 +279,35 @@ export function ValidacaoRelatorioClient({
     setPreviewData(null);
     setNote("");
     setContext("");
+    setHistory([]);
+    setHistoryError(null);
+  };
+
+  /**
+   * Carrega o histórico de contextos de UM relatório. Rota própria: o
+   * histórico existe mesmo sem `report_json` (erro de geração) e continua
+   * consultável depois do envio.
+   */
+  const loadHistory = async (item: ValidacaoRelatorioItem) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const r = await fetch(`/api/bi-validation/${item.id}/contextos`, {
+        cache: "no-store",
+      });
+      const payload = (await r.json().catch(() => null)) as
+        | { contexts?: ContextHistoryEntry[]; error?: string }
+        | null;
+      if (!r.ok) {
+        throw new Error(payload?.error ?? `Falha ao carregar (HTTP ${r.status}).`);
+      }
+      setHistory(payload?.contexts ?? []);
+    } catch (err) {
+      setHistory([]);
+      setHistoryError(err instanceof Error ? err.message : "Erro inesperado.");
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const runAction = async (
@@ -490,6 +618,23 @@ export function ValidacaoRelatorioClient({
                           >
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
+                          {/* Histórico de contexto — disponível SEMPRE, inclusive
+                              depois do envio e quando a geração falhou: é
+                              justamente aí que saber o que já foi informado à
+                              IA importa. */}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setActive(item);
+                              setDialogMode("historico");
+                              void loadHistory(item);
+                            }}
+                            title="Ver o histórico de contextos adicionados a este relatório."
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </Button>
                           {!sent ? (
                             <>
                               <Button
@@ -517,6 +662,10 @@ export function ValidacaoRelatorioClient({
                                   setActive(item);
                                   setContext("");
                                   setDialogMode("contexto");
+                                  // O que já foi informado antes aparece no
+                                  // próprio dialog: o contexto ACUMULA, então
+                                  // repetir o que já vale só polui o prompt.
+                                  void loadHistory(item);
                                 }}
                                 disabled={busy || !hasReport}
                                 title="Adicionar contexto de negócio para a IA reprocessar a análise textual."
@@ -720,6 +869,29 @@ export function ValidacaoRelatorioClient({
               placeholder="Ex.: a queda de receita no mês é sazonal — dois eventos foram remarcados para o mês seguinte."
             />
           </div>
+
+          {/* Contextos já registrados neste relatório. O novo texto SOMA aos
+              anteriores (não os substitui) — ver addValidationContext. */}
+          <div className="space-y-1.5 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="text-xs font-medium text-muted-foreground">
+              Contextos já registrados neste relatório
+              {history.length > 0 ? ` (${history.length})` : ""}
+            </div>
+            <div className="max-h-48 overflow-y-auto pr-1">
+              <ContextHistoryList
+                entries={history}
+                loading={historyLoading}
+                error={historyError}
+                emptyMessage="Nenhum contexto foi adicionado a este relatório até agora."
+                compact
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              O texto novo é somado aos anteriores — todos continuam valendo na
+              próxima análise.
+            </p>
+          </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={closeDialog}>
               Cancelar
@@ -740,6 +912,54 @@ export function ValidacaoRelatorioClient({
               {busyId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Reprocessar com contexto
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Histórico de contexto — consulta, sem ação. */}
+      <Dialog
+        open={dialogMode === "historico"}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+      >
+        <DialogContent className="max-h-[85vh] max-w-[min(720px,95vw)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Histórico de contexto</DialogTitle>
+            <DialogDescription>
+              {active?.companyName} — {active?.periodLabel}. Tudo o que foi informado à IA
+              sobre este relatório, do mais recente para o mais antigo. Os textos ficam
+              guardados mesmo depois do envio.
+            </DialogDescription>
+          </DialogHeader>
+          <ContextHistoryList
+            entries={history}
+            loading={historyLoading}
+            error={historyError}
+            emptyMessage="Nenhum contexto foi adicionado a este relatório até agora."
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDialog}>
+              Fechar
+            </Button>
+            {active && !active.sentAt ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  setContext("");
+                  setDialogMode("contexto");
+                }}
+                disabled={active.status === "erro_geracao"}
+                title={
+                  active.status === "erro_geracao"
+                    ? "Gere o relatório antes de adicionar contexto."
+                    : "Adicionar um novo contexto a este relatório."
+                }
+              >
+                <MessageSquarePlus className="mr-1 h-3.5 w-3.5" />
+                Adicionar contexto
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
