@@ -96,6 +96,11 @@ export interface CreateRequestInput {
   usd_amount?: number;
   usd_brl_rate?: number;
   iof_rate?: number;
+  // Rateio entre setores: a requisição é ÚNICA, mas dividida entre setores, cada
+  // um com seu valor e sua aprovação. Quando is_rateio, `rateio` traz as parcelas
+  // (>= 2 setores) e o `amount` efetivo é a soma delas; `sector_id` recebe o 1º.
+  is_rateio?: boolean;
+  rateio?: { sector_id: string; amount: number }[];
 }
 
 // ─── Budget Verification ──────────────────────────────────────────────────────
@@ -247,6 +252,154 @@ function dueDateForRecurrence(
   return `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+// ─── Create Request (rateio entre setores) ────────────────────────────────────
+//
+// Cria UMA requisição dividida entre vários setores. Cada setor tem seu VALOR e
+// sua APROVAÇÃO própria (ctrl_request_sectors): o nível (dentro/fora do orçamento)
+// é calculado com a parcela DAQUELE setor. A requisição nasce em 'pendente' e só
+// vira 'aprovado' quando todos os setores aprovarem (Fase 4). Isolado do fluxo de
+// 1 setor. Parcelamento/recorrência não se aplicam ao rateio (v1).
+async function createRateioRequest(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
+  data: CreateRequestInput,
+) {
+  const parts = (data.rateio ?? [])
+    .map((p) => ({ sector_id: p.sector_id, amount: Math.round(Number(p.amount) * 100) / 100 }))
+    .filter((p) => p.sector_id && p.amount > 0);
+
+  if (parts.length < 2) return { error: "O rateio precisa de pelo menos 2 setores com valor." };
+  if (new Set(parts.map((p) => p.sector_id)).size !== parts.length) {
+    return { error: "Cada setor só pode aparecer uma vez no rateio." };
+  }
+  if (!data.expense_type_id) return { error: "Selecione o tipo de despesa para ratear." };
+  if (data.reference_month < 1 || data.reference_month > 12) {
+    return { error: "Mês de referência inválido." };
+  }
+
+  // Fornecedor em aprovação não é suportado no rateio (v1).
+  if (data.supplier_id) {
+    const { data: sup } = await supabase
+      .from("ctrl_suppliers")
+      .select("status")
+      .eq("id", data.supplier_id)
+      .single();
+    if (sup?.status === "pendente") {
+      return { error: "Fornecedor em aprovação — aprove-o antes de criar um rateio." };
+    }
+  }
+
+  const total = Math.round(parts.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+
+  // Mês/ano de verificação: pelo vencimento, com fallback para a competência.
+  const vMonth = data.due_date
+    ? new Date(data.due_date + "T00:00:00").getMonth() + 1
+    : data.reference_month;
+  const vYear = data.due_date
+    ? new Date(data.due_date + "T00:00:00").getFullYear()
+    : data.reference_year;
+
+  // Nível de aprovação POR setor (parcela daquele setor no orçamento dele).
+  const perSector: { sector_id: string; amount: number; tier: ApprovalTier; isBudgeted: boolean }[] = [];
+  for (const p of parts) {
+    const v = await performBudgetVerification(
+      supabase,
+      p.sector_id,
+      data.expense_type_id,
+      p.amount,
+      vMonth,
+      vYear,
+    );
+    perSector.push({ ...p, tier: v.approvalTier, isBudgeted: v.isBudgeted });
+  }
+  const anyOverBudget = perSector.some((s) => s.tier === "nivel_3");
+  if (anyOverBudget && !data.justification?.trim()) {
+    return {
+      error: "Justificativa obrigatória — há setor fora do orçamento (exige aprovação do Diretor).",
+    };
+  }
+
+  const primary = parts[0].sector_id;
+
+  const { data: newReq, error: insErr } = await supabase
+    .from("ctrl_requests")
+    .insert({
+      title: data.title,
+      description: data.description ?? null,
+      sector_id: primary,
+      expense_type_id: data.expense_type_id,
+      supplier_id: data.supplier_id ?? null,
+      amount: total,
+      due_date: data.due_date ?? null,
+      reference_month: data.reference_month,
+      reference_year: data.reference_year,
+      payment_method: data.payment_method,
+      justification: data.justification ?? null,
+      observations: data.observations ?? null,
+      event_id: data.event_id ?? null,
+      supplier_issues_invoice: data.supplier_issues_invoice ?? null,
+      invoice_number: data.invoice_number ?? null,
+      bank_name: data.bank_name ?? null,
+      bank_agency: data.bank_agency ?? null,
+      bank_account: data.bank_account ?? null,
+      bank_account_digit: data.bank_account_digit ?? null,
+      bank_cpf_cnpj: data.bank_cpf_cnpj ?? null,
+      pix_key: data.pix_key ?? null,
+      pix_key_type: data.pix_key_type ?? null,
+      favorecido: data.favorecido ?? null,
+      barcode: data.barcode ?? null,
+      attachment_path: data.attachment_path ?? null,
+      invoice_attachment_path: data.invoice_attachment_path ?? null,
+      extra_attachment_paths: data.extra_attachment_paths ?? [],
+      needs_credit_card: data.needs_credit_card ?? null,
+      is_rateio: true,
+      is_budgeted: perSector.every((s) => s.isBudgeted),
+      approval_tier: anyOverBudget ? "nivel_3" : "nivel_2",
+      approval_level: anyOverBudget ? 2 : 1,
+      status: "pendente",
+      created_by: ctx.id,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .select("id, request_number")
+    .single();
+
+  if (insErr || !newReq) return { error: insErr?.message ?? "Erro ao criar a requisição rateada." };
+
+  // Parcela + estado inicial de aprovação de cada setor. Setor Diretoria (ou
+  // solicitante especial) começa direto na etapa do diretor daquele setor.
+  const sectorRows = perSector.map((s) => {
+    const forceDirector =
+      ctx.id === APPROVAL_ROUTING.directorOnly.requesterId ||
+      s.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+    return {
+      request_id: newReq.id as string,
+      sector_id: s.sector_id,
+      amount: s.amount,
+      approval_tier: s.tier,
+      status: forceDirector ? "pendente_diretor" : "pendente",
+    };
+  });
+  const { error: rsErr } = await supabase.from("ctrl_request_sectors").insert(sectorRows);
+  if (rsErr) return { error: rsErr.message };
+
+  await supabase.from("ctrl_history").insert({
+    request_id: newReq.id,
+    user_id: ctx.id,
+    action: "criado",
+    comment: `Requisição rateada entre ${parts.length} setores (total ${total}).`,
+    metadata: { rateio: perSector.map((s) => ({ sector_id: s.sector_id, amount: s.amount, tier: s.tier })) },
+  });
+
+  revalidatePath("/ctrl/requisicoes");
+  return {
+    ok: true as const,
+    requestNumber: newReq.request_number as number,
+    totalCreated: 1,
+    autoApproved: false,
+  };
+}
+
 // ─── Create Request ───────────────────────────────────────────────────────────
 
 export async function createRequest(data: CreateRequestInput) {
@@ -259,6 +412,12 @@ export async function createRequest(data: CreateRequestInput) {
   );
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
+
+  // Rateio entre setores: caminho próprio, isolado do fluxo de 1 setor (que
+  // continua idêntico abaixo).
+  if (data.is_rateio) {
+    return createRateioRequest(supabase, ctx, data);
+  }
 
   // Compra em dólar: o valor efetivo (amount, em BRL) é RECALCULADO no servidor a
   // partir de USD × câmbio × (1 + IOF). A partir daqui o BRL é a fonte de verdade
