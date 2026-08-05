@@ -217,14 +217,7 @@ Comente os indicadores estruturais presentes no input. Use o "nome" EXATO do ind
   - "Positivo": indicador acima do orcamento (em receita/resultado) OU abaixo do orcamento (em deducao de receita, despesa ou custo — caso favoravel).
   - "Neutro": variacao dentro de +/- 5% versus orcamento, OU sem orcamento informado.
   - "Atenção": variacao desfavoravel mas controlavel.
-  - "Crítico": variacao significativa que ameaca o resultado consolidado.
-
-## "contextoControladoria" (texto ou null)
-Preencha SOMENTE quando o user prompt trouxer o bloco "CONTEXTO DE NEGOCIO
-INFORMADO PELA CONTROLADORIA (CSC)". Sem esse bloco, o valor e null.
-Quando houver, escreva 2 a 4 frases explicando ao leitor o que a controladoria
-informou e como isso explica os numeros do periodo — regras detalhadas na
-secao especifica ao final deste prompt.`;
+  - "Crítico": variacao significativa que ameaca o resultado consolidado.`;
 
 // ============================================================================
 // Contexto de negocio — FRANQUIAS VIVA
