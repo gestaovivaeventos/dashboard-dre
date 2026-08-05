@@ -1175,6 +1175,22 @@ export async function getRequests(filters?: {
     ["gerente"].includes(r),
   );
 
+  // Rateios cuja alguma PARCELA cai nestes setores (o setor primário pode ser
+  // outro) — para o gerente/alçada enxergar o rateio pelo setor da parcela.
+  const rateioReqIdsForSectors = async (sectorIds: string[]): Promise<string[]> => {
+    if (!sectorIds.length) return [];
+    const { data } = await supabase
+      .from("ctrl_request_sectors")
+      .select("request_id")
+      .in("sector_id", sectorIds);
+    return Array.from(new Set((data ?? []).map((r) => r.request_id as string)));
+  };
+  const sectorOrRateio = (sectorIds: string[], rateioIds: string[]) => {
+    const parts = [`sector_id.in.(${sectorIds.join(",")})`];
+    if (rateioIds.length) parts.push(`id.in.(${rateioIds.join(",")})`);
+    return parts.join(",");
+  };
+
   if (!filters?.approvalScope) {
     if (!ctx.ctrlRoles.includes("admin")) {
       query = query.eq("created_by", ctx.id);
@@ -1182,7 +1198,8 @@ export async function getRequests(filters?: {
   } else if (!hasGlobalVisibility) {
     if (hasSectorVisibility) {
       if (ctx.sectorIds.length > 0) {
-        query = query.in("sector_id", ctx.sectorIds);
+        const rateioIds = await rateioReqIdsForSectors(ctx.sectorIds);
+        query = query.or(sectorOrRateio(ctx.sectorIds, rateioIds));
       }
       // sem vinculo de setor => sem restricao (fallback ve tudo)
     } else {
@@ -1202,7 +1219,12 @@ export async function getRequests(filters?: {
     const allowedIds = (allSectors ?? [])
       .filter((s) => s.name != null && allowedNames.has(normalizeSectorName(s.name)))
       .map((s) => s.id);
-    query = query.in("sector_id", allowedIds);
+    if (allowedIds.length === 0) {
+      query = query.in("sector_id", allowedIds); // falha fechada (nada)
+    } else {
+      const rateioIds = await rateioReqIdsForSectors(allowedIds);
+      query = query.or(sectorOrRateio(allowedIds, rateioIds));
+    }
   }
 
   const { data, error } = await query;
@@ -1236,6 +1258,26 @@ export async function getRequests(filters?: {
           r.approver = byId.get(r.approved_by);
         }
       }
+    }
+  }
+
+  // Anexa as parcelas dos rateios (setor + valor + status por setor) para exibição.
+  const rateioRowIds = rows.filter((r) => r.is_rateio).map((r) => r.id as string);
+  if (rateioRowIds.length) {
+    const client = adminClient ?? supabase;
+    const { data: portions } = await client
+      .from("ctrl_request_sectors")
+      .select("request_id, sector_id, amount, status, approval_tier, ctrl_sectors(name)")
+      .in("request_id", rateioRowIds);
+    const byReq = new Map<string, unknown[]>();
+    for (const p of portions ?? []) {
+      const key = (p as { request_id: string }).request_id;
+      const arr = byReq.get(key) ?? [];
+      arr.push(p);
+      byReq.set(key, arr);
+    }
+    for (const r of rows) {
+      if (r.is_rateio) r.ctrl_request_sectors = byReq.get(r.id as string) ?? [];
     }
   }
 
@@ -1408,6 +1450,158 @@ async function applyApprovalStep(
   return { ok: true, finalized: true };
 }
 
+// Aprovação de um RATEIO: cada setor tem sua etapa (gerente → diretor conforme o
+// orçamento daquele setor). O aprovador avança as etapas sob sua responsabilidade
+// — gerente: a etapa de gerente dos SEUS setores; diretor/csc/admin: a etapa do
+// diretor de qualquer setor (e, como no fluxo de 1 setor, também podem concluir a
+// etapa de gerente). A requisição só vira 'aprovado' quando TODOS os setores
+// estiverem aprovados.
+async function approveRateio(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
+  req: { id: string; created_by: string; request_number: number },
+  comment?: string,
+): Promise<{ ok: true } | { error: string }> {
+  const { data: rows } = await supabase
+    .from("ctrl_request_sectors")
+    .select("id, sector_id, amount, approval_tier, status")
+    .eq("request_id", req.id);
+  if (!rows?.length) return { error: "Rateio sem setores." };
+
+  const isDirector = ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r));
+  const isManager = ctx.ctrlRoles.some((r) => r === "gerente");
+  const managerSectors = ctx.sectorIds ?? [];
+  const managesAll = isManager && managerSectors.length === 0; // sem vínculo → fallback
+
+  // Alçada por nome de setor (se o usuário tiver restrição): resolve os setores
+  // permitidos entre os do rateio.
+  const allowedNames = approverSectorRestrictionFor(ctx);
+  let allowedSectorIds: Set<string> | null = null;
+  if (allowedNames) {
+    const { data: secs } = await supabase
+      .from("ctrl_sectors")
+      .select("id, name")
+      .in("id", rows.map((r) => r.sector_id as string));
+    allowedSectorIds = new Set(
+      (secs ?? [])
+        .filter((s) => s.name && allowedNames.has(normalizeSectorName(s.name)))
+        .map((s) => s.id as string),
+    );
+  }
+
+  const now = new Date().toISOString();
+  let advanced = 0;
+  const toDirector: { sector_id: string; amount: number }[] = [];
+
+  for (const row of rows) {
+    if (row.status === "aprovado" || row.status === "rejeitado") continue;
+    if (allowedSectorIds && !allowedSectorIds.has(row.sector_id as string)) continue;
+
+    if (row.status === "pendente_diretor") {
+      if (!isDirector) continue;
+      await supabase
+        .from("ctrl_request_sectors")
+        .update({ status: "aprovado", director_approved_by: ctx.id, director_approved_at: now, updated_at: now })
+        .eq("id", row.id);
+      advanced++;
+    } else if (row.status === "pendente") {
+      const canManagerStep =
+        isDirector || (isManager && (managesAll || managerSectors.includes(row.sector_id as string)));
+      if (!canManagerStep) continue;
+      if (isDirector) {
+        // Super-aprovador conclui gerente + diretor de uma vez (como no 1 setor).
+        await supabase
+          .from("ctrl_request_sectors")
+          .update({
+            status: "aprovado",
+            manager_approved_by: ctx.id,
+            manager_approved_at: now,
+            director_approved_by: row.approval_tier === "nivel_3" ? ctx.id : null,
+            director_approved_at: row.approval_tier === "nivel_3" ? now : null,
+            updated_at: now,
+          })
+          .eq("id", row.id);
+        advanced++;
+      } else if (row.approval_tier === "nivel_3") {
+        await supabase
+          .from("ctrl_request_sectors")
+          .update({ status: "pendente_diretor", manager_approved_by: ctx.id, manager_approved_at: now, updated_at: now })
+          .eq("id", row.id);
+        advanced++;
+        toDirector.push({ sector_id: row.sector_id as string, amount: Number(row.amount) });
+      } else {
+        await supabase
+          .from("ctrl_request_sectors")
+          .update({ status: "aprovado", manager_approved_by: ctx.id, manager_approved_at: now, updated_at: now })
+          .eq("id", row.id);
+        advanced++;
+      }
+    }
+  }
+
+  if (advanced === 0) {
+    return { error: "Nenhuma etapa deste rateio está sob sua responsabilidade no momento." };
+  }
+
+  const { data: after } = await supabase
+    .from("ctrl_request_sectors")
+    .select("status")
+    .eq("request_id", req.id);
+  const allApproved = (after ?? []).length > 0 && (after ?? []).every((r) => r.status === "aprovado");
+
+  await supabase.from("ctrl_history").insert({
+    request_id: req.id,
+    user_id: ctx.id,
+    action: "aprovado",
+    comment:
+      comment?.trim() ||
+      (allApproved
+        ? `Rateio totalmente aprovado por ${ctx.name ?? ctx.email}.`
+        : `Aprovação parcial do rateio por ${ctx.name ?? ctx.email}.`),
+    metadata: { rateio: true, finalized: allApproved, approver_roles: ctx.ctrlRoles },
+  });
+
+  if (allApproved) {
+    await supabase
+      .from("ctrl_requests")
+      .update({ status: "aprovado", approved_by: ctx.id, approved_at: now, updated_at: now })
+      .eq("id", req.id);
+    await notifyRequester({
+      userId: req.created_by,
+      requestId: req.id,
+      requestNumber: req.request_number,
+      title: "Requisição Aprovada",
+      message: `Sua requisição #${req.request_number} (rateada) foi totalmente aprovada.`,
+      type: "aprovacao",
+    });
+  } else {
+    // Notifica os diretores dos setores que avançaram para a etapa do diretor.
+    for (const d of toDirector) {
+      const { data: sec } = await supabase.from("ctrl_sectors").select("name").eq("id", d.sector_id).maybeSingle();
+      const { data: requester } = await supabase.from("users").select("name, email").eq("id", req.created_by).maybeSingle();
+      await notifyPendingApproval({
+        requestId: req.id,
+        requestNumber: req.request_number,
+        requesterName: (requester?.name as string) ?? (requester?.email as string) ?? "Solicitante",
+        sectorId: d.sector_id,
+        sectorName: (sec?.name as string) ?? "Setor",
+        amount: d.amount,
+        stage: "diretor",
+      });
+    }
+    await notifyRequester({
+      userId: req.created_by,
+      requestId: req.id,
+      requestNumber: req.request_number,
+      title: "Rateio — aprovação parcial",
+      message: `Sua requisição #${req.request_number} teve setor(es) aprovado(s); aguardando os demais.`,
+      type: "aprovacao",
+    });
+  }
+
+  return { ok: true };
+}
+
 export async function approveRequest(requestId: string, comment?: string) {
   const ctx = await requireCtrlRole("gerente", "diretor", "csc", "admin");
   const adminClient = createAdminClientIfAvailable();
@@ -1415,11 +1609,24 @@ export async function approveRequest(requestId: string, comment?: string) {
 
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
-    .select("id, status, complement_return_status, approval_tier, sector_id, amount, created_by, request_number")
+    .select("id, status, complement_return_status, approval_tier, sector_id, amount, created_by, request_number, is_rateio")
     .eq("id", requestId)
     .single();
 
   if (fetchErr || !req) return { error: "Requisição não encontrada." };
+
+  // Rateio: aprovação por setor (cada um com sua etapa). A alçada e a etapa são
+  // tratadas por setor dentro do approveRateio.
+  if (req.is_rateio) {
+    if (req.status !== "pendente" && req.status !== "aguardando_complementacao") {
+      return { error: `Status atual: ${req.status}. Só é possível aprovar requisições pendentes.` };
+    }
+    const result = await approveRateio(supabase, ctx, req, comment);
+    if ("error" in result) return result;
+    revalidatePath("/ctrl/requisicoes");
+    revalidatePath("/ctrl/aprovacoes");
+    return { ok: true };
+  }
 
   const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
   if (sectorBlock) return { error: sectorBlock };
@@ -1463,13 +1670,18 @@ export async function rejectRequest(requestId: string, reason: string) {
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("id, status, sector_id, created_by, request_number")
+    .select("id, status, sector_id, created_by, request_number, is_rateio")
     .eq("id", requestId)
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
-  const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
-  if (sectorBlock) return { error: sectorBlock };
+  // No rateio, a alçada é por setor da parcela — a visibilidade da tela de
+  // Aprovações já limitou quem chega aqui; qualquer aprovador de um dos setores
+  // pode rejeitar a requisição inteira (regra: rejeição de um setor rejeita tudo).
+  if (!req.is_rateio) {
+    const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
+    if (sectorBlock) return { error: sectorBlock };
+  }
   if (
     req.status !== "pendente" &&
     req.status !== "pendente_diretor" &&
@@ -1485,6 +1697,14 @@ export async function rejectRequest(requestId: string, reason: string) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", requestId);
+
+  // Rateio: rejeitar a requisição rejeita todas as parcelas (um setor rejeita tudo).
+  if (req.is_rateio) {
+    await supabase
+      .from("ctrl_request_sectors")
+      .update({ status: "rejeitado", updated_at: new Date().toISOString() })
+      .eq("request_id", requestId);
+  }
 
   await supabase.from("ctrl_history").insert({
     request_id: requestId,
@@ -2155,7 +2375,7 @@ export async function batchApproveRequests(
 
   const { data: requests } = await supabase
     .from("ctrl_requests")
-    .select("id, status, approval_tier, sector_id, amount, created_by, request_number")
+    .select("id, status, approval_tier, sector_id, amount, created_by, request_number, is_rateio")
     .in("id", requestIds);
 
   if (!requests) return { error: "Erro ao buscar requisições." };
@@ -2166,6 +2386,17 @@ export async function batchApproveRequests(
   for (const req of requests) {
     if (req.status !== "pendente" && req.status !== "pendente_diretor") {
       results.push({ id: req.id, number: req.request_number, ok: false, error: "Não está pendente." });
+      continue;
+    }
+
+    // Rateio: aprovação por setor (alçada tratada por setor dentro do approveRateio).
+    if (req.is_rateio) {
+      const res = await approveRateio(supabase, ctx, req, comment);
+      results.push(
+        "error" in res
+          ? { id: req.id, number: req.request_number, ok: false, error: res.error }
+          : { id: req.id, number: req.request_number, ok: true },
+      );
       continue;
     }
 

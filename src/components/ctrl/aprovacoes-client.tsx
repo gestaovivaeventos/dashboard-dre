@@ -39,6 +39,23 @@ type Req = {
   ctrl_suppliers?: { name: string } | null;
   creator?: { name: string | null; email: string } | null;
   approver?: { name: string | null } | null;
+  // Rateio entre setores (aprovação própria de cada setor).
+  is_rateio?: boolean | null;
+  ctrl_request_sectors?: Array<{
+    sector_id: string;
+    amount: number;
+    status: string;
+    approval_tier: string;
+    ctrl_sectors?: { name: string } | { name: string }[] | null;
+  }> | null;
+};
+
+// Rótulo curto do status da parcela de rateio (por setor).
+const RATEIO_SECTOR_STATUS: Record<string, string> = {
+  pendente: "aguardando gerente",
+  pendente_diretor: "aguardando diretor",
+  aprovado: "aprovado",
+  rejeitado: "rejeitado",
 };
 
 type Tab = "pendente" | "aguardando_complementacao" | "aprovado" | "rejeitado";
@@ -367,7 +384,20 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
                       )}
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap">{sector?.name ?? "—"}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {req.is_rateio ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
+                          title={(req.ctrl_request_sectors ?? [])
+                            .map((s) => `${resolve(s.ctrl_sectors)?.name ?? "Setor"}: ${fmt.format(Number(s.amount))} (${RATEIO_SECTOR_STATUS[s.status] ?? s.status})`)
+                            .join(" · ")}
+                        >
+                          Rateio ({req.ctrl_request_sectors?.length ?? 0} setores)
+                        </span>
+                      ) : (
+                        sector?.name ?? "—"
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
                       {formatDayBR(req.due_date)}
@@ -476,7 +506,32 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                 <div className="space-y-3 text-sm">
                   <Row label="Valor" value={fmt.format(modal.req.amount)} />
                   <Row label="Status" value={STATUS_BADGE[modal.req.status]?.label ?? modal.req.status} />
-                  {modal.req.ctrl_sectors && <Row label="Setor" value={resolve(modal.req.ctrl_sectors)?.name ?? "—"} />}
+                  {modal.req.is_rateio && (modal.req.ctrl_request_sectors?.length ?? 0) > 0 ? (
+                    <div>
+                      <p className="text-muted-foreground">Rateio por setor</p>
+                      <div className="mt-1 space-y-1 rounded-md border bg-muted/10 p-2">
+                        {(modal.req.ctrl_request_sectors ?? []).map((s, i) => (
+                          <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-medium">{resolve(s.ctrl_sectors)?.name ?? "Setor"}</span>
+                            <span className="tabular-nums">{fmt.format(Number(s.amount))}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 ${
+                                s.status === "aprovado"
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                                  : s.status === "rejeitado"
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                                  : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
+                              }`}
+                            >
+                              {RATEIO_SECTOR_STATUS[s.status] ?? s.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    modal.req.ctrl_sectors && <Row label="Setor" value={resolve(modal.req.ctrl_sectors)?.name ?? "—"} />
+                  )}
                   {modal.req.ctrl_expense_types && <Row label="Tipo" value={resolve(modal.req.ctrl_expense_types)?.name ?? "—"} />}
                   <Row label="Evento" value={resolve(modal.req.ctrl_events)?.name ?? "Nenhum evento"} />
                   {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
