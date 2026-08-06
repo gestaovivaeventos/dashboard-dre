@@ -971,32 +971,46 @@ export function NovaRequisicaoForm({
           <label className={LABEL_CLS}>
             Rateio por setor <span className="text-destructive">*</span>
           </label>
+          {/* Cabeçalho das colunas — o setor ocupa o espaço flexível (nome
+              inteiro legível) e o valor fica numa coluna estreita e fixa. */}
+          <div className="flex items-center gap-2 px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="min-w-0 flex-1">Setor</span>
+            <span className="w-32 shrink-0 text-right">Valor</span>
+            <span className="w-9 shrink-0" aria-hidden />
+          </div>
           {rateioRows.map((row, i) => (
             <div key={i} className="flex items-center gap-2">
               <select
                 value={row.sectorId}
                 onChange={(e) => updateRateioRow(i, "sectorId", e.target.value)}
-                className={INPUT_CLS + " flex-1"}
+                className={INPUT_CLS + " min-w-0 flex-1"}
               >
                 <option value="">Selecione o setor</option>
                 {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              <input
-                inputMode="numeric"
-                placeholder="0,00"
-                value={row.valueStr}
-                onChange={(e) => updateRateioRow(i, "valueStr", formatBRL(e.target.value.replace(/\D/g, "")))}
-                className={INPUT_CLS + " w-36"}
-              />
-              {rateioRows.length > 2 && (
+              {/* Wrapper de largura fixa: o input usa w-full (do INPUT_CLS), que
+                  aqui significa 100% da caixa estreita — evita que o w-full do
+                  INPUT_CLS engula a coluna do setor. */}
+              <div className="w-32 shrink-0">
+                <input
+                  inputMode="numeric"
+                  placeholder="0,00"
+                  value={row.valueStr}
+                  onChange={(e) => updateRateioRow(i, "valueStr", formatBRL(e.target.value.replace(/\D/g, "")))}
+                  className={INPUT_CLS + " text-right"}
+                />
+              </div>
+              {rateioRows.length > 2 ? (
                 <button
                   type="button"
                   onClick={() => removeRateioRow(i)}
                   aria-label="Remover setor"
-                  className="rounded-md border px-2 py-2 text-muted-foreground hover:bg-muted"
+                  className="w-9 shrink-0 rounded-md border px-2 py-2 text-muted-foreground hover:bg-muted"
                 >
                   <X className="h-4 w-4" />
                 </button>
+              ) : (
+                <span className="w-9 shrink-0" aria-hidden />
               )}
             </div>
           ))}
