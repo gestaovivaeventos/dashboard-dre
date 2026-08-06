@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { X } from "lucide-react";
 
 import {
   approveRequest,
@@ -11,6 +12,7 @@ import {
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
 import { ExtraAttachments } from "@/components/ctrl/request-detail-modal";
+import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 import { formatDateBR, formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 
@@ -32,6 +34,9 @@ type Req = {
   due_date: string | null;
   created_at: string;
   created_by: string;
+  // Preenchido quando o título foi efetivamente PAGO (baixado) no Omie — vira o
+  // status "Pago", sobrepondo "Enviado Pgto" (igual à tela de Requisições).
+  omie_paid_at?: string | null;
   extra_attachment_paths?: string[] | null;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
@@ -39,9 +44,31 @@ type Req = {
   ctrl_suppliers?: { name: string } | null;
   creator?: { name: string | null; email: string } | null;
   approver?: { name: string | null } | null;
+  // Rateio entre setores (aprovação própria de cada setor).
+  is_rateio?: boolean | null;
+  ctrl_request_sectors?: Array<{
+    sector_id: string;
+    amount: number;
+    status: string;
+    approval_tier: string;
+    ctrl_sectors?: { name: string } | { name: string }[] | null;
+  }> | null;
+};
+
+// Rótulo curto do status da parcela de rateio (por setor).
+const RATEIO_SECTOR_STATUS: Record<string, string> = {
+  pendente: "aguardando gerente",
+  pendente_diretor: "aguardando diretor",
+  aprovado: "aprovado",
+  rejeitado: "rejeitado",
 };
 
 type Tab = "pendente" | "aguardando_complementacao" | "aprovado" | "rejeitado";
+
+// A aba "Aprovadas" reúne todo o histórico do que passou pela aprovação: a que
+// ainda aguarda envio (aprovado) e as que já seguiram para o Contas a Pagar
+// (agendado / info pendente). Todas foram aprovadas.
+const APPROVED_HISTORY = new Set(["aprovado", "agendado", "info_pagamento_pendente"]);
 
 const TAB_LABELS: Record<Tab, string> = {
   pendente: "Pendentes",
@@ -57,7 +84,13 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   rejeitado:                   { label: "Rejeitado",       cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" },
   aguardando_complementacao:   { label: "Complementação",  cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   agendado:                    { label: "Enviado Pgto",    cls: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
+  info_pagamento_pendente:     { label: "Info pendente",   cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" },
 };
+
+// "Pago" (título baixado no Omie) sobrepõe o rótulo do status (a requisição segue
+// com status 'agendado' por baixo). Mesmo critério da tela de Requisições.
+const PAGO_BADGE = { label: "Pago", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300" };
+const isPaid = (r: Req) => Boolean(r.omie_paid_at);
 
 const PAYMENT_LABELS: Record<string, string> = {
   boleto: "Boleto", pix: "PIX", transferencia: "Transferência",
@@ -70,9 +103,6 @@ function resolve<T>(v: T | T[] | null | undefined): T | null {
   if (!v) return null;
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
-
-type SortField = "setor" | "data";
-type SortDir = "asc" | "desc";
 
 interface Props {
   requests: Req[];
@@ -93,8 +123,6 @@ interface Props {
 export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], forceSectorGroups = false, awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
-  const [sortField, setSortField] = useState<SortField>("data");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<{ req: Req; mode: "reject" | "detail" } | null>(null);
   // Conversa de complementação (pedir info / responder) — thread completa.
@@ -126,21 +154,40 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
       : false;
   };
 
-  // Aba "Pendentes" agrupa as duas etapas de pendência.
+  // Aba "Pendentes" agrupa as duas etapas de pendência; "Aprovadas" reúne todo o
+  // histórico (aprovado + enviadas ao pagamento); as demais casam o status exato.
   const filteredRequests =
     activeTab === "pendente"
       ? requests.filter((r) => isPendingStatus(r.status))
+      : activeTab === "aprovado"
+      ? requests.filter((r) => APPROVED_HISTORY.has(r.status))
       : requests.filter((r) => r.status === activeTab);
 
-  const sectorName = (r: Req) => resolve(r.ctrl_sectors)?.name ?? "";
-  const tabRequests = [...filteredRequests].sort((a, b) => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    if (sortField === "setor") {
-      const cmp = sectorName(a).localeCompare(sectorName(b), "pt-BR", { sensitivity: "base" });
-      return cmp !== 0 ? cmp * dir : 0;
-    }
-    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * dir;
-  });
+  // Cabeçalho estilo Excel (ordenar + filtrar por valores), igual ao de Requisições.
+  const columns = useMemo<ExcelColumn<Req>[]>(
+    () => [
+      { key: "numero", type: "number", getValue: (r) => r.request_number, label: (r) => `#${r.request_number}` },
+      { key: "requisicao", type: "text", getValue: (r) => r.title },
+      {
+        key: "setor",
+        type: "text",
+        getValue: (r) =>
+          r.is_rateio
+            ? `Rateio (${r.ctrl_request_sectors?.length ?? 0} setores)`
+            : resolve(r.ctrl_sectors)?.name ?? "",
+      },
+      { key: "valor", type: "number", getValue: (r) => r.amount, label: (r) => fmt.format(r.amount) },
+      { key: "vencimento", type: "date", getValue: (r) => r.due_date ?? null, label: (r) => formatDayBR(r.due_date) },
+      { key: "criado", type: "date", getValue: (r) => r.created_at ?? null, label: (r) => formatDateBR(r.created_at) },
+      {
+        key: "solicitante",
+        type: "text",
+        getValue: (r) => (r.creator ? r.creator.name ?? r.creator.email : ""),
+      },
+    ],
+    [],
+  );
+  const { rows: tabRequests, headerProps, hasFilters, clearAll } = useExcelTable(filteredRequests, columns);
 
   // Diretor (ou responsável marcado via override) com setores vinculados: separa
   // visualmente as requisições do(s) setor(es) sob sua responsabilidade das
@@ -163,26 +210,19 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   const showCheckboxCol = activeTab === "pendente" && canApprove;
   const colCount = (showCheckboxCol ? 1 : 0) + 8;
 
-  function toggleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-    }
-  }
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
-  const actionablePendentes = pendentes.filter(canActOn);
+  // "Selecionar todas" respeita os filtros do cabeçalho: só as visíveis (tabRequests).
+  const visibleActionable =
+    activeTab === "pendente" ? tabRequests.filter(canActOn) : [];
   const allSelected =
-    actionablePendentes.length > 0 &&
-    selected.size === actionablePendentes.length &&
-    activeTab === "pendente";
+    visibleActionable.length > 0 &&
+    visibleActionable.every((r) => selected.has(r.id));
 
   const counts: Record<Tab, number> = {
     pendente: pendentes.length,
     aguardando_complementacao: requests.filter((r) => r.status === "aguardando_complementacao").length,
-    aprovado: requests.filter((r) => r.status === "aprovado").length,
+    aprovado: requests.filter((r) => APPROVED_HISTORY.has(r.status)).length,
     rejeitado: requests.filter((r) => r.status === "rejeitado").length,
   };
 
@@ -264,7 +304,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
             <input
               type="checkbox"
               checked={allSelected}
-              onChange={() => setSelected(allSelected ? new Set() : new Set(actionablePendentes.map((r) => r.id)))}
+              onChange={() => setSelected(allSelected ? new Set() : new Set(visibleActionable.map((r) => r.id)))}
               className="h-4 w-4 rounded border-gray-300"
             />
             Selecionar todas
@@ -284,10 +324,29 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
         </div>
       )}
 
+      {/* Barra de filtros ativos (cabeçalho estilo Excel) */}
+      {hasFilters && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>
+            {tabRequests.length} de {filteredRequests.length} requisição{filteredRequests.length === 1 ? "" : "ões"}
+          </span>
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2.5 py-1 font-medium hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Limpar filtros
+          </button>
+        </div>
+      )}
+
       {/* Request table */}
       {tabRequests.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-          Nenhuma requisição nesta categoria.
+          {filteredRequests.length > 0
+            ? "Nenhuma requisição para os filtros atuais."
+            : "Nenhuma requisição nesta categoria."}
         </div>
       ) : (
         <div className="rounded-lg border overflow-x-auto">
@@ -295,14 +354,14 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                 {activeTab === "pendente" && canApprove && <th className="w-10 px-3 py-2" />}
-                <th className="px-3 py-2 font-medium">#</th>
-                <th className="px-3 py-2 font-medium">Requisição</th>
-                <SortHeader field="setor" label="Setor" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
-                <th className="px-3 py-2 font-medium text-right">Valor</th>
-                <th className="px-3 py-2 font-medium">Vencimento</th>
-                <SortHeader field="data" label="Criado em" sortField={sortField} sortDir={sortDir} onSort={toggleSort} />
-                <th className="px-3 py-2 font-medium">Solicitante</th>
-                <th className="px-3 py-2 font-medium text-right">Ações</th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Criado em" {...headerProps("criado")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Solicitante" menuSide="right" {...headerProps("solicitante")} /></th>
+                <th className="px-3 py-2 font-medium text-right uppercase tracking-wide">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -345,7 +404,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                     <td className="px-3 py-3 min-w-[200px]">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{req.title}</span>
-                        {(() => { const b = STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
+                        {(() => { const b = isPaid(req) ? PAGO_BADGE : STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
                         {isOverBudget && (
                           <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
                             Fora do orçamento
@@ -367,7 +426,20 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
                       )}
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap">{sector?.name ?? "—"}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {req.is_rateio ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
+                          title={(req.ctrl_request_sectors ?? [])
+                            .map((s) => `${resolve(s.ctrl_sectors)?.name ?? "Setor"}: ${fmt.format(Number(s.amount))} (${RATEIO_SECTOR_STATUS[s.status] ?? s.status})`)
+                            .join(" · ")}
+                        >
+                          Rateio ({req.ctrl_request_sectors?.length ?? 0} setores)
+                        </span>
+                      ) : (
+                        sector?.name ?? "—"
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
                       {formatDayBR(req.due_date)}
@@ -475,8 +547,33 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
               {modal.mode === "detail" && (
                 <div className="space-y-3 text-sm">
                   <Row label="Valor" value={fmt.format(modal.req.amount)} />
-                  <Row label="Status" value={STATUS_BADGE[modal.req.status]?.label ?? modal.req.status} />
-                  {modal.req.ctrl_sectors && <Row label="Setor" value={resolve(modal.req.ctrl_sectors)?.name ?? "—"} />}
+                  <Row label="Status" value={isPaid(modal.req) ? "Pago" : STATUS_BADGE[modal.req.status]?.label ?? modal.req.status} />
+                  {modal.req.is_rateio && (modal.req.ctrl_request_sectors?.length ?? 0) > 0 ? (
+                    <div>
+                      <p className="text-muted-foreground">Rateio por setor</p>
+                      <div className="mt-1 space-y-1 rounded-md border bg-muted/10 p-2">
+                        {(modal.req.ctrl_request_sectors ?? []).map((s, i) => (
+                          <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-medium">{resolve(s.ctrl_sectors)?.name ?? "Setor"}</span>
+                            <span className="tabular-nums">{fmt.format(Number(s.amount))}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 ${
+                                s.status === "aprovado"
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                                  : s.status === "rejeitado"
+                                  ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                                  : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300"
+                              }`}
+                            >
+                              {RATEIO_SECTOR_STATUS[s.status] ?? s.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    modal.req.ctrl_sectors && <Row label="Setor" value={resolve(modal.req.ctrl_sectors)?.name ?? "—"} />
+                  )}
                   {modal.req.ctrl_expense_types && <Row label="Tipo" value={resolve(modal.req.ctrl_expense_types)?.name ?? "—"} />}
                   <Row label="Evento" value={resolve(modal.req.ctrl_events)?.name ?? "Nenhum evento"} />
                   {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
@@ -571,33 +668,6 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
         />
       )}
     </div>
-  );
-}
-
-function SortHeader({
-  field,
-  label,
-  sortField,
-  sortDir,
-  onSort,
-}: {
-  field: SortField;
-  label: string;
-  sortField: SortField;
-  sortDir: SortDir;
-  onSort: (field: SortField) => void;
-}) {
-  const active = sortField === field;
-  return (
-    <th className="px-3 py-2 font-medium">
-      <button
-        onClick={() => onSort(field)}
-        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${active ? "text-foreground" : ""}`}
-      >
-        {label}
-        <span aria-hidden className={active ? "" : "opacity-30"}>{active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span>
-      </button>
-    </th>
   );
 }
 

@@ -223,7 +223,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, extra_attachment_paths, event_id",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, extra_attachment_paths, event_id, is_rateio",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -310,10 +310,67 @@ export async function launchRequestToOmie(
       ? (ccCartaoPrepago ?? ccPadrao)
       : ccPadrao;
 
+  // Distribuição por departamento (rateio). Título de 1 setor: um departamento a
+  // 100%. Título rateado: um departamento por setor, enviando VALOR (nValDep) e
+  // percentual (nPerDep somando 100 exatamente — última parcela absorve o
+  // arredondamento). Omie armazena os dois campos (ver estrutura da API).
   const missing: string[] = [];
   if (!codigoCategoriaResolved) missing.push("categoria");
-  if (!depRow?.codigo_departamento) missing.push("departamento");
   if (!codigoContaCorrenteResolved) missing.push("conta corrente");
+
+  let distribuicao: Array<Record<string, string | number>> = [];
+  if (request.is_rateio) {
+    const { data: portions } = await supabase
+      .from("ctrl_request_sectors")
+      .select("sector_id, amount, ctrl_sectors(name)")
+      .eq("request_id", request.id);
+    const parts = (portions ?? []).map((p) => {
+      const sec = Array.isArray(p.ctrl_sectors) ? p.ctrl_sectors[0] : p.ctrl_sectors;
+      return {
+        sector_id: p.sector_id as string,
+        amount: Number(p.amount),
+        sector_name: (sec as { name: string } | null)?.name ?? "setor",
+      };
+    });
+    if (parts.length === 0) {
+      missing.push("setores do rateio");
+    } else {
+      const { data: depRows } = await supabase
+        .from("ctrl_sector_omie_departamento")
+        .select("sector_id, codigo_departamento")
+        .in("sector_id", parts.map((p) => p.sector_id))
+        .eq("company_id", companyId);
+      const depBySector = new Map<string, string>();
+      for (const d of depRows ?? []) {
+        if (d.codigo_departamento) depBySector.set(d.sector_id as string, d.codigo_departamento as string);
+      }
+      const semDep = parts.filter((p) => !depBySector.has(p.sector_id));
+      if (semDep.length > 0) {
+        missing.push(`departamento de ${semDep.map((p) => p.sector_name).join(", ")}`);
+      } else {
+        const total = parts.reduce((s, p) => s + p.amount, 0);
+        let somaPer = 0;
+        distribuicao = parts.map((p, i) => {
+          const isLast = i === parts.length - 1;
+          const per = isLast
+            ? Math.round((100 - somaPer) * 100) / 100
+            : Math.round((p.amount / total) * 10000) / 100;
+          somaPer += per;
+          return {
+            cCodDep: depBySector.get(p.sector_id)!,
+            nPerDep: per,
+            nValDep: Math.round(p.amount * 100) / 100,
+          };
+        });
+      }
+    }
+  } else {
+    if (!depRow?.codigo_departamento) missing.push("departamento");
+    else
+      distribuicao = [
+        { cCodDep: depRow.codigo_departamento as string, nPerDep: 100, nValDep: Number(request.amount) },
+      ];
+  }
 
   if (missing.length > 0) {
     return {
@@ -322,7 +379,6 @@ export async function launchRequestToOmie(
   }
 
   const codigoCategoria = codigoCategoriaResolved as string;
-  const codigoDepartamento = depRow!.codigo_departamento as string;
   const codigoContaCorrente = codigoContaCorrenteResolved as string | number;
 
   // 3. Credenciais
@@ -461,7 +517,7 @@ export async function launchRequestToOmie(
     data_emissao: toOmieDate(emissaoIso),
     valor_documento: Number(request.amount),
     codigo_categoria: codigoCategoria,
-    distribuicao: [{ cCodDep: codigoDepartamento, nPerDep: 100 }],
+    distribuicao,
     id_conta_corrente: Number(codigoContaCorrente),
     ...(codigoTipoDocumento ? { codigo_tipo_documento: codigoTipoDocumento } : {}),
     ...(codigoProjeto ? { codigo_projeto: codigoProjeto } : {}),

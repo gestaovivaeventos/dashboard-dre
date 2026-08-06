@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { CornerUpLeft, Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, CornerUpLeft, Eye, Loader2, MessageCircle, Pencil, RefreshCw, Search, X } from "lucide-react";
 
 import {
   enqueueSendToPayment,
@@ -52,6 +52,15 @@ const naFila = (r: ContasRequest) =>
 /** Requisição aprovada cujo lançamento falhou — dá para recolocar na fila. */
 const falhouNoEnvio = (r: ContasRequest) =>
   r.status === "aprovado" && r.omie_launch_status === "erro";
+
+/** Rótulo da coluna Setor: rateio mostra "Rateio (N setores)" no lugar do setor. */
+function sectorLabel(r: ContasRequest): string {
+  if (r.is_rateio) {
+    const n = r.ctrl_request_sectors?.length ?? 0;
+    return n > 0 ? `Rateio (${n} setores)` : "Rateio";
+  }
+  return resolveNamed(r.ctrl_sectors ?? null) ?? "";
+}
 
 function formatarDuracao(minutos: number) {
   if (minutos < 1) return "menos de 1 min";
@@ -141,10 +150,17 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const canReturn = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
   const [returnModal, setReturnModal] = useState<ContasRequest | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  // Alerta pós-devolução: pop-up grande orientando a conferir no Omie se o título
+  // foi mesmo excluído (evita pagamento errado). Aparece após TODA devolução.
+  const [returnedAlert, setReturnedAlert] = useState<
+    { number: number; company: string | null; wasOnOmie: boolean } | null
+  >(null);
 
   function handleDevolver() {
     if (!returnModal || !returnReason.trim()) return;
     const num = returnModal.request_number;
+    const company = returnModal.paying_company ?? null;
+    const wasOnOmie = returnModal.omie_contapagar_codigo != null;
     startTransition(async () => {
       const result = await returnRequestToRequisicoes(returnModal.id, returnReason);
       if (result && "error" in result) {
@@ -153,7 +169,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         setReturnModal(null);
         setReturnReason("");
         setSelected(new Set());
-        notify(`Requisição #${num} devolvida para requisições.`);
+        setReturnedAlert({ number: num, company, wasOnOmie });
         router.refresh();
       }
     });
@@ -230,7 +246,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       {
         key: "setor",
         type: "text",
-        getValue: (r) => resolveNamed(r.ctrl_sectors ?? null) ?? "",
+        getValue: (r) => sectorLabel(r),
       },
       {
         key: "descricao",
@@ -506,7 +522,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       {req.categoria ?? <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>}
+                      {req.is_rateio ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300"
+                          title={(req.ctrl_request_sectors ?? [])
+                            .map(
+                              (p) =>
+                                `${resolveNamed(p.ctrl_sectors ?? null) ?? "Setor"}: ${fmt.format(Number(p.amount))}`,
+                            )
+                            .join("\n")}
+                        >
+                          Rateio ({req.ctrl_request_sectors?.length ?? 0})
+                        </span>
+                      ) : (
+                        resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {req.description ? (
@@ -856,6 +886,16 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         </div>
       )}
 
+      {/* Alerta pós-devolução: confira o Omie (giroflex piscando) */}
+      {returnedAlert && (
+        <DevolverOmieAlert
+          number={returnedAlert.number}
+          company={returnedAlert.company}
+          wasOnOmie={returnedAlert.wasOnOmie}
+          onClose={() => setReturnedAlert(null)}
+        />
+      )}
+
       {/* Detail modal */}
       {detail && (
         <RequestDetailModal
@@ -1022,6 +1062,115 @@ function ResyncButton({ requestId, onDone }: { requestId: string; onDone: () => 
         Reenviar ao Omie
       </button>
       {feedback && <p className="text-[10px] text-muted-foreground">{feedback}</p>}
+    </div>
+  );
+}
+
+// ── Alerta pós-devolução (confira o Omie) ─────────────────────────────────────
+// Pop-up grande e vermelho, com giroflex piscando, exibido após devolver uma
+// requisição. Orienta o operador a CONFERIR MANUALMENTE se o título foi excluído
+// do Omie da empresa — mesmo que o sistema já tente excluir, a checagem evita
+// pagamento errado caso a exclusão não tenha ocorrido.
+
+// Giroflex: domo piscando + facho de luz girando (puro CSS).
+function Giroflex() {
+  return (
+    <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center">
+      {/* facho de luz girando */}
+      <span
+        className="absolute inset-0 rounded-full"
+        style={{
+          background:
+            "conic-gradient(from 0deg, rgba(255,255,255,0) 0deg, rgba(255,255,255,.95) 35deg, rgba(255,255,255,0) 75deg)",
+          animation: "giroflex-sweep 1.05s linear infinite",
+        }}
+      />
+      {/* domo piscando */}
+      <span
+        className="relative h-6 w-6 rounded-full bg-white"
+        style={{ animation: "giroflex-flash 0.9s ease-in-out infinite" }}
+      />
+    </span>
+  );
+}
+
+function DevolverOmieAlert({
+  number,
+  company,
+  wasOnOmie,
+  onClose,
+}: {
+  number: number;
+  company: string | null;
+  wasOnOmie: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+      <style>{`
+        @keyframes giroflex-flash {
+          0%,100% { opacity: 1; box-shadow: 0 0 24px 8px rgba(239,68,68,.95), 0 0 60px 22px rgba(239,68,68,.55); }
+          50%     { opacity: .35; box-shadow: 0 0 6px 2px rgba(239,68,68,.4); }
+        }
+        @keyframes giroflex-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes giroflex-border {
+          0%,100% { border-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,.55); }
+          50%     { border-color: #fecaca; box-shadow: 0 0 0 8px rgba(220,38,38,0); }
+        }
+      `}</style>
+      <div
+        className="w-full max-w-xl overflow-hidden rounded-2xl border-4 bg-white shadow-2xl dark:bg-neutral-900"
+        style={{ animation: "giroflex-border 1.1s ease-in-out infinite" }}
+        role="alertdialog"
+        aria-modal="true"
+      >
+        {/* Cabeçalho vermelho com giroflex dos dois lados */}
+        <div className="flex items-center justify-center gap-4 bg-red-600 px-6 py-5">
+          <Giroflex />
+          <h2 className="text-center text-xl font-extrabold uppercase tracking-wide text-white">
+            Atenção — Confira o Omie
+          </h2>
+          <Giroflex />
+        </div>
+
+        {/* Corpo */}
+        <div className="space-y-4 px-6 py-6 text-center">
+          <p className="text-base font-semibold text-red-700 dark:text-red-400">
+            A requisição #{number} foi devolvida para requisições.
+          </p>
+
+          <div className="flex items-start gap-3 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-4 text-left text-sm text-red-900 dark:bg-red-950/40 dark:text-red-200">
+            <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600 dark:text-red-400" />
+            <div className="space-y-2">
+              <p className="font-bold">
+                CONFIRA MANUALMENTE se a Requisição de Pagamento foi EXCLUÍDA do Omie
+                {company ? (
+                  <>
+                    {" "}da empresa <strong>{company}</strong>
+                  </>
+                ) : (
+                  " da empresa"
+                )}
+                .
+              </p>
+              <p>
+                {wasOnOmie
+                  ? "O sistema tentou excluir o título automaticamente, mas confirme no Omie que ele realmente saiu."
+                  : "Verifique no Omie da empresa se não há título correspondente."}{" "}
+                Se o título permanecer no Omie, ele pode ser <strong>pago por engano</strong>.
+                Confirme a exclusão para evitar pagamentos errados.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="mt-2 w-full rounded-lg bg-red-600 px-4 py-3 text-base font-bold text-white transition-colors hover:bg-red-700"
+          >
+            Entendi, vou conferir o Omie
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

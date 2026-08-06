@@ -42,6 +42,7 @@ async function getContasAPagar() {
       reference_month,
       reference_year,
       status,
+      is_rateio,
       sector_id,
       expense_type_id,
       event_id,
@@ -148,9 +149,27 @@ async function getContasAPagar() {
     return optByKey.get(`${company}:${codigo}`) ?? codigo;
   };
 
+  // Parcelas dos rateios (setor + valor + status) para exibir "Rateio" na coluna
+  // Setor e o detalhamento no modal. Mesma fonte da tela de Aprovações.
+  const rateioIds = (data ?? []).filter((r) => r.is_rateio).map((r) => r.id as string);
+  const portionsByReq = new Map<string, unknown[]>();
+  if (rateioIds.length) {
+    const { data: portions } = await supabase
+      .from("ctrl_request_sectors")
+      .select("request_id, sector_id, amount, status, approval_tier, ctrl_sectors(name)")
+      .in("request_id", rateioIds);
+    for (const p of portions ?? []) {
+      const key = (p as { request_id: string }).request_id;
+      const arr = portionsByReq.get(key) ?? [];
+      arr.push(p);
+      portionsByReq.set(key, arr);
+    }
+  }
+
   const requests = (data ?? []).map((r) => ({
     ...r,
     categoria: resolveCategoria(r as Parameters<typeof resolveCategoria>[0]),
+    ...(r.is_rateio ? { ctrl_request_sectors: portionsByReq.get(r.id as string) ?? [] } : {}),
   })) as ContasRequest[];
 
   return { requests };

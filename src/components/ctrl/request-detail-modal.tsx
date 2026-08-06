@@ -23,6 +23,15 @@ export type Supplier = {
 };
 
 export type NamedRef = { name: string } | { name: string }[] | null;
+
+// Parcela de um rateio: um setor com seu valor e o status da aprovação dele.
+export type RateioPortion = {
+  sector_id: string;
+  amount: number;
+  status?: string | null;
+  approval_tier?: string | null;
+  ctrl_sectors?: NamedRef;
+};
 export type UserRef =
   | { name: string | null; email: string | null }
   | Array<{ name: string | null; email: string | null }>
@@ -82,6 +91,10 @@ export type RequestDetail = {
   sector_id?: string | null;
   expense_type_id?: string | null;
   event_id?: string | null;
+  // Rateio entre setores: quando true, o valor é dividido entre as parcelas de
+  // ctrl_request_sectors (cada uma com seu setor, valor e aprovação própria).
+  is_rateio?: boolean | null;
+  ctrl_request_sectors?: RateioPortion[] | null;
   ctrl_suppliers: Supplier | Supplier[] | null;
   ctrl_expense_types: NamedRef;
   ctrl_sectors?: NamedRef;
@@ -119,6 +132,14 @@ export const PAYMENT_METHOD_LABEL: Record<string, string> = {
   cartao_credito: "Cartão de Crédito",
   cartao_prepago: "Cartão Pré-Pago",
   dinheiro: "Dinheiro",
+};
+
+// Rótulo e cor do status de cada parcela do rateio (aprovação por setor).
+export const RATEIO_STATUS_META: Record<string, { label: string; className: string }> = {
+  pendente: { label: "Aguardando Gerente", className: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300" },
+  pendente_diretor: { label: "Aguardando Diretor", className: "bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300" },
+  aprovado: { label: "Aprovado", className: "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300" },
+  rejeitado: { label: "Rejeitado", className: "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300" },
 };
 
 const MONTHS = [
@@ -161,6 +182,14 @@ export function RequestDetailModal({
 }) {
   const sup = resolveSupplier(req.ctrl_suppliers);
   const sector = resolveNamed(req.ctrl_sectors ?? null);
+  const rateio =
+    req.is_rateio && Array.isArray(req.ctrl_request_sectors) && req.ctrl_request_sectors.length > 0
+      ? req.ctrl_request_sectors.map((p) => ({
+          name: resolveNamed(p.ctrl_sectors ?? null) ?? "Setor",
+          amount: Number(p.amount),
+          status: p.status ?? null,
+        }))
+      : null;
   const expenseType = resolveNamed(req.ctrl_expense_types);
   const event = resolveNamed(req.ctrl_events ?? null);
   const creator = resolveUser(req.creator ?? null);
@@ -251,7 +280,10 @@ export function RequestDetailModal({
                   : "—"
               }
             />
-            <DetailField label="Setor" value={sector ?? "—"} />
+            <DetailField
+              label="Setor"
+              value={rateio ? `Rateio · ${rateio.length} setores` : sector ?? "—"}
+            />
             <DetailField label="Tipo de Despesa" value={expenseType ?? "—"} />
             <DetailField label="Evento" value={event ?? "Nenhum evento"} />
             <DetailField
@@ -259,6 +291,51 @@ export function RequestDetailModal({
               value={req.payment_method ? PAYMENT_METHOD_LABEL[req.payment_method] ?? req.payment_method : "—"}
             />
           </Section>
+
+          {/* Rateio entre setores — cada parcela com seu valor e o status da
+              aprovação daquele setor. A requisição só fica aprovada quando todas. */}
+          {rateio && (
+            <Section title="Rateio entre setores" twoCol={false}>
+              <div className="overflow-hidden rounded-md border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50 text-left text-xs font-semibold">
+                      <th className="px-3 py-2">Setor</th>
+                      <th className="px-3 py-2 text-right">Valor</th>
+                      <th className="px-3 py-2 text-right">Aprovação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rateio.map((p, i) => {
+                      const meta = p.status ? RATEIO_STATUS_META[p.status] : null;
+                      return (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="px-3 py-2">{p.name}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmt.format(p.amount)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                meta?.className ?? "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {meta?.label ?? p.status ?? "—"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-muted/30 font-semibold">
+                      <td className="px-3 py-2">Total</td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {fmt.format(Number(req.amount))}
+                      </td>
+                      <td className="px-3 py-2" />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
 
           {/* Descrição / observações / justificativa */}
           {(req.description || req.observations || req.justification) && (

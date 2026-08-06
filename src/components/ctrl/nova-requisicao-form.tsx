@@ -16,6 +16,11 @@ import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
+// Rateio entre setores: fluxo completo de ponta a ponta (criação → orçamento por
+// setor → aprovação multi-setor → lançamento único no Omie com distribuicao por
+// departamento → exibição). Ligar/desligar aqui.
+const RATEIO_ENABLED = true;
+
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
@@ -100,6 +105,12 @@ export function NovaRequisicaoForm({
 
   // ── Fields that drive budget verification (controlled) ──────────────────────
   const [sectorId, setSectorId] = useState("");
+  // Rateio entre setores (requisição única dividida). Começa com 2 linhas.
+  const [isRateio, setIsRateio] = useState(false);
+  const [rateioRows, setRateioRows] = useState<{ sectorId: string; valueStr: string }[]>([
+    { sectorId: "", valueStr: "" },
+    { sectorId: "", valueStr: "" },
+  ]);
   const [expenseTypeId, setExpenseTypeId] = useState("");
   const [amountStr, setAmountStr] = useState("");
   // Compra em dólar (US$): o usuário digita em dólar e o sistema converte para
@@ -393,15 +404,36 @@ export function NovaRequisicaoForm({
     return isNaN(n) ? 0 : n;
   }, [usdAmountStr]);
 
+  // Soma das parcelas do rateio (BRL). Total da requisição quando rateada.
+  const parsedRateioTotal = useMemo(() => {
+    const sum = rateioRows.reduce((s, r) => {
+      const v = Number(r.valueStr.replace(/\./g, "").replace(",", "."));
+      return Number.isFinite(v) ? s + v : s;
+    }, 0);
+    return Math.round(sum * 100) / 100;
+  }, [rateioRows]);
+
   // Valor EFETIVO em reais — é o que vale para orçamento, Omie e todo o trâmite.
-  // Compra em dólar: converte (USD × câmbio × (1 + IOF)). Senão, o valor digitado.
+  // Rateio: soma das parcelas. Dólar: converte (USD × câmbio × (1 + IOF)). Senão,
+  // o valor digitado.
   const parsedAmount = useMemo(() => {
+    if (isRateio) return parsedRateioTotal;
     if (isUsd) return usdToBrl(parsedUsd, usdBrlRate, usdIofRate);
     // amountStr is in BR format (1.234,56) — strip thousand sep, swap decimal.
     const cleaned = amountStr.replace(/\./g, "").replace(",", ".");
     const n = parseFloat(cleaned);
     return isNaN(n) ? 0 : n;
-  }, [isUsd, parsedUsd, usdBrlRate, usdIofRate, amountStr]);
+  }, [isRateio, parsedRateioTotal, isUsd, parsedUsd, usdBrlRate, usdIofRate, amountStr]);
+
+  function updateRateioRow(i: number, field: "sectorId" | "valueStr", value: string) {
+    setRateioRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  }
+  function addRateioRow() {
+    setRateioRows((rows) => [...rows, { sectorId: "", valueStr: "" }]);
+  }
+  function removeRateioRow(i: number) {
+    setRateioRows((rows) => (rows.length <= 2 ? rows : rows.filter((_, idx) => idx !== i)));
+  }
 
   // Vencimento mínimo (horário de Brasília): mesmo dia até 12:00; após 12:00,
   // só a partir do dia seguinte. Calculado no fuso America/Sao_Paulo, então não
@@ -443,9 +475,11 @@ export function NovaRequisicaoForm({
     parsedAmount > 0 &&
     Math.abs(invoiceNetAmount - parsedAmount) > 0.01;
 
-  // Budget check is only required when an expense type is selected
-  const needsVerification = !!expenseTypeId;
-  const canVerify = !!sectorId && !!expenseTypeId && parsedAmount > 0;
+  // Budget check is only required when an expense type is selected. No rateio a
+  // verificação é POR SETOR e roda no servidor na criação — a checagem única aqui
+  // não se aplica, então não bloqueia o envio.
+  const needsVerification = !!expenseTypeId && !isRateio;
+  const canVerify = !isRateio && !!sectorId && !!expenseTypeId && parsedAmount > 0;
   const canSubmit = !needsVerification || !!verification;
 
   // Justification required when verification says nivel_3
@@ -573,6 +607,21 @@ export function NovaRequisicaoForm({
       return;
     }
 
+    // Rateio: pelo menos 2 setores distintos, cada um com valor > 0.
+    if (isRateio) {
+      const parts = rateioRows
+        .map((r) => ({ sector_id: r.sectorId, amount: Number(r.valueStr.replace(/\./g, "").replace(",", ".")) }))
+        .filter((p) => p.sector_id && Number.isFinite(p.amount) && p.amount > 0);
+      if (parts.length < 2) {
+        setError("O rateio precisa de pelo menos 2 setores com valor maior que zero.");
+        return;
+      }
+      if (new Set(parts.map((p) => p.sector_id)).size !== parts.length) {
+        setError("Cada setor só pode aparecer uma vez no rateio.");
+        return;
+      }
+    }
+
     if (attachmentRequired && !attachment) {
       setError("Anexe o boleto (PDF, imagem ou documento) antes de enviar.");
       return;
@@ -633,10 +682,21 @@ export function NovaRequisicaoForm({
       attachment_path: finalAttachmentPath,
       invoice_attachment_path: finalInvoicePath,
       extra_attachment_paths: extraAttachments.map((a) => a.path),
-      sector_id: sectorId,
+      sector_id: isRateio ? rateioRows.find((r) => r.sectorId)?.sectorId ?? "" : sectorId,
       expense_type_id: expenseTypeId || undefined,
       supplier_id: selectedSupplierId || undefined,
       amount: parsedAmount,
+      // Rateio entre setores: a requisição é única; o servidor calcula o nível de
+      // aprovação por setor e grava ctrl_request_sectors.
+      is_rateio: isRateio || undefined,
+      rateio: isRateio
+        ? rateioRows
+            .map((r) => ({
+              sector_id: r.sectorId,
+              amount: Number(r.valueStr.replace(/\./g, "").replace(",", ".")),
+            }))
+            .filter((p) => p.sector_id && Number.isFinite(p.amount) && p.amount > 0)
+        : undefined,
       // Compra em dólar: manda a origem em USD + câmbio + IOF (o servidor
       // recalcula o BRL a partir disso). O valor efetivo continua em reais.
       currency: isUsd ? "USD" : undefined,
@@ -850,20 +910,42 @@ export function NovaRequisicaoForm({
       {/* Setor + Tipo de Despesa */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label htmlFor="sector_id" className={LABEL_CLS}>
-            Setor <span className="text-destructive">*</span>
-          </label>
-          <select
-            id="sector_id"
-            name="sector_id"
-            required
-            value={sectorId}
-            onChange={(e) => setSectorId(e.target.value)}
-            className={INPUT_CLS}
-          >
-            <option value="">Selecione o setor</option>
-            {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="sector_id" className={LABEL_CLS}>
+              Setor <span className="text-destructive">*</span>
+            </label>
+            {RATEIO_ENABLED && (
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={isRateio}
+                  onChange={(e) => {
+                    setIsRateio(e.target.checked);
+                    if (e.target.checked) setIsUsd(false); // rateio e dólar não se combinam (v1)
+                  }}
+                  className="h-3.5 w-3.5 rounded border-input"
+                />
+                Ratear entre setores
+              </label>
+            )}
+          </div>
+          {isRateio ? (
+            <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Rateado entre setores — defina os setores e valores abaixo.
+            </div>
+          ) : (
+            <select
+              id="sector_id"
+              name="sector_id"
+              required
+              value={sectorId}
+              onChange={(e) => setSectorId(e.target.value)}
+              className={INPUT_CLS}
+            >
+              <option value="">Selecione o setor</option>
+              {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
         </div>
         <div className="space-y-1.5">
           <label htmlFor="expense_type_id" className={LABEL_CLS}>
@@ -882,6 +964,70 @@ export function NovaRequisicaoForm({
           </select>
         </div>
       </div>
+
+      {/* Rateio por setor (setor + valor de cada um; total = soma) */}
+      {isRateio && (
+        <div className="space-y-2 rounded-lg border bg-muted/10 p-4">
+          <label className={LABEL_CLS}>
+            Rateio por setor <span className="text-destructive">*</span>
+          </label>
+          {/* Cabeçalho das colunas — o setor ocupa o espaço flexível (nome
+              inteiro legível) e o valor fica numa coluna estreita e fixa. */}
+          <div className="flex items-center gap-2 px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="min-w-0 flex-1">Setor</span>
+            <span className="w-32 shrink-0 text-right">Valor</span>
+            <span className="w-9 shrink-0" aria-hidden />
+          </div>
+          {rateioRows.map((row, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <select
+                value={row.sectorId}
+                onChange={(e) => updateRateioRow(i, "sectorId", e.target.value)}
+                className={INPUT_CLS + " min-w-0 flex-1"}
+              >
+                <option value="">Selecione o setor</option>
+                {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              {/* Wrapper de largura fixa: o input usa w-full (do INPUT_CLS), que
+                  aqui significa 100% da caixa estreita — evita que o w-full do
+                  INPUT_CLS engula a coluna do setor. */}
+              <div className="w-32 shrink-0">
+                <input
+                  inputMode="numeric"
+                  placeholder="0,00"
+                  value={row.valueStr}
+                  onChange={(e) => updateRateioRow(i, "valueStr", formatBRL(e.target.value.replace(/\D/g, "")))}
+                  className={INPUT_CLS + " text-right"}
+                />
+              </div>
+              {rateioRows.length > 2 ? (
+                <button
+                  type="button"
+                  onClick={() => removeRateioRow(i)}
+                  aria-label="Remover setor"
+                  className="w-9 shrink-0 rounded-md border px-2 py-2 text-muted-foreground hover:bg-muted"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : (
+                <span className="w-9 shrink-0" aria-hidden />
+              )}
+            </div>
+          ))}
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={addRateioRow}
+              className="text-sm font-medium text-violet-600 hover:underline"
+            >
+              + Adicionar setor
+            </button>
+            <span className="text-sm text-muted-foreground">
+              Total: <strong className="text-foreground">R$ {fmt.format(parsedRateioTotal)}</strong>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Fornecedor */}
       <div className="space-y-1.5">
@@ -1179,10 +1325,11 @@ export function NovaRequisicaoForm({
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label htmlFor="amount" className={LABEL_CLS}>
-              {isUsd ? "Valor (US$)" : "Valor (R$)"} <span className="text-destructive">*</span>
+              {isRateio ? "Valor total (R$)" : isUsd ? "Valor (US$)" : "Valor (R$)"}{" "}
+              <span className="text-destructive">*</span>
             </label>
-            {/* Compra em dólar — indisponível no PIX. */}
-            {paymentMethod !== "pix" && paymentMethod !== "pix_copia_cola" && (
+            {/* Compra em dólar — indisponível no PIX e no rateio (v1). */}
+            {!isRateio && paymentMethod !== "pix" && paymentMethod !== "pix_copia_cola" && (
               <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <input
                   type="checkbox"
@@ -1194,21 +1341,31 @@ export function NovaRequisicaoForm({
               </label>
             )}
           </div>
-          <input
-            id="amount"
-            name="amount"
-            type="text"
-            inputMode="numeric"
-            required
-            placeholder="0,00"
-            value={isUsd ? usdAmountStr : amountStr}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/\D/g, "");
-              if (isUsd) setUsdAmountStr(formatBRL(digits));
-              else setAmountStr(formatBRL(digits));
-            }}
-            className={INPUT_CLS}
-          />
+          {isRateio ? (
+            // No rateio o total é a soma das parcelas (definidas acima) — travado.
+            <input
+              type="text"
+              value={`R$ ${fmt.format(parsedRateioTotal)}`}
+              disabled
+              className={INPUT_CLS + " cursor-not-allowed opacity-70"}
+            />
+          ) : (
+            <input
+              id="amount"
+              name="amount"
+              type="text"
+              inputMode="numeric"
+              required
+              placeholder="0,00"
+              value={isUsd ? usdAmountStr : amountStr}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "");
+                if (isUsd) setUsdAmountStr(formatBRL(digits));
+                else setAmountStr(formatBRL(digits));
+              }}
+              className={INPUT_CLS}
+            />
+          )}
           {isUsd && (
             <p className="text-xs text-muted-foreground">
               {parsedUsd > 0 ? (
