@@ -234,6 +234,32 @@ async function performBudgetVerification(
   };
 }
 
+// ─── Prefixo "NÃO ORÇADO" na descrição ────────────────────────────────────────
+
+// Requisição fora do orçamento (approval_tier = nivel_3 → exige diretor) ganha o
+// prefixo "NÃO ORÇADO - " no título E na descrição, gravado já na criação para
+// acompanhar a requisição em tudo (listas, aprovações, detalhe, Contas a Pagar e
+// a observação no Omie, que lê justamente `description`).
+const NAO_ORCADO_PREFIX = "NÃO ORÇADO - ";
+// Casa qualquer prefixo já existente (com/sem o "-", acento/caixa flexíveis) para
+// não duplicar e para permitir a remoção quando a requisição voltar ao orçamento.
+const NAO_ORCADO_RE = /^\s*N[ÃA]O\s+OR[ÇC]ADO\s*-?\s*/i;
+
+/**
+ * Sincroniza o prefixo "NÃO ORÇADO - " na descrição conforme a requisição esteja
+ * fora do orçamento. Idempotente e reversível: adiciona quando `overBudget`,
+ * remove quando voltar a estar dentro (ex.: edição que troca o setor no Contas a
+ * Pagar). Preserva o texto do usuário.
+ */
+function syncNaoOrcadoPrefix(
+  description: string | null | undefined,
+  overBudget: boolean,
+): string | null {
+  const base = (description ?? "").replace(NAO_ORCADO_RE, "").trimStart();
+  if (!overBudget) return base.length > 0 ? base : null;
+  return base.length > 0 ? `${NAO_ORCADO_PREFIX}${base}` : "NÃO ORÇADO";
+}
+
 // ─── Installment date calculation ────────────────────────────────────────────
 
 function calculateInstallmentDates(
@@ -349,8 +375,8 @@ async function createRateioRequest(
   const { data: newReq, error: insErr } = await supabase
     .from("ctrl_requests")
     .insert({
-      title: data.title,
-      description: data.description ?? null,
+      title: syncNaoOrcadoPrefix(data.title, anyOverBudget),
+      description: syncNaoOrcadoPrefix(data.description, anyOverBudget),
       sector_id: primary,
       expense_type_id: data.expense_type_id,
       supplier_id: data.supplier_id ?? null,
@@ -692,7 +718,8 @@ export async function createRequest(data: CreateRequestInput) {
     .from("ctrl_requests")
     .insert({
       ...baseFields,
-      title: firstTitle,
+      title: syncNaoOrcadoPrefix(firstTitle, approvalTier === "nivel_3"),
+      description: syncNaoOrcadoPrefix(data.description, approvalTier === "nivel_3"),
       amount: unitAmount,
       reference_month: firstMonth,
       reference_year: firstYear,
@@ -817,7 +844,11 @@ export async function createRequest(data: CreateRequestInput) {
         .from("ctrl_requests")
         .insert({
           ...baseFields,
-          title: `${data.title} — Parcela ${inst.installment}/${data.installments}`,
+          title: syncNaoOrcadoPrefix(
+            `${data.title} — Parcela ${inst.installment}/${data.installments}`,
+            instTier === "nivel_3",
+          ),
+          description: syncNaoOrcadoPrefix(data.description, instTier === "nivel_3"),
           amount: instAmount,
           reference_month: inst.month,
           reference_year: inst.year,
@@ -891,7 +922,8 @@ export async function createRequest(data: CreateRequestInput) {
         .from("ctrl_requests")
         .insert({
           ...baseFields,
-          title: data.title,
+          title: syncNaoOrcadoPrefix(data.title, monthTier === "nivel_3"),
+          description: syncNaoOrcadoPrefix(data.description, monthTier === "nivel_3"),
           amount: data.amount,
           reference_month: month,
           reference_year: data.reference_year,
@@ -2833,7 +2865,7 @@ export async function editExpenseRoutingFromContasAPagar(
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
     .select(
-      `id, status, deleted_at, omie_contapagar_codigo, request_number,
+      `id, status, deleted_at, omie_contapagar_codigo, request_number, title, description,
        sector_id, expense_type_id, amount, due_date, reference_month, reference_year, created_by,
        payment_method, barcode, pix_key,
        ctrl_sectors(name), ctrl_expense_types(name)`,
@@ -2972,6 +3004,11 @@ export async function editExpenseRoutingFromContasAPagar(
     .update({
       sector_id: newSectorId,
       expense_type_id: newExpenseTypeId,
+      // Setor/tipo mudou → o "fora do orçamento" foi recalculado; sincroniza o
+      // prefixo "NÃO ORÇADO -" (adiciona ou remove) no título e na descrição
+      // conforme o novo tier.
+      title: syncNaoOrcadoPrefix(req.title as string | null, approvalTier === "nivel_3"),
+      description: syncNaoOrcadoPrefix(req.description as string | null, approvalTier === "nivel_3"),
       is_budgeted: verification?.isBudgeted ?? false,
       approval_tier: approvalTier,
       approval_level: approvalTier === "nivel_3" ? 2 : 1,
