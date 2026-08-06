@@ -30,7 +30,19 @@ export default async function AprovacoesPage() {
   }
 
   const { requests = [], error } = await getRequests({
-    statuses: ["pendente", "pendente_diretor", "aguardando_complementacao", "aprovado", "rejeitado"],
+    // Aba "Aprovadas" mostra o histórico completo do que já passou pela aprovação:
+    // além de "aprovado" (ainda não enviada), inclui as que seguiram para o Contas
+    // a Pagar (agendado / info pendente). Sem isso, a aba só listava as que ainda
+    // não tinham sido enviadas ao pagamento.
+    statuses: [
+      "pendente",
+      "pendente_diretor",
+      "aguardando_complementacao",
+      "aprovado",
+      "agendado",
+      "info_pagamento_pendente",
+      "rejeitado",
+    ],
     approvalScope: true,
   });
 
