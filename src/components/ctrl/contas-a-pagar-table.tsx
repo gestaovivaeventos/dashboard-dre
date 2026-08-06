@@ -53,6 +53,15 @@ const naFila = (r: ContasRequest) =>
 const falhouNoEnvio = (r: ContasRequest) =>
   r.status === "aprovado" && r.omie_launch_status === "erro";
 
+/** Rótulo da coluna Setor: rateio mostra "Rateio (N setores)" no lugar do setor. */
+function sectorLabel(r: ContasRequest): string {
+  if (r.is_rateio) {
+    const n = r.ctrl_request_sectors?.length ?? 0;
+    return n > 0 ? `Rateio (${n} setores)` : "Rateio";
+  }
+  return resolveNamed(r.ctrl_sectors ?? null) ?? "";
+}
+
 function formatarDuracao(minutos: number) {
   if (minutos < 1) return "menos de 1 min";
   if (minutos < 60) return `${minutos} min`;
@@ -230,7 +239,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       {
         key: "setor",
         type: "text",
-        getValue: (r) => resolveNamed(r.ctrl_sectors ?? null) ?? "",
+        getValue: (r) => sectorLabel(r),
       },
       {
         key: "descricao",
@@ -506,7 +515,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       {req.categoria ?? <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>}
+                      {req.is_rateio ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300"
+                          title={(req.ctrl_request_sectors ?? [])
+                            .map(
+                              (p) =>
+                                `${resolveNamed(p.ctrl_sectors ?? null) ?? "Setor"}: ${fmt.format(Number(p.amount))}`,
+                            )
+                            .join("\n")}
+                        >
+                          Rateio ({req.ctrl_request_sectors?.length ?? 0})
+                        </span>
+                      ) : (
+                        resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {req.description ? (

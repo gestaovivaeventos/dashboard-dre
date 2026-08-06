@@ -16,10 +16,10 @@ import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
-// Rateio entre setores: recurso em construção (criação → orçamento → aprovação
-// multi-setor → Omie). Mantido DESLIGADO até o fluxo estar completo de ponta a
-// ponta; ligar aqui quando pronto.
-const RATEIO_ENABLED = false;
+// Rateio entre setores: fluxo completo de ponta a ponta (criação → orçamento por
+// setor → aprovação multi-setor → lançamento único no Omie com distribuicao por
+// departamento → exibição). Ligar/desligar aqui.
+const RATEIO_ENABLED = true;
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",

@@ -87,6 +87,9 @@ export default async function RequisicoesPage() {
       sector_id: (r.sector_id as string | null) ?? null,
       expense_type_id: (r.expense_type_id as string | null) ?? null,
       event_id: (r.event_id as string | null) ?? null,
+      is_rateio: (r.is_rateio as boolean | null) ?? null,
+      ctrl_request_sectors:
+        (r.ctrl_request_sectors as RequestDetail["ctrl_request_sectors"]) ?? null,
       paying_company: (r.paying_company as string | null) ?? null,
       omie_contapagar_codigo: (r.omie_contapagar_codigo as number | null) ?? null,
       sent_to_payment_at: (r.sent_to_payment_at as string | null) ?? null,
