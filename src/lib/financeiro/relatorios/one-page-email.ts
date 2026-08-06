@@ -348,6 +348,20 @@ function renderResumo(data: OnePageReportPreviewData, showSemaforo: boolean): st
                 variacao,
               )}</span> vs orçado</div>`
             : ""
+        }
+        ${
+          // Segunda leitura do mesmo indicador (Hero Holding): resultado do DRE
+          // + dividendos recebidos. Idêntica à da tela — mesmo objeto de dados.
+          data.resultadoComplemento
+            ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid ${C.cardBorder};">
+          <div style="font-family:${FF};font-size:11px;color:${C.sub};">${esc(
+            data.resultadoComplemento.label,
+          )}</div>
+          <div style="font-family:${FM};font-size:20px;font-weight:600;color:${C.ink};margin-top:2px;">${esc(
+            data.resultadoComplemento.value,
+          )}</div>
+        </div>`
+            : ""
         }`)
     : "";
 

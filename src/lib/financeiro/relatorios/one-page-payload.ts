@@ -35,6 +35,10 @@ import {
   type DividendosUnidadesResult,
 } from "./dividendos-unidades";
 import { buildMutuosBlock, type MutuosResult } from "./mutuos";
+import {
+  buildResumoResultadoComplemento,
+  type ResumoResultadoComplementoResult,
+} from "./resumo-resultado-complemento";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 import type { ReportTemplateId } from "./templates/report-template-types";
 
@@ -258,6 +262,15 @@ export interface OnePagePayload {
   // distribuiu), no período de referência. Ausente (undefined) quando não houve
   // dividendo no período ou a conta não existe no plano da empresa.
   dividendosUnidades?: DividendosUnidadesResult;
+  // Linha complementar do indicador "Resultado operacional do período" (Resumo
+  // Executivo) — hoje só a Hero Holding a configura. `value` = Resultado do
+  // Exercício + Dividendos Recebidos (Fluxo de Caixa) no período; o número
+  // grande do indicador NÃO muda. Ausente (undefined) nas demais empresas.
+  resumoResultadoComplemento?: {
+    label: string;
+    value: number;
+    formattedValue: string;
+  };
   // Dividendos pagos aos sócios — EXCLUSIVO da Hero Holding. Quebra da linha
   // "Dividendos Pagos" do Fluxo de Caixa pelos sócios configurados no template,
   // no período de referência. Ausente (undefined) quando a conta não existe no
@@ -1958,12 +1971,13 @@ export async function buildOnePagePayload(
   // 11e. Dividendos recebidos por unidade — EXCLUSIVO da Hero Holding.
   //
   // Só é montado quando o template define `report.dividendosUnidades`. Agrupa
-  // por FORNECEDOR o drill-down da conta DRE "Dividendos Recebidos" (mesma RPC
-  // da tela de DRE gerencial), no período [dateFrom..dateTo] escolhido pelo
-  // usuário — leitura direta da Omie, sem valor manual. `scopedAccounts` é o
-  // plano DRE já escopado na empresa, o mesmo usado pelo resto do relatório.
-  // Sem dividendo no período o builder devolve undefined e o quadro não aparece.
-  // Inerte nos demais templates.
+  // por FORNECEDOR o drill-down da conta "Dividendos Recebidos" na tela em que a
+  // categoria é apresentada (`source`: Fluxo de Caixa na Hero de hoje, ou DRE
+  // gerencial), no período [dateFrom..dateTo] escolhido pelo usuário — leitura
+  // direta da Omie, sem valor manual. `scopedAccounts` é o plano DRE já escopado
+  // na empresa (usado só quando `source` é "dre"). Sem dividendo no período o
+  // builder devolve undefined e o quadro não aparece. Inerte nos demais
+  // templates.
   // -------------------------------------------------------------------------
   const dividendosCfg = template.report?.dividendosUnidades;
   const dividendosUnidades: DividendosUnidadesResult | undefined = dividendosCfg
@@ -1975,6 +1989,7 @@ export async function buildOnePagePayload(
         accounts: scopedAccounts,
         dateFrom,
         dateTo,
+        source: dividendosCfg.source,
         accountCode: dividendosCfg.accountCode,
         accountName: dividendosCfg.accountName,
       })
@@ -2001,6 +2016,43 @@ export async function buildOnePagePayload(
         accountName: dividendosSociosCfg.accountName,
       })
     : undefined;
+
+  // -------------------------------------------------------------------------
+  // 11g. Linha complementar do "Resultado operacional do período" (Resumo
+  //      Executivo) — hoje EXCLUSIVA da Hero Holding.
+  //
+  // Só é montada quando o template define `report.resumoResultadoComplemento`.
+  // O número grande do indicador continua sendo `resultadoRealizado` (Resultado
+  // do Exercício do DRE gerencial, code 11) para TODA empresa; esta linha só
+  // acrescenta, abaixo do "% vs orçado", o mesmo resultado SOMADO ao realizado
+  // da conta de Fluxo de Caixa configurada (Hero: 4.1 Dividendos Recebidos, que
+  // desde a volta da categoria para o Fluxo não compõe mais o resultado do DRE).
+  // Nenhum outro indicador do relatório é afetado; inerte nos demais templates.
+  // -------------------------------------------------------------------------
+  const resumoComplementoCfg = template.report?.resumoResultadoComplemento;
+  const resumoComplemento: ResumoResultadoComplementoResult | undefined =
+    resumoComplementoCfg
+      ? await buildResumoResultadoComplemento(supabase, {
+          companyId,
+          dateFrom,
+          dateTo,
+          resultadoRealizado,
+          label: resumoComplementoCfg.label,
+          accountCode: resumoComplementoCfg.cashFlowCode,
+          accountName: resumoComplementoCfg.cashFlowName,
+        })
+      : undefined;
+
+  // Mesmo número exibido no quadro, enviado à IA para que ela nunca precise
+  // somar por conta própria (nem contradiga o que o leitor vê ao lado).
+  const resultadoComDividendosInput = resumoComplemento
+    ? {
+        rotulo: resumoComplemento.label,
+        resultado_exercicio: Number(resultadoRealizado.toFixed(2)),
+        dividendos_recebidos: Number(resumoComplemento.complementValue.toFixed(2)),
+        total: Number(resumoComplemento.value.toFixed(2)),
+      }
+    : null;
 
   // Resumo dos dividendos pagos para a IA. Inclui os sócios com 0 no período —
   // a ausência de pagamento é informação, não lacuna.
@@ -2235,6 +2287,9 @@ export async function buildOnePagePayload(
         dividendos_unidades: dividendosInput,
         // Dividendos pagos aos sócios configurados — só presente p/ Hero Holding.
         dividendos_socios: dividendosSociosInput,
+        // Resultado do período somado aos dividendos recebidos (linha
+        // complementar do Resumo Executivo) — só presente p/ Hero Holding.
+        resultado_com_dividendos: resultadoComDividendosInput,
       },
       generatedAt: new Date().toISOString(),
       template: { id: template.id, name: template.name },
@@ -2269,6 +2324,16 @@ export async function buildOnePagePayload(
       dividendosUnidades,
       // Dividendos pagos aos sócios configurados — só presente p/ Hero Holding.
       dividendosSocios,
+      // Linha complementar do "Resultado operacional do período" (Resumo
+      // Executivo) — só presente p/ templates que a configuram (Hero Holding).
+      // Formatada com o MESMO formatBRL do número grande logo acima dela.
+      resumoResultadoComplemento: resumoComplemento
+        ? {
+            label: resumoComplemento.label,
+            value: resumoComplemento.value,
+            formattedValue: formatBRL(resumoComplemento.value),
+          }
+        : undefined,
       // Quadro de indicadores por conta DRE — só presente p/ templates que o
       // configuram (ex.: Terrazzo — "Locação de Espaço").
       indicadoresDre,

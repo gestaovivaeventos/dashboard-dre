@@ -295,6 +295,14 @@ export interface OnePageReportPreviewData {
    */
   diagnosticoPrincipal: string;
   acoes: AcaoCard[];
+  /**
+   * Segunda leitura do indicador "Resultado operacional do período" (hoje só a
+   * Hero Holding): exibida DENTRO do mesmo quadro, abaixo do "% vs orçado". O
+   * número grande não muda — continua sendo o Resultado do Exercício do DRE
+   * gerencial. `value` já vem formatado no mesmo padrão do número grande.
+   * Ausência = quadro do indicador exatamente como nas demais empresas.
+   */
+  resultadoComplemento?: { label: string; value: string };
   // ── Extensões por template (Fase 2) ───────────────────────────────────────
   // Ausência de todas = comportamento Franquias Viva (mostra todos os blocos,
   // títulos e grade padrão). Preenchidas por templates com `report` (ex.: SGX).
@@ -797,6 +805,33 @@ function ResumoExecutivo({
                   {variacao}
                 </span>{" "}
                 vs orçado
+              </div>
+            ) : null}
+            {/* Segunda leitura do mesmo indicador (Hero Holding): resultado do
+                DRE + dividendos recebidos do Fluxo de Caixa. Só renderiza quando
+                o template da empresa a configura — as demais ficam idênticas. */}
+            {data.resultadoComplemento ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  paddingTop: 8,
+                  borderTop: `1px solid ${C.cardBorder}`,
+                }}
+              >
+                <div style={{ fontSize: 11, color: C.sub }}>
+                  {data.resultadoComplemento.label}
+                </div>
+                <div
+                  style={{
+                    fontFamily: FONT_MONO,
+                    fontSize: 20,
+                    fontWeight: 600,
+                    color: C.ink,
+                    marginTop: 2,
+                  }}
+                >
+                  {data.resultadoComplemento.value}
+                </div>
               </div>
             ) : null}
           </div>

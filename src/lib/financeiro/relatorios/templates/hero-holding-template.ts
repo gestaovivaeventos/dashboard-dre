@@ -145,13 +145,15 @@ export const heroHoldingTemplate: ReportTemplate = {
       companyNames: HERO_HOLDING_MUTUOS_COMPANY_NAMES,
     },
     // Dividendos que a holding RECEBEU de cada unidade no período de referência.
-    // Vem da linha "Dividendos Recebidos" do DRE gerencial da Hero (conta 1.3 —
-    // a mesma linha que antes ficava no Fluxo de Caixa), quebrada pelo FORNECEDOR
-    // de cada lançamento (a unidade que distribuiu). Leitura direta da Omie,
-    // sempre atualizada pelo período escolhido no relatório.
+    // Vem da linha "Dividendos Recebidos" do FLUXO DE CAIXA da Hero (conta 4.1),
+    // quebrada pelo FORNECEDOR de cada lançamento (a unidade que distribuiu).
+    // A categoria já esteve no DRE gerencial (conta 1.3) e voltou para o Fluxo —
+    // por isso `source: "fluxo"`: é a tela que apresenta a categoria hoje.
+    // Leitura direta da Omie, sempre atualizada pelo período do relatório.
     dividendosUnidades: {
       key: "dividendosUnidades",
       title: "Dividendos recebidos das unidades",
+      source: "fluxo",
     },
     // Dividendos que a holding PAGOU aos sócios no período. Vem da linha
     // "Dividendos Pagos" do Fluxo de Caixa (conta 4.2), quebrada pelo FORNECEDOR
@@ -162,6 +164,15 @@ export const heroHoldingTemplate: ReportTemplate = {
       key: "dividendosSocios",
       title: "Dividendos pagos aos sócios",
       partnerNames: ["Renan", "Jefferson", "V Company"],
+    },
+    // Segunda leitura do indicador "Resultado operacional do período" (Resumo
+    // Executivo). O número grande segue sendo o Resultado do Exercício do DRE
+    // gerencial; abaixo do "% vs orçado" entra o mesmo resultado SOMADO aos
+    // Dividendos Recebidos (conta 4.1 do Fluxo de Caixa), que desde a volta da
+    // categoria para o Fluxo não compõem mais o resultado do DRE — mas são a
+    // essência da operação da holding. Nenhum outro indicador do relatório muda.
+    resumoResultadoComplemento: {
+      label: "Somando os dividendos recebidos",
     },
   },
 };

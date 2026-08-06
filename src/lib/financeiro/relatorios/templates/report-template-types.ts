@@ -250,8 +250,8 @@ export type ReportBlockKey =
   // grupo; nas demais Franquias Viva mostra só a própria unidade.
   | "mutuos"
   // Quadro de DIVIDENDOS RECEBIDOS por unidade EXCLUSIVO da Hero Holding
-  // (quebra da linha "Dividendos Recebidos" do DRE por fornecedor, no período de
-  // referência). Só o template hero-holding o habilita.
+  // (quebra da linha "Dividendos Recebidos" do Fluxo de Caixa por fornecedor, no
+  // período de referência). Só o template hero-holding o habilita.
   | "dividendosUnidades"
   // Quadro de DIVIDENDOS PAGOS AOS SÓCIOS EXCLUSIVO da Hero Holding (quebra da
   // linha "Dividendos Pagos" do Fluxo de Caixa pelos sócios configurados, no
@@ -450,21 +450,52 @@ export interface TemplateReportConfig {
   };
   /**
    * Quadro de DIVIDENDOS RECEBIDOS por unidade (Hero Holding). Quebra por
-   * FORNECEDOR (`supplier_customer`) a conta DRE "Dividendos Recebidos" da
-   * própria empresa analisada, no PERÍODO DE REFERÊNCIA escolhido na geração do
-   * relatório — usando a mesma RPC de drill-down da tela de DRE gerencial.
-   * Leitura sempre atualizada da Omie; nenhum valor manual.
+   * FORNECEDOR (`supplier_customer`) a conta "Dividendos Recebidos" da própria
+   * empresa analisada, no PERÍODO DE REFERÊNCIA escolhido na geração do
+   * relatório — usando a mesma RPC de drill-down da TELA em que a categoria é
+   * apresentada. Leitura sempre atualizada da Omie; nenhum valor manual.
    *
-   * `accountCode` (default "1.3") e `accountName` (default "Dividendos
-   * Recebidos") resolvem a conta dentro do plano DRE já escopado na empresa.
+   * `source` diz QUAL tela/plano contém a categoria:
+   *   "fluxo" → plano de Fluxo de Caixa + `cash_flow_drilldown` (é onde a
+   *     categoria está hoje na Hero Holding, conta 4.1);
+   *   "dre" (default) → plano DRE + `dashboard_dre_drilldown`.
+   * Os defaults de `accountCode`/`accountName` acompanham a fonte: "fluxo" =>
+   * 4.1 / "Dividendos Recebidos"; "dre" => 1.3 / "Dividendos Recebidos".
+   *
    * Unidade sem dividendo no período não entra; sem nenhuma linha, o quadro não
    * é renderizado. Gated por `key`.
    */
   dividendosUnidades?: {
     key: ReportBlockKey;
     title: string;
+    source?: "dre" | "fluxo";
     accountCode?: string;
     accountName?: string;
+  };
+  /**
+   * Linha COMPLEMENTAR dentro do indicador "Resultado operacional do período"
+   * (Resumo Executivo) — hoje EXCLUSIVA da Hero Holding.
+   *
+   * O número grande do indicador NÃO muda para ninguém: continua sendo o
+   * "Resultado do Exercício" da tela de DRE Gerencial no período de referência.
+   * Quando este bloco está configurado, o relatório exibe ABAIXO do percentual
+   * "vs orçado", no mesmo quadro, um segundo valor = Resultado do Exercício +
+   * o realizado da conta de FLUXO DE CAIXA indicada, no mesmo período.
+   *
+   * Motivo (Hero Holding): a categoria "Dividendos Recebidos" das unidades é
+   * apresentada na tela de Fluxo de Caixa (conta 4.1) e portanto NÃO compõe o
+   * Resultado do Exercício — mas é a essência da operação da holding, então a
+   * diretoria precisa das duas leituras lado a lado.
+   *
+   * `cashFlowCode` (default "4.1") e `cashFlowName` (default "Dividendos
+   * Recebidos") resolvem a conta no plano de fluxo escopado na empresa. Conta
+   * ausente do plano ou leitura falha => a linha não aparece (nunca um total
+   * parcial). Ausência deste bloco = comportamento atual em todas as empresas.
+   */
+  resumoResultadoComplemento?: {
+    label: string;
+    cashFlowCode?: string;
+    cashFlowName?: string;
   };
   /**
    * Quadro de DIVIDENDOS PAGOS AOS SÓCIOS (Hero Holding). Quebra por FORNECEDOR

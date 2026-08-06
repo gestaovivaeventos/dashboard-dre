@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
+import { resolveScopedCashFlowAccountId } from "./cash-flow-account";
 import { CASH_FLOW_DRILLDOWN, fetchDrilldownRowsByMonth } from "./drilldown-chunked";
 import { formatIsoDate } from "./dividendos-unidades";
 import { normalizeCompanyName } from "./templates/hero-holding-template";
@@ -58,14 +59,6 @@ export interface DividendosSociosResult {
   total: number;
 }
 
-/** Conta de Fluxo de Caixa da empresa (linha do plano). */
-interface CashFlowAccountRow {
-  id: string;
-  code: string;
-  name: string;
-  company_id: string | null;
-}
-
 interface BuildArgs {
   key: string;
   title: string;
@@ -79,41 +72,6 @@ interface BuildArgs {
   accountCode?: string;
   /** Nome da conta de Fluxo p/ fallback (default "Dividendos Pagos"). */
   accountName?: string;
-}
-
-/**
- * Resolve a conta "Dividendos Pagos" no plano de Fluxo de Caixa da empresa.
- * Mesmo critério de escopo da tela: plano custom da empresa quando existe, senão
- * o global. Casa por CODE e, se não achar, por NOME normalizado.
- */
-async function resolveDividendosPagosAccountId(
-  supabase: SupabaseClient,
-  companyId: string,
-  accountCode: string,
-  accountName: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("cash_flow_accounts")
-    .select("id,code,name,company_id")
-    .eq("active", true)
-    .or(`company_id.is.null,company_id.eq.${companyId}`);
-  if (error) {
-    console.warn(`[${LOG_LABEL}] falha ao ler o plano de fluxo: ${error.message}`);
-    return null;
-  }
-
-  const all = (data ?? []) as CashFlowAccountRow[];
-  const hasCustomPlan = all.some((a) => a.company_id === companyId);
-  const scoped = all.filter((a) =>
-    hasCustomPlan ? a.company_id === companyId : a.company_id === null,
-  );
-
-  const byCode = scoped.find((a) => a.code === accountCode);
-  if (byCode) return byCode.id;
-
-  const wantedName = normalizeCompanyName(accountName);
-  const byName = scoped.find((a) => normalizeCompanyName(a.name) === wantedName);
-  return byName?.id ?? null;
 }
 
 /**
@@ -145,12 +103,14 @@ export async function buildDividendosSociosBlock(
   // dividendos-unidades.ts). Estritamente LEITURA, da própria empresa analisada.
   const db = createAdminClientIfAvailable() ?? supabase;
 
-  const accountId = await resolveDividendosPagosAccountId(
-    db,
+  // Mesmo critério de escopo da tela de Fluxo (plano custom da empresa quando
+  // existe, senão o global) — resolução compartilhada em cash-flow-account.ts.
+  const accountId = await resolveScopedCashFlowAccountId(db, {
     companyId,
     accountCode,
     accountName,
-  );
+    logLabel: LOG_LABEL,
+  });
   if (!accountId) {
     console.warn(
       `[${LOG_LABEL}] conta "${accountName}" (code ${accountCode}) nao encontrada no plano de fluxo da empresa ${companyId}`,

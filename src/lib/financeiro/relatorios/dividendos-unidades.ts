@@ -2,23 +2,31 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
-import { DRE_DRILLDOWN, fetchDrilldownRowsByMonth } from "./drilldown-chunked";
+import { resolveScopedCashFlowAccountId } from "./cash-flow-account";
+import {
+  CASH_FLOW_DRILLDOWN,
+  DRE_DRILLDOWN,
+  fetchDrilldownRowsByMonth,
+} from "./drilldown-chunked";
 import { normalizeCompanyName } from "./templates/hero-holding-template";
 
 // ============================================================================
 // Quadro de DIVIDENDOS RECEBIDOS POR UNIDADE — EXCLUSIVO da Hero Holding.
 // ============================================================================
-// De onde vem o número: da linha "Dividendos Recebidos" do DRE GERENCIAL da
-// holding (conta 1.3 no plano da Hero). Essa linha vivia no Fluxo de Caixa e foi
-// deslocada para o DRE para compor o resultado — é a MESMA categoria da Omie e o
-// MESMO valor; só mudou a tela que a apresenta. No drill-down, a unidade que
-// distribuiu o dividendo aparece no campo FORNECEDOR (`supplier_customer`).
+// De onde vem o número: da linha "Dividendos Recebidos" da holding. Essa
+// categoria já foi apresentada no DRE gerencial (conta 1.3) e VOLTOU para a tela
+// de FLUXO DE CAIXA (conta 4.1) — é a MESMA categoria da Omie e o MESMO valor;
+// muda apenas a tela (e, portanto, o plano e a RPC de drill-down). Por isso o
+// template diz de qual fonte ler (`source: "fluxo" | "dre"`): apontar para a
+// tela errada não erra o número, faz o quadro SUMIR (a conta não existe naquele
+// plano). No drill-down, a unidade que distribuiu o dividendo aparece no campo
+// FORNECEDOR (`supplier_customer`).
 //
 // Este módulo apenas AGRUPA esse mesmo drill-down por fornecedor, no período de
-// referência escolhido pelo usuário na geração do relatório — via a RPC
-// `dashboard_dre_drilldown`, a mesma que a tela usa (lida mês a mês, ver
-// drilldown-chunked.ts). Nenhum cálculo paralelo, nenhum valor manual: mudou na
-// Omie, muda aqui na próxima geração do relatório.
+// referência escolhido pelo usuário na geração do relatório — via a MESMA RPC
+// que a tela usa (`cash_flow_drilldown` ou `dashboard_dre_drilldown`, lida mês a
+// mês; ver drilldown-chunked.ts). Nenhum cálculo paralelo, nenhum valor manual:
+// mudou na Omie, muda aqui na próxima geração do relatório.
 //
 // Nome exibido: o fornecedor vem da Omie com a razão social ("VIVA CAMPO GRANDE
 // - BB CC 123852-3"). Quando o nome do fornecedor CONTÉM o nome de uma empresa
@@ -31,8 +39,14 @@ import { normalizeCompanyName } from "./templates/hero-holding-template";
 // Sem nenhuma linha, o builder devolve `undefined` e o quadro não aparece.
 // ============================================================================
 
-/** Code padrão da conta DRE "Dividendos Recebidos" no plano da Hero Holding. */
-const DEFAULT_ACCOUNT_CODE = "1.3";
+/** Fonte da categoria: a TELA (e o plano) em que ela é apresentada hoje. */
+export type DividendosUnidadesSource = "dre" | "fluxo";
+
+/** Code padrão por fonte: 4.1 no plano de Fluxo, 1.3 no plano DRE. */
+const DEFAULT_ACCOUNT_CODE: Record<DividendosUnidadesSource, string> = {
+  fluxo: "4.1",
+  dre: "1.3",
+};
 /** Fallback por nome, caso o code mude no plano da empresa. */
 const DEFAULT_ACCOUNT_NAME = "Dividendos Recebidos";
 
@@ -74,13 +88,16 @@ interface BuildArgs {
   /**
    * Plano DRE JÁ ESCOPADO na empresa (o mesmo que o restante do relatório usa).
    * Recebido pronto para não duplicar a regra de escopo custom/global aqui.
+   * Só é usado quando `source` é "dre"; no Fluxo o plano é lido aqui.
    */
   accounts: ScopedDreAccount[];
   dateFrom: string;
   dateTo: string;
-  /** Code da conta DRE (default "1.3"). */
+  /** Tela/plano que apresenta a categoria (default "dre"). */
+  source?: DividendosUnidadesSource;
+  /** Code da conta (default: 4.1 no Fluxo, 1.3 no DRE). */
   accountCode?: string;
-  /** Nome da conta DRE p/ fallback (default "Dividendos Recebidos"). */
+  /** Nome da conta p/ fallback (default "Dividendos Recebidos"). */
   accountName?: string;
 }
 
@@ -126,7 +143,8 @@ export async function buildDividendosUnidadesBlock(
     accounts,
     dateFrom,
     dateTo,
-    accountCode = DEFAULT_ACCOUNT_CODE,
+    source = "dre",
+    accountCode = DEFAULT_ACCOUNT_CODE[source],
     accountName = DEFAULT_ACCOUNT_NAME,
   } = args;
 
@@ -137,16 +155,26 @@ export async function buildDividendosUnidadesBlock(
   // foi autorizado na rota. Sem service key, cai para o client da sessão.
   const db = createAdminClientIfAvailable() ?? supabase;
 
-  const accountId = resolveDividendosAccountId(accounts, accountCode, accountName);
+  // Resolve a conta no plano da TELA que apresenta a categoria: Fluxo de Caixa
+  // (onde ela está hoje na Hero) ou DRE gerencial.
+  const accountId =
+    source === "fluxo"
+      ? await resolveScopedCashFlowAccountId(db, {
+          companyId,
+          accountCode,
+          accountName,
+          logLabel: LOG_LABEL,
+        })
+      : resolveDividendosAccountId(accounts, accountCode, accountName);
   if (!accountId) {
     console.warn(
-      `[${LOG_LABEL}] conta "${accountName}" (code ${accountCode}) nao encontrada no plano DRE da empresa ${companyId}`,
+      `[${LOG_LABEL}] conta "${accountName}" (code ${accountCode}) nao encontrada no plano de ${source === "fluxo" ? "fluxo" : "DRE"} da empresa ${companyId}`,
     );
     return undefined;
   }
 
   const entries = await fetchDrilldownRowsByMonth(db, {
-    source: DRE_DRILLDOWN,
+    source: source === "fluxo" ? CASH_FLOW_DRILLDOWN : DRE_DRILLDOWN,
     accountId,
     companyId,
     dateFrom,

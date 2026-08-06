@@ -154,6 +154,14 @@ export interface OnePageApiResponse {
   // Dividendos pagos aos sócios (Hero Holding). Já vem no shape do componente
   // (R$ cheios, só os sócios configurados — inclusive os zerados).
   dividendosSocios?: DividendosSociosBlock;
+  // Linha complementar do indicador "Resultado operacional do período" (Hero
+  // Holding): resultado do DRE + dividendos recebidos. Já vem FORMATADA com o
+  // mesmo padrão do número grande — o mapper só repassa o texto.
+  resumoResultadoComplemento?: {
+    label: string;
+    value: number;
+    formattedValue: string;
+  };
   // Gráficos extras por template (ex.: Village): colunas (acum. do ano) + linhas
   // (6 meses, N séries). Valores em R$ — o mapper divide por 1000 (escala "mil").
   barsSerie?: { mes: string; valor: number | null }[];
@@ -861,6 +869,15 @@ export function mapOnePageApiResponseToPreviewData(
     dividendosUnidades: response.dividendosUnidades,
     // Dividendos pagos aos sócios (Hero Holding) — passa direto (R$ cheios).
     dividendosSocios: response.dividendosSocios,
+    // Segunda leitura do "Resultado operacional do período" (Hero Holding):
+    // resultado do DRE + dividendos recebidos do Fluxo. undefined nas demais
+    // empresas → o quadro do indicador fica exatamente como está hoje.
+    resultadoComplemento: response.resumoResultadoComplemento
+      ? {
+          label: response.resumoResultadoComplemento.label,
+          value: response.resumoResultadoComplemento.formattedValue,
+        }
+      : undefined,
     // Gráficos extras por template (Village): R$ → "mil" (÷1000).
     barsSerie: response.barsSerie?.map((p) => ({
       mes: p.mes,

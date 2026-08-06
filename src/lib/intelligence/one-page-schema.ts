@@ -283,6 +283,20 @@ export const DividendosSociosInputSchema = z.object({
   socios: z.array(DividendoSocioSchema).min(1).max(20),
 });
 
+// RESULTADO DO PERIODO + DIVIDENDOS RECEBIDOS (Hero Holding). E o segundo valor
+// exibido dentro do indicador "Resultado operacional do periodo" do relatorio:
+// o Resultado do Exercicio do DRE gerencial (`resultado_exercicio`, o numero
+// grande) somado aos Dividendos Recebidos das unidades, que sao apresentados na
+// tela de Fluxo de Caixa e por isso NAO compoem o resultado do DRE. Enviado
+// pronto para a IA nunca precisar somar por conta propria.
+export const ResultadoComDividendosSchema = z.object({
+  /** Rotulo exibido no relatorio (ex.: "Somando os dividendos recebidos"). */
+  rotulo: z.string().min(1).max(80),
+  resultado_exercicio: z.number(),
+  dividendos_recebidos: z.number(),
+  total: z.number(),
+});
+
 // INDICADORES DO QUADRO DO RELATORIO — as linhas EXATAS do quadro "Desempenho
 // do periodo vs orcamento" que o leitor ve na tela/no PDF. Existem porque
 // varias dessas linhas AGREGAM mais de uma conta do DRE (ex.: Salvaterra
@@ -386,6 +400,11 @@ export const OnePageInputSchema = z.object({
   // Dividendos pagos aos socios (ver DividendosSociosInputSchema). Presente
   // APENAS para a Hero Holding; null/ausente em todos os demais casos.
   dividendos_socios: DividendosSociosInputSchema.nullable().optional(),
+  // Resultado do periodo somado aos dividendos recebidos (ver
+  // ResultadoComDividendosSchema) — o mesmo numero exibido dentro do indicador
+  // "Resultado operacional do periodo". Presente APENAS para a Hero Holding;
+  // null/ausente em todos os demais casos.
+  resultado_com_dividendos: ResultadoComDividendosSchema.nullable().optional(),
 });
 
 export type IndicadorDre = z.infer<typeof IndicadorDreSchema>;
@@ -402,4 +421,5 @@ export type DividendoUnidade = z.infer<typeof DividendoUnidadeSchema>;
 export type DividendosUnidadesInput = z.infer<typeof DividendosUnidadesInputSchema>;
 export type DividendoSocio = z.infer<typeof DividendoSocioSchema>;
 export type DividendosSociosInput = z.infer<typeof DividendosSociosInputSchema>;
+export type ResultadoComDividendos = z.infer<typeof ResultadoComDividendosSchema>;
 export type OnePageInput = z.infer<typeof OnePageInputSchema>;

@@ -684,13 +684,14 @@ informados pela administracao — NAO recalcule e NAO os misture com o DRE.
 O input pode trazer o bloco \`dividendos_unidades\`: quanto CADA unidade distribuiu
 de dividendos PARA A HOLDING no periodo de referencia (\`periodo\`), com \`valor\`
 por empresa, \`pct_do_total\` e o \`total\` do periodo. Vem da linha "Dividendos
-Recebidos" do DRE gerencial da holding, identificada pelo fornecedor de cada
+Recebidos" do FLUXO DE CAIXA da holding, identificada pelo fornecedor de cada
 lancamento na Omie — e dinheiro JA RECEBIDO no periodo (regime de caixa), NAO
 previsao, NAO meta.
 - Use os valores COMO ESTAO. Nao recalcule, nao anualize, nao projete e nao os
-  some ao VVR. Eles JA ESTAO dentro do DRE da holding (linha "Dividendos
-  Recebidos"), entao NAO os some de novo ao resultado nem os trate como uma
-  receita extra fora do DRE: aqui eles aparecem apenas ABERTOS POR UNIDADE.
+  some ao VVR. Eles sao apresentados no Fluxo de Caixa e NAO compoem o Resultado
+  do Exercicio do DRE — mas NAO os some voce mesmo ao resultado: o relatorio ja
+  exibe essa soma pronta no campo \`resultado_com_dividendos\` (ver abaixo). Aqui
+  eles aparecem ABERTOS POR UNIDADE.
 - E o RETORNO do portfolio para a holding: mostra quais unidades efetivamente
   remuneraram o acionista no periodo e qual a CONCENTRACAO dessa remuneracao
   (\`pct_do_total\`). Concentracao alta em poucas unidades e um ponto de atencao
@@ -706,6 +707,21 @@ previsao, NAO meta.
   performance forte, sao leituras uteis para a holding.
 - Ao citar valores em \`destaques\`/\`pontosAtencao\`, use o NOME da unidade e o
   VALOR LITERAL do input, sempre amarrado ao periodo de referencia.
+
+## Resultado do periodo somado aos dividendos recebidos
+
+O input pode trazer o campo \`resultado_com_dividendos\`, com \`resultado_exercicio\`
+(o Resultado do Exercicio do DRE gerencial no periodo — o mesmo numero em
+destaque no indicador "Resultado operacional do periodo"), \`dividendos_recebidos\`
+(o total recebido das unidades, apresentado no Fluxo de Caixa) e \`total\` (a soma
+dos dois, exibida logo abaixo do numero em destaque, no mesmo quadro).
+- Sao TRES numeros prontos: use-os LITERALMENTE. Nunca some, subtraia ou
+  recalcule nada a partir deles, e nunca apresente um quarto valor de resultado.
+- Ao falar do desempenho do periodo, o resultado OPERACIONAL da holding continua
+  sendo \`resultado_exercicio\` (e e ele que o orcamento compara). O \`total\` e uma
+  leitura COMPLEMENTAR: quanto sobra somando o retorno que as unidades
+  distribuiram. Deixe claro qual dos dois voce esta citando.
+- Se o campo nao vier, NAO mencione essa soma em campo nenhum.
 
 ## Dividendos pagos aos socios
 
@@ -1099,7 +1115,10 @@ export function buildOnePageReportUserPrompt(input: OnePageInput): string {
     input.dividendos_unidades
       ? `Dividendos recebidos das unidades (periodo ${input.dividendos_unidades.periodo}): total = ${input.dividendos_unidades.total} distribuido por ${input.dividendos_unidades.unidades.length} ${input.dividendos_unidades.unidades.length === 1 ? "unidade" : "unidades"} — ${input.dividendos_unidades.unidades
           .map((u) => `${u.empresa} = ${u.valor}`)
-          .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie, linha "Dividendos Recebidos" do proprio DRE da holding — NAO some de novo ao resultado). Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
+          .join("; ")}. Sao valores JA RECEBIDOS pela holding no periodo (regime de caixa, dado da Omie, linha "Dividendos Recebidos" do FLUXO DE CAIXA da holding — nao compoem o Resultado do Exercicio do DRE, e voce NAO deve soma-los: a soma pronta vem em resultado_com_dividendos). Unidade que nao consta NAO distribuiu dividendo no periodo (detalhe no JSON, campo dividendos_unidades)`
+      : null,
+    input.resultado_com_dividendos
+      ? `Resultado do periodo (indicador em destaque no relatorio): resultado do exercicio (DRE gerencial) = ${input.resultado_com_dividendos.resultado_exercicio}; "${input.resultado_com_dividendos.rotulo}" = ${input.resultado_com_dividendos.total} (= resultado do exercicio + ${input.resultado_com_dividendos.dividendos_recebidos} de dividendos recebidos, apresentados no Fluxo de Caixa). Use os numeros LITERALMENTE, sem recalcular; o desempenho vs orcamento se refere ao resultado do exercicio, e o valor somado e leitura COMPLEMENTAR`
       : null,
     input.dividendos_socios
       ? `Dividendos pagos aos socios (periodo ${input.dividendos_socios.periodo}): total = ${input.dividendos_socios.total} — ${input.dividendos_socios.socios
