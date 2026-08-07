@@ -104,7 +104,7 @@ async function main() {
   console.log(`HTML: ${process.env.SCRATCH}/teste-carol.html`);
 
   const cfg = resendConfigStatus();
-  console.log(`\nResend configurado: ${cfg.ok}${cfg.ok ? ` (remetente ${process.env.RESEND_FROM})` : ` — falta ${cfg.missing.join(" e ")}`}`);
+  console.log(`\nResend configurado: ${cfg.ok}${cfg.ok ? ` (remetente ${cfg.from})` : ` — falta ${cfg.missing.join(" e ")}`}`);
 
   if (!ENVIAR) {
     console.log("\nModo simulacao. Rode com --enviar para disparar.");

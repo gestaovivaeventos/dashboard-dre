@@ -111,8 +111,7 @@ export async function runApprovalReminders(
     return {
       ...base,
       ok: false,
-      error:
-        "Resend não configurado (RESEND_API_KEY / RESEND_FROM). Nenhum e-mail foi enviado.",
+      error: "Resend não configurado (falta RESEND_API_KEY). Nenhum e-mail foi enviado.",
     };
   }
 
