@@ -1040,8 +1040,10 @@ export function NovaRequisicaoForm({
           onSelect={handleSupplierChange}
         />
         {selectedSupplier?.status === "pendente" && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
-            Este fornecedor está aguardando aprovação. A requisição ficará bloqueada até a aprovação.
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+            Fornecedor ainda <strong>não homologado</strong>. Você pode seguir com a requisição
+            normalmente — ela vai para aprovação como qualquer outra. O pagamento é que só será
+            enviado depois que o fornecedor for homologado na tela de Fornecedores.
           </p>
         )}
       </div>
@@ -1955,8 +1957,8 @@ function SupplierCombobox({
                   <div className="font-medium">{s.name}</div>
                   <div className="flex gap-2 text-xs text-muted-foreground">
                     {s.cnpj_cpf && <span>{s.cnpj_cpf}</span>}
-                    {s.status === "pendente" && (
-                      <span className="text-amber-600">pendente</span>
+                    {s.status !== "aprovado" && (
+                      <span className="text-amber-600">não homologado</span>
                     )}
                   </div>
                 </li>

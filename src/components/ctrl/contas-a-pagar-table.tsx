@@ -23,6 +23,10 @@ import {
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
+import {
+  SupplierNotApprovedBadge,
+  isSupplierHomologado,
+} from "@/components/ctrl/supplier-status-badge";
 import { formatDateBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { useRouter } from "next/navigation";
 
@@ -52,6 +56,20 @@ const naFila = (r: ContasRequest) =>
 /** Requisição aprovada cujo lançamento falhou — dá para recolocar na fila. */
 const falhouNoEnvio = (r: ContasRequest) =>
   r.status === "aprovado" && r.omie_launch_status === "erro";
+
+/**
+ * Fornecedor não homologado TRAVA o envio para pagamento. Desde a mudança de
+ * fluxo, o solicitante pode criar a requisição com fornecedor pendente e ela
+ * percorre a aprovação normalmente — este é o único ponto de bloqueio. O
+ * servidor repete a checagem (`enqueueSendToPayment` / `launchRequestToOmie`);
+ * aqui é só para avisar antes do clique virar erro.
+ *
+ * `status` ausente = tela sem o dado; não bloqueia no client (o servidor decide).
+ */
+const fornecedorBloqueado = (r: ContasRequest) => {
+  const sup = resolveSupplier(r.ctrl_suppliers);
+  return sup != null && sup.status != null && !isSupplierHomologado(sup.status);
+};
 
 /** Rótulo da coluna Setor: rateio mostra "Rateio (N setores)" no lugar do setor. */
 function sectorLabel(r: ContasRequest): string {
@@ -111,6 +129,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [payingCompanyId, setPayingCompanyId] = useState("");
   const [showEnviarModal, setShowEnviarModal] = useState(false);
+  // Alerta de bloqueio: requisições selecionadas cujo fornecedor não está
+  // homologado. Enquanto houver alguma, o envio para pagamento não abre.
+  const [bloqueioFornecedor, setBloqueioFornecedor] = useState<
+    { id: string; number: number; supplier: string; status: string }[] | null
+  >(null);
   const [previsaoPreview, setPrevisaoPreview] = useState<PrevisaoMatch[] | null>(null);
   // requestId -> decisão escolhida no diálogo
   const [previsaoDecisoes, setPrevisaoDecisoes] = useState<Record<string, number | "novo">>({});
@@ -334,6 +357,31 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     });
   }
 
+  /**
+   * Porta de entrada do envio: antes de abrir o diálogo, barra o lote quando
+   * alguma requisição selecionada está com fornecedor não homologado e explica
+   * o que fazer (homologar em Fornecedores).
+   */
+  function abrirEnvio() {
+    const bloqueadas = tabRequests
+      .filter((r) => selected.has(r.id) && fornecedorBloqueado(r))
+      .map((r) => {
+        const sup = resolveSupplier(r.ctrl_suppliers);
+        return {
+          id: r.id,
+          number: r.request_number,
+          supplier: sup?.name ?? "—",
+          status: sup?.status ?? "pendente",
+        };
+      });
+
+    if (bloqueadas.length > 0) {
+      setBloqueioFornecedor(bloqueadas);
+      return;
+    }
+    setShowEnviarModal(true);
+  }
+
   function handleEnviar() {
     if (selected.size === 0 || !payingCompanyId) return;
     startTransition(async () => {
@@ -510,7 +558,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     <td className="px-4 py-3">
                       {sup ? (
                         <div>
-                          <p className="font-medium">{sup.name}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-medium">{sup.name}</p>
+                            <SupplierNotApprovedBadge status={sup.status} />
+                          </div>
                           {sup.cnpj_cpf && <p className="text-xs text-muted-foreground">{sup.cnpj_cpf}</p>}
                         </div>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
@@ -666,12 +717,66 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             <span className="text-sm text-muted-foreground">Selecione as requisições para enviar ao pagamento.</span>
           )}
           <button
-            onClick={() => setShowEnviarModal(true)}
+            onClick={abrirEnvio}
             disabled={selected.size === 0 || isPending}
             className="ml-auto rounded-md bg-violet-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {`Enviar para Pagamento${selected.size > 0 ? ` (${selected.size})` : ""}`}
           </button>
+        </div>
+      )}
+
+      {/* Alerta — fornecedor não homologado trava o envio */}
+      {bloqueioFornecedor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-xl border bg-background shadow-lg">
+            <div className="flex items-start gap-3 border-b px-6 py-4">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div>
+                <h3 className="font-semibold">Fornecedor não homologado</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {bloqueioFornecedor.length === 1
+                    ? "Uma das requisições selecionadas está com fornecedor não homologado."
+                    : `${bloqueioFornecedor.length} requisições selecionadas estão com fornecedor não homologado.`}{" "}
+                  O envio para pagamento fica bloqueado até a homologação.
+                </p>
+              </div>
+            </div>
+            <div className="max-h-[45vh] space-y-2 overflow-y-auto px-6 py-4">
+              {bloqueioFornecedor.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-900 dark:bg-amber-950/30"
+                >
+                  <span className="font-medium">
+                    #{b.number} — {b.supplier}
+                  </span>
+                  <span className="shrink-0 text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                    {b.status === "rejeitado" ? "Rejeitado" : "Aguardando homologação"}
+                  </span>
+                </div>
+              ))}
+              <p className="pt-1 text-sm text-muted-foreground">
+                Acesse a tela de <strong>Fornecedores</strong> para homologar o cadastro e volte
+                aqui para enviar o pagamento. Enquanto isso, você pode desmarcar essas requisições
+                e enviar as demais.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 border-t px-6 py-4">
+              <button
+                onClick={() => setBloqueioFornecedor(null)}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+              >
+                Fechar
+              </button>
+              <a
+                href="/ctrl/admin/fornecedores"
+                className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+              >
+                Ir para Fornecedores
+              </a>
+            </div>
+          </div>
         </div>
       )}
 

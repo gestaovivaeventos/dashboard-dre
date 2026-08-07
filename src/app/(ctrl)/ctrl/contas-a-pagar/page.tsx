@@ -79,6 +79,7 @@ async function getContasAPagar() {
       ctrl_suppliers(
         name,
         cnpj_cpf,
+        status,
         chave_pix,
         banco,
         agencia,

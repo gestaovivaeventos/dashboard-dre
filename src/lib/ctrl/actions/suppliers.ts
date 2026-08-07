@@ -8,11 +8,17 @@ import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
-import type { CtrlSupplier } from "@/lib/supabase/types";
+import type { CtrlSupplier, CtrlSupplierStatus } from "@/lib/supabase/types";
 import { decryptSecret } from "@/lib/security/encryption";
 import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
 
-export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado") {
+// `status` aceita um valor ou uma lista. A tela de Nova Requisição usa a lista
+// (aprovado + pendente): o fornecedor ainda não homologado pode ser escolhido e
+// a requisição segue o fluxo normal de aprovação — a trava passou a ser no
+// Contas a Pagar, no momento do envio para pagamento.
+export async function getSuppliers(
+  status?: CtrlSupplierStatus | CtrlSupplierStatus[],
+) {
   await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
   const supabase = await createClient();
 
@@ -26,7 +32,11 @@ export async function getSuppliers(status?: "pendente" | "aprovado" | "rejeitado
       .select("*, ctrl_supplier_expense_types(ctrl_expense_types(id, name))")
       .order("name")
       .range(from, from + pageSize - 1);
-    if (status) query = query.eq("status", status);
+    if (Array.isArray(status)) {
+      if (status.length > 0) query = query.in("status", status);
+    } else if (status) {
+      query = query.eq("status", status);
+    }
 
     const { data, error } = await query;
     if (error) return { error: error.message };

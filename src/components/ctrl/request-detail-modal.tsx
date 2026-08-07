@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Download, ExternalLink, FileText, Loader2, Paperclip, X } from "lucide-react";
 
 import { ApprovalHistory } from "@/components/ctrl/approval-history";
+import { SupplierNotApprovedBadge } from "@/components/ctrl/supplier-status-badge";
 import {
   getRequestExtraAttachments,
   type RequestExtraAttachment,
@@ -20,6 +21,10 @@ export type Supplier = {
   agencia: string | null;
   conta_corrente: string | null;
   titular_banco: string | null;
+  // Status de homologação (ctrl_suppliers.status). Opcional porque nem toda
+  // consulta traz a coluna; quando ausente, o selo de "não homologado" não é
+  // exibido — a trava de verdade é do servidor.
+  status?: string | null;
 };
 
 export type NamedRef = { name: string } | { name: string }[] | null;
@@ -348,7 +353,15 @@ export function RequestDetailModal({
 
           {/* Fornecedor + dados de pagamento */}
           <Section title="Fornecedor / Pagamento">
-            <DetailField label="Fornecedor" value={sup?.name ?? req.favorecido ?? "—"} />
+            <div className="space-y-0.5">
+              <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Fornecedor
+              </dt>
+              <dd className="flex flex-wrap items-center gap-2 text-sm">
+                <span>{sup?.name ?? req.favorecido ?? "—"}</span>
+                <SupplierNotApprovedBadge status={sup?.status} />
+              </dd>
+            </div>
             <DetailField label="CNPJ/CPF" value={sup?.cnpj_cpf ?? req.bank_cpf_cnpj ?? "—"} mono />
             <DetailField label="Emite nota fiscal?" value={formatIssuesInvoice(req.supplier_issues_invoice)} />
             {req.invoice_number && (

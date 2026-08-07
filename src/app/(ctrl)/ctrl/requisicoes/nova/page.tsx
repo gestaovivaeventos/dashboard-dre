@@ -30,7 +30,11 @@ export default async function NovaRequisicaoPage() {
     await Promise.allSettled([
       getSectors(),
       getExpenseTypes(),
-      getSuppliers("aprovado"),
+      // Fornecedor ainda não homologado (pendente) TAMBÉM aparece como opção: a
+      // requisição pode ser criada e segue o fluxo normal de aprovação. A trava
+      // do fornecedor foi movida para o Contas a Pagar (envio para pagamento).
+      // Rejeitado continua fora da lista.
+      getSuppliers(["aprovado", "pendente"]),
       getActiveEvents(),
       getUsdConversion(),
     ]);

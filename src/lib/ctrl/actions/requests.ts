@@ -493,65 +493,21 @@ export async function createRequest(data: CreateRequestInput) {
     return { error: "Mês de referência inválido." };
   }
 
-  // If supplier is pending, create request in waiting state
+  // Fornecedor ainda não homologado NÃO interrompe mais a criação: a requisição
+  // segue o fluxo normal (orçamento → gerente → diretor) e a trava passou a ser
+  // no Contas a Pagar, no envio para pagamento (ver enqueueSendToPayment). O
+  // status `aguardando_aprovacao_fornecedor` deixou de ser produzido aqui —
+  // além de duplicar a trava, ele não aparecia em nenhuma tela de aprovação, o
+  // que deixava a requisição parada sem ninguém para destravá-la.
+  // Guardado só para avisar os admins depois da criação (abaixo).
+  let supplierPendingName: string | null = null;
   if (data.supplier_id) {
     const { data: sup } = await supabase
       .from("ctrl_suppliers")
-      .select("status")
+      .select("name, status")
       .eq("id", data.supplier_id)
-      .single();
-
-    if (sup?.status === "pendente") {
-      const { data: req, error } = await supabase
-        .from("ctrl_requests")
-        .insert({
-          title: data.title,
-          description: data.description ?? null,
-          sector_id: data.sector_id,
-          expense_type_id: data.expense_type_id ?? null,
-          supplier_id: data.supplier_id,
-          amount: data.amount,
-          ...usdFields,
-          due_date: data.due_date ?? null,
-          reference_month: data.reference_month,
-          reference_year: data.reference_year,
-          payment_method: data.payment_method,
-          observations: data.observations ?? null,
-          event_id: data.event_id ?? null,
-          attachment_path: data.attachment_path ?? null,
-          invoice_attachment_path: data.invoice_attachment_path ?? null,
-          extra_attachment_paths: data.extra_attachment_paths ?? [],
-          status: "aguardando_aprovacao_fornecedor",
-          approval_level: 0,
-          created_by: ctx.id,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any)
-        .select("id, request_number")
-        .single();
-
-      if (error || !req) return { error: error?.message ?? "Erro ao criar." };
-
-      await supabase.from("ctrl_history").insert({
-        request_id: req.id,
-        user_id: ctx.id,
-        action: "criado",
-        comment: "Aguardando aprovação do fornecedor pelo administrador.",
-      });
-
-      await notifyAdmins({
-        requestId: req.id,
-        title: "Novo Fornecedor Aguardando Aprovação",
-        message: `Requisição #${req.request_number} aguarda aprovação do fornecedor. Acesse Admin > Fornecedores.`,
-        type: "fornecedor_pendente",
-      });
-
-      revalidatePath("/ctrl/requisicoes");
-      return {
-        requestId: req.id,
-        requestNumber: req.request_number,
-        totalCreated: 1,
-      };
-    }
+      .maybeSingle();
+    if (sup && sup.status !== "aprovado") supplierPendingName = sup.name as string;
   }
 
   // Budget verification
@@ -757,6 +713,27 @@ export async function createRequest(data: CreateRequestInput) {
         }
       : null,
   });
+
+  // Fornecedor não homologado: a requisição segue normalmente, mas o pagamento
+  // vai travar no Contas a Pagar. Registra no histórico e avisa quem homologa
+  // (admins + CSC), para o cadastro poder ser tratado antes de a requisição
+  // chegar lá. A homologação em si continua sob demanda — a notificação é um
+  // aviso antecipado, não um mutirão de homologação do cadastro legado.
+  if (supplierPendingName) {
+    await supabase.from("ctrl_history").insert({
+      request_id: newReq.id,
+      user_id: ctx.id,
+      action: "criado",
+      comment: `Fornecedor "${supplierPendingName}" ainda não homologado — o envio para pagamento ficará bloqueado até a homologação.`,
+    });
+
+    await notifyAdmins({
+      requestId: newReq.id,
+      title: "Fornecedor não homologado em requisição",
+      message: `Requisição #${newReq.request_number} usa o fornecedor "${supplierPendingName}", ainda não homologado. Homologue em Fornecedores para liberar o envio ao pagamento.`,
+      type: "fornecedor_pendente",
+    });
+  }
 
   // Auditoria da auto-aprovação gerencial (etapa do gerente dispensada porque o
   // solicitante é o próprio gerente e a despesa está prevista em orçamento).
@@ -1169,7 +1146,7 @@ export async function getRequests(filters?: {
     .from("ctrl_requests")
     .select(
       `*, ctrl_sectors(name), ctrl_expense_types(name), ctrl_events(name),
-       ctrl_suppliers(name, cnpj_cpf, chave_pix, banco, agencia, conta_corrente, titular_banco),
+       ctrl_suppliers(name, cnpj_cpf, status, chave_pix, banco, agencia, conta_corrente, titular_banco),
        creator:users!ctrl_requests_created_by_fkey(name, email),
        approver:users!ctrl_requests_approved_by_fkey(name, email)`
     )
@@ -2588,6 +2565,41 @@ export async function enqueueSendToPayment(
   if (compErr || !company) return { error: "Empresa pagadora não encontrada." };
   if (!company.omie_app_key || !company.omie_app_secret) {
     return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
+  // ── Trava do fornecedor ────────────────────────────────────────────────────
+  // O fornecedor não homologado pode ser usado na criação da requisição e ela
+  // percorre a aprovação normalmente; o bloqueio é AQUI, na saída para o
+  // pagamento. Barra o lote inteiro (nada é enfileirado) para não gerar envio
+  // parcial silencioso — o operador desmarca as travadas ou homologa o cadastro.
+  const { data: comFornecedor, error: supErr } = await supabase
+    .from("ctrl_requests")
+    .select("request_number, ctrl_suppliers(name, status)")
+    .in("id", requestIds)
+    .not("supplier_id", "is", null);
+
+  if (supErr) return { error: supErr.message };
+
+  const naoHomologados = (comFornecedor ?? [])
+    .map((r) => {
+      const raw = (r as { ctrl_suppliers: unknown }).ctrl_suppliers;
+      const sup = (Array.isArray(raw) ? raw[0] : raw) as
+        | { name: string; status: string }
+        | null
+        | undefined;
+      return { number: r.request_number as number, sup };
+    })
+    .filter(({ sup }) => sup && sup.status !== "aprovado");
+
+  if (naoHomologados.length > 0) {
+    const lista = naoHomologados
+      .map(({ number, sup }) => `#${number} (${sup!.name})`)
+      .join(", ");
+    return {
+      error:
+        `Fornecedor não homologado em ${lista}. ` +
+        "Acesse a tela de Fornecedores para homologar o cadastro antes de enviar para pagamento.",
+    };
   }
 
   const now = new Date().toISOString();

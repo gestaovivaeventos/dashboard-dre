@@ -12,6 +12,7 @@ import {
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
 import { ExtraAttachments } from "@/components/ctrl/request-detail-modal";
+import { SupplierNotApprovedBadge } from "@/components/ctrl/supplier-status-badge";
 import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
 import { formatDateBR, formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
@@ -41,7 +42,9 @@ type Req = {
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
   ctrl_events?: { name: string } | { name: string }[] | null;
-  ctrl_suppliers?: { name: string } | null;
+  // `status` = homologação do fornecedor (ctrl_suppliers.status). Opcional: sem
+  // o campo o selo de "não homologado" simplesmente não aparece.
+  ctrl_suppliers?: { name: string; status?: string | null } | null;
   creator?: { name: string | null; email: string } | null;
   approver?: { name: string | null } | null;
   // Rateio entre setores (aprovação própria de cada setor).
@@ -423,7 +426,10 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         )}
                       </div>
                       {supplier && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">{supplier.name}</p>
+                        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                          {supplier.name}
+                          <SupplierNotApprovedBadge status={supplier.status} />
+                        </p>
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
@@ -576,7 +582,17 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                   )}
                   {modal.req.ctrl_expense_types && <Row label="Tipo" value={resolve(modal.req.ctrl_expense_types)?.name ?? "—"} />}
                   <Row label="Evento" value={resolve(modal.req.ctrl_events)?.name ?? "Nenhum evento"} />
-                  {modal.req.ctrl_suppliers && <Row label="Fornecedor" value={resolve(modal.req.ctrl_suppliers)?.name ?? "—"} />}
+                  {modal.req.ctrl_suppliers && (
+                    <div className="flex gap-2">
+                      <span className="shrink-0 w-36 text-muted-foreground">Fornecedor:</span>
+                      <span className="flex flex-wrap items-center gap-1.5 font-medium break-words">
+                        {resolve(modal.req.ctrl_suppliers)?.name ?? "—"}
+                        <SupplierNotApprovedBadge
+                          status={resolve(modal.req.ctrl_suppliers)?.status}
+                        />
+                      </span>
+                    </div>
+                  )}
                   {modal.req.payment_method && <Row label="Pagamento" value={PAYMENT_LABELS[modal.req.payment_method] ?? modal.req.payment_method} />}
                   {modal.req.due_date && <Row label="Vencimento" value={formatDayBR(modal.req.due_date)} />}
                   {modal.req.approval_tier && (

@@ -234,12 +234,23 @@ export async function launchRequestToOmie(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
+      "id, name, status, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
     )
     .eq("id", request.supplier_id)
     .maybeSingle();
 
   if (supErr || !supplier) return { error: "Fornecedor não encontrado." };
+  // Trava do fornecedor não homologado. A checagem principal é na tela de Contas
+  // a Pagar (enqueueSendToPayment); esta aqui é a rede de segurança do caminho
+  // de lançamento — cobre reenvio, resync e a fila drenada pelo cron, e impede
+  // que um fornecedor rejeitado/pendente chegue ao cadastro da Omie.
+  if (supplier.status !== "aprovado") {
+    return {
+      error:
+        `Fornecedor "${supplier.name}" não está homologado. ` +
+        "Homologue o cadastro na tela de Fornecedores antes de enviar para pagamento.",
+    };
+  }
   // Fornecedor estrangeiro não tem CNPJ/CPF: a Omie o cadastra com estado="EX"
   // (exibindo "Estrangeiro" no campo de documento). Só bloqueamos quando o
   // fornecedor brasileiro está sem documento.
