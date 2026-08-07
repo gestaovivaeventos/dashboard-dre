@@ -5,17 +5,30 @@ import { Resend } from "resend";
 //
 // É o canal OBRIGATÓRIO dos relatórios BI (One Page Report) enviados aos
 // gestores das unidades — cron mensal, envio manual pós-aceite e envio
-// automático do dia 10. O transporte antigo (SMTP do Gmail, em
-// `@/lib/email/gmail`) segue existindo para os alertas internos ao admin.
+// automático do dia 10. Também é o canal do lembrete diário de aprovações do
+// Compras. O transporte antigo (SMTP do Gmail, em `@/lib/email/gmail`) segue
+// existindo para os alertas internos ao admin.
 //
 // Config:
-//   RESEND_API_KEY   obrigatório (sem ele o envio falha explicitamente — não
-//                    cai em fallback silencioso, que mascararia o problema).
-//   RESEND_FROM      remetente completo, ex.: "Control Hub <bi@empresa.com.br>".
-//                    Precisa ser de um domínio verificado no Resend.
-//   EMAIL_FROM_NAME  usado apenas para compor o display name quando RESEND_FROM
-//                    traz só o endereço.
+//   RESEND_API_KEY   ÚNICA variável obrigatória.
+//   RESEND_FROM      OPCIONAL. Só para trocar o remetente padrão abaixo. Aceita
+//                    "Nome <email>" ou só "email". Precisa ser de um domínio
+//                    verificado no Resend — endereço de domínio não verificado
+//                    é recusado pela API deles, não por este código.
+//   EMAIL_FROM_NAME  OPCIONAL. Display name, quando o endereço vem sem nome.
+//
+// Por que existe um remetente padrão no código: o Resend não tem remetente
+// genérico — todo envio exige um endereço de domínio verificado. Deixar isso
+// só em variável de ambiente significou, na prática, relatório aceito pelo CSC
+// que não saía (e rotina do dia 10 falhando em silêncio) porque a variável não
+// tinha sido criada na Vercel. O domínio abaixo é o verificado do grupo; se um
+// dia mudar, troque aqui ou defina RESEND_FROM.
 // ============================================================================
+
+/** Domínio verificado no Resend (resend.com/domains). */
+const DEFAULT_FROM_DOMAIN = "contato.quokka.net.br";
+/** Caixa usada como remetente dos e-mails automáticos. */
+const DEFAULT_FROM_MAILBOX = "bi";
 
 export interface SendResendEmailOptions {
   to: string | string[];
@@ -39,27 +52,36 @@ function getClient(): Resend | null {
   return client;
 }
 
-/** Remetente configurado. Aceita "Nome <email>" ou só "email". */
-function resolveFrom(): string | null {
-  const raw = process.env.RESEND_FROM?.trim();
-  if (!raw) return null;
-  if (raw.includes("<")) return raw;
-  const name = process.env.EMAIL_FROM_NAME?.trim() || "Control Hub";
-  return `${name} <${raw}>`;
+function fromName(): string {
+  return process.env.EMAIL_FROM_NAME?.trim() || "Control Hub";
 }
 
-/** True quando o Resend está configurado (chave + remetente). */
+/**
+ * Remetente efetivo. Nunca é nulo: sem RESEND_FROM cai no domínio verificado
+ * padrão. Aceita "Nome <email>" (usado como veio) ou só "email".
+ */
+export function resolveFrom(): string {
+  const raw = process.env.RESEND_FROM?.trim();
+  if (raw) {
+    if (raw.includes("<")) return raw;
+    return `${fromName()} <${raw}>`;
+  }
+  return `${fromName()} <${DEFAULT_FROM_MAILBOX}@${DEFAULT_FROM_DOMAIN}>`;
+}
+
+/** True quando o Resend está configurado (basta a chave da API). */
 export function isResendConfigured(): boolean {
-  return Boolean(getClient() && resolveFrom());
+  return Boolean(getClient());
 }
 
 export interface ResendConfigStatus {
   ok: boolean;
   hasApiKey: boolean;
-  hasFrom: boolean;
+  /** Remetente que será usado no envio — exibido para conferência. */
+  from: string;
   /** Nomes das variáveis que faltam, para a mensagem na tela. */
   missing: string[];
-  /** Explicação pronta para o usuário (vazia quando está tudo certo). */
+  /** Explicação pronta para o usuário (nula quando está tudo certo). */
   message: string | null;
 }
 
@@ -70,22 +92,35 @@ export interface ResendConfigStatus {
  */
 export function resendConfigStatus(): ResendConfigStatus {
   const hasApiKey = Boolean(process.env.RESEND_API_KEY?.trim());
-  const hasFrom = Boolean(resolveFrom());
-  const missing: string[] = [];
-  if (!hasApiKey) missing.push("RESEND_API_KEY");
-  if (!hasFrom) missing.push("RESEND_FROM");
 
   return {
-    ok: hasApiKey && hasFrom,
+    ok: hasApiKey,
     hasApiKey,
-    hasFrom,
-    missing,
-    message: missing.length
-      ? `Envio por e-mail indisponível: falta ${missing.join(" e ")} nas variáveis de ambiente. ` +
+    from: resolveFrom(),
+    missing: hasApiKey ? [] : ["RESEND_API_KEY"],
+    message: hasApiKey
+      ? null
+      : "Envio por e-mail indisponível: falta RESEND_API_KEY nas variáveis de ambiente. " +
         "Defina no projeto da Vercel e REIMPLANTE — variável nova só passa a valer em um deploy novo, " +
-        "não no que já está no ar. O remetente (RESEND_FROM) precisa ser de um domínio verificado no Resend."
-      : null,
+        "não no que já está no ar.",
   };
+}
+
+/**
+ * O Resend recusa qualquer envio partindo de domínio não verificado, e a
+ * mensagem dele é em inglês e não diz o que fazer. Como o remetente agora vem
+ * de um padrão no código, esse é o erro mais provável quando o DNS do domínio
+ * ainda não propagou — vale traduzir em vez de repassar cru.
+ */
+function explainSendError(message: string, from: string): string {
+  if (/not verified|domain is not verified|verify your domain/i.test(message)) {
+    return (
+      `${message} — o remetente em uso é ${from}. ` +
+      "Verifique o domínio em resend.com/domains (registros DNS) ou defina RESEND_FROM " +
+      "com um endereço de outro domínio já verificado."
+    );
+  }
+  return message;
 }
 
 /**
@@ -103,20 +138,12 @@ export async function sendEmailViaResend({
     return {
       ok: false,
       error:
-        "RESEND_API_KEY não configurada — o envio do relatório BI exige a API do Resend.",
+        "RESEND_API_KEY não configurada — o envio do relatório BI exige a API do Resend. " +
+        "Defina a chave nas variáveis de ambiente do projeto na Vercel e REIMPLANTE.",
     };
   }
 
   const from = resolveFrom();
-  if (!from) {
-    return {
-      ok: false,
-      error:
-        'RESEND_FROM não configurado. Não basta a chave da API: o Resend exige um remetente de domínio verificado. ' +
-        'Defina RESEND_FROM (ex.: "Control Hub <bi@empresa.com.br>") nas variáveis de ambiente do projeto na Vercel ' +
-        "e REIMPLANTE — variável nova não vale para o deploy que já está no ar.",
-    };
-  }
 
   // Lista de destinatários deduplicada e normalizada. Endereço vazio na lista
   // faz a API inteira falhar — e um envio de relatório não pode cair por causa
@@ -142,7 +169,10 @@ export async function sendEmailViaResend({
     });
 
     if (error) {
-      const message = error.message || "Falha desconhecida no Resend.";
+      const message = explainSendError(
+        error.message || "Falha desconhecida no Resend.",
+        from,
+      );
       console.error("[resend] Falha no envio:", message);
       return { ok: false, error: message };
     }
@@ -150,7 +180,8 @@ export async function sendEmailViaResend({
     console.log("[resend] Enviado para:", recipients.join(", "), "id:", data?.id);
     return { ok: true, id: data?.id };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Erro inesperado no Resend.";
+    const raw = err instanceof Error ? err.message : "Erro inesperado no Resend.";
+    const message = explainSendError(raw, from);
     console.error("[resend] Falha no envio:", message);
     return { ok: false, error: message };
   }

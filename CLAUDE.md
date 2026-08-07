@@ -180,7 +180,9 @@ All cron endpoints require `Authorization: Bearer <CRON_SECRET>`.
 
 ## Environment Variables
 
-Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, `RESEND_API_KEY` (+ optional `RESEND_FROM`), `ADMIN_EMAIL`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`.
+Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, `RESEND_API_KEY`, `ADMIN_EMAIL`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`.
+
+O remetente do Resend tem **default no código** (`bi@contato.quokka.net.br`, domínio verificado do grupo, em `src/lib/email/resend.ts`) — `RESEND_FROM` só existe para trocá-lo. Não volte a exigir a variável: o Resend não aceita remetente genérico, então "só a chave configurada" já derrubou relatório aceito pelo CSC e a rotina do dia 10, sem que ninguém percebesse até o clique em Enviar.
 
 Feature-specific: `OPENAI_API_KEY` (AI reports + contract LLM + Viagens web-price search), `APIDEVOOS_API_KEY` (Viagens — real flight prices via apidevoos.dev), `VISION_AGENT_API_KEY` (LandingAI contract OCR), `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` + `FEAT_PRODUCOES_SHEET_ID`/`FEAT_PRODUCOES_SHEET_TAB` + `TERRAZZO_SHEET_ID` (Sheets sync; `TERRAZZO_SHEETS_SYNC_DISABLED` to disable).
 
