@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getCadastros } from "@/lib/ctrl/actions/cadastros";
+import { listBudgetLines } from "@/lib/ctrl/actions/budget-editor";
 import { currentYearBR } from "@/lib/ctrl/datetime";
-import { BudgetLineEditor } from "@/components/ctrl/budget-line-editor";
+import { BudgetLinesManager } from "@/components/ctrl/budget-lines-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,11 @@ export default async function EditarOrcamentoPage() {
     redirect("/ctrl/orcamento");
   }
 
-  const [sectorsRes, typesRes] = await Promise.all([
+  const year = currentYearBR();
+  const [sectorsRes, typesRes, linesRes] = await Promise.all([
     getCadastros("sector"),
     getCadastros("expense_type"),
+    listBudgetLines(year),
   ]);
   const { items: sectorItems = [] } = sectorsRes;
   const { items: typeItems = [] } = typesRes;
@@ -27,19 +30,25 @@ export default async function EditarOrcamentoPage() {
   const expenseTypes = typeItems
     .filter((t) => t.active)
     .map((t) => ({ id: t.id, name: t.name }));
-  const year = currentYearBR();
+  const initialLines = "lines" in linesRes ? linesRes.lines : [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Editar Orçamento</h1>
         <p className="text-muted-foreground">
-          Ajuste manualmente o orçado e o realizado por setor, tipo de despesa e mês. Alternativa ao
-          upload da planilha — atenção: um upload substitui o ano inteiro e sobrescreve estes ajustes.
+          Adicione, edite, mova ou exclua linhas do orçamento (setor × tipo de despesa), direto no
+          sistema — sem planilha. Atenção: um upload de planilha substitui o ano inteiro e sobrescreve
+          estes ajustes.
         </p>
       </div>
 
-      <BudgetLineEditor sectors={sectors} expenseTypes={expenseTypes} defaultYear={year} />
+      <BudgetLinesManager
+        sectors={sectors}
+        expenseTypes={expenseTypes}
+        defaultYear={year}
+        initialLines={initialLines}
+      />
     </div>
   );
 }

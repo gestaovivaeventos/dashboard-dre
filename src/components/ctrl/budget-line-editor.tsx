@@ -44,13 +44,30 @@ interface Props {
   sectors: Option[];
   expenseTypes: Option[];
   defaultYear: number;
+  // Reuso em modal: pré-seleciona a linha, opcionalmente trava os seletores
+  // (edição de uma linha específica), fixa o ano e avisa quando salvou.
+  initialSectorId?: string;
+  initialExpenseTypeId?: string;
+  lockSelectors?: boolean;
+  controlledYear?: number;
+  onSaved?: () => void;
 }
 
-export function BudgetLineEditor({ sectors, expenseTypes, defaultYear }: Props) {
+export function BudgetLineEditor({
+  sectors,
+  expenseTypes,
+  defaultYear,
+  initialSectorId,
+  initialExpenseTypeId,
+  lockSelectors = false,
+  controlledYear,
+  onSaved,
+}: Props) {
   const router = useRouter();
-  const [year, setYear] = useState(defaultYear);
-  const [sectorId, setSectorId] = useState("");
-  const [expenseTypeId, setExpenseTypeId] = useState("");
+  const [internalYear, setInternalYear] = useState(defaultYear);
+  const year = controlledYear ?? internalYear;
+  const [sectorId, setSectorId] = useState(initialSectorId ?? "");
+  const [expenseTypeId, setExpenseTypeId] = useState(initialExpenseTypeId ?? "");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -107,6 +124,7 @@ export function BudgetLineEditor({ sectors, expenseTypes, defaultYear }: Props) 
     }
     setFeedback({ ok: true, msg: "Orçamento salvo." });
     router.refresh();
+    onSaved?.();
   }
 
   const years = [defaultYear - 1, defaultYear, defaultYear + 1];
@@ -116,17 +134,24 @@ export function BudgetLineEditor({ sectors, expenseTypes, defaultYear }: Props) 
     <div className="space-y-5">
       {/* Seletores */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-4">
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-muted-foreground">Ano</label>
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={INPUT}>
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
+        {controlledYear === undefined && (
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-muted-foreground">Ano</label>
+            <select value={year} onChange={(e) => setInternalYear(Number(e.target.value))} className={INPUT}>
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="space-y-1 min-w-[180px]">
           <label className="block text-xs font-medium text-muted-foreground">Setor</label>
-          <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} className={INPUT}>
+          <select
+            value={sectorId}
+            onChange={(e) => setSectorId(e.target.value)}
+            disabled={lockSelectors || saving}
+            className={INPUT}
+          >
             <option value="">Selecione…</option>
             {sectors.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
@@ -135,7 +160,12 @@ export function BudgetLineEditor({ sectors, expenseTypes, defaultYear }: Props) 
         </div>
         <div className="space-y-1 min-w-[220px]">
           <label className="block text-xs font-medium text-muted-foreground">Tipo de despesa</label>
-          <select value={expenseTypeId} onChange={(e) => setExpenseTypeId(e.target.value)} className={INPUT}>
+          <select
+            value={expenseTypeId}
+            onChange={(e) => setExpenseTypeId(e.target.value)}
+            disabled={lockSelectors || saving}
+            className={INPUT}
+          >
             <option value="">Selecione…</option>
             {expenseTypes.map((t) => (
               <option key={t.id} value={t.id}>{t.name}</option>
