@@ -190,16 +190,23 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     if (!returnModal || !returnReason.trim()) return;
     const num = returnModal.request_number;
     const company = returnModal.paying_company ?? null;
-    const wasOnOmie = returnModal.omie_contapagar_codigo != null;
     startTransition(async () => {
       const result = await returnRequestToRequisicoes(returnModal.id, returnReason);
       if (result && "error" in result) {
         notify(String((result as { error: string }).error), false);
       } else {
+        const stage = (result as { stage?: string }).stage;
         setReturnModal(null);
         setReturnReason("");
         setSelected(new Set());
-        setReturnedAlert({ number: num, company, wasOnOmie });
+        if (stage === "aguardando_envio") {
+          // Estágio 1: estava no Omie → título excluído, voltou para Aguardando
+          // Envio. Mostra o alerta grande (confira o Omie).
+          setReturnedAlert({ number: num, company, wasOnOmie: true });
+        } else {
+          // Estágio 2: sem título no Omie → voltou para Aprovações. Toast simples.
+          notify(`Requisição #${num} devolvida para Aprovações.`);
+        }
         router.refresh();
       }
     });
@@ -956,19 +963,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
           <div className="w-full max-w-md rounded-xl border bg-background shadow-lg">
             <div className="border-b px-6 py-4">
               <h3 className="font-semibold">
-                Devolver requisição #{returnModal.request_number} para requisições
+                Devolver requisição #{returnModal.request_number}
               </h3>
             </div>
             <div className="px-6 py-4 space-y-3">
-              <p className="text-sm text-muted-foreground">
-                A requisição volta para a aprovação e poderá ser editada, reaprovada
-                ou excluída. O valor deixa de contar como realizado no orçamento.
-              </p>
-              {returnModal.omie_contapagar_codigo != null && (
+              {returnModal.status === "agendado" || returnModal.omie_contapagar_codigo != null ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                   Esta requisição já foi enviada ao Omie. Ao devolver, o título será
-                  <strong> excluído do Omie</strong> (se ainda não estiver pago).
+                  <strong> excluído do Omie</strong> (se ainda não estiver pago) e ela volta
+                  para <strong>Aguardando Envio</strong> — continua aqui no Contas a Pagar.
                 </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  A requisição volta para a <strong>aprovação</strong> e poderá ser editada,
+                  reaprovada ou excluída. O valor deixa de contar como realizado no orçamento.
+                </p>
               )}
               <div className="space-y-1">
                 <label className="text-sm font-medium">
@@ -1257,7 +1266,8 @@ function DevolverOmieAlert({
         {/* Corpo */}
         <div className="space-y-4 px-6 py-6 text-center">
           <p className="text-base font-semibold text-red-700 dark:text-red-400">
-            A requisição #{number} foi devolvida para requisições.
+            A requisição #{number} voltou para <strong>Aguardando Envio</strong> e o título
+            foi excluído do Omie.
           </p>
 
           <div className="flex items-start gap-3 rounded-lg border-2 border-red-500 bg-red-50 px-4 py-4 text-left text-sm text-red-900 dark:bg-red-950/40 dark:text-red-200">

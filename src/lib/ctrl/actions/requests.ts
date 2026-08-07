@@ -2815,40 +2815,97 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
     };
   }
 
-  // Já lançada no Omie: exclui o título antes de devolver (mantém sincronia).
-  if (req.omie_contapagar_codigo != null) {
-    if (!req.paying_company_id) {
-      return {
-        error:
-          "Requisição lançada no Omie mas sem empresa pagadora registrada — faça o acerto no Omie manualmente.",
-      };
-    }
-    const { data: company } = await supabase
-      .from("companies")
-      .select("omie_app_key, omie_app_secret")
-      .eq("id", req.paying_company_id)
-      .maybeSingle();
-    if (!company?.omie_app_key || !company?.omie_app_secret) {
-      return { error: "Empresa pagadora sem conexão Omie — não foi possível excluir o título." };
-    }
-    try {
-      const appKey = decryptSecret(company.omie_app_key as string);
-      const appSecret = decryptSecret(company.omie_app_secret as string);
-      await excluirContaPagar(appKey, appSecret, Number(req.omie_contapagar_codigo));
-    } catch (e) {
-      const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-      // Título já inexistente no Omie → segue (o estado desejado já é esse).
-      const jaSumiu = /n[ãa]o encontrad|not found|n[ãa]o cadastrad|inexistente/.test(msg);
-      if (!jaSumiu) {
+  // Devolução em DOIS estágios (decididos pelo estado atual):
+  //  1) Já enviada ao Omie (status 'agendado' / com título) → exclui o título no
+  //     Omie e devolve para "Aguardando Envio" (continua no Contas a Pagar, ainda
+  //     aprovada). É o passo intermediário: NÃO volta à aprovação.
+  //  2) Já em "Aguardando Envio" (sem título no Omie) → volta à aprovação.
+  const onOmie = req.status === "agendado" || req.omie_contapagar_codigo != null;
+  const now = new Date().toISOString();
+
+  // ── Estágio 1 ────────────────────────────────────────────────────────────────
+  if (onOmie) {
+    if (req.omie_contapagar_codigo != null) {
+      if (!req.paying_company_id) {
         return {
-          error: `Não foi possível excluir o título no Omie (código ${req.omie_contapagar_codigo}): ${
-            e instanceof Error ? e.message : String(e)
-          }. Se ele já foi pago/baixado, faça o acerto no Omie.`,
+          error:
+            "Requisição lançada no Omie mas sem empresa pagadora registrada — faça o acerto no Omie manualmente.",
         };
       }
+      const { data: company } = await supabase
+        .from("companies")
+        .select("omie_app_key, omie_app_secret")
+        .eq("id", req.paying_company_id)
+        .maybeSingle();
+      if (!company?.omie_app_key || !company?.omie_app_secret) {
+        return { error: "Empresa pagadora sem conexão Omie — não foi possível excluir o título." };
+      }
+      try {
+        const appKey = decryptSecret(company.omie_app_key as string);
+        const appSecret = decryptSecret(company.omie_app_secret as string);
+        await excluirContaPagar(appKey, appSecret, Number(req.omie_contapagar_codigo));
+      } catch (e) {
+        const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+        // Título já inexistente no Omie → segue (o estado desejado já é esse).
+        const jaSumiu = /n[ãa]o encontrad|not found|n[ãa]o cadastrad|inexistente/.test(msg);
+        if (!jaSumiu) {
+          return {
+            error: `Não foi possível excluir o título no Omie (código ${req.omie_contapagar_codigo}): ${
+              e instanceof Error ? e.message : String(e)
+            }. Se ele já foi pago/baixado, faça o acerto no Omie.`,
+          };
+        }
+      }
     }
+
+    // Volta para "Aguardando Envio" (status 'aprovado'). Segue aprovada — só
+    // desfaz o vínculo com o Omie/pagamento (approved_by/approved_at preservados).
+    const { error: updErr } = await supabase
+      .from("ctrl_requests")
+      .update({
+        status: "aprovado",
+        paying_company: null,
+        paying_company_id: null,
+        sent_to_payment_at: null,
+        sent_to_payment_by: null,
+        omie_contapagar_codigo: null,
+        omie_launch_status: null,
+        omie_launch_error: null,
+        omie_launched_at: null,
+        omie_paid_at: null,
+        updated_at: now,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+      .eq("id", requestId)
+      .eq("status", req.status); // guarda contra corrida
+    if (updErr) return { error: updErr.message };
+
+    await supabase.from("ctrl_history").insert({
+      request_id: requestId,
+      user_id: ctx.id,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      action: "editado" as any,
+      comment: `Devolvida para Aguardando Envio (título excluído do Omie). Motivo: ${reason.trim()}`,
+      metadata: {
+        kind: "devolucao",
+        stage: "aguardando_envio",
+        from_status: req.status,
+        omie_titulo_excluido: req.omie_contapagar_codigo ?? null,
+      },
+    });
+
+    revalidatePath("/ctrl/contas-a-pagar");
+    revalidatePath("/ctrl/requisicoes");
+    revalidatePath("/ctrl/orcamento");
+    return {
+      ok: true as const,
+      status: "aprovado" as const,
+      stage: "aguardando_envio" as const,
+      omieExcluido: req.omie_contapagar_codigo != null,
+    };
   }
 
+  // ── Estágio 2 ────────────────────────────────────────────────────────────────
   // Volta ao fluxo de aprovação. Nível preservado: nivel_3 (ou setor/solicitante
   // forçado ao diretor) → pendente_diretor; senão pendente.
   const forceDirector =
@@ -2857,7 +2914,6 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
   const newStatus: CtrlRequestStatus =
     forceDirector || req.approval_tier === "nivel_3" ? "pendente_diretor" : "pendente";
 
-  const now = new Date().toISOString();
   const { error: updErr } = await supabase
     .from("ctrl_requests")
     .update({
@@ -2865,8 +2921,8 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
       approved_by: null,
       approved_at: null,
       complement_return_status: null,
-      // Limpa todo o vínculo de pagamento/Omie — a requisição volta "limpa" e
-      // pode ser editada (a edição é bloqueada enquanto há título no Omie).
+      // Limpa qualquer vínculo de pagamento/Omie residual — volta "limpa" e pode
+      // ser editada (a edição é bloqueada enquanto há título no Omie).
       paying_company: null,
       paying_company_id: null,
       sent_to_payment_at: null,
@@ -2890,11 +2946,12 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
     // Reaproveita a ação 'editado' (não há enum próprio); o metadata distingue.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     action: "editado" as any,
-    comment: `Devolvida para requisições. Motivo: ${reason.trim()}`,
+    comment: `Devolvida para aprovação. Motivo: ${reason.trim()}`,
     metadata: {
       kind: "devolucao",
+      stage: "aprovacao",
       from_status: req.status,
-      omie_titulo_excluido: req.omie_contapagar_codigo ?? null,
+      omie_titulo_excluido: null,
     },
   });
 
@@ -2911,7 +2968,7 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
   revalidatePath("/ctrl/requisicoes");
   revalidatePath("/ctrl/aprovacoes");
   revalidatePath("/ctrl/orcamento");
-  return { ok: true as const, status: newStatus };
+  return { ok: true as const, status: newStatus, stage: "aprovacao" as const };
 }
 
 // ─── Editar setor/tipo em Contas a Pagar (retorna à aprovação) ───────────────
