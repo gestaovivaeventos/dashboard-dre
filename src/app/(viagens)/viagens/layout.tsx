@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app/app-shell";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 
 export default async function ViagensLayout({ children }: { children: React.ReactNode }) {
@@ -57,6 +58,9 @@ export default async function ViagensLayout({ children }: { children: React.Reac
       activeModule={activeModule}
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
+      // Visão completa do módulo Compras (override nominal): só faz sentido
+      // para quem já tem o módulo — não concede o módulo a ninguém.
+      ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
     >
       {children}

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { ContasAPagarTable, type ContasRequest } from "@/components/ctrl/contas-a-pagar-table";
@@ -196,14 +197,20 @@ export default async function ContasAPagarPage() {
   if (!ctx) redirect("/login");
 
   // Contas a Pagar é exclusivo do perfil Contas a Pagar (+ admin). Demais
-  // perfis (gerente/diretor/solicitante) não veem nem acessam o menu.
-  if (!hasCtrlRole(ctx, "contas_a_pagar", "admin")) {
+  // perfis (gerente/diretor/solicitante) não veem nem acessam o menu. A visão
+  // completa do módulo (override nominal — @/lib/ctrl/full-view) entra aqui com
+  // as mesmas ações da tela: enviar ao pagamento, devolver, pedir info e
+  // corrigir setor/tipo (as server actions correspondentes usam
+  // requireCtrlRoleOrFullView).
+  const canOperate =
+    hasCtrlRole(ctx, "contas_a_pagar", "admin") || hasCtrlFullView(ctx.email);
+  if (!canOperate) {
     redirect("/ctrl/requisicoes");
   }
 
-  // Só carrega os cadastros de setor/tipo quando o usuário pode editar (perfil
-  // Contas a Pagar ou admin); os demais recebem listas vazias.
-  const canEditRouting = hasCtrlRole(ctx, "contas_a_pagar", "admin");
+  // Só carrega os cadastros de setor/tipo quando o usuário pode editar; os
+  // demais recebem listas vazias.
+  const canEditRouting = canOperate;
   const [{ requests = [], error }, companies, cadastros] = await Promise.all([
     getContasAPagar(),
     getCompanies(),
@@ -250,6 +257,7 @@ export default async function ContasAPagarPage() {
         companies={companies}
         sectors={cadastros.sectors}
         expenseTypes={cadastros.expenseTypes}
+        canOperate={canOperate}
       />
     </div>
   );

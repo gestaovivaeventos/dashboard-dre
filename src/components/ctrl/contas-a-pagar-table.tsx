@@ -96,6 +96,13 @@ interface Props {
   // usuário pode editar). Vazios para quem não pode.
   sectors: { id: string; name: string }[];
   expenseTypes: { id: string; name: string }[];
+  /**
+   * Libera as ações da tela (enviar ao pagamento, devolver, pedir info,
+   * corrigir setor/tipo) independentemente dos `ctrlRoles`. A página é quem
+   * decide: perfil Contas a Pagar / admin ou visão completa do módulo
+   * (@/lib/ctrl/full-view). As server actions replicam a mesma regra.
+   */
+  canOperate?: boolean;
 }
 
 function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
@@ -122,7 +129,7 @@ function PaymentInfo({ supplier }: { supplier: Supplier | null }) {
   return <span className="text-xs text-muted-foreground">Dados não informados</span>;
 }
 
-export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, expenseTypes }: Props) {
+export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, expenseTypes, canOperate = false }: Props) {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<Tab>("aprovado");
@@ -159,7 +166,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 
   // Modal de correção de setor/tipo (perfil Contas a Pagar / admin).
   const [editRouting, setEditRouting] = useState<ContasRequest | null>(null);
-  const canEditRouting = ctrlRoles.some((r) => ["contas_a_pagar", "admin"].includes(r));
+  const canEditRouting = canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "admin"].includes(r));
 
   // Modal de thread de info — aberto pelo botao "Pedir info" / "Continuar conversa".
   const [infoModal, setInfoModal] = useState<{
@@ -167,10 +174,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     mode: "ask" | "view";
   } | null>(null);
 
-  const canAskInfo = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
+  const canAskInfo = canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
 
   // Devolver p/ requisições (volta à aprovação; exclui o título no Omie se já enviada).
-  const canReturn = ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
+  const canReturn = canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
   const [returnModal, setReturnModal] = useState<ContasRequest | null>(null);
   const [returnReason, setReturnReason] = useState("");
   // Alerta pós-devolução: pop-up grande orientando a conferir no Omie se o título
@@ -198,9 +205,17 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     });
   }
 
-  const canSendToPayment = ctrlRoles.some((r) =>
-    ["gerente", "diretor", "csc", "contas_a_pagar", "admin"].includes(r),
-  );
+  // Enviar para pagamento: Contas a Pagar / admin (via `canOperate`, decidido na
+  // página) e quem tem a visão completa do módulo. `gerente` e `diretor` já
+  // estiveram nesta lista — nunca chegaram à tela, mas a lista dava a impressão
+  // contrária. Fora daqui, a trava real é o requireCtrlRoleOrFullView das
+  // actions de envio.
+  const canSendToPayment =
+    canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
+
+  // Coluna de seleção: só existe para quem pode de fato enviar ao pagamento —
+  // sem isso a tabela ofereceria marcação e clique na linha sem ação no fim.
+  const canSelectRows = activeTab === "aprovado" && canSendToPayment;
 
   // Só faz sentido devolver o que ainda está no fluxo de pagamento, não foi pago
   // e não está na fila (devolver no meio deixaria o worker lançando algo que já
@@ -503,7 +518,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
-                {activeTab === "aprovado" && (
+                {canSelectRows && (
                   <th className="w-10 px-4 py-3">
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-gray-300" />
                   </th>
@@ -532,7 +547,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                 const isSelected = selected.has(req.id);
                 // Na fila do Omie: não pode ser reenviada nem mexida até o worker concluir.
                 const enfileirada = naFila(req);
-                const clickable = activeTab === "aprovado" && !enfileirada;
+                const clickable = canSelectRows && !enfileirada;
 
                 return (
                   <tr
@@ -540,7 +555,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     onClick={clickable ? () => toggle(req.id) : undefined}
                     className={`transition-colors ${clickable ? "cursor-pointer" : ""} ${isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-muted/20"}`}
                   >
-                    {activeTab === "aprovado" && (
+                    {canSelectRows && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -681,7 +696,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         {/* Falha no Omie ou lote antigo que ficou sem lançamento. */}
                         {activeTab === "agendado" &&
                           (req.omie_launch_status === "erro" || !req.omie_contapagar_codigo) &&
-                          ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r)) && (
+                          (canOperate ||
+                            ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r))) && (
                           <ResyncButton requestId={req.id} onDone={() => router.refresh()} />
                         )}
                         {canReturnRow(req) && (
@@ -709,7 +725,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       )}
 
       {/* Action bar — Aprovadas */}
-      {activeTab === "aprovado" && displayed.length > 0 && (
+      {activeTab === "aprovado" && canSendToPayment && displayed.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           {selected.size > 0 ? (
             <span className="text-sm text-muted-foreground">{selected.size} selecionada(s) · {fmt.format(totalSelected)}</span>

@@ -1,4 +1,5 @@
 import { getSessionContext } from "@/lib/auth/session";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import type { CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 export interface CtrlUserContext {
@@ -53,6 +54,30 @@ export async function requireCtrlRole(
   const ctx = await getCtrlUser();
   if (!ctx) throw new Error("Não autenticado.");
   if (allowedRoles.length > 0 && !hasCtrlRole(ctx, ...allowedRoles)) {
+    throw new Error("Acesso negado.");
+  }
+  return ctx;
+}
+
+/**
+ * Igual ao requireCtrlRole, mas também autoriza quem tem a visão completa do
+ * módulo (@/lib/ctrl/full-view) — o override nominal que dá a um líder de área
+ * o módulo Compras inteiro sem mudar o perfil dele.
+ *
+ * Usar SÓ nas ações que o override deve mesmo alcançar (hoje: as operações da
+ * tela Contas a Pagar). Onde a alçada continua valendo — aprovar/rejeitar por
+ * setor — a guarda é outra (fullViewSectorBlock, em actions/requests.ts).
+ */
+export async function requireCtrlRoleOrFullView(
+  ...allowedRoles: CtrlRole[]
+): Promise<CtrlUserContext> {
+  const ctx = await getCtrlUser();
+  if (!ctx) throw new Error("Não autenticado.");
+  if (
+    allowedRoles.length > 0 &&
+    !hasCtrlRole(ctx, ...allowedRoles) &&
+    !hasCtrlFullView(ctx.email)
+  ) {
     throw new Error("Acesso negado.");
   }
   return ctx;

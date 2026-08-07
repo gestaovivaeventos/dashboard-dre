@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AprovacoesClient } from "@/components/ctrl/aprovacoes-client";
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests, getComplementsAwaitingApprover } from "@/lib/ctrl/actions/requests";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { directorHighlightSectorsFor, normalizeSectorName } from "@/lib/ctrl/routing";
 import { createClient } from "@/lib/supabase/server";
 
@@ -10,7 +11,11 @@ export default async function AprovacoesPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "gerente", "diretor", "csc", "contas_a_pagar", "admin")) {
+  const fullView = hasCtrlFullView(ctx.email);
+  if (
+    !fullView &&
+    !hasCtrlRole(ctx, "gerente", "diretor", "csc", "contas_a_pagar", "admin")
+  ) {
     redirect("/ctrl");
   }
 
@@ -27,7 +32,24 @@ export default async function AprovacoesPage() {
       .filter((s) => highlightNames.has(normalizeSectorName(s.name)))
       .map((s) => s.id);
     forceSectorGroups = ownSectorIds.length > 0;
+  } else if (fullView) {
+    // Visão completa do módulo: a listagem passa a mostrar TODAS as requisições,
+    // então o destaque deixa de ser cosmético — é ele que separa o que depende
+    // da aprovação dela do que é só acompanhamento. Os setores vêm do vínculo em
+    // Usuários (user_sectors), a mesma fonte da alçada.
+    forceSectorGroups = ownSectorIds.length > 0;
   }
+
+  // Setores em que o usuário de fato pode aprovar. Só restringe quem tem a visão
+  // completa (e algum setor vinculado) — para os demais, null = sem restrição, a
+  // alçada segue exatamente como era. Espelha o fullViewSectorBlock do servidor,
+  // que é a trava de verdade; aqui é só para não oferecer o botão.
+  const actionSectorIds =
+    fullView &&
+    ownSectorIds.length > 0 &&
+    !hasCtrlRole(ctx, "diretor", "csc", "admin")
+      ? ownSectorIds
+      : null;
 
   const { requests = [], error } = await getRequests({
     // Aba "Aprovadas" mostra o histórico completo do que já passou pela aprovação:
@@ -73,6 +95,7 @@ export default async function AprovacoesPage() {
           ctrlRoles={ctx.ctrlRoles}
           ownSectorIds={ownSectorIds}
           forceSectorGroups={forceSectorGroups}
+          actionSectorIds={actionSectorIds}
           awaitingApproverIds={awaitingApproverIds}
         />
       )}

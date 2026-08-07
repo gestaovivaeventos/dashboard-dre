@@ -334,3 +334,22 @@ export const FRANQUEADO_NAV_KEYS: ReadonlySet<string> = new Set([
 export const CSC_NAV_KEYS: ReadonlySet<string> = new Set(
   Array.from(FRANQUEADO_NAV_KEYS).concat(BI_VALIDATION_NAV_KEY),
 );
+
+/**
+ * Chaves do grupo COMPRAS liberadas pela visão completa do módulo
+ * (@/lib/ctrl/full-view) — o override nominal que dá a um líder de área a
+ * leitura do módulo inteiro sem mudar o perfil dele.
+ *
+ * É o módulo TODO menos "Configurações" (ct-config), que segue admin-only.
+ * Deve espelhar as liberações do bloco `/ctrl` em `@/lib/auth/access.ts`: ao
+ * incluir uma tela nova aqui, libere a rota lá também (senão o item aparece no
+ * menu e o middleware redireciona).
+ */
+export const CTRL_FULL_VIEW_NAV_KEYS: ReadonlySet<string> = new Set([
+  "ct-req",
+  "ct-apr",
+  "ct-cap",
+  "ct-orc",
+  "ct-rel",
+  "ct-forn",
+]);

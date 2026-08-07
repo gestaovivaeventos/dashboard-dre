@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import {
   CSC_NAV_KEYS,
+  CTRL_FULL_VIEW_NAV_KEYS,
   FRANQUEADO_NAV_KEYS,
   NAV_GROUPS,
   type NavGroup,
@@ -42,6 +43,12 @@ interface NavLinksProps {
    * seja, admin e os e-mails nominais. Ver canAccessBiValidation.
    */
   canBiValidation?: boolean;
+  /**
+   * Visão completa do módulo Compras (override nominal — ver
+   * @/lib/ctrl/full-view): mostra todo o grupo COMPRAS menos Configurações,
+   * independentemente dos ctrlRoles do usuário.
+   */
+  ctrlFullView?: boolean;
 }
 
 interface RenderItem {
@@ -114,6 +121,7 @@ export function NavLinks({
   isFranqueado,
   isCsc,
   canBiValidation,
+  ctrlFullView,
 }: NavLinksProps) {
   const pathname = usePathname();
 
@@ -122,7 +130,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -261,6 +269,7 @@ interface BuildInput {
   isFranqueado?: boolean;
   isCsc?: boolean;
   canBiValidation?: boolean;
+  ctrlFullView?: boolean;
 }
 
 function buildContractsOnlyGroups(): RenderGroup[] {
@@ -293,6 +302,7 @@ function buildGroups({
   isFranqueado,
   isCsc,
   canBiValidation,
+  ctrlFullView,
 }: BuildInput): RenderGroup[] {
   const ctrlSet = new Set(ctrlRoles ?? []);
   const slug =
@@ -306,7 +316,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado, isCsc, canBiValidation)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado, isCsc, canBiValidation, ctrlFullView)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -332,6 +342,7 @@ function isItemVisible(
   isFranqueado?: boolean,
   isCsc?: boolean,
   canBiValidation?: boolean,
+  ctrlFullView?: boolean,
 ): boolean {
   // CSC: cópia do franqueado + a tela "Validação Relatório".
   if (isCsc) return CSC_NAV_KEYS.has(item.key);
@@ -342,6 +353,11 @@ function isItemVisible(
 
   // "Validação Relatório" não passa por dreRole/ctrlRole: whitelist própria.
   if (item.biValidationAccess) return Boolean(canBiValidation);
+
+  // Visão completa do módulo Compras (override nominal): mostra o grupo inteiro
+  // menos Configurações, mesmo que os ctrlRoles do usuário não bastassem. Só
+  // ADICIONA itens — quem não tem o override segue nas regras abaixo.
+  if (ctrlFullView && CTRL_FULL_VIEW_NAV_KEYS.has(item.key)) return true;
 
   const dreOk =
     item.dreRoles && dreRole !== null

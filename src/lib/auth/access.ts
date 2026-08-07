@@ -2,6 +2,7 @@ import {
   BI_VALIDATION_PATH,
   canAccessBiValidationByProfile,
 } from "@/lib/auth/bi-validation";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
@@ -71,9 +72,10 @@ export function canAccessPathByProfile(
   canCase: boolean = false,
   canViagens: boolean = false,
   /**
-   * E-mail do usuário. Só é usado pela tela "Validação Relatório", liberada
-   * nominalmente para marcela@/marcelo@quokka.net.br além de CSC/admin.
-   * Ausente = trata como não-nominal (a regra por perfil continua valendo).
+   * E-mail do usuário. Usado pelas liberações NOMINAIS: a tela "Validação
+   * Relatório" (marcela@/marcelo@quokka.net.br além de CSC/admin) e a visão
+   * completa do módulo Compras (@/lib/ctrl/full-view). Ausente = trata como
+   * não-nominal (a regra por perfil continua valendo).
    */
   email: string | null = null,
 ): boolean {
@@ -143,14 +145,23 @@ export function canAccessPathByProfile(
   // Rotas do módulo Compras (CTRL).
   if (pathname.startsWith("/ctrl")) {
     if (!canCompras) return false;
+    // Visão completa (leitura) do módulo por liberação nominal — ver
+    // @/lib/ctrl/full-view. Vale para as telas operacionais abaixo; NÃO vale
+    // para Configurações (/ctrl/configuracoes, /ctrl/admin/* e Editar
+    // Orçamento), que seguem admin-only mais adiante.
+    const fullView = hasCtrlFullView(email);
     // Aprovações: gerente/diretor/contas_a_pagar/admin
     if (pathname.startsWith("/ctrl/aprovacoes")) {
-      return ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile);
+      return (
+        fullView ||
+        ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile)
+      );
     }
     // Contas a Pagar: exclusivo do perfil Contas a Pagar (+ admin, que já
-    // retornou true no topo). Diretor/gerente/solicitante não acessam.
+    // retornou true no topo). Diretor/gerente/solicitante não acessam — só a
+    // visão completa entra, e em modo somente-leitura (gate na própria página).
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
-      return profile === "contas_a_pagar";
+      return fullView || profile === "contas_a_pagar";
     }
     // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
     // ANTES da regra geral /ctrl/orcamento abaixo, senão gerente/diretor/csc
@@ -162,18 +173,24 @@ export function canAccessPathByProfile(
     // contas_a_pagar (csc). O gerente_setor entra na tela, mas só enxerga os
     // setores vinculados a ele (filtro na própria página).
     if (pathname.startsWith("/ctrl/orcamento")) {
-      return ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile);
+      return (
+        fullView ||
+        ["gerente", "gerente_setor", "diretor", "contas_a_pagar"].includes(profile)
+      );
     }
     // Relatorios: diretor + contas_a_pagar (csc); escondido do gerente/solicitante.
     if (pathname.startsWith("/ctrl/relatorios")) {
-      return ["diretor", "contas_a_pagar"].includes(profile);
+      return fullView || ["diretor", "contas_a_pagar"].includes(profile);
     }
     // Fornecedores: qualquer perfil do CTRL pode listar/cadastrar/editar.
     // A aprovação em si fica restrita ao CSC/admin (gate no client + server
     // action), mas a tela é colaborativa.
     if (pathname.startsWith("/ctrl/admin/fornecedores")) {
-      return ["solicitante", "gerente", "gerente_setor", "diretor", "csc", "contas_a_pagar"].includes(
-        profile,
+      return (
+        fullView ||
+        ["solicitante", "gerente", "gerente_setor", "diretor", "csc", "contas_a_pagar"].includes(
+          profile,
+        )
       );
     }
     // Configurações do módulo Compras (admin-only): o hub /ctrl/configuracoes e

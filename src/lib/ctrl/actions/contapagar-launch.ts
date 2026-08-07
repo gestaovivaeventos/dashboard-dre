@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { requireCtrlRoleOrFullView } from "@/lib/ctrl/auth";
 import { decryptSecret } from "@/lib/security/encryption";
 import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/clientes";
 import {
@@ -726,7 +726,7 @@ export async function launchRequestToOmie(
 }
 
 export async function resyncContaPagar(requestId: string): Promise<LaunchResult> {
-  await requireCtrlRole("contas_a_pagar", "csc", "admin");
+  await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
 
   const supabase = createAdminClientIfAvailable();
   if (!supabase) throw new Error("Admin client não disponível.");

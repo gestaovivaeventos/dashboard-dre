@@ -118,12 +118,16 @@ interface Props {
   // também é diretor de aprovação de setores específicos — override por e-mail no
   // servidor). Quando true, `ownSectorIds` já vem resolvido para esses setores.
   forceSectorGroups?: boolean;
+  // Setores em que o usuário pode APROVAR, quando a alçada é menor que a
+  // visibilidade (visão completa do módulo — ver @/lib/ctrl/full-view). null =
+  // sem restrição: a alçada é a de sempre. É só UI — a trava é no servidor.
+  actionSectorIds?: string[] | null;
   // Ids de requisições em complementação aguardando análise do aprovador
   // (último turno foi resposta do solicitante). Alimenta o alerta da aba.
   awaitingApproverIds?: string[];
 }
 
-export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], forceSectorGroups = false, awaitingApproverIds = [] }: Props) {
+export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], forceSectorGroups = false, actionSectorIds = null, awaitingApproverIds = [] }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("pendente");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -139,6 +143,21 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
 
   const awaitingSet = new Set(awaitingApproverIds);
 
+  // Setores tocados pela requisição: o próprio, ou os das parcelas no rateio
+  // (cada parcela tem sua etapa de aprovação, no orçamento do SEU setor).
+  const sectorsOf = (r: Req): string[] =>
+    r.is_rateio && r.ctrl_request_sectors?.length
+      ? r.ctrl_request_sectors.map((p) => p.sector_id)
+      : r.sector_id
+      ? [r.sector_id]
+      : [];
+
+  // Alçada menor que a visibilidade (visão completa do módulo): só pode agir nas
+  // requisições que tocam um setor dele. Sem restrição => tudo que ele vê.
+  const actionSectorSet = actionSectorIds ? new Set(actionSectorIds) : null;
+  const inActionScope = (r: Req) =>
+    !actionSectorSet || sectorsOf(r).some((s) => actionSectorSet.has(s));
+
   // Etapa atual da requisição e se o usuário pode agir nela.
   // pendente → etapa do gerente (gerente/diretor/csc/admin podem aprovar);
   // pendente_diretor → etapa do diretor (só diretor/csc/admin).
@@ -146,6 +165,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   // origem (complement_return_status) para saber quem pode aprovar.
   const isPendingStatus = (s: string) => s === "pendente" || s === "pendente_diretor";
   const canActOn = (r: Req) => {
+    if (!inActionScope(r)) return false;
     const stage =
       r.status === "aguardando_complementacao"
         ? r.complement_return_status ?? "pendente"
@@ -199,8 +219,16 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   const ownSectorSet = new Set(ownSectorIds);
   const groupByOwnSector =
     (hasRole("diretor") || forceSectorGroups) && ownSectorSet.size > 0;
+  // Quem tem alçada menor que a visibilidade (visão completa do módulo) conta o
+  // rateio pelos setores das PARCELAS: a parcela que cai no setor dele depende
+  // da sua aprovação, e pelo `sector_id` ela ficaria escondida em "Demais
+  // setores" — justamente o que a separação existe para evitar. Para o diretor,
+  // o agrupamento segue como sempre foi (só o setor primário).
   const isOwnSector = (r: Req) =>
-    groupByOwnSector && !!r.sector_id && ownSectorSet.has(r.sector_id);
+    groupByOwnSector &&
+    (actionSectorSet
+      ? sectorsOf(r).some((s) => ownSectorSet.has(s))
+      : !!r.sector_id && ownSectorSet.has(r.sector_id));
   const mineRows = groupByOwnSector ? tabRequests.filter(isOwnSector) : [];
   const otherRows = groupByOwnSector
     ? tabRequests.filter((r) => !isOwnSector(r))
@@ -488,7 +516,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
 
                         {/* Não-aprovador (ex.: o próprio solicitante) responde aqui;
                             o aprovador decide via Aprovar/Rejeitar/Pedir Info acima. */}
-                        {req.status === "aguardando_complementacao" && !actionable && (
+                        {req.status === "aguardando_complementacao" && !actionable && inActionScope(req) && (
                           <button
                             onClick={() => setThreadModal({ req, mode: "answer" })}
                             className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"

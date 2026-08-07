@@ -38,6 +38,8 @@ interface AppShellProps {
   isCsc?: boolean;
   /** Pode acessar "Validação Relatório" (CSC, admin ou e-mail nominal). */
   canBiValidation?: boolean;
+  /** Visão completa (leitura) do módulo Compras — override nominal por e-mail. */
+  ctrlFullView?: boolean;
   unreadNotifications?: number;
 }
 
@@ -60,6 +62,7 @@ export function AppShell({
   isFranqueado,
   isCsc,
   canBiValidation,
+  ctrlFullView,
   unreadNotifications = 0,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
@@ -83,6 +86,7 @@ export function AppShell({
       isFranqueado={isFranqueado}
       isCsc={isCsc}
       canBiValidation={canBiValidation}
+      ctrlFullView={ctrlFullView}
     />
   );
 

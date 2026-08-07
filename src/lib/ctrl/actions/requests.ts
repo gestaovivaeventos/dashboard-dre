@@ -4,13 +4,14 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { requireCtrlRole, requireCtrlRoleOrFullView } from "@/lib/ctrl/auth";
 import {
   APPROVAL_ROUTING,
   approverSectorRestrictionFor,
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
@@ -1177,7 +1178,13 @@ export async function getRequests(filters?: {
   //    vinculado em user_sectors. Sem vinculo => fallback ve tudo, pra nao
   //    quebrar o fluxo enquanto os cadastros estao incompletos.
   //  - Solicitante (nenhum dos anteriores): apenas as proprias requisicoes.
-  const hasGlobalVisibility = ctx.ctrlRoles.some((r) =>
+  //
+  // Visão completa do módulo (override nominal por e-mail — ver full-view.ts):
+  // entra nos dois escopos, ou seja, vê TODAS as requisições nas duas telas.
+  // É leitura: a alçada de aprovação continua limitada aos setores vinculados
+  // (fullViewSectorBlock, mais abaixo).
+  const fullView = hasCtrlFullView(ctx.email);
+  const hasGlobalVisibility = fullView || ctx.ctrlRoles.some((r) =>
     ["diretor", "csc", "admin", "contas_a_pagar"].includes(r),
   );
   const hasSectorVisibility = ctx.ctrlRoles.some((r) =>
@@ -1201,7 +1208,7 @@ export async function getRequests(filters?: {
   };
 
   if (!filters?.approvalScope) {
-    if (!ctx.ctrlRoles.includes("admin")) {
+    if (!ctx.ctrlRoles.includes("admin") && !fullView) {
       query = query.eq("created_by", ctx.id);
     }
   } else if (!hasGlobalVisibility) {
@@ -1326,6 +1333,51 @@ async function approverSectorBlock(
   const name = sec?.name;
   if (name && allowedNames.has(normalizeSectorName(name))) return null;
   return "Você não tem alçada para aprovar requisições deste setor.";
+}
+
+/**
+ * Guarda de alçada da VISÃO COMPLETA do módulo (override nominal — full-view.ts).
+ *
+ * Quem tem o override passa a VER todas as requisições na tela de Aprovações,
+ * como um diretor. Mas ver não é aprovar: a alçada continua sendo a de antes do
+ * override — os setores vinculados ao usuário em Usuários (user_sectors). Sem
+ * isso, a listagem global transformaria um clique errado em aprovação de outro
+ * setor. A separação "Do seu setor" x "Demais setores" na tela é o aviso; esta
+ * função é a trava.
+ *
+ * Retorna a mensagem de erro quando o usuário NÃO pode agir, ou null quando pode
+ * (inclusive para quem não tem o override — aí nada muda).
+ *
+ * No RATEIO basta uma parcela cair num setor do usuário — mesmo critério do
+ * approveRateio, que avança só as etapas dos setores dele.
+ *
+ * Sem nenhum setor vinculado, não bloqueia nada: mantém o comportamento que o
+ * perfil já tinha (o gerente sem vínculo cai no fallback "vê tudo").
+ */
+async function fullViewSectorBlock(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
+  req: { id: string; sector_id?: string | null; is_rateio?: boolean | null },
+): Promise<string | null> {
+  if (!hasCtrlFullView(ctx.email)) return null;
+  // Perfis que já aprovam qualquer setor por natureza não são afetados.
+  if (ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r))) return null;
+  if (ctx.sectorIds.length === 0) return null;
+
+  if (req.is_rateio) {
+    const { data: portions } = await supabase
+      .from("ctrl_request_sectors")
+      .select("sector_id")
+      .eq("request_id", req.id);
+    const hit = (portions ?? []).some((p) =>
+      ctx.sectorIds.includes(p.sector_id as string),
+    );
+    if (hit) return null;
+  } else if (req.sector_id && ctx.sectorIds.includes(req.sector_id)) {
+    return null;
+  }
+
+  return "Você tem acesso de leitura a todos os setores, mas só pode aprovar requisições dos setores vinculados ao seu usuário.";
 }
 
 // Notifica os diretores quando uma requisição fora do orçamento avança da etapa
@@ -1639,6 +1691,8 @@ export async function approveRequest(requestId: string, comment?: string) {
 
   const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
   if (sectorBlock) return { error: sectorBlock };
+  const fullViewBlock = await fullViewSectorBlock(supabase, ctx, req);
+  if (fullViewBlock) return { error: fullViewBlock };
 
   // Permite aprovar diretamente de dentro da Complementação: a decisão usa a
   // etapa de origem guardada em complement_return_status (gerente/diretor).
@@ -1691,6 +1745,10 @@ export async function rejectRequest(requestId: string, reason: string) {
     const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
     if (sectorBlock) return { error: sectorBlock };
   }
+  // Vale também para o rateio: com a visão completa a listagem deixou de ser o
+  // limite (a premissa do bloco acima), e rejeitar um setor rejeita tudo.
+  const fullViewBlock = await fullViewSectorBlock(supabase, ctx, req);
+  if (fullViewBlock) return { error: fullViewBlock };
   if (
     req.status !== "pendente" &&
     req.status !== "pendente_diretor" &&
@@ -1748,13 +1806,15 @@ export async function requestInfo(requestId: string, question: string) {
 
   const { data: req } = await supabase
     .from("ctrl_requests")
-    .select("id, status, sector_id, created_by, request_number")
+    .select("id, status, sector_id, created_by, request_number, is_rateio")
     .eq("id", requestId)
     .single();
 
   if (!req) return { error: "Requisição não encontrada." };
   const sectorBlock = await approverSectorBlock(supabase, ctx, req.sector_id);
   if (sectorBlock) return { error: sectorBlock };
+  const fullViewBlock = await fullViewSectorBlock(supabase, ctx, req);
+  if (fullViewBlock) return { error: fullViewBlock };
   if (
     req.status !== "pendente" &&
     req.status !== "pendente_diretor" &&
@@ -2187,7 +2247,7 @@ export async function getComplementsAwaitingApprover(
 // com action info_pagamento_solicitada ou info_pagamento_respondida).
 
 export async function requestPaymentInfo(requestId: string, question: string) {
-  const ctx = await requireCtrlRole("contas_a_pagar", "csc", "admin");
+  const ctx = await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
   if (!question.trim()) return { error: "Informe a pergunta." };
 
   const adminClient = createAdminClientIfAvailable();
@@ -2415,6 +2475,12 @@ export async function batchApproveRequests(
       continue;
     }
 
+    const fullViewBlock = await fullViewSectorBlock(supabase, ctx, req);
+    if (fullViewBlock) {
+      results.push({ id: req.id, number: req.request_number, ok: false, error: fullViewBlock });
+      continue;
+    }
+
     const res = await applyApprovalStep(supabase, ctx, req as ApprovableReq, comment);
     if ("error" in res) {
       results.push({ id: req.id, number: req.request_number, ok: false, error: res.error });
@@ -2450,7 +2516,10 @@ export async function previewPrevisaoMatches(
   requestIds: string[],
   payingCompanyId: string,
 ): Promise<{ ok: true; matches: PrevisaoMatch[] } | { error: string }> {
-  await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+  // Envio ao pagamento é do Contas a Pagar (+ admin) e de quem tem a visão
+  // completa do módulo. `gerente`/`diretor` constavam desta lista sem nunca
+  // alcançarem a tela — removidos para a permissão bater com o acesso.
+  await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
   if (!payingCompanyId) return { error: "Empresa pagadora é obrigatória." };
 
   const adminClient = createAdminClientIfAvailable();
@@ -2547,7 +2616,8 @@ export async function enqueueSendToPayment(
   payingCompanyId: string,
   decisoes?: Record<string, number | "novo">,
 ) {
-  const ctx = await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+  // Mesma alçada da tela Contas a Pagar (ver previewPrevisaoMatches).
+  const ctx = await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
 
   if (!payingCompanyId) return { error: "Empresa pagadora é obrigatória." };
   if (requestIds.length === 0) return { error: "Nenhuma requisição selecionada." };
@@ -2666,7 +2736,8 @@ export async function enqueueSendToPayment(
  * `aprovado`, com `omie_launch_status = 'erro'`).
  */
 export async function requeueRequestToOmie(requestId: string) {
-  await requireCtrlRole("gerente", "diretor", "csc", "contas_a_pagar", "admin");
+  // Mesma alçada da tela Contas a Pagar (ver previewPrevisaoMatches).
+  await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
 
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
@@ -2714,7 +2785,7 @@ export async function requeueRequestToOmie(requestId: string) {
 // (ver /ctrl/orcamento): a requisição sai de "realizado" e volta a "pendente";
 // se depois for rejeitada/excluída, o valor é totalmente liberado.
 export async function returnRequestToRequisicoes(requestId: string, reason: string) {
-  const ctx = await requireCtrlRole("contas_a_pagar", "csc", "admin");
+  const ctx = await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
   if (!reason?.trim()) return { error: "Informe o motivo da devolução." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -2866,7 +2937,7 @@ export async function editExpenseRoutingFromContasAPagar(
     due_date?: string; // cartão de crédito → vencimento da fatura (dia 05)
   },
 ) {
-  const ctx = await requireCtrlRole("contas_a_pagar", "admin");
+  const ctx = await requireCtrlRoleOrFullView("contas_a_pagar", "admin");
 
   if (!input.reason?.trim()) return { error: "Informe o motivo da alteração." };
   if (!input.sector_id) return { error: "Selecione o setor." };

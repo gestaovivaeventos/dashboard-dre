@@ -5,6 +5,7 @@ import { canAccessBiValidation } from "@/lib/auth/bi-validation";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 
 export default async function CaseLayout({ children }: { children: React.ReactNode }) {
@@ -59,6 +60,9 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
       canBiValidation={canAccessBiValidation(profile)}
+      // Visão completa do módulo Compras (override nominal): só faz sentido
+      // para quem já tem o módulo — não concede o módulo a ninguém.
+      ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
     >
       {children}
