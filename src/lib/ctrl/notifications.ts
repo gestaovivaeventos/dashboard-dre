@@ -154,22 +154,30 @@ export async function notifyAdmins(params: {
 }) {
   const supabase = await getSupabase();
 
-  // Admins DRE (role=admin) + usuarios com permissao 'csc' em user_module_roles
-  const { data: adminRows } = await supabase
-    .from("users")
-    .select("id")
-    .eq("role", "admin")
-    .eq("active", true);
-  const adminIds = (adminRows ?? []).map((r) => r.id as string);
+  // Destinatários: admins (role=admin) + quem opera Contas a Pagar / CSC.
+  //
+  // O pool operacional sai de `users.profile` — fonte de verdade do modelo
+  // atual. `user_module_roles` entra só como união retrocompatível: a tabela
+  // legada ainda guarda papéis de quem hoje tem outro perfil, e sozinha ela
+  // deixaria de fora um usuário `contas_a_pagar` novo (que é justamente quem
+  // homologa fornecedor e precisa desses avisos).
+  const [{ data: adminRows }, { data: profileRows }, { data: cscRows }] = await Promise.all([
+    supabase.from("users").select("id").eq("role", "admin").eq("active", true),
+    supabase.from("users").select("id").eq("profile", "contas_a_pagar").eq("active", true),
+    supabase
+      .from("user_module_roles")
+      .select("user_id")
+      .eq("module", "ctrl")
+      .eq("role", "csc"),
+  ]);
 
-  const { data: cscRows } = await supabase
-    .from("user_module_roles")
-    .select("user_id")
-    .eq("module", "ctrl")
-    .eq("role", "csc");
+  const adminIds = (adminRows ?? []).map((r) => r.id as string);
+  const payableIds = (profileRows ?? []).map((r) => r.id as string);
   const cscIds = (cscRows ?? []).map((r) => r.user_id as string);
 
-  const admins = Array.from(new Set([...adminIds, ...cscIds])).map((id) => ({ id }));
+  const admins = Array.from(new Set([...adminIds, ...payableIds, ...cscIds])).map((id) => ({
+    id,
+  }));
   if (!admins.length) return;
   await supabase.from("ctrl_notifications").insert(
     admins.map((u) => ({

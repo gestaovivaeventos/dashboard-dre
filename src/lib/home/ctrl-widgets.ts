@@ -14,6 +14,7 @@ export interface HomeCtrlCaps {
   canPay: boolean; // vê fila de pagamento
   canRequest: boolean; // vê "minhas requisições"
   canBudget: boolean; // vê orçamento do setor
+  canHomologate: boolean; // vê fornecedores a homologar (só perfil Contas a Pagar)
 }
 
 export function deriveCtrlCaps(roles: CtrlRole[], sectorIds: string[]): HomeCtrlCaps {
@@ -23,6 +24,11 @@ export function deriveCtrlCaps(roles: CtrlRole[], sectorIds: string[]): HomeCtrl
     canPay: has("contas_a_pagar", "csc", "admin"),
     canRequest: has("solicitante", "gerente", "diretor", "csc", "admin"),
     canBudget: has("gerente", "diretor") && sectorIds.length > 0,
+    // Exclusivo do perfil "Contas a Pagar". O CtrlRole `contas_a_pagar` só é
+    // emitido por esse perfil (ver deriveCtrlRoles) — admin recebe ["admin"] e
+    // o perfil `csc` não tem papel no módulo Compras. Então este gate não
+    // adiciona nada à home de nenhum outro perfil.
+    canHomologate: roles.includes("contas_a_pagar"),
   };
 }
 
@@ -57,11 +63,35 @@ export interface HomeBudgetSector {
   consumido: number;
 }
 
+/** Fornecedor recém-cadastrado que ainda não passou pela homologação. */
+export interface HomeNewSupplier {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+/** Requisição em aberto cujo fornecedor não está homologado (vai travar no pagamento). */
+export interface HomeBlockedRequest {
+  id: string;
+  requestNumber: number;
+  title: string;
+  amount: number;
+  status: string;
+  supplierName: string;
+  supplierStatus: string;
+}
+export interface HomeSuppliers {
+  novos: HomeNewSupplier[];
+  novosTotal: number;
+  bloqueadas: HomeBlockedRequest[];
+  bloqueadasTotal: number;
+}
+
 export interface HomeCtrlData {
   approvals: HomeApprovals | null;
   payments: HomePayments | null;
   myRequests: HomeMyRequests | null;
   budget: HomeBudgetSector[] | null;
+  suppliers: HomeSuppliers | null;
 }
 
 // Resolve join de fornecedor (objeto ou array) → nome.
@@ -216,6 +246,81 @@ async function loadBudget(sectorIds: string[]): Promise<HomeBudgetSector[] | nul
   }
 }
 
+/**
+ * Fornecedores a homologar — os dois lados da mesma pendência:
+ *
+ *  1. `novos`: fornecedores cadastrados no ControlHub que ainda estão
+ *     `pendente`. O filtro `from_omie = false` é ESSENCIAL: dos ~1000
+ *     fornecedores em status `pendente`, quase todos são legado importado do
+ *     Omie e nunca passaram pelo fluxo de homologação. Sem esse filtro o
+ *     widget mostraria mil itens e não significaria nada.
+ *  2. `bloqueadas`: requisições ainda em aberto cujo fornecedor não está
+ *     homologado — exatamente as que vão travar no envio para pagamento.
+ *     `agendado` fica de fora: já foi lançada, então o fornecedor já passou.
+ *
+ * Os dois blocos são derivados do ESTADO atual, não do log de notificações:
+ * homologou o fornecedor, o item some sozinho.
+ */
+const OPEN_STATUSES_FOR_SUPPLIER_BLOCK = [
+  "pendente",
+  "pendente_diretor",
+  "aguardando_complementacao",
+  "aprovado",
+  "info_pagamento_pendente",
+];
+
+async function loadSuppliers(): Promise<HomeSuppliers | null> {
+  try {
+    const db = createAdminClient();
+
+    const [novosRes, bloqueadasRes] = await Promise.all([
+      db
+        .from("ctrl_suppliers")
+        .select("id, name, created_at", { count: "exact" })
+        .eq("status", "pendente")
+        .eq("from_omie", false)
+        .order("created_at", { ascending: false })
+        .limit(5),
+      db
+        .from("ctrl_requests")
+        .select("id, request_number, title, amount, status, ctrl_suppliers!inner(name, status)", {
+          count: "exact",
+        })
+        .in("status", OPEN_STATUSES_FOR_SUPPLIER_BLOCK)
+        .is("deleted_at", null)
+        .neq("ctrl_suppliers.status", "aprovado")
+        .order("request_number", { ascending: false })
+        .limit(5),
+    ]);
+
+    const supplierField = (raw: unknown, field: "name" | "status"): string => {
+      const v = Array.isArray(raw) ? raw[0] : raw;
+      return ((v as Record<string, string> | null)?.[field] as string) ?? "";
+    };
+
+    return {
+      novos: (novosRes.data ?? []).map((s) => ({
+        id: s.id as string,
+        name: s.name as string,
+        createdAt: s.created_at as string,
+      })),
+      novosTotal: novosRes.count ?? 0,
+      bloqueadas: (bloqueadasRes.data ?? []).map((r) => ({
+        id: r.id as string,
+        requestNumber: r.request_number as number,
+        title: r.title as string,
+        amount: Number(r.amount),
+        status: r.status as string,
+        supplierName: supplierField(r.ctrl_suppliers, "name"),
+        supplierStatus: supplierField(r.ctrl_suppliers, "status"),
+      })),
+      bloqueadasTotal: bloqueadasRes.count ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Carrega só os widgets que o usuário pode ver, em paralelo.
 export async function loadHomeCtrlData(params: {
   userId: string;
@@ -224,11 +329,12 @@ export async function loadHomeCtrlData(params: {
   caps: HomeCtrlCaps;
 }): Promise<HomeCtrlData> {
   const { userId, roles, sectorIds, caps } = params;
-  const [approvals, payments, myRequests, budget] = await Promise.all([
+  const [approvals, payments, myRequests, budget, suppliers] = await Promise.all([
     caps.canApprove ? loadApprovals(roles) : Promise.resolve(null),
     caps.canPay ? loadPayments() : Promise.resolve(null),
     caps.canRequest ? loadMyRequests(userId) : Promise.resolve(null),
     caps.canBudget ? loadBudget(sectorIds) : Promise.resolve(null),
+    caps.canHomologate ? loadSuppliers() : Promise.resolve(null),
   ]);
-  return { approvals, payments, myRequests, budget };
+  return { approvals, payments, myRequests, budget, suppliers };
 }

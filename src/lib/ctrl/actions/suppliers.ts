@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
+import { notifyAdmins } from "@/lib/ctrl/notifications";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
 import type { CtrlSupplier, CtrlSupplierStatus } from "@/lib/supabase/types";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -740,7 +741,19 @@ export async function createSupplier(data: {
     action: "criado",
   });
 
+  // Fornecedor novo nasce "pendente": avisa quem homologa (Contas a Pagar +
+  // admins) para o cadastro não ficar parado esperando uma requisição travar no
+  // pagamento. Sem request_id — a notificação é sobre o fornecedor, e aponta
+  // para a tela de Fornecedores.
+  await notifyAdmins({
+    requestId: null,
+    title: "Novo fornecedor aguardando homologação",
+    message: `O fornecedor "${trimmedName}" foi cadastrado e aguarda homologação. Acesse Fornecedores para homologar.`,
+    type: "fornecedor_pendente",
+  });
+
   revalidatePath("/ctrl/admin/fornecedores");
+  revalidatePath("/home");
   return { supplierId: inserted.id };
 }
 

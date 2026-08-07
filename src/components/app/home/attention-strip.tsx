@@ -36,6 +36,21 @@ function buildItems(data: HomeCtrlData): AttentionItem[] {
       href: "/ctrl/requisicoes",
     });
   }
+  // Homologação de fornecedor. `suppliers` só é carregado para o perfil Contas
+  // a Pagar (caps.canHomologate), então é null para todo o resto e a faixa dos
+  // demais perfis fica byte a byte igual à de antes.
+  if (data.suppliers && data.suppliers.bloqueadasTotal > 0) {
+    items.push({
+      label: `${data.suppliers.bloqueadasTotal} requisição(ões) com fornecedor não homologado`,
+      href: "/ctrl/contas-a-pagar",
+    });
+  }
+  if (data.suppliers && data.suppliers.novosTotal > 0) {
+    items.push({
+      label: `${data.suppliers.novosTotal} fornecedor(es) aguardando homologação`,
+      href: "/ctrl/admin/fornecedores",
+    });
+  }
   return items;
 }
 

@@ -29,8 +29,12 @@ export default async function HomePage() {
     payments: null,
     myRequests: null,
     budget: null,
+    suppliers: null,
   };
-  if (profile && (caps.canApprove || caps.canPay || caps.canRequest || caps.canBudget)) {
+  if (
+    profile &&
+    (caps.canApprove || caps.canPay || caps.canRequest || caps.canBudget || caps.canHomologate)
+  ) {
     ctrlData = await loadHomeCtrlData({
       userId: profile.id,
       roles: ctrlRoles,

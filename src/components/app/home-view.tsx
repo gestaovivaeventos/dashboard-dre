@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AttentionStrip } from "@/components/app/home/attention-strip";
 import { WidgetAprovacoes } from "@/components/app/home/widget-aprovacoes";
 import { WidgetFilaPagamento } from "@/components/app/home/widget-fila-pagamento";
+import { WidgetFornecedores } from "@/components/app/home/widget-fornecedores";
 import { WidgetMinhasRequisicoes } from "@/components/app/home/widget-minhas-requisicoes";
 import { WidgetOrcamento } from "@/components/app/home/widget-orcamento";
 import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
@@ -96,7 +97,8 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
     (caps.canApprove && ctrlData.approvals) ||
     (caps.canPay && ctrlData.payments) ||
     (caps.canRequest && ctrlData.myRequests) ||
-    (caps.canBudget && ctrlData.budget);
+    (caps.canBudget && ctrlData.budget) ||
+    (caps.canHomologate && ctrlData.suppliers);
 
   return (
     <div className="space-y-6 p-6">
@@ -119,6 +121,10 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
           )}
           {caps.canPay && ctrlData.payments && (
             <WidgetFilaPagamento data={ctrlData.payments} />
+          )}
+          {/* Só o perfil Contas a Pagar — canHomologate não liga para os demais. */}
+          {caps.canHomologate && ctrlData.suppliers && (
+            <WidgetFornecedores data={ctrlData.suppliers} />
           )}
           {caps.canRequest && ctrlData.myRequests && (
             <WidgetMinhasRequisicoes data={ctrlData.myRequests} />
