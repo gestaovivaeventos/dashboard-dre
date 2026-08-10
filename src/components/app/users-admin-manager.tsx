@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  AlertTriangle,
   Check,
   CheckCircle2,
   Loader2,
   MailPlus,
   Pencil,
+  ShieldAlert,
   ShieldX,
   X,
 } from "lucide-react";
@@ -38,6 +40,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  describeUserExceptions,
+  findOrphanExceptionRules,
+  NON_USER_RULES,
+  type UserException,
+} from "@/lib/auth/user-exceptions";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -232,6 +240,9 @@ function userToForm(u: UserItem): FormState {
 export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   const [users, setUsers] = useState(initialUsers);
   const [inviteOpen, setInviteOpen] = useState(false);
+  // Diálogo das regras nominais do código. `null` = fechado; string vazia =
+  // aberto com todas; um id = aberto destacando aquele usuário.
+  const [exceptionsFor, setExceptionsFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserItem | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -254,6 +265,22 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
 
   // Ordem alfabetica (pt-BR, ignora caixa/acentos), por nome ou e-mail quando
   // sem nome. Cobre o load inicial e os refetches apos convite/edicao.
+  // Regras nominais (as que vivem no código, não no cadastro) por usuário.
+  const exceptionsByUser = useMemo(() => {
+    const map = new Map<string, UserException[]>();
+    for (const u of users) {
+      const list = describeUserExceptions({ id: u.id, email: u.email, name: u.name });
+      if (list.length > 0) map.set(u.id, list);
+    }
+    return map;
+  }, [users]);
+
+  // Regras cujo e-mail/ID não existe mais na base — falham em silêncio.
+  const orphanRules = useMemo(
+    () => findOrphanExceptionRules(users.map((u) => ({ id: u.id, email: u.email }))),
+    [users],
+  );
+
   const sortedUsers = useMemo(
     () =>
       [...users].sort((a, b) =>
@@ -588,6 +615,22 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
             {filteredUsers.length} de {users.length}{" "}
             {users.length === 1 ? "usuário" : "usuários"}
           </span>
+          {/* Vitrine das regras nominais: sem ela, um acordo fixo no código
+              (alçada restrita, visão completa, roteamento) fica invisível pra
+              quem administra os usuários. */}
+          <Button
+            variant="outline"
+            onClick={() => setExceptionsFor("")}
+            title="Regras especiais definidas no código"
+          >
+            <ShieldAlert className="mr-2 h-4 w-4 text-amber-600" />
+            Regras especiais
+            {exceptionsByUser.size > 0 && (
+              <span className="ml-2 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800">
+                {exceptionsByUser.size}
+              </span>
+            )}
+          </Button>
           <Button onClick={openInvite}>
             <MailPlus className="mr-2 h-4 w-4" />
             Convidar usuário
@@ -692,7 +735,20 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           {filteredUsers.map((u) => (
             <TableRow key={u.id}>
               <TableCell>
-                <div className="font-medium">{u.name || "—"}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{u.name || "—"}</span>
+                  {exceptionsByUser.has(u.id) && (
+                    <button
+                      type="button"
+                      onClick={() => setExceptionsFor(u.id)}
+                      title="Este usuário tem regras especiais definidas no código — clique para ver"
+                      className="rounded p-0.5 text-amber-600 transition-colors hover:bg-amber-100 hover:text-amber-800"
+                    >
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      <span className="sr-only">Ver regras especiais</span>
+                    </button>
+                  )}
+                </div>
                 {u.position && (
                   <div className="text-xs text-muted-foreground">{u.position}</div>
                 )}
@@ -773,6 +829,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         </TableBody>
       </Table>
 
+      {/* Regras nominais do código */}
+      <ExceptionsDialog
+        open={exceptionsFor !== null}
+        focusUserId={exceptionsFor || null}
+        users={sortedUsers}
+        exceptionsByUser={exceptionsByUser}
+        orphanRules={orphanRules}
+        onClose={() => setExceptionsFor(null)}
+      />
+
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={(o) => !o && closeAll()}>
         <DialogContent className="max-w-2xl">
@@ -852,6 +918,134 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ─── Regras nominais (exceções fixas no código) ─────────────────────────────
+
+function ExceptionsDialog({
+  open,
+  focusUserId,
+  users,
+  exceptionsByUser,
+  orphanRules,
+  onClose,
+}: {
+  open: boolean;
+  /** Quando preenchido, mostra só este usuário (clique no ícone da linha). */
+  focusUserId: string | null;
+  users: UserItem[];
+  exceptionsByUser: Map<string, UserException[]>;
+  orphanRules: ReturnType<typeof findOrphanExceptionRules>;
+  onClose: () => void;
+}) {
+  const listed = users.filter(
+    (u) => exceptionsByUser.has(u.id) && (!focusUserId || u.id === focusUserId),
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-amber-600" />
+            Regras especiais
+          </DialogTitle>
+          <DialogDescription>
+            Acordos de negócio que não têm campo de cadastro e vivem no código do sistema. Eles
+            valem <strong>além</strong> do perfil e dos módulos marcados na edição do usuário —
+            e só podem ser alterados por quem edita o código.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {listed.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Nenhum usuário com regra especial.
+            </p>
+          )}
+
+          {listed.map((u) => (
+            <div key={u.id} className="rounded-md border p-3">
+              <div className="mb-2">
+                <p className="text-sm font-semibold">{u.name || u.email}</p>
+                <p className="text-xs text-muted-foreground">{u.email}</p>
+              </div>
+              <ul className="space-y-2.5">
+                {(exceptionsByUser.get(u.id) ?? []).map((ex) => (
+                  <li key={ex.key} className="border-l-2 border-amber-300 pl-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{ex.title}</span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          ex.scope === "Compras"
+                            ? "border-violet-200 bg-violet-50 text-violet-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        }
+                      >
+                        {ex.scope}
+                      </Badge>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{ex.detail}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                      {ex.source}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          {/* Só na visão geral: regras que não são por usuário e regras órfãs. */}
+          {!focusUserId && (
+            <>
+              <div className="rounded-md border p-3">
+                <p className="mb-2 text-sm font-semibold">Regras que não são por usuário</p>
+                <ul className="space-y-2.5">
+                  {NON_USER_RULES.map((rule) => (
+                    <li key={rule.title} className="border-l-2 border-slate-300 pl-3">
+                      <p className="text-sm font-medium">{rule.title}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{rule.detail}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                        {rule.source}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {orphanRules.length > 0 && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
+                  <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-red-800 dark:text-red-300">
+                    <AlertTriangle className="h-4 w-4" />
+                    Regras sem usuário correspondente
+                  </p>
+                  <p className="mb-2 text-xs text-red-800/90 dark:text-red-300/90">
+                    Estas regras existem no código mas não casam com nenhum usuário — provavelmente
+                    o e-mail mudou ou o cadastro foi recriado. Elas simplesmente <strong>deixam de
+                    valer</strong>, sem erro visível. Avise quem cuida do código.
+                  </p>
+                  <ul className="space-y-1">
+                    {orphanRules.map((rule) => (
+                      <li key={rule.key} className="text-xs text-red-800 dark:text-red-300">
+                        <strong>{rule.label}</strong> — {rule.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Fechar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

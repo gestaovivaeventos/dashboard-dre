@@ -95,9 +95,12 @@ export const DIRECTOR_HIGHLIGHT_SECTORS: ReadonlyArray<{
 }> = [
   {
     // Marcelo Gonçalves — admin (todas as permissões) e diretor responsável pela
-    // aprovação destes três setores. Destaca-os na tela de Aprovações.
+    // aprovação destes setores. Destaca-os na tela de Aprovações e o coloca na
+    // etapa do diretor do lembrete diário. "Diretoria" entrou em 10/08/2026: o
+    // setor já era roteado direto ao diretor (APPROVAL_ROUTING.directorSector),
+    // mas sem ninguém vinculado a ele o e-mail não tinha destinatário.
     email: "marcelo@quokka.net.br",
-    sectorNames: ["TI", "Financeiro Cash Out", "Financeiro CSC"],
+    sectorNames: ["TI", "Financeiro Cash Out", "Financeiro CSC", "Diretoria"],
   },
 ];
 

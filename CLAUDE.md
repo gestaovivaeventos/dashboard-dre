@@ -123,6 +123,14 @@ Special profiles to remember:
 - `franqueado` — explicit **whitelist** of DRE view screens (dashboard, fluxo-de-caixa, budget-forecast, kpis, business-intelligence, documentos), at both `/...` and `/s/<slug>/...`. Everything else (conexões, mapeamento, configurações, admin, ctrl, contratos, usuarios) is denied.
 - `validador_contrato` — island: only `/contratos*`. Continua existindo, mas **não é mais o único caminho** para a tela — ver o módulo Validação de Contratos abaixo.
 
+### Regras nominais (exceções por usuário fixas no código)
+
+Alguns acordos de negócio não têm campo de cadastro e vivem no código: alçada de aprovação restrita e roteamento fixo (`src/lib/ctrl/routing.ts`), visão completa do Compras (`src/lib/ctrl/full-view.ts`) e a liberação da Validação Relatório (`src/lib/auth/bi-validation.ts`).
+
+`src/lib/auth/user-exceptions.ts` é a **vitrine** dessas regras: não define nada, apenas lê as fontes acima e as descreve em português. A tela de Usuários usa isso em dois lugares — um ícone âmbar na linha de quem tem exceção e o botão "Regras especiais" no cabeçalho, que abre o catálogo completo. O catálogo também aponta **regras órfãs** (e-mail/ID do código que não existe mais na base), que de outro modo deixariam de valer em silêncio.
+
+**Ao criar uma regra nominal nova, registre a leitura dela em `user-exceptions.ts`** — senão ela volta a ser invisível para quem administra os usuários, que é exatamente o problema que essa tela resolve.
+
 ### Módulo Validação de Contratos (`/contratos`)
 
 `src/lib/auth/contratos.ts` é a fonte de verdade. A tela deixou de ser exclusiva do perfil `validador_contrato` (que isolava o usuário) e virou um **módulo** marcável em "Módulos visíveis" na tela de Usuários — assim um Gerente Sócio do Compras, por exemplo, pode validar contratos sem trocar de perfil.
@@ -189,7 +197,7 @@ O fim de semana é excluído em **dois lugares de propósito**: no agendamento (
 Quem recebe o quê é derivado da mesma fonte de verdade da tela de Aprovações — não replique a regra em outro lugar:
 - a **etapa vem do status**: `pendente` → gerente/gerente sócio; `pendente_diretor` → diretor. Como `applyApprovalStep` só move para `pendente_diretor` depois do aval do gerente, o diretor nunca é notificado antes da etapa gerencial;
 - **notificação é sempre limitada pelo setor, inclusive para o diretor**: ele *aprova* qualquer setor (`hasGlobalVisibility`), mas só *recebe e-mail* dos setores cadastrados para ele na tela de Usuários (`user_sectors`). Decisão de negócio — não confunda com a visibilidade da tela. Gerente segue o mesmo filtro, com o fallback "sem vínculo recebe tudo" do `getRequests`;
-- valem os overrides de `routing.ts`: `APPROVAL_ROUTING` (diretor/gerente fixo) e `approverSectorRestrictionFor` (alçada, falha fechada). **`DIRECTOR_HIGHLIGHT_SECTORS` agora tem dois efeitos**: além do destaque na tela, coloca o e-mail listado na etapa do diretor da rotina, restrito àqueles setores (é assim que `marcelo@quokka.net.br`, perfil admin, recebe TI / Financeiro Cash Out / Financeiro CSC);
+- valem os overrides de `routing.ts`: `APPROVAL_ROUTING` (diretor/gerente fixo) e `approverSectorRestrictionFor` (alçada, falha fechada). **`DIRECTOR_HIGHLIGHT_SECTORS` agora tem dois efeitos**: além do destaque na tela, coloca o e-mail listado na etapa do diretor da rotina, restrito àqueles setores (é assim que `marcelo@quokka.net.br`, perfil admin, recebe TI / Financeiro Cash Out / Financeiro CSC / Diretoria — este último entrou em 10/08/2026 porque o setor era roteado direto ao diretor sem ninguém vinculado, e o e-mail ficava órfão);
 - o pool sai de `users.profile` (`gerente`, `gerente_setor`, `diretor` + `can_compras` + `active`), **não** de `user_module_roles` — a tabela legada ainda guarda papéis de quem hoje tem outro perfil. Admin não recebe por ser admin, só via `DIRECTOR_HIGHLIGHT_SECTORS`.
 
 `ctrl_approval_email_log` (unique `user_id` + `run_date` em BRT) é o rastro e a trava de duplicidade: reexecutar o endpoint no mesmo dia não reenvia. `?dryRun=1` monta sem enviar; `?force=1` reenvia conscientemente. Requisição pendente sem nenhum aprovador elegível não some: entra em `orphans` e vira alerta ao `ADMIN_EMAIL` — é o sintoma normal de setor sem gerente/diretor cadastrado, já que o filtro por setor não tem fallback global. A "mensagem do dia" é sorteada por hash de (usuário, dia) excluindo as últimas frases do log — determinística, então um reprocessamento repete a frase que o usuário viu.
