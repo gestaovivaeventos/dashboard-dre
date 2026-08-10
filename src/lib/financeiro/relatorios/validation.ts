@@ -180,7 +180,7 @@ export async function listCompaniesWithRecipients(
   const { data, error } = await admin
     .from("bi_report_subscriptions")
     .select(
-      "company_id, users!bi_report_subscriptions_user_id_fkey(email,active), companies!bi_report_subscriptions_company_id_fkey(id,name,active)",
+      "company_id, users!bi_report_subscriptions_user_id_fkey(email,active), companies!bi_report_subscriptions_company_id_fkey(id,name,active,sync_enabled)",
     )
     .eq("active", true);
 
@@ -189,12 +189,24 @@ export async function listCompaniesWithRecipients(
   const rows = (data ?? []) as unknown as Array<{
     company_id: string;
     users: { email: string; active: boolean } | null;
-    companies: { id: string; name: string; active: boolean } | null;
+    companies: {
+      id: string;
+      name: string;
+      active: boolean;
+      sync_enabled: boolean | null;
+    } | null;
   }>;
 
   const byCompany = new Map<string, { companyName: string; emails: Set<string> }>();
   for (const row of rows) {
     if (!row.users?.active || !row.companies?.active) continue;
+    // Empresa fora do pacote (sync desligado) não entra no ciclo mensal: sem
+    // sync, o mês seguinte ao desligamento não tem dado real, então gerar o
+    // relatório só produz uma linha vazia para o CSC bloquear todo mês. É o
+    // caso da Viva Cuiabá (contrato encerrado em 31/05/2026). `active` NÃO
+    // serve para isso — ele controla visibilidade, não o ciclo de dados.
+    // null é tratado como ligado (empresas anteriores à coluna).
+    if (row.companies.sync_enabled === false) continue;
     const entry =
       byCompany.get(row.company_id) ??
       { companyName: row.companies.name, emails: new Set<string>() };
