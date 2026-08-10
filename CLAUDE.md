@@ -141,8 +141,8 @@ Omie credentials (app_key/app_secret) are encrypted with AES-256-GCM before stor
 Vercel. Cron jobs (`vercel.json`):
 - `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the 4th of each month (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
-- `/api/cron/bi-monthly-validation` — `0 12 4 * *`. Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions`), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
-- `/api/cron/bi-monthly-autosend` — `0 12 10 * *`. Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead.
+- `/api/cron/bi-monthly-validation` — `0 12 4 * *` (12:00 UTC / **09:00 BRT**). Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions` **and** `sync_enabled` not false — unidade fora do pacote não entra no ciclo), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
+- `/api/cron/bi-monthly-autosend` — `0 12 10 * *` (12:00 UTC / **09:00 BRT** — cron da Vercel é sempre UTC; não é meio-dia de Brasília). Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead. Destinatário é resolvido **no momento do envio**, então mexer na lista em Plataforma > Relatório BI depois da geração muda quem recebe; empresa que ficou sem destinatário falha o envio.
 - `/api/cron/ctrl-approval-reminders` — `0 13 * * 1-5` (13:00 UTC / **10:00 BRT, segunda a sexta**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
 
