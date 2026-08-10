@@ -368,14 +368,14 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.company_ids = []; // admin vê tudo, não precisa restringir
       }
       // Franqueado e CSC (cópia funcional): só Financeiro, sem setores.
-      // Unidades obrigatórias.
+      // Unidades obrigatórias. `can_contratos` NÃO é zerado: a Validação de
+      // Contratos é um módulo à parte, liberável pra qualquer perfil.
       if (key === "profile" && (value === "franqueado" || value === "csc")) {
         next.can_financeiro = true;
         next.can_compras = false;
         next.can_case = false;
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
-        next.can_contratos = false;
         next.sector_ids = [];
       }
       // Saiu do perfil isolado de validador → o módulo deixa de ser implícito
@@ -883,6 +883,12 @@ function UserForm({
   const showCompanies =
     form.can_financeiro && form.profile !== "admin" && form.profile !== "validador_contrato";
   const isValidator = form.profile === "validador_contrato";
+  // Visão Financeira e CSC são só-Financeiro: não escolhem Compras/Case. Mas a
+  // Validação de Contratos é um módulo independente, então a seção continua
+  // aparecendo pra eles — só com esse botão.
+  const isFinanceiroOnly = form.profile === "franqueado" || form.profile === "csc";
+  // Admin já tem tudo; o Validador de Contrato É o módulo. Os demais escolhem.
+  const showModules = !isValidator && form.profile !== "admin";
 
   const profileDescription = useMemo(
     () => PROFILES.find((p) => p.value === form.profile)?.description ?? "",
@@ -967,12 +973,14 @@ function UserForm({
         <p className="text-xs text-muted-foreground">{profileDescription}</p>
       </div>
 
-      {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && form.profile !== "csc" && (
+      {showModules && (
         <div className="space-y-1.5">
           <Label>Módulos visíveis</Label>
           {/* Grid: "Validação de Contratos" é longo demais pra 4 colunas
               iguais numa linha só. */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {!isFinanceiroOnly && (
+            <>
             <button
               type="button"
               onClick={() => onChange("can_financeiro", !form.can_financeiro)}
@@ -1009,6 +1017,8 @@ function UserForm({
               {form.can_case ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
               Case
             </button>
+            </>
+            )}
             <button
               type="button"
               onClick={() => onChange("can_contratos", !form.can_contratos)}
@@ -1023,7 +1033,9 @@ function UserForm({
             </button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Plataforma (Conexões, Usuários, Inteligência) é automática pra admin.
+            {isFinanceiroOnly
+              ? "Este perfil é fixo no Financeiro (sem Compras e sem Case). A Validação de Contratos é um módulo à parte e pode ser liberada."
+              : "Plataforma (Conexões, Usuários, Inteligência) é automática pra admin."}
           </p>
         </div>
       )}

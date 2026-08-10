@@ -95,14 +95,11 @@ export async function POST(request: Request) {
       ? false
       : Boolean(body.can_viagens);
   const canViagensAprovar = canViagens && Boolean(body.can_viagens_aprovar);
-  // Módulo Validação de Contratos: o perfil validador sempre tem; franqueado e
-  // CSC nunca (são só-Financeiro); os demais seguem a marcação da tela.
+  // Módulo Validação de Contratos: o perfil validador sempre tem; os demais
+  // seguem a marcação da tela — inclusive franqueado/CSC, que são fixos no
+  // Financeiro mas podem receber este módulo, que é independente.
   const canContratos =
-    userProfile === "validador_contrato"
-      ? true
-      : isFinanceiroOnly
-      ? false
-      : Boolean(body.can_contratos);
+    userProfile === "validador_contrato" ? true : Boolean(body.can_contratos);
   const sectorIds =
     userProfile === "validador_contrato" || isFinanceiroOnly
       ? []

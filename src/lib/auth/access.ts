@@ -111,10 +111,20 @@ export function canAccessPathByProfile(
     return canViagens || profile === "admin";
   }
 
+  // Módulo Validação de Contratos — acesso binário pelo módulo concedido ao
+  // usuário (admin sempre pode). Antes a tela era exclusiva do perfil
+  // 'validador_contrato', o que impedia dar o acesso a quem tem outro perfil
+  // (ex.: gerente do Compras, Visão Financeira). Precisa vir ANTES do bloco do
+  // franqueado/CSC, cuja whitelist negaria a rota mesmo com o módulo marcado.
+  if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
+    return canContratos || profile === "admin";
+  }
+
   // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
-  // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl,
-  // /contratos e qualquer página fora das visualizações permitidas. A tela
-  // "Validação Relatório" já foi liberada acima para o CSC.
+  // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl e
+  // qualquer página fora das visualizações permitidas. As telas "Validação
+  // Relatório" (CSC) e "Validação de Contratos" (quem tem o módulo) já foram
+  // decididas acima.
   if (profile === "franqueado" || profile === "csc") {
     if (FRANQUEADO_BASE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
       return true;
@@ -131,14 +141,6 @@ export function canAccessPathByProfile(
 
   // Admin: tudo.
   if (profile === "admin") return true;
-
-  // Módulo Validação de Contratos — acesso binário pelo módulo concedido ao
-  // usuário (admin sempre pode; já retornou true acima). Antes a tela era
-  // exclusiva do perfil 'validador_contrato', o que impedia dar o acesso a
-  // quem tem outro perfil (ex.: gerente do módulo Compras).
-  if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
-    return canContratos;
-  }
 
   // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios
   // exige admin. O módulo Orçamento (/orcamento*) também é admin-only: admin

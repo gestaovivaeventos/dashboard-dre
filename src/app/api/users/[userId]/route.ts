@@ -110,16 +110,13 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   // ── Sync módulo Validação de Contratos ──
-  // Vive em user_module_roles (ver @/lib/auth/contratos). Perfis que não
-  // enxergam a seção "Módulos visíveis" têm o valor forçado: validador de
-  // contrato sempre tem o módulo; franqueado/CSC nunca. `undefined` (ex.: o
-  // PATCH que só ativa/desativa o usuário) não mexe em nada.
+  // Vive em user_module_roles (ver @/lib/auth/contratos). O perfil validador de
+  // contrato sempre tem o módulo (é a própria tela dele); os demais seguem a
+  // marcação da tela, inclusive franqueado/CSC — o módulo é independente do
+  // recorte só-Financeiro desses perfis. `undefined` (ex.: o PATCH que só
+  // ativa/desativa o usuário) não mexe em nada.
   const contratosTarget =
-    body.profile === "validador_contrato"
-      ? true
-      : body.profile === "franqueado" || body.profile === "csc"
-      ? false
-      : body.can_contratos;
+    body.profile === "validador_contrato" ? true : body.can_contratos;
 
   if (contratosTarget !== undefined) {
     const { error } = await setContratosGrant(adminClient, params.userId, contratosTarget);

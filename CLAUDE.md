@@ -131,6 +131,8 @@ A concessão é gravada numa linha de `user_module_roles` (`module='contratos'`,
 
 As policies de `contract_validation_batches` / `_items` só conhecem `is_admin()` / `is_hero_manager()` — como o módulo agora pode cair em qualquer perfil, as páginas `/contratos` leem com service role (mesmo padrão que `/api/contracts/batches` já usava), depois de checarem `profile.can_contratos`.
 
+O módulo é liberável em **qualquer perfil**, inclusive `franqueado` ("Visão Financeira") e `csc` — que escondiam a seção "Módulos visíveis" inteira por serem só-Financeiro e hoje mostram só esse botão. Duas ordens importam por causa disso: em `canAccessPathByProfile` o gate de `/contratos` vem **antes** do bloco franqueado/CSC (a whitelist deles negaria a rota), e em `nav-links.tsx` o item é decidido **antes** de `FRANQUEADO_NAV_KEYS`/`CSC_NAV_KEYS`. Só `admin` (tem tudo) e `validador_contrato` (é o próprio módulo) seguem sem a seção.
+
 No menu, a tela tem grupo próprio (`CONTRATOS`); saiu de PLATAFORMA, onde convivia com as telas de administração sem ter relação com elas.
 
 "Viagens" saiu de "Módulos visíveis" (módulo sem uso). As colunas `can_viagens`/`can_viagens_aprovar`, o módulo e o kill-switch `VIAGENS_ENABLED` continuam existindo; o formulário só carrega e devolve os valores atuais, sem oferecê-los.

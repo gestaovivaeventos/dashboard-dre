@@ -356,6 +356,11 @@ function isItemVisible(
   canBiValidation?: boolean,
   ctrlFullView?: boolean,
 ): boolean {
+  // Validação de Contratos: módulo próprio, concedido por usuário. Não passa
+  // por dreRole/ctrlRole nem pelas whitelists de franqueado/CSC — qualquer
+  // perfil com o módulo enxerga o item.
+  if (item.contratosAccess) return canContratos;
+
   // CSC: cópia do franqueado + a tela "Validação Relatório".
   if (isCsc) return CSC_NAV_KEYS.has(item.key);
   // Franqueado: a visibilidade não segue o dreRole (cai em 'gestor_unidade',
@@ -365,10 +370,6 @@ function isItemVisible(
 
   // "Validação Relatório" não passa por dreRole/ctrlRole: whitelist própria.
   if (item.biValidationAccess) return Boolean(canBiValidation);
-
-  // Validação de Contratos: módulo próprio, concedido por usuário. Também não
-  // passa por dreRole/ctrlRole.
-  if (item.contratosAccess) return canContratos;
 
   // Visão completa do módulo Compras (override nominal): mostra o grupo inteiro
   // menos Configurações, mesmo que os ctrlRoles do usuário não bastassem. Só
