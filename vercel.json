@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/cron/ctrl-approval-reminders",
-      "schedule": "0 13 * * *"
+      "schedule": "0 13 * * 1-5"
     }
   ]
 }

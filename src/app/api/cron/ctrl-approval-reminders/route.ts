@@ -8,7 +8,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // GET /api/cron/ctrl-approval-reminders — LEMBRETE DIÁRIO DE APROVAÇÕES
 //
 // Roda às 10h de Brasília (13:00 UTC — o Brasil não tem mais horário de verão,
-// então o offset é fixo em -03:00 o ano todo).
+// então o offset é fixo em -03:00 o ano todo), de SEGUNDA A SEXTA. O fim de
+// semana é excluído em dois lugares de propósito: no cron (`0 13 * * 1-5`) e na
+// própria rotina (guarda por dia da semana em Brasília), para que uma execução
+// manual num sábado também não dispare.
 //
 // Envia, via Resend, UM e-mail por aprovador com TODAS as requisições do módulo
 // de Compras que dependem da aprovação dele agora:
@@ -17,8 +20,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // Quem não tem pendência não recebe nada.
 //
 // Duplicidade é travada em ctrl_approval_email_log (unique user_id + run_date),
-// então reexecutar o endpoint no mesmo dia não reenvia. Para reenvio manual
-// consciente, use ?force=1; para conferir sem enviar, ?dryRun=1.
+// então reexecutar o endpoint no mesmo dia não reenvia. Para conferir sem enviar
+// use ?dryRun=1 (funciona inclusive no fim de semana). ?force=1 é o override
+// manual consciente: reenvia para quem já recebeu hoje E ignora a trava de fim
+// de semana.
 // ============================================================================
 
 export const runtime = "nodejs";

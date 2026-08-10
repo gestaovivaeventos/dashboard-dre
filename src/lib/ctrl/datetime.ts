@@ -119,6 +119,25 @@ export function todayBR(): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+/**
+ * Dia da semana do dia informado (padrão: hoje em Brasília). 0 = domingo … 6 = sábado.
+ *
+ * Recebe/assume um dia de calendário já resolvido em Brasília ('YYYY-MM-DD') e
+ * faz a conta em UTC puro — `new Date("2026-08-08").getDay()` usaria o fuso do
+ * runtime e, no servidor em UTC, poderia devolver o dia anterior.
+ */
+export function weekdayBR(day: string = todayBR()): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(day.trim());
+  if (!m) return new Date(NaN).getUTCDay();
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+}
+
+/** Sábado ou domingo em Brasília. */
+export function isWeekendBR(day: string = todayBR()): boolean {
+  const wd = weekdayBR(day);
+  return wd === 0 || wd === 6;
+}
+
 /** Ano corrente em Brasília. No servidor (UTC), 31/12 após 21h já seria o ano seguinte. */
 export function currentYearBR(): number {
   return Number(todayBR().slice(0, 4));

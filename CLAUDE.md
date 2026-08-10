@@ -143,7 +143,7 @@ Vercel. Cron jobs (`vercel.json`):
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
 - `/api/cron/bi-monthly-validation` — `0 12 4 * *`. Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions`), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
 - `/api/cron/bi-monthly-autosend` — `0 12 10 * *`. Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead.
-- `/api/cron/ctrl-approval-reminders` — `0 13 * * *` (13:00 UTC / **10:00 BRT**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
+- `/api/cron/ctrl-approval-reminders` — `0 13 * * 1-5` (13:00 UTC / **10:00 BRT, segunda a sexta**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
 
 There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
@@ -166,7 +166,9 @@ O **PDF** da prévia (botão "Baixar PDF", no topo do diálogo do olho) e o da t
 
 ### Lembrete diário de aprovações (CTRL / Compras)
 
-`src/lib/ctrl/approval-reminders/` + `/api/cron/ctrl-approval-reminders`. Às 10h BRT envia, via Resend, **um e-mail por aprovador** com todas as requisições que dependem da aprovação dele. Quem não tem pendência não recebe nada.
+`src/lib/ctrl/approval-reminders/` + `/api/cron/ctrl-approval-reminders`. Às 10h BRT, **de segunda a sexta**, envia via Resend **um e-mail por aprovador** com todas as requisições que dependem da aprovação dele. Quem não tem pendência não recebe nada.
+
+O fim de semana é excluído em **dois lugares de propósito**: no agendamento (`0 13 * * 1-5`) e dentro da rotina (`isWeekendBR` sobre o dia em Brasília, não em UTC — às 22h de domingo o servidor em UTC já é segunda). Assim uma execução manual num sábado também não dispara; `?force=1` é a saída consciente e `?dryRun=1` monta o conteúdo em qualquer dia.
 
 Quem recebe o quê é derivado da mesma fonte de verdade da tela de Aprovações — não replique a regra em outro lugar:
 - a **etapa vem do status**: `pendente` → gerente/gerente sócio; `pendente_diretor` → diretor. Como `applyApprovalStep` só move para `pendente_diretor` depois do aval do gerente, o diretor nunca é notificado antes da etapa gerencial;

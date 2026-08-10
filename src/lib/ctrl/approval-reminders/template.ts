@@ -1,42 +1,42 @@
-// HTML do lembrete diário de aprovações (módulo de Compras).
+// HTML do lembrete diário de aprovações (módulo de Compras) — design Modernist.
 //
-// Layout inspirado no modelo de referência: cartão central, saudação, blocos
-// destacados — um por requisição, com os dados centralizados e rotulados — e um
-// botão único ao final. Paleta e tipografia seguem os e-mails que o Control Hub
-// já envia (one-page-email.ts), para o usuário reconhecer o remetente.
+// Estrutura: faixa vermelha com a mensagem do dia no topo, saudação com a
+// contagem em destaque sutil, uma seção por requisição com os campos rotulados
+// em duas colunas alinhadas à esquerda, CTA único e rodapé escuro.
 //
-// Tudo é table-based com CSS inline: cliente de e-mail não carrega <style>
-// externo nem respeita flex/grid de forma confiável.
+// Regras de HTML de e-mail seguidas aqui (não "simplifique" nenhuma delas):
+//   - só <table role="presentation">, coluna única, wrapper de 600px. Nada de
+//     flex/grid/float/position, que Outlook e Gmail app ignoram ou quebram;
+//   - TODO estilo inline no próprio elemento. O <style> do <head> carrega apenas
+//     as media queries — o e-mail tem que ficar correto se o bloco for removido
+//     (Gmail app remove <style> em várias situações);
+//   - sem imagens, sem web fonts, sem JS, sem corner radius: o desenho é feito
+//     de células coloridas, réguas e tipografia;
+//   - larguras explícitas e `mso-line-height-rule:exactly` junto de todo
+//     line-height, senão o Outlook desktop recalcula a entrelinha;
+//   - preheader oculto como primeiro elemento do <body>.
 
-import { formatDateBR, formatDayBR } from "@/lib/ctrl/datetime";
+import { formatDateBR, formatDayBR, todayBR } from "@/lib/ctrl/datetime";
 
 import type { PendingApprovalRequest } from "./recipients";
 
 /** Destino do botão — página principal do Control Hub (definido na especificação). */
 export const CTRL_HOME_URL = "https://controlhub.vivaeventos.com.br/home";
 
-const FF = "'IBM Plex Sans', Arial, Helvetica, sans-serif";
+const FF = "Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif";
 
 const C = {
-  pageBg: "#eceae6",
-  cardBg: "#ffffff",
-  cardBorder: "#e6e4df",
-  blockBg: "#fbfbfa",
-  blockBorder: "#e6e4df",
-  ink: "#16191f",
-  body: "#3c424d",
-  sub: "#717784",
-  tertiary: "#9aa0ac",
-  accent: "#1f6fd6",
-  darkCard: "#1b2532",
-  fortuneBg: "#f4f7fb",
-  fortuneBorder: "#1f6fd6",
-  alertText: "#c0392b",
-  alertBg: "#fdf1ef",
-  alertBorder: "#f3d6d0",
-  routeText: "#4338ca",
-  routeBg: "#eef0fd",
-  routeBorder: "#d8dcfa",
+  ground: "#e9e6e4",
+  card: "#fbfaf9",
+  ink: "#201e1d",
+  body: "#6b6663",
+  footerText: "#a9a4a1",
+  accent: "#ec3013",
+  accentDark: "#b3230f",
+  accentSoft: "#ffd9d2",
+  ruleStrong: "#201e1d",
+  ruleField: "#e0dddb",
+  ruleRequest: "#cdc9c7",
 } as const;
 
 const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -68,50 +68,66 @@ function firstName(name: string): string {
   return clean.split(/\s+/)[0];
 }
 
-function badge(text: string, color: string, bg: string, border: string): string {
+/** Coluna de data pura: vence exatamente hoje (em Brasília). */
+function isDueToday(dueDate: string | null, today: string): boolean {
+  return Boolean(dueDate) && dueDate!.slice(0, 10) === today;
+}
+
+/** Régua horizontal entre blocos. */
+function rule(color: string, weight: 1 | 2, padTop: number): string {
+  return `<tr><td class="px" style="padding:${padTop}px 32px 0;"><div style="border-top:${weight}px solid ${color};font-size:0;line-height:0;">&nbsp;</div></td></tr>`;
+}
+
+interface FieldOptions {
+  /** Primeira linha da tabela: carrega a largura da coluna de rótulos. */
+  first?: boolean;
+  strong?: boolean;
+  danger?: boolean;
+}
+
+function fieldRow(label: string, value: string, opts: FieldOptions = {}): string {
+  const labelAttrs = opts.first ? ` class="lbl" width="160"` : "";
+  const labelWidth = opts.first ? "width:160px;" : "";
+  const valueStyle =
+    (opts.strong ? "font-weight:700;" : "") + (opts.danger ? `color:${C.accentDark};` : "");
   return (
-    `<span style="display:inline-block;font-family:${FF};font-size:10px;font-weight:700;` +
-    `letter-spacing:.4px;text-transform:uppercase;color:${color};background:${bg};` +
-    `border:1px solid ${border};border-radius:999px;padding:3px 9px;margin-top:6px;">${esc(text)}</span>`
+    `<tr>` +
+    `<td${labelAttrs} style="${labelWidth}padding:6px 8px 6px 0;color:${C.body};border-top:1px solid ${C.ruleField};" valign="top">${esc(label)}:</td>` +
+    `<td style="padding:6px 0;${valueStyle}border-top:1px solid ${C.ruleField};" valign="top">${esc(value)}</td>` +
+    `</tr>`
   );
 }
 
-function fieldRow(label: string, value: string, opts: { strong?: boolean } = {}): string {
-  const weight = opts.strong ? "700" : "400";
-  const color = opts.strong ? C.ink : C.body;
-  return (
-    `<tr><td align="center" style="font-family:${FF};font-size:13px;line-height:21px;color:${color};padding:1px 0;">` +
-    `<span style="color:${C.sub};">${esc(label)}:</span> ` +
-    `<span style="font-weight:${weight};">${esc(value)}</span>` +
-    `</td></tr>`
-  );
-}
+function requestSection(req: PendingApprovalRequest, today: string): string {
+  const dueToday = isDueToday(req.dueDate, today);
+  const dueLabel = dueToday
+    ? `${formatDayBR(req.dueDate)} (hoje)`
+    : formatDayBR(req.dueDate);
 
-function requestBlock(req: PendingApprovalRequest): string {
-  const heading =
-    req.requestNumber > 0 ? `#${req.requestNumber} — ${req.title}` : req.title;
-
-  const tag = req.outOfBudget
-    ? badge("Fora do orçamento", C.alertText, C.alertBg, C.alertBorder)
-    : req.forcedDirector
-      ? badge("Direto ao Diretor", C.routeText, C.routeBg, C.routeBorder)
-      : "";
+  const kicker =
+    req.requestNumber > 0 ? `Requisição #${req.requestNumber}` : "Requisição";
 
   return `
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.blockBg};border:1px solid ${C.blockBorder};border-radius:8px;margin:0 0 14px;">
-    <tr><td style="padding:18px 20px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-        <tr><td align="center" style="font-family:${FF};font-size:16px;font-weight:700;color:${C.accent};line-height:22px;padding-bottom:2px;">${esc(heading)}</td></tr>
-        ${tag ? `<tr><td align="center" style="padding-bottom:8px;">${tag}</td></tr>` : `<tr><td style="height:8px;line-height:8px;">&nbsp;</td></tr>`}
-        ${fieldRow("Setor", req.sectorName)}
-        ${fieldRow("Categoria", req.category)}
-        ${fieldRow("Data de criação", formatDateBR(req.createdAt))}
-        ${fieldRow("Data de vencimento", formatDayBR(req.dueDate))}
-        ${fieldRow("Valor", BRL.format(req.amount), { strong: true })}
-        ${fieldRow("Fornecedor", req.supplier)}
-      </table>
-    </td></tr>
-  </table>`;
+        <tr><td class="px" style="padding:22px 32px 0;font-family:${FF};">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:${C.accentDark};padding-bottom:6px;mso-line-height-rule:exactly;line-height:14px;">${esc(kicker)}</div>
+          <div style="font-size:17px;line-height:23px;font-weight:700;color:${C.ink};padding-bottom:14px;mso-line-height-rule:exactly;">${esc(req.title)}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:${FF};font-size:13px;line-height:19px;color:${C.ink};">
+            ${fieldRow("Setor", req.sectorName, { first: true })}
+            ${fieldRow("Categoria", req.category)}
+            ${fieldRow("Data de criação", formatDateBR(req.createdAt))}
+            ${fieldRow("Data de vencimento", dueLabel, { strong: dueToday, danger: dueToday })}
+            ${fieldRow("Valor", BRL.format(req.amount), { strong: true })}
+            ${fieldRow("Fornecedor", req.supplier)}
+          </table>
+        </td></tr>`;
+}
+
+/** "uma delas vence hoje" / "3 vencem hoje" — só quando houver. */
+function dueTodayNote(total: number, dueToday: number): string {
+  if (dueToday === 0) return "";
+  if (total === 1) return " &middot; vence hoje";
+  if (dueToday === 1) return " &middot; uma delas vence hoje";
+  return ` &middot; ${dueToday} vencem hoje`;
 }
 
 export interface ApprovalReminderEmailInput {
@@ -126,62 +142,78 @@ export function renderApprovalReminderEmail({
   fortune,
   requests,
 }: ApprovalReminderEmailInput): string {
+  const today = todayBR();
   const count = requests.length;
   const total = requests.reduce((sum, r) => sum + r.amount, 0);
+  const dueToday = requests.filter((r) => isDueToday(r.dueDate, today)).length;
   const greetName = firstName(recipientName);
 
-  const intro =
-    count === 1
-      ? "Este e-mail é para avisar que <strong>existe 1 pagamento que precisa da sua aprovação</strong> no módulo de Compras."
-      : `Este e-mail é para avisar que <strong>existem ${count} pagamentos que precisam da sua aprovação</strong> no módulo de Compras.`;
+  const countPhrase = count === 1 ? "1 pagamento" : `${count} pagamentos`;
+  const greeting = greetName ? `Oi, ${esc(greetName)} 👋 Você tem` : "Você tem";
+  const preheader =
+    `${count === 1 ? "1 requisição aguarda" : `${count} requisições aguardam`} a sua aprovação` +
+    ` — ${BRL.format(total)} no total. Leva menos de um minuto.`;
+
+  // Réguas 1px entre requisições; a primeira já vem depois da régua 2px do topo.
+  const sections = requests
+    .map((req, i) => (i === 0 ? "" : rule(C.ruleRequest, 1, 22)) + requestSection(req, today))
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>${esc(approvalReminderSubject(count))}</title>
+  <style>
+    @media only screen and (max-width:620px){
+      .px{padding-left:22px !important;padding-right:22px !important;}
+      .lbl{width:auto !important;}
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:${C.pageBg};">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(
-    count === 1
-      ? "1 requisição aguarda a sua aprovação no Control Hub."
-      : `${count} requisições aguardam a sua aprovação no Control Hub.`,
-  )}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pageBg};padding:24px 0;">
-    <tr><td align="center">
-      <table role="presentation" width="620" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:8px;padding:30px 34px 28px;max-width:620px;width:100%;">
-        <tr><td>
+<body style="margin:0;padding:0;background:${C.ground};-webkit-text-size-adjust:100%;">
+  <span style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.ground};font-size:1px;">${esc(preheader)}</span>
 
-          <div style="font-family:${FF};font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:${C.tertiary};padding-bottom:4px;">Control Hub</div>
-          <div style="font-family:${FF};font-size:19px;font-weight:700;color:${C.ink};padding-bottom:18px;">Compras &middot; Aprovações pendentes</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.ground};">
+    <tr><td align="center" style="padding:28px 12px 40px;">
 
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.fortuneBg};border-left:3px solid ${C.fortuneBorder};border-radius:4px;margin:0 0 20px;">
-            <tr><td style="padding:13px 16px;">
-              <div style="font-family:${FF};font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${C.sub};padding-bottom:4px;">Mensagem do dia para você</div>
-              <div style="font-family:${FF};font-size:14px;line-height:21px;color:${C.ink};font-style:italic;">&ldquo;${esc(fortune)}&rdquo;</div>
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:${C.card};">
+
+        <!-- mensagem do dia (topo) -->
+        <tr><td bgcolor="${C.accent}" class="px" style="background:${C.accent};padding:24px 32px 26px;font-family:${FF};">
+          <div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${C.accentSoft};padding-bottom:10px;mso-line-height-rule:exactly;line-height:14px;">Mensagem do dia</div>
+          <div style="font-size:19px;line-height:27px;font-weight:600;color:#ffffff;mso-line-height-rule:exactly;">&ldquo;${esc(fortune)}&rdquo;</div>
+        </td></tr>
+
+        <!-- cabeçalho / contagem -->
+        <tr><td class="px" style="padding:26px 32px 0;font-family:${FF};">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:${C.body};padding-bottom:12px;mso-line-height-rule:exactly;line-height:14px;">Control Hub &middot; Compras</div>
+          <div style="font-size:22px;line-height:29px;font-weight:700;color:${C.ink};mso-line-height-rule:exactly;">${greeting} <span style="color:${C.accentDark};">${esc(countPhrase)}</span> aguardando a sua aprovação.</div>
+          <div style="font-size:14px;line-height:21px;color:${C.body};padding-top:8px;mso-line-height-rule:exactly;">Total de <strong style="color:${C.ink};">${esc(BRL.format(total))}</strong>${dueTodayNote(count, dueToday)}</div>
+        </td></tr>
+
+        ${rule(C.ruleStrong, 2, 22)}
+        ${sections}
+        ${rule(C.ruleStrong, 2, 24)}
+
+        <!-- CTA -->
+        <tr><td class="px" style="padding:22px 32px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+            <tr><td bgcolor="${C.accent}" style="background:${C.accent};padding:15px 24px;">
+              <a href="${CTRL_HOME_URL}" style="display:block;font-family:${FF};font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;mso-line-height-rule:exactly;line-height:18px;">Aprovar no Control Hub&nbsp;&nbsp;&rarr;</a>
             </td></tr>
           </table>
-
-          <div style="font-family:${FF};font-size:14px;line-height:22px;color:${C.body};padding-bottom:10px;">${
-            greetName ? `Saudações, ${esc(greetName)}!` : "Saudações!"
-          }</div>
-          <div style="font-family:${FF};font-size:14px;line-height:22px;color:${C.body};padding-bottom:10px;">${intro}</div>
-          <div style="font-family:${FF};font-size:14px;line-height:22px;color:${C.body};padding-bottom:6px;">Confira abaixo as requisições que aguardam a sua aprovação:</div>
-          <div style="font-family:${FF};font-size:12px;line-height:20px;color:${C.sub};padding-bottom:18px;">Valor total: <strong style="color:${C.ink};">${esc(BRL.format(total))}</strong></div>
-
-          ${requests.map(requestBlock).join("")}
-
-          <div style="text-align:center;margin:22px 0 6px;">
-            <a href="${CTRL_HOME_URL}" style="display:inline-block;background:${C.darkCard};color:#ffffff;font-family:${FF};font-size:14px;font-weight:700;padding:14px 30px;border-radius:999px;text-decoration:none;">Visualizar pagamentos pendentes de aprovação</a>
-          </div>
-
-          <div style="font-family:${FF};font-size:11px;line-height:18px;color:${C.tertiary};text-align:center;padding-top:16px;border-top:1px solid ${C.cardBorder};margin-top:20px;">
-            Você recebeu este e-mail porque estas requisições dependem da sua aprovação no Control Hub.<br>
-            Mensagem automática enviada uma vez por dia, às 10h (horário de Brasília).
-          </div>
-
+          <div style="font-family:${FF};font-size:12px;line-height:18px;color:${C.body};padding-top:11px;mso-line-height-rule:exactly;">Leva menos de um minuto e libera o time para seguir com as compras.</div>
         </td></tr>
+
+        <!-- rodapé -->
+        <tr><td bgcolor="${C.ink}" class="px" style="background:${C.ink};padding:22px 32px 24px;font-family:${FF};font-size:11px;line-height:18px;color:${C.footerText};mso-line-height-rule:exactly;">
+          Você recebe este aviso porque estas requisições dependem da sua aprovação no Control Hub. Envio automático, uma vez por dia, às 10h (Brasília).<br><br>
+          Viva Eventos &middot; Control Hub
+        </td></tr>
+
       </table>
     </td></tr>
   </table>

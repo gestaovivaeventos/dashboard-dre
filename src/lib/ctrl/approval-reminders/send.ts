@@ -12,7 +12,7 @@
 //
 // `runDate` é sempre o dia em Brasília (todayBR()).
 
-import { todayBR } from "@/lib/ctrl/datetime";
+import { isWeekendBR, todayBR } from "@/lib/ctrl/datetime";
 import { isResendConfigured, sendEmailViaResend } from "@/lib/email/resend";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -57,6 +57,10 @@ export interface ApprovalReminderRunResult {
    * alçada restrita demais, aprovador inativo).
    */
   orphans: OrphanPendingRequest[];
+  /** O dia da execução (em Brasília) é sábado ou domingo. */
+  weekend: boolean;
+  /** Motivo de a rotina não ter enviado nada. Hoje só 'fim_de_semana'. */
+  skipped?: "fim_de_semana";
   error?: string;
   details: ApprovalReminderDetail[];
 }
@@ -92,6 +96,7 @@ export async function runApprovalReminders(
 ): Promise<ApprovalReminderRunResult> {
   const runDate = todayBR();
   const dryRun = opts.dryRun ?? false;
+  const weekend = isWeekendBR(runDate);
   const details: ApprovalReminderDetail[] = [];
 
   const base: ApprovalReminderRunResult = {
@@ -104,8 +109,19 @@ export async function runApprovalReminders(
     failed: 0,
     pendingRequests: 0,
     orphans: [],
+    weekend,
     details,
   };
+
+  // Sábado e domingo não têm expediente de compras: o lembrete só vai de
+  // segunda a sexta. O agendamento do cron já exclui o fim de semana, mas a
+  // regra vive aqui também porque uma execução manual (ou uma mudança futura no
+  // vercel.json) não pode furá-la sem querer. `force` é a saída consciente,
+  // para teste. Em dryRun a regra é apenas sinalizada — nada sai mesmo —, assim
+  // dá para conferir o conteúdo num sábado.
+  if (weekend && !dryRun && !opts.force) {
+    return { ...base, skipped: "fim_de_semana" };
+  }
 
   if (!dryRun && !isResendConfigured()) {
     return {
