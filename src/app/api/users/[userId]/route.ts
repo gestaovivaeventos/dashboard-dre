@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UserProfileType } from "@/lib/supabase/types";
@@ -43,6 +44,8 @@ export async function PATCH(request: Request, { params }: Params) {
     can_case?: boolean;
     can_viagens?: boolean;
     can_viagens_aprovar?: boolean;
+    /** Módulo Validação de Contratos (user_module_roles, não coluna de users). */
+    can_contratos?: boolean;
     active?: boolean;
     /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
     sector_ids?: string[];
@@ -104,6 +107,23 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!data || data.length === 0) {
       return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     }
+  }
+
+  // ── Sync módulo Validação de Contratos ──
+  // Vive em user_module_roles (ver @/lib/auth/contratos). Perfis que não
+  // enxergam a seção "Módulos visíveis" têm o valor forçado: validador de
+  // contrato sempre tem o módulo; franqueado/CSC nunca. `undefined` (ex.: o
+  // PATCH que só ativa/desativa o usuário) não mexe em nada.
+  const contratosTarget =
+    body.profile === "validador_contrato"
+      ? true
+      : body.profile === "franqueado" || body.profile === "csc"
+      ? false
+      : body.can_contratos;
+
+  if (contratosTarget !== undefined) {
+    const { error } = await setContratosGrant(adminClient, params.userId, contratosTarget);
+    if (error) return NextResponse.json({ error }, { status: 400 });
   }
 
   // ── Sync sectors ──

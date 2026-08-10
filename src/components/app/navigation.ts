@@ -32,6 +32,7 @@ import {
   BI_VALIDATION_NAV_KEY,
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
+import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -208,6 +209,11 @@ export interface NavItem {
   /** Item restrito a aprovadores de Viagens (can_viagens_aprovar). */
   viagensAprovarOnly?: boolean;
   /**
+   * Item do módulo Validação de Contratos — visível quando o usuário tem o
+   * módulo (ver @/lib/auth/contratos). Independe de dreRoles/ctrlRoles.
+   */
+  contratosAccess?: boolean;
+  /**
    * Item da tela "Validação Relatório" — visível apenas para quem passa em
    * canAccessBiValidation (CSC, admin, e-mails nominais). Independe de
    * dreRoles/ctrlRoles.
@@ -215,7 +221,14 @@ export interface NavItem {
   biValidationAccess?: boolean;
 }
 
-export type NavGroupId = "financeiro" | "orcamento" | "compras" | "case" | "viagens" | "plataforma";
+export type NavGroupId =
+  | "financeiro"
+  | "orcamento"
+  | "compras"
+  | "case"
+  | "viagens"
+  | "contratos"
+  | "plataforma";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -285,10 +298,20 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    // Módulo próprio: a Validação de Contratos morava dentro de PLATAFORMA,
+    // junto das telas de administração, com as quais não tem relação. Agora é
+    // um módulo concedido por usuário em "Módulos visíveis" (ver
+    // @/lib/auth/contratos) e ganha grupo próprio no menu.
+    id: "contratos",
+    label: "CONTRATOS",
+    items: [
+      { key: CONTRATOS_NAV_KEY, title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: CONTRATOS_PATH, contratosAccess: true },
+    ],
+  },
+  {
     id: "plataforma",
     label: "PLATAFORMA",
     items: [
-      { key: "pf-contratos", title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: "/contratos", dreRoles: ["admin", "gestor_hero"] },
       { key: "pf-users", title: "Usuarios", icon: Users, scope: "global", href: "/usuarios", dreRoles: ["admin"] },
       { key: "pf-relatorios-bi", title: "Relatorios BI", icon: Mail, scope: "global", href: "/admin/relatorios-bi", dreRoles: ["admin"] },
       // Painel Administrador: reune gestao de empresas, Omie, orcamento, status,

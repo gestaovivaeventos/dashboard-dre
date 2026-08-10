@@ -30,6 +30,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const canCase = Boolean(modules.case);
   const canViagens = Boolean(modules.viagens);
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
+  const canContratos = Boolean(modules.contratos);
 
   // Segmentos para o shell DRE — fonte única compartilhada com o (app) layout
   // e as páginas DRE (resolveUserSegments): admin vê todos; os demais recebem a
@@ -66,6 +67,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       canCase={canCase}
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
+      canContratos={canContratos}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

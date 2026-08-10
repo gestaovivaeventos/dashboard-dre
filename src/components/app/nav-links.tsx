@@ -22,6 +22,8 @@ interface NavLinksProps {
   canCase?: boolean;
   canViagens?: boolean;
   canViagensAprovar?: boolean;
+  /** Módulo Validação de Contratos (grupo CONTRATOS). */
+  canContratos?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -99,6 +101,12 @@ const MODULE_COLOR: Record<
     rail: "bg-teal-600 dark:bg-teal-400",
     dot: "bg-teal-600 dark:bg-teal-400",
   },
+  contratos: {
+    text: "text-orange-600 dark:text-orange-400",
+    bg: "bg-orange-600/[0.06] dark:bg-orange-400/[0.08]",
+    rail: "bg-orange-600 dark:bg-orange-400",
+    dot: "bg-orange-600 dark:bg-orange-400",
+  },
   plataforma: {
     text: "text-slate-600 dark:text-slate-300",
     bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
@@ -113,6 +121,7 @@ export function NavLinks({
   canCase,
   canViagens,
   canViagensAprovar,
+  canContratos,
   segments,
   activeSegmentSlug,
   collapsed,
@@ -130,7 +139,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -264,6 +273,7 @@ interface BuildInput {
   canCase?: boolean;
   canViagens?: boolean;
   canViagensAprovar?: boolean;
+  canContratos?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -297,6 +307,7 @@ function buildGroups({
   canCase,
   canViagens,
   canViagensAprovar,
+  canContratos,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -316,7 +327,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), isFranqueado, isCsc, canBiValidation, ctrlFullView)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -339,6 +350,7 @@ function isItemVisible(
   canCase: boolean,
   canViagens: boolean,
   canViagensAprovar: boolean,
+  canContratos: boolean,
   isFranqueado?: boolean,
   isCsc?: boolean,
   canBiValidation?: boolean,
@@ -353,6 +365,10 @@ function isItemVisible(
 
   // "Validação Relatório" não passa por dreRole/ctrlRole: whitelist própria.
   if (item.biValidationAccess) return Boolean(canBiValidation);
+
+  // Validação de Contratos: módulo próprio, concedido por usuário. Também não
+  // passa por dreRole/ctrlRole.
+  if (item.contratosAccess) return canContratos;
 
   // Visão completa do módulo Compras (override nominal): mostra o grupo inteiro
   // menos Configurações, mesmo que os ctrlRoles do usuário não bastassem. Só
@@ -371,7 +387,14 @@ function isItemVisible(
     ? canViagens && (!item.viagensAprovarOnly || canViagensAprovar)
     : false;
 
-  if (!item.dreRoles && !item.ctrlRoles && !item.caseAccess && !item.viagensAccess) return false;
+  if (
+    !item.dreRoles &&
+    !item.ctrlRoles &&
+    !item.caseAccess &&
+    !item.viagensAccess &&
+    !item.contratosAccess
+  )
+    return false;
   return dreOk || ctrlOk || caseOk || viagensOk;
 }
 

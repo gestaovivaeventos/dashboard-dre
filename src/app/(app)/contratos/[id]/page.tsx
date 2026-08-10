@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { ContractsDetailView } from '@/components/app/contracts-detail-view'
 import { getCurrentSessionContext } from '@/lib/auth/session'
+import { createAdminClientIfAvailable } from '@/lib/supabase/admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,15 +13,16 @@ interface Params {
 export default async function ContratoBatchPage({ params }: Params) {
   const { supabase, user, profile } = await getCurrentSessionContext()
   if (!user) redirect('/login')
-  const allowed =
-    profile?.contracts_only === true ||
-    profile?.role === 'admin' ||
-    profile?.role === 'gestor_hero'
-  if (!profile || !allowed) {
+  // Acesso pelo MÓDULO Validação de Contratos (ver @/lib/auth/contratos).
+  if (!profile || profile.can_contratos !== true) {
     redirect('/dashboard')
   }
 
-  const { data: batch } = await supabase
+  // Service role pelo mesmo motivo da listagem: as policies das tabelas de
+  // contrato só conhecem admin/gestor_hero e o módulo é concedido por usuário.
+  const db = createAdminClientIfAvailable() ?? supabase
+
+  const { data: batch } = await db
     .from('contract_validation_batches')
     .select(
       'id, name, status, total_items, items_approved, items_reproved, items_failed, items_specialist, items_verificar_saldo, ai_credits_used, created_at, started_at, completed_at, error_message',
@@ -30,7 +32,7 @@ export default async function ContratoBatchPage({ params }: Params) {
 
   if (!batch) redirect('/contratos')
 
-  const { data: items } = await supabase
+  const { data: items } = await db
     .from('contract_validation_items')
     .select(
       'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, data_baile, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, assinatura_contratante, assinatura_contratado, status, status_motivos, status_resumo, ai_credits, error_log, processed_at',

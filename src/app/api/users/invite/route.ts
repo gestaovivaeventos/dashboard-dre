@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UserProfileType } from "@/lib/supabase/types";
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
     can_case?: boolean;
     can_viagens?: boolean;
     can_viagens_aprovar?: boolean;
+    can_contratos?: boolean;
     sector_ids?: string[];
     company_ids?: string[];
   };
@@ -93,6 +95,14 @@ export async function POST(request: Request) {
       ? false
       : Boolean(body.can_viagens);
   const canViagensAprovar = canViagens && Boolean(body.can_viagens_aprovar);
+  // Módulo Validação de Contratos: o perfil validador sempre tem; franqueado e
+  // CSC nunca (são só-Financeiro); os demais seguem a marcação da tela.
+  const canContratos =
+    userProfile === "validador_contrato"
+      ? true
+      : isFinanceiroOnly
+      ? false
+      : Boolean(body.can_contratos);
   const sectorIds =
     userProfile === "validador_contrato" || isFinanceiroOnly
       ? []
@@ -163,6 +173,12 @@ export async function POST(request: Request) {
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 400 });
+  }
+
+  // Módulo Validação de Contratos (linha em user_module_roles)
+  if (canContratos) {
+    const { error } = await setContratosGrant(adminClient, newUserId, true);
+    if (error) return NextResponse.json({ error }, { status: 400 });
   }
 
   // Sectors

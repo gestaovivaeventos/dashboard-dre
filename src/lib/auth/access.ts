@@ -17,6 +17,7 @@ export function defaultLandingFor(
   canCompras: boolean,
   canCase: boolean = false,
   canViagens: boolean = false,
+  canContratos: boolean = false,
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
@@ -29,6 +30,8 @@ export function defaultLandingFor(
   if (canCase) return "/case/contratos";
   // Usuário só-Viagens cai direto nas requisições de viagem.
   if (canViagens) return "/viagens/requisicoes";
+  // Usuário cujo único módulo é Validação de Contratos.
+  if (canContratos) return "/contratos";
   return "/pendente";
 }
 
@@ -71,6 +74,11 @@ export function canAccessPathByProfile(
   canCompras: boolean,
   canCase: boolean = false,
   canViagens: boolean = false,
+  /**
+   * Módulo Validação de Contratos (/contratos). Concedido por usuário em
+   * "Módulos visíveis" — ver @/lib/auth/contratos.
+   */
+  canContratos: boolean = false,
   /**
    * E-mail do usuário. Usado pelas liberações NOMINAIS: a tela "Validação
    * Relatório" (marcela@/marcelo@quokka.net.br além de CSC/admin) e a visão
@@ -124,9 +132,12 @@ export function canAccessPathByProfile(
   // Admin: tudo.
   if (profile === "admin") return true;
 
-  // /contratos é restrito a admin + validador_contrato; demais perfis: 403.
+  // Módulo Validação de Contratos — acesso binário pelo módulo concedido ao
+  // usuário (admin sempre pode; já retornou true acima). Antes a tela era
+  // exclusiva do perfil 'validador_contrato', o que impedia dar o acesso a
+  // quem tem outro perfil (ex.: gerente do módulo Compras).
   if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
-    return false;
+    return canContratos;
   }
 
   // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios

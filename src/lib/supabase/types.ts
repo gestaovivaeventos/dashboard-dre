@@ -31,6 +31,12 @@ export interface ModuleAccess {
   case: Record<string, never> | null;
   /** Módulo Viagens. Acesso via can_viagens; `aprovador` habilita a fila de aprovações. */
   viagens: { aprovador: boolean } | null;
+  /**
+   * Módulo Validação de Contratos. Acesso binário — ver
+   * `@/lib/auth/contratos` (a concessão vive em user_module_roles, não numa
+   * coluna can_* de users).
+   */
+  contratos: Record<string, never> | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -77,6 +83,13 @@ export interface UnifiedProfile {
   can_viagens: boolean;
   /** Pode aprovar/escolher orçamentos no módulo Viagens (gerente de viagens). */
   can_viagens_aprovar: boolean;
+  /**
+   * Visibilidade do módulo Validação de Contratos. Diferente das demais flags,
+   * NÃO é uma coluna de `users`: é derivada da linha em `user_module_roles`
+   * (module='contratos') — ver `@/lib/auth/contratos`. O perfil
+   * 'validador_contrato' continua implicando o módulo.
+   */
+  can_contratos: boolean;
   /** Setores aos quais este usuário está vinculado (relevante pra Gerente/Solicitante). */
   sector_ids: string[];
   /** Empresas (unidades) que o usuário enxerga. Ignorado para admin (vê tudo). */

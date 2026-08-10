@@ -121,7 +121,19 @@ Session helpers: `hasDreAccess(ctx, minRole?)` (hierarchy `gestor_unidade < gest
 
 Special profiles to remember:
 - `franqueado` — explicit **whitelist** of DRE view screens (dashboard, fluxo-de-caixa, budget-forecast, kpis, business-intelligence, documentos), at both `/...` and `/s/<slug>/...`. Everything else (conexões, mapeamento, configurações, admin, ctrl, contratos, usuarios) is denied.
-- `validador_contrato` — island: only `/contratos*`.
+- `validador_contrato` — island: only `/contratos*`. Continua existindo, mas **não é mais o único caminho** para a tela — ver o módulo Validação de Contratos abaixo.
+
+### Módulo Validação de Contratos (`/contratos`)
+
+`src/lib/auth/contratos.ts` é a fonte de verdade. A tela deixou de ser exclusiva do perfil `validador_contrato` (que isolava o usuário) e virou um **módulo** marcável em "Módulos visíveis" na tela de Usuários — assim um Gerente Sócio do Compras, por exemplo, pode validar contratos sem trocar de perfil.
+
+A concessão é gravada numa linha de `user_module_roles` (`module='contratos'`, `role='validador'`), **não** numa coluna `can_contratos` em `users`. Foi decisão consciente: coluna nova exigiria migration, e enquanto ela não roda o `select` explícito de `getSessionContext` quebra inteiro (42703) e derruba o app. A sessão expõe o resultado como `profile.can_contratos`, então o resto do código lê como se fosse mais uma flag de módulo. Quem lê a flag precisa ler a linha: `getSessionContext`, o middleware e a root page (`/`) fazem o mesmo join. `validador_contrato` (e o flag legado `contracts_only`) continua implicando o módulo, então ninguém perde acesso.
+
+As policies de `contract_validation_batches` / `_items` só conhecem `is_admin()` / `is_hero_manager()` — como o módulo agora pode cair em qualquer perfil, as páginas `/contratos` leem com service role (mesmo padrão que `/api/contracts/batches` já usava), depois de checarem `profile.can_contratos`.
+
+No menu, a tela tem grupo próprio (`CONTRATOS`); saiu de PLATAFORMA, onde convivia com as telas de administração sem ter relação com elas.
+
+"Viagens" saiu de "Módulos visíveis" (módulo sem uso). As colunas `can_viagens`/`can_viagens_aprovar`, o módulo e o kill-switch `VIAGENS_ENABLED` continuam existindo; o formulário só carrega e devolve os valores atuais, sem oferecê-los.
 - `mapeamento` and `configuracoes` are **admin-only** even for other DRE users.
 
 ## Database

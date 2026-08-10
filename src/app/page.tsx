@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { defaultLandingFor } from "@/lib/auth/access";
+import { hasContratosGrant } from "@/lib/auth/contratos";
 import { createClient } from "@/lib/supabase/server";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -28,14 +29,18 @@ export default async function RootRouter() {
   // pra decidir entre /pendente vs landing.
   const { data: profileRow } = await supabase
     .from("users")
-    .select("profile, active, can_financeiro, can_compras, can_case")
+    .select(
+      "profile, active, contracts_only, can_financeiro, can_compras, can_case, user_module_roles!user_module_roles_user_id_fkey(module)",
+    )
     .eq("id", user.id)
     .maybeSingle<{
       profile: UserProfileType | null;
       active: boolean | null;
+      contracts_only: boolean | null;
       can_financeiro: boolean | null;
       can_compras: boolean | null;
       can_case: boolean | null;
+      user_module_roles: Array<{ module: string | null }> | null;
     }>();
 
   // Sem profile (signup ainda não materializado) ou inativo → /pendente.
@@ -43,12 +48,25 @@ export default async function RootRouter() {
     redirect("/pendente");
   }
 
+  const userProfile = profileRow.profile ?? "solicitante";
+  // Módulo Validação de Contratos — mesma regra do getSessionContext.
+  const canContratos =
+    hasContratosGrant(profileRow.user_module_roles) ||
+    userProfile === "validador_contrato" ||
+    Boolean(profileRow.contracts_only) ||
+    userProfile === "admin";
+
   redirect(
     defaultLandingFor(
-      profileRow.profile ?? "solicitante",
+      userProfile,
       Boolean(profileRow.can_financeiro),
       Boolean(profileRow.can_compras),
       Boolean(profileRow.can_case),
+      // Viagens fica de fora do roteamento de entrada como sempre esteve — o
+      // módulo tem kill-switch próprio (VIAGENS_ENABLED) e mandar alguém pra
+      // /viagens com ele desligado devolveria o usuário pra cá.
+      false,
+      canContratos,
     ),
   );
 }

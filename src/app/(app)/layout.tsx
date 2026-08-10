@@ -30,6 +30,7 @@ export default async function ProtectedLayout({
   const canCase = Boolean(modules?.case);
   const canViagens = Boolean(modules?.viagens);
   const canViagensAprovar = Boolean(modules?.viagens?.aprovador);
+  const canContratos = Boolean(modules?.contratos);
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
   const isCsc = profile?.profile === "csc";
@@ -70,6 +71,7 @@ export default async function ProtectedLayout({
       canCase={canCase}
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
+      canContratos={canContratos}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

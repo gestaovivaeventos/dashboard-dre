@@ -64,6 +64,7 @@ interface UserItem {
   can_case: boolean;
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
+  can_contratos: boolean;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -116,7 +117,8 @@ const PROFILES: Array<{
   {
     value: "validador_contrato",
     label: "Validador de Contrato",
-    description: "Acesso isolado ao módulo de Validação de Contratos.",
+    description:
+      "Acesso isolado à Validação de Contratos. Para liberar a tela sem isolar o usuário, mantenha o perfil dele e marque o módulo Validação de Contratos.",
   },
   {
     value: "solicitante",
@@ -178,8 +180,15 @@ interface FormState {
   can_financeiro: boolean;
   can_compras: boolean;
   can_case: boolean;
+  /**
+   * Viagens saiu de "Módulos visíveis" (o módulo não está em uso). Os dois
+   * campos continuam no formulário só como PASSAGEM: carregam o valor atual do
+   * usuário e o devolvem intacto no salvamento, pra que remover o botão não
+   * apague o acesso de ninguém.
+   */
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
+  can_contratos: boolean;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -195,6 +204,7 @@ const emptyForm: FormState = {
   can_case: false,
   can_viagens: false,
   can_viagens_aprovar: false,
+  can_contratos: false,
   sector_ids: [],
   company_ids: [],
 };
@@ -211,6 +221,7 @@ function userToForm(u: UserItem): FormState {
     can_case: u.can_case,
     can_viagens: u.can_viagens,
     can_viagens_aprovar: u.can_viagens_aprovar,
+    can_contratos: u.can_contratos,
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -271,6 +282,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           const isAdmin = u.profile === "admin";
           if (filterModule === "financeiro" && !(isAdmin || u.can_financeiro)) return false;
           if (filterModule === "compras" && !(isAdmin || u.can_compras)) return false;
+          if (filterModule === "case" && !(isAdmin || u.can_case)) return false;
+          if (filterModule === "contratos" && !(isAdmin || u.can_contratos)) return false;
         }
         if (filterSector !== "all" && !u.sector_ids.includes(filterSector)) return false;
         if (
@@ -335,17 +348,20 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
-      // Validador de contrato: força sem módulos/setores/unidades
+      // Validador de contrato: perfil isolado — só a Validação de Contratos,
+      // sem os demais módulos, setores ou unidades.
       if (key === "profile" && value === "validador_contrato") {
         next.can_financeiro = false;
         next.can_compras = false;
         next.can_case = false;
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
+        next.can_contratos = true;
         next.sector_ids = [];
         next.company_ids = [];
       }
-      // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case.
+      // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case
+      // e a Validação de Contratos.
       if (key === "profile" && value === "admin") {
         next.can_financeiro = true;
         next.can_compras = true;
@@ -359,7 +375,13 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_case = false;
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
+        next.can_contratos = false;
         next.sector_ids = [];
+      }
+      // Saiu do perfil isolado de validador → o módulo deixa de ser implícito
+      // e volta a depender da marcação em "Módulos visíveis".
+      if (key === "profile" && prev.profile === "validador_contrato" && value !== "validador_contrato") {
+        next.can_contratos = false;
       }
       // Sem Viagens → não pode aprovar viagens
       if (key === "can_viagens" && value === false) {
@@ -407,6 +429,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: boolean;
         can_viagens: boolean;
         can_viagens_aprovar: boolean;
+        can_contratos: boolean;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -425,6 +448,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: u.can_case,
         can_viagens: u.can_viagens,
         can_viagens_aprovar: u.can_viagens_aprovar,
+        can_contratos: u.can_contratos,
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -439,8 +463,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       // Tudo OK — sem módulos/setores/unidades é o esperado
       return null;
     }
-    if (!form.can_financeiro && !form.can_compras && !form.can_case && !form.can_viagens && form.profile !== "admin") {
-      return "Marque ao menos um módulo (Financeiro, Compras, Case ou Viagens).";
+    if (
+      !form.can_financeiro &&
+      !form.can_compras &&
+      !form.can_case &&
+      !form.can_contratos &&
+      // Viagens saiu da tela, mas quem já tinha o módulo continua válido.
+      !form.can_viagens &&
+      form.profile !== "admin"
+    ) {
+      return "Marque ao menos um módulo (Financeiro, Compras, Case ou Validação de Contratos).";
     }
     if (profileNeedsSectors(form.profile) && form.sector_ids.length === 0) {
       return "Gerente e Solicitante precisam de pelo menos um setor.";
@@ -474,6 +506,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: form.can_case,
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
+        can_contratos: form.can_contratos,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -511,6 +544,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: form.can_case,
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
+        can_contratos: form.can_contratos,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -600,6 +634,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                   { value: "all", label: "Todos os módulos" },
                   { value: "financeiro", label: "Financeiro" },
                   { value: "compras", label: "Compras" },
+                  { value: "case", label: "Case" },
+                  { value: "contratos", label: "Validação de Contratos" },
                 ]}
               />
             </TableHead>
@@ -672,13 +708,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
               </TableCell>
               <TableCell className="text-xs">
                 {u.profile === "validador_contrato"
-                  ? "(isolado)"
+                  ? "Validação de Contratos (isolado)"
                   : u.profile === "admin"
                   ? "Todos"
                   : [
                       u.can_financeiro && "Financeiro",
                       u.can_compras && "Compras",
                       u.can_case && "Case",
+                      u.can_contratos && "Validação de Contratos",
+                      // Viagens não é mais atribuível, mas segue exibido pra
+                      // quem ainda tem o módulo.
                       u.can_viagens && (u.can_viagens_aprovar ? "Viagens (aprova)" : "Viagens"),
                     ]
                       .filter(Boolean)
@@ -931,11 +970,13 @@ function UserForm({
       {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && form.profile !== "csc" && (
         <div className="space-y-1.5">
           <Label>Módulos visíveis</Label>
-          <div className="flex gap-2">
+          {/* Grid: "Validação de Contratos" é longo demais pra 4 colunas
+              iguais numa linha só. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <button
               type="button"
               onClick={() => onChange("can_financeiro", !form.can_financeiro)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_financeiro
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -947,7 +988,7 @@ function UserForm({
             <button
               type="button"
               onClick={() => onChange("can_compras", !form.can_compras)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_compras
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -959,7 +1000,7 @@ function UserForm({
             <button
               type="button"
               onClick={() => onChange("can_case", !form.can_case)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_case
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -970,28 +1011,17 @@ function UserForm({
             </button>
             <button
               type="button"
-              onClick={() => onChange("can_viagens", !form.can_viagens)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                form.can_viagens
+              onClick={() => onChange("can_contratos", !form.can_contratos)}
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
+                form.can_contratos
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
               }`}
             >
-              {form.can_viagens ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
-              Viagens
+              {form.can_contratos ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Validação de Contratos
             </button>
           </div>
-          {form.can_viagens && (
-            <label className="flex cursor-pointer items-center gap-2 pt-1 text-sm">
-              <input
-                type="checkbox"
-                checked={form.can_viagens_aprovar}
-                onChange={(e) => onChange("can_viagens_aprovar", e.target.checked)}
-                className="h-4 w-4 rounded border"
-              />
-              Pode aprovar viagens (escolhe o orçamento e fecha a reserva)
-            </label>
-          )}
           <p className="text-xs text-muted-foreground">
             Plataforma (Conexões, Usuários, Inteligência) é automática pra admin.
           </p>
@@ -1041,7 +1071,9 @@ function UserForm({
       {isValidator && (
         <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
           Validador de Contrato é um perfil <strong>isolado</strong>: só enxerga a tela de
-          Validação de Contratos. Sem setores ou unidades.
+          Validação de Contratos. Sem setores ou unidades. Para dar essa tela a alguém
+          <strong> sem</strong> isolar o acesso, mantenha o perfil atual do usuário e marque o
+          módulo <strong>Validação de Contratos</strong> em &ldquo;Módulos visíveis&rdquo;.
         </p>
       )}
       {form.profile === "franqueado" && (

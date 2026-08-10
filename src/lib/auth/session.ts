@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { hasContratosGrant } from "@/lib/auth/contratos";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type {
   DreRole,
@@ -43,6 +44,10 @@ export function hasViagensAccess(ctx: SessionContext): boolean {
 
 export function hasViagensAprovar(ctx: SessionContext): boolean {
   return Boolean(ctx.modules?.viagens?.aprovador);
+}
+
+export function hasContratosAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.contratos);
 }
 
 // ─── Função principal ─────────────────────────────────────────────────────────
@@ -129,6 +134,22 @@ export async function getSessionContext(): Promise<SessionContext> {
   const canViagens = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens) || isAdminUser);
   const canViagensAprovar = VIAGENS_ENABLED && (Boolean(profileRow.can_viagens_aprovar) || isAdminUser);
 
+  const moduleRoleRows = (profileRow.user_module_roles as Array<{
+    role: string;
+    module: string;
+  }> | null) ?? null;
+
+  // Módulo Validação de Contratos. A concessão explícita vem de
+  // user_module_roles (ver @/lib/auth/contratos); admin sempre enxerga, e o
+  // perfil 'validador_contrato' (assim como o flag legado contracts_only)
+  // continua implicando o módulo — usuários que já validavam contratos não
+  // dependem de nenhum cadastro novo pra manter o acesso.
+  const canContratos =
+    hasContratosGrant(moduleRoleRows) ||
+    userProfile === "validador_contrato" ||
+    Boolean(profileRow.contracts_only) ||
+    isAdminUser;
+
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
   ).map((s) => s.sector_id);
@@ -142,7 +163,7 @@ export async function getSessionContext(): Promise<SessionContext> {
   // — we keep those filled while the codebase migrates. New code should
   // consume `profile.profile` directly.
   const dreRole: DreRole = deriveDreRole(userProfile, profileRow.role as DreRole | null);
-  const ctrlRoles: CtrlRole[] = deriveCtrlRoles(userProfile, canCompras, profileRow.user_module_roles as Array<{ role: string; module: string }> | null);
+  const ctrlRoles: CtrlRole[] = deriveCtrlRoles(userProfile, canCompras, moduleRoleRows);
 
   const profile: UnifiedProfile = {
     id: profileRow.id,
@@ -154,6 +175,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     can_case: canCase,
     can_viagens: canViagens,
     can_viagens_aprovar: canViagensAprovar,
+    can_contratos: canContratos,
     sector_ids: sectorIds,
     company_ids: companyIds,
     active: profileRow.active,
@@ -170,6 +192,7 @@ export async function getSessionContext(): Promise<SessionContext> {
     ctrl: ctrlRoles.length > 0 ? { roles: ctrlRoles } : null,
     case: canCase ? {} : null,
     viagens: canViagens ? { aprovador: canViagensAprovar } : null,
+    contratos: canContratos ? {} : null,
   };
 
   return { supabase, user, profile, modules };
