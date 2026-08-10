@@ -837,7 +837,7 @@ export async function runCompanySyncAsSystem(
 
 /**
  * Sync de um intervalo customizado SEM checagem de permissao (cron/sistema).
- * Usado pela rotina do dia 4, que relê os ultimos 6 meses para capturar
+ * Usado pela rotina de geração mensal, que relê os ultimos 6 meses p/ capturar
  * lancamentos retroativos, ajustes e baixas feitos na Omie antes de gerar os
  * relatorios mensais.
  */

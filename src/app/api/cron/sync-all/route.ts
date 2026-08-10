@@ -9,6 +9,7 @@ import { runCompanyRangeSyncAsSystem, runCompanySyncAsSystem } from "@/lib/omie/
 import { syncCaseCadastrosFromOmie } from "@/lib/case/sync-cadastros";
 import { syncCasePagamentosFromOmie } from "@/lib/case/sync-pagamentos";
 import { reconcilePaidRequests } from "@/lib/ctrl/reconcile-payments";
+import { BI_GENERATION_DAY } from "@/lib/financeiro/relatorios/schedule";
 import { syncFeatSheetsToManualValues } from "@/lib/sheets/feat-sync";
 import { syncTerrazzoSheetsToManualValues } from "@/lib/sheets/terrazzo-sync";
 import { syncSirenaSheetsToManualValues } from "@/lib/sheets/sirena-sync";
@@ -39,16 +40,17 @@ const SYNC_CONCURRENCY = Math.max(
   Number(process.env.SYNC_CONCURRENCY ?? "4") || 4,
 );
 
-// ── Janela ampliada do dia 4 ────────────────────────────────────────────────
-// Todo dia 4 a sincronizacao diaria le os ULTIMOS 6 MESES (em vez da janela
-// "rolling" de 3 dias). Objetivo: garantir que lancamentos retroativos,
-// ajustes, baixas e correcoes feitos na Omie estejam refletidos ANTES da
-// geracao dos relatorios mensais (rotina /api/cron/bi-monthly-validation, que
-// roda algumas horas depois no mesmo dia). Nos demais dias nada muda.
-const DEEP_SYNC_DAY_OF_MONTH = 4;
+// ── Janela ampliada do dia da geracao ───────────────────────────────────────
+// No dia em que os relatorios mensais sao gerados, a sincronizacao diaria le os
+// ULTIMOS 6 MESES (em vez da janela "rolling" de 3 dias). Objetivo: garantir
+// que lancamentos retroativos, ajustes, baixas e correcoes feitos na Omie
+// estejam refletidos ANTES da geracao (rotina /api/cron/bi-monthly-validation,
+// que roda algumas horas depois no mesmo dia: este cron e 03:00 BRT, ela e
+// 09:00 BRT). Nos demais dias nada muda.
+const DEEP_SYNC_DAY_OF_MONTH = BI_GENERATION_DAY;
 const DEEP_SYNC_MONTHS_BACK = 6;
 
-/** Data no fuso de Brasilia — o "dia 4" e o dia 4 no Brasil, nao em UTC. */
+/** Data no fuso de Brasilia — o dia da geracao e o dia no Brasil, nao em UTC. */
 function nowInBrasilia(): Date {
   const utc = new Date();
   return new Date(utc.getTime() - 3 * 60 * 60 * 1000);
@@ -378,7 +380,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     ok: failures.length === 0,
-    // Rastreabilidade da regra do dia 4 (janela de 6 meses).
+    // Rastreabilidade da regra do dia da geração (janela de 6 meses).
     syncWindow: deepRange
       ? { mode: "deep-6-months", ...deepRange }
       : { mode: "rolling" },

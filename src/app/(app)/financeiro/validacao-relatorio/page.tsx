@@ -14,7 +14,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //
 // O CSC valida aqui os relatórios BI mensais ANTES do envio aos gestores das
 // unidades. Cada linha é uma empresa × período, com o relatório gerado
-// automaticamente no dia 4.
+// automaticamente pela rotina mensal (BI_GENERATION_DAY em
+// @/lib/financeiro/relatorios/schedule).
 //
 // Acesso (whitelist fechada — ver @/lib/auth/bi-validation):
 //   perfil CSC · Admin · marcela@quokka.net.br · marcelo@quokka.net.br
@@ -67,7 +68,7 @@ export default async function ValidacaoRelatorioPage() {
   }
 
   // Períodos disponíveis (mais recentes primeiro) + o período ativo (default:
-  // mês anterior, que é o gerado no dia 4).
+  // mês anterior, que é o gerado pela rotina mensal).
   const { data: rowsData, error } = await admin
     .from("bi_report_validations")
     .select(

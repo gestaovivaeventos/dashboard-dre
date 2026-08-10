@@ -139,14 +139,16 @@ Omie credentials (app_key/app_secret) are encrypted with AES-256-GCM before stor
 ## Deployment
 
 Vercel. Cron jobs (`vercel.json`):
-- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the 4th of each month (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
+- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the BI generation day (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
-- `/api/cron/bi-monthly-validation` — `0 12 4 * *` (12:00 UTC / **09:00 BRT**). Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions` **and** `sync_enabled` not false — unidade fora do pacote não entra no ciclo), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
-- `/api/cron/bi-monthly-autosend` — `0 12 10 * *` (12:00 UTC / **09:00 BRT** — cron da Vercel é sempre UTC; não é meio-dia de Brasília). Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead. Destinatário é resolvido **no momento do envio**, então mexer na lista em Plataforma > Relatório BI depois da geração muda quem recebe; empresa que ficou sem destinatário falha o envio.
+- `/api/cron/bi-monthly-validation` — `0 12 5 * *` (12:00 UTC / **09:00 BRT**). Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions` **and** `sync_enabled` not false — unidade fora do pacote não entra no ciclo), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
+- `/api/cron/bi-monthly-autosend` — `0 12 11 * *` (12:00 UTC / **09:00 BRT** — cron da Vercel é sempre UTC; não é meio-dia de Brasília). Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead. Destinatário é resolvido **no momento do envio**, então mexer na lista em Plataforma > Relatório BI depois da geração muda quem recebe; empresa que ficou sem destinatário falha o envio.
 - `/api/cron/ctrl-approval-reminders` — `0 13 * * 1-5` (13:00 UTC / **10:00 BRT, segunda a sexta**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
 
-There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
+Os dois dias da rotina (geração e envio automático) vivem em `src/lib/financeiro/relatorios/schedule.ts` — `BI_GENERATION_DAY` / `BI_AUTOSEND_DAY`. Todo texto de tela, notificação e e-mail lê de lá; **o cron não lê constante**, então mudar um dia exige editar `vercel.json` junto (e conferir que a janela de 6 meses do `sync-all` casa com o dia da geração). Não escreva o número do dia à mão em texto novo.
+
+There is **no direct dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
 
 ### BI report validation flow (CSC)
 
@@ -184,7 +186,7 @@ All cron endpoints require `Authorization: Bearer <CRON_SECRET>`.
 
 Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, `RESEND_API_KEY`, `ADMIN_EMAIL`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`.
 
-O remetente do Resend tem **default no código** (`bi@contato.quokka.net.br`, domínio verificado do grupo, em `src/lib/email/resend.ts`) — `RESEND_FROM` só existe para trocá-lo. Não volte a exigir a variável: o Resend não aceita remetente genérico, então "só a chave configurada" já derrubou relatório aceito pelo CSC e a rotina do dia 10, sem que ninguém percebesse até o clique em Enviar.
+O remetente do Resend tem **default no código** (`bi@contato.quokka.net.br`, domínio verificado do grupo, em `src/lib/email/resend.ts`) — `RESEND_FROM` só existe para trocá-lo. Não volte a exigir a variável: o Resend não aceita remetente genérico, então "só a chave configurada" já derrubou relatório aceito pelo CSC e a rotina de envio automático, sem que ninguém percebesse até o clique em Enviar.
 
 Feature-specific: `OPENAI_API_KEY` (AI reports + contract LLM + Viagens web-price search), `APIDEVOOS_API_KEY` (Viagens — real flight prices via apidevoos.dev), `VISION_AGENT_API_KEY` (LandingAI contract OCR), `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` + `FEAT_PRODUCOES_SHEET_ID`/`FEAT_PRODUCOES_SHEET_TAB` + `TERRAZZO_SHEET_ID` (Sheets sync; `TERRAZZO_SHEETS_SYNC_DISABLED` to disable).
 

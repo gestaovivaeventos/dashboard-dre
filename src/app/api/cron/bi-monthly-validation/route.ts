@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { sendEmail } from "@/lib/email/gmail";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
+import { BI_GENERATION_DAY } from "@/lib/financeiro/relatorios/schedule";
 import {
   notifyCscPendingValidation,
   runMonthlyGeneration,
@@ -10,18 +11,19 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ============================================================================
-// GET /api/cron/bi-monthly-validation   — ROTINA DO DIA 4 (parte 2)
+// GET /api/cron/bi-monthly-validation   — ROTINA DA GERACAO (parte 2)
 //
-// Roda todo dia 4, DEPOIS da sincronizacao ampliada de 6 meses feita pelo
-// /api/cron/sync-all do mesmo dia (por isso o horario mais tarde no
-// vercel.json). Sequencia do dia 4:
-//   1. sync-all sincroniza 6 meses de Omie   (06:00 UTC)
+// Roda no dia BI_GENERATION_DAY (ver @/lib/financeiro/relatorios/schedule),
+// DEPOIS da sincronizacao ampliada de 6 meses feita pelo /api/cron/sync-all do
+// mesmo dia (por isso o horario mais tarde no vercel.json). Sequencia do dia:
+//   1. sync-all sincroniza 6 meses de Omie   (06:00 UTC / 03:00 BRT)
 //   2. ESTA rotina gera os relatorios do MES ANTERIOR de cada empresa com
-//      destinatarios cadastrados e os coloca na fila de validacao (12:00 UTC)
+//      destinatarios cadastrados e os coloca na fila de validacao
+//      (12:00 UTC / 09:00 BRT)
 //   3. cria a pendencia/notificacao no Control Hub para os usuarios CSC
 //
 // Os relatorios NAO sao enviados aqui: ficam em /financeiro/validacao-relatorio
-// aguardando o aceite do CSC. Sem aceite ate o dia 10, o cron
+// aguardando o aceite do CSC. Sem aceite ate o dia BI_AUTOSEND_DAY, o cron
 // /api/cron/bi-monthly-autosend envia automaticamente.
 //
 // RETOMAVEL: `runMonthlyGeneration` pula quem ja tem relatorio pronto no
@@ -72,7 +74,7 @@ export async function GET(request: Request) {
       : 0;
 
   // Falha de geracao ficava so na coluna da tela; o admin precisa saber no dia,
-  // porque o dia 10 nao envia relatorio sem conteudo.
+  // porque o envio automatico nao manda relatorio sem conteudo.
   if (failures.length > 0 && process.env.ADMIN_EMAIL) {
     const list = failures
       .map((f) => `<li><strong>${f.companyName}</strong>: ${f.error ?? "erro desconhecido"}</li>`)
@@ -81,7 +83,7 @@ export async function GET(request: Request) {
       to: process.env.ADMIN_EMAIL,
       subject: `[Control Hub] Falhas na geração dos relatórios BI — ${range.periodLabel}`,
       html:
-        `<h2>Geração do dia 4 — ${range.periodLabel}</h2>` +
+        `<h2>Geração do dia ${BI_GENERATION_DAY} — ${range.periodLabel}</h2>` +
         `<p>${generated} relatório(s) gerados, ${failures.length} com falha.</p>` +
         `<ul>${list}</ul>` +
         `<p>Use "Gerar novamente" em Financeiro &gt; Validação Relatório para refazer as empresas que falharam.</p>`,

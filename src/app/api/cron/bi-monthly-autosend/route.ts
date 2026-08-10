@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { sendEmail } from "@/lib/email/gmail";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
+import { BI_AUTOSEND_DAY } from "@/lib/financeiro/relatorios/schedule";
 import {
   NOT_SENT_STATUSES,
   sendValidationReport,
@@ -12,11 +13,12 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ============================================================================
-// GET /api/cron/bi-monthly-autosend   — ROTINA DO DIA 10
+// GET /api/cron/bi-monthly-autosend   — ROTINA DO ENVIO AUTOMATICO
+// (dia BI_AUTOSEND_DAY, ver @/lib/financeiro/relatorios/schedule)
 //
 // Envia automaticamente, via Resend, os relatorios do MES ANTERIOR que ainda
 // NAO foram enviados ao gestor — ou seja, aqueles em que o CSC nao deu o
-// aceite ate o dia 10.
+// aceite a tempo.
 //
 // Regras aplicadas:
 //   - so entram relatorios NAO enviados (sent_at IS NULL) → zero duplicidade
@@ -136,7 +138,7 @@ export async function GET(request: Request) {
       to: process.env.ADMIN_EMAIL,
       subject: `[Control Hub] Relatórios BI pendentes no envio automático — ${range.periodLabel}`,
       html:
-        `<h2>Envio automático do dia 10 — ${range.periodLabel}</h2>` +
+        `<h2>Envio automático do dia ${BI_AUTOSEND_DAY} — ${range.periodLabel}</h2>` +
         `<p>${sent.length} relatório(s) enviados com sucesso.</p>` +
         (blockedList
           ? `<h3>Pendência crítica (não enviados)</h3><ul>${blockedList}</ul>`
