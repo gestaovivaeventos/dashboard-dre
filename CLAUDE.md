@@ -121,7 +121,29 @@ Session helpers: `hasDreAccess(ctx, minRole?)` (hierarchy `gestor_unidade < gest
 
 Special profiles to remember:
 - `franqueado` — explicit **whitelist** of DRE view screens (dashboard, fluxo-de-caixa, budget-forecast, kpis, business-intelligence, documentos), at both `/...` and `/s/<slug>/...`. Everything else (conexões, mapeamento, configurações, admin, ctrl, contratos, usuarios) is denied.
-- `validador_contrato` — island: only `/contratos*`.
+- `validador_contrato` — island: only `/contratos*`. Continua existindo, mas **não é mais o único caminho** para a tela — ver o módulo Validação de Contratos abaixo.
+
+### Regras nominais (exceções por usuário fixas no código)
+
+Alguns acordos de negócio não têm campo de cadastro e vivem no código: alçada de aprovação restrita e roteamento fixo (`src/lib/ctrl/routing.ts`), visão completa do Compras (`src/lib/ctrl/full-view.ts`) e a liberação da Validação Relatório (`src/lib/auth/bi-validation.ts`).
+
+`src/lib/auth/user-exceptions.ts` é a **vitrine** dessas regras: não define nada, apenas lê as fontes acima e as descreve em português. A tela de Usuários usa isso em dois lugares — um ícone âmbar na linha de quem tem exceção e o botão "Regras especiais" no cabeçalho, que abre o catálogo completo. O catálogo também aponta **regras órfãs** (e-mail/ID do código que não existe mais na base), que de outro modo deixariam de valer em silêncio.
+
+**Ao criar uma regra nominal nova, registre a leitura dela em `user-exceptions.ts`** — senão ela volta a ser invisível para quem administra os usuários, que é exatamente o problema que essa tela resolve.
+
+### Módulo Validação de Contratos (`/contratos`)
+
+`src/lib/auth/contratos.ts` é a fonte de verdade. A tela deixou de ser exclusiva do perfil `validador_contrato` (que isolava o usuário) e virou um **módulo** marcável em "Módulos visíveis" na tela de Usuários — assim um Gerente Sócio do Compras, por exemplo, pode validar contratos sem trocar de perfil.
+
+A concessão é gravada numa linha de `user_module_roles` (`module='contratos'`, `role='validador'`), **não** numa coluna `can_contratos` em `users`. Foi decisão consciente: coluna nova exigiria migration, e enquanto ela não roda o `select` explícito de `getSessionContext` quebra inteiro (42703) e derruba o app. A sessão expõe o resultado como `profile.can_contratos`, então o resto do código lê como se fosse mais uma flag de módulo. Quem lê a flag precisa ler a linha: `getSessionContext`, o middleware e a root page (`/`) fazem o mesmo join. `validador_contrato` (e o flag legado `contracts_only`) continua implicando o módulo, então ninguém perde acesso.
+
+As policies de `contract_validation_batches` / `_items` só conhecem `is_admin()` / `is_hero_manager()` — como o módulo agora pode cair em qualquer perfil, as páginas `/contratos` leem com service role (mesmo padrão que `/api/contracts/batches` já usava), depois de checarem `profile.can_contratos`.
+
+O módulo é liberável em **qualquer perfil**, inclusive `franqueado` ("Visão Financeira") e `csc` — que escondiam a seção "Módulos visíveis" inteira por serem só-Financeiro e hoje mostram só esse botão. Duas ordens importam por causa disso: em `canAccessPathByProfile` o gate de `/contratos` vem **antes** do bloco franqueado/CSC (a whitelist deles negaria a rota), e em `nav-links.tsx` o item é decidido **antes** de `FRANQUEADO_NAV_KEYS`/`CSC_NAV_KEYS`. Só `admin` (tem tudo) e `validador_contrato` (é o próprio módulo) seguem sem a seção.
+
+No menu, a tela tem grupo próprio (`CONTRATOS`); saiu de PLATAFORMA, onde convivia com as telas de administração sem ter relação com elas.
+
+"Viagens" saiu de "Módulos visíveis" (módulo sem uso). As colunas `can_viagens`/`can_viagens_aprovar`, o módulo e o kill-switch `VIAGENS_ENABLED` continuam existindo; o formulário só carrega e devolve os valores atuais, sem oferecê-los.
 - `mapeamento` and `configuracoes` are **admin-only** even for other DRE users.
 
 ## Database
@@ -139,14 +161,16 @@ Omie credentials (app_key/app_secret) are encrypted with AES-256-GCM before stor
 ## Deployment
 
 Vercel. Cron jobs (`vercel.json`):
-- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the 4th of each month (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
+- `/api/cron/sync-all` — `0 6 * * *` (06:00 UTC / 03:00 BRT). Omie sync. **On the BI generation day (BRT) it syncs the last 6 months** instead of the 3-day rolling window, so retroactive entries land before the monthly reports are generated. Emails admin on sync failures and unmapped categories.
 - `/api/cron/process-contracts` — `*/2 * * * *`. Drains the contract-extraction batch queue.
-- `/api/cron/bi-monthly-validation` — `0 12 4 * *` (12:00 UTC / **09:00 BRT**). Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions` **and** `sync_enabled` not false — unidade fora do pacote não entra no ciclo), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
-- `/api/cron/bi-monthly-autosend` — `0 12 10 * *` (12:00 UTC / **09:00 BRT** — cron da Vercel é sempre UTC; não é meio-dia de Brasília). Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead. Destinatário é resolvido **no momento do envio**, então mexer na lista em Plataforma > Relatório BI depois da geração muda quem recebe; empresa que ficou sem destinatário falha o envio.
+- `/api/cron/bi-monthly-validation` — `0 12 5 * *` (12:00 UTC / **09:00 BRT**). Generates the previous month's BI report per company (only companies with recipients in `bi_report_subscriptions` **and** `sync_enabled` not false — unidade fora do pacote não entra no ciclo), stores it in `bi_report_validations` as `pendente_validacao`, and notifies CSC users. **Does not send.**
+- `/api/cron/bi-monthly-autosend` — `0 12 11 * *` (12:00 UTC / **09:00 BRT** — cron da Vercel é sempre UTC; não é meio-dia de Brasília). Sends (via Resend) every previous-month report still unsent. Reports `em_revisao` or without content are *not* sent — they raise an admin alert instead. Destinatário é resolvido **no momento do envio**, então mexer na lista em Plataforma > Relatório BI depois da geração muda quem recebe; empresa que ficou sem destinatário falha o envio.
 - `/api/cron/ctrl-approval-reminders` — `0 13 * * 1-5` (13:00 UTC / **10:00 BRT, segunda a sexta**). Lembrete diário de aprovações do módulo Compras (ver abaixo).
 - `/api/cron/monthly-report` — AI monthly executive report (invoked on schedule/manually).
 
-There is **no day-5 dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
+Os dois dias da rotina (geração e envio automático) vivem em `src/lib/financeiro/relatorios/schedule.ts` — `BI_GENERATION_DAY` / `BI_AUTOSEND_DAY`. Todo texto de tela, notificação e e-mail lê de lá; **o cron não lê constante**, então mudar um dia exige editar `vercel.json` junto (e conferir que a janela de 6 meses do `sync-all` casa com o dia da geração). Não escreva o número do dia à mão em texto novo.
+
+There is **no direct dispatch**. The legacy `/api/cron/monthly-bi-report` (direct send to `bi_report_subscriptions`, bypassing validation) was deleted — do not recreate it. `/admin/relatorios-bi` ("Relatórios BI") now only defines *who receives*; the validation flow below is the official send. The one remaining bypass is the admin-only `POST /api/bi-subscriptions/send` ("Enviar agora"), kept as manual contingency for a single manager.
 
 ### BI report validation flow (CSC)
 
@@ -173,7 +197,7 @@ O fim de semana é excluído em **dois lugares de propósito**: no agendamento (
 Quem recebe o quê é derivado da mesma fonte de verdade da tela de Aprovações — não replique a regra em outro lugar:
 - a **etapa vem do status**: `pendente` → gerente/gerente sócio; `pendente_diretor` → diretor. Como `applyApprovalStep` só move para `pendente_diretor` depois do aval do gerente, o diretor nunca é notificado antes da etapa gerencial;
 - **notificação é sempre limitada pelo setor, inclusive para o diretor**: ele *aprova* qualquer setor (`hasGlobalVisibility`), mas só *recebe e-mail* dos setores cadastrados para ele na tela de Usuários (`user_sectors`). Decisão de negócio — não confunda com a visibilidade da tela. Gerente segue o mesmo filtro, com o fallback "sem vínculo recebe tudo" do `getRequests`;
-- valem os overrides de `routing.ts`: `APPROVAL_ROUTING` (diretor/gerente fixo) e `approverSectorRestrictionFor` (alçada, falha fechada). **`DIRECTOR_HIGHLIGHT_SECTORS` agora tem dois efeitos**: além do destaque na tela, coloca o e-mail listado na etapa do diretor da rotina, restrito àqueles setores (é assim que `marcelo@quokka.net.br`, perfil admin, recebe TI / Financeiro Cash Out / Financeiro CSC);
+- valem os overrides de `routing.ts`: `APPROVAL_ROUTING` (diretor/gerente fixo) e `approverSectorRestrictionFor` (alçada, falha fechada). **`DIRECTOR_HIGHLIGHT_SECTORS` agora tem dois efeitos**: além do destaque na tela, coloca o e-mail listado na etapa do diretor da rotina, restrito àqueles setores (é assim que `marcelo@quokka.net.br`, perfil admin, recebe TI / Financeiro Cash Out / Financeiro CSC / Diretoria — este último entrou em 10/08/2026 porque o setor era roteado direto ao diretor sem ninguém vinculado, e o e-mail ficava órfão);
 - o pool sai de `users.profile` (`gerente`, `gerente_setor`, `diretor` + `can_compras` + `active`), **não** de `user_module_roles` — a tabela legada ainda guarda papéis de quem hoje tem outro perfil. Admin não recebe por ser admin, só via `DIRECTOR_HIGHLIGHT_SECTORS`.
 
 `ctrl_approval_email_log` (unique `user_id` + `run_date` em BRT) é o rastro e a trava de duplicidade: reexecutar o endpoint no mesmo dia não reenvia. `?dryRun=1` monta sem enviar; `?force=1` reenvia conscientemente. Requisição pendente sem nenhum aprovador elegível não some: entra em `orphans` e vira alerta ao `ADMIN_EMAIL` — é o sintoma normal de setor sem gerente/diretor cadastrado, já que o filtro por setor não tem fallback global. A "mensagem do dia" é sorteada por hash de (usuário, dia) excluindo as últimas frases do log — determinística, então um reprocessamento repete a frase que o usuário viu.
@@ -184,7 +208,7 @@ All cron endpoints require `Authorization: Bearer <CRON_SECRET>`.
 
 Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`, `RESEND_API_KEY`, `ADMIN_EMAIL`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`.
 
-O remetente do Resend tem **default no código** (`bi@contato.quokka.net.br`, domínio verificado do grupo, em `src/lib/email/resend.ts`) — `RESEND_FROM` só existe para trocá-lo. Não volte a exigir a variável: o Resend não aceita remetente genérico, então "só a chave configurada" já derrubou relatório aceito pelo CSC e a rotina do dia 10, sem que ninguém percebesse até o clique em Enviar.
+O remetente do Resend tem **default no código** (`bi@contato.quokka.net.br`, domínio verificado do grupo, em `src/lib/email/resend.ts`) — `RESEND_FROM` só existe para trocá-lo. Não volte a exigir a variável: o Resend não aceita remetente genérico, então "só a chave configurada" já derrubou relatório aceito pelo CSC e a rotina de envio automático, sem que ninguém percebesse até o clique em Enviar.
 
 Feature-specific: `OPENAI_API_KEY` (AI reports + contract LLM + Viagens web-price search), `APIDEVOOS_API_KEY` (Viagens — real flight prices via apidevoos.dev), `VISION_AGENT_API_KEY` (LandingAI contract OCR), `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON` + `FEAT_PRODUCOES_SHEET_ID`/`FEAT_PRODUCOES_SHEET_TAB` + `TERRAZZO_SHEET_ID` (Sheets sync; `TERRAZZO_SHEETS_SYNC_DISABLED` to disable).
 

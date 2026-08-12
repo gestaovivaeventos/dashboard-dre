@@ -28,6 +28,8 @@ interface AppShellProps {
   canCase?: boolean;
   canViagens?: boolean;
   canViagensAprovar?: boolean;
+  /** Módulo Validação de Contratos — grupo CONTRATOS no menu. */
+  canContratos?: boolean;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -52,6 +54,7 @@ export function AppShell({
   canCase,
   canViagens,
   canViagensAprovar,
+  canContratos,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -78,6 +81,7 @@ export function AppShell({
       canCase={canCase}
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
+      canContratos={canContratos}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

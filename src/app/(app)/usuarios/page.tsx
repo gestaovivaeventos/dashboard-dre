@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { UsersAdminManager } from "@/components/app/users-admin-manager";
+import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -31,6 +32,10 @@ export default async function UsuariosPage() {
     adminClient.from("user_company_access").select("user_id,company_id"),
     adminClient.from("user_sectors").select("user_id,sector_id"),
   ]);
+
+  // Módulo Validação de Contratos: a concessão mora em user_module_roles, não
+  // numa coluna de `users` (ver @/lib/auth/contratos).
+  const contratosUserIds = await fetchContratosGrantUserIds(adminClient);
 
   const companyById = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorById = new Map((sectors ?? []).map((s) => [s.id as string, s.name as string]));
@@ -67,6 +72,9 @@ export default async function UsuariosPage() {
     can_case: Boolean(item.can_case),
     can_viagens: Boolean(item.can_viagens),
     can_viagens_aprovar: Boolean(item.can_viagens_aprovar),
+    // O perfil 'validador_contrato' implica o módulo mesmo sem a linha.
+    can_contratos:
+      contratosUserIds.has(item.id as string) || item.profile === "validador_contrato",
     active: Boolean(item.active),
     company_ids: userCompanies.get(item.id as string) ?? [],
     sector_ids: userSectors.get(item.id as string) ?? [],

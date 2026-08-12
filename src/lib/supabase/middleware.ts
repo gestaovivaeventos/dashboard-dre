@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { canAccessPathByProfile, defaultLandingFor } from "@/lib/auth/access";
+import { hasContratosGrant } from "@/lib/auth/contratos";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -58,15 +59,19 @@ export async function updateSession(request: NextRequest) {
   } else if (user && !isApiRoute && !isAuthRoute && !isPublicRoot && !isDevMode) {
     const { data: profileData } = await supabase
       .from("users")
-      .select("profile, active, can_financeiro, can_compras, can_case, can_viagens")
+      .select(
+        "profile, active, contracts_only, can_financeiro, can_compras, can_case, can_viagens, user_module_roles!user_module_roles_user_id_fkey(module)",
+      )
       .eq("id", user.id)
       .maybeSingle<{
         profile: UserProfileType | null;
         active: boolean;
+        contracts_only: boolean | null;
         can_financeiro: boolean | null;
         can_compras: boolean | null;
         can_case: boolean | null;
         can_viagens: boolean | null;
+        user_module_roles: Array<{ module: string | null }> | null;
       }>();
 
     const userProfile: UserProfileType = profileData?.profile ?? "solicitante";
@@ -74,6 +79,13 @@ export async function updateSession(request: NextRequest) {
     const canCompras = Boolean(profileData?.can_compras);
     const canCase = Boolean(profileData?.can_case);
     const canViagens = Boolean(profileData?.can_viagens);
+    // Mesma regra do getSessionContext: concessão explícita do módulo, perfil
+    // validador (ou o flag legado) e admin.
+    const canContratos =
+      hasContratosGrant(profileData?.user_module_roles) ||
+      userProfile === "validador_contrato" ||
+      Boolean(profileData?.contracts_only) ||
+      userProfile === "admin";
     const isActive = profileData?.active ?? true;
 
     if (!isActive) {
@@ -88,13 +100,21 @@ export async function updateSession(request: NextRequest) {
         canCompras,
         canCase,
         canViagens,
+        canContratos,
         // Necessário para a tela "Validação Relatório", liberada nominalmente
         // para dois e-mails além de CSC/admin.
         user.email ?? null,
       )
     ) {
       const url = request.nextUrl.clone();
-      url.pathname = defaultLandingFor(userProfile, canFinanceiro, canCompras, canCase, canViagens);
+      url.pathname = defaultLandingFor(
+        userProfile,
+        canFinanceiro,
+        canCompras,
+        canCase,
+        canViagens,
+        canContratos,
+      );
       supabaseResponse = NextResponse.redirect(url);
     }
   }

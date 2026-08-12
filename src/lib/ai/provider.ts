@@ -512,7 +512,7 @@ export async function generateJsonViaChat(
 
   // Resposta vazia (content vazio com HTTP 200) NÃO é sempre "raciocínio
   // estourou o teto": também acontece por sobrecarga momentânea do provedor —
-  // e é mais provável em lote (a rotina do dia 4 dispara uma chamada por
+  // e é mais provável em lote (a rotina mensal dispara uma chamada por
   // empresa em sequência) do que na tela, onde o usuário gera um relatório por
   // vez. Por isso tentamos de novo em QUALQUER caso de vazio, com um respiro
   // entre as tentativas. (Antes o retry tinha `!thinkingOffDeStart` na

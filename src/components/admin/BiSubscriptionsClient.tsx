@@ -21,6 +21,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toaster";
+import {
+  BI_AUTOSEND_DAY,
+  BI_GENERATION_DAY,
+} from "@/lib/financeiro/relatorios/schedule";
 
 interface UserOption {
   id: string;
@@ -178,9 +182,9 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
         <p className="text-sm text-muted-foreground">
           Defina quais usuários recebem por email o relatório mensal de Business Intelligence de cada
           unidade. Esta tela define <strong>quem recebe</strong> — o envio em si é regido pela tela{" "}
-          <strong>Financeiro &gt; Validação Relatório</strong>: no dia 4 o relatório do mês anterior é
-          gerado e fica aguardando o CSC; o aceite libera o envio em 1 clique e, sem aceite até o dia
-          10, o Control Hub envia automaticamente.
+          <strong>Financeiro &gt; Validação Relatório</strong>: no dia {BI_GENERATION_DAY} o relatório
+          do mês anterior é gerado e fica aguardando o CSC; o aceite libera o envio em 1 clique e,
+          sem aceite até o dia {BI_AUTOSEND_DAY}, o Control Hub envia automaticamente.
         </p>
       </div>
 
@@ -266,8 +270,8 @@ export function BiSubscriptionsClient({ users, companies }: Props) {
             </div>
           ) : subscriptions.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
-              Nenhuma assinatura cadastrada. Sem destinatário, a unidade não entra na geração do dia 4
-              e ninguém recebe o relatório mensal.
+              Nenhuma assinatura cadastrada. Sem destinatário, a unidade não entra na geração do dia{" "}
+              {BI_GENERATION_DAY} e ninguém recebe o relatório mensal.
             </p>
           ) : (
             <Table>

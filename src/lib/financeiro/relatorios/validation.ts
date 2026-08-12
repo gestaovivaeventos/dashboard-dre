@@ -9,12 +9,14 @@ import {
 } from "@/lib/financeiro/relatorios/monthly-bi-sender";
 import { sendEmailViaResend } from "@/lib/email/resend";
 import type { OnePageApiResponse } from "@/lib/financeiro/relatorios/one-page-report-mapper";
+import { BI_AUTOSEND_DAY } from "@/lib/financeiro/relatorios/schedule";
 
 // ============================================================================
 // Dominio da VALIDACAO MENSAL dos relatorios BI (tela Validação Relatório).
 //
-// Fluxo: dia 4 gera → CSC valida (aceitar / revisão / adicionar contexto) →
-// envio em 1 clique apos o aceite → dia 10 envia automaticamente o que sobrou.
+// Fluxo: a rotina mensal gera → CSC valida (aceitar / revisão / adicionar
+// contexto) → envio em 1 clique apos o aceite → o envio automatico manda o que
+// sobrou. Os dois dias estao em @/lib/financeiro/relatorios/schedule.
 //
 // ISOLAMENTO POR EMPRESA (regra crítica):
 //   - a linha de validacao guarda `company_id`; o relatorio (`report_json`)
@@ -45,7 +47,7 @@ export type ValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
 // NOTA: 'em_revisao' é o valor gravado (constraint CHECK da tabela). O RÓTULO
 // exibido é "Envio bloqueado" — foi renomeado para dizer o que o estado faz:
-// impedir o envio, inclusive o automático do dia 10. Mudar o valor exigiria
+// impedir o envio, inclusive o automático mensal. Mudar o valor exigiria
 // migration e não traria ganho.
 export const VALIDATION_STATUS_LABEL: Record<ValidationStatus, string> = {
   pendente_validacao: "Pendente de validação",
@@ -99,7 +101,7 @@ export interface ValidationActor {
   label: string;
 }
 
-/** Ator "sistema" — usado pelos crons (dias 4 e 10). */
+/** Ator "sistema" — usado pelos crons de geração e de envio automático. */
 export const SYSTEM_ACTOR: ValidationActor = { id: null, label: "Control Hub (automático)" };
 
 // ─── Log de auditoria ───────────────────────────────────────────────────────
@@ -359,7 +361,7 @@ export async function generateValidationReport({
   return { ok: true, validationId: data.id };
 }
 
-// ─── Leva mensal (rotina do dia 4 e o botao "Gerar relatórios do mês") ──────
+// ─── Leva mensal (rotina de geração e o botao "Gerar relatórios do mês") ───
 
 export interface MonthlyRunResult {
   companyId: string;
@@ -545,9 +547,9 @@ export async function acceptValidation(
 /**
  * BLOQUEIO DE ENVIO (exibido como "Bloquear envio" / "Envio bloqueado"; valor
  * gravado: 'em_revisao'). Registra quem/quando/por quê e — este é o ponto —
- * impede o envio AUTOMATICO do dia 10 (ver bi-monthly-autosend). E o unico
+ * impede o envio AUTOMATICO mensal (ver bi-monthly-autosend). E o unico
  * estado com esse efeito: um relatorio apenas nao-aceito continua saindo no
- * dia 10. Sai do bloqueio ao ser gerado novamente ou aceito.
+ * envio automatico. Sai do bloqueio ao ser gerado novamente ou aceito.
  */
 export async function markValidationForReview(
   admin: SupabaseClient,
@@ -654,7 +656,7 @@ export interface SendValidationArgs {
   appUrl?: string;
   /**
    * Exige aceite previo. `true` no envio manual (so envia o que foi aceito);
-   * `false` no cron do dia 10, que envia a versao mais recente disponivel.
+   * `false` no cron do envio automatico, que manda a versao mais recente.
    */
   requireAccepted: boolean;
 }
@@ -671,7 +673,7 @@ export interface SendValidationResult {
  * status (sucesso ou falha).
  *
  * Nunca reenvia um relatorio ja enviado (protecao contra duplicidade entre o
- * envio manual e o cron do dia 10).
+ * envio manual e o cron do envio automatico).
  */
 export async function sendValidationReport({
   admin,
@@ -812,7 +814,7 @@ export async function sendValidationReport({
 /**
  * Cria a pendencia de validacao como notificacao do Control Hub para os
  * usuarios do perfil CSC (e para os admins ativos, que tambem enxergam a
- * tela). Best-effort: falha aqui nao derruba a rotina do dia 4.
+ * tela). Best-effort: falha aqui nao derruba a rotina de geração.
  */
 export async function notifyCscPendingValidation(
   admin: SupabaseClient,
@@ -847,7 +849,7 @@ export async function notifyCscPendingValidation(
   const title = "Relatórios BI pendentes de validação";
   const message =
     `${params.total} relatório(s) de ${params.periodLabel} foram gerados e aguardam validação ` +
-    "em Financeiro > Validação Relatório. Sem aceite até o dia 10, o envio aos gestores é automático.";
+    `em Financeiro > Validação Relatório. Sem aceite até o dia ${BI_AUTOSEND_DAY}, o envio aos gestores é automático.`;
 
   const { error: insertError } = await admin.from("ctrl_notifications").insert(
     targets.map((u) => ({

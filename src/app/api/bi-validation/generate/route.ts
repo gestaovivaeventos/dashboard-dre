@@ -13,13 +13,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // ============================================================================
 // POST /api/bi-validation/generate
 //
-// Dispara MANUALMENTE a mesma leva da rotina do dia 4: monta o relatório do mês
+// Dispara MANUALMENTE a mesma leva da rotina mensal: monta o relatório do mês
 // anterior de CADA empresa com destinatários cadastrados em
 // Plataforma > Relatório BI e coloca tudo na fila de validação.
 //
 // Por padrão só COMPLETA a leva — empresas que já têm relatório pronto no
 // período são puladas (não faz sentido gastar IA de novo). É assim que se
-// recupera de uma geração parcial ou de falhas pontuais do dia 4. Para refazer
+// recupera de uma geração parcial ou de falhas pontuais da rotina. Para refazer
 // uma empresa específica, use "Gerar novamente" na linha dela; para refazer a
 // leva inteira, envie `{ "force": true }`.
 //

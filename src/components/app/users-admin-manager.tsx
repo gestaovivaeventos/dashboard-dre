@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  AlertTriangle,
   Check,
   CheckCircle2,
   Loader2,
   MailPlus,
   Pencil,
+  ShieldAlert,
   ShieldX,
   X,
 } from "lucide-react";
@@ -38,6 +40,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  describeUserExceptions,
+  findOrphanExceptionRules,
+  NON_USER_RULES,
+  type UserException,
+} from "@/lib/auth/user-exceptions";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +72,7 @@ interface UserItem {
   can_case: boolean;
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
+  can_contratos: boolean;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -116,7 +125,8 @@ const PROFILES: Array<{
   {
     value: "validador_contrato",
     label: "Validador de Contrato",
-    description: "Acesso isolado ao módulo de Validação de Contratos.",
+    description:
+      "Acesso isolado à Validação de Contratos. Para liberar a tela sem isolar o usuário, mantenha o perfil dele e marque o módulo Validação de Contratos.",
   },
   {
     value: "solicitante",
@@ -178,8 +188,15 @@ interface FormState {
   can_financeiro: boolean;
   can_compras: boolean;
   can_case: boolean;
+  /**
+   * Viagens saiu de "Módulos visíveis" (o módulo não está em uso). Os dois
+   * campos continuam no formulário só como PASSAGEM: carregam o valor atual do
+   * usuário e o devolvem intacto no salvamento, pra que remover o botão não
+   * apague o acesso de ninguém.
+   */
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
+  can_contratos: boolean;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -195,6 +212,7 @@ const emptyForm: FormState = {
   can_case: false,
   can_viagens: false,
   can_viagens_aprovar: false,
+  can_contratos: false,
   sector_ids: [],
   company_ids: [],
 };
@@ -211,6 +229,7 @@ function userToForm(u: UserItem): FormState {
     can_case: u.can_case,
     can_viagens: u.can_viagens,
     can_viagens_aprovar: u.can_viagens_aprovar,
+    can_contratos: u.can_contratos,
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -221,6 +240,9 @@ function userToForm(u: UserItem): FormState {
 export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   const [users, setUsers] = useState(initialUsers);
   const [inviteOpen, setInviteOpen] = useState(false);
+  // Diálogo das regras nominais do código. `null` = fechado; string vazia =
+  // aberto com todas; um id = aberto destacando aquele usuário.
+  const [exceptionsFor, setExceptionsFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserItem | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +265,22 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
 
   // Ordem alfabetica (pt-BR, ignora caixa/acentos), por nome ou e-mail quando
   // sem nome. Cobre o load inicial e os refetches apos convite/edicao.
+  // Regras nominais (as que vivem no código, não no cadastro) por usuário.
+  const exceptionsByUser = useMemo(() => {
+    const map = new Map<string, UserException[]>();
+    for (const u of users) {
+      const list = describeUserExceptions({ id: u.id, email: u.email, name: u.name });
+      if (list.length > 0) map.set(u.id, list);
+    }
+    return map;
+  }, [users]);
+
+  // Regras cujo e-mail/ID não existe mais na base — falham em silêncio.
+  const orphanRules = useMemo(
+    () => findOrphanExceptionRules(users.map((u) => ({ id: u.id, email: u.email }))),
+    [users],
+  );
+
   const sortedUsers = useMemo(
     () =>
       [...users].sort((a, b) =>
@@ -271,6 +309,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           const isAdmin = u.profile === "admin";
           if (filterModule === "financeiro" && !(isAdmin || u.can_financeiro)) return false;
           if (filterModule === "compras" && !(isAdmin || u.can_compras)) return false;
+          if (filterModule === "case" && !(isAdmin || u.can_case)) return false;
+          if (filterModule === "contratos" && !(isAdmin || u.can_contratos)) return false;
         }
         if (filterSector !== "all" && !u.sector_ids.includes(filterSector)) return false;
         if (
@@ -335,24 +375,28 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
-      // Validador de contrato: força sem módulos/setores/unidades
+      // Validador de contrato: perfil isolado — só a Validação de Contratos,
+      // sem os demais módulos, setores ou unidades.
       if (key === "profile" && value === "validador_contrato") {
         next.can_financeiro = false;
         next.can_compras = false;
         next.can_case = false;
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
+        next.can_contratos = true;
         next.sector_ids = [];
         next.company_ids = [];
       }
-      // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case.
+      // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case
+      // e a Validação de Contratos.
       if (key === "profile" && value === "admin") {
         next.can_financeiro = true;
         next.can_compras = true;
         next.company_ids = []; // admin vê tudo, não precisa restringir
       }
       // Franqueado e CSC (cópia funcional): só Financeiro, sem setores.
-      // Unidades obrigatórias.
+      // Unidades obrigatórias. `can_contratos` NÃO é zerado: a Validação de
+      // Contratos é um módulo à parte, liberável pra qualquer perfil.
       if (key === "profile" && (value === "franqueado" || value === "csc")) {
         next.can_financeiro = true;
         next.can_compras = false;
@@ -360,6 +404,11 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
         next.sector_ids = [];
+      }
+      // Saiu do perfil isolado de validador → o módulo deixa de ser implícito
+      // e volta a depender da marcação em "Módulos visíveis".
+      if (key === "profile" && prev.profile === "validador_contrato" && value !== "validador_contrato") {
+        next.can_contratos = false;
       }
       // Sem Viagens → não pode aprovar viagens
       if (key === "can_viagens" && value === false) {
@@ -407,6 +456,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: boolean;
         can_viagens: boolean;
         can_viagens_aprovar: boolean;
+        can_contratos: boolean;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -425,6 +475,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: u.can_case,
         can_viagens: u.can_viagens,
         can_viagens_aprovar: u.can_viagens_aprovar,
+        can_contratos: u.can_contratos,
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -439,8 +490,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       // Tudo OK — sem módulos/setores/unidades é o esperado
       return null;
     }
-    if (!form.can_financeiro && !form.can_compras && !form.can_case && !form.can_viagens && form.profile !== "admin") {
-      return "Marque ao menos um módulo (Financeiro, Compras, Case ou Viagens).";
+    if (
+      !form.can_financeiro &&
+      !form.can_compras &&
+      !form.can_case &&
+      !form.can_contratos &&
+      // Viagens saiu da tela, mas quem já tinha o módulo continua válido.
+      !form.can_viagens &&
+      form.profile !== "admin"
+    ) {
+      return "Marque ao menos um módulo (Financeiro, Compras, Case ou Validação de Contratos).";
     }
     if (profileNeedsSectors(form.profile) && form.sector_ids.length === 0) {
       return "Gerente e Solicitante precisam de pelo menos um setor.";
@@ -474,6 +533,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: form.can_case,
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
+        can_contratos: form.can_contratos,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -511,6 +571,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_case: form.can_case,
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
+        can_contratos: form.can_contratos,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -554,6 +615,22 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
             {filteredUsers.length} de {users.length}{" "}
             {users.length === 1 ? "usuário" : "usuários"}
           </span>
+          {/* Vitrine das regras nominais: sem ela, um acordo fixo no código
+              (alçada restrita, visão completa, roteamento) fica invisível pra
+              quem administra os usuários. */}
+          <Button
+            variant="outline"
+            onClick={() => setExceptionsFor("")}
+            title="Regras especiais definidas no código"
+          >
+            <ShieldAlert className="mr-2 h-4 w-4 text-amber-600" />
+            Regras especiais
+            {exceptionsByUser.size > 0 && (
+              <span className="ml-2 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800">
+                {exceptionsByUser.size}
+              </span>
+            )}
+          </Button>
           <Button onClick={openInvite}>
             <MailPlus className="mr-2 h-4 w-4" />
             Convidar usuário
@@ -600,6 +677,8 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                   { value: "all", label: "Todos os módulos" },
                   { value: "financeiro", label: "Financeiro" },
                   { value: "compras", label: "Compras" },
+                  { value: "case", label: "Case" },
+                  { value: "contratos", label: "Validação de Contratos" },
                 ]}
               />
             </TableHead>
@@ -656,7 +735,20 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           {filteredUsers.map((u) => (
             <TableRow key={u.id}>
               <TableCell>
-                <div className="font-medium">{u.name || "—"}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{u.name || "—"}</span>
+                  {exceptionsByUser.has(u.id) && (
+                    <button
+                      type="button"
+                      onClick={() => setExceptionsFor(u.id)}
+                      title="Este usuário tem regras especiais definidas no código — clique para ver"
+                      className="rounded p-0.5 text-amber-600 transition-colors hover:bg-amber-100 hover:text-amber-800"
+                    >
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      <span className="sr-only">Ver regras especiais</span>
+                    </button>
+                  )}
+                </div>
                 {u.position && (
                   <div className="text-xs text-muted-foreground">{u.position}</div>
                 )}
@@ -672,13 +764,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
               </TableCell>
               <TableCell className="text-xs">
                 {u.profile === "validador_contrato"
-                  ? "(isolado)"
+                  ? "Validação de Contratos (isolado)"
                   : u.profile === "admin"
                   ? "Todos"
                   : [
                       u.can_financeiro && "Financeiro",
                       u.can_compras && "Compras",
                       u.can_case && "Case",
+                      u.can_contratos && "Validação de Contratos",
+                      // Viagens não é mais atribuível, mas segue exibido pra
+                      // quem ainda tem o módulo.
                       u.can_viagens && (u.can_viagens_aprovar ? "Viagens (aprova)" : "Viagens"),
                     ]
                       .filter(Boolean)
@@ -733,6 +828,16 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           )}
         </TableBody>
       </Table>
+
+      {/* Regras nominais do código */}
+      <ExceptionsDialog
+        open={exceptionsFor !== null}
+        focusUserId={exceptionsFor || null}
+        users={sortedUsers}
+        exceptionsByUser={exceptionsByUser}
+        orphanRules={orphanRules}
+        onClose={() => setExceptionsFor(null)}
+      />
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={(o) => !o && closeAll()}>
@@ -816,6 +921,134 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
   );
 }
 
+// ─── Regras nominais (exceções fixas no código) ─────────────────────────────
+
+function ExceptionsDialog({
+  open,
+  focusUserId,
+  users,
+  exceptionsByUser,
+  orphanRules,
+  onClose,
+}: {
+  open: boolean;
+  /** Quando preenchido, mostra só este usuário (clique no ícone da linha). */
+  focusUserId: string | null;
+  users: UserItem[];
+  exceptionsByUser: Map<string, UserException[]>;
+  orphanRules: ReturnType<typeof findOrphanExceptionRules>;
+  onClose: () => void;
+}) {
+  const listed = users.filter(
+    (u) => exceptionsByUser.has(u.id) && (!focusUserId || u.id === focusUserId),
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-amber-600" />
+            Regras especiais
+          </DialogTitle>
+          <DialogDescription>
+            Acordos de negócio que não têm campo de cadastro e vivem no código do sistema. Eles
+            valem <strong>além</strong> do perfil e dos módulos marcados na edição do usuário —
+            e só podem ser alterados por quem edita o código.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {listed.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Nenhum usuário com regra especial.
+            </p>
+          )}
+
+          {listed.map((u) => (
+            <div key={u.id} className="rounded-md border p-3">
+              <div className="mb-2">
+                <p className="text-sm font-semibold">{u.name || u.email}</p>
+                <p className="text-xs text-muted-foreground">{u.email}</p>
+              </div>
+              <ul className="space-y-2.5">
+                {(exceptionsByUser.get(u.id) ?? []).map((ex) => (
+                  <li key={ex.key} className="border-l-2 border-amber-300 pl-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{ex.title}</span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          ex.scope === "Compras"
+                            ? "border-violet-200 bg-violet-50 text-violet-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        }
+                      >
+                        {ex.scope}
+                      </Badge>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{ex.detail}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                      {ex.source}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          {/* Só na visão geral: regras que não são por usuário e regras órfãs. */}
+          {!focusUserId && (
+            <>
+              <div className="rounded-md border p-3">
+                <p className="mb-2 text-sm font-semibold">Regras que não são por usuário</p>
+                <ul className="space-y-2.5">
+                  {NON_USER_RULES.map((rule) => (
+                    <li key={rule.title} className="border-l-2 border-slate-300 pl-3">
+                      <p className="text-sm font-medium">{rule.title}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{rule.detail}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                        {rule.source}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {orphanRules.length > 0 && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
+                  <p className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-red-800 dark:text-red-300">
+                    <AlertTriangle className="h-4 w-4" />
+                    Regras sem usuário correspondente
+                  </p>
+                  <p className="mb-2 text-xs text-red-800/90 dark:text-red-300/90">
+                    Estas regras existem no código mas não casam com nenhum usuário — provavelmente
+                    o e-mail mudou ou o cadastro foi recriado. Elas simplesmente <strong>deixam de
+                    valer</strong>, sem erro visível. Avise quem cuida do código.
+                  </p>
+                  <ul className="space-y-1">
+                    {orphanRules.map((rule) => (
+                      <li key={rule.key} className="text-xs text-red-800 dark:text-red-300">
+                        <strong>{rule.label}</strong> — {rule.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Fechar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Inner form ─────────────────────────────────────────────────────────────
 
 function UserForm({
@@ -844,6 +1077,12 @@ function UserForm({
   const showCompanies =
     form.can_financeiro && form.profile !== "admin" && form.profile !== "validador_contrato";
   const isValidator = form.profile === "validador_contrato";
+  // Visão Financeira e CSC são só-Financeiro: não escolhem Compras/Case. Mas a
+  // Validação de Contratos é um módulo independente, então a seção continua
+  // aparecendo pra eles — só com esse botão.
+  const isFinanceiroOnly = form.profile === "franqueado" || form.profile === "csc";
+  // Admin já tem tudo; o Validador de Contrato É o módulo. Os demais escolhem.
+  const showModules = !isValidator && form.profile !== "admin";
 
   const profileDescription = useMemo(
     () => PROFILES.find((p) => p.value === form.profile)?.description ?? "",
@@ -928,14 +1167,18 @@ function UserForm({
         <p className="text-xs text-muted-foreground">{profileDescription}</p>
       </div>
 
-      {!isValidator && form.profile !== "admin" && form.profile !== "franqueado" && form.profile !== "csc" && (
+      {showModules && (
         <div className="space-y-1.5">
           <Label>Módulos visíveis</Label>
-          <div className="flex gap-2">
+          {/* Grid: "Validação de Contratos" é longo demais pra 4 colunas
+              iguais numa linha só. */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {!isFinanceiroOnly && (
+            <>
             <button
               type="button"
               onClick={() => onChange("can_financeiro", !form.can_financeiro)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_financeiro
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -947,7 +1190,7 @@ function UserForm({
             <button
               type="button"
               onClick={() => onChange("can_compras", !form.can_compras)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_compras
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -959,7 +1202,7 @@ function UserForm({
             <button
               type="button"
               onClick={() => onChange("can_case", !form.can_case)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
                 form.can_case
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
@@ -968,32 +1211,25 @@ function UserForm({
               {form.can_case ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
               Case
             </button>
+            </>
+            )}
             <button
               type="button"
-              onClick={() => onChange("can_viagens", !form.can_viagens)}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                form.can_viagens
+              onClick={() => onChange("can_contratos", !form.can_contratos)}
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
+                form.can_contratos
                   ? "border-primary bg-primary/10 text-primary"
                   : "hover:bg-muted"
               }`}
             >
-              {form.can_viagens ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
-              Viagens
+              {form.can_contratos ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Validação de Contratos
             </button>
           </div>
-          {form.can_viagens && (
-            <label className="flex cursor-pointer items-center gap-2 pt-1 text-sm">
-              <input
-                type="checkbox"
-                checked={form.can_viagens_aprovar}
-                onChange={(e) => onChange("can_viagens_aprovar", e.target.checked)}
-                className="h-4 w-4 rounded border"
-              />
-              Pode aprovar viagens (escolhe o orçamento e fecha a reserva)
-            </label>
-          )}
           <p className="text-xs text-muted-foreground">
-            Plataforma (Conexões, Usuários, Inteligência) é automática pra admin.
+            {isFinanceiroOnly
+              ? "Este perfil é fixo no Financeiro (sem Compras e sem Case). A Validação de Contratos é um módulo à parte e pode ser liberada."
+              : "Plataforma (Conexões, Usuários, Inteligência) é automática pra admin."}
           </p>
         </div>
       )}
@@ -1041,7 +1277,9 @@ function UserForm({
       {isValidator && (
         <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
           Validador de Contrato é um perfil <strong>isolado</strong>: só enxerga a tela de
-          Validação de Contratos. Sem setores ou unidades.
+          Validação de Contratos. Sem setores ou unidades. Para dar essa tela a alguém
+          <strong> sem</strong> isolar o acesso, mantenha o perfil atual do usuário e marque o
+          módulo <strong>Validação de Contratos</strong> em &ldquo;Módulos visíveis&rdquo;.
         </p>
       )}
       {form.profile === "franqueado" && (

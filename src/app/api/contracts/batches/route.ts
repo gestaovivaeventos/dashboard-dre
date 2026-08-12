@@ -4,17 +4,18 @@ import { getCurrentSessionContext } from '@/lib/auth/session'
 import { parseRequisitionsXlsx } from '@/lib/contracts/parse-xlsx'
 import { createAdminClientIfAvailable } from '@/lib/supabase/admin'
 
-function canUseContracts(
-  role: string | undefined,
-  contractsOnly: boolean | undefined,
-): boolean {
-  return contractsOnly === true || role === 'admin' || role === 'gestor_hero'
+/**
+ * Acesso pelo MÓDULO Validação de Contratos (ver @/lib/auth/contratos). O
+ * perfil 'validador_contrato' e o admin já entram por ele.
+ */
+function canUseContracts(canContratos: boolean | undefined): boolean {
+  return canContratos === true
 }
 
 export async function GET() {
   const { supabase, user, profile } = await getCurrentSessionContext()
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 })
-  if (!canUseContracts(profile?.role, profile?.contracts_only)) {
+  if (!canUseContracts(profile?.can_contratos)) {
     return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 })
   }
 
@@ -38,7 +39,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const { supabase, user, profile } = await getCurrentSessionContext()
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 })
-  if (!canUseContracts(profile?.role, profile?.contracts_only)) {
+  if (!canUseContracts(profile?.can_contratos)) {
     return NextResponse.json({ error: 'Sem permissão.' }, { status: 403 })
   }
 

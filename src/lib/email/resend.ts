@@ -5,7 +5,7 @@ import { Resend } from "resend";
 //
 // É o canal OBRIGATÓRIO dos relatórios BI (One Page Report) enviados aos
 // gestores das unidades — cron mensal, envio manual pós-aceite e envio
-// automático do dia 10. Também é o canal do lembrete diário de aprovações do
+// automático mensal. Também é o canal do lembrete diário de aprovações do
 // Compras. O transporte antigo (SMTP do Gmail, em `@/lib/email/gmail`) segue
 // existindo para os alertas internos ao admin.
 //
@@ -20,7 +20,7 @@ import { Resend } from "resend";
 // Por que existe um remetente padrão no código: o Resend não tem remetente
 // genérico — todo envio exige um endereço de domínio verificado. Deixar isso
 // só em variável de ambiente significou, na prática, relatório aceito pelo CSC
-// que não saía (e rotina do dia 10 falhando em silêncio) porque a variável não
+// que não saía (e o envio automático falhando em silêncio) porque a variável não
 // tinha sido criada na Vercel. O domínio abaixo é o verificado do grupo; se um
 // dia mudar, troque aqui ou defina RESEND_FROM.
 // ============================================================================

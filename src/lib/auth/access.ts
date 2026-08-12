@@ -17,6 +17,7 @@ export function defaultLandingFor(
   canCompras: boolean,
   canCase: boolean = false,
   canViagens: boolean = false,
+  canContratos: boolean = false,
 ): string {
   // Ilha de contratos — não passa pela home.
   if (profile === "validador_contrato") return "/contratos";
@@ -29,6 +30,8 @@ export function defaultLandingFor(
   if (canCase) return "/case/contratos";
   // Usuário só-Viagens cai direto nas requisições de viagem.
   if (canViagens) return "/viagens/requisicoes";
+  // Usuário cujo único módulo é Validação de Contratos.
+  if (canContratos) return "/contratos";
   return "/pendente";
 }
 
@@ -72,6 +75,11 @@ export function canAccessPathByProfile(
   canCase: boolean = false,
   canViagens: boolean = false,
   /**
+   * Módulo Validação de Contratos (/contratos). Concedido por usuário em
+   * "Módulos visíveis" — ver @/lib/auth/contratos.
+   */
+  canContratos: boolean = false,
+  /**
    * E-mail do usuário. Usado pelas liberações NOMINAIS: a tela "Validação
    * Relatório" (marcela@/marcelo@quokka.net.br além de CSC/admin) e a visão
    * completa do módulo Compras (@/lib/ctrl/full-view). Ausente = trata como
@@ -103,10 +111,20 @@ export function canAccessPathByProfile(
     return canViagens || profile === "admin";
   }
 
+  // Módulo Validação de Contratos — acesso binário pelo módulo concedido ao
+  // usuário (admin sempre pode). Antes a tela era exclusiva do perfil
+  // 'validador_contrato', o que impedia dar o acesso a quem tem outro perfil
+  // (ex.: gerente do Compras, Visão Financeira). Precisa vir ANTES do bloco do
+  // franqueado/CSC, cuja whitelist negaria a rota mesmo com o módulo marcado.
+  if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
+    return canContratos || profile === "admin";
+  }
+
   // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
-  // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl,
-  // /contratos e qualquer página fora das visualizações permitidas. A tela
-  // "Validação Relatório" já foi liberada acima para o CSC.
+  // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl e
+  // qualquer página fora das visualizações permitidas. As telas "Validação
+  // Relatório" (CSC) e "Validação de Contratos" (quem tem o módulo) já foram
+  // decididas acima.
   if (profile === "franqueado" || profile === "csc") {
     if (FRANQUEADO_BASE_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
       return true;
@@ -123,11 +141,6 @@ export function canAccessPathByProfile(
 
   // Admin: tudo.
   if (profile === "admin") return true;
-
-  // /contratos é restrito a admin + validador_contrato; demais perfis: 403.
-  if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
-    return false;
-  }
 
   // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios
   // exige admin. O módulo Orçamento (/orcamento*) também é admin-only: admin

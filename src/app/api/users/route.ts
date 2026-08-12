@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -36,6 +37,10 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
+
+  // Módulo Validação de Contratos: concessão em user_module_roles (ver
+  // @/lib/auth/contratos), não numa coluna de `users`.
+  const contratosUserIds = await fetchContratosGrantUserIds(adminClient);
 
   const companyNames = new Map((companiesData ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorNames = new Map((sectorsData ?? []).map((s) => [s.id as string, s.name as string]));
@@ -74,6 +79,11 @@ export async function GET() {
     can_case: Boolean(item.can_case),
     can_viagens: Boolean(item.can_viagens),
     can_viagens_aprovar: Boolean(item.can_viagens_aprovar),
+    // O perfil 'validador_contrato' implica o módulo mesmo sem a linha.
+    can_contratos:
+      contratosUserIds.has(item.id as string) ||
+      item.profile === "validador_contrato" ||
+      Boolean(item.contracts_only),
     active: Boolean(item.active),
     created_at: item.created_at as string,
     // Legacy fields for backwards compatibility with the existing UI:

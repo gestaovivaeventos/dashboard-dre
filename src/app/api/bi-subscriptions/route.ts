@@ -8,8 +8,9 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 // QUEM recebe o One Page Report do mes anterior.
 //
 // Quem envia e o fluxo de validacao do CSC (tela Validacao Relatorio):
-// dia 4 gera para as empresas com assinantes → aceite envia em 1 clique →
-// dia 10 envia o que sobrou. O disparo automatico do dia 5 nao existe mais.
+// a rotina mensal gera para as empresas com assinantes → aceite envia em 1
+// clique → o envio automatico manda o que sobrou (dias em
+// @/lib/financeiro/relatorios/schedule). O disparo direto nao existe mais.
 // ============================================================================
 
 async function requireAdmin() {

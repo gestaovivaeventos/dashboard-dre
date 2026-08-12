@@ -10,11 +10,11 @@
     },
     {
       "path": "/api/cron/bi-monthly-validation",
-      "schedule": "0 12 4 * *"
+      "schedule": "0 12 5 * *"
     },
     {
       "path": "/api/cron/bi-monthly-autosend",
-      "schedule": "0 12 10 * *"
+      "schedule": "0 12 11 * *"
     },
     {
       "path": "/api/cron/process-viagens",

@@ -10,8 +10,9 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 // quais usuarios recebem o One Page Report de quais unidades.
 //
 // Esta tela define APENAS os destinatarios. O envio e regido pela tela
-// Financeiro > Validacao Relatorio (dia 4 gera → aceite do CSC envia em 1
-// clique → dia 10 envia o que sobrou). O antigo disparo automatico do dia 5
+// Financeiro > Validacao Relatorio (a rotina mensal gera → aceite do CSC envia
+// em 1 clique → o envio automatico manda o que sobrou; os dias estao em
+// @/lib/financeiro/relatorios/schedule). O antigo disparo automatico direto
 // (/api/cron/monthly-bi-report) foi REMOVIDO — nao reintroduzir.
 // ============================================================================
 

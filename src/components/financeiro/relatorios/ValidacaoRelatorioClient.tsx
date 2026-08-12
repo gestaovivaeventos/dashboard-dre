@@ -40,6 +40,10 @@ import { useToast } from "@/components/ui/toaster";
 import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { exportOnePageReportPdf } from "@/lib/financeiro/relatorios/export-one-page-pdf";
 import {
+  BI_AUTOSEND_DAY,
+  BI_GENERATION_DAY,
+} from "@/lib/financeiro/relatorios/schedule";
+import {
   mapOnePageApiResponseToPreviewData,
   type OnePageApiResponse,
 } from "@/lib/financeiro/relatorios/one-page-report-mapper";
@@ -107,7 +111,7 @@ interface Props {
 
 // NOTA: o valor gravado no banco continua 'em_revisao' (constraint CHECK em
 // bi_report_validations). Só o RÓTULO mudou, para dizer o que o estado de fato
-// faz: impedir o envio, inclusive o automático do dia 10.
+// faz: impedir o envio, inclusive o automático (ver BI_AUTOSEND_DAY).
 const STATUS_LABEL: Record<ValidacaoStatus, string> = {
   pendente_validacao: "Pendente de validação",
   em_revisao: "Envio bloqueado",
@@ -450,8 +454,16 @@ export function ValidacaoRelatorioClient({
             <div>
               <h1 className="text-lg font-semibold text-ink-primary">Validação Relatório</h1>
               <p className="text-xs text-muted-foreground">
-                Valide os relatórios BI do mês antes do envio aos gestores das unidades. Sem
-                aceite até o dia 10, o Control Hub envia automaticamente a versão mais recente.
+                Valide os relatórios BI do mês antes do envio aos gestores das unidades. O
+                relatório do mês anterior é gerado automaticamente no{" "}
+                <strong className="font-semibold text-ink-primary">
+                  dia {BI_GENERATION_DAY}
+                </strong>
+                . Sem aceite até o{" "}
+                <strong className="font-semibold text-ink-primary">
+                  dia {BI_AUTOSEND_DAY}
+                </strong>
+                , o Control Hub envia automaticamente a versão mais recente.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-2">
@@ -481,7 +493,7 @@ export function ValidacaoRelatorioClient({
                 variant="outline"
                 onClick={handleGenerateMonth}
                 disabled={generating}
-                title="Executa a mesma geração da rotina do dia 4 para o mês anterior. Relatórios já enviados não são regerados."
+                title={`Executa a mesma geração da rotina do dia ${BI_GENERATION_DAY} para o mês anterior. Relatórios já enviados não são regerados.`}
               >
                 {generating ? (
                   <>
@@ -516,7 +528,8 @@ export function ValidacaoRelatorioClient({
                 <div className="text-xs">{envioIndisponivel}</div>
                 <div className="mt-1 text-xs">
                   Você ainda pode gerar, revisar, aceitar e bloquear relatórios — apenas o
-                  envio está suspenso. Isso vale também para a rotina automática do dia 10.
+                  envio está suspenso. Isso vale também para a rotina automática do dia{" "}
+                  {BI_AUTOSEND_DAY}.
                 </div>
               </div>
             </div>
@@ -578,12 +591,12 @@ export function ValidacaoRelatorioClient({
                           </div>
                         ) : null}
                         {/* A consequência de "Em revisão" é invisível sem isto:
-                            é o único estado que impede o envio automático do
-                            dia 10 — e, por isso, o único que exige ação do CSC
-                            antes dessa data para o gestor receber algo. */}
+                            é o único estado que impede o envio automático — e,
+                            por isso, o único que exige ação do CSC antes dessa
+                            data para o gestor receber algo. */}
                         {item.status === "em_revisao" ? (
                           <div className="mt-1 max-w-[220px] text-xs text-orange-700">
-                            Não será enviado no dia 10. Corrija e clique em gerar
+                            Não será enviado no dia {BI_AUTOSEND_DAY}. Corrija e clique em gerar
                             novamente, ou aceite para liberar o envio.
                           </div>
                         ) : null}
@@ -745,7 +758,7 @@ export function ValidacaoRelatorioClient({
                               {/* Ação de EXCEÇÃO — separada do fluxo de rotina
                                   (aceitar / contexto / regerar / enviar) por um
                                   divisor e com tratamento de alerta. É o único
-                                  freio do envio automático do dia 10, então
+                                  freio do envio automático mensal, então
                                   precisa saltar aos olhos; mas justamente por
                                   parar o fluxo, não deve parecer um passo
                                   normal do dia a dia. */}
@@ -767,7 +780,7 @@ export function ValidacaoRelatorioClient({
                                 title={
                                   item.status === "em_revisao"
                                     ? "O envio deste relatório já está bloqueado. Para liberar, gere novamente após o ajuste ou aceite."
-                                    : "EXCEÇÃO: impede o envio deste relatório, inclusive o automático do dia 10. Use apenas quando houver um problema conhecido que ainda não foi corrigido."
+                                    : `EXCEÇÃO: impede o envio deste relatório, inclusive o automático do dia ${BI_AUTOSEND_DAY}. Use apenas quando houver um problema conhecido que ainda não foi corrigido.`
                                 }
                               >
                                 <Ban className="mr-1 h-3.5 w-3.5" />
@@ -857,8 +870,9 @@ export function ValidacaoRelatorioClient({
             <DialogTitle>Bloquear o envio deste relatório</DialogTitle>
             <DialogDescription>
               {active?.companyName} — {active?.periodLabel}. O relatório deixa de ser
-              enviado: nem manualmente, nem pela rotina automática do dia 10. Um relatório
-              apenas <em>não aceito</em> continua saindo no dia 10 — é este bloqueio que
+              enviado: nem manualmente, nem pela rotina automática do dia {BI_AUTOSEND_DAY}.
+              Um relatório apenas <em>não aceito</em> continua saindo no dia{" "}
+              {BI_AUTOSEND_DAY} — é este bloqueio que
               impede isso. Use só quando houver um problema conhecido que ainda não foi
               corrigido; para ajustes que você já vai fazer agora, basta corrigir e clicar
               em gerar novamente.
