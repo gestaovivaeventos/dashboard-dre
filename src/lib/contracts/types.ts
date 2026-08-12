@@ -96,6 +96,9 @@ export interface RequisitionInput {
   // BV: chave de casamento com a base de RPs pagas.
   fundo?: string | null
   numero_contrato?: string | null
+  // Tipo de pagamento da RP (ex.: "Reembolso"). Quando indica reembolso e os
+  // anexos são comprovantes de reembolso, o match de favorecido não reprova.
+  tipo_pagamento?: string | null
 }
 
 export interface ExtractedContract {
