@@ -385,6 +385,18 @@ export interface RequisitionGroup {
 const TIPO_CONTRATO = 'Contrato / Aditivo Contratual'
 const TIPO_NF = 'Nota Fiscal / Fatura'
 const TIPO_BOLETO = 'Boleto'
+const TIPO_REEMBOLSO = 'Comprovantes de pgto para reembolso'
+
+// "Reembolso", "reembolso km", "Reembolso de despesas"… — basta conter a
+// palavra, sem acento e sem caixa, para marcar a RP como reembolso.
+export function isTipoPagamentoReembolso(tipo: string | null | undefined): boolean {
+  if (!tipo) return false
+  return tipo
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .includes('reembolso')
+}
 
 export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // If ANY document had an extraction failure, we can't audit the requisition
@@ -428,9 +440,11 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // motivos  → REPROVAR (divergência explícita OU requisito documental da faixa ausente)
   // revisar  → analise_especialista (falta info de entrada / caso não avaliável)
   // ressalvas→ aprovada_ressalva (avisos que não bloqueiam o pagamento)
+  // alertas  → informativos, não mudam o status
   const motivos: string[] = []
   const revisar: string[] = []
   const ressalvas: string[] = []
+  const alertas: string[] = []
 
   // ── Identificação cruzada da RP com os documentos ────────────────────────
   const reqForn = limparNomeEmpresa(req.fornecedor)
@@ -448,10 +462,23 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
       )
     : false
 
+  // ── Reembolso ─────────────────────────────────────────────────────────────
+  // Quando TODOS os anexos são comprovantes de reembolso: a origem do pagamento
+  // no comprovante costuma ser a pessoa reembolsada, mas pode estar em nome de
+  // terceiro — isso NÃO reprova (regra de negócio, 2026-08). O requisito é a RP
+  // estar marcada com tipo de pagamento "reembolso"; sem a marcação, vai para
+  // análise do especialista confirmar que é reembolso mesmo.
+  const soReembolso = docs.every((d) => d.tipo_documento === TIPO_REEMBOLSO)
+  const rpMarcadaReembolso = isTipoPagamentoReembolso(req.tipo_pagamento)
+
   // ── Valor (ambas as faixas) ──────────────────────────────────────────────
   // Soma dos valores dos documentos vs valor da RP. Estouro com parcela
-  // compatível → pagamento parcial (verificar_saldo); soma menor → reprova.
+  // compatível → pagamento parcial (verificar_saldo). RP abaixo de uma parcela
+  // (ou do contrato, quando não há parcelas) também vai para verificar_saldo —
+  // acontece quando o fundo não tem saldo para a parcela cheia; reprovar
+  // esconderia um pagamento legítimo. Soma menor que a RP → reprova.
   let partialPayment: null | { somaContratos: number; parcelaIdentificada: number } = null
+  let pagamentoAbaixo: null | { somaContratos: number; parcelaReferencia: number | null } = null
   {
     const soma = docs.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
     const diff = soma - reqValor
@@ -460,8 +487,16 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     } else if (diff > 0) {
       const todasParcelas = docs.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
       const parcela = todasParcelas.find((v) => Math.abs(v - reqValor) <= VALUE_TOLERANCE)
+      const parcelasAcima = todasParcelas.filter((v) => v > reqValor + VALUE_TOLERANCE)
       if (parcela !== undefined) {
         partialPayment = { somaContratos: soma, parcelaIdentificada: parcela }
+      } else if (parcelasAcima.length > 0) {
+        // RP paga menos que uma parcela prevista — cita a menor parcela acima
+        // do valor (a que provavelmente está sendo paga em partes).
+        pagamentoAbaixo = { somaContratos: soma, parcelaReferencia: Math.min(...parcelasAcima) }
+      } else if (todasParcelas.length === 0) {
+        // Documento sem parcelas declaradas: só dá para comparar com o total.
+        pagamentoAbaixo = { somaContratos: soma, parcelaReferencia: null }
       } else {
         motivos.push(
           `Valor da requisição (${reqValor.toFixed(2)}) não corresponde à soma dos documentos (${soma.toFixed(2)}) nem a nenhuma parcela declarada`,
@@ -479,13 +514,27 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     // Aprova com: favorecido identificável (CNPJ OU nome) + valor compatível +
     // ≥1 anexo classificável (garantido por docs.length > 0). Não exige
     // dados bancários, assinaturas, cronograma nem tipo específico de anexo.
-    const reqTemIdentificacao = Boolean(reqCnpj || reqForn || reqFav)
-    if (!reqTemIdentificacao) {
-      revisar.push('Favorecido da requisição em branco (sem nome e sem CPF/CNPJ)')
-    } else if (!matchNome && !matchCnpj) {
-      motivos.push(
-        `Favorecido da requisição não confere com nenhum documento (Req: '${req.favorecido ?? req.fornecedor ?? ''}' / '${req.cpf_cnpj ?? ''}')`,
-      )
+    if (soReembolso) {
+      // Reembolso: favorecido divergente não reprova — o que valida é a RP
+      // estar marcada como reembolso + o valor bater com os comprovantes.
+      if (!rpMarcadaReembolso) {
+        revisar.push(
+          'Anexos são comprovantes de reembolso, mas o tipo de pagamento da RP não está marcado como reembolso — confirme se a RP é de fato um reembolso',
+        )
+      } else if (!matchNome && !matchCnpj) {
+        alertas.push(
+          `Reembolso: origem dos comprovantes não está no nome do favorecido da RP (Req: '${req.favorecido ?? req.fornecedor ?? ''}') — permitido para reembolso; validação feita pelo valor`,
+        )
+      }
+    } else {
+      const reqTemIdentificacao = Boolean(reqCnpj || reqForn || reqFav)
+      if (!reqTemIdentificacao) {
+        revisar.push('Favorecido da requisição em branco (sem nome e sem CPF/CNPJ)')
+      } else if (!matchNome && !matchCnpj) {
+        motivos.push(
+          `Favorecido da requisição não confere com nenhum documento (Req: '${req.favorecido ?? req.fornecedor ?? ''}' / '${req.cpf_cnpj ?? ''}')`,
+        )
+      }
     }
   } else {
     // ═══════════ FAIXA 2 — RP acima de R$ 10.000 (validação rígida) ═══════════
@@ -567,7 +616,6 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   }
 
   // ── Alertas (não mudam o status): cronograma por módulo ──────────────────
-  const alertas: string[] = []
   if (req.modulo && req.data_evento) {
     const contratoComData = docs.find((d) => d.data_contrato)
     const al = alertaCronograma(req.modulo, req.data_evento, contratoComData?.data_contrato)
@@ -624,6 +672,22 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
         `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
       ],
       resumo: `Verificar saldo — parcela de R$ ${partialPayment.parcelaIdentificada.toFixed(2)} identificada em contrato de R$ ${partialPayment.somaContratos.toFixed(2)} (${docs.length} doc${docs.length === 1 ? '' : 's'})`,
+      ...comAlertas,
+    }
+  }
+
+  if (pagamentoAbaixo) {
+    const { somaContratos, parcelaReferencia } = pagamentoAbaixo
+    const referencia =
+      parcelaReferencia !== null
+        ? `abaixo da parcela prevista em contrato de R$ ${parcelaReferencia.toFixed(2)}`
+        : `abaixo do valor do contrato de R$ ${somaContratos.toFixed(2)} (sem parcelas declaradas no documento)`
+    return {
+      status: 'verificar_saldo',
+      motivos: [
+        `Valor da RP (R$ ${reqValor.toFixed(2)}) está ${referencia}. Possível pagamento parcial por falta de saldo do fundo — confirme o saldo do contrato e o valor restante da parcela antes de pagar.`,
+      ],
+      resumo: `Verificar saldo — RP R$ ${reqValor.toFixed(2)} ${referencia}${parcelaReferencia !== null ? ` (contrato R$ ${somaContratos.toFixed(2)})` : ''}`,
       ...comAlertas,
     }
   }

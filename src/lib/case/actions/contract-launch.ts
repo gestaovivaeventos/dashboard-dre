@@ -16,6 +16,7 @@ import {
 import { incluirContaPagar, toOmieDate } from "@/lib/omie/contapagar";
 import { incluirContaReceber, alterarContaReceberCategorias, consultarContaReceberCategorias } from "@/lib/omie/contareceber";
 import { incluirAnexoContaPagar, incluirAnexoContaReceber } from "@/lib/omie/anexo";
+import { ensureContractTitles } from "@/lib/case/titles";
 import type { CaseLegKind } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
@@ -130,6 +131,14 @@ export async function launchContractToOmie(
     .eq("id", contractId)
     .single();
   if (cErr || !contract) return { error: "Contrato não encontrado." };
+
+  // Self-healing: contrato sem NENHUM título (ex.: assinado direto da aba
+  // Cliente, sem passar pela aba Atração) regenera os títulos a partir do
+  // cronograma do cliente + atrações salvas antes de lançar.
+  {
+    const ensured = await ensureContractTitles(db, contractId);
+    if ("error" in ensured) return markContractError(db, contractId, ensured.error);
+  }
 
   const [{ data: client }, { data: atracoesData }, { data: fornecedoresData }, { data: company }, { data: config }] = await Promise.all([
     db.from("case_clients").select("*").eq("id", contract.client_id).single(),
@@ -378,6 +387,18 @@ export async function launchContractToOmie(
     .select("status")
     .eq("contract_id", contractId);
   const statuses = (allTitles ?? []).map((t: { status: string }) => t.status);
+
+  // Mesmo após o self-healing não há título nenhum: não existe parcela do
+  // cliente nem atração com cronograma. Mensagem acionável em vez do genérico
+  // "Falha ao lançar os títulos no Omie".
+  if (statuses.length === 0) {
+    return markContractError(
+      db,
+      contractId,
+      "Contrato sem títulos para lançar — confira as parcelas do cliente (aba Cliente) e os cronogramas das atrações (aba Atração), depois use Lançar no Omie novamente.",
+    );
+  }
+
   const allLancado = statuses.length > 0 && statuses.every((s: string) => s === "lancado");
 
   const finalStatus: "lancado" | "parcial" | "erro" = allLancado

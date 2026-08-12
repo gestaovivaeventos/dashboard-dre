@@ -1,7 +1,9 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
-import { Fragment, useState } from "react";
+import { ChevronRight, X } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+
+import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
 
 export interface OrcamentoSectorRow {
   sector_id: string | null;
@@ -90,21 +92,58 @@ export function OrcamentoTable({ rows }: { rows: OrcamentoRow[] }) {
       return next;
     });
 
+  // Cabeçalho estilo Excel (ordenar + filtrar por valores), igual às telas de
+  // Requisições / Contas a Pagar / Aprovações. O filtro/ordenação vale para as
+  // linhas de tipo de despesa; o detalhamento por setor acompanha a linha-pai.
+  const columns = useMemo<ExcelColumn<OrcamentoRow>[]>(
+    () => [
+      { key: "tipo", type: "text", getValue: (r) => r.name },
+      { key: "orcado", type: "number", getValue: (r) => r.orcado, label: (r) => fmt.format(r.orcado) },
+      { key: "realizado", type: "number", getValue: (r) => r.realizado, label: (r) => fmt.format(r.realizado) },
+      { key: "pendente", type: "number", getValue: (r) => r.pendente, label: (r) => fmt.format(r.pendente) },
+      {
+        key: "disponivel",
+        type: "number",
+        getValue: (r) => r.orcado - r.realizado - r.pendente,
+        label: (r) => fmt.format(r.orcado - r.realizado - r.pendente),
+      },
+    ],
+    [],
+  );
+  const { rows: displayed, headerProps, hasFilters, clearAll } = useExcelTable(rows, columns);
+
   return (
-    <div className="rounded-lg border overflow-hidden">
+    <div className="space-y-3">
+      {hasFilters && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>
+            {displayed.length} de {rows.length} tipo{rows.length === 1 ? "" : "s"} de despesa
+          </span>
+          <button
+            type="button"
+            onClick={clearAll}
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2.5 py-1 font-medium hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Limpar filtros
+          </button>
+        </div>
+      )}
+
+      <div className="rounded-lg border overflow-hidden">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b bg-muted/40">
-            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Tipo de despesa</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Orçado</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Realizado</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Pendente</th>
-            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Disponível</th>
+          <tr className="border-b bg-muted/40 text-xs font-medium text-muted-foreground">
+            <th className="px-4 py-3"><ExcelHeaderCell label="Tipo de despesa" {...headerProps("tipo")} /></th>
+            <th className="px-4 py-3"><ExcelHeaderCell label="Orçado" align="right" {...headerProps("orcado")} /></th>
+            <th className="px-4 py-3"><ExcelHeaderCell label="Realizado" align="right" {...headerProps("realizado")} /></th>
+            <th className="px-4 py-3"><ExcelHeaderCell label="Pendente" align="right" {...headerProps("pendente")} /></th>
+            <th className="px-4 py-3"><ExcelHeaderCell label="Disponível" align="right" {...headerProps("disponivel")} /></th>
             <th className="px-4 py-3 text-left font-medium text-muted-foreground w-32">Execução</th>
           </tr>
         </thead>
         <tbody className="divide-y">
-          {rows.map((row) => {
+          {displayed.map((row) => {
             const key = row.expense_type_id ?? "__none__";
             const isOpen = expanded.has(key);
             const hasSectors = row.sectors.length > 0;
@@ -147,6 +186,7 @@ export function OrcamentoTable({ rows }: { rows: OrcamentoRow[] }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

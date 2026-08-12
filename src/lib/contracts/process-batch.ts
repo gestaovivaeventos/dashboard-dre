@@ -53,6 +53,7 @@ interface ItemRow {
   data_contrato: string | null
   fundo: string | null
   numero_contrato: string | null
+  tipo_pagamento: string | null
 }
 
 export interface ProcessBatchResult {
@@ -286,7 +287,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, raw_extraction',
+      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, tipo_pagamento, raw_extraction',
     )
     .eq('batch_id', batchId)
 
@@ -382,6 +383,7 @@ export async function processBatch(
         data_pagamento_prevista: first.data_pagamento_prevista,
         fundo: first.fundo,
         numero_contrato: first.numero_contrato,
+        tipo_pagamento: first.tipo_pagamento,
       },
       documentos,
     })

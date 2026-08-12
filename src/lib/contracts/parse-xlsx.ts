@@ -25,6 +25,9 @@ export interface RequisitionRow {
   // BV (saldo do contrato): chave de casamento com a base de RPs pagas.
   fundo: string | null
   numero_contrato: string | null
+  // Tipo de pagamento da RP (ex.: "Reembolso"). Usado pela validação para
+  // relaxar o match de favorecido quando os anexos são comprovantes de reembolso.
+  tipo_pagamento: string | null
 }
 
 export interface ParseXlsxResult {
@@ -92,6 +95,13 @@ const HEADER_ALIASES: Record<string, keyof RequisitionRow> = {
   link: 'link_contrato',
   url: 'link_contrato',
   linkcontrato: 'link_contrato',
+
+  tipopagamento: 'tipo_pagamento',
+  tipodepagamento: 'tipo_pagamento',
+  formapagamento: 'tipo_pagamento',
+  formadepagamento: 'tipo_pagamento',
+  tipopgto: 'tipo_pagamento',
+  formapgto: 'tipo_pagamento',
 }
 
 function normalizeHeader(value: unknown): string {
@@ -196,6 +206,7 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
         else if (field === 'data_pagamento_prevista') result.data_pagamento_prevista = stringValue
         else if (field === 'fundo') result.fundo = stringValue
         else if (field === 'numero_contrato') result.numero_contrato = stringValue
+        else if (field === 'tipo_pagamento') result.tipo_pagamento = stringValue
       }
     }
 
@@ -233,6 +244,7 @@ export function parseRequisitionsXlsx(buffer: ArrayBuffer): ParseXlsxResult {
       data_pagamento_prevista: result.data_pagamento_prevista ?? null,
       fundo: result.fundo ?? null,
       numero_contrato: result.numero_contrato ?? null,
+      tipo_pagamento: result.tipo_pagamento ?? null,
     })
   }
 

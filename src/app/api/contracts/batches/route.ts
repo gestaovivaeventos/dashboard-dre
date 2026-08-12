@@ -135,6 +135,7 @@ export async function POST(request: Request) {
     data_pagamento_prevista: row.data_pagamento_prevista,
     fundo: row.fundo,
     numero_contrato: row.numero_contrato,
+    tipo_pagamento: row.tipo_pagamento,
     status: 'pending' as const,
   }))
 
