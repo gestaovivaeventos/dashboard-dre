@@ -19,19 +19,26 @@ export function defaultLandingFor(
   canViagens: boolean = false,
   canContratos: boolean = false,
 ): string {
-  // Ilha de contratos — não passa pela home.
-  if (profile === "validador_contrato") return "/contratos";
-  // Franqueado (e a cópia CSC): mantém /dashboard até o Plano 2 entregar o
-  // widget Mini-DRE dele.
-  if (profile === "franqueado" || profile === "csc") return "/dashboard";
-  // Demais perfis com algum módulo → cockpit /home.
-  if (canFinanceiro || canCompras || profile === "admin") return "/home";
-  // Usuário só-Case cai direto nos contratos da Case.
-  if (canCase) return "/case/contratos";
-  // Usuário só-Viagens cai direto nas requisições de viagem.
-  if (canViagens) return "/viagens/requisicoes";
-  // Usuário cujo único módulo é Validação de Contratos.
-  if (canContratos) return "/contratos";
+  // TODO perfil pousa na tela inicial. Ela é o cockpit comum do Control Hub:
+  // saudação, indicadores e notícias econômicas para todos, e as seções
+  // operacionais que cada perfil pode ver (@/lib/home/ctrl-widgets). Os destinos
+  // por módulo que existiam aqui (franqueado/CSC em /dashboard, validador de
+  // contrato em /contratos, só-Case em /case/contratos, só-Viagens em
+  // /viagens/requisicoes) saíram: a home é acessível a todos e leva a essas
+  // telas pelo menu.
+  if (
+    canFinanceiro ||
+    canCompras ||
+    canCase ||
+    canViagens ||
+    canContratos ||
+    profile === "admin"
+  ) {
+    return "/home";
+  }
+  // Usuário ativo sem NENHUM módulo liberado — não é regra de perfil, é falta de
+  // acesso: continua na tela de espera. (Usuário inativo já vai para /pendente
+  // antes de chegar aqui, na root page e no middleware.)
   return "/pendente";
 }
 
@@ -87,7 +94,18 @@ export function canAccessPathByProfile(
    */
   email: string | null = null,
 ): boolean {
-  // Validador de contrato: ilha. Só /contratos.
+  // Tela inicial (cockpit): liberada para TODOS os perfis, sem depender de
+  // módulo. O que cada um VÊ lá dentro é decidido por perfil na própria tela
+  // (ver @/lib/home/ctrl-widgets) — aqui é só o acesso à rota.
+  //
+  // Vem antes de tudo de propósito: /home estava dentro do bloco do módulo
+  // Financeiro, então quem só tem Compras (solicitante, gerente, diretor,
+  // contas a pagar sem can_financeiro) era barrado justamente na rota para a
+  // qual o defaultLandingFor o manda — o middleware negava e redirecionava de
+  // volta para /home, em loop.
+  if (pathname === "/home" || pathname.startsWith("/home/")) return true;
+
+  // Validador de contrato: ilha. Só /contratos (+ a tela inicial, acima).
   if (profile === "validador_contrato") {
     return pathname === "/contratos" || pathname.startsWith("/contratos/");
   }
@@ -228,7 +246,8 @@ export function canAccessPathByProfile(
     pathname.startsWith("/budget-forecast") ||
     pathname.startsWith("/comparativos-anuais") ||
     pathname.startsWith("/kpis") ||
-    pathname.startsWith("/home") ||
+    // /home saiu daqui: a tela inicial é de todos os perfis e já foi liberada
+    // no topo desta função, antes de qualquer gate de módulo.
     pathname.startsWith("/s/") ||
     pathname.startsWith("/conexoes") ||
     pathname.startsWith("/financeiro") ||

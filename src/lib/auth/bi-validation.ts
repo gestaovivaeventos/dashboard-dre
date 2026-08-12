@@ -12,6 +12,10 @@ import type { UnifiedProfile, UserProfileType } from "@/lib/supabase/types";
 // Qualquer outro usuário NÃO vê o item no menu, é bloqueado no middleware e
 // levaria 403 nas rotas de API. Espelha public.can_validate_bi_reports() no
 // banco (RLS) — ao mudar um, mude os dois.
+//
+// ⚠️ AO INCLUIR UM E-MAIL AQUI, confira o catálogo em
+//    `src/lib/auth/user-exceptions.ts` — ele já lê esta lista, mas é o que
+//    mantém a exceção visível no botão "Regras especiais" da tela de Usuários.
 // ============================================================================
 
 /** E-mails nominais liberados além do perfil CSC/admin. Sempre em minúsculas. */

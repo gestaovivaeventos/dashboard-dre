@@ -3,6 +3,12 @@
 // Estes IDs são acordos de negócio explícitos, não dados derivados — por isso
 // ficam fixos no código. Mudaram? Atualize aqui.
 //
+// ⚠️ AO ADICIONAR/ALTERAR UMA REGRA NOMINAL AQUI, ATUALIZE TAMBÉM
+//    `src/lib/auth/user-exceptions.ts` — é o catálogo que alimenta o botão
+//    "Regras especiais" da tela de Usuários. Instrução permanente do Marcelo:
+//    o admin precisa conseguir consultar TODAS as exceções por lá. Regra que
+//    não está no catálogo volta a ser invisível pra quem administra usuários.
+//
 // Vive num módulo próprio (sem "use server") para ser compartilhado entre a
 // server action (createRequest) e a UI (badges de aprovação): ambos precisam
 // concordar sobre "quem vai direto ao diretor". Antes, o createRequest embutia

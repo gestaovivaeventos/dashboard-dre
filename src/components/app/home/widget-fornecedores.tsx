@@ -8,8 +8,8 @@ import { formatDayBR } from "@/lib/ctrl/datetime";
 import { fmtBRL, type HomeSuppliers } from "@/lib/home/ctrl-widgets";
 
 /**
- * Fornecedores a homologar — exclusivo do perfil "Contas a Pagar"
- * (gate `caps.canHomologate`, ver deriveCtrlCaps).
+ * Fornecedores a homologar — perfil "Contas a Pagar" (dono da homologação) e
+ * Admin, que vê a home completa (gate `caps.canHomologate`, ver deriveCtrlCaps).
  *
  * Junta as duas pontas da mesma pendência: o fornecedor recém-cadastrado que
  * ainda não foi homologado e a requisição em aberto que vai travar no envio

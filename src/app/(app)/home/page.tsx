@@ -17,10 +17,10 @@ export default async function HomePage() {
   const userName = profile?.name || user.email || "Usuário";
   const ctrlRoles = modules?.ctrl?.roles ?? [];
   const sectorIds = profile?.sector_ids ?? [];
-  const canFinanceiro = Boolean(modules?.dre);
-  // Solicitante também vê Indicadores + Notícias econômicas na home (abaixo de
-  // "Minhas Requisições"), embora não tenha acesso ao módulo financeiro.
-  const showEconomic = canFinanceiro || profile?.profile === "solicitante";
+  // Alertas do Sistema (sync, mapeamento, integração) são administração da
+  // plataforma — só o perfil Admin. Indicadores e Notícias econômicas, ao
+  // contrário, valem para todos os perfis e não dependem de módulo.
+  const isAdmin = profile?.profile === "admin";
 
   const caps = deriveCtrlCaps(ctrlRoles, sectorIds);
 
@@ -37,7 +37,6 @@ export default async function HomePage() {
   ) {
     ctrlData = await loadHomeCtrlData({
       userId: profile.id,
-      roles: ctrlRoles,
       sectorIds,
       caps,
     });
@@ -48,8 +47,7 @@ export default async function HomePage() {
       userName={userName}
       caps={caps}
       ctrlData={ctrlData}
-      canFinanceiro={canFinanceiro}
-      showEconomic={showEconomic}
+      isAdmin={Boolean(isAdmin)}
     />
   );
 }

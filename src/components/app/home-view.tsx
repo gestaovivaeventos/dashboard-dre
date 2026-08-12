@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { ShieldAlert } from "lucide-react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AttentionStrip } from "@/components/app/home/attention-strip";
@@ -36,9 +38,13 @@ interface HomeViewProps {
   userName: string;
   caps: HomeCtrlCaps;
   ctrlData: HomeCtrlData;
-  canFinanceiro: boolean;
-  /** Mostra Indicadores + Notícias econômicas (financeiro e também Solicitante). */
-  showEconomic: boolean;
+  /**
+   * Alertas do Sistema (erro de sync, categorias sem mapeamento, falhas de
+   * integração) são administração da plataforma: só o perfil Admin vê. Antes
+   * bastava ter o módulo Financeiro, o que expunha pendência técnica a quem não
+   * pode agir sobre ela. A geração dos alertas não mudou — só quem os enxerga.
+   */
+  isAdmin: boolean;
 }
 
 function getGreeting(): string {
@@ -58,7 +64,7 @@ function alertDotColor(type: string): string {
   return "bg-blue-400";
 }
 
-export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic }: HomeViewProps) {
+export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -67,7 +73,7 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
   const [loadingNews, setLoadingNews] = useState(true);
 
   useEffect(() => {
-    if (!showEconomic) return;
+    // Indicadores e Notícias econômicas são de todos os perfis — nenhum gate.
     void fetch("/api/home/indicators")
       .then((r) => r.json())
       .then((d: { indicators: Indicator[] }) => setIndicators(d.indicators ?? []))
@@ -76,13 +82,14 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
       .then((r) => r.json())
       .then((d: { news: NewsItem[] }) => setNews(d.news ?? []))
       .finally(() => setLoadingNews(false));
-    // Alertas do Sistema é exclusivo do módulo financeiro.
-    if (!canFinanceiro) return;
+    // Alertas do Sistema é exclusivo do perfil Admin. O endpoint também recusa
+    // não-admin (403); este gate evita a chamada inútil.
+    if (!isAdmin) return;
     void fetch("/api/home/stats")
       .then((r) => r.json())
-      .then((d: { alerts: Alert[] }) => setAlerts(d.alerts ?? []))
+      .then((d: { alerts?: Alert[] }) => setAlerts(d.alerts ?? []))
       .finally(() => setLoadingAlerts(false));
-  }, [showEconomic, canFinanceiro]);
+  }, [isAdmin]);
 
   const greeting = getGreeting();
   const currentDate = new Date().toLocaleDateString("pt-BR", {
@@ -110,8 +117,50 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
         <p className="mt-1 text-sm text-muted-foreground">{formattedDate}</p>
       </div>
 
-      {/* Faixa de atenção */}
-      <AttentionStrip data={ctrlData} />
+      {/* Faixa de atenção — itens filtrados pela responsabilidade do perfil */}
+      <AttentionStrip data={ctrlData} caps={caps} />
+
+      {/* Alertas do Sistema — exclusivo do Admin e no TOPO: é a única seção da
+          home que é responsabilidade dele (sync, mapeamento, integração). Os
+          quadros abaixo são acompanhamento geral. Nunca parcial: ou o card
+          inteiro aparece, ou nem o pedido ao endpoint acontece. */}
+      {isAdmin && (
+        <Card className="rounded-lg border-2 border-amber-300 bg-background dark:border-amber-800">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              Alertas do Sistema
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loadingAlerts ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <Skeleton className="mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full" />
+                  <div className="flex-1 space-y-1">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-3 w-56" />
+                  </div>
+                </div>
+              ))
+            ) : alerts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhum alerta no momento.</p>
+            ) : (
+              alerts.map((alert, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <span
+                    className={`mt-1.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${alertDotColor(alert.type)}`}
+                  />
+                  <div>
+                    <p className="text-sm font-medium leading-tight">{alert.title}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{alert.detail}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Grade de widgets */}
       {hasAnyWidget && (
@@ -122,7 +171,7 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
           {caps.canPay && ctrlData.payments && (
             <WidgetFilaPagamento data={ctrlData.payments} />
           )}
-          {/* Só o perfil Contas a Pagar — canHomologate não liga para os demais. */}
+          {/* Contas a Pagar (dono da homologação) e Admin (visão completa). */}
           {caps.canHomologate && ctrlData.suppliers && (
             <WidgetFornecedores data={ctrlData.suppliers} />
           )}
@@ -135,127 +184,86 @@ export function HomeView({ userName, caps, ctrlData, canFinanceiro, showEconomic
         </div>
       )}
 
-      {/* Rodapé econômico — financeiro vê tudo; Solicitante vê Indicadores + Notícias */}
-      {showEconomic && (
-        <>
-          <section>
-            <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {loadingIndicators
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <Card key={i} className="rounded-lg border bg-background">
-                      <CardContent className="space-y-2 p-4">
-                        <Skeleton className="h-4 w-24" />
-                        <Skeleton className="h-7 w-20" />
-                        <Skeleton className="h-4 w-16" />
-                      </CardContent>
-                    </Card>
-                  ))
-                : indicators.map((ind) => (
-                    <Card key={ind.name} className="rounded-lg border bg-background">
-                      <CardContent className="p-4">
-                        <div className="mb-1 flex items-center gap-2">
-                          <span
-                            className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                            style={{ backgroundColor: ind.color }}
-                          />
-                          <span className="truncate text-xs text-muted-foreground">
-                            {ind.label}
-                          </span>
-                        </div>
-                        <p className="text-2xl font-bold tracking-tight">{ind.value}</p>
-                        <p
-                          className="mt-1 text-xs font-medium"
-                          style={{ color: changeColor(ind.changeType) }}
-                        >
-                          {ind.change}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
-            </div>
-          </section>
-
-          <section
-            className={`grid grid-cols-1 gap-6 ${canFinanceiro ? "lg:grid-cols-2" : ""}`}
-          >
-            {canFinanceiro && (
-            <Card className="rounded-lg border bg-background">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">Alertas do Sistema</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {loadingAlerts ? (
-                  Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="flex items-start gap-3">
-                      <Skeleton className="mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full" />
-                      <div className="flex-1 space-y-1">
-                        <Skeleton className="h-4 w-40" />
-                        <Skeleton className="h-3 w-56" />
-                      </div>
-                    </div>
-                  ))
-                ) : alerts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhum alerta no momento.</p>
-                ) : (
-                  alerts.map((alert, i) => (
-                    <div key={i} className="flex items-start gap-3">
+      {/* Rodapé econômico — Indicadores e Notícias são de TODOS os perfis */}
+      <section>
+        <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {loadingIndicators
+            ? Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i} className="rounded-lg border bg-background">
+                  <CardContent className="space-y-2 p-4">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-7 w-20" />
+                    <Skeleton className="h-4 w-16" />
+                  </CardContent>
+                </Card>
+              ))
+            : indicators.map((ind) => (
+                <Card key={ind.name} className="rounded-lg border bg-background">
+                  <CardContent className="p-4">
+                    <div className="mb-1 flex items-center gap-2">
                       <span
-                        className={`mt-1.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${alertDotColor(alert.type)}`}
+                        className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                        style={{ backgroundColor: ind.color }}
                       />
-                      <div>
-                        <p className="text-sm font-medium leading-tight">{alert.title}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{alert.detail}</p>
-                      </div>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {ind.label}
+                      </span>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-            )}
-
-            <Card className="rounded-lg border bg-background">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">Notícias Econômicas</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1">
-                {loadingNews ? (
-                  Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="space-y-1 px-3 py-2.5">
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-3 w-32" />
-                    </div>
-                  ))
-                ) : news.length === 0 ? (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">
-                    Nenhuma notícia disponível no momento.
-                  </p>
-                ) : (
-                  news.map((item, i) => (
-                    <a
-                      key={i}
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group flex items-center justify-between rounded-md px-3 py-2.5 transition-colors hover:bg-muted/60"
+                    <p className="text-2xl font-bold tracking-tight">{ind.value}</p>
+                    <p
+                      className="mt-1 text-xs font-medium"
+                      style={{ color: changeColor(ind.changeType) }}
                     >
-                      <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-sm font-medium transition-colors group-hover:text-primary">
-                          {item.title}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {item.source}
-                          {item.publishedAt ? ` · ${item.publishedAt}` : ""}
-                        </p>
-                      </div>
-                    </a>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </section>
-        </>
-      )}
+                      {ind.change}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+        </div>
+      </section>
+
+      <section>
+        <Card className="rounded-lg border bg-background">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">Notícias Econômicas</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {loadingNews ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="space-y-1 px-3 py-2.5">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+              ))
+            ) : news.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-muted-foreground">
+                Nenhuma notícia disponível no momento.
+              </p>
+            ) : (
+              news.map((item, i) => (
+                <a
+                  key={i}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center justify-between rounded-md px-3 py-2.5 transition-colors hover:bg-muted/60"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-sm font-medium transition-colors group-hover:text-primary">
+                      {item.title}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {item.source}
+                      {item.publishedAt ? ` · ${item.publishedAt}` : ""}
+                    </p>
+                  </div>
+                </a>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }
