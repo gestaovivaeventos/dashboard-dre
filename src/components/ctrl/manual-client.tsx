@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
-  Download,
   Info,
   Search,
   X,
@@ -329,24 +328,15 @@ export function ManualClient({ defaultAudience }: { defaultAudience: Filtro }) {
     <div className="space-y-6">
       {/* Cabeçalho */}
       <div className="overflow-hidden rounded-xl border bg-gradient-to-br from-violet-50 to-transparent dark:from-violet-950/30">
-        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600 dark:text-violet-400">
-              Control Hub · Compras
-            </p>
-            <h1 className="text-2xl font-bold tracking-tight">{MANUAL_TITLE}</h1>
-            <p className="text-sm text-muted-foreground">{MANUAL_SUBTITLE}</p>
-            <p className="pt-1 text-xs text-muted-foreground">
-              Versão {MANUAL_VERSION} · atualizado em {MANUAL_UPDATED_AT}
-            </p>
-          </div>
-          <a
-            href="/api/ctrl/manual"
-            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700"
-          >
-            <Download className="h-4 w-4" />
-            Baixar em Word
-          </a>
+        <div className="space-y-1 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600 dark:text-violet-400">
+            Control Hub · Compras
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{MANUAL_TITLE}</h1>
+          <p className="text-sm text-muted-foreground">{MANUAL_SUBTITLE}</p>
+          <p className="pt-1 text-xs text-muted-foreground">
+            Versão {MANUAL_VERSION} · atualizado em {MANUAL_UPDATED_AT}
+          </p>
         </div>
       </div>
 

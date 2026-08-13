@@ -106,7 +106,7 @@ Approval tier is computed from remaining annual balance at request time. Once `a
 
 ### Manual do módulo Compras — `src/lib/ctrl/manual/content.ts`
 
-O manual do usuário final (fluxo, alçadas, status, o que cada perfil faz) tem **fonte única** nesse arquivo de dados puro. Dele saem as duas versões: a tela `/ctrl/manual` (`manual-client.tsx`, último item do menu COMPRAS, liberada a qualquer papel do módulo) e o arquivo Word servido por `/api/ctrl/manual` (`manual/word.ts` renderiza HTML/MSO — não há lib de .docx no projeto). `scripts/gen-manual-doc.ts` grava uma cópia em `docs/`.
+O manual do usuário final (fluxo, alçadas, status, o que cada perfil faz) tem **fonte única** nesse arquivo de dados puro. Dele saem as duas versões: a tela `/ctrl/manual` (`manual-client.tsx`, último item do menu COMPRAS, liberada a qualquer papel do módulo) e o arquivo Word em `docs/`, gerado por `npx tsx scripts/gen-manual-doc.ts` (`manual/word.ts` renderiza HTML/MSO — não há lib de .docx no projeto). O Word é distribuído **fora do app**: a tela não oferece download, e a rota que servia esse botão foi removida a pedido.
 
 **Ao mudar uma regra do módulo (fluxo, alçada, status, campo obrigatório, trava), atualize a seção correspondente do manual** — ele é lido pelo usuário como se fosse a regra, e um manual desatualizado gera mais chamado do que manual nenhum.
 

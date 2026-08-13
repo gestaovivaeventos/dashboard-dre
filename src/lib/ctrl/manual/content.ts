@@ -1,9 +1,9 @@
 // Conteúdo do Manual do módulo Compras (Control Hub).
 //
 // FONTE ÚNICA: esta é a única definição do manual. A tela (/ctrl/manual) e o
-// arquivo Word (/api/ctrl/manual) renderizam exatamente estes blocos — não
-// escreva o texto do manual em nenhum outro lugar, senão as duas versões
-// divergem em silêncio.
+// arquivo Word (scripts/gen-manual-doc.ts → docs/) renderizam exatamente estes
+// blocos — não escreva o texto do manual em nenhum outro lugar, senão as duas
+// versões divergem em silêncio.
 //
 // Módulo PURO de dados: sem imports, sem "use server", sem React. É o que
 // permite gerar o .doc por script (npx tsx) sem carregar o app inteiro.

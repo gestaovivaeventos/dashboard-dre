@@ -6,6 +6,9 @@
 //
 // O conteúdo vem inteiro de ./content — este arquivo só sabe DESENHAR. Se o
 // manual precisa mudar, mude lá.
+//
+// Único consumidor: scripts/gen-manual-doc.ts. A tela /ctrl/manual não oferece
+// download — o Word é distribuído fora do app.
 
 import {
   MANUAL_AUDIENCES,

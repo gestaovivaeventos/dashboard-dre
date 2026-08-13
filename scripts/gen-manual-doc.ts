@@ -4,9 +4,9 @@
 //
 // Saída padrão: docs/Manual-Modulo-Compras-Control-Hub.doc
 //
-// O mesmo conteúdo é servido em tempo real pela rota /api/ctrl/manual (botão
-// "Baixar em Word" na tela /ctrl/manual). Este script existe só para deixar uma
-// cópia do arquivo versionada/compartilhável sem precisar subir o app.
+// É a ÚNICA forma de gerar o Word: a tela /ctrl/manual não oferece download (a
+// rota que servia esse botão foi removida a pedido). O arquivo é distribuído
+// fora do app. Rode este script sempre que o conteúdo do manual mudar.
 
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
