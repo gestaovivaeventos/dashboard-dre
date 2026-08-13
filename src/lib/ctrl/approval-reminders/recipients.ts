@@ -376,3 +376,27 @@ export async function buildApprovalReminderPlan(
     pendingCount: rows.length,
   };
 }
+
+/**
+ * As requisições que dependem da aprovação DESTE usuário agora — a fatia do
+ * plano acima que seria enviada por e-mail para ele.
+ *
+ * Existe para a tela inicial (widget "Aprovações pendentes" e a faixa "Precisa
+ * da sua atenção") consumir exatamente a mesma decisão que a tela de Aprovações
+ * e o lembrete diário já tomam: ETAPA pelo status ('pendente' → gerente /
+ * gerente sócio, 'pendente_diretor' → diretor), SETOR pelos vínculos de
+ * user_sectors (inclusive para o diretor) e os overrides nominais de
+ * routing.ts. Nenhuma regra nova nasce aqui — por isso é um recorte do plano,
+ * e não uma segunda consulta com filtros próprios.
+ *
+ * Aprovadores com visão global (admin / contas a pagar) NÃO saem daqui: eles
+ * não estão no pool de destinatários do lembrete. A home resolve esses casos
+ * pela consulta global, como antes.
+ */
+export async function pendingApprovalsForUser(
+  db: SupabaseClient,
+  userId: string,
+): Promise<PendingApprovalRequest[]> {
+  const plan = await buildApprovalReminderPlan(db);
+  return plan.targets.find((t) => t.userId === userId)?.requests ?? [];
+}

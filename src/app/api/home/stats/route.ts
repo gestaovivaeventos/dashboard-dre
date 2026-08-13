@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
 export async function GET() {
-  const { supabase, user } = await getCurrentSessionContext();
+  const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+  }
+  // Alertas do Sistema (erro de sync, categorias sem mapeamento, empresas sem
+  // sync recente) são administração da plataforma: exclusivos do perfil Admin.
+  // A regra vive aqui também, e não só no gate visual da home, para que o
+  // conteúdo não fique acessível por chamada direta ao endpoint.
+  if (profile?.profile !== "admin") {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
   // Fetch all stats in parallel

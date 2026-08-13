@@ -3,49 +3,63 @@
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
-import type { HomeCtrlData } from "@/lib/home/ctrl-widgets";
+import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
 
 interface AttentionItem {
   label: string;
   href: string;
 }
 
-function buildItems(data: HomeCtrlData): AttentionItem[] {
+/**
+ * Cada item é um par "existe pendência" + "esta pendência é responsabilidade
+ * deste perfil" (caps.alerts, montado em deriveCtrlCaps). Os dois gates são
+ * necessários: um widget pode estar carregado para acompanhamento sem que o
+ * alerta correspondente pertença ao usuário — é o caso do Contas a Pagar, que
+ * vê o quadro de aprovações mas não é avisado delas porque não aprova.
+ */
+function buildItems(data: HomeCtrlData, caps: HomeCtrlCaps): AttentionItem[] {
   const items: AttentionItem[] = [];
-  if (data.approvals && data.approvals.total > 0) {
+  const alerts = caps.alerts;
+
+  if (alerts.approvals && data.approvals && data.approvals.total > 0) {
     items.push({
       label: `${data.approvals.total} aprovação(ões) aguardando você`,
       href: "/ctrl/aprovacoes",
     });
   }
-  if (data.payments && data.payments.omieErrors > 0) {
+  if (alerts.omieErrors && data.payments && data.payments.omieErrors > 0) {
     items.push({
       label: `${data.payments.omieErrors} falha(s) no envio ao Omie`,
       href: "/ctrl/contas-a-pagar",
     });
   }
-  if (data.myRequests && data.myRequests.infoPendente > 0) {
+  // Só `aguardando_complementacao`: é a pendência que está de fato com o
+  // solicitante (o aprovador perguntou algo antes de decidir).
+  if (
+    alerts.ownComplement &&
+    data.myRequests &&
+    data.myRequests.aguardandoComplementacao > 0
+  ) {
     items.push({
-      label: `${data.myRequests.infoPendente} requisição(ões) com info pedida`,
+      label: `${data.myRequests.aguardandoComplementacao} requisição(ões) aguardando complementação`,
       href: "/ctrl/requisicoes",
     });
   }
-  if (data.myRequests && data.myRequests.rejeitadas > 0) {
+  if (alerts.ownRejected && data.myRequests && data.myRequests.rejeitadas > 0) {
     items.push({
       label: `${data.myRequests.rejeitadas} requisição(ões) rejeitada(s)`,
       href: "/ctrl/requisicoes",
     });
   }
   // Homologação de fornecedor. `suppliers` só é carregado para o perfil Contas
-  // a Pagar (caps.canHomologate), então é null para todo o resto e a faixa dos
-  // demais perfis fica byte a byte igual à de antes.
-  if (data.suppliers && data.suppliers.bloqueadasTotal > 0) {
+  // a Pagar (caps.canHomologate), então é null para todo o resto.
+  if (alerts.suppliers && data.suppliers && data.suppliers.bloqueadasTotal > 0) {
     items.push({
       label: `${data.suppliers.bloqueadasTotal} requisição(ões) com fornecedor não homologado`,
       href: "/ctrl/contas-a-pagar",
     });
   }
-  if (data.suppliers && data.suppliers.novosTotal > 0) {
+  if (alerts.suppliers && data.suppliers && data.suppliers.novosTotal > 0) {
     items.push({
       label: `${data.suppliers.novosTotal} fornecedor(es) aguardando homologação`,
       href: "/ctrl/admin/fornecedores",
@@ -54,8 +68,21 @@ function buildItems(data: HomeCtrlData): AttentionItem[] {
   return items;
 }
 
-export function AttentionStrip({ data }: { data: HomeCtrlData }) {
-  const items = buildItems(data);
+export function AttentionStrip({
+  data,
+  caps,
+}: {
+  data: HomeCtrlData;
+  caps: HomeCtrlCaps;
+}) {
+  const items = buildItems(data, caps);
+
+  // Perfil sem nenhum tipo de pendência sob sua responsabilidade (Visão
+  // Financeira, CSC, Validação de Contratos): a faixa não se aplica e some por
+  // inteiro — "Tudo em dia" prometeria um acompanhamento que essa tela não faz
+  // para eles.
+  const hasAnyAlertKind = Object.values(caps.alerts).some(Boolean);
+  if (!hasAnyAlertKind) return null;
 
   if (items.length === 0) {
     return (
