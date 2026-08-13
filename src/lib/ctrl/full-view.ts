@@ -30,6 +30,10 @@
 //     override não coloca ninguém na rotina de e-mail.
 //
 // Identificamos por e-mail (chave natural estável), como em bi-validation.ts.
+//
+// ⚠️ AO INCLUIR UM E-MAIL AQUI, confira o catálogo em
+//    `src/lib/auth/user-exceptions.ts` — ele já lê esta lista, mas é o que
+//    mantém a exceção visível no botão "Regras especiais" da tela de Usuários.
 // ============================================================================
 
 /** E-mails com visão completa (leitura) do módulo Compras. Sempre minúsculos. */

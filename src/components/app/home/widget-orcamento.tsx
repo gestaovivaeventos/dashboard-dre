@@ -3,16 +3,16 @@
 import { PiggyBank } from "lucide-react";
 
 import { WidgetCard, WidgetEmpty } from "@/components/app/home/widget-card";
-import { fmtBRL, type HomeBudgetSector } from "@/lib/home/ctrl-widgets";
+import { fmtBRL, type HomeBudget } from "@/lib/home/ctrl-widgets";
 
-export function WidgetOrcamento({ data }: { data: HomeBudgetSector[] }) {
+export function WidgetOrcamento({ data }: { data: HomeBudget }) {
   return (
     <WidgetCard title="Orçamento do setor" icon={PiggyBank} href="/ctrl/orcamento">
-      {data.length === 0 ? (
+      {data.sectors.length === 0 ? (
         <WidgetEmpty>Sem orçamento cadastrado para seus setores.</WidgetEmpty>
       ) : (
         <ul className="space-y-3">
-          {data.map((s) => {
+          {data.sectors.map((s) => {
             const pct =
               s.orcadoAnual > 0
                 ? Math.min(100, Math.round((s.consumido / s.orcadoAnual) * 100))
@@ -36,6 +36,11 @@ export function WidgetOrcamento({ data }: { data: HomeBudgetSector[] }) {
             );
           })}
         </ul>
+      )}
+      {data.hidden > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          +{data.hidden} setor(es) — veja todos em Orçamento.
+        </p>
       )}
     </WidgetCard>
   );

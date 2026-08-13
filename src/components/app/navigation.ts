@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  BookOpen,
   Brain,
   Calendar,
   CheckSquare,
@@ -22,6 +23,7 @@ import {
   Sliders,
   Sparkles,
   Target,
+  TrendingUp,
   Truck,
   Users,
   Wallet,
@@ -269,6 +271,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "ORÇAMENTO",
     items: [
       { key: "orc-pessoal", title: "Despesas com pessoal", icon: Users, scope: "global", href: "/orcamento/despesas/pessoal", dreRoles: ["admin"] },
+      { key: "orc-media", title: "Média com correção de índices", icon: TrendingUp, scope: "global", href: "/orcamento/despesas/media", dreRoles: ["admin"] },
       { key: "orc-config", title: "Configurações", icon: Cog, scope: "global", href: "/orcamento/configuracoes", dreRoles: ["admin"] },
     ],
   },
@@ -285,6 +288,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // Configurações: hub admin-only que agrupa Editar Orçamento, Eventos,
       // Mapeamento Omie, Setores e Tipos de Despesa (ver /ctrl/configuracoes).
       { key: "ct-config", title: "Configurações", icon: Cog, scope: "global", href: "/ctrl/configuracoes", ctrlRoles: ["admin"] },
+      // Manual: último item do grupo de propósito — é referência, não operação.
+      // Liberado para TODOS os papéis do módulo (inclusive os que só solicitam):
+      // é o material de entrada de quem está chegando.
+      { key: "ct-manual", title: "Manual", icon: BookOpen, scope: "global", href: "/ctrl/manual", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "aprovacao_fornecedor", "admin"] },
     ],
   },
   {
@@ -375,4 +382,5 @@ export const CTRL_FULL_VIEW_NAV_KEYS: ReadonlySet<string> = new Set([
   "ct-orc",
   "ct-rel",
   "ct-forn",
+  "ct-manual",
 ]);
