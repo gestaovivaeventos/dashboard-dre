@@ -1,5 +1,6 @@
 import type { OnePageInput } from "@/lib/intelligence/one-page-schema";
 
+import { appliesCustosVariaveisReceita } from "./custos-variaveis-receita";
 import { resolveReportTemplate } from "./templates/report-template-registry";
 
 // ============================================================================
@@ -833,6 +834,102 @@ REGRAS (obrigatorias, prevalecem sobre a leitura conta a conta):
    LITERALMENTE como estao no input.`;
 
 // ============================================================================
+// Regra dos CUSTOS VARIAVEIS (custos de servicos prestados + impostos sobre a
+// receita) em relacao a RECEITA.
+//
+// Anexada SOMENTE para as empresas listadas em `custos-variaveis-receita.ts`
+// (Sirena, Terrazzo, Salvaterra Estacionamento, SGX, Village, Spot, Express).
+// Nas demais — inclusive todo o segmento Franquias Viva, Case Shows, Feat
+// Producoes, Young Med e Salvaterra Condominio — o prompt continua byte a byte
+// o de sempre.
+//
+// POR QUE EXISTE: nesses modelos de negocio o custo de servico prestado e os
+// impostos sobre a receita so ocorrem em volume relevante QUANDO HA RECEITA. A
+// regra geral de linhas redutoras do SHARED_TAIL ("custo abaixo do orcado =
+// FAVORAVEL") fazia a IA celebrar como economia operacional o que era apenas o
+// reflexo de um faturamento que nao aconteceu — ex.: Sirena, salao de eventos,
+// com receita 50% abaixo do orcado e custo direto abaixo junto.
+//
+// O QUE ESTA REGRA NAO FAZ: nao move essas linhas para "pontosAtencao" (a regra
+// do SHARED_TAIL continua valendo — o ponto de atencao e a RECEITA, nunca o
+// custo que gastou menos), nao muda numero nenhum e nao alcanca as despesas
+// operacionais/administrativas fixas, que seguem com a leitura atual.
+// ============================================================================
+const CUSTOS_VARIAVEIS_RECEITA_RULE = `# CUSTOS VARIAVEIS E IMPOSTOS SOBRE A RECEITA (leitura obrigatoria junto com a receita)
+
+Nesta empresa, os CUSTOS DE SERVICOS PRESTADOS (tambem chamados de custos
+diretos ou variaveis) e os IMPOSTOS SOBRE A RECEITA sao DIRETAMENTE LIGADOS A
+GERACAO DE RECEITA: so existem em volume relevante quando ha receita no
+periodo. Sao LINHAS VARIAVEIS, nao estrutura fixa.
+
+Linhas cobertas por esta regra (use o nome como aparece no input; variacoes do
+nome contam):
+- "Custos com Servicos Prestados" / "Custos de Servicos Prestados" / custos
+  diretos ou variaveis da operacao;
+- IRPJ;
+- CSLL;
+- PIS;
+- COFINS.
+
+NAO estao cobertas as despesas operacionais/administrativas e a estrutura fixa
+(pessoal administrativo, aluguel, manutencao, etc.) — para elas vale a leitura
+normal das linhas redutoras descrita acima.
+
+## Regra de interpretacao
+
+Antes de qualificar qualquer uma dessas linhas, OLHE PRIMEIRO A RECEITA do
+periodo (variacao_percentual da linha de receita).
+
+CENARIO A — receita ABAIXO do orcado (variacao_percentual da receita menor que
+-5%) e as linhas cobertas TAMBEM abaixo do orcado:
+- Leia a queda desses custos/impostos como CONSEQUENCIA da menor geracao de
+  receita, nao como economia conquistada.
+- E PROIBIDO descreve-la como "economia positiva", "economia operacional",
+  "reducao eficiente de custos", "ganho de eficiencia", "controle de custos bem
+  executado", "custos abaixo do orcamento, o que e positivo" ou qualquer
+  variacao com o mesmo sentido. Trate todas como uma unica categoria proibida.
+- E PROIBIDO gerar um "destaque" celebrando essa reducao. Se ela for citada, o
+  texto TEM de trazer o vinculo com a receita na MESMA frase.
+- Em "leituraPorIndicador", a "classificacao" dessas linhas nesse cenario e
+  "Neutro" (nem merito nem problema).
+- PRECEDENCIA: para ESTAS linhas e NESTE cenario, esta regra prevalece sobre a
+  leitura generica de linhas redutoras descrita acima — ou seja, sobre o "custo
+  ou deducao abaixo do orcado = Positivo / elegivel a destaques". Isso vale
+  inclusive quando os impostos sobre a receita (PIS, COFINS, IRPJ, CSLL)
+  aparecerem dentro de uma linha de "Deducoes de Receita".
+- O PONTO CENTRAL da analise e o NAO ATINGIMENTO DA RECEITA prevista. E ele que
+  vai para "pontosAtencao", para o "diagnosticoPrincipal" e para as
+  "acoesRecomendadas".
+- CONTINUA VALENDO a regra geral: essas linhas de custo/imposto abaixo do
+  orcado NUNCA entram em "pontosAtencao" e NUNCA sao descritas como gasto
+  "elevado", "acima do esperado" ou que "merece acompanhamento". O alerta e da
+  receita, jamais do custo que deixou de ocorrer.
+
+CENARIO B — receita DENTRO do orcado (variacao entre -5% e +5%) ou ACIMA do
+orcado, com as linhas cobertas abaixo do orcado:
+- Ai sim pode haver eficiencia real. Avalie e, se os numeros sustentarem,
+  registre como ponto positivo — seguindo a leitura normal das linhas
+  redutoras.
+
+## Tom
+
+Sutil, objetivo e assertivo. NAO alarmista e NAO moralista: nao repita a
+ressalva em todos os campos, nao transforme a leitura em acusacao e nao ignore
+o ponto. Uma frase clara amarrando custo variavel a receita basta.
+
+Exemplos de formulacao adequada (adapte aos numeros reais, nunca copie):
+- "Embora os custos de servicos prestados e impostos tenham ficado abaixo do
+  orcamento, essa reducao acompanha o menor volume de receita do periodo.
+  Portanto, nao deve ser lida necessariamente como economia operacional, mas
+  como reflexo da receita inferior ao previsto."
+- "A queda nos custos diretos esta relacionada a menor geracao de receita. O
+  ponto principal de atencao e o desvio da receita em relacao ao orcamento, ja
+  que parte desses custos so ocorre quando ha faturamento."
+- "Os custos variaveis ficaram abaixo do previsto, mas isso parece estar ligado
+  ao nao atingimento da receita orcada. Nesse cenario, a reducao dos custos nao
+  representa necessariamente ganho de eficiencia."`;
+
+// ============================================================================
 // Regra do CONTEXTO DE NEGOCIO informado pela controladoria (tela Validação
 // Relatório > "Adicionar contexto"). Anexada ao system prompt SOMENTE quando
 // existe contexto — sem ele o prompt e byte a byte o de sempre.
@@ -1048,6 +1145,12 @@ export function resolveOnePageSystemPrompt(
   // byte o de sempre — nenhuma empresa muda de comportamento sem o gatilho.
   const extras = [
     input.indicadores_relatorio ? INDICADORES_RELATORIO_RULE : null,
+    appliesCustosVariaveisReceita({
+      companyName: input.empresa.nome,
+      segmentSlug: input.segmento?.slug ?? null,
+    })
+      ? CUSTOS_VARIAVEIS_RECEITA_RULE
+      : null,
     opts.hasBusinessContext ? CONTEXTO_CONTROLADORIA_RULE : null,
   ].filter((rule): rule is string => rule !== null);
 
