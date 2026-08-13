@@ -22,6 +22,7 @@ import {
   Sliders,
   Sparkles,
   Target,
+  TrendingUp,
   Truck,
   Users,
   Wallet,
@@ -269,6 +270,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "ORÇAMENTO",
     items: [
       { key: "orc-pessoal", title: "Despesas com pessoal", icon: Users, scope: "global", href: "/orcamento/despesas/pessoal", dreRoles: ["admin"] },
+      { key: "orc-media", title: "Média com correção de índices", icon: TrendingUp, scope: "global", href: "/orcamento/despesas/media", dreRoles: ["admin"] },
       { key: "orc-config", title: "Configurações", icon: Cog, scope: "global", href: "/orcamento/configuracoes", dreRoles: ["admin"] },
     ],
   },
