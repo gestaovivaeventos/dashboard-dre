@@ -137,6 +137,21 @@ function isAssinaturaPresente(value: string | null | undefined): boolean {
   return normalized === 'sim'
 }
 
+// "Indeterminado": a extração viu assinatura na área de assinaturas mas não
+// conseguiu atribuir a parte com segurança. Decisão de negócio (Marcelo,
+// 2026-08-14): evidência de assinatura — mesmo rabisco ilegível ou carimbo
+// digital — vale como assinado; aprova com ressalva para ficar auditável.
+// Reprovar aqui gerava falso negativo (caso real: req 789062, assinaturas à
+// esquerda dos rótulos CONTRATANTE/CONTRATADA).
+function isAssinaturaIndeterminada(value: string | null | undefined): boolean {
+  if (!value) return false
+  return value.trim().toLowerCase() === 'indeterminado'
+}
+
+function isAssinaturaAusente(value: string | null | undefined): boolean {
+  return !isAssinaturaPresente(value) && !isAssinaturaIndeterminada(value)
+}
+
 // Match thefuzz's WRatio semantics: when one side is empty, treat as no match.
 function nomesParecem(a: string, b: string): boolean {
   if (!a || !b) return false
@@ -551,11 +566,17 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
       // ── A) Contrato de serviço / compromisso formal: contrato completo ──
       const contratos = docs.filter((d) => d.tipo_documento === TIPO_CONTRATO)
 
-      if (contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratante))) {
+      // Sem evidência nenhuma → reprova; "Indeterminado" (assinado mas sem
+      // atribuição segura de parte) → aprova com ressalva.
+      if (contratos.some((c) => isAssinaturaAusente(c.assinatura_contratante))) {
         motivos.push('Contrato sem assinatura do contratante')
+      } else if (contratos.some((c) => isAssinaturaIndeterminada(c.assinatura_contratante))) {
+        ressalvas.push('Assinatura do contratante sem atribuição clara (rabisco/digital) — aceita como assinada')
       }
-      if (contratos.some((c) => !isAssinaturaPresente(c.assinatura_contratado))) {
+      if (contratos.some((c) => isAssinaturaAusente(c.assinatura_contratado))) {
         motivos.push('Contrato sem assinatura do contratado')
+      } else if (contratos.some((c) => isAssinaturaIndeterminada(c.assinatura_contratado))) {
+        ressalvas.push('Assinatura do contratado sem atribuição clara (rabisco/digital) — aceita como assinada')
       }
 
       // Dados bancários compatíveis com o favorecido. Sem conta no documento →
