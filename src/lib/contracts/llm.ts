@@ -2,8 +2,9 @@
 // returns the structured ContractExtraction JSON.
 //
 // Uses OpenAI Chat Completions with response_format=json_object. The prompt
-// is the same one validated in production by the GCP Cloud Function — kept
-// verbatim (Portuguese, exact rules) so behaviour stays consistent.
+// started as the GCP Cloud Function one; the ASSINATURAS section evolved here
+// (2026-08-14) to read LandingAI attestation blocks and to allow
+// "Indeterminado" (assinado, mas sem atribuição segura de parte).
 
 import type { ContractExtraction } from './types'
 import { resolveAiProvider, logResolvedUsage } from '@/lib/ai/provider'
@@ -91,12 +92,28 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
     - \`pagamentoX_data_vencimento\`: data de vencimento da parcela. Se for relativa (ex: "7 dias antes
       do evento"), extraia a data exata se der; senão, o texto relativo.
 
-- **ASSINATURAS (Sim/Não):**
-    - \`assinatura_contratante\`: **"Sim"** se houver QUALQUER assinatura (digital, manuscrita, rubrica)
-      do CONTRATANTE; senão **"Não"**.
+- **ASSINATURAS (Sim/Não/Indeterminado):**
+    - **COMO A ASSINATURA APARECE NO TEXTO:** o texto vem de um OCR visual que descreve
+      assinaturas como blocos especiais, geralmente em inglês. Exemplos de evidência de
+      assinatura: bloco \`<::attestation: Signature ... ::>\`, "Signed", "Signature: illegible",
+      "handwritten signature", descrição de figura com assinatura, carimbo/selo "gov.br",
+      "Assinado digitalmente", painel de verificação ICP-Brasil. **Assinatura manuscrita
+      ilegível (rabisco) CONTA como assinatura válida.**
+    - \`assinatura_contratante\`: **"Sim"** se houver QUALQUER assinatura (digital, manuscrita,
+      rubrica, mesmo ilegível) atribuível ao CONTRATANTE; **"Não"** só quando não há NENHUMA
+      evidência de assinatura para ele.
     - \`assinatura_contratado\`: idem para o CONTRATADO/FAVORECIDO.
+    - **ATRIBUIÇÃO PELA POSIÇÃO:** atribua pela linha/rótulo de assinatura a que o bloco associa
+      a assinatura ("CONTRATANTE:", "CONTRATADA:", nome da parte). A assinatura pode estar sobre
+      a linha, acima, abaixo, **à esquerda ou à direita** do rótulo — posição deslocada não
+      invalida a assinatura.
+    - **"Indeterminado":** quando a área de assinaturas indica que o documento ESTÁ assinado
+      (ex.: "Signed", assinatura descrita perto dos DOIS rótulos) mas não dá para atribuir com
+      segurança a qual parte pertence cada assinatura, preencha **"Indeterminado"** na(s)
+      parte(s) sem atribuição clara. **NUNCA responda "Não" quando existe evidência de
+      assinatura na área de assinaturas** — "Não" é apenas para ausência total de evidência.
     - \`assinatura_digital_detectada\`: **"Sim"** se houver hash/carimbo de assinatura digital
-      (ICP-Brasil ou equivalente verificável); senão **"Não"**.
+      (gov.br, ICP-Brasil ou equivalente verificável); senão **"Não"**.
 
 # 3. REGRAS DE FORMATAÇÃO
 - **VALORES:** strings, só números e ponto \`.\` decimal, sem "R$" e sem separador de milhar.
