@@ -45,7 +45,7 @@ li { margin-bottom: 4pt; }
     <p class=org>Grupo Viva · Control Hub</p>
     <p class=titulo>Manual do Módulo Compras</p>
     <p class=sub>Requisições, aprovações e contas a pagar no Control Hub</p>
-    <p class=meta>Versão 1.0 · Atualizado em 13/08/2026</p>
+    <p class=meta>Versão 1.0 · Atualizado em 14/08/2026</p>
   </div>
 
   <h1 class=h1 style='page-break-before:auto'>Como usar este manual</h1>
@@ -270,6 +270,7 @@ li { margin-bottom: 4pt; }
         <p class=resumo>Alçada, tela de Aprovações, aprovação em lote e o que checar antes de aprovar.</p>
         <p class=txt>Sua autonomia: <b>aprovar, rejeitar ou pedir informação nas requisições dos setores vinculados ao seu usuário</b>. Dentro do orçamento, a sua aprovação encerra o fluxo e a requisição segue direto para pagamento. Fora do orçamento, você aprova e a requisição segue para o diretor.</p>
 <table class=grid cellspacing=0 cellpadding=0><tr><td class=th>Situação da requisição</td><td class=th>Quem precisa aprovar</td><td class=th>Resultado da sua aprovação</td></tr><tr><td class="td tdFirst">Dentro do orçamento anual do setor</td><td class="td">Somente o gerente</td><td class="td">Vai direto para Aprovado (segue ao Contas a Pagar).</td></tr><tr><td class="td tdFirst">Fora do orçamento (saldo anual insuficiente)</td><td class="td">Gerente e depois Diretor</td><td class="td">Passa para Aguardando Diretor e notifica a diretoria.</td></tr><tr><td class="td tdFirst">Setor ou solicitante direcionado à diretoria por regra</td><td class="td">Somente o Diretor</td><td class="td">Não aparece para você — nasce direto na etapa do diretor.</td></tr></table>
+<p class=txt>A tela <b>Requisições</b> é a sua visão de acompanhamento: além das requisições que você mesmo criou, ela lista <b>todas as requisições dos setores sob sua responsabilidade</b>, em qualquer status — inclusive as já aprovadas, pagas ou rejeitadas. Serve para consultar o histórico do setor; decidir continua sendo na tela <b>Aprovações</b>. As colunas <b>Solicitante</b> e <b>Setor</b> aparecem nessa situação e podem ser ordenadas e filtradas.</p>
 <p class=txt><b>Como trabalhar a tela Aprovações:</b></p>
 <table class=steps cellspacing=0 cellpadding=0>
             <tr>
@@ -300,7 +301,7 @@ li { margin-bottom: 4pt; }
           </td></tr>
         </table>
 <p class=txt><b>Regras de alçada que valem a pena conhecer:</b></p>
-<ul><li class=txt>Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub.</li><li class=txt>Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.</li><li class=txt>Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, e um setor pode ir sempre direto à diretoria.</li><li class=txt><b>Autoaprovação gerencial:</b> quando o próprio gerente é o solicitante e a despesa está prevista em orçamento, a etapa gerencial é dispensada e a requisição nasce aprovada, com registro no histórico. Fora do orçamento isso não vale — o diretor continua obrigatório.</li></ul>
+<ul><li class=txt>Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub. Na tela <b>Requisições</b> essa mesma falta de vínculo faz o contrário: sem setor, você vê apenas as suas.</li><li class=txt>Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Ela vale nos dois lugares — são esses setores, e não os vínculos da tela de Usuários, que definem o que você aprova e o que vê na tela de Requisições. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.</li><li class=txt>Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, e um setor pode ir sempre direto à diretoria.</li><li class=txt><b>Autoaprovação gerencial:</b> quando o próprio gerente é o solicitante e a despesa está prevista em orçamento, a etapa gerencial é dispensada e a requisição nasce aprovada, com registro no histórico. Fora do orçamento isso não vale — o diretor continua obrigatório.</li></ul>
 <p class=txt>Na tela <b>Orçamento</b> você acompanha orçado, realizado, pendente e disponível por tipo de despesa; clique na linha para abrir o detalhamento por setor. É a mesma base usada na verificação orçamentária da requisição.</p>
       </div>
 
@@ -308,7 +309,8 @@ li { margin-bottom: 4pt; }
         <h1 class=h1>6. Manual do Diretor</h1>
         <p class=publico>Para: Diretor · Contas a Pagar</p>
         <p class=resumo>Quando a diretoria entra, visão de todos os setores e leitura do orçamento.</p>
-        <p class=txt>Sua autonomia: <b>aprovar a etapa final das requisições que exigem a diretoria e enxergar todos os setores</b>. Você aprova requisições de qualquer setor; os setores vinculados ao seu usuário servem para destacar o que é da sua área e para direcionar o e-mail diário de pendências.</p>
+        <p class=txt>Sua autonomia: <b>aprovar a etapa final das requisições que exigem a diretoria e enxergar todos os setores</b>. Você aprova requisições de qualquer setor; os setores vinculados ao seu usuário servem para destacar o que é da sua área, para direcionar o e-mail diário de pendências e para definir o que a tela <b>Requisições</b> lista.</p>
+<p class=txt>Atenção à diferença entre as duas telas: em <b>Aprovações</b> você vê todos os setores; em <b>Requisições</b> você vê as suas requisições e as dos setores vinculados ao seu usuário — é uma visão de acompanhamento da sua área, com todos os status, não só o que aguarda decisão. Sem setor vinculado, essa tela mostra apenas as suas.</p>
 <p class=txt><b>A diretoria entra em três situações:</b></p>
 <ol><li class=txt><b>Fora do orçamento</b> — o saldo anual do setor + tipo de despesa não cobre o valor. A requisição chega com justificativa obrigatória e com o prefixo NÃO ORÇADO no título.</li><li class=txt><b>Setor direcionado à diretoria</b> — requisições desse setor nascem direto na sua etapa, mesmo dentro do orçamento.</li><li class=txt><b>Solicitante direcionado</b> — regra nominal em que as requisições de uma pessoa específica vão direto ao diretor determinado.</li></ol>
 

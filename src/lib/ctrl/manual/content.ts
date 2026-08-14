@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "13/08/2026";
+export const MANUAL_UPDATED_AT = "14/08/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -488,6 +488,11 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       },
       {
         kind: "p",
+        text:
+          "A tela **Requisições** é a sua visão de acompanhamento: além das requisições que você mesmo criou, ela lista **todas as requisições dos setores sob sua responsabilidade**, em qualquer status — inclusive as já aprovadas, pagas ou rejeitadas. Serve para consultar o histórico do setor; decidir continua sendo na tela **Aprovações**. As colunas **Solicitante** e **Setor** aparecem nessa situação e podem ser ordenadas e filtradas.",
+      },
+      {
+        kind: "p",
         text: "**Como trabalhar a tela Aprovações:**",
       },
       {
@@ -534,8 +539,8 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "list",
         items: [
-          "Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub.",
-          "Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.",
+          "Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub. Na tela **Requisições** essa mesma falta de vínculo faz o contrário: sem setor, você vê apenas as suas.",
+          "Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Ela vale nos dois lugares — são esses setores, e não os vínculos da tela de Usuários, que definem o que você aprova e o que vê na tela de Requisições. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.",
           "Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, e um setor pode ir sempre direto à diretoria.",
           "**Autoaprovação gerencial:** quando o próprio gerente é o solicitante e a despesa está prevista em orçamento, a etapa gerencial é dispensada e a requisição nasce aprovada, com registro no histórico. Fora do orçamento isso não vale — o diretor continua obrigatório.",
         ],
@@ -558,7 +563,12 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "p",
         text:
-          "Sua autonomia: **aprovar a etapa final das requisições que exigem a diretoria e enxergar todos os setores**. Você aprova requisições de qualquer setor; os setores vinculados ao seu usuário servem para destacar o que é da sua área e para direcionar o e-mail diário de pendências.",
+          "Sua autonomia: **aprovar a etapa final das requisições que exigem a diretoria e enxergar todos os setores**. Você aprova requisições de qualquer setor; os setores vinculados ao seu usuário servem para destacar o que é da sua área, para direcionar o e-mail diário de pendências e para definir o que a tela **Requisições** lista.",
+      },
+      {
+        kind: "p",
+        text:
+          "Atenção à diferença entre as duas telas: em **Aprovações** você vê todos os setores; em **Requisições** você vê as suas requisições e as dos setores vinculados ao seu usuário — é uma visão de acompanhamento da sua área, com todos os status, não só o que aguarda decisão. Sem setor vinculado, essa tela mostra apenas as suas.",
       },
       {
         kind: "p",
