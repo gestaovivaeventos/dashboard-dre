@@ -373,6 +373,24 @@ export interface TemplateReportConfig {
     consolidatedLabel?: string;
   };
   /**
+   * Quadro ISOLADO de um recorte da própria empresa por DEPARTAMENTO Omie +
+   * CATEGORIAS Omie (códigos brutos), somando `financial_entries` diretamente
+   * (regime de caixa, por data de pagamento). A união é `department_code = X OR
+   * category_code IN (...)`, deduplicada por LINHA — cada lançamento conta uma
+   * vez, mesmo quando está no departamento E numa das categorias. Mostra
+   * Receitas, Despesas e Resultado (Receitas − Despesas), em duas colunas:
+   * PERÍODO selecionado e ACUMULADO do ano (jan → fim do período). Complementar;
+   * só dados da própria empresa. Ex.: Salvaterra Mall isolando o departamento
+   * CONDOMÍNIO + categorias de Repasse a Terceiros.
+   */
+  isolatedResultGroup?: {
+    title: string;
+    /** Departamento Omie — financial_entries.department_code. */
+    departmentCode: string;
+    /** Categorias Omie (código bruto) — financial_entries.category_code. */
+    categoryCodes: string[];
+  };
+  /**
    * Blocos de BREAKDOWN por contas DRE, em barras horizontais (ex.: Spot —
    * "Composição da Receita" e "Frete: Receita × Custo Logístico"). Cada linha =
    * Σ(codes) − Σ(minus) sobre o REALIZADO. `showPctOfTotal` exibe o % de cada

@@ -9,6 +9,7 @@ import type {
   FeatContasReceberAbertoBlock,
   FeatEventosBlock,
   HoldingComparativoBlock,
+  IsolatedResult,
   KpiCard,
   MutuosBlock,
   OnePageReportPreviewData,
@@ -1344,6 +1345,53 @@ function renderConsolidated(block: Consolidated): string {
   )}`;
 }
 
+// Quadro isolado (departamento + categorias) — Receitas/Despesas/Resultado em
+// duas colunas (período e acumulado do ano). Espelha IsolatedResultBlock da tela.
+function renderIsolatedResult(block: IsolatedResult): string {
+  const linhas: Array<{ label: string; periodo: number; acumulado: number; emphasis?: boolean }> = [
+    { label: "Receitas", periodo: block.periodo.receitas, acumulado: block.acumulado.receitas },
+    { label: "Despesas", periodo: block.periodo.despesas, acumulado: block.acumulado.despesas },
+    { label: "Resultado", periodo: block.periodo.resultado, acumulado: block.acumulado.resultado, emphasis: true },
+  ];
+  const rows = linhas
+    .map((r) => {
+      const emph = !!r.emphasis;
+      const negP = r.periodo < 0;
+      const negA = r.acumulado < 0;
+      return `<tr style="background:${emph ? C.emphasisBg : "transparent"};">
+        <td style="font-family:${FF};font-size:13px;font-weight:${
+          emph ? 700 : 500
+        };color:${emph ? C.ink : C.body};padding:9px 10px;border-bottom:1px solid ${C.grid};">${esc(
+          r.label,
+        )}</td>
+        <td style="font-family:${FM};font-size:12.5px;font-weight:${
+          emph ? 700 : 600
+        };color:${negP ? SEV.critical.text : emph ? C.ink : C.body};padding:9px 10px;text-align:right;border-bottom:1px solid ${C.grid};white-space:nowrap;">${esc(
+          fmtMil(r.periodo),
+        )}</td>
+        <td style="font-family:${FM};font-size:12.5px;font-weight:${
+          emph ? 700 : 600
+        };color:${negA ? SEV.critical.text : emph ? C.ink : C.body};padding:9px 10px;text-align:right;border-bottom:1px solid ${C.grid};white-space:nowrap;">${esc(
+          fmtMil(r.acumulado),
+        )}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const nota = `<div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:10px;">Valores em milhares de R$ (mil). Recorte isolado (departamento + categorias), deduplicado por lançamento.</div>`;
+
+  return `${sectionTitle(block.title)}${panel(
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      <thead><tr>${thCell("Indicador")}${thCell("Período", "right")}${thCell(
+        "Acumulado no ano",
+        "right",
+      )}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>${nota}`,
+    "14px 16px 12px",
+  )}`;
+}
+
 function renderAlertas(items: AlertaCard[]): string {
   if (items.length === 0) return "";
   const cells = items.map((a) => {
@@ -1492,6 +1540,7 @@ export function renderOnePageEmail({ data, appUrl }: OnePageEmailArgs): string {
   }
 
   if (data.consolidated) parts.push(renderConsolidated(data.consolidated));
+  if (data.isolatedResult) parts.push(renderIsolatedResult(data.isolatedResult));
   if (show("alertas")) parts.push(renderAlertas(data.alertas));
   if (show("acoes")) parts.push(renderAcoes(data.acoes));
 
