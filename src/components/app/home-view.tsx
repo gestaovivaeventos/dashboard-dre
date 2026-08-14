@@ -2,11 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { ShieldAlert } from "lucide-react";
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AttentionStrip } from "@/components/app/home/attention-strip";
+import { AttentionStrip, hasAttentionSection } from "@/components/app/home/attention-strip";
+import { SectionHead } from "@/components/app/home/widget-card";
 import { WidgetAprovacoes } from "@/components/app/home/widget-aprovacoes";
 import { WidgetFilaPagamento } from "@/components/app/home/widget-fila-pagamento";
 import { WidgetFornecedores } from "@/components/app/home/widget-fornecedores";
@@ -53,16 +50,6 @@ function getGreeting(): string {
   if (hour < 18) return "Boa tarde";
   return "Boa noite";
 }
-function changeColor(type: "up" | "down" | "neutral"): string {
-  if (type === "up") return "#16a34a";
-  if (type === "down") return "#dc2626";
-  return "#64748b";
-}
-function alertDotColor(type: string): string {
-  if (type === "error") return "bg-red-500";
-  if (type === "warning") return "bg-amber-400";
-  return "bg-blue-400";
-}
 
 export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
@@ -71,8 +58,10 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
   const [loadingIndicators, setLoadingIndicators] = useState(true);
   const [loadingAlerts, setLoadingAlerts] = useState(true);
   const [loadingNews, setLoadingNews] = useState(true);
+  const [host, setHost] = useState("");
 
   useEffect(() => {
+    setHost(window.location.host);
     // Indicadores e Notícias econômicas são de todos os perfis — nenhum gate.
     void fetch("/api/home/indicators")
       .then((r) => r.json())
@@ -91,179 +80,192 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
       .finally(() => setLoadingAlerts(false));
   }, [isAdmin]);
 
-  const greeting = getGreeting();
   const currentDate = new Date().toLocaleDateString("pt-BR", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
   });
-  const formattedDate = currentDate.charAt(0).toUpperCase() + currentDate.slice(1);
-
-  const hasAnyWidget =
-    (caps.canApprove && ctrlData.approvals) ||
-    (caps.canPay && ctrlData.payments) ||
-    (caps.canRequest && ctrlData.myRequests) ||
-    (caps.canBudget && ctrlData.budget) ||
-    (caps.canHomologate && ctrlData.suppliers);
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Saudação */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {greeting}, {userName}
+    <div>
+      {/* 1. Saudação -------------------------------------------------
+             Só a saudação. A contagem de aprovações vive na faixa
+             "Precisa da sua atenção", logo abaixo — ter as duas deixava o
+             mesmo alerta duas vezes na mesma dobra. */}
+      <section className="ch-band">
+        <p className="ch-kicker ch-kicker--accent">{currentDate}</p>
+        <h1 className="ch-hello">
+          {getGreeting()}, {userName}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{formattedDate}</p>
-      </div>
+      </section>
 
-      {/* Faixa de atenção — itens filtrados pela responsabilidade do perfil */}
-      <AttentionStrip data={ctrlData} caps={caps} />
+      {/* 2. Precisa da sua atenção — único campo vermelho cheio da tela.
+             A faixa inteira some para quem não tem pendência sob sua
+             responsabilidade (ver hasAttentionSection). */}
+      {hasAttentionSection(caps) && (
+        <section className="ch-band">
+          <AttentionStrip data={ctrlData} caps={caps} />
+        </section>
+      )}
 
-      {/* Alertas do Sistema — exclusivo do Admin e no TOPO: é a única seção da
-          home que é responsabilidade dele (sync, mapeamento, integração). Os
-          quadros abaixo são acompanhamento geral. Nunca parcial: ou o card
-          inteiro aparece, ou nem o pedido ao endpoint acontece. */}
+      {/* 3. Alertas do sistema — exclusivo do Admin, é a única seção da
+             home que é responsabilidade dele (sync, mapeamento, integração).
+             Nunca parcial: ou aparece inteira, ou nem o pedido acontece. */}
       {isAdmin && (
-        <Card className="rounded-lg border-2 border-amber-300 bg-background dark:border-amber-800">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <ShieldAlert className="h-4 w-4 text-amber-600" />
-              Alertas do Sistema
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loadingAlerts ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <Skeleton className="mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-1">
-                    <Skeleton className="h-4 w-40" />
-                    <Skeleton className="h-3 w-56" />
-                  </div>
-                </div>
-              ))
-            ) : alerts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhum alerta no momento.</p>
-            ) : (
-              alerts.map((alert, i) => (
-                <div key={i} className="flex items-start gap-3">
+        <section className="ch-band">
+          <SectionHead title="Alertas do sistema" />
+          {loadingAlerts ? (
+            <div className="ch-2col">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i}>
+                  <span className="ch-skel" style={{ height: 12, width: "45%" }} />
                   <span
-                    className={`mt-1.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${alertDotColor(alert.type)}`}
+                    className="ch-skel"
+                    style={{ height: 10, width: "70%", marginTop: 6 }}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : alerts.length === 0 ? (
+            <p className="ch-empty">Nenhum alerta no momento.</p>
+          ) : (
+            <div className="ch-2col">
+              {alerts.map((alert, i) => (
+                <div key={i} className="ch-alert">
+                  <span
+                    className={`ch-alert__dot ${
+                      alert.type === "error" ? "ch-alert__dot--critical" : ""
+                    }`}
                   />
                   <div>
-                    <p className="text-sm font-medium leading-tight">{alert.title}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{alert.detail}</p>
+                    <p className="ch-alert__title">{alert.title}</p>
+                    <p className="ch-alert__detail">{alert.detail}</p>
                   </div>
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Grade de widgets */}
-      {hasAnyWidget && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {caps.canApprove && ctrlData.approvals && (
-            <WidgetAprovacoes data={ctrlData.approvals} />
-          )}
-          {caps.canPay && ctrlData.payments && (
-            <WidgetFilaPagamento data={ctrlData.payments} />
-          )}
-          {/* Contas a Pagar (dono da homologação) e Admin (visão completa). */}
-          {caps.canHomologate && ctrlData.suppliers && (
-            <WidgetFornecedores data={ctrlData.suppliers} />
-          )}
-          {caps.canRequest && ctrlData.myRequests && (
-            <WidgetMinhasRequisicoes data={ctrlData.myRequests} />
-          )}
-          {caps.canBudget && ctrlData.budget && (
-            <WidgetOrcamento data={ctrlData.budget} />
-          )}
-        </div>
-      )}
-
-      {/* Rodapé econômico — Indicadores e Notícias são de TODOS os perfis */}
-      <section>
-        <h2 className="mb-3 text-base font-semibold">Indicadores Econômicos</h2>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {loadingIndicators
-            ? Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i} className="rounded-lg border bg-background">
-                  <CardContent className="space-y-2 p-4">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-7 w-20" />
-                    <Skeleton className="h-4 w-16" />
-                  </CardContent>
-                </Card>
-              ))
-            : indicators.map((ind) => (
-                <Card key={ind.name} className="rounded-lg border bg-background">
-                  <CardContent className="p-4">
-                    <div className="mb-1 flex items-center gap-2">
-                      <span
-                        className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: ind.color }}
-                      />
-                      <span className="truncate text-xs text-muted-foreground">
-                        {ind.label}
-                      </span>
-                    </div>
-                    <p className="text-2xl font-bold tracking-tight">{ind.value}</p>
-                    <p
-                      className="mt-1 text-xs font-medium"
-                      style={{ color: changeColor(ind.changeType) }}
-                    >
-                      {ind.change}
-                    </p>
-                  </CardContent>
-                </Card>
               ))}
-        </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* 4. Fila de pagamento ---------------------------------------- */}
+      {caps.canPay && ctrlData.payments && (
+        <section className="ch-band">
+          <WidgetFilaPagamento data={ctrlData.payments} />
+        </section>
+      )}
+
+      {/* 5. Aprovações pendentes ------------------------------------- */}
+      {caps.canApprove && ctrlData.approvals && (
+        <section className="ch-band">
+          <WidgetAprovacoes data={ctrlData.approvals} />
+        </section>
+      )}
+
+      {/* 6. Fornecedores a homologar + Minhas requisições ------------- */}
+      {((caps.canHomologate && ctrlData.suppliers) ||
+        (caps.canRequest && ctrlData.myRequests)) && (
+        <section className="ch-band">
+          <div
+            className={
+              caps.canHomologate && ctrlData.suppliers && caps.canRequest && ctrlData.myRequests
+                ? "ch-split"
+                : undefined
+            }
+          >
+            {caps.canHomologate && ctrlData.suppliers && (
+              <WidgetFornecedores data={ctrlData.suppliers} />
+            )}
+            {caps.canRequest && ctrlData.myRequests && (
+              <WidgetMinhasRequisicoes data={ctrlData.myRequests} />
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* 7. Orçamento do setor --------------------------------------- */}
+      {caps.canBudget && ctrlData.budget && (
+        <section className="ch-band">
+          <WidgetOrcamento data={ctrlData.budget} />
+        </section>
+      )}
+
+      {/* 8. Indicadores econômicos — todos os perfis ------------------ */}
+      <section className="ch-band">
+        <SectionHead title="Indicadores econômicos" />
+        {loadingIndicators ? (
+          <div className="ch-cols">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i}>
+                <span className="ch-skel" style={{ height: 22, width: 90 }} />
+                <span className="ch-skel" style={{ height: 10, width: 60, marginTop: 8 }} />
+              </div>
+            ))}
+          </div>
+        ) : indicators.length === 0 ? (
+          <p className="ch-empty">Indicadores indisponíveis no momento.</p>
+        ) : (
+          <div className={`ch-cols ${indicators.length === 4 ? "ch-cols--4" : ""}`}>
+            {indicators.map((ind) => (
+              <div key={ind.name}>
+                <p className="ch-metric">{ind.value}</p>
+                <p className="ch-kicker" style={{ marginTop: 8 }}>
+                  {ind.label}
+                </p>
+                <p
+                  className={`ch-row__meta ${
+                    ind.changeType === "down" ? "ch-change--down" : ""
+                  }`}
+                  style={{ marginTop: 4 }}
+                >
+                  {ind.change}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
-      <section>
-        <Card className="rounded-lg border bg-background">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Notícias Econômicas</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {loadingNews ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="space-y-1 px-3 py-2.5">
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-3 w-32" />
-                </div>
-              ))
-            ) : news.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-muted-foreground">
-                Nenhuma notícia disponível no momento.
-              </p>
-            ) : (
-              news.map((item, i) => (
-                <a
-                  key={i}
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group flex items-center justify-between rounded-md px-3 py-2.5 transition-colors hover:bg-muted/60"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="line-clamp-2 text-sm font-medium transition-colors group-hover:text-primary">
-                      {item.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {item.source}
-                      {item.publishedAt ? ` · ${item.publishedAt}` : ""}
-                    </p>
-                  </div>
-                </a>
-              ))
-            )}
-          </CardContent>
-        </Card>
+      {/* 9. Notícias econômicas — todos os perfis --------------------- */}
+      <section className="ch-band">
+        <SectionHead title="Notícias econômicas" />
+        {loadingNews ? (
+          <div className="ch-2col">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i}>
+                <span className="ch-skel" style={{ height: 12, width: "80%" }} />
+                <span className="ch-skel" style={{ height: 10, width: 90, marginTop: 6 }} />
+              </div>
+            ))}
+          </div>
+        ) : news.length === 0 ? (
+          <p className="ch-empty">Nenhuma notícia disponível no momento.</p>
+        ) : (
+          <div className="ch-2col">
+            {news.map((item, i) => (
+              <a
+                key={i}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ch-news"
+              >
+                <span className="ch-row__title">{item.title}</span>
+                <span className="ch-kicker" style={{ display: "block", marginTop: 5 }}>
+                  {item.source}
+                  {item.publishedAt ? ` · ${item.publishedAt}` : ""}
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
       </section>
+
+      <footer className="ch-footer">
+        <span>Control Hub · Beta</span>
+        <span>{host}</span>
+      </footer>
     </div>
   );
 }

@@ -1,17 +1,17 @@
 "use client";
 
-import { PiggyBank } from "lucide-react";
-
-import { WidgetCard, WidgetEmpty } from "@/components/app/home/widget-card";
+import { SectionHead, WidgetEmpty } from "@/components/app/home/widget-card";
 import { fmtBRL, type HomeBudget } from "@/lib/home/ctrl-widgets";
 
 export function WidgetOrcamento({ data }: { data: HomeBudget }) {
   return (
-    <WidgetCard title="Orçamento do setor" icon={PiggyBank} href="/ctrl/orcamento">
+    <>
+      <SectionHead title="Orçamento do setor" href="/ctrl/orcamento" />
+
       {data.sectors.length === 0 ? (
         <WidgetEmpty>Sem orçamento cadastrado para seus setores.</WidgetEmpty>
       ) : (
-        <ul className="space-y-3">
+        <div className="ch-2col">
           {data.sectors.map((s) => {
             const pct =
               s.orcadoAnual > 0
@@ -19,29 +19,27 @@ export function WidgetOrcamento({ data }: { data: HomeBudget }) {
                 : 0;
             const over = s.orcadoAnual > 0 && s.consumido > s.orcadoAnual;
             return (
-              <li key={s.sectorId} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium">{s.sectorName}</span>
-                  <span className="text-xs text-muted-foreground">
+              <div key={s.sectorId}>
+                <div className="ch-row" style={{ padding: 0, margin: 0 }}>
+                  <span className="ch-row__title">{s.sectorName}</span>
+                  <span className="ch-row__meta">
                     {fmtBRL.format(s.consumido)} / {fmtBRL.format(s.orcadoAnual)}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`h-full rounded-full ${over ? "bg-red-500" : "bg-violet-500"}`}
-                    style={{ width: `${over ? 100 : pct}%` }}
-                  />
-                </div>
-              </li>
+                <span className="ch-bar">
+                  <span className="ch-bar__fill" style={{ width: `${over ? 100 : pct}%` }} />
+                </span>
+              </div>
             );
           })}
-        </ul>
+        </div>
       )}
+
       {data.hidden > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="ch-empty" style={{ marginTop: 14 }}>
           +{data.hidden} setor(es) — veja todos em Orçamento.
         </p>
       )}
-    </WidgetCard>
+    </>
   );
 }

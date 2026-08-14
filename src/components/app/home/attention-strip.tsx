@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
 
 interface AttentionItem {
+  /** Número grande do cartão — a contagem da pendência. */
+  count: number;
+  /** Descrição em duas linhas, abaixo do número. */
   label: string;
   href: string;
 }
@@ -23,13 +25,15 @@ function buildItems(data: HomeCtrlData, caps: HomeCtrlCaps): AttentionItem[] {
 
   if (alerts.approvals && data.approvals && data.approvals.total > 0) {
     items.push({
-      label: `${data.approvals.total} aprovação(ões) aguardando você`,
+      count: data.approvals.total,
+      label: "aprovações aguardando você",
       href: "/ctrl/aprovacoes",
     });
   }
   if (alerts.omieErrors && data.payments && data.payments.omieErrors > 0) {
     items.push({
-      label: `${data.payments.omieErrors} falha(s) no envio ao Omie`,
+      count: data.payments.omieErrors,
+      label: "falhas no envio ao Omie",
       href: "/ctrl/contas-a-pagar",
     });
   }
@@ -41,13 +45,15 @@ function buildItems(data: HomeCtrlData, caps: HomeCtrlCaps): AttentionItem[] {
     data.myRequests.aguardandoComplementacao > 0
   ) {
     items.push({
-      label: `${data.myRequests.aguardandoComplementacao} requisição(ões) aguardando complementação`,
+      count: data.myRequests.aguardandoComplementacao,
+      label: "requisições aguardando complementação",
       href: "/ctrl/requisicoes",
     });
   }
   if (alerts.ownRejected && data.myRequests && data.myRequests.rejeitadas > 0) {
     items.push({
-      label: `${data.myRequests.rejeitadas} requisição(ões) rejeitada(s)`,
+      count: data.myRequests.rejeitadas,
+      label: "requisições rejeitadas",
       href: "/ctrl/requisicoes",
     });
   }
@@ -55,19 +61,38 @@ function buildItems(data: HomeCtrlData, caps: HomeCtrlCaps): AttentionItem[] {
   // a Pagar (caps.canHomologate), então é null para todo o resto.
   if (alerts.suppliers && data.suppliers && data.suppliers.bloqueadasTotal > 0) {
     items.push({
-      label: `${data.suppliers.bloqueadasTotal} requisição(ões) com fornecedor não homologado`,
+      count: data.suppliers.bloqueadasTotal,
+      label: "requisições com fornecedor não homologado",
       href: "/ctrl/contas-a-pagar",
     });
   }
   if (alerts.suppliers && data.suppliers && data.suppliers.novosTotal > 0) {
     items.push({
-      label: `${data.suppliers.novosTotal} fornecedor(es) aguardando homologação`,
+      count: data.suppliers.novosTotal,
+      label: "fornecedores aguardando homologação",
       href: "/ctrl/admin/fornecedores",
     });
   }
   return items;
 }
 
+/**
+ * A faixa se aplica a este perfil?
+ *
+ * Perfil sem nenhum tipo de pendência sob sua responsabilidade (Visão
+ * Financeira, CSC, Validação de Contratos) não tem a seção: "Tudo em dia"
+ * prometeria um acompanhamento que essa tela não faz para eles. Quem decide
+ * é o HomeView, para não sobrar uma faixa vazia entre duas réguas.
+ */
+export function hasAttentionSection(caps: HomeCtrlCaps): boolean {
+  return Object.values(caps.alerts).some(Boolean);
+}
+
+/**
+ * Único campo vermelho cheio da tela. É onde o vermelho significa
+ * "ação/atenção" no seu grau máximo — por isso não se repete em mais
+ * nenhum painel.
+ */
 export function AttentionStrip({
   data,
   caps,
@@ -77,40 +102,27 @@ export function AttentionStrip({
 }) {
   const items = buildItems(data, caps);
 
-  // Perfil sem nenhum tipo de pendência sob sua responsabilidade (Visão
-  // Financeira, CSC, Validação de Contratos): a faixa não se aplica e some por
-  // inteiro — "Tudo em dia" prometeria um acompanhamento que essa tela não faz
-  // para eles.
-  const hasAnyAlertKind = Object.values(caps.alerts).some(Boolean);
-  if (!hasAnyAlertKind) return null;
+  if (!hasAttentionSection(caps)) return null;
 
   if (items.length === 0) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-5 py-3 text-sm text-muted-foreground">
-        <CheckCircle2 className="h-4 w-4 text-green-600" />
+      <p className="ch-attention--clear">
         Tudo em dia. Nada precisa da sua atenção agora.
-      </div>
+      </p>
     );
   }
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-3 dark:border-amber-900 dark:bg-amber-950/30">
-      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
-        <AlertTriangle className="h-4 w-4 text-amber-600" />
-        Precisa da sua atenção
-      </div>
-      <ul className="flex flex-wrap gap-2">
+    <div className="ch-attention">
+      <div className="ch-attention__head">Precisa da sua atenção</div>
+      <div className="ch-attention__grid">
         {items.map((it) => (
-          <li key={it.href + it.label}>
-            <Link
-              href={it.href}
-              className="inline-flex rounded-full border border-amber-300 bg-white/70 px-3 py-1 text-xs font-medium text-amber-900 transition-colors hover:bg-white dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
-            >
-              {it.label}
-            </Link>
-          </li>
+          <Link key={it.href + it.label} href={it.href} className="ch-attention__card">
+            <span className="ch-metric ch-metric--accent">{it.count}</span>
+            <p>{it.label}</p>
+          </Link>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

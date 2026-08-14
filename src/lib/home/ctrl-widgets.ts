@@ -45,8 +45,8 @@ export interface HomeCtrlCaps {
    */
   approvalsGlobal: boolean;
   /**
-   * Orçamento de TODOS os setores (admin). Os aprovadores veem só os setores em
-   * que estão cadastrados.
+   * Orçamento de TODOS os setores (admin e Contas a Pagar). Os aprovadores
+   * veem só os setores em que estão cadastrados.
    */
   budgetAllSectors: boolean;
   alerts: HomeAttentionAlerts;
@@ -77,10 +77,14 @@ export function deriveCtrlCaps(roles: CtrlRole[], sectorIds: string[]): HomeCtrl
     // de pagamento e homologação), não cria as próprias. O papel legado "csc"
     // que ele acumula é que o trazia para este quadro.
     canRequest: isAdmin || isApprover || isRequester,
-    canBudget: isAdmin || (isApprover && sectorIds.length > 0),
+    // Contas a Pagar entra SEM depender de user_sectors: ele acompanha o
+    // orçamento de todos os setores (é o mesmo alcance que já tem na tela
+    // /ctrl/orcamento, liberada a ele no access.ts). O aprovador continua
+    // preso aos setores em que está cadastrado — sem vínculo, sem quadro.
+    canBudget: isAdmin || isContasAPagar || (isApprover && sectorIds.length > 0),
     canHomologate: isAdmin || isContasAPagar,
     approvalsGlobal: isAdmin || isContasAPagar,
-    budgetAllSectors: isAdmin,
+    budgetAllSectors: isAdmin || isContasAPagar,
     alerts: {
       approvals: isAdmin || isApprover,
       // Falha no envio ao Omie é operação do Contas a Pagar — é ele quem

@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LogOut } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
 export function SignOutButton() {
@@ -20,16 +19,14 @@ export function SignOutButton() {
   };
 
   return (
-    <Button
+    <button
       type="button"
-      variant="outline"
-      size="sm"
       onClick={handleLogout}
       disabled={loading}
-      className="gap-2"
+      className="ch-btn ch-btn--secondary"
     >
-      <LogOut className="h-4 w-4" />
-      {loading ? "Saindo..." : "Logout"}
-    </Button>
+      <LogOut className="h-3.5 w-3.5" strokeWidth={2} />
+      {loading ? "Saindo..." : "Sair"}
+    </button>
   );
 }

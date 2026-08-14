@@ -31,6 +31,13 @@ export type PaymentMethod =
 
 export type ApprovalTier = "nivel_2" | "nivel_3";
 
+/**
+ * Escopo efetivo da listagem devolvida por `getRequests` — a tela usa para
+ * rotular o que está sendo mostrado e para decidir se exibe as colunas
+ * Solicitante/Setor (só fazem sentido quando há requisições de terceiros).
+ */
+export type RequestsVisibilityScope = "todas" | "setores" | "proprias";
+
 // As regras de roteamento (IDs fixos) vivem em "@/lib/ctrl/routing" para serem
 // compartilhadas com a UI (badges). Ver APPROVAL_ROUTING importado acima.
 
@@ -1127,10 +1134,12 @@ export async function getRequests(filters?: {
   sector_id?: string;
   statuses?: CtrlRequestStatus[];
   // Escopo da tela de Aprovações. Define DUAS coisas:
-  //  1. Liga a restrição de alçada de aprovação (APPROVER_SECTOR_RESTRICTIONS).
+  //  1. Liga a restrição de alçada de aprovação (APPROVER_SECTOR_RESTRICTIONS)
+  //     como filtro independente da visibilidade — o diretor, que é global aqui,
+  //     também passa por ela.
   //  2. Liga a visibilidade operacional por perfil (global/por setor). Fora
-  //     deste escopo (tela de Requisições) cada um vê só as próprias, exceto
-  //     admin — ver o bloco de visibilidade abaixo.
+  //     deste escopo (tela de Requisições) a visibilidade é outra: própria para
+  //     o solicitante, por setor para gerente/diretor — ver o bloco abaixo.
   approvalScope?: boolean;
 }) {
   const ctx = await requireCtrlRole(
@@ -1162,11 +1171,20 @@ export async function getRequests(filters?: {
 
   // Visibilidade — depende da TELA, não só do perfil:
   //
-  // Tela de Requisições (sem approvalScope): cada usuário vê APENAS as
-  // requisições que ele mesmo solicitou. Única exceção é o perfil admin, que vê
-  // todas. Vale inclusive para gerente, diretor, csc e contas_a_pagar: quem
-  // precisa agir sobre requisições de terceiros faz isso nas telas próprias
-  // (Aprovações e Contas a Pagar), não nesta listagem.
+  // Tela de Requisições (sem approvalScope):
+  //  - Solicitante (e csc / contas_a_pagar): APENAS as requisições que ele mesmo
+  //    criou. Quem opera pagamentos age na tela de Contas a Pagar, não aqui.
+  //  - Gerente, Gerente Sócio e Diretor: as próprias MAIS todas as requisições
+  //    dos setores pelos quais respondem (user_sectors, ou a alçada nominal
+  //    quando houver — ver abaixo). É a listagem gerencial do setor: mostra o
+  //    histórico inteiro, não só o que está parado esperando aprovação.
+  //  - Admin (e a visão completa nominal): todas.
+  //
+  // Sem setor vinculado o responsável cai para "só as próprias" — falha fechada.
+  // Aqui não vale o fallback "vê tudo" das Aprovações: lá ele existe para não
+  // travar o fluxo de aprovação enquanto os cadastros estão incompletos; nesta
+  // listagem ele daria visão geral da empresa a quem não responde por setor
+  // nenhum.
   //
   // Tela de Aprovações (approvalScope): mantém a visibilidade operacional em
   // tres niveis, senão o aprovador não enxerga o que precisa aprovar:
@@ -1190,6 +1208,12 @@ export async function getRequests(filters?: {
   const hasSectorVisibility = ctx.ctrlRoles.some((r) =>
     ["gerente"].includes(r),
   );
+  // Responsáveis por setor na tela de REQUISIÇÕES. O diretor entra aqui (vê o
+  // que é do setor dele) mesmo sendo global na tela de Aprovações — são regras
+  // de telas diferentes, de propósito.
+  const isSectorResponsible = ctx.ctrlRoles.some((r) =>
+    ["gerente", "diretor"].includes(r),
+  );
 
   // Rateios cuja alguma PARCELA cai nestes setores (o setor primário pode ser
   // outro) — para o gerente/alçada enxergar o rateio pelo setor da parcela.
@@ -1207,9 +1231,45 @@ export async function getRequests(filters?: {
     return parts.join(",");
   };
 
+  // Ids dos setores cujo NOME está no conjunto informado (alçada nominal —
+  // casada por nome, resiliente a acento/caixa).
+  const sectorIdsByName = async (names: Set<string>): Promise<string[]> => {
+    const { data: allSectors } = await supabase
+      .from("ctrl_sectors")
+      .select("id, name");
+    return (allSectors ?? [])
+      .filter((s) => s.name != null && names.has(normalizeSectorName(s.name)))
+      .map((s) => s.id as string);
+  };
+
+  // Escopo efetivo — devolvido à tela para rotular a listagem.
+  let scope: RequestsVisibilityScope = "todas";
+
   if (!filters?.approvalScope) {
-    if (!ctx.ctrlRoles.includes("admin") && !fullView) {
+    if (ctx.ctrlRoles.includes("admin") || fullView) {
+      scope = "todas";
+    } else if (isSectorResponsible) {
+      // Setores pelos quais ele responde. A alçada nominal (Regis, por exemplo,
+      // vinculado a todos os setores para poder CRIAR requisições) SUBSTITUI os
+      // vínculos aqui — é ela que diz de quais setores ele é o aprovador. Falha
+      // fechada: nenhum nome casou => cai para as próprias requisições.
+      const restriction = approverSectorRestrictionFor(ctx);
+      const sectorIds = restriction
+        ? await sectorIdsByName(restriction)
+        : ctx.sectorIds;
+      if (sectorIds.length > 0) {
+        const rateioIds = await rateioReqIdsForSectors(sectorIds);
+        query = query.or(
+          [`created_by.eq.${ctx.id}`, sectorOrRateio(sectorIds, rateioIds)].join(","),
+        );
+        scope = "setores";
+      } else {
+        query = query.eq("created_by", ctx.id);
+        scope = "proprias";
+      }
+    } else {
       query = query.eq("created_by", ctx.id);
+      scope = "proprias";
     }
   } else if (!hasGlobalVisibility) {
     if (hasSectorVisibility) {
@@ -1218,8 +1278,10 @@ export async function getRequests(filters?: {
         query = query.or(sectorOrRateio(ctx.sectorIds, rateioIds));
       }
       // sem vinculo de setor => sem restricao (fallback ve tudo)
+      scope = "setores";
     } else {
       query = query.eq("created_by", ctx.id);
+      scope = "proprias";
     }
   }
 
@@ -1228,13 +1290,7 @@ export async function getRequests(filters?: {
   // limitada a um subconjunto. Intersecta a visibilidade com os setores
   // permitidos por NOME. Falha fechada: se nenhum setor casar, não mostra nada.
   if (filters?.approvalScope && approverSectorRestrictionFor(ctx)) {
-    const allowedNames = approverSectorRestrictionFor(ctx)!;
-    const { data: allSectors } = await supabase
-      .from("ctrl_sectors")
-      .select("id, name");
-    const allowedIds = (allSectors ?? [])
-      .filter((s) => s.name != null && allowedNames.has(normalizeSectorName(s.name)))
-      .map((s) => s.id);
+    const allowedIds = await sectorIdsByName(approverSectorRestrictionFor(ctx)!);
     if (allowedIds.length === 0) {
       query = query.in("sector_id", allowedIds); // falha fechada (nada)
     } else {
@@ -1297,7 +1353,7 @@ export async function getRequests(filters?: {
     }
   }
 
-  return { requests: rows };
+  return { requests: rows, scope };
 }
 
 // ─── Approve ──────────────────────────────────────────────────────────────────

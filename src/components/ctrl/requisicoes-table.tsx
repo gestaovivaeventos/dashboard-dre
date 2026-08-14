@@ -13,6 +13,8 @@ import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import {
   RequestDetailModal,
   fmt,
+  resolveNamed,
+  resolveUser,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import {
@@ -26,10 +28,34 @@ import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/c
 
 interface Props {
   requests: RequestDetail[];
+  /**
+   * Liga as colunas Solicitante e Setor. Só faz sentido quando a listagem traz
+   * requisições de terceiros (admin/visão completa, ou responsável vendo os
+   * setores dele) — para quem vê só as próprias as duas colunas seriam
+   * constantes.
+   */
+  showRequester?: boolean;
   isAdmin?: boolean;
   canReconcile?: boolean;
   sectors?: CadastroOption[];
   expenseTypes?: CadastroOption[];
+}
+
+/** Nome (ou e-mail) de quem criou a requisição, para exibição. */
+function requesterName(req: RequestDetail): string {
+  const creator = resolveUser(req.creator ?? null);
+  return creator?.name?.trim() || creator?.email?.trim() || "—";
+}
+
+/** Setor da requisição; em rateio, lista os setores das parcelas. */
+function sectorName(req: RequestDetail): string {
+  if (req.is_rateio && Array.isArray(req.ctrl_request_sectors)) {
+    const parts = req.ctrl_request_sectors
+      .map((p) => resolveNamed(p.ctrl_sectors ?? null))
+      .filter((n): n is string => Boolean(n));
+    if (parts.length) return `Rateio: ${parts.join(", ")}`;
+  }
+  return resolveNamed(req.ctrl_sectors ?? null) ?? (req.is_rateio ? "Rateio" : "—");
 }
 
 // Uma requisição só é considerada "Paga" quando o título foi efetivamente
@@ -47,6 +73,7 @@ function isOmieLaunched(req: RequestDetail): boolean {
 
 export function RequisicoesTable({
   requests,
+  showRequester = false,
   isAdmin = false,
   canReconcile = false,
   sectors = [],
@@ -136,19 +163,28 @@ export function RequisicoesTable({
     return requests.filter((r) => {
       if (termDigits && String(r.request_number).startsWith(termDigits)) return true;
       if (r.title.toLowerCase().includes(term)) return true;
+      // Solicitante e setor só entram na busca quando estão visíveis na tela.
+      if (showRequester && requesterName(r).toLowerCase().includes(term)) return true;
+      if (showRequester && sectorName(r).toLowerCase().includes(term)) return true;
       // "Pago" tem precedência sobre o rótulo do status (a requisição paga
       // continua com status 'agendado' por baixo).
       const statusLabel = isPaid(r) ? "Pago" : STATUS_LABEL[r.status] ?? r.status;
       if (statusLabel.toLowerCase().includes(term)) return true;
       return false;
     });
-  }, [requests, search]);
+  }, [requests, search, showRequester]);
 
   // Colunas para o cabeçalho estilo Excel (ordenar + filtrar por valores).
   const columns = useMemo<ExcelColumn<RequestDetail>[]>(
     () => [
       { key: "numero", type: "number", getValue: (r) => r.request_number, label: (r) => `#${r.request_number}` },
       { key: "titulo", type: "text", getValue: (r) => r.title },
+      ...(showRequester
+        ? ([
+            { key: "solicitante", type: "text", getValue: (r) => requesterName(r) },
+            { key: "setor", type: "text", getValue: (r) => sectorName(r) },
+          ] as ExcelColumn<RequestDetail>[])
+        : []),
       { key: "valor", type: "number", getValue: (r) => r.amount, label: (r) => fmt.format(r.amount) },
       {
         key: "vencimento",
@@ -168,7 +204,7 @@ export function RequisicoesTable({
         label: (r) => formatDateBR(r.created_at),
       },
     ],
-    [],
+    [showRequester],
   );
 
   const { rows: displayed, headerProps, hasFilters, clearAll } = useExcelTable(filtered, columns);
@@ -263,6 +299,12 @@ export function RequisicoesTable({
               <tr className="border-b bg-muted/50 text-left text-xs font-semibold">
                 <th className="px-4 py-3"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Título" {...headerProps("titulo")} /></th>
+                {showRequester && (
+                  <>
+                    <th className="px-4 py-3"><ExcelHeaderCell label="Solicitante" {...headerProps("solicitante")} /></th>
+                    <th className="px-4 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                  </>
+                )}
                 <th className="px-4 py-3"><ExcelHeaderCell label="Valor" {...headerProps("valor")} /></th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
                 <th className="px-4 py-3"><ExcelHeaderCell label="Status" {...headerProps("status")} /></th>
@@ -281,6 +323,16 @@ export function RequisicoesTable({
                       #{req.request_number}
                     </td>
                     <td className="px-4 py-3 font-medium">{req.title}</td>
+                    {showRequester && (
+                      <>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {requesterName(req)}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {sectorName(req)}
+                        </td>
+                      </>
+                    )}
                     <td className="px-4 py-3">{fmt.format(req.amount)}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {formatDayBR(req.due_date)}

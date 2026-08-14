@@ -63,8 +63,10 @@ export function describeUserExceptions(user: UserRef): UserException[] {
       title: "Alçada de aprovação restrita",
       detail:
         `Mesmo vinculado a outros setores na tela de Usuários (o que ele precisa para CRIAR ` +
-        `requisições), só aprova: ${restriction.allowedSectorNames.join(", ")}. ` +
-        `Vale na tela de Aprovações, nas ações do servidor e no lembrete diário por e-mail.`,
+        `requisições), só responde por: ${restriction.allowedSectorNames.join(", ")}. ` +
+        `Vale na tela de Aprovações, nas ações do servidor e no lembrete diário por e-mail — e ` +
+        `também na tela de Requisições, onde estes setores (e não os vínculos) definem quais ` +
+        `requisições de terceiros ele enxerga.`,
       source: "src/lib/ctrl/routing.ts",
     });
   }

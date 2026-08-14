@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { getRequests } from "@/lib/ctrl/actions/requests";
-import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getSectors } from "@/lib/ctrl/actions/sectors";
 import { getExpenseTypes } from "@/lib/ctrl/actions/expense-types";
 import { RequisicoesTable } from "@/components/ctrl/requisicoes-table";
@@ -43,10 +42,6 @@ export default async function RequisicoesPage() {
   // Edição/exclusão administrativa (a princípio) só para admin. Carrega os
   // cadastros de setor/tipo só nesse caso, para alimentar o form de edição.
   const isAdmin = hasCtrlRole(ctx, "admin");
-  // Quem enxerga a listagem inteira (e não só as próprias): admin e a visão
-  // completa do módulo (@/lib/ctrl/full-view). Só muda o subtítulo — a lista em
-  // si já vem no escopo certo do getRequests, e editar/excluir segue admin-only.
-  const seesAllRequests = isAdmin || hasCtrlFullView(ctx.email);
   const [sectorsRes, typesRes] = isAdmin
     ? await Promise.all([getSectors(), getExpenseTypes()])
     : [null, null];
@@ -57,7 +52,17 @@ export default async function RequisicoesPage() {
     typesRes && "expenseTypes" in typesRes ? typesRes.expenseTypes ?? [] : []
   ).map((t) => ({ id: t.id, name: t.name }));
 
-  const { requests, error } = await getRequests();
+  // O escopo da listagem é decidido no servidor (getRequests) — a tela só o usa
+  // para rotular o que está sendo mostrado e para exibir Solicitante/Setor
+  // quando há requisições de terceiros na lista.
+  const { requests, error, scope } = await getRequests();
+  const seesOthers = scope === "todas" || scope === "setores";
+  const subtitle =
+    scope === "todas"
+      ? "Todas as requisições"
+      : scope === "setores"
+        ? "Suas requisições e as dos setores sob sua responsabilidade"
+        : "Suas requisições de pagamento";
 
   // Projeta os campos que a tabela e o modal de detalhes precisam. O modal é o
   // mesmo componente compartilhado usado em Contas a Pagar (RequestDetail).
@@ -117,9 +122,7 @@ export default async function RequisicoesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Requisições</h1>
-          <p className="text-muted-foreground">
-            {seesAllRequests ? "Todas as requisições" : "Suas requisições de pagamento"}
-          </p>
+          <p className="text-muted-foreground">{subtitle}</p>
         </div>
         {canCreateRequest ? (
           <a
@@ -137,6 +140,7 @@ export default async function RequisicoesPage() {
       ) : (
         <RequisicoesTable
           requests={rows}
+          showRequester={seesOthers}
           isAdmin={isAdmin}
           canReconcile={canReconcile}
           sectors={sectors}

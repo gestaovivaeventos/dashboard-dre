@@ -1,51 +1,60 @@
 /* =========================================================
-   Ordem de import importa: viva-tokens DEVE vir antes dos
+   Ordem de import importa: os tokens DEVEM vir antes dos
    @tailwind para que as variaveis estejam disponiveis nos layers.
+   control-hub.css vem DEPOIS de viva-tokens: ele reescreve os
+   tokens legados (--surface-*, --text-*, --border-*, laranja ->
+   vermelho) e e o que propaga o design system para todas as telas.
    ========================================================= */
 @import "../styles/viva-tokens.css";
+@import "../styles/control-hub.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* =========================================================
-   Mapeamento shadcn/ui -> paleta Viva
+   Mapeamento shadcn/ui -> paleta Control Hub
    Cada variavel HSL abaixo e o equivalente em HSL dos tokens
-   Viva em HEX. Assim, todos os componentes shadcn (<Card>,
-   <Button>, <Badge>, <Table>...) herdam automaticamente o
-   tema dark + laranja sem precisar reescrever nada.
+   de control-hub.css em HEX (o formato HSL sem virgulas e
+   exigencia do shadcn; os tokens continuam sendo a fonte).
+   Assim, todos os componentes shadcn (<Card>, <Button>,
+   <Badge>, <Table>...) das demais telas herdam a paleta nova
+   sem precisar reescrever cada uma.
    ========================================================= */
 :root {
   /* Modo CLARO (default). O toggle adiciona .dark para trocar. */
-  --background:            220 20% 98%;   /* off-white */
-  --foreground:            217 23% 12%;   /* quase preto */
+  --background:            0 4% 95%;      /* --color-bg      #f3f2f2 */
+  --foreground:            20 5% 12%;     /* --color-text    #201e1d */
 
-  --card:                  0 0% 100%;     /* branco puro */
-  --card-foreground:       217 23% 12%;
+  --card:                  0 0% 100%;     /* --color-surface #ffffff */
+  --card-foreground:       20 5% 12%;
 
   --popover:               0 0% 100%;
-  --popover-foreground:    217 23% 12%;
+  --popover-foreground:    20 5% 12%;
 
-  --primary:               20 100% 55%;   /* viva-500 (identidade, nao muda) */
+  --primary:               8 85% 50%;     /* --color-accent  #ec3013 */
   --primary-foreground:    0 0% 100%;
 
-  --secondary:             220 14% 94%;   /* cinza bem claro */
-  --secondary-foreground:  217 23% 12%;
+  --secondary:             0 7% 91%;      /* --color-neutral-200 #eae7e7 */
+  --secondary-foreground:  20 5% 12%;
 
-  --muted:                 220 14% 94%;
-  --muted-foreground:      220 10% 45%;   /* cinza medio para textos secundarios */
+  --muted:                 0 7% 91%;
+  --muted-foreground:      0 2% 60%;      /* --color-neutral-500 #9b9797 */
 
-  --accent:                220 14% 94%;
-  --accent-foreground:     217 23% 12%;
+  --accent:                0 7% 91%;
+  --accent-foreground:     20 5% 12%;
 
-  --destructive:           4 86% 58%;
+  /* Vermelho e o unico acento: erro/atencao usa o mesmo tom. */
+  --destructive:           8 85% 50%;
   --destructive-foreground: 0 0% 100%;
 
-  --border:                220 13% 88%;   /* cinza visivel em fundo claro */
-  --input:                 220 13% 88%;
-  --ring:                  20 100% 55%;
+  --border:                0 4% 85%;      /* equivalente a --line-strong */
+  --input:                 0 4% 85%;
+  --ring:                  8 85% 50%;
 
-  --radius: 0.75rem;
+  /* 10px: rounded-lg = 10 (cartoes), rounded-md = 8, rounded-sm = 6
+     (botoes/inputs) — alinhado com --radius-sm/md/lg do design system. */
+  --radius: 0.625rem;
 
   /* Fontes do Relatório Financeiro Mensal. Carregadas via <link> em runtime
      (layout.tsx) — não pelo next/font, para não acoplar o build da Vercel ao
@@ -55,28 +64,31 @@
   --font-plex-mono: "IBM Plex Mono";
 }
 
-/* Mantemos .dark como alias do :root para compatibilidade
-   com eventuais next-themes toggles (se um dia virar). */
+/* Tema escuro — carvao quente, nao preto. Os valores abaixo sao o
+   equivalente HSL dos tokens do bloco [data-theme="dark"] de
+   control-hub.css; mexeu la, mexa aqui. */
+[data-theme="dark"],
 .dark {
-  --background:            217 23% 8%;
-  --foreground:            216 29% 96%;
-  --card:                  218 25% 12%;
-  --card-foreground:       216 29% 96%;
-  --popover:               218 27% 15%;
-  --popover-foreground:    216 29% 96%;
-  --primary:               20 100% 55%;
-  --primary-foreground:    0 0% 100%;
-  --secondary:             219 25% 18%;
-  --secondary-foreground:  216 29% 96%;
-  --muted:                 218 27% 15%;
-  --muted-foreground:      220 15% 71%;
-  --accent:                219 25% 18%;
-  --accent-foreground:     216 29% 96%;
-  --destructive:           4 86% 58%;
-  --destructive-foreground: 0 0% 100%;
-  --border:                219 26% 19%;
-  --input:                 218 27% 15%;
-  --ring:                  20 100% 55%;
+  --background:            20 5% 12%;     /* --color-bg      #211f1e */
+  --foreground:            26 16% 91%;    /* --color-text    #ece8e5 */
+  --card:                  15 5% 16%;     /* --ch-card       #2c2928 */
+  --card-foreground:       26 16% 91%;
+  --popover:               15 5% 16%;
+  --popover-foreground:    26 16% 91%;
+  --primary:               9 100% 62%;    /* --color-accent  #ff5a3c */
+  /* O vermelho clareou: tinta branca sobre ele nao passa de 3:1. */
+  --primary-foreground:    20 5% 9%;      /* #1a1817 */
+  --secondary:             20 6% 20%;     /* #35312f */
+  --secondary-foreground:  26 16% 91%;
+  --muted:                 20 6% 20%;
+  --muted-foreground:      20 4% 52%;     /* --color-neutral-500 #8a8481 */
+  --accent:                20 6% 20%;
+  --accent-foreground:     26 16% 91%;
+  --destructive:           9 100% 62%;
+  --destructive-foreground: 20 5% 9%;
+  --border:                20 5% 22%;     /* --color-divider #3a3634 */
+  --input:                 20 5% 22%;
+  --ring:                  9 100% 62%;
 }
 
 @layer base {
@@ -89,7 +101,12 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: var(--font-body), "Inter", system-ui, -apple-system, sans-serif;
+    /* Archivo em headings e corpo — fonte unica do design system.
+       13px e a base do app: vale para o texto sem tamanho explicito.
+       O rem NAO foi mexido de proposito (html continua 16px), senao
+       toda utilitaria Tailwind das outras telas mudaria de escala. */
+    font-family: var(--font);
+    font-size: 13px;
   }
 }
 
