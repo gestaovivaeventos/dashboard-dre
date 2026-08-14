@@ -22,9 +22,12 @@ const CELL =
 interface Props {
   initialItems: CompanyEncargos[];
   initialYear: number;
+  /** Quando definido, mostra só esta empresa e esconde o ano (workspace). */
+  fixedCompanyId?: string;
+  fixedYear?: number;
 }
 
-export function EncargosManager({ initialItems, initialYear }: Props) {
+export function EncargosManager({ initialItems, initialYear, fixedCompanyId, fixedYear }: Props) {
   const [year, setYear] = useState<number>(initialYear || defaultBudgetYear());
   const [rows, setRows] = useState<CompanyEncargos[]>(initialItems);
   const [loading, setLoading] = useState(false);
@@ -56,9 +59,14 @@ export function EncargosManager({ initialItems, initialYear }: Props) {
     );
   }
 
+  // No workspace, mostra só a empresa do contexto.
+  const displayRows = fixedCompanyId
+    ? rows.filter((r) => r.companyId === fixedCompanyId)
+    : rows;
+
   return (
     <div className="space-y-4">
-      <YearSelect value={year} onChange={setYear} disabled={loading} />
+      {!fixedYear && <YearSelect value={year} onChange={setYear} disabled={loading} />}
 
       {feedback && (
         <div
@@ -98,7 +106,7 @@ export function EncargosManager({ initialItems, initialYear }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {rows.map((row) => (
+              {displayRows.map((row) => (
                 <EncargoRow
                   key={row.companyId}
                   row={row}

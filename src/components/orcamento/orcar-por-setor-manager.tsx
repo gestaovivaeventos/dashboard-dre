@@ -16,9 +16,12 @@ import { cn } from "@/lib/utils";
 interface Props {
   companies: CompanyBudgetConfig[];
   initialYear: number;
+  /** Quando definido, mostra só esta empresa e esconde ano/clonar (workspace). */
+  fixedCompanyId?: string;
+  fixedYear?: number;
 }
 
-export function OrcarPorSetorManager({ companies, initialYear }: Props) {
+export function OrcarPorSetorManager({ companies, initialYear, fixedCompanyId, fixedYear }: Props) {
   const [year, setYear] = useState<number>(initialYear || defaultBudgetYear());
   const [rows, setRows] = useState(companies);
   const [loading, setLoading] = useState(false);
@@ -105,20 +108,28 @@ export function OrcarPorSetorManager({ companies, initialYear }: Props) {
     );
   }
 
+  // No workspace, mostra só a empresa do contexto.
+  const displayRows = fixedCompanyId
+    ? rows.filter((r) => r.companyId === fixedCompanyId)
+    : rows;
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
-        <button
-          type="button"
-          onClick={handleClone}
-          disabled={loading || cloning}
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
-        >
-          {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-          Clonar de {year - 1}
-        </button>
-      </div>
+      {/* Ano + clonar: só fora do workspace (lá o ano vem da rota). */}
+      {!fixedYear && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+          <button
+            type="button"
+            onClick={handleClone}
+            disabled={loading || cloning}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
+          >
+            {cloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+            Clonar de {year - 1}
+          </button>
+        </div>
+      )}
 
       {feedback && (
         <div
@@ -140,7 +151,7 @@ export function OrcarPorSetorManager({ companies, initialYear }: Props) {
         </div>
       ) : (
         <div className="rounded-lg border divide-y">
-          {rows.map((company) => {
+          {displayRows.map((company) => {
             const isPending = pendingId === company.companyId;
             return (
               <div

@@ -26,7 +26,6 @@ import {
 } from "@/lib/orcamento/regime-apuracao";
 import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
-import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import {
   MOV_TIPOS,
@@ -36,7 +35,6 @@ import {
   type MovTipo,
   type VinculoKey,
 } from "@/lib/orcamento/vinculos";
-import { YearSelect } from "@/components/orcamento/year-select";
 import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
 import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
@@ -121,11 +119,6 @@ function CurrencyCell({
   );
 }
 
-interface Company {
-  companyId: string;
-  companyName: string;
-}
-
 type TabKey = "quadro" | "beneficios" | "colaborador" | "previa";
 
 const TABS: readonly { key: TabKey; label: string }[] = [
@@ -145,9 +138,13 @@ const EMPTY_SETUP: PessoalSetup = {
   usarEmpresaEncargos: false,
 };
 
-export function DespesasPessoalManager({ companies }: { companies: Company[] }) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function DespesasPessoalManager({
+  companyId,
+  year,
+}: {
+  companyId: string;
+  year: number;
+}) {
   const [tab, setTab] = useState<TabKey>("quadro");
   const [setorId, setSetorId] = useState<string | null>(null);
   const [setup, setSetup] = useState<PessoalSetup>(EMPTY_SETUP);
@@ -312,33 +309,10 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
       ? "todos os setores"
       : `setor ${setup.setores.find((s) => s.id === setorAtual)?.name ?? ""}`.trim();
 
-  if (companies.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-        Nenhuma empresa ativa encontrada.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
-      {/* Empresa + ano + setor */}
+      {/* Regime de apuração + setor (empresa e ano ficam no cabeçalho do workspace) */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-64 space-y-1.5">
-          <label className="text-sm font-medium">Empresa</label>
-          <select
-            value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            disabled={loading}
-            className={INPUT_CLS}
-          >
-            {companies.map((c) => (
-              <option key={c.companyId} value={c.companyId}>
-                {c.companyName}
-              </option>
-            ))}
-          </select>
-        </div>
         {/* Regime de apuração — distribui o 13º (caixa: nov/dez; competência: 1/12). */}
         <div className="w-48 space-y-1.5">
           <label className="text-sm font-medium">Regime de apuração</label>
@@ -355,7 +329,6 @@ export function DespesasPessoalManager({ companies }: { companies: Company[] }) 
             ))}
           </select>
         </div>
-        <YearSelect value={year} onChange={setYear} disabled={loading} />
         {setup.orcarPorSetor && setup.setores.length > 0 && (
           <div className="w-56 space-y-1.5">
             <label className="text-sm font-medium">Setor</label>

@@ -15,9 +15,12 @@ import { cn } from "@/lib/utils";
 interface Props {
   companies: CompanyBudgetConfig[];
   initialYear: number;
+  /** Quando definido, mostra só esta empresa e esconde o ano (workspace). */
+  fixedCompanyId?: string;
+  fixedYear?: number;
 }
 
-export function EmpresaEncargosManager({ companies, initialYear }: Props) {
+export function EmpresaEncargosManager({ companies, initialYear, fixedCompanyId, fixedYear }: Props) {
   const [year, setYear] = useState<number>(initialYear || defaultBudgetYear());
   const [rows, setRows] = useState(companies);
   const [loading, setLoading] = useState(false);
@@ -83,9 +86,14 @@ export function EmpresaEncargosManager({ companies, initialYear }: Props) {
     );
   }
 
+  // No workspace, mostra só a empresa do contexto.
+  const displayRows = fixedCompanyId
+    ? rows.filter((r) => r.companyId === fixedCompanyId)
+    : rows;
+
   return (
     <div className="space-y-4">
-      <YearSelect value={year} onChange={setYear} disabled={loading} />
+      {!fixedYear && <YearSelect value={year} onChange={setYear} disabled={loading} />}
 
       {feedback && (
         <div
@@ -105,7 +113,7 @@ export function EmpresaEncargosManager({ companies, initialYear }: Props) {
         </div>
       ) : (
         <div className="rounded-lg border divide-y">
-          {rows.map((company) => {
+          {displayRows.map((company) => {
             const isPending = pendingId === company.companyId;
             return (
               <div

@@ -60,9 +60,18 @@ function readSalario(input: string): number | null {
   return v;
 }
 
-export function PlanoCargosManager({ companies }: { companies: Company[] }) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function PlanoCargosManager({
+  companies,
+  fixedCompanyId,
+  fixedYear,
+}: {
+  companies: Company[];
+  /** Quando definido, empresa e ano vêm da rota (workspace) — sem seletores. */
+  fixedCompanyId?: string;
+  fixedYear?: number;
+}) {
+  const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [orcarPorSetor, setOrcarPorSetor] = useState(false);
   const [setores, setSetores] = useState<{ id: string; name: string }[]>([]);
   const [setorId, setSetorId] = useState<string | null>(null);
@@ -321,21 +330,23 @@ export function PlanoCargosManager({ companies }: { companies: Company[] }) {
       {/* Seletor de empresa + ano + clonar */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-64 space-y-1.5">
-            <label className="text-sm font-medium">Empresa</label>
-            <select
-              value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
-              className={INPUT_CLS}
-            >
-              {companies.map((c) => (
-                <option key={c.companyId} value={c.companyId}>
-                  {c.companyName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+          {!fixedCompanyId && (
+            <div className="w-64 space-y-1.5">
+              <label className="text-sm font-medium">Empresa</label>
+              <select
+                value={companyId}
+                onChange={(e) => setCompanyId(e.target.value)}
+                className={INPUT_CLS}
+              >
+                {companies.map((c) => (
+                  <option key={c.companyId} value={c.companyId}>
+                    {c.companyName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {!fixedYear && <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />}
           {orcarPorSetor && setores.length > 0 && (
             <div className="w-56 space-y-1.5">
               <label className="text-sm font-medium">Setor</label>

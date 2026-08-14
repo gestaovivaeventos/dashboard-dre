@@ -25,11 +25,14 @@ const BTN_GHOST =
 
 interface Props {
   companies: CompanyBudgetConfig[];
+  /** Quando definido, empresa e ano vêm da rota (workspace) — sem seletores. */
+  fixedCompanyId?: string;
+  fixedYear?: number;
 }
 
-export function SetoresManager({ companies }: Props) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) {
+  const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [items, setItems] = useState<OrcamentoSetor[]>([]);
   const [orcarPorSetor, setOrcarPorSetor] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -141,24 +144,27 @@ export function SetoresManager({ companies }: Props) {
 
   return (
     <div className="space-y-5">
-      {/* Seletor de empresa + ano + clonar */}
+      {/* Seletor de empresa + ano + clonar. No workspace, empresa e ano vêm da
+          rota (fixos) — os seletores não aparecem. */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-64 space-y-1.5">
-            <label className="text-sm font-medium">Empresa</label>
-            <select
-              value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
-              className={INPUT_CLS}
-            >
-              {companies.map((c) => (
-                <option key={c.companyId} value={c.companyId}>
-                  {c.companyName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+          {!fixedCompanyId && (
+            <div className="w-64 space-y-1.5">
+              <label className="text-sm font-medium">Empresa</label>
+              <select
+                value={companyId}
+                onChange={(e) => setCompanyId(e.target.value)}
+                className={INPUT_CLS}
+              >
+                {companies.map((c) => (
+                  <option key={c.companyId} value={c.companyId}>
+                    {c.companyName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {!fixedYear && <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />}
         </div>
         <button
           type="button"

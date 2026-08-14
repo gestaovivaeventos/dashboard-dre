@@ -10,6 +10,7 @@ import {
   type EnvioBudgetResultado,
 } from "@/lib/orcamento/actions/previa-budget";
 import { ENCARGOS } from "@/lib/orcamento/encargos";
+import { workspaceConfigSecaoHref } from "@/lib/orcamento/workspace-tabs";
 import { regimeApuracaoLabel } from "@/lib/orcamento/regime-apuracao";
 import { PreviaTabela } from "@/components/orcamento/previa-tabela";
 import { formatBRL } from "@/lib/orcamento/format";
@@ -109,7 +110,10 @@ export function PreviaPessoal({ companyId, year, setorId, escopoLabel }: Props) 
           INSS <strong className="text-foreground">{totalInss.toLocaleString("pt-BR")}%</strong> +
           FGTS <strong className="text-foreground">{encargos.fgts.toLocaleString("pt-BR")}%</strong>{" "}
           —{" "}
-          <Link href="/orcamento/configuracoes/encargos" className="underline hover:text-foreground">
+          <Link
+            href={workspaceConfigSecaoHref(companyId, year, "encargos")}
+            className="underline hover:text-foreground"
+          >
             ajustar
           </Link>
         </span>

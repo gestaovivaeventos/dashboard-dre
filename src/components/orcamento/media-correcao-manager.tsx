@@ -21,9 +21,7 @@ import {
 } from "@/lib/orcamento/actions/media";
 import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
-import { defaultBudgetYear } from "@/lib/orcamento/years";
 import type { IndiceKey } from "@/lib/orcamento/indices";
-import { YearSelect } from "@/components/orcamento/year-select";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -32,11 +30,6 @@ const CELL =
   "w-full rounded border bg-background px-2 py-1 text-sm text-right tabular-nums outline-none focus:ring-1 focus:ring-ring disabled:opacity-40 disabled:bg-muted/40";
 
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-
-interface Company {
-  companyId: string;
-  companyName: string;
-}
 
 /** Célula de moeda: mostra "R$ 3.000,00" fora de foco; ao focar, valor cru. */
 function CurrencyCell({
@@ -332,12 +325,16 @@ function MediaRow({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export function MediaCorrecaoManager({ companies }: { companies: Company[] }) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function MediaCorrecaoManager({
+  companyId,
+  year,
+}: {
+  companyId: string;
+  year: number;
+}) {
   const [items, setItems] = useState<MediaCategoriaItem[]>([]);
   const [indices, setIndices] = useState<IndiceOption[]>([]);
-  const [baseYear, setBaseYear] = useState<number>(defaultBudgetYear() - 1);
+  const [baseYear, setBaseYear] = useState<number>(year - 1);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
@@ -407,33 +404,10 @@ export function MediaCorrecaoManager({ companies }: { companies: Company[] }) {
     );
   }, [items, search]);
 
-  if (companies.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-        Nenhuma empresa ativa encontrada.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-64 space-y-1.5">
-          <label className="text-sm font-medium">Empresa</label>
-          <select
-            value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            className={INPUT_CLS}
-          >
-            {companies.map((c) => (
-              <option key={c.companyId} value={c.companyId}>
-                {c.companyName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <YearSelect value={year} onChange={setYear} disabled={loading || recalcAll} />
         <button
           type="button"
           onClick={handleRecalcAll}

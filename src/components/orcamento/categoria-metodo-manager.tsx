@@ -25,9 +25,18 @@ interface Company {
 const CORE_METODOS = METODOS.filter((m) => !m.ve);
 const VE_METODOS = METODOS.filter((m) => m.ve);
 
-export function CategoriaMetodoManager({ companies }: { companies: Company[] }) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function CategoriaMetodoManager({
+  companies,
+  fixedCompanyId,
+  fixedYear,
+}: {
+  companies: Company[];
+  /** Quando definido, empresa e ano vêm da rota (workspace) — sem seletores. */
+  fixedCompanyId?: string;
+  fixedYear?: number;
+}) {
+  const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [items, setItems] = useState<CategoriaMetodoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -144,23 +153,26 @@ export function CategoriaMetodoManager({ companies }: { companies: Company[] }) 
 
   return (
     <div className="space-y-4">
-      {/* Seletor de empresa + ano + clonar + busca */}
+      {/* Seletor de empresa + ano + clonar + busca. No workspace, empresa e ano
+          vêm da rota (fixos) — os seletores não aparecem. */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-64 space-y-1.5">
-          <label className="text-sm font-medium">Empresa</label>
-          <select
-            value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            className={INPUT_CLS}
-          >
-            {companies.map((c) => (
-              <option key={c.companyId} value={c.companyId}>
-                {c.companyName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />
+        {!fixedCompanyId && (
+          <div className="w-64 space-y-1.5">
+            <label className="text-sm font-medium">Empresa</label>
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              className={INPUT_CLS}
+            >
+              {companies.map((c) => (
+                <option key={c.companyId} value={c.companyId}>
+                  {c.companyName}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {!fixedYear && <YearSelect value={year} onChange={setYear} disabled={loading || cloning} />}
         <button
           type="button"
           onClick={handleClone}
