@@ -67,54 +67,6 @@ interface RenderGroup {
   items: RenderItem[];
 }
 
-const MODULE_COLOR: Record<
-  NavGroupId,
-  { text: string; bg: string; rail: string; dot: string }
-> = {
-  financeiro: {
-    text: "text-blue-600 dark:text-blue-400",
-    bg: "bg-blue-600/[0.06] dark:bg-blue-400/[0.08]",
-    rail: "bg-blue-600 dark:bg-blue-400",
-    dot: "bg-blue-600 dark:bg-blue-400",
-  },
-  orcamento: {
-    text: "text-emerald-600 dark:text-emerald-400",
-    bg: "bg-emerald-600/[0.06] dark:bg-emerald-400/[0.08]",
-    rail: "bg-emerald-600 dark:bg-emerald-400",
-    dot: "bg-emerald-600 dark:bg-emerald-400",
-  },
-  compras: {
-    text: "text-violet-600 dark:text-violet-400",
-    bg: "bg-violet-600/[0.06] dark:bg-violet-400/[0.08]",
-    rail: "bg-violet-600 dark:bg-violet-400",
-    dot: "bg-violet-600 dark:bg-violet-400",
-  },
-  case: {
-    text: "text-amber-600 dark:text-amber-400",
-    bg: "bg-amber-600/[0.06] dark:bg-amber-400/[0.08]",
-    rail: "bg-amber-600 dark:bg-amber-400",
-    dot: "bg-amber-600 dark:bg-amber-400",
-  },
-  viagens: {
-    text: "text-teal-600 dark:text-teal-400",
-    bg: "bg-teal-600/[0.06] dark:bg-teal-400/[0.08]",
-    rail: "bg-teal-600 dark:bg-teal-400",
-    dot: "bg-teal-600 dark:bg-teal-400",
-  },
-  contratos: {
-    text: "text-orange-600 dark:text-orange-400",
-    bg: "bg-orange-600/[0.06] dark:bg-orange-400/[0.08]",
-    rail: "bg-orange-600 dark:bg-orange-400",
-    dot: "bg-orange-600 dark:bg-orange-400",
-  },
-  plataforma: {
-    text: "text-slate-600 dark:text-slate-300",
-    bg: "bg-slate-600/[0.06] dark:bg-slate-400/[0.08]",
-    rail: "bg-slate-600 dark:bg-slate-400",
-    dot: "bg-slate-600 dark:bg-slate-400",
-  },
-};
-
 export function NavLinks({
   dreRole,
   ctrlRoles,
@@ -149,16 +101,17 @@ export function NavLinks({
 
   if (groups.length === 0) {
     return (
-      <p className="px-3 py-4 text-sm text-ink-muted">
+      <p className="px-4 py-4 text-[12.5px] text-ink-muted">
         Sem acesso a nenhuma area — fale com um admin.
       </p>
     );
   }
 
-  const renderItem = (item: RenderItem, groupId: NavGroupId) => {
+  const renderItem = (item: RenderItem) => {
     const Icon = item.icon;
+    // A home nao tem item correspondente no menu, entao nenhum item fica
+    // destacado nela — o destaque so aparece dentro de um modulo.
     const isActive = item.href === activeHref;
-    const color = MODULE_COLOR[groupId];
 
     if (collapsed) {
       const collapsedLink = (
@@ -166,23 +119,9 @@ export function NavLinks({
           href={item.href}
           onClick={onNavigate}
           aria-current={isActive ? "page" : undefined}
-          className={cn(
-            "relative flex h-9 w-full items-center justify-center rounded-md transition-colors",
-            isActive
-              ? cn(color.bg, color.text)
-              : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-          )}
+          className="ch-navitem ch-navitem--rail"
         >
-          {isActive && (
-            <span
-              aria-hidden
-              className={cn(
-                "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
-                color.rail,
-              )}
-            />
-          )}
-          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+          <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
         </Link>
       );
       return (
@@ -199,70 +138,30 @@ export function NavLinks({
         href={item.href}
         onClick={onNavigate}
         aria-current={isActive ? "page" : undefined}
-        className={cn(
-          "relative flex h-[30px] items-center gap-2.5 rounded-md px-3 text-[12.5px] transition-colors",
-          isActive
-            ? cn(color.text, color.bg, "font-semibold")
-            : "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary",
-        )}
+        className="ch-navitem"
       >
-        {isActive && (
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-0 top-[6px] bottom-[6px] w-[2px] rounded-sm",
-              color.rail,
-            )}
-          />
-        )}
-        <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-        <span className="flex-1 truncate">{item.title}</span>
-        {item.badge != null && (
-          <span
-            className={cn(
-              "text-[10px] font-semibold tabular-nums",
-              color.text,
-              !isActive && "opacity-80",
-            )}
-          >
-            {item.badge}
-          </span>
-        )}
+        <span className="truncate">{item.title}</span>
+        {item.badge != null && <span className="ch-navitem__badge">{item.badge}</span>}
       </Link>
     );
   };
 
   return (
-    <nav className={collapsed ? "space-y-1" : "space-y-0.5"}>
-      {groups.map((group, idx) => {
-        const color = MODULE_COLOR[group.id];
-        return (
-          <div key={group.id} className={idx === 0 ? undefined : "mt-2"}>
-            {!collapsed && (
-              <div className="flex items-center gap-1.5 px-3 pt-3 pb-1.5">
-                <span
-                  aria-hidden
-                  className={cn("h-[5px] w-[5px] rounded-full", color.dot)}
-                />
-                <span
-                  className={cn(
-                    "text-[10px] font-semibold uppercase tracking-[0.12em]",
-                    color.text,
-                  )}
-                >
-                  {group.label}
-                </span>
-              </div>
-            )}
-            {collapsed && idx > 0 && (
-              <div className="my-2 border-t border-border" />
-            )}
-            <div className={collapsed ? "space-y-1" : "space-y-px"}>
-              {group.items.map((item) => renderItem(item, group.id))}
+    <nav>
+      {groups.map((group, idx) => (
+        <div key={group.id}>
+          {/* Modulo: sem numeracao, sem caixa — barra vermelha + regua. */}
+          {!collapsed && (
+            <div className="ch-module">
+              <span>{group.label}</span>
             </div>
+          )}
+          {collapsed && idx > 0 && <div className="ch-rail-sep" aria-hidden />}
+          <div className={cn("ch-nav", collapsed && "ch-nav--rail")}>
+            {group.items.map((item) => renderItem(item))}
           </div>
-        );
-      })}
+        </div>
+      ))}
     </nav>
   );
 }

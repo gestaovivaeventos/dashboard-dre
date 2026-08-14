@@ -1,29 +1,39 @@
 "use client";
 
-import { Wallet } from "lucide-react";
-
-import { WidgetCard } from "@/components/app/home/widget-card";
+import { SectionHead } from "@/components/app/home/widget-card";
 import type { HomePayments } from "@/lib/home/ctrl-widgets";
 
+/**
+ * Três métricas em colunas separadas por linha vertical. Vermelho só nos
+ * números críticos — vencimento em 7 dias e falhas no envio ao Omie (esta
+ * só quando existe alguma).
+ */
 export function WidgetFilaPagamento({ data }: { data: HomePayments }) {
   return (
-    <WidgetCard title="Fila de pagamento" icon={Wallet} href="/ctrl/contas-a-pagar">
-      <div className="grid grid-cols-3 gap-3 text-center">
+    <>
+      <SectionHead title="Fila de pagamento" href="/ctrl/contas-a-pagar" />
+      <div className="ch-cols">
         <div>
-          <p className="text-2xl font-bold">{data.toSend}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">A enviar</p>
+          <p className="ch-metric">{data.toSend}</p>
+          <p className="ch-kicker ch-kicker--accent" style={{ marginTop: 8 }}>
+            A enviar
+          </p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-amber-600">{data.dueThisWeek}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">Vencendo (7 dias)</p>
+          <p className="ch-metric ch-metric--accent">{data.dueThisWeek}</p>
+          <p className="ch-kicker ch-kicker--accent" style={{ marginTop: 8 }}>
+            Vencendo em 7 dias
+          </p>
         </div>
         <div>
-          <p className={`text-2xl font-bold ${data.omieErrors > 0 ? "text-red-600" : ""}`}>
+          <p className={`ch-metric ${data.omieErrors > 0 ? "ch-metric--accent" : ""}`}>
             {data.omieErrors}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">Falhas Omie</p>
+          <p className="ch-kicker ch-kicker--accent" style={{ marginTop: 8 }}>
+            Falhas no envio ao Omie
+          </p>
         </div>
       </div>
-    </WidgetCard>
+    </>
   );
 }

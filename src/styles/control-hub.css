@@ -1,0 +1,923 @@
+/* =========================================================
+   CONTROL HUB — Design System
+   Importado por src/app/globals.css DEPOIS de viva-tokens.css
+   (ordem importa: este arquivo REESCREVE os tokens antigos).
+
+   Regra de ouro: nenhum hex solto nos componentes. Tudo aqui,
+   sempre consumido via var().
+
+   Duas camadas:
+   1. Tokens novos (--color-*, --line-*, --radius-*, --font).
+   2. Remapeamento dos tokens legados (--surface-*, --text-*,
+      --border-*, --viva-orange-*) para os novos. É isso que
+      propaga a paleta para TODAS as telas do app sem reescrever
+      cada uma — as telas antigas leem os tokens legados.
+   ========================================================= */
+
+:root,
+[data-theme="light"] {
+  /* ---------- 1. Tokens ---------- */
+  --color-bg: #f3f2f2;          /* fundo do conteúdo */
+  --color-surface: #ffffff;     /* superfícies */
+  --color-text: #201e1d;        /* tinta */
+  --color-accent: #ec3013;      /* vermelho — único acento */
+  --color-accent-700: #ae1800;  /* vermelho para texto pequeno (contraste) */
+  --color-divider: #dcd9d8;     /* borda opaca (botões, tags) */
+  --color-neutral-200: #eae7e7; /* trilha de barra de progresso */
+  --color-neutral-500: #9b9797;
+
+  --line-soft: color-mix(in srgb, var(--color-text) 8%, transparent);
+  --line-strong: color-mix(in srgb, var(--color-text) 12%, transparent);
+  --menu-bg: color-mix(in srgb, var(--color-text) 8%, var(--color-bg));
+
+  --radius-sm: 6px;   /* botões, inputs, tags, linhas de lista */
+  --radius-md: 8px;   /* cartões pequenos */
+  --radius-lg: 12px;  /* painéis */
+
+  --font: var(--font-archivo), "Archivo", system-ui, sans-serif;
+
+  /* Cartões e sombras. --ch-shadow/-h são COR, não a sombra inteira:
+     assim o mesmo componente muda de peso entre os temas. */
+  --ch-card: #ffffff;
+  --ch-shadow: rgba(32, 30, 29, 0.10);
+  --ch-shadow-h: rgba(32, 30, 29, 0.16);
+
+  /* Tinta que vai SOBRE o vermelho sólido (botão primário, badge).
+     No claro, branco; no escuro o accent clareia e pede tinta escura. */
+  --ch-accent-ink: #ffffff;
+  /* Rótulo do painel "Precisa da sua atenção": branco sobre o campo
+     vermelho cheio (claro) / vermelho sobre a superfície tingida (escuro). */
+  --ch-attention-label: #ffffff;
+
+  /* Tintas derivadas (evita repetir color-mix nos componentes).
+     As porcentagens subiram de 55/50/45 para 66/60/54: nas anteriores o
+     texto auxiliar ficava em ~3,3:1 — nos DOIS temas, não só no escuro.
+     Como derivam de --color-text, uma fórmula só serve claro e escuro. */
+  --ink-68: color-mix(in srgb, var(--color-text) 68%, transparent);
+  --ink-55: color-mix(in srgb, var(--color-text) 66%, transparent);
+  --ink-50: color-mix(in srgb, var(--color-text) 60%, transparent);
+  --ink-45: color-mix(in srgb, var(--color-text) 54%, transparent);
+  --hover-tint: color-mix(in srgb, var(--color-text) 4%, transparent);
+  --accent-tint: color-mix(in srgb, var(--color-accent) 9%, transparent);
+
+  /* Largura da sidebar — usada também pelo padding do conteúdo. */
+  --ch-sidebar-w: 230px;
+  --ch-sidebar-w-collapsed: 60px;
+  --ch-band-x: 40px;
+
+  /* ---------- 2. Remapeamento dos tokens legados ----------
+     As demais telas (dashboard, fluxo, compras, orçamento...)
+     leem estes nomes via Tailwind (bg-surface-1, text-ink-muted,
+     border-border). Redefinidos aqui, elas herdam a paleta nova. */
+  --surface-0: var(--color-bg);
+  --surface-1: var(--color-surface);
+  --surface-2: var(--color-neutral-200);
+  --surface-3: color-mix(in srgb, var(--color-text) 10%, var(--color-bg));
+  --surface-4: color-mix(in srgb, var(--color-text) 18%, var(--color-bg));
+
+  --text-primary: var(--color-text);
+  --text-secondary: color-mix(in srgb, var(--color-text) 72%, transparent);
+  --text-muted: var(--color-neutral-500);
+  --text-disabled: color-mix(in srgb, var(--color-text) 32%, transparent);
+
+  --border-subtle: var(--line-soft);
+  --border-default: var(--line-strong);
+  --border-strong: color-mix(in srgb, var(--color-text) 20%, transparent);
+
+  /* O laranja da identidade antiga passa a resolver para o
+     vermelho do Control Hub — um acento só no app inteiro. */
+  --viva-orange-50: #fdece9;
+  --viva-orange-100: #fbd5ce;
+  --viva-orange-200: #f7aa9d;
+  --viva-orange-300: #f27f6c;
+  --viva-orange-400: #ef553b;
+  --viva-orange-500: var(--color-accent);
+  --viva-orange-600: #cf250c;
+  --viva-orange-700: var(--color-accent-700);
+  --viva-orange-800: #841200;
+  --viva-orange-900: #560c00;
+
+  --shadow-sm: 0 1px 2px var(--ch-shadow);
+  --shadow-md: 0 3px 8px var(--ch-shadow-h);
+  --shadow-lg: 0 8px 20px var(--ch-shadow-h);
+
+  --radius-xl: 16px;
+}
+
+/* =========================================================
+   TEMA ESCURO — carvão quente, nunca preto puro; tinta
+   off-white, nunca #fff.
+
+   Só os tokens mudam: tudo que é derivado (linhas, menu,
+   tintas auxiliares, superfícies legadas das outras telas)
+   acompanha sozinho.
+
+   `.dark` continua no seletor porque é dele que dependem as
+   centenas de utilitárias `dark:` do Tailwind espalhadas pelo
+   app — o toggle marca os dois (ver theme-toggle.tsx).
+   ========================================================= */
+[data-theme="dark"],
+.dark {
+  --color-bg: #211f1e;          /* fundo do conteúdo */
+  --color-surface: #2a2726;     /* superfícies */
+  --color-text: #ece8e5;        /* tinta clara, levemente quente */
+  --color-divider: #3a3634;
+  --color-neutral-200: #35312f; /* trilhas de barra de progresso */
+  --color-neutral-500: #8a8481;
+  --color-accent: #ff5a3c;      /* vermelho clareado p/ fundo escuro */
+  --color-accent-700: #ff9a86;  /* vermelho de texto pequeno no escuro */
+
+  --ch-card: #2c2928;
+  --ch-shadow: rgba(0, 0, 0, 0.45);
+  --ch-shadow-h: rgba(0, 0, 0, 0.60);
+
+  /* O accent clareou: tinta branca sobre ele não passa de 3:1. */
+  --ch-accent-ink: #1a1817;
+  /* Rótulo vermelho sobre a superfície tingida. Usa o -700 e não o
+     accent puro por medida: accent sobre o tingido dá 3,9:1, abaixo do
+     mínimo para texto pequeno; o -700 dá 5,9:1 e continua lendo vermelho. */
+  --ch-attention-label: var(--color-accent-700);
+
+  /* Hover de linha: clareia a superfície em vez de escurecê-la. */
+  --hover-tint: color-mix(in srgb, #ffffff 6%, transparent);
+  --accent-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+
+  /* Superfícies legadas (telas que ainda leem --surface-*). */
+  --surface-2: #302c2b;
+  --surface-3: #3a3634;
+  --surface-4: #474241;
+
+  color-scheme: dark;
+}
+
+/* =========================================================
+   Base
+   ========================================================= */
+
+/* O fundo precisa estar no html/body também: sem isso aparece
+   uma faixa clara no overscroll e quando a página é mais curta
+   que a viewport. */
+html,
+body {
+  background: var(--color-bg);
+}
+/* Guarda de bootstrap: o script de tema marca .ch-dark no <html> antes
+   da primeira pintura, então o fundo escuro vale mesmo que o CSS de
+   tokens ainda não tenha sido aplicado. Único hex literal do arquivo
+   fora do bloco de tokens, e é de propósito. */
+html.ch-dark,
+html.ch-dark body {
+  background: #211f1e;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Fotos, quando houver, em preto e branco. */
+.ch-photo {
+  filter: grayscale(1);
+}
+
+/* =========================================================
+   SHELL — sidebar
+   ========================================================= */
+.ch-shell {
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.ch-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20;
+  width: var(--ch-sidebar-w);
+  height: 100vh;
+  /* A coluna inteira NÃO rola: só a lista de telas (.ch-sidebar__scroll).
+     Assim o "Recolher menu" fica sempre visível na base, sem depender de
+     o usuário chegar ao fim do menu. */
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  background: var(--menu-bg);
+  border-right: 1px solid var(--line-strong);
+}
+.ch-sidebar__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 10px;
+}
+.ch-sidebar--collapsed {
+  width: var(--ch-sidebar-w-collapsed);
+}
+.ch-content {
+  padding-left: 0;
+}
+.ch-drawer-trigger {
+  display: flex;
+  align-items: center;
+}
+/* Abaixo de 1100px a sidebar vira drawer (ver .ch-drawer-trigger). */
+@media (min-width: 1100px) {
+  .ch-sidebar {
+    display: flex;
+  }
+  .ch-content {
+    padding-left: var(--ch-sidebar-w);
+  }
+  .ch-content--collapsed {
+    padding-left: var(--ch-sidebar-w-collapsed);
+  }
+  .ch-drawer-trigger {
+    display: none;
+  }
+}
+
+/* .ch-brand = a marca em si (usada tambem no login, /pendente...).
+   .ch-brand-link = o bloco clicavel no topo da sidebar. */
+.ch-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.ch-brand-link {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 18px 16px 16px;
+  text-decoration: none;
+  color: var(--color-text);
+}
+.ch-brand-link--collapsed {
+  justify-content: center;
+  padding: 18px 0 16px;
+}
+
+.ch-brand__word {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.ch-brand__word em {
+  font-style: normal;
+  color: var(--color-accent);
+}
+.ch-brand__beta {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-50);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1;
+}
+
+/* Módulo (Financeiro, Orçamento, Compras, Case, Contratos):
+   sem numeração, sem caixa — barra vermelha + régua abaixo. */
+.ch-module {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 7px;
+  margin: 14px 0 7px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.ch-module::before {
+  content: "";
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+.ch-module span {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
+}
+
+.ch-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 16px;
+}
+.ch-navitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-68);
+  padding: 4px 10px;
+  margin-left: -10px;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background-color 110ms ease, color 110ms ease;
+}
+.ch-navitem:hover {
+  background: var(--accent-tint);
+  color: var(--color-accent-700);
+}
+.ch-navitem[aria-current="page"] {
+  color: var(--color-accent-700);
+  font-weight: 600;
+  background: var(--accent-tint);
+}
+.ch-navitem__badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-700);
+}
+
+/* Rail recolhida — só ícones. */
+.ch-navitem--rail {
+  justify-content: center;
+  margin-left: 0;
+  padding: 7px 0;
+}
+.ch-nav--rail {
+  padding: 0 8px;
+}
+.ch-rail-sep {
+  height: 1px;
+  background: var(--line-strong);
+  margin: 10px 12px;
+}
+
+/* Base fixa da sidebar — fora da área que rola. */
+.ch-sidebar__foot {
+  flex-shrink: 0;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line-strong);
+  background: var(--menu-bg);
+}
+
+/* =========================================================
+   SHELL — topbar
+   ========================================================= */
+.ch-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 50px;
+  padding: 0 var(--ch-band-x);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--line-strong);
+}
+/* Sem título na topbar: quem nomeia a tela é o próprio conteúdo dela.
+   A barra fica só com o gatilho do menu (abaixo de 1100px) e os
+   controles à direita. */
+.ch-topbar__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ch-user {
+  text-align: right;
+  line-height: 1.25;
+  display: none;
+}
+@media (min-width: 720px) {
+  .ch-user { display: block; }
+}
+.ch-user__name {
+  font-size: 12px;
+  font-weight: 600;
+}
+.ch-user__mail {
+  font-size: 10.5px;
+  color: var(--ink-50);
+}
+
+.ch-iconbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-68);
+  cursor: pointer;
+  transition: background-color 110ms ease, color 110ms ease;
+}
+.ch-iconbtn:hover {
+  background: var(--hover-tint);
+  color: var(--color-text);
+}
+.ch-iconbtn__badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--ch-accent-ink);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* =========================================================
+   FAIXAS DE CONTEÚDO
+   A hierarquia vem do espaçamento; as réguas são sempre 1px.
+   ========================================================= */
+.ch-band {
+  padding: 22px var(--ch-band-x);
+}
+.ch-band + .ch-band {
+  border-top: 1px solid var(--line-soft);
+}
+
+@media (max-width: 1099px) {
+  :root { --ch-band-x: 20px; }
+}
+
+/* Título de seção com barra vermelha à esquerda. */
+.ch-sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text);
+}
+.ch-sec::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+.ch-sec-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.ch-kicker {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-50);
+}
+.ch-kicker--accent {
+  color: var(--color-accent-700);
+}
+
+.ch-link {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent-700);
+  text-decoration: none;
+}
+.ch-link:hover {
+  text-decoration: underline;
+}
+
+.ch-empty {
+  font-size: 12px;
+  color: var(--ink-50);
+}
+
+/* Saudação */
+.ch-hello {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-top: 6px;
+}
+/* Métricas */
+.ch-metric {
+  display: block;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ch-metric--accent {
+  color: var(--color-accent);
+}
+/* Variação negativa (indicadores) — vermelho de texto pequeno. */
+.ch-change--down {
+  color: var(--color-accent-700);
+}
+
+/* Painel "Precisa da sua atenção" — único campo vermelho cheio. */
+.ch-attention {
+  background: var(--color-accent);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+}
+.ch-attention__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ch-attention-label);
+}
+.ch-attention__head::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--ch-attention-label);
+  flex-shrink: 0;
+}
+.ch-attention__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.ch-attention__card {
+  display: block;
+  background: var(--ch-card);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  box-shadow: 0 1px 2px var(--ch-shadow);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: transform 110ms ease, box-shadow 110ms ease;
+}
+.ch-attention__card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px var(--ch-shadow-h);
+}
+.ch-attention__card p {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-55);
+}
+.ch-attention--clear {
+  font-size: 12px;
+  color: var(--ink-55);
+}
+
+/* Alertas do sistema */
+.ch-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.ch-alert__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: var(--color-neutral-500);
+}
+.ch-alert__dot--critical {
+  background: var(--color-accent);
+}
+.ch-alert__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ch-alert__detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-55);
+}
+
+/* Colunas por linha vertical (fila de pagamento, indicadores) */
+.ch-cols {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.ch-cols > * + * {
+  border-left: 1px solid var(--line-soft);
+  padding-left: 26px;
+}
+.ch-cols > * {
+  padding-right: 26px;
+}
+
+.ch-cols--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Notícias: título + fonte/tempo, sem linha por item. */
+.ch-news {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  padding: 4px 10px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+}
+.ch-news:hover {
+  background: var(--hover-tint);
+}
+.ch-news .ch-row__title {
+  display: block;
+}
+.ch-news:hover .ch-row__title {
+  color: var(--color-accent-700);
+}
+
+/* Listas em grid */
+.ch-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 36px;
+}
+.ch-split {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 32px;
+}
+
+@media (max-width: 1099px) {
+  .ch-attention__grid,
+  .ch-cols,
+  .ch-2col,
+  .ch-split {
+    grid-template-columns: 1fr;
+  }
+  .ch-cols > * + * {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+    padding-left: 0;
+    padding-top: 14px;
+    margin-top: 14px;
+  }
+  .ch-cols > * {
+    padding-right: 0;
+  }
+}
+
+/* Aprovações pendentes — lista de leitura (nº, requisição, valor). */
+.ch-approvals__head,
+.ch-approval {
+  display: grid;
+  grid-template-columns: 52px 1fr 110px;
+  align-items: center;
+  gap: 12px;
+}
+.ch-approvals__head {
+  padding: 0 10px 7px;
+  margin-left: -10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ch-approval {
+  padding: 8px 10px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+  transition: background-color 110ms ease;
+}
+.ch-approval:hover {
+  background: var(--hover-tint);
+}
+.ch-approval__num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-700);
+  font-variant-numeric: tabular-nums;
+}
+.ch-approval__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-approval__meta {
+  font-size: 11.5px;
+  color: var(--ink-55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-approval__value {
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1099px) {
+  .ch-approvals__head {
+    display: none;
+  }
+  .ch-approval {
+    grid-template-columns: 40px 1fr;
+    row-gap: 4px;
+  }
+  .ch-approval__value {
+    text-align: left;
+    grid-column: 2;
+  }
+}
+
+/* Linha simples de lista (fornecedores, requisições, notícias) */
+.ch-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 10px;
+  margin-left: -10px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: inherit;
+}
+a.ch-row:hover,
+.ch-row--hover:hover {
+  background: var(--hover-tint);
+}
+.ch-row__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.ch-row__meta {
+  font-size: 11.5px;
+  color: var(--ink-55);
+  white-space: nowrap;
+}
+.ch-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-divider);
+  color: var(--ink-55);
+  white-space: nowrap;
+}
+.ch-tag--accent {
+  color: var(--color-accent-700);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* Barras de orçamento */
+.ch-bar {
+  height: 4px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: var(--color-neutral-200);
+  overflow: hidden;
+}
+.ch-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+/* Botões */
+.ch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 110ms ease, color 110ms ease, border-color 110ms ease;
+}
+.ch-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ch-btn--primary {
+  background: var(--color-accent);
+  color: var(--ch-accent-ink);
+}
+.ch-btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-700);
+}
+.ch-btn--secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-divider);
+}
+.ch-btn--secondary:hover:not(:disabled) {
+  background: var(--color-neutral-200);
+}
+.ch-btn--ghost {
+  background: transparent;
+  color: var(--ink-55);
+}
+.ch-btn--ghost:hover:not(:disabled) {
+  background: var(--hover-tint);
+  color: var(--color-text);
+}
+.ch-btn--wide {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* Rodapé */
+.ch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px var(--ch-band-x) 28px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-45);
+}
+
+/* Skeleton neutro (sem gradiente) */
+.ch-skel {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-200);
+  animation: ch-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* =========================================================
+   AJUSTES DE COMPONENTE NO ESCURO
+
+   Quase tudo já virou pelos tokens. O que sobra aqui é o que
+   muda de TRATAMENTO, não só de valor.
+   ========================================================= */
+
+/* Campo vermelho cheio → superfície tingida com contorno.
+   No claro o painel é 100% accent; no escuro isso brilha demais
+   e come a tela inteira. O rótulo acompanha: vira vermelho sobre
+   a superfície (via --ch-attention-label), nunca vermelho sobre
+   vermelho — que era como o texto sumia. */
+[data-theme="dark"] .ch-attention {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface));
+  color: var(--color-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+/* Botão secundário: contorno em vez de superfície preenchida —
+   um retângulo claro sobre o carvão pesaria mais que o primário. */
+[data-theme="dark"] .ch-btn--secondary {
+  background: transparent;
+}
+[data-theme="dark"] .ch-btn--secondary:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Tags outline ganham a tinta cheia: no carvão o texto a 55%
+   cai abaixo do mínimo de contraste. */
+[data-theme="dark"] .ch-tag {
+  color: var(--color-text);
+}
+
+/* O hover do menu NÃO precisa de regra escura: a base já é
+   `accent 16% + texto --color-accent-700`, e o -700 clareia sozinho
+   no escuro (5,3:1 sobre o hover tingido — o accent puro daria 3,5:1). */

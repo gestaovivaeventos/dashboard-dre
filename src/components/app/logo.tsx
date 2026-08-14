@@ -3,39 +3,39 @@ interface LogoProps {
   size?: number;
 }
 
-export function Logo({ className, size = 32 }: LogoProps) {
+/**
+ * Símbolo do Control Hub: quadrado vermelho com três barras brancas
+ * crescentes (gráfico de barras). Tamanho canônico 22px — o mesmo do
+ * topo da sidebar; `size` existe para os usos maiores (login, etc.).
+ */
+export function Logo({ className, size = 22 }: LogoProps) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 40 40"
+      viewBox="0 0 22 22"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden
     >
-      {/* Rounded square background */}
-      <rect width="40" height="40" rx="10" fill="currentColor" className="text-primary" />
-      {/* Bar chart icon representing financial control */}
-      <rect x="8" y="22" width="5" height="10" rx="1.5" fill="white" opacity="0.9" />
-      <rect x="17.5" y="14" width="5" height="18" rx="1.5" fill="white" />
-      <rect x="27" y="8" width="5" height="24" rx="1.5" fill="white" opacity="0.9" />
+      <rect width="22" height="22" rx="5" fill="var(--color-accent)" />
+      <rect x="5" y="12" width="3" height="5" rx="1" fill="#fff" />
+      <rect x="9.5" y="9" width="3" height="8" rx="1" fill="#fff" />
+      <rect x="14" y="6" width="3" height="11" rx="1" fill="#fff" />
     </svg>
   );
 }
 
+/** Símbolo + wordmark "ControlHub" ("Hub" em vermelho) + tag BETA. */
 export function LogoFull({ className }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-2.5 ${className ?? ""}`}>
-      <Logo size={36} />
-      <div className="leading-tight flex items-center gap-1.5">
-        <div>
-          <span className="text-lg font-bold tracking-tight">Control</span>
-          <span className="text-lg font-light tracking-tight text-primary"> Hub</span>
-        </div>
-        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
-          beta
-        </span>
-      </div>
-    </div>
+    <span className={`ch-brand ${className ?? ""}`}>
+      <Logo size={22} />
+      <span className="ch-brand__word">
+        Control<em>Hub</em>
+      </span>
+      <span className="ch-brand__beta">Beta</span>
+    </span>
   );
 }
