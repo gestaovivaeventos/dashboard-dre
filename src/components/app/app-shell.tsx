@@ -1,6 +1,7 @@
 "use client";
 
 import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { Logo, LogoFull } from "@/components/app/logo";
@@ -9,8 +10,6 @@ import { NotificationsLink } from "@/components/app/notifications-link";
 import { SegmentChip } from "@/components/app/segment-chip";
 import { SignOutButton } from "@/components/app/sign-out-button";
 import { ThemeToggle } from "@/components/app/theme-toggle";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
@@ -70,9 +69,13 @@ export function AppShell({
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
 
   const hasCtrl = (ctrlRoles?.length ?? 0) > 0;
   const hasSegments = segments.length > 0;
+  // A home é desenhada em faixas de largura total (padding próprio por
+  // faixa); as demais telas continuam com o respiro do <main>.
+  const isHome = pathname === "/home";
 
   const sidebarNav = (mobile: boolean) => (
     <NavLinks
@@ -96,59 +99,56 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="min-h-screen bg-surface-0">
-        {/* Desktop sidebar */}
-        <aside
-          className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-border bg-surface-1 transition-all duration-300 md:flex ${
-            collapsed ? "w-16" : "w-72"
-          }`}
-        >
-          <a href="/home" className={`flex items-center p-4 ${collapsed ? "justify-center" : ""}`}>
-            {collapsed ? <Logo size={32} /> : <LogoFull />}
+      <div className="ch-shell">
+        {/* Sidebar fixa (>= 1100px). Abaixo disso vira drawer. */}
+        <aside className={`ch-sidebar ${collapsed ? "ch-sidebar--collapsed" : ""}`}>
+          <a
+            href="/home"
+            className={`ch-brand-link ${collapsed ? "ch-brand-link--collapsed" : ""}`}
+          >
+            {collapsed ? <Logo size={22} /> : <LogoFull />}
           </a>
 
-          <div className="flex-1 overflow-y-auto px-2">{sidebarNav(false)}</div>
+          {/* Só esta faixa rola; a marca no topo e o "Recolher menu" na base
+              ficam sempre à vista. */}
+          <div className="ch-sidebar__scroll">{sidebarNav(false)}</div>
 
-          <div className="border-t border-border p-2">
-            <Button
+          <div className="ch-sidebar__foot">
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
               onClick={() => setCollapsed(!collapsed)}
-              className={`w-full text-ink-secondary hover:text-ink-primary ${
-                collapsed ? "justify-center px-0" : "justify-start gap-2"
-              }`}
+              className={`ch-btn ch-btn--ghost ${collapsed ? "" : "ch-btn--wide"}`}
+              title={collapsed ? "Expandir menu" : "Recolher menu"}
             >
               {collapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
+                <PanelLeftOpen className="h-4 w-4" strokeWidth={2} />
               ) : (
                 <>
-                  <PanelLeftClose className="h-4 w-4" />
-                  <span className="text-xs">Recolher menu</span>
+                  <PanelLeftClose className="h-4 w-4" strokeWidth={2} />
+                  Recolher menu
                 </>
               )}
-            </Button>
+            </button>
           </div>
         </aside>
 
-        <div className={`transition-all duration-300 ${collapsed ? "md:pl-16" : "md:pl-72"}`}>
-          <header className="sticky top-0 z-30 flex h-[68px] items-center gap-3 border-b-2 border-viva-500 bg-surface-1 px-4 md:px-6">
-            {/* Mobile menu trigger */}
-            <div className="flex items-center gap-3 md:hidden">
+        <div className={`ch-content ${collapsed ? "ch-content--collapsed" : ""}`}>
+          <header className="ch-topbar">
+            {/* Drawer (abaixo de 1100px) */}
+            <div className="ch-drawer-trigger">
               <Sheet open={open} onOpenChange={setOpen}>
                 <SheetTrigger asChild>
-                  <Button type="button" variant="outline" size="icon">
-                    <Menu className="h-5 w-5" />
-                    <span className="sr-only">Abrir menu</span>
-                  </Button>
+                  <button type="button" className="ch-iconbtn" aria-label="Abrir menu">
+                    <Menu className="h-4 w-4" strokeWidth={2} />
+                  </button>
                 </SheetTrigger>
-                <SheetContent className="bg-surface-1">
-                  <a href="/home" className="mb-4 block">
+                <SheetContent className="bg-[var(--menu-bg)] p-0">
+                  <a href="/home" className="ch-brand-link">
                     <LogoFull />
                   </a>
 
                   {hasSegments && (
-                    <div className="mb-4">
+                    <div className="px-4 pb-3">
                       <SegmentChip segments={segments} activeSlug={activeSegmentSlug} />
                     </div>
                   )}
@@ -158,11 +158,10 @@ export function AppShell({
               </Sheet>
             </div>
 
-            <div className="ml-auto flex items-center gap-3">
-              <div className="hidden text-right md:block">
-                <p className="text-sm font-medium leading-none text-ink-primary">{userName}</p>
-                <p className="text-xs text-ink-muted">{userEmail}</p>
-              </div>
+            {/* Sem título aqui: cada tela já abre com o próprio título (e a
+                linha de descrição abaixo dele). Repetir o nome na topbar
+                deixava o mesmo texto duas vezes no topo de toda página. */}
+            <div className="ch-topbar__right">
               {/* Sino: módulo Compras (padrão) ou, para quem só valida
                   relatórios BI (perfil CSC, sem Compras), a própria tela de
                   Validação Relatório — onde a pendência é resolvida. */}
@@ -172,12 +171,15 @@ export function AppShell({
                 href={hasCtrl ? "/ctrl/notificacoes" : BI_VALIDATION_PATH}
               />
               <ThemeToggle />
-              <Separator className="hidden h-8 w-px bg-white/10 sm:block" />
+              <div className="ch-user">
+                <p className="ch-user__name">{userName}</p>
+                <p className="ch-user__mail">{userEmail}</p>
+              </div>
               <SignOutButton />
             </div>
           </header>
 
-          <main className="p-4 md:p-6">{children}</main>
+          <main className={isHome ? undefined : "p-5 md:p-7"}>{children}</main>
         </div>
       </div>
     </TooltipProvider>

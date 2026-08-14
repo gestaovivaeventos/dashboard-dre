@@ -3,9 +3,6 @@
 import { Bell } from "lucide-react";
 import Link from "next/link";
 
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-
 interface NotificationsLinkProps {
   visible: boolean;
   /** Contagem de notificações não lidas. Renderiza badge quando > 0. */
@@ -38,14 +35,11 @@ export function NotificationsLink({
           ? `${unreadCount} notificação${unreadCount === 1 ? "" : "ões"} não lida${unreadCount === 1 ? "" : "s"}`
           : "Notificações"
       }
-      className={cn(buttonVariants({ variant: "outline", size: "icon" }), "relative")}
+      className="ch-iconbtn"
     >
-      <Bell className="h-5 w-5" />
+      <Bell className="h-4 w-4" strokeWidth={2} />
       {unreadCount > 0 && (
-        <span
-          aria-hidden="true"
-          className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white shadow-sm ring-2 ring-surface-1"
-        >
+        <span aria-hidden="true" className="ch-iconbtn__badge">
           {display}
         </span>
       )}

@@ -45,18 +45,21 @@ const config: Config = {
           foreground: "hsl(var(--card-foreground))",
         },
 
-        // Viva Eventos — paleta direta (HEX)
+        // Control Hub — acento unico (vermelho). A escala mantem o
+        // nome `viva` para nao quebrar as telas que ja usam
+        // bg-viva-500 / text-viva-700; o valor e que passou a ser o
+        // vermelho do design system (--color-accent / -700).
         viva: {
-          50:  "#FFF2E8",
-          100: "#FFE0C9",
-          200: "#FFC091",
-          300: "#FFA05A",
-          400: "#FF8636",
-          500: "#FF6B1A",
-          600: "#E85A0F",
-          700: "#B8450B",
-          800: "#8A3208",
-          900: "#5C2105",
+          50:  "#FDECE9",
+          100: "#FBD5CE",
+          200: "#F7AA9D",
+          300: "#F27F6C",
+          400: "#EF553B",
+          500: "#EC3013",
+          600: "#CF250C",
+          700: "#AE1800",
+          800: "#841200",
+          900: "#560C00",
         },
         // Surfaces e textos seguem as CSS vars — alternam entre tema
         // claro (:root) e escuro (.dark) definidos em viva-tokens.css.
@@ -82,9 +85,11 @@ const config: Config = {
         },
       },
       fontFamily: {
-        // var(--font-display) e var(--font-body) injetados pelo next/font em layout.tsx
-        display: ['var(--font-display)', '"Chakra Petch"', "Rajdhani", "system-ui", "sans-serif"],
-        sans:    ['var(--font-body)', "Inter", "system-ui", "-apple-system", "sans-serif"],
+        // Archivo (var(--font-archivo), injetada pelo next/font em layout.tsx)
+        // e a fonte unica do design system: headings e corpo. `display` e
+        // `sans` apontam para ela para que as telas antigas acompanhem.
+        display: ['var(--font-archivo)', "Archivo", "system-ui", "sans-serif"],
+        sans:    ['var(--font-archivo)', "Archivo", "system-ui", "-apple-system", "sans-serif"],
       },
       borderRadius: {
         // shadcn
@@ -98,9 +103,10 @@ const config: Config = {
         "viva-xl": "16px",
       },
       boxShadow: {
-        "viva-sm": "0 1px 2px rgba(0,0,0,0.3)",
-        "viva-md": "0 4px 12px rgba(0,0,0,0.4)",
-        "viva-lg": "0 12px 32px rgba(0,0,0,0.5)",
+        // Sombras muito discretas — nada de elevacao dramatica.
+        "viva-sm": "0 1px 2px rgba(32,30,29,0.10)",
+        "viva-md": "0 3px 8px rgba(32,30,29,0.14)",
+        "viva-lg": "0 8px 20px rgba(32,30,29,0.16)",
       },
       letterSpacing: {
         display: "0.08em",

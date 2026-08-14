@@ -1,73 +1,52 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { CheckSquare, Loader2 } from "lucide-react";
-
-import { approveRequest } from "@/lib/ctrl/actions/requests";
-import { WidgetCard, WidgetEmpty } from "@/components/app/home/widget-card";
+import { SectionHead } from "@/components/app/home/widget-card";
 import { fmtBRL, type HomeApprovals } from "@/lib/home/ctrl-widgets";
 
+/**
+ * Aprovações pendentes — quadro de LEITURA.
+ *
+ * Nada é decidido aqui: aprovar/recusar em um clique na tela inicial abre
+ * espaço para o clique sem querer, e recusa ainda exige motivo. A decisão
+ * acontece em /ctrl/aprovacoes, para onde o "Ver tudo" leva.
+ */
 export function WidgetAprovacoes({ data }: { data: HomeApprovals }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  function aprovar(id: string) {
-    setBusyId(id);
-    setError(null);
-    startTransition(async () => {
-      const res = await approveRequest(id);
-      setBusyId(null);
-      if (res && "error" in res && res.error) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
-
   return (
-    <WidgetCard title="Aprovações pendentes" icon={CheckSquare} href="/ctrl/aprovacoes">
-      {error && (
-        <p className="mb-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {error}
-        </p>
-      )}
+    <>
+      <SectionHead title="Aprovações pendentes" href="/ctrl/aprovacoes" />
+
       {data.items.length === 0 ? (
-        <WidgetEmpty>Nenhuma requisição aguardando você.</WidgetEmpty>
+        <p className="ch-empty">Fila limpa — nenhuma aprovação pendente.</p>
       ) : (
-        <ul className="divide-y">
+        <>
+          <div className="ch-approvals__head">
+            <span className="ch-kicker">Nº</span>
+            <span className="ch-kicker">Requisição</span>
+            <span className="ch-kicker" style={{ textAlign: "right" }}>
+              Valor
+            </span>
+          </div>
           {data.items.map((r) => (
-            <li key={r.id} className="flex items-center justify-between gap-3 py-2.5">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{r.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  #{r.requestNumber}
-                  {r.supplierName ? ` · ${r.supplierName}` : ""} · {fmtBRL.format(r.amount)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => aprovar(r.id)}
-                disabled={isPending}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                {isPending && busyId === r.id ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : null}
-                Aprovar
-              </button>
-            </li>
+            <div key={r.id} className="ch-approval">
+              <span className="ch-approval__num">{r.requestNumber}</span>
+              <span style={{ minWidth: 0 }}>
+                <span className="ch-approval__title" style={{ display: "block" }}>
+                  {r.title}
+                </span>
+                <span className="ch-approval__meta" style={{ display: "block" }}>
+                  {r.supplierName ?? "Sem fornecedor"}
+                </span>
+              </span>
+              <span className="ch-approval__value">{fmtBRL.format(r.amount)}</span>
+            </div>
           ))}
-        </ul>
+          {data.total > data.items.length && (
+            <p className="ch-empty" style={{ marginTop: 12 }}>
+              +{data.total - data.items.length} aguardando — veja todas em Aprovações.
+            </p>
+          )}
+        </>
       )}
-      {data.total > data.items.length && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          +{data.total - data.items.length} aguardando — veja todas em Aprovações.
-        </p>
-      )}
-    </WidgetCard>
+    </>
   );
 }

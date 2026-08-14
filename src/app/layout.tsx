@@ -1,8 +1,17 @@
 import type { Metadata } from "next";
-import { Chakra_Petch, Inter } from "next/font/google";
+import { Archivo, Chakra_Petch, Inter } from "next/font/google";
 
 import { ToasterProvider } from "@/components/ui/toaster";
 import "./globals.css";
+
+// Archivo — fonte unica do design system (headings e corpo).
+// Resolve var(--font) em control-hub.css.
+const archivo = Archivo({
+  weight: ["400", "600", "700", "800"],
+  subsets: ["latin"],
+  variable: "--font-archivo",
+  display: "swap",
+});
 
 const display = Chakra_Petch({
   weight: ["400", "500", "600", "700"],
@@ -31,14 +40,26 @@ export const metadata: Metadata = {
   description: "Painel DRE com autenticação Supabase",
 };
 
-// Aplica o tema salvo antes da hidratacao para nao "piscar" ao carregar.
-// Se nao houver preferencia salva, usa a do sistema operacional.
+// Aplica o tema salvo ANTES da primeira pintura, para nao piscar claro ao
+// carregar no escuro. Sem preferencia salva, segue a do sistema.
+//
+// Tres marcas no <html>, cada uma com um dono:
+//   data-theme="dark" — os tokens do design system (control-hub.css)
+//   .dark            — as utilitarias `dark:` do Tailwind, espalhadas pelas
+//                      telas antigas; nao da para largar sem reescrever todas
+//   .ch-dark         — a guarda de fundo do html/body (overscroll)
+//
+// A chave e `ch-theme`; `theme` (a antiga) e lida uma vez para nao resetar a
+// escolha de quem ja tinha o tema definido.
 const THEME_INIT_SCRIPT = `
 (function(){try{
-  var stored = localStorage.getItem('theme');
+  var stored = localStorage.getItem('ch-theme') || localStorage.getItem('theme');
   var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   var isDark = stored === 'dark' || (!stored && prefersDark);
-  if (isDark) document.documentElement.classList.add('dark');
+  var el = document.documentElement;
+  el.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  el.classList.toggle('dark', isDark);
+  el.classList.toggle('ch-dark', isDark);
 }catch(e){}})();
 `;
 
@@ -50,7 +71,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${display.variable} ${body.variable}`}
+      className={`${archivo.variable} ${display.variable} ${body.variable}`}
       suppressHydrationWarning
     >
       <head>

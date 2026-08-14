@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { BadgeCheck } from "lucide-react";
 
-import { WidgetCard, WidgetEmpty } from "@/components/app/home/widget-card";
+import { SectionHead, WidgetEmpty } from "@/components/app/home/widget-card";
 import { formatDayBR } from "@/lib/ctrl/datetime";
 import { fmtBRL, type HomeSuppliers } from "@/lib/home/ctrl-widgets";
 
@@ -19,33 +18,30 @@ export function WidgetFornecedores({ data }: { data: HomeSuppliers }) {
   const nada = data.novosTotal === 0 && data.bloqueadasTotal === 0;
 
   return (
-    <WidgetCard
-      title="Fornecedores a homologar"
-      icon={BadgeCheck}
-      href="/ctrl/admin/fornecedores"
-      hrefLabel="Homologar"
-    >
+    <div>
+      <SectionHead
+        title="Fornecedores a homologar"
+        href="/ctrl/admin/fornecedores"
+        hrefLabel="Homologar"
+      />
+
       {nada ? (
         <WidgetEmpty>Nenhum fornecedor aguardando homologação.</WidgetEmpty>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {data.novosTotal > 0 && (
             <section>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="ch-kicker" style={{ marginBottom: 7 }}>
                 Novos cadastros ({data.novosTotal})
               </p>
-              <ul className="divide-y">
-                {data.novos.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between gap-3 py-2">
-                    <p className="truncate text-sm font-medium">{s.name}</p>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatDayBR(s.createdAt)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {data.novos.map((s) => (
+                <div key={s.id} className="ch-row ch-row--hover">
+                  <span className="ch-row__title">{s.name}</span>
+                  <span className="ch-row__meta">{formatDayBR(s.createdAt)}</span>
+                </div>
+              ))}
               {data.novosTotal > data.novos.length && (
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="ch-empty" style={{ marginTop: 8 }}>
                   +{data.novosTotal - data.novos.length} cadastro(s) — veja em Fornecedores.
                 </p>
               )}
@@ -54,46 +50,37 @@ export function WidgetFornecedores({ data }: { data: HomeSuppliers }) {
 
           {data.bloqueadasTotal > 0 && (
             <section>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="ch-kicker" style={{ marginBottom: 7 }}>
                 Requisições que vão travar no pagamento ({data.bloqueadasTotal})
               </p>
-              <ul className="divide-y">
-                {data.bloqueadas.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between gap-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{r.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        #{r.requestNumber} · {r.supplierName} · {fmtBRL.format(r.amount)}
-                      </p>
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        r.supplierStatus === "rejeitado"
-                          ? "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300"
-                          : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-                      }`}
-                    >
-                      {r.supplierStatus === "rejeitado" ? "Rejeitado" : "Não homologado"}
+              {data.bloqueadas.map((r) => (
+                <div key={r.id} className="ch-row ch-row--hover">
+                  <span style={{ minWidth: 0 }}>
+                    <span className="ch-row__title" style={{ display: "block" }}>
+                      {r.title}
                     </span>
-                  </li>
-                ))}
-              </ul>
+                    <span className="ch-row__meta">
+                      #{r.requestNumber} · {r.supplierName} · {fmtBRL.format(r.amount)}
+                    </span>
+                  </span>
+                  <span className={`ch-tag ${r.supplierStatus === "rejeitado" ? "ch-tag--accent" : ""}`}>
+                    {r.supplierStatus === "rejeitado" ? "Rejeitado" : "Não homologado"}
+                  </span>
+                </div>
+              ))}
               {data.bloqueadasTotal > data.bloqueadas.length && (
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="ch-empty" style={{ marginTop: 8 }}>
                   +{data.bloqueadasTotal - data.bloqueadas.length} requisição(ões) na mesma
                   situação.
                 </p>
               )}
-              <Link
-                href="/ctrl/contas-a-pagar"
-                className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
-              >
-                Ver no Contas a Pagar
+              <Link href="/ctrl/contas-a-pagar" className="ch-link" style={{ marginTop: 8, display: "inline-block" }}>
+                Ver no Contas a Pagar →
               </Link>
             </section>
           )}
         </div>
       )}
-    </WidgetCard>
+    </div>
   );
 }
