@@ -181,6 +181,10 @@ export function canAccessPathByProfile(
     // para Configurações (/ctrl/configuracoes, /ctrl/admin/* e Editar
     // Orçamento), que seguem admin-only mais adiante.
     const fullView = hasCtrlFullView(email);
+    // Manual do módulo: liberado a todo mundo que tem Compras (a regra geral no
+    // fim desta função já bastaria; explícito aqui para que uma futura restrição
+    // por perfil não o derrube junto sem querer).
+    if (pathname.startsWith("/ctrl/manual")) return true;
     // Aprovações: gerente/diretor/contas_a_pagar/admin
     if (pathname.startsWith("/ctrl/aprovacoes")) {
       return (

@@ -9,6 +9,7 @@
 // "tipo_documento IS NULL".
 
 import { extractContract, mergeCpfCnpj } from './extract'
+import { decidirPorSaldoFee, loadFeeSaldo, type FeeSaldoMap } from './fee-saldo'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
 import { analisarRequisicao, isFeeCerimonial, type RequisitionDocument } from './validate'
@@ -136,8 +137,9 @@ export async function processBatch(
   console.log(`[contracts] processBatch start batch=${batchId} budget=${timeBudgetMs}ms maxItems=${maxItems ?? 'unlimited'}`)
 
   // ── Phase 0: atalho FEE/Cerimonial ─────────────────────────────────────────
-  // Requisições cuja descrição contém FEE/Cerimonial não são lidas: vão direto
-  // para aprovação manual (análise especialista), sem gastar crédito de IA.
+  // Requisições cuja descrição contém FEE/Cerimonial não são lidas (sem gastar
+  // crédito de IA): a decisão vem do saldo FEE do fundo na planilha da
+  // controladoria (fase 0b, abaixo), não da leitura de documento.
   // A decisão é por requisição (a descrição é da requisição, não do documento).
   const { data: descRows } = await db
     .from('contract_validation_items')
@@ -171,6 +173,55 @@ export async function processBatch(
     .eq('status', 'processing')
     .lt('processed_at', orfaoLimite)
 
+  // ── Phase 0b: decisão FEE/Cerimonial pelo saldo do fundo ──────────────────
+  // Consulta a planilha de saldo FEE (coluna "Valor a receber") e decide na
+  // hora: RP dentro do saldo → aprovada; acima → reprovada. Fundo ausente/não
+  // encontrado, linha duplicada divergente ou planilha inacessível → análise
+  // especialista (fallback conservador — nunca decide às cegas).
+  if (feeReqs.size > 0) {
+    const { data: feePendingRows } = await db
+      .from('contract_validation_items')
+      .select('id, requisicao_codigo, fundo, valor')
+      .eq('batch_id', batchId)
+      .eq('status', 'pending')
+
+    const feeItems = (
+      (feePendingRows ?? []) as Array<
+        Pick<ItemRow, 'id' | 'requisicao_codigo' | 'fundo' | 'valor'>
+      >
+    ).filter((r) => feeReqs.has(r.requisicao_codigo))
+
+    let saldoMap: FeeSaldoMap | null = null
+    let saldoErro: string | null = null
+    if (feeItems.length > 0) {
+      try {
+        saldoMap = await loadFeeSaldo()
+        console.log(
+          `[contracts] fee-saldo loaded funds=${saldoMap.byKey.size} conflicts=${saldoMap.conflitos.size}`,
+        )
+      } catch (err) {
+        saldoErro = err instanceof Error ? err.message : String(err)
+        console.error('[contracts] fee-saldo load failed:', saldoErro)
+      }
+    }
+
+    for (const item of feeItems) {
+      const decisao = decidirPorSaldoFee(item.fundo, item.valor, saldoMap, saldoErro)
+      await db
+        .from('contract_validation_items')
+        .update({
+          status: decisao.status,
+          status_resumo: decisao.resumo,
+          status_motivos: decisao.motivos,
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', item.id)
+    }
+    if (feeItems.length > 0) {
+      console.log(`[contracts] phase0b FEE/Cerimonial decided items=${feeItems.length}`)
+    }
+  }
+
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
     .from('contract_validation_items')
@@ -193,14 +244,16 @@ export async function processBatch(
       break
     }
 
-    // FEE/Cerimonial → aprovação manual, sem leitura (não chama o LLM).
+    // Rede de segurança: FEE/Cerimonial nunca entra em extração (a fase 0b já
+    // decidiu os itens pendentes; se algum update falhou, cai para especialista
+    // em vez de gastar crédito de IA).
     if (feeReqs.has(item.requisicao_codigo)) {
       await db
         .from('contract_validation_items')
         .update({
           status: 'analise_especialista',
-          status_resumo: 'FEE/Cerimonial — aprovação manual (leitura dispensada)',
-          status_motivos: ['Requisição de FEE/Cerimonial: não exige leitura de documento'],
+          status_resumo: 'FEE/Cerimonial — análise especialista (decisão de saldo não aplicada)',
+          status_motivos: ['Requisição de FEE/Cerimonial: leitura dispensada; checagem de saldo não concluiu'],
           processed_at: new Date().toISOString(),
         })
         .eq('id', item.id)

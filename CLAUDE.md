@@ -104,6 +104,12 @@ Purchase requests move through a status machine driven by a **budget check** aga
 - Side states: `aguardando_complementacao` (info requested), `aguardando_aprovacao_fornecedor`, `rejeitado`
 Approval tier is computed from remaining annual balance at request time. Once `aprovado`, a request can be launched into Omie *contas a pagar* via `contapagar-launch.ts`. Guard every action with `requireCtrlRole(...)`.
 
+### Manual do módulo Compras — `src/lib/ctrl/manual/content.ts`
+
+O manual do usuário final (fluxo, alçadas, status, o que cada perfil faz) tem **fonte única** nesse arquivo de dados puro. Dele saem as duas versões: a tela `/ctrl/manual` (`manual-client.tsx`, último item do menu COMPRAS, liberada a qualquer papel do módulo) e o arquivo Word em `docs/`, gerado por `npx tsx scripts/gen-manual-doc.ts` (`manual/word.ts` renderiza HTML/MSO — não há lib de .docx no projeto). O Word é distribuído **fora do app**: a tela não oferece download, e a rota que servia esse botão foi removida a pedido.
+
+**Ao mudar uma regra do módulo (fluxo, alçada, status, campo obrigatório, trava), atualize a seção correspondente do manual** — ele é lido pelo usuário como se fosse a regra, e um manual desatualizado gera mais chamado do que manual nenhum.
+
 ## Authentication & Authorization
 
 - Supabase Auth with HTTP-only cookies; session refreshed in `src/lib/supabase/middleware.ts`.
