@@ -15,22 +15,20 @@ const FEE_SALDO_SPREADSHEET_ID = '1ymgmW6ISadb8xKBpcNDXTnGr0buoOFVszSZmxaOxKBQ'
 const FEE_SALDO_GID = 1986082110
 
 // Índices 0-based na aba de importação: A=Unidade, C=Nome do Fundo,
-// I=Valor a receber.
+// K=Valor Disponível Para Retirada Conforme Saldo SPDX. Decisão 2026-08-14:
+// a coluna certa é a K ("saque disponível"), que limita o FEE restante pelo
+// caixa real do fundo — a coluna I ("Valor a receber", FEE − pago) ignora o
+// caixa e superestimava (caso real: RP 872197 aprovada com FEE restante
+// 8.400,12 quando o saque disponível era 2.264,85).
 const COL_UNIDADE = 0
 const COL_NOME = 2
-const COL_SALDO = 8
+const COL_SALDO = 10
 
-// Fallback: fundos recentes demoram a entrar na aba de importação (casos
-// reais: 9578/9619, RPs 872197/872136 caíam em "não encontrado"). A aba
-// carteira_realizado tem todos os fundos e a coluna O ("VALOR RESTANTE DE
-// FEE") faz a mesma conta da coluna I da importação (FEE − pago), então ela
-// cobre quem ainda não foi importado. A importação continua sendo a fonte
-// primária — o fallback nunca sobrepõe um fundo que está lá.
+// A carteira_realizado não tem o saldo SPDX, então NÃO serve para decidir —
+// ela só distingue a mensagem: fundo que existe lá mas não na importação é
+// "falta importar" (acionável pela equipe), não "fundo desconhecido".
 const CARTEIRA_GID = 429827027
-// carteira_realizado: A=FRANQUIA, C=FUNDO, O=VALOR RESTANTE DE FEE.
-const CART_COL_UNIDADE = 0
 const CART_COL_NOME = 2
-const CART_COL_SALDO = 14
 
 // Mesma tolerância de centavos usada na validação de valores (validate.ts).
 const SALDO_TOLERANCE = 0.02
@@ -39,18 +37,18 @@ export interface FeeSaldoEntry {
   /** Nome do fundo como está na planilha (para exibição/auditoria). */
   nome: string
   unidade: string
-  /** Valor disponível de FEE. Pode ser negativo. */
+  /** Coluna K: saque disponível conforme saldo SPDX. */
   saldo: number
-  /** De qual aba veio o saldo (para o motivo ficar auditável). */
-  fonte: 'importacao' | 'carteira'
 }
 
 export interface FeeSaldoMap {
   byKey: Map<string, FeeSaldoEntry>
   /** Chaves que aparecem em mais de uma linha com saldos divergentes. */
   conflitos: Set<string>
-  /** Fundos presentes na planilha mas com a coluna I vazia/não numérica. */
+  /** Fundos presentes na importação mas com a coluna K vazia/não numérica. */
   semSaldo: Set<string>
+  /** Fundos que existem na carteira_realizado mas não na importação. */
+  naoImportados: Set<string>
   totalLinhas: number
 }
 
@@ -74,27 +72,26 @@ function parseSaldo(cell: unknown): number | null {
   return null
 }
 
-interface ParsedTab {
-  byKey: Map<string, FeeSaldoEntry>
-  conflitos: Set<string>
-  semSaldo: Set<string>
-  totalLinhas: number
-}
+/** Lê as duas abas e monta o mapa fundo → saque disponível. */
+export async function loadFeeSaldo(): Promise<FeeSaldoMap> {
+  const [tabImport, tabCarteira] = await Promise.all([
+    fetchSheetTabTitleByGid(FEE_SALDO_SPREADSHEET_ID, FEE_SALDO_GID),
+    fetchSheetTabTitleByGid(FEE_SALDO_SPREADSHEET_ID, CARTEIRA_GID),
+  ])
+  const [rowsImport, rowsCarteira] = await Promise.all([
+    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabImport.replace(/'/g, "''")}'!A2:K`),
+    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabCarteira.replace(/'/g, "''")}'!A2:C`),
+  ])
 
-function parseTab(
-  rows: Awaited<ReturnType<typeof fetchSheetValues>>,
-  cols: { nome: number; unidade: number; saldo: number },
-  fonte: FeeSaldoEntry['fonte'],
-): ParsedTab {
   const byKey = new Map<string, FeeSaldoEntry>()
   const conflitos = new Set<string>()
   const semSaldo = new Set<string>()
-  for (const row of rows) {
-    const nome = String(row[cols.nome] ?? '').trim()
+  for (const row of rowsImport) {
+    const nome = String(row[COL_NOME] ?? '').trim()
     if (!nome) continue
     const key = normFundo(nome)
     if (!key) continue
-    const saldo = parseSaldo(row[cols.saldo])
+    const saldo = parseSaldo(row[COL_SALDO])
     if (saldo === null) {
       // Fundo listado mas sem valor — acontece na planilha real (célula em
       // branco). Distinguir de "não encontrado" na mensagem.
@@ -109,52 +106,20 @@ function parseTab(
     }
     byKey.set(key, {
       nome,
-      unidade: String(row[cols.unidade] ?? '').trim(),
+      unidade: String(row[COL_UNIDADE] ?? '').trim(),
       saldo,
-      fonte,
     })
     semSaldo.delete(key)
   }
-  return { byKey, conflitos, semSaldo, totalLinhas: rows.length }
-}
 
-/** Lê as duas abas e monta o mapa fundo → saldo. Lança erro se inacessível. */
-export async function loadFeeSaldo(): Promise<FeeSaldoMap> {
-  const [tabImport, tabCarteira] = await Promise.all([
-    fetchSheetTabTitleByGid(FEE_SALDO_SPREADSHEET_ID, FEE_SALDO_GID),
-    fetchSheetTabTitleByGid(FEE_SALDO_SPREADSHEET_ID, CARTEIRA_GID),
-  ])
-  const [rowsImport, rowsCarteira] = await Promise.all([
-    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabImport.replace(/'/g, "''")}'!A2:I`),
-    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabCarteira.replace(/'/g, "''")}'!A2:O`),
-  ])
+  const naoImportados = new Set<string>()
+  for (const row of rowsCarteira) {
+    const key = normFundo(String(row[CART_COL_NOME] ?? ''))
+    if (!key || byKey.has(key) || conflitos.has(key) || semSaldo.has(key)) continue
+    naoImportados.add(key)
+  }
 
-  const primaria = parseTab(rowsImport, { nome: COL_NOME, unidade: COL_UNIDADE, saldo: COL_SALDO }, 'importacao')
-  const carteira = parseTab(
-    rowsCarteira,
-    { nome: CART_COL_NOME, unidade: CART_COL_UNIDADE, saldo: CART_COL_SALDO },
-    'carteira',
-  )
-
-  // Merge: a importação manda; a carteira só entra onde a importação não
-  // conhece o fundo (nem como conflito).
-  const byKey = primaria.byKey
-  const conflitos = primaria.conflitos
-  const semSaldo = new Set(primaria.semSaldo)
-  carteira.byKey.forEach((entry, key) => {
-    if (byKey.has(key) || conflitos.has(key)) return
-    if (carteira.conflitos.has(key)) return
-    byKey.set(key, entry)
-    semSaldo.delete(key)
-  })
-  carteira.conflitos.forEach((key) => {
-    if (!byKey.has(key) && !conflitos.has(key)) conflitos.add(key)
-  })
-  carteira.semSaldo.forEach((key) => {
-    if (!byKey.has(key) && !conflitos.has(key)) semSaldo.add(key)
-  })
-
-  return { byKey, conflitos, semSaldo, totalLinhas: primaria.totalLinhas + carteira.totalLinhas }
+  return { byKey, conflitos, semSaldo, naoImportados, totalLinhas: rowsImport.length }
 }
 
 export interface FeeDecisao {
@@ -205,26 +170,30 @@ export function decidirPorSaldoFee(
   if (!entry) {
     if (saldoMap.semSaldo.has(key)) {
       return especialista(
-        `fundo "${String(fundo).trim()}" está na planilha de saldo FEE, mas sem valor na coluna de saldo`,
+        `fundo "${String(fundo).trim()}" está na aba de importação, mas sem valor na coluna de saque disponível`,
+      )
+    }
+    if (saldoMap.naoImportados.has(key)) {
+      return especialista(
+        `fundo "${String(fundo).trim()}" ainda não foi importado para a aba CONTROLE FEE QUOKKA (IMPORT) — sem saque disponível na planilha; pedir a importação do fundo`,
       )
     }
     return especialista(
-      `fundo "${String(fundo).trim()}" não encontrado na planilha de saldo FEE (abas de importação e carteira)`,
+      `fundo "${String(fundo).trim()}" não encontrado na planilha de saldo FEE`,
     )
   }
 
-  const fonteTxt = entry.fonte === 'carteira' ? ', aba carteira_realizado' : ''
-  const detalhe = `fundo "${entry.nome}" (${entry.unidade || 'sem unidade'}${fonteTxt}): saldo a receber ${fmt(entry.saldo)}, RP ${fmt(valor)}`
+  const detalhe = `fundo "${entry.nome}" (${entry.unidade || 'sem unidade'}): saque disponível ${fmt(entry.saldo)}, RP ${fmt(valor)}`
   if (valor <= entry.saldo + SALDO_TOLERANCE) {
     return {
       status: 'aprovada',
-      resumo: `Aprovada — FEE/Cerimonial dentro do saldo do fundo (${fmt(entry.saldo)} disponível, RP ${fmt(valor)})`,
-      motivos: [`Saldo FEE comporta a requisição: ${detalhe}`],
+      resumo: `Aprovada — FEE/Cerimonial dentro do saque disponível do fundo (${fmt(entry.saldo)} disponível, RP ${fmt(valor)})`,
+      motivos: [`Saque disponível comporta a requisição: ${detalhe}`],
     }
   }
   return {
     status: 'reprovada',
-    resumo: `Reprovada — FEE/Cerimonial acima do saldo do fundo (${fmt(entry.saldo)} disponível, RP ${fmt(valor)})`,
-    motivos: [`Valor da RP excede o saldo FEE do fundo: ${detalhe}`],
+    resumo: `Reprovada — FEE/Cerimonial acima do saque disponível do fundo (${fmt(entry.saldo)} disponível, RP ${fmt(valor)})`,
+    motivos: [`Valor da RP excede o saque disponível do fundo: ${detalhe}`],
   }
 }
