@@ -55,6 +55,18 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
+    // Link de recuperação que chegou aqui com a sessão no fragmento
+    // (#access_token=...&type=recovery), quando o Supabase usa o Site URL no
+    // lugar do redirect_to. O fragmento sobrevive ao redirect da raiz mas não
+    // chega ao servidor, então o desvio é feito aqui — e ANTES de instanciar o
+    // client, que consumiria o hash (detectSessionInUrl) e o descartaria,
+    // deixando o usuário parado nesta tela.
+    const hash = window.location.hash;
+    if (hash.includes("type=recovery") || hash.includes("type=invite")) {
+      window.location.replace(`/redefinir-senha${hash}`);
+      return;
+    }
+
     const checkSession = async () => {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();

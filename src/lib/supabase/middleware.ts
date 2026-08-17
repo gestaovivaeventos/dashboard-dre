@@ -12,6 +12,24 @@ export async function updateSession(request: NextRequest) {
   const { supabaseAnonKey, supabaseUrl } = getSupabaseEnv();
   const pathname = request.nextUrl.pathname;
 
+  // Link de recuperação/convite que caiu na raiz (ou no login) em vez de
+  // /redefinir-senha. Acontece quando o Supabase descarta o `redirect_to` e
+  // usa o Site URL no lugar — destino fora da allowlist de Redirect URLs, ou
+  // e-mail disparado pelo painel (que não manda redirectTo nenhum).
+  // Sem este desvio o `?code=` morre no redirect da raiz para /login e o
+  // usuário cai numa tela de login sem erro nenhum, como se o link não
+  // valesse. O fragmento (#access_token) não chega ao servidor: aquele caso é
+  // tratado no cliente, em /login.
+  if (
+    (pathname === "/" || pathname === "/login") &&
+    (request.nextUrl.searchParams.has("code") ||
+      request.nextUrl.searchParams.get("type") === "recovery")
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/redefinir-senha";
+    return NextResponse.redirect(url);
+  }
+
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
@@ -33,8 +51,9 @@ export async function updateSession(request: NextRequest) {
     pathname === "/signup" ||
     pathname === "/pendente" ||
     // Recuperação de senha: "/recuperar-senha" é público (deslogado pede o link);
-    // "/redefinir-senha" recebe a sessão de recovery (via /auth/callback) e define
-    // a nova senha — fica fora do guard de perfil pra não ser redirecionada.
+    // "/redefinir-senha" recebe a sessão de recovery na própria URL (?code= ou
+    // #access_token, processados pelo browser client) e define a nova senha —
+    // fica fora do guard de perfil pra não ser redirecionada.
     pathname === "/recuperar-senha" ||
     pathname === "/redefinir-senha" ||
     pathname.startsWith("/auth/callback");

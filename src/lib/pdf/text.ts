@@ -35,17 +35,44 @@ export interface PdfText {
   plain: string;
 }
 
+// Z_SYNC_FLUSH em vez do Z_FINISH padrão: muitos produtores fecham o deflate
+// sem o bloco final, e o inflate estrito aborta com "unexpected end of file"
+// DESCARTANDO tudo o que já havia descomprimido. É o caso da NFS-e da
+// Prefeitura de São Paulo: o content stream inflava inteiro (5,5 KB de texto,
+// "Número da Nota" incluído), mas o erro no fim jogava fora o resultado, o
+// chunk caía no `raw.toString("latin1")` e a página virava ruído binário.
+const TOLERANTE = { finishFlush: zlib.constants.Z_SYNC_FLUSH } as const;
+
+/**
+ * Descomprime um stream Flate. A ORDEM das tentativas importa e é o oposto do
+ * intuitivo: as ESTRITAS vêm primeiro, a tolerante só como resgate.
+ *
+ * Motivo: `Z_SYNC_FLUSH` também deixa de reclamar de stream que não é zlib de
+ * verdade — basta o primeiro par de bytes passar no teste de cabeçalho e ele
+ * devolve lixo parcial em vez de lançar. Tolerando de saída, esse lixo tomava o
+ * lugar do `inflateRaw` (deflate sem cabeçalho), e um boleto que era lido
+ * corretamente parou de entregar a linha digitável. Estrito primeiro mantém
+ * intacto tudo o que já funcionava; a tolerância só entra onde antes não
+ * sobrava nada além do binário cru.
+ */
 function inflate(raw: Buffer): string | null {
-  try {
-    return zlib.inflateSync(raw).toString("latin1");
-  } catch {
+  const tentativas = [
+    () => zlib.inflateSync(raw),
     // Alguns produtores gravam o stream sem o cabeçalho zlib.
+    () => zlib.inflateRawSync(raw),
+    () => zlib.inflateSync(raw, TOLERANTE),
+    () => zlib.inflateRawSync(raw, TOLERANTE),
+  ];
+  for (const tentar of tentativas) {
+    try {
+      const out = tentar();
+      // Saída vazia não é resgate: deixa a próxima tentativa correr.
+      if (out.length > 0) return out.toString("latin1");
+    } catch {
+      // Próxima estratégia.
+    }
   }
-  try {
-    return zlib.inflateRawSync(raw).toString("latin1");
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**
