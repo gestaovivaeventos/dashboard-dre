@@ -123,7 +123,24 @@ async function getData() {
   };
 }
 
-export default async function FornecedoresPage() {
+/**
+ * A tela abre em "Aprovados" por padrão, mas os alertas da tela inicial
+ * ("N fornecedores aguardando homologação" / "Homologar →") apontam para uma
+ * pendência específica: os cadastros novos, feitos pelo próprio time, que ainda
+ * não foram homologados. Sem os parâmetros abaixo o clique caía na listagem
+ * inteira e o usuário tinha que descobrir sozinho quais eram os 5 do alerta.
+ *
+ *   ?status=pendente   → abre já na aba Pendentes
+ *   &novos=1           → esconde os ~1000 pendentes legados vindos do Omie
+ *   &fornecedor=<id>   → destaca a linha daquele fornecedor
+ */
+interface FornecedoresPageProps {
+  searchParams?: Record<string, string | string[] | undefined>;
+}
+
+const firstParam = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+export default async function FornecedoresPage({ searchParams }: FornecedoresPageProps) {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
@@ -136,6 +153,15 @@ export default async function FornecedoresPage() {
   const canApprove = hasCtrlRole(ctx, "gerente", "csc", "admin", "aprovacao_fornecedor");
 
   const { suppliers, expenseTypes, suppliersError, omieCompanies, linksBySupplier } = await getData();
+
+  const statusParam = firstParam(searchParams?.status);
+  const initialTab =
+    statusParam === "pendente" || statusParam === "aprovado" || statusParam === "rejeitado"
+      ? statusParam
+      : undefined;
+  const novosParam = firstParam(searchParams?.novos);
+  const initialOnlyNovos = novosParam === "1" || novosParam === "true";
+  const highlightId = firstParam(searchParams?.fornecedor) ?? null;
 
   return (
     <div className="space-y-6">
@@ -206,6 +232,9 @@ export default async function FornecedoresPage() {
           expenseTypes={expenseTypes}
           canApprove={canApprove}
           omieCompanies={omieCompanies}
+          initialTab={initialTab}
+          initialOnlyNovos={initialOnlyNovos}
+          highlightId={highlightId}
         />
       )}
     </div>

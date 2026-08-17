@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
+import { FORNECEDORES_NOVOS_HREF, type HomeCtrlCaps, type HomeCtrlData } from "@/lib/home/ctrl-widgets";
 
 interface AttentionItem {
   /** Número grande do cartão — a contagem da pendência. */
@@ -66,11 +66,14 @@ function buildItems(data: HomeCtrlData, caps: HomeCtrlCaps): AttentionItem[] {
       href: "/ctrl/contas-a-pagar",
     });
   }
+  // O link carrega o recorte (aba Pendentes + cadastros novos): a listagem abre
+  // em Aprovados e tem mais de mil linhas, então sem os parâmetros o cartão
+  // entregava o usuário numa tela onde ele teria que achar os N sozinho.
   if (alerts.suppliers && data.suppliers && data.suppliers.novosTotal > 0) {
     items.push({
       count: data.suppliers.novosTotal,
       label: "fornecedores aguardando homologação",
-      href: "/ctrl/admin/fornecedores",
+      href: FORNECEDORES_NOVOS_HREF,
     });
   }
   return items;

@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { SectionHead, WidgetEmpty } from "@/components/app/home/widget-card";
 import { formatDayBR } from "@/lib/ctrl/datetime";
-import { fmtBRL, type HomeSuppliers } from "@/lib/home/ctrl-widgets";
+import { FORNECEDORES_NOVOS_HREF, fmtBRL, type HomeSuppliers } from "@/lib/home/ctrl-widgets";
 
 /**
  * Fornecedores a homologar — perfil "Contas a Pagar" (dono da homologação) e
@@ -13,6 +13,10 @@ import { fmtBRL, type HomeSuppliers } from "@/lib/home/ctrl-widgets";
  * Junta as duas pontas da mesma pendência: o fornecedor recém-cadastrado que
  * ainda não foi homologado e a requisição em aberto que vai travar no envio
  * para pagamento por causa disso. Some sozinho conforme a homologação acontece.
+ *
+ * Cada nome é um link para a própria linha na listagem (recorte + `fornecedor=`
+ * destacando a linha), e não só para a tela: o quadro nomeia os fornecedores,
+ * então o clique deve continuar de onde a leitura parou.
  */
 export function WidgetFornecedores({ data }: { data: HomeSuppliers }) {
   const nada = data.novosTotal === 0 && data.bloqueadasTotal === 0;
@@ -21,7 +25,7 @@ export function WidgetFornecedores({ data }: { data: HomeSuppliers }) {
     <div>
       <SectionHead
         title="Fornecedores a homologar"
-        href="/ctrl/admin/fornecedores"
+        href={FORNECEDORES_NOVOS_HREF}
         hrefLabel="Homologar"
       />
 
@@ -35,14 +39,22 @@ export function WidgetFornecedores({ data }: { data: HomeSuppliers }) {
                 Novos cadastros ({data.novosTotal})
               </p>
               {data.novos.map((s) => (
-                <div key={s.id} className="ch-row ch-row--hover">
+                <Link
+                  key={s.id}
+                  href={`${FORNECEDORES_NOVOS_HREF}&fornecedor=${s.id}`}
+                  className="ch-row"
+                >
                   <span className="ch-row__title">{s.name}</span>
                   <span className="ch-row__meta">{formatDayBR(s.createdAt)}</span>
-                </div>
+                </Link>
               ))}
               {data.novosTotal > data.novos.length && (
                 <p className="ch-empty" style={{ marginTop: 8 }}>
-                  +{data.novosTotal - data.novos.length} cadastro(s) — veja em Fornecedores.
+                  +{data.novosTotal - data.novos.length} cadastro(s) —{" "}
+                  <Link href={FORNECEDORES_NOVOS_HREF} className="ch-link">
+                    ver os {data.novosTotal}
+                  </Link>
+                  .
                 </p>
               )}
             </section>

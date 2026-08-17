@@ -35,17 +35,44 @@ export interface PdfText {
   plain: string;
 }
 
+// Z_SYNC_FLUSH em vez do Z_FINISH padrão: muitos produtores fecham o deflate
+// sem o bloco final, e o inflate estrito aborta com "unexpected end of file"
+// DESCARTANDO tudo o que já havia descomprimido. É o caso da NFS-e da
+// Prefeitura de São Paulo: o content stream inflava inteiro (5,5 KB de texto,
+// "Número da Nota" incluído), mas o erro no fim jogava fora o resultado, o
+// chunk caía no `raw.toString("latin1")` e a página virava ruído binário.
+const TOLERANTE = { finishFlush: zlib.constants.Z_SYNC_FLUSH } as const;
+
+/**
+ * Descomprime um stream Flate. A ORDEM das tentativas importa e é o oposto do
+ * intuitivo: as ESTRITAS vêm primeiro, a tolerante só como resgate.
+ *
+ * Motivo: `Z_SYNC_FLUSH` também deixa de reclamar de stream que não é zlib de
+ * verdade — basta o primeiro par de bytes passar no teste de cabeçalho e ele
+ * devolve lixo parcial em vez de lançar. Tolerando de saída, esse lixo tomava o
+ * lugar do `inflateRaw` (deflate sem cabeçalho), e um boleto que era lido
+ * corretamente parou de entregar a linha digitável. Estrito primeiro mantém
+ * intacto tudo o que já funcionava; a tolerância só entra onde antes não
+ * sobrava nada além do binário cru.
+ */
 function inflate(raw: Buffer): string | null {
-  try {
-    return zlib.inflateSync(raw).toString("latin1");
-  } catch {
+  const tentativas = [
+    () => zlib.inflateSync(raw),
     // Alguns produtores gravam o stream sem o cabeçalho zlib.
+    () => zlib.inflateRawSync(raw),
+    () => zlib.inflateSync(raw, TOLERANTE),
+    () => zlib.inflateRawSync(raw, TOLERANTE),
+  ];
+  for (const tentar of tentativas) {
+    try {
+      const out = tentar();
+      // Saída vazia não é resgate: deixa a próxima tentativa correr.
+      if (out.length > 0) return out.toString("latin1");
+    } catch {
+      // Próxima estratégia.
+    }
   }
-  try {
-    return zlib.inflateRawSync(raw).toString("latin1");
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**
@@ -206,6 +233,41 @@ function extractTokens(content: string): string[] {
   return out;
 }
 
+/**
+ * Converte um token gravado em UTF-16BE para texto normal.
+ *
+ * O PDF pode gravar a string de texto com 2 bytes por caractere, com ou sem o
+ * BOM FE FF. Lido como latin1, cada caractere vira um NUL colado no caractere
+ * real — "341-7" chega como "\0 3 \0 4 \0 1 \0 - \0 7" e, depois que
+ * buildPlainText troca os controles por espaço, o documento inteiro parece
+ * espaçado letra a letra ("O B V I O   B R A S I L").
+ *
+ * Não é cosmético: a varredura da linha digitável casa os dígitos com
+ * `[\d\s.-]` entre eles, e NUL **não** é `\s`. O boleto do Itaú/Óbvio trazia a
+ * linha inteira e íntegra no arquivo, e a varredura devolvia ZERO candidatos —
+ * o boleto era dado como "sem texto" e mandado para o OCR de visão. Por isso a
+ * conversão acontece aqui, na origem: varredura e modelo veem o mesmo texto.
+ */
+function decodeUtf16BE(s: string): string {
+  if (s.length < 2) return s;
+  const temBom = s.charCodeAt(0) === 0xfe && s.charCodeAt(1) === 0xff;
+  const corpo = temBom ? s.slice(2) : s;
+  if (corpo.length < 2 || corpo.length % 2 !== 0) return s;
+  if (!temBom) {
+    // Sem BOM, só tratamos como UTF-16BE quando TODO byte alto é zero: é a
+    // assinatura de texto ASCII/latino gravado em 2 bytes. Byte alto não nulo
+    // pode ser um caractere latin1 legítimo — nesse caso não mexemos.
+    for (let i = 0; i < corpo.length; i += 2) {
+      if (corpo.charCodeAt(i) !== 0) return s;
+    }
+  }
+  let out = "";
+  for (let i = 0; i + 1 < corpo.length; i += 2) {
+    out += String.fromCharCode((corpo.charCodeAt(i) << 8) | corpo.charCodeAt(i + 1));
+  }
+  return out;
+}
+
 /** Camada de texto do PDF. `strings` vazio = PDF escaneado (só imagem). */
 export function extractPdfText(bytes: Buffer): PdfText {
   const tokens: string[] = [];
@@ -213,7 +275,9 @@ export function extractPdfText(bytes: Buffer): PdfText {
   for (const chunk of pdfContentChunks(bytes)) {
     scanned += chunk.length;
     if (scanned > MAX_SCAN_CHARS) break;
-    tokens.push(...extractTokens(chunk));
+    for (const token of extractTokens(chunk)) {
+      tokens.push(token === BREAK ? token : decodeUtf16BE(token));
+    }
   }
 
   const strings = tokens.filter((t) => t !== BREAK);

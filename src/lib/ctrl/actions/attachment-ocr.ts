@@ -18,15 +18,26 @@ import { extractPdfText, type PdfText } from "@/lib/pdf/text";
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
-// gpt-4o (visão) lê o documento direto — boletos exigem OCR preciso da linha
-// digitável (47-48 dígitos), o que o pipeline LandingAI→markdown não entregava
-// bem. A validação (isValidBoletoLinhaDigitavel) ainda barra leitura ruim.
+// ============================================================================
+// COMO O MÓDULO COMPRAS LÊ NOTA FISCAL E BOLETO — dois caminhos, nesta ordem.
 //
-// A leitura de boleto e de nota fiscal é a ÚNICA parte do sistema que continua
-// no GPT: `resolveAiProvider({ capability: "vision" })` força a OpenAI mesmo
-// com o DeepSeek ativo no painel, porque a API do DeepSeek não aceita imagem
-// nem arquivo (o endpoint recusa o content part: "unknown variant `image_url`,
-// expected `text`"). O resto do sistema segue no provedor configurado.
+// 1. TEXTO (padrão, provedor ativo do painel = DeepSeek). Boleto de banco e nota
+//    de prefeitura/ERP são PDF vetorial: os dados estão na camada de texto do
+//    arquivo. Dali sai a linha digitável SEM IA NENHUMA (varredura com os DVs
+//    mod10/mod11 conferindo cada dígito — ver boleto-pdf.ts) e o número da nota
+//    pelo modelo de TEXTO. É de graça, responde em ~1s e não depende da OpenAI.
+//
+// 2. VISÃO (plano B, gpt-4o na OpenAI). Só para o que NÃO tem camada de texto:
+//    documento escaneado e foto. `resolveAiProvider({ capability: "vision" })`
+//    força a OpenAI mesmo com o DeepSeek ativo, porque a API do DeepSeek aceita
+//    exclusivamente texto (o endpoint recusa o content part: "unknown variant
+//    `image_url`, expected `text`").
+//
+// A ordem já foi a inversa, com a visão na frente, e isso deixou o módulo
+// inteiro refém de UMA conta externa: em três episódios seguidos (chave ausente,
+// chave inválida e conta sem crédito) nenhum documento foi lido, nem os PDFs
+// que o próprio arquivo entregava de graça. Com o crédito da OpenAI zerado só
+// escaneado/foto ficam no manual.
 const OCR_MODEL = "gpt-4o";
 
 // Resultado da leitura. Campos por tipo de documento; ambos opcionais porque a
@@ -63,6 +74,31 @@ const NotaSchema = z.object({
       "'295,47' ou '1.234,56'). Null se não houver um campo de valor líquido.",
     ),
 });
+
+// Regras de leitura da nota — as MESMAS nos dois caminhos: o de TEXTO (provedor
+// ativo lendo a camada de texto do PDF) e o de VISÃO (GPT olhando a página).
+// Manter uma cópia só evita que um caminho aprenda uma armadilha e o outro não.
+const NOTA_RULES =
+  "NÚMERO DA NOTA — REGRA 1 (prioritária): procure um campo rotulado explicitamente com o " +
+  "número da nota e copie EXATAMENTE o valor impresso ao lado do rótulo. Os rótulos possíveis " +
+  "são, nesta ordem: 'Número da NFS-e', 'Número da Nota', 'Número da NF-e', 'Nº', 'NF-e nº', 'Número'. " +
+  "Em NFS-e (nota de serviço de prefeitura — cabeçalho 'DANFSe' / 'Documento Auxiliar da NFS-e' / " +
+  "'NOTA FISCAL ELETRÔNICA DE SERVIÇOS') o valor correto é sempre o de 'Número da NFS-e'/'Número da " +
+  "Nota' (costuma ter poucos dígitos, ex.: 388, e pode vir com zeros à esquerda, ex.: 00024315). " +
+  "NUNCA confunda com 'Número da DPS', 'RPS Nº', 'Série', 'Competência', 'Código de Verificação', " +
+  "'Identificador Nacional', 'Inscrição Municipal', CNPJ, CEP, 'Código do Serviço', NBS, NCM, datas, " +
+  "valores em R$ nem com a chave de acesso — nenhum desses é o número da nota. " +
+  "NÚMERO DA NOTA — REGRA 2 (só se NÃO existir nenhum campo rotulado da Regra 1): se houver uma " +
+  "chave de acesso de NF-e com EXATAMENTE 44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
+  "A chave de acesso de NFS-e tem cerca de 50 dígitos e NÃO deve ser fatiada — ignore-a. " +
+  "NUNCA retorne um número composto apenas de zeros; se você chegou a algo assim, você leu o " +
+  "campo errado — volte e leia o valor ao lado do rótulo do número da nota.\n\n" +
+  "VALOR LÍQUIDO: procure o campo rotulado 'Valor Líquido' (ou 'Valor líquido a pagar', 'Valor " +
+  "Líquido da NFS-e', 'Valor Líquido do documento') — é o valor a pagar já com as retenções " +
+  "descontadas (ISS retido, INSS, IR, PIS, COFINS, CSLL). NÃO confunda com 'Valor Serviços', " +
+  "'Valor Bruto', 'Valor Total', 'Valor Total Cobrado' nem 'Base de Cálculo', que são o valor bruto. " +
+  "Copie o valor impresso mantendo a formatação brasileira (ex.: '295,47'). Se não houver campo de " +
+  "valor líquido, retorne null nesse campo — não invente nem calcule.";
 
 const BoletoSchema = z.object({
   linha_digitavel: z
@@ -147,24 +183,37 @@ export async function extractAttachmentData(
 
   const bytes = Buffer.from(await blob.arrayBuffer());
 
-  // Boleto em PDF: a linha digitável está no TEXTO do arquivo (PDF de banco é
-  // vetorial). Ler dali é determinístico — os DVs conferem cada dígito — então
-  // esse valor tem precedência sobre o que o OCR enxergar, e ainda serve de rede
-  // quando o GPT está fora do ar.
   const pdfText = mediaType === "application/pdf" ? safeExtractPdfText(bytes) : null;
-  const linhaDoPdf = kind === "boleto" && pdfText ? findLinhaDigitavelInStrings(pdfText.strings) : null;
 
-  // OCR usa visão — sempre OpenAI (o resolver força isso mesmo se o provedor
-  // ativo for outro). O consumo é registrado para aparecer no painel de IA.
+  // ── Caminho 1: a camada de texto do PDF (ver o cabeçalho do arquivo) ───────
+
+  // Boleto: a linha digitável sai do texto de forma DETERMINÍSTICA, com os DVs
+  // conferindo dígito por dígito — melhor que qualquer OCR, então achando-a não
+  // há motivo para gastar uma chamada de visão. Favorecido e CNPJ vêm do mesmo
+  // texto, pelo provedor ativo.
+  const linhaDoPdf = kind === "boleto" && pdfText ? findLinhaDigitavelInStrings(pdfText.strings) : null;
+  if (linhaDoPdf) {
+    return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+  }
+
+  // Nota fiscal: o número e o valor líquido saem do mesmo texto, lidos pelo
+  // provedor ATIVO (DeepSeek). Sem o número não adianta parar aqui — o valor
+  // líquido sozinho não preenche o campo —, então segue para a visão levando o
+  // que já conseguiu.
+  const notaDoTexto = kind === "nota" && pdfText ? await readNotaFromText(pdfText) : null;
+  if (notaDoTexto?.invoice_number) return { data: notaDoTexto };
+
+  // ── Caminho 2: visão, sempre OpenAI (o resolver força, mesmo com outro
+  // provedor ativo). O consumo é registrado para aparecer no painel de IA. ────
   const resolved = await resolveAiProvider({ capability: "vision" }).catch((e: unknown) =>
     e instanceof Error ? e : new Error(String(e)),
   );
   if (resolved instanceof Error) {
-    // Sem GPT o boleto ainda sai: linha digitável do texto do PDF e, para
-    // favorecido/CNPJ, o provedor ativo lendo esse mesmo texto (sem visão).
-    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+    // O que o texto já entregou (aqui, no máximo o valor líquido da nota — com
+    // o número a função teria retornado acima) vale mais que a tela vazia.
+    if (notaDoTexto) return { data: notaDoTexto };
     await logOcrFailure(null, `resolveAiProvider: ${resolved.message}`);
-    return { error: `Leitura automática indisponível — ${resolved.message}` };
+    return { error: mensagemAoUsuario(resolved.message) };
   }
   // Imagens vão com detalhe ALTO — a linha digitável tem dígitos pequenos e o
   // detalhe padrão downscaleia a imagem, derrubando a precisão do OCR.
@@ -194,24 +243,7 @@ export async function extractAttachmentData(
                 text:
                   "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia dois dados: o NÚMERO da " +
                   "nota fiscal e o VALOR LÍQUIDO da nota.\n\n" +
-                  "NÚMERO DA NOTA — REGRA 1 (prioritária): procure um campo rotulado explicitamente com o " +
-                  "número da nota e copie EXATAMENTE o valor impresso ao lado do rótulo. Os rótulos possíveis " +
-                  "são, nesta ordem: 'Número da NFS-e', 'Número da NF-e', 'Nº', 'NF-e nº', 'Número'. " +
-                  "Em NFS-e (nota de serviço de prefeitura — cabeçalho 'DANFSe' / 'Documento Auxiliar da NFS-e') " +
-                  "o valor correto é sempre o de 'Número da NFS-e' (costuma ter poucos dígitos, ex.: 388). " +
-                  "NUNCA confunda com 'Número da DPS', 'Série da DPS', 'Competência', datas, valores em R$ " +
-                  "nem com a chave de acesso — nenhum desses é o número da nota. " +
-                  "NÚMERO DA NOTA — REGRA 2 (só se NÃO existir nenhum campo rotulado da Regra 1): se houver uma " +
-                  "chave de acesso de NF-e com EXATAMENTE 44 dígitos, o número são os dígitos 26 a 34 (nNF). " +
-                  "A chave de acesso de NFS-e tem cerca de 50 dígitos e NÃO deve ser fatiada — ignore-a. " +
-                  "NUNCA retorne um número composto apenas de zeros; se você chegou a algo assim, você leu o " +
-                  "campo errado — volte e leia o valor ao lado do rótulo 'Número da NFS-e'.\n\n" +
-                  "VALOR LÍQUIDO: procure o campo rotulado 'Valor Líquido' (ou 'Valor líquido a pagar', 'Valor " +
-                  "Líquido da NFS-e', 'Valor Líquido do documento') — é o valor a pagar já com as retenções " +
-                  "descontadas (ISS retido, INSS, IR, PIS, COFINS, CSLL). NÃO confunda com 'Valor Serviços', " +
-                  "'Valor Bruto', 'Valor Total' nem 'Base de Cálculo', que são o valor bruto. Copie o valor " +
-                  "impresso mantendo a formatação brasileira (ex.: '295,47'). Se não houver campo de valor " +
-                  "líquido, retorne null nesse campo — não invente nem calcule.",
+                  NOTA_RULES,
               },
               docPart,
             ],
@@ -222,7 +254,9 @@ export async function extractAttachmentData(
       return {
         data: {
           invoice_number: cleanInvoice(object.invoice_number),
-          net_amount: parseBRLCurrency(object.valor_liquido),
+          // A visão só chegou aqui porque o texto não achou o NÚMERO; o valor
+          // líquido ele pode ter achado, então não o descarta à toa.
+          net_amount: parseBRLCurrency(object.valor_liquido) ?? notaDoTexto?.net_amount ?? null,
         },
       };
     }
@@ -261,11 +295,30 @@ export async function extractAttachmentData(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Falha do GPT não derruba o boleto que o PDF já entregou.
-    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+    // Falha do GPT não derruba o que o texto do PDF já entregou.
+    if (notaDoTexto) return { data: notaDoTexto };
     await logOcrFailure(resolved, msg);
-    return { error: `Não consegui interpretar o documento: ${msg}` };
+    return { error: mensagemAoUsuario(msg) };
   }
+}
+
+/**
+ * Traduz a falha técnica para quem está lançando a requisição.
+ *
+ * Chegar aqui significa que o texto do arquivo não resolveu e a visão também
+ * não — quase sempre porque a conta da OpenAI está sem crédito ou sem chave
+ * válida. Despejar "You have no credits remaining. Add credits at
+ * platform.openai.com/settings/organization/billing" para um solicitante é
+ * ruído: ele não tem acesso ao billing, e a ação dele é a mesma de sempre —
+ * digitar o campo. A causa técnica continua registrada no `ai_usage_log`
+ * (visível em /admin/ia), que é onde o administrador precisa dela.
+ */
+function mensagemAoUsuario(msg: string): string {
+  const contaForaDoAr = /no credits|insufficient|quota|billing|invalid[_ ]api[_ ]key|incorrect api key|401|403|429/i;
+  if (contaForaDoAr.test(msg)) {
+    return "documento sem camada de texto e a leitura por imagem está indisponível";
+  }
+  return `Não consegui interpretar o documento: ${msg}`;
 }
 
 // Leitura local nunca pode derrubar o fluxo: PDF corrompido/exótico só cai no OCR.
@@ -279,7 +332,83 @@ function safeExtractPdfText(bytes: Buffer): PdfText | null {
   }
 }
 
-// Favorecido/CNPJ quando o GPT não está disponível — ver readBoletoPartiesFromText.
+const NOTA_SCHEMA_HINT = JSON.stringify({
+  type: "object",
+  properties: {
+    invoice_number: { type: ["string", "null"] },
+    valor_liquido: { type: ["string", "null"] },
+  },
+  required: ["invoice_number", "valor_liquido"],
+});
+
+/**
+ * Número + valor líquido a partir do TEXTO do PDF da nota, usando o provedor
+ * ATIVO do painel (DeepSeek hoje) — não precisa de visão, o texto já veio do
+ * arquivo.
+ *
+ * É o caminho NORMAL para nota em PDF, não a exceção: nota de prefeitura/ERP é
+ * vetorial, então esse texto existe quase sempre, sai de graça e não depende da
+ * OpenAI — que é o único provedor com visão e vinha derrubando toda leitura
+ * (chave ausente antes, conta sem crédito agora). Visão continua atendendo o
+ * que não tem camada de texto: nota escaneada ou foto.
+ *
+ * Best-effort: qualquer falha devolve null e o fluxo segue para a visão.
+ */
+async function readNotaFromText(pdfText: PdfText): Promise<AttachmentReadResult | null> {
+  const text = pdfText.plain;
+  if (text.length < 40) return null;
+
+  const resolved = await resolveAiProvider().catch(() => null);
+  if (!resolved) return null;
+
+  try {
+    const { object, usage } = await generateJsonViaChat(resolved, {
+      system:
+        "Você extrai dados de notas fiscais brasileiras (NF-e e NFS-e) a partir do texto bruto do " +
+        "PDF. Responda apenas com JSON.",
+      prompt:
+        "Abaixo está o texto extraído de uma nota fiscal. O LAYOUT SE PERDEU: é comum um bloco de " +
+        "rótulos aparecer junto e os valores logo em seguida, na mesma ordem — case cada rótulo com " +
+        "o valor correspondente pela ordem em que aparecem, não pela proximidade no texto.\n\n" +
+        NOTA_RULES +
+        `\n\nTEXTO DA NOTA:\n${text}`,
+      schemaHint: NOTA_SCHEMA_HINT,
+      maxTokens: 400,
+      temperature: 0,
+    });
+    await logResolvedUsage(resolved, "ocr", usage);
+
+    const parsed = NotaSchema.safeParse(object);
+    if (!parsed.success) return null;
+    const invoice = invoicePresentInPdf(cleanInvoice(parsed.data.invoice_number), pdfText);
+    const net = parseBRLCurrency(parsed.data.valor_liquido);
+    // Nada aproveitável: devolve null para o chamador tentar a visão.
+    if (!invoice && net === null) return null;
+    return { invoice_number: invoice, net_amount: net };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[ocr] leitura da nota pelo texto falhou:", msg);
+    await logOcrFailure(resolved, `texto da nota: ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Rede contra alucinação: o número devolvido pelo modelo precisa EXISTIR no
+ * texto do PDF. A conferência é feita na corrida de dígitos colada (o kerning
+ * quebra o número em vários pedaços, então espaço não serve de separador
+ * confiável). Só rejeita — nunca aprova algo que não estava no documento.
+ */
+function invoicePresentInPdf(invoice: string | null, pdfText: PdfText): string | null {
+  if (!invoice) return null;
+  const digits = invoice.replace(/\D/g, "");
+  // Número sem dígito nenhum (raríssimo) não tem como ser conferido assim.
+  if (!digits) return invoice;
+  const haystack = pdfText.strings.join("").replace(/\D/g, "");
+  return haystack.includes(digits) ? invoice : null;
+}
+
+// Favorecido/CNPJ do boleto — ver readBoletoPartiesFromText.
 async function boletoParties(
   pdfText: PdfText | null,
 ): Promise<{ favorecido: string | null; cnpj_cpf: string | null }> {
@@ -305,11 +434,10 @@ const PARTES_SCHEMA_HINT = JSON.stringify({
  * Favorecido + CNPJ/CPF a partir do TEXTO do boleto, usando o provedor ATIVO do
  * painel (DeepSeek hoje) — não precisa de visão, o texto já veio do PDF.
  *
- * REDE DE SEGURANÇA, não o caminho normal: a leitura de boleto roda no GPT
- * (visão), e isto só entra em cena se o GPT estiver indisponível — chave
- * ausente/expirada, cota estourada, API fora. Melhor devolver o boleto com
- * favorecido preenchido do que uma tela vazia. Best-effort: qualquer falha
- * devolve null e a linha digitável (validada pelos DVs) segue sozinha.
+ * É o CAMINHO NORMAL do boleto em PDF (era rede de segurança quando a visão
+ * vinha na frente). Best-effort: qualquer falha devolve null e a linha
+ * digitável, que já vem validada pelos DVs, segue sozinha — o campo do
+ * favorecido é preenchível na tela, a linha digitável não se adivinha.
  */
 async function readBoletoPartiesFromText(
   text: string,
