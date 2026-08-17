@@ -350,6 +350,8 @@ export interface OnePageReportPreviewData {
   prevRealCharts?: PrevRealChart[];
   /** Bloco consolidado do grupo (ex.: Salvaterra) — Previsto × Realizado. */
   consolidated?: Consolidated;
+  /** Quadro isolado por departamento + categorias (ex.: Salvaterra Condomínio). */
+  isolatedResult?: IsolatedResult;
   /** Acumulado do ano (Jan→análise) do gráfico de histórico — rodapé. */
   historicoAcum?: { previsto: number | null; realizado: number | null };
   /** Bloco "Performance por Parceiro — Período e Acumulado" (ex.: Young Med). */
@@ -390,6 +392,14 @@ export interface Consolidated {
   rows: ConsolidatedRow[];
   /** Acumulado do ano (Jan→análise) do consolidado — rodapé. */
   acum?: { previsto: number | null; realizado: number | null };
+}
+
+// Quadro isolado: Receitas/Despesas/Resultado em duas colunas (período e
+// acumulado do ano). Valores já em "mil" (o mapper divide por 1000).
+export interface IsolatedResult {
+  title: string;
+  periodo: { receitas: number; despesas: number; resultado: number };
+  acumulado: { receitas: number; despesas: number; resultado: number };
 }
 
 export interface PrevRealPoint {
@@ -2107,6 +2117,97 @@ function ConsolidadoBlock({ data }: { data: Consolidated }) {
         ) : null}
         <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
           Valores em milhares de R$ (mil). Bloco complementar — soma apenas as empresas do grupo.
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── 5g-bis. Bloco RESULTADO ISOLADO (departamento + categorias) ──────────────
+// Receitas, Despesas e Resultado (Receitas − Despesas) de um recorte da própria
+// empresa (ex.: Salvaterra Condomínio), em duas colunas: PERÍODO e ACUMULADO do
+// ano. Valores em "mil". Bloco COMPLEMENTAR; só realizado.
+function IsolatedResultBlock({ data }: { data: IsolatedResult }) {
+  const th: CSSProperties = {
+    fontSize: 9,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    color: C.sub,
+    padding: "0 10px 8px",
+    borderBottom: `1px solid ${C.rule}`,
+  };
+  const tdNum: CSSProperties = {
+    fontFamily: FONT_MONO,
+    fontSize: 12.5,
+    padding: "9px 10px",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  };
+  const fmtV = (v: number) => `${fmtNum(v, 1)} mil`;
+  const linhas: Array<{ label: string; periodo: number; acumulado: number; emphasis?: boolean }> = [
+    { label: "Receitas", periodo: data.periodo.receitas, acumulado: data.acumulado.receitas },
+    { label: "Despesas", periodo: data.periodo.despesas, acumulado: data.acumulado.despesas },
+    { label: "Resultado", periodo: data.periodo.resultado, acumulado: data.acumulado.resultado, emphasis: true },
+  ];
+  return (
+    <section style={{ breakInside: "avoid" }}>
+      <SectionTitle>{data.title}</SectionTitle>
+      <div style={{ ...panelStyle, padding: "14px 16px 12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: "left" }}>Indicador</th>
+              <th style={{ ...th, textAlign: "right" }}>Período</th>
+              <th style={{ ...th, textAlign: "right" }}>Acumulado no ano</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((r) => {
+              const emph = !!r.emphasis;
+              const negP = r.periodo < 0;
+              const negA = r.acumulado < 0;
+              return (
+                <tr key={r.label} style={{ background: emph ? "#f7f8fa" : "transparent", breakInside: "avoid" }}>
+                  <td
+                    style={{
+                      fontSize: 13,
+                      fontWeight: emph ? 700 : 500,
+                      color: emph ? C.ink : C.body,
+                      padding: "9px 10px",
+                      borderBottom: `1px solid ${C.grid}`,
+                    }}
+                  >
+                    {r.label}
+                  </td>
+                  <td
+                    style={{
+                      ...tdNum,
+                      borderBottom: `1px solid ${C.grid}`,
+                      fontWeight: emph ? 700 : 600,
+                      color: negP ? SEV.critical.text : emph ? C.ink : C.body,
+                    }}
+                  >
+                    {fmtV(r.periodo)}
+                  </td>
+                  <td
+                    style={{
+                      ...tdNum,
+                      borderBottom: `1px solid ${C.grid}`,
+                      fontWeight: emph ? 700 : 600,
+                      color: negA ? SEV.critical.text : emph ? C.ink : C.body,
+                    }}
+                  >
+                    {fmtV(r.acumulado)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10, fontSize: 10, color: C.tertiary, lineHeight: 1.5 }}>
+          Valores em milhares de R$ (mil). Recorte isolado (departamento + categorias),
+          deduplicado por lançamento.
         </div>
       </div>
     </section>
@@ -3892,6 +3993,8 @@ export function OnePageReportPreview({
         {/* Bloco CONSOLIDADO do grupo (ex.: Salvaterra) — complementar. Só
             existe quando o template define consolidatedGroup (demais inalterados). */}
         {data.consolidated ? <ConsolidadoBlock data={data.consolidated} /> : null}
+
+        {data.isolatedResult ? <IsolatedResultBlock data={data.isolatedResult} /> : null}
 
         {show("alertas") ? <Alertas items={data.alertas} /> : null}
         {show("acoes") ? <Acoes items={data.acoes} /> : null}

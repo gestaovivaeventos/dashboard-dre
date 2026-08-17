@@ -142,6 +142,15 @@ export const realEstateSalvaterraCondominioTemplate: ReportTemplate = {
       // 68.333,81 (jan-jun/2026). Ver o template do Estacionamento (idem).
       perCompanyPlan: true,
     },
+    // Quadro isolado do CONDOMÍNIO: soma direta de financial_entries do
+    // departamento CONDOMÍNIO (3801827426) OU das categorias de Repasse a
+    // Terceiros (1.04.82 / 2.08.89 / 2.08.90), deduplicado por lançamento.
+    // Aparece abaixo do consolidado e antes dos alertas.
+    isolatedResultGroup: {
+      title: "Resultado Isolado - Condomínio",
+      departmentCode: "3801827426",
+      categoryCodes: ["1.04.82", "2.08.89", "2.08.90"],
+    },
     // Oculta VVR/FEE/sobrevivência (via capabilities) + acumulado/composição/
     // semáforo (via allowlist). Bloco consolidado e histórico aparecem.
     enabledBlocks: ["diagnostico", "previstoRealizado", "historico", "alertas", "acoes"],

@@ -183,6 +183,12 @@ export interface OnePageApiResponse {
     rows: { label: string; previsto: number | null; realizado: number | null; emphasis?: boolean }[];
     acum?: { previsto: number | null; realizado: number | null };
   };
+  // Quadro isolado (departamento + categorias). Valores em R$ (÷1000 no map).
+  isolatedResult?: {
+    title: string;
+    periodo: { receitas: number; despesas: number; resultado: number };
+    acumulado: { receitas: number; despesas: number; resultado: number };
+  };
   historicoAcum?: { previsto: number | null; realizado: number | null };
   // Bloco Performance por Parceiro (ex.: Young Med). Valores em R$ (÷1000 no map).
   partnerPerformance?: {
@@ -927,6 +933,21 @@ export function mapOnePageApiResponseToPreviewData(
                     : response.consolidated.acum.realizado / 1000,
               }
             : undefined,
+        }
+      : undefined,
+    isolatedResult: response.isolatedResult
+      ? {
+          title: response.isolatedResult.title,
+          periodo: {
+            receitas: response.isolatedResult.periodo.receitas / 1000,
+            despesas: response.isolatedResult.periodo.despesas / 1000,
+            resultado: response.isolatedResult.periodo.resultado / 1000,
+          },
+          acumulado: {
+            receitas: response.isolatedResult.acumulado.receitas / 1000,
+            despesas: response.isolatedResult.acumulado.despesas / 1000,
+            resultado: response.isolatedResult.acumulado.resultado / 1000,
+          },
         }
       : undefined,
     historicoAcum: response.historicoAcum

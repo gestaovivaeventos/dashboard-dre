@@ -203,6 +203,14 @@ export interface ConsolidatedPayload {
   acum?: { previsto: number | null; realizado: number | null };
 }
 
+// Quadro isolado (departamento + categorias) — Receitas/Despesas/Resultado em
+// duas colunas: período e acumulado do ano. Valores em R$ (o mapper escala p/ mil).
+export interface IsolatedResultPayload {
+  title: string;
+  periodo: { receitas: number; despesas: number; resultado: number };
+  acumulado: { receitas: number; despesas: number; resultado: number };
+}
+
 // Serie temporal do VVR de Jan/ano(dateTo) ate o mes(dateTo). Realizado vira
 // barras no chart; meta vira linha sobreposta.
 export interface VvrSerieAnualPayload {
@@ -297,6 +305,8 @@ export interface OnePagePayload {
   prevRealCharts?: PrevRealChartPayload[];
   // Bloco consolidado do grupo (ex.: Salvaterra). undefined p/ os demais.
   consolidated?: ConsolidatedPayload;
+  // Quadro isolado por departamento + categorias (ex.: Salvaterra Condomínio).
+  isolatedResult?: IsolatedResultPayload;
   // Acumulado do ano (Jan→análise) do métrico do gráfico de histórico
   // (previsto + realizado) — rodapé do gráfico. undefined quando sem histórico.
   historicoAcum?: { previsto: number | null; realizado: number | null };
@@ -1691,6 +1701,59 @@ export async function buildOnePagePayload(
   }
 
   // -------------------------------------------------------------------------
+  // 9d. Quadro ISOLADO por departamento + categorias (ex.: Salvaterra
+  //     Condomínio). Soma direta de financial_entries (regime de caixa) da
+  //     PRÓPRIA empresa, na união `department_code = X OR category_code IN (...)`
+  //     — deduplicada por LINHA (cada lançamento conta uma vez, mesmo estando no
+  //     departamento E numa das categorias; somar as duas metades em separado
+  //     duplicaria a sobreposição). Receitas/Despesas pelo campo `type`. Duas
+  //     colunas: PERÍODO [dateFrom,dateTo] e ACUMULADO do ano [Jan, dateTo].
+  // -------------------------------------------------------------------------
+  let isolatedResult: IsolatedResultPayload | undefined;
+  const ig = template.report?.isolatedResultGroup;
+  if (ig && ig.departmentCode && ig.categoryCodes.length > 0) {
+    const orFilter = `department_code.eq.${ig.departmentCode},category_code.in.(${ig.categoryCodes.join(",")})`;
+    // Soma `value` por type na união, paginado: o PostgREST corta em 1000 linhas
+    // por página, e um ano de um departamento pode passar disso — sem paginar,
+    // subcontaria em silêncio. `order(id)` garante fatias estáveis entre páginas.
+    const sumUnion = async (df: string, dt: string) => {
+      let receitas = 0;
+      let despesas = 0;
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("financial_entries")
+          .select("type, value")
+          .eq("company_id", companyId)
+          .gte("payment_date", df)
+          .lte("payment_date", dt)
+          .or(orFilter)
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const rows = (data ?? []) as Array<{ type: string; value: number | string | null }>;
+        for (const r of rows) {
+          const v = Number(r.value ?? 0);
+          if (r.type === "receita") receitas += v;
+          else despesas += v;
+        }
+        if (rows.length < PAGE) break;
+      }
+      return { receitas, despesas, resultado: receitas - despesas };
+    };
+    try {
+      const [periodo, acumulado] = await Promise.all([
+        sumUnion(dateFrom, dateTo),
+        sumUnion(`${toYear}-01-01`, dateTo),
+      ]);
+      isolatedResult = { title: ig.title, periodo, acumulado };
+    } catch (e) {
+      // Best-effort: uma falha aqui não pode derrubar o relatório inteiro.
+      console.error("[one-page] falha ao montar o quadro isolado:", e);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // 10. Acumulado do ano (Jan/ano de dateTo ate dateTo).
   //
   // Faz 1 RPC consolidando o range inteiro (Jan-1 ate dateTo) + 1 query
@@ -2348,6 +2411,7 @@ export async function buildOnePagePayload(
       linesAcumBaseIndex,
       prevRealCharts,
       consolidated,
+      isolatedResult,
       historicoAcum,
       // Bloco Performance por Parceiro (ex.: Young Med). undefined nos demais.
       partnerPerformance,
