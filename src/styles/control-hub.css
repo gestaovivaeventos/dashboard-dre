@@ -49,6 +49,11 @@
      vermelho cheio (claro) / vermelho sobre a superfície tingida (escuro). */
   --ch-attention-label: #ffffff;
 
+  /* Símbolo da marca: quadrado vermelho cheio com barras brancas. */
+  --ch-mark-bg: var(--color-accent);
+  --ch-mark-stroke: transparent;
+  --ch-mark-ink: #ffffff;
+
   /* Tintas derivadas (evita repetir color-mix nos componentes).
      As porcentagens subiram de 55/50/45 para 66/60/54: nas anteriores o
      texto auxiliar ficava em ~3,3:1 — nos DOIS temas, não só no escuro.
@@ -137,6 +142,13 @@
      accent puro por medida: accent sobre o tingido dá 3,9:1, abaixo do
      mínimo para texto pequeno; o -700 dá 5,9:1 e continua lendo vermelho. */
   --ch-attention-label: var(--color-accent-700);
+
+  /* O quadrado vermelho cheio queima no carvão: vira superfície tingida
+     com contorno, e as barras assumem o vermelho para a marca continuar
+     lendo como vermelha. */
+  --ch-mark-bg: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+  --ch-mark-stroke: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  --ch-mark-ink: var(--color-accent);
 
   /* Hover de linha: clareia a superfície em vez de escurecê-la. */
   --hover-tint: color-mix(in srgb, #ffffff 6%, transparent);
@@ -424,6 +436,12 @@ html.ch-dark body {
 .ch-iconbtn:hover {
   background: var(--hover-tint);
   color: var(--color-text);
+}
+/* Variante contornada, 32px — usada fora da topbar (ex.: login). */
+.ch-iconbtn--outline {
+  width: 32px;
+  height: 32px;
+  border-color: var(--color-divider);
 }
 .ch-iconbtn__badge {
   position: absolute;
@@ -854,6 +872,244 @@ a.ch-row:hover,
 .ch-btn--wide {
   width: 100%;
   justify-content: flex-start;
+}
+/* Botões de formulário: altura pelo padding, para acompanharem o campo
+   de texto (que também é padding-based). */
+.ch-btn--lg {
+  height: auto;
+  width: 100%;
+  padding: 11px;
+  font-size: 13px;
+}
+.ch-btn--md {
+  height: auto;
+  padding: 9px 18px;
+  font-size: 12px;
+}
+
+/* =========================================================
+   FORMULÁRIOS
+   ========================================================= */
+.ch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ch-field__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ch-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-50);
+}
+.ch-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-divider);
+  background: var(--ch-card);
+  color: var(--color-text);
+  font-family: var(--font);
+  font-size: 13.5px;
+  transition: border-color 110ms ease;
+}
+.ch-input::placeholder {
+  color: var(--ink-45);
+}
+/* O anel de foco substitui a borda — as duas juntas engordam o campo. */
+.ch-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+/* Campo com botão dentro (mostrar/ocultar senha). */
+.ch-field__wrap {
+  position: relative;
+  display: flex;
+}
+.ch-field__wrap .ch-input {
+  padding-right: 40px;
+}
+.ch-eye {
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-50);
+  cursor: pointer;
+}
+.ch-eye:hover {
+  color: var(--color-text);
+}
+
+
+/* Mensagem de erro do formulário — vermelho de texto pequeno sobre o
+   accent tingido, legível nos dois temas. */
+.ch-alertbox {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-tint);
+  color: var(--color-accent-700);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* =========================================================
+   TELAS DE AUTENTICAÇÃO (login, cadastro, senha)
+   Duas colunas: à esquerda a marca sobre a superfície do menu
+   (o mesmo degrau da sidebar), à direita o formulário.
+   ========================================================= */
+.ch-auth {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.ch-auth__aside {
+  display: none;
+  flex-direction: column;
+  padding: 32px 56px;
+  background: var(--menu-bg);
+  border-right: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+@media (min-width: 960px) {
+  .ch-auth {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+  .ch-auth__aside {
+    display: flex;
+  }
+  .ch-auth__mobile-brand {
+    display: none;
+  }
+}
+
+/* Bloco central e rodapé: os dois com margin-top:auto dividem a sobra
+   entre si — o bloco cai no meio, o rodapé encosta na base. */
+.ch-auth__lead {
+  margin-top: auto;
+  max-width: 520px;
+}
+.ch-auth__pitch {
+  margin-top: 14px;
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+.ch-auth__lede {
+  margin-top: 16px;
+  max-width: 440px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-55);
+  text-wrap: pretty;
+}
+.ch-auth__modules {
+  margin-top: 28px;
+  max-width: 520px;
+}
+.ch-auth__module {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+.ch-auth__module b {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.ch-auth__module b::before {
+  content: "";
+  width: 3px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+.ch-auth__module span {
+  margin-left: auto;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--ink-55);
+}
+.ch-auth__foot {
+  margin-top: auto;
+  padding-top: 28px;
+}
+
+/* ---- coluna do formulário ---- */
+.ch-auth__main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px 32px;
+}
+.ch-auth__theme {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+}
+.ch-auth__mobile-brand {
+  margin-bottom: 22px;
+}
+.ch-authcard {
+  width: 100%;
+  max-width: 392px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px 30px;
+  border-radius: var(--radius-lg);
+  background: var(--ch-card);
+  box-shadow: 0 1px 2px var(--ch-shadow);
+}
+.ch-authcard__title {
+  margin-top: 2px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.ch-auth__signup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  font-size: 12px;
+  color: var(--ink-55);
+}
+.ch-auth__note {
+  margin-top: 26px;
+  text-align: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-45);
 }
 
 /* Rodapé */

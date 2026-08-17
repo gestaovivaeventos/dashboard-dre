@@ -3,16 +3,31 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 import { LogoFull } from "@/components/app/logo";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { createClient } from "@/lib/supabase/client";
+
+/**
+ * Módulos anunciados na coluna da marca. Lista curta e literal — o que
+ * o usuário vai encontrar no menu depois de entrar.
+ */
+const MODULES = [
+  { name: "Financeiro", detail: "DRE · Fluxo de caixa · BI" },
+  { name: "Compras", detail: "Requisições · Aprovações · Contas a pagar" },
+  { name: "Orçamento", detail: "Budget · Forecast · Previsto x Realizado" },
+];
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  // NÃO reintroduza um "manter conectado" aqui sem implementar a persistência
+  // junto: a duração da sessão vem do cookie que o @supabase/ssr grava, não
+  // desta tela. O controle chegou a existir e saiu por prometer o que não
+  // entregava.
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -52,114 +67,140 @@ export default function LoginPage() {
   }, [router]);
 
   return (
-    <div className="flex min-h-screen">
-      {/* Left panel — branding */}
-      <div className="hidden w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground lg:flex">
-        <div>
-          <LogoFull className="[&_svg]:text-white [&_span]:text-white" />
-        </div>
+    <div className="ch-auth">
+      {/* Coluna da marca — a superfície do menu, o mesmo degrau da sidebar.
+          Nada de campo vermelho cheio aqui: no design system o vermelho é
+          raro e significa ação/atenção; quem o usa nesta tela é o botão
+          Entrar, que é justamente a ação. */}
+      <aside className="ch-auth__aside">
+        <LogoFull size={26} />
 
-        <div className="space-y-6">
-          <h2 className="text-4xl font-bold leading-tight tracking-tight">
-            Controladoria inteligente para sua empresa.
-          </h2>
-          <p className="max-w-md text-lg text-primary-foreground/80">
-            Consolide resultados financeiros, acompanhe KPIs e gerencie multiplos segmentos de negocio em uma unica plataforma.
+        <div className="ch-auth__lead">
+          <p className="ch-kicker ch-kicker--accent">
+            Controladoria inteligente para sua empresa
+          </p>
+          <h1 className="ch-auth__pitch">
+            Resultados, orçamento
+            <br />
+            e pagamentos —
+            <br />
+            tudo em um só lugar.
+          </h1>
+          <p className="ch-auth__lede">
+            DRE gerencial, fluxo de caixa, Relatório financeiro, orçamento e
+            requisições de compra para sua empresa.
           </p>
 
-          <div className="flex gap-8 pt-4">
-            <div>
-              <p className="text-3xl font-bold">DRE</p>
-              <p className="text-sm text-primary-foreground/70">Consolidado</p>
-            </div>
-            <div>
-              <p className="text-3xl font-bold">KPIs</p>
-              <p className="text-sm text-primary-foreground/70">Em tempo real</p>
-            </div>
-            <div>
-              <p className="text-3xl font-bold">Multi</p>
-              <p className="text-sm text-primary-foreground/70">Segmentos</p>
-            </div>
+          <div className="ch-auth__modules">
+            {MODULES.map((m) => (
+              <div key={m.name} className="ch-auth__module">
+                <b>{m.name}</b>
+                <span>{m.detail}</span>
+              </div>
+            ))}
           </div>
         </div>
 
-        <p className="text-xs text-primary-foreground/50">
-          Control Hub &copy; {new Date().getFullYear()}
+        <p className="ch-kicker ch-auth__foot">
+          Control Hub · Beta · {new Date().getFullYear()}
         </p>
-      </div>
+      </aside>
 
-      {/* Right panel — login form */}
-      <div className="flex w-full flex-col items-center justify-center px-6 lg:w-1/2">
-        <div className="w-full max-w-sm space-y-8">
-          <div className="lg:hidden">
-            <LogoFull />
-          </div>
+      {/* Coluna do formulário */}
+      <main className="ch-auth__main">
+        <div className="ch-auth__theme">
+          <ThemeToggle className="ch-iconbtn--outline" />
+        </div>
 
+        <div className="ch-auth__mobile-brand">
+          <LogoFull size={26} />
+        </div>
+
+        <div className="ch-authcard">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Entrar</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Acesse sua conta para continuar.
-            </p>
+            <p className="ch-kicker ch-kicker--accent">Acesso ao sistema</p>
+            <h2 className="ch-authcard__title">Entrar</h2>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
+          <form
+            onSubmit={handleSubmit}
+            style={{ display: "flex", flexDirection: "column", gap: 16 }}
+          >
+            <div className="ch-field">
+              <label htmlFor="email" className="ch-label">
                 E-mail
               </label>
-              <Input
+              <input
                 id="email"
                 type="email"
-                placeholder="seu-email@empresa.com"
+                autoComplete="email"
+                className="ch-input"
+                placeholder="nome@empresa.com.br"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
-                className="h-11"
               />
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label htmlFor="password" className="text-sm font-medium">
+            <div className="ch-field">
+              <div className="ch-field__head">
+                <label htmlFor="password" className="ch-label">
                   Senha
                 </label>
-                <Link
-                  href="/recuperar-senha"
-                  className="text-sm font-medium text-primary hover:underline"
-                >
+                <Link href="/recuperar-senha" className="ch-link">
                   Esqueci minha senha
                 </Link>
               </div>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Sua senha"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                className="h-11"
-              />
+              <div className="ch-field__wrap">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  className="ch-input"
+                  placeholder="Sua senha"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="ch-eye"
+                  onClick={() => setShowPassword((v) => !v)}
+                  title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" strokeWidth={2} />
+                  ) : (
+                    <Eye className="h-4 w-4" strokeWidth={2} />
+                  )}
+                </button>
+              </div>
             </div>
 
-            <Button type="submit" className="h-11 w-full text-base" disabled={loading}>
+            <button
+              type="submit"
+              className="ch-btn ch-btn--primary ch-btn--lg"
+              disabled={loading}
+            >
               {loading ? "Entrando..." : "Entrar"}
-            </Button>
+            </button>
 
-            {status ? (
-              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30">
-                {status}
-              </p>
-            ) : null}
+            {status ? <p className="ch-alertbox">{status}</p> : null}
           </form>
-
-          <p className="text-center text-sm text-muted-foreground">
-            Ainda nao tem conta?{" "}
-            <Link href="/signup" className="font-medium text-primary hover:underline">
-              Criar conta
-            </Link>
-          </p>
         </div>
-      </div>
+
+        <div className="ch-auth__signup">
+          <span>Ainda não tem acesso?</span>
+          <Link href="/signup" className="ch-btn ch-btn--secondary ch-btn--md">
+            Criar conta
+          </Link>
+        </div>
+
+        <p className="ch-auth__note">
+          Ambiente restrito · Acessos são registrados e auditados
+        </p>
+      </main>
     </div>
   );
 }

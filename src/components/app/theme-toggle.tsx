@@ -20,7 +20,7 @@ function applyTheme(dark: boolean) {
   el.classList.toggle("ch-dark", dark);
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string } = {}) {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -46,7 +46,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      className="ch-iconbtn"
+      className={`ch-iconbtn ${className ?? ""}`}
       onClick={toggle}
       title={label}
       aria-label={label}
