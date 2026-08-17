@@ -68,6 +68,12 @@ interface FornecedoresTableProps {
   expenseTypes: ExpenseTypeOption[];
   canApprove: boolean;
   omieCompanies: Array<{ id: string; name: string }>;
+  /** Aba inicial (?status=). Sem parâmetro, a tela abre em Aprovados. */
+  initialTab?: TabKey;
+  /** ?novos=1 — abre a aba Pendentes já filtrada nos cadastros novos. */
+  initialOnlyNovos?: boolean;
+  /** ?fornecedor=<id> — destaca a linha de um fornecedor específico. */
+  highlightId?: string | null;
 }
 
 type TabKey = "aprovado" | "pendente" | "rejeitado";
@@ -88,6 +94,9 @@ export function FornecedoresTable({
   expenseTypes,
   canApprove,
   omieCompanies,
+  initialTab,
+  initialOnlyNovos = false,
+  highlightId = null,
 }: FornecedoresTableProps) {
   const [isPending, startTransition] = useTransition();
   const [actingId, setActingId] = useState<string | null>(null);
@@ -246,9 +255,13 @@ export function FornecedoresTable({
     });
   }
 
-  const [activeTab, setActiveTab] = useState<TabKey>("aprovado");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab ?? "aprovado");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // Recorte "cadastros novos" dentro da aba Pendentes. Só vale ali: os ~1000
+  // pendentes legados vieram do Omie (from_omie) e nunca passaram por
+  // homologação — são eles que escondem os poucos cadastros de verdade.
+  const [onlyNovos, setOnlyNovos] = useState(initialOnlyNovos);
 
   const expenseTypeMap = useMemo(
     () => new Map(expenseTypes.map((e) => [e.id, e.name])),
@@ -265,6 +278,16 @@ export function FornecedoresTable({
     return acc;
   }, [suppliers]);
 
+  // Mesma definição do alerta da tela inicial (loadSuppliers em
+  // lib/home/ctrl-widgets.ts): pendente + from_omie = false. Se as duas
+  // divergirem, o número do cartão deixa de bater com a lista que ele abre.
+  const novosCount = useMemo(
+    () => suppliers.filter((s) => s.status === "pendente" && !s.from_omie).length,
+    [suppliers],
+  );
+  // O filtro só faz sentido na aba Pendentes.
+  const novosFilterOn = activeTab === "pendente" && onlyNovos;
+
   // Suppliers in the active tab, filtered by the free-text search.
   // Search matches on name (case-insensitive substring) OR CNPJ/CPF digits
   // (so the user can type "12.345" or "12345" and both work).
@@ -280,8 +303,25 @@ export function FornecedoresTable({
   const filteredSuppliers = useMemo(() => {
     const term = search.trim().toLowerCase();
     const termDigits = term.replace(/\D/g, "");
-    return suppliers.filter((s) => s.status === activeTab && matchesSearch(s, term, termDigits));
-  }, [suppliers, activeTab, search]);
+    return suppliers.filter(
+      (s) =>
+        s.status === activeTab &&
+        (!novosFilterOn || !s.from_omie) &&
+        matchesSearch(s, term, termDigits),
+    );
+  }, [suppliers, activeTab, search, novosFilterOn]);
+
+  // Quantos a busca encontraria entre os pendentes legados do Omie, que o
+  // filtro de cadastros novos está escondendo — senão o usuário procura um
+  // fornecedor que existe e a tela diz que não achou nada.
+  const hiddenByNovos = useMemo(() => {
+    if (!novosFilterOn) return 0;
+    const term = search.trim().toLowerCase();
+    const termDigits = term.replace(/\D/g, "");
+    return suppliers.filter(
+      (s) => s.status === "pendente" && s.from_omie && matchesSearch(s, term, termDigits),
+    ).length;
+  }, [suppliers, search, novosFilterOn]);
 
   // Quantos resultados da busca existem nas OUTRAS abas — para um aviso de
   // descoberta ("encontrado em Pendentes"), já que a busca é escopada por aba.
@@ -311,7 +351,7 @@ export function FornecedoresTable({
   // user can find themselves on page 3 of a list that now only has 2 pages.
   useEffect(() => {
     setPage(1);
-  }, [activeTab, search]);
+  }, [activeTab, search, novosFilterOn]);
 
   const openApproveModal = (supplier: SupplierRow) => {
     setApproveModal(supplier);
@@ -429,6 +469,43 @@ export function FornecedoresTable({
         })}
       </div>
 
+      {/* Recorte da aba Pendentes: cadastros novos x pendentes vindos do Omie.
+          Os dois números ficam à vista porque o cartão da tela inicial conta só
+          os novos, enquanto o contador da aba conta todos os pendentes. */}
+      {activeTab === "pendente" && (
+        <div className="flex flex-wrap items-center gap-2">
+          {(
+            [
+              { key: true, label: "Novos cadastros", count: novosCount },
+              { key: false, label: "Todos os pendentes", count: counts.pendente },
+            ] as const
+          ).map((chip) => {
+            const active = onlyNovos === chip.key;
+            return (
+              <button
+                key={String(chip.key)}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setOnlyNovos(chip.key)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-transparent bg-muted text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {chip.label} ({chip.count})
+              </button>
+            );
+          })}
+          {novosFilterOn && (
+            <span className="text-xs text-muted-foreground">
+              Cadastrados pelo time e ainda não homologados — os demais pendentes vieram
+              importados do Omie.
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Search */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
@@ -455,6 +532,21 @@ export function FornecedoresTable({
         </p>
       </div>
 
+      {/* Dica: o filtro de cadastros novos está escondendo resultados da busca */}
+      {novosFilterOn && search.trim() && hiddenByNovos > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Mais {hiddenByNovos} pendente(s) com esse termo entre os cadastros importados do
+          Omie.{" "}
+          <button
+            type="button"
+            onClick={() => setOnlyNovos(false)}
+            className="font-medium text-primary hover:underline"
+          >
+            Ver todos os pendentes ({counts.pendente})
+          </button>
+        </p>
+      )}
+
       {/* Dica: a busca achou resultados em outras abas */}
       {search.trim() && (otherTabMatches.pendente + otherTabMatches.aprovado + otherTabMatches.rejeitado) > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -480,7 +572,9 @@ export function FornecedoresTable({
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
           {search
             ? `Nenhum fornecedor ${TAB_LABELS[activeTab].toLowerCase()} encontrado para "${search}".`
-            : `Nenhum fornecedor ${TAB_LABELS[activeTab].toLowerCase()}.`}
+            : novosFilterOn
+              ? "Nenhum cadastro novo aguardando homologação."
+              : `Nenhum fornecedor ${TAB_LABELS[activeTab].toLowerCase()}.`}
         </div>
       ) : (
       <div className="rounded-lg border">
@@ -504,13 +598,26 @@ export function FornecedoresTable({
               const linkedNames = s.expense_type_ids
                 .map((id) => expenseTypeMap.get(id))
                 .filter(Boolean) as string[];
+              // Cadastro feito no sistema (não importado do Omie) que ainda
+              // aguarda homologação — é o que o alerta da tela inicial conta.
+              const isNovoCadastro = isPendente && !s.from_omie;
+              const isHighlighted = highlightId === s.id;
               return (
                 <tr
                   key={s.id}
-                  className="cursor-pointer border-b last:border-0 hover:bg-muted/30 transition-colors"
+                  className={`cursor-pointer border-b last:border-0 transition-colors ${
+                    isHighlighted ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-muted/30"
+                  }`}
                   onClick={() => openDetail(s)}
                 >
-                  <td className="px-4 py-3 font-medium">{s.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {s.name}
+                    {isNovoCadastro && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                        Novo cadastro
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-mono text-muted-foreground">
                     {s.estrangeiro ? (
                       <span className="italic">Estrangeiro</span>

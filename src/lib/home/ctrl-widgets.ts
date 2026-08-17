@@ -414,6 +414,16 @@ async function loadBudget(
  * Os dois blocos são derivados do ESTADO atual, não do log de notificações:
  * homologou o fornecedor, o item some sozinho.
  */
+/**
+ * Destino dos links de homologação da tela inicial (cartão de atenção e quadro
+ * "Fornecedores a homologar"). A listagem abre em "Aprovados" por padrão e tem
+ * mais de mil fornecedores, então o link precisa levar o recorte junto: aba
+ * Pendentes + filtro de cadastros novos, ou seja, o MESMO filtro do `novos`
+ * abaixo (`pendente` + `from_omie = false`). Mudou um, mude o outro — senão o
+ * número do alerta deixa de bater com a lista que ele abre.
+ */
+export const FORNECEDORES_NOVOS_HREF = "/ctrl/admin/fornecedores?status=pendente&novos=1";
+
 const OPEN_STATUSES_FOR_SUPPLIER_BLOCK = [
   "pendente",
   "pendente_diretor",
