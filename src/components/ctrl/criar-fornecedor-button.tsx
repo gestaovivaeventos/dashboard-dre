@@ -4,6 +4,7 @@ import { Banknote, Building2, Contact, Globe, KeyRound, Loader2, MapPin, Plus, T
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 
+import { ExpenseTypePicker } from "@/components/ctrl/expense-type-picker";
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
 import {
@@ -727,31 +728,13 @@ export function CriarFornecedorButton({
                       Vincule os tipos de despesa deste fornecedor. A seleção já virá marcada
                       na hora da aprovação (o aprovador ainda pode ajustar).
                     </p>
-                    {expenseTypes.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Nenhum tipo de despesa cadastrado.
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        {expenseTypes.map((et) => {
-                          const checked = selectedExpenseTypes.has(et.id);
-                          return (
-                            <label
-                              key={et.id}
-                              className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleExpenseType(et.id)}
-                                className="h-4 w-4"
-                              />
-                              <span>{et.name}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <ExpenseTypePicker
+                      idPrefix="new-supplier"
+                      options={expenseTypes}
+                      selected={selectedExpenseTypes}
+                      onToggle={toggleExpenseType}
+                      onClear={() => setSelectedExpenseTypes(new Set())}
+                    />
                   </div>
                 </section>
 
