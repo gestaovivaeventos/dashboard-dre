@@ -18,15 +18,26 @@ import { extractPdfText, type PdfText } from "@/lib/pdf/text";
 
 const ATTACHMENT_BUCKET = "ctrl-attachments";
 
-// gpt-4o (visão) lê o documento direto — boletos exigem OCR preciso da linha
-// digitável (47-48 dígitos), o que o pipeline LandingAI→markdown não entregava
-// bem. A validação (isValidBoletoLinhaDigitavel) ainda barra leitura ruim.
+// ============================================================================
+// COMO O MÓDULO COMPRAS LÊ NOTA FISCAL E BOLETO — dois caminhos, nesta ordem.
 //
-// A leitura de boleto e de nota fiscal é a ÚNICA parte do sistema que continua
-// no GPT: `resolveAiProvider({ capability: "vision" })` força a OpenAI mesmo
-// com o DeepSeek ativo no painel, porque a API do DeepSeek não aceita imagem
-// nem arquivo (o endpoint recusa o content part: "unknown variant `image_url`,
-// expected `text`"). O resto do sistema segue no provedor configurado.
+// 1. TEXTO (padrão, provedor ativo do painel = DeepSeek). Boleto de banco e nota
+//    de prefeitura/ERP são PDF vetorial: os dados estão na camada de texto do
+//    arquivo. Dali sai a linha digitável SEM IA NENHUMA (varredura com os DVs
+//    mod10/mod11 conferindo cada dígito — ver boleto-pdf.ts) e o número da nota
+//    pelo modelo de TEXTO. É de graça, responde em ~1s e não depende da OpenAI.
+//
+// 2. VISÃO (plano B, gpt-4o na OpenAI). Só para o que NÃO tem camada de texto:
+//    documento escaneado e foto. `resolveAiProvider({ capability: "vision" })`
+//    força a OpenAI mesmo com o DeepSeek ativo, porque a API do DeepSeek aceita
+//    exclusivamente texto (o endpoint recusa o content part: "unknown variant
+//    `image_url`, expected `text`").
+//
+// A ordem já foi a inversa, com a visão na frente, e isso deixou o módulo
+// inteiro refém de UMA conta externa: em três episódios seguidos (chave ausente,
+// chave inválida e conta sem crédito) nenhum documento foi lido, nem os PDFs
+// que o próprio arquivo entregava de graça. Com o crédito da OpenAI zerado só
+// escaneado/foto ficam no manual.
 const OCR_MODEL = "gpt-4o";
 
 // Resultado da leitura. Campos por tipo de documento; ambos opcionais porque a
@@ -172,36 +183,37 @@ export async function extractAttachmentData(
 
   const bytes = Buffer.from(await blob.arrayBuffer());
 
-  // Boleto em PDF: a linha digitável está no TEXTO do arquivo (PDF de banco é
-  // vetorial). Ler dali é determinístico — os DVs conferem cada dígito — então
-  // esse valor tem precedência sobre o que o OCR enxergar, e ainda serve de rede
-  // quando o GPT está fora do ar.
   const pdfText = mediaType === "application/pdf" ? safeExtractPdfText(bytes) : null;
-  const linhaDoPdf = kind === "boleto" && pdfText ? findLinhaDigitavelInStrings(pdfText.strings) : null;
 
-  // Nota fiscal em PDF: nota de prefeitura/ERP é vetorial, então o número e os
-  // valores estão na camada de TEXTO. Ler dali com o provedor ATIVO (DeepSeek)
-  // é mais barato, mais rápido e — o que motivou inverter a ordem — não depende
-  // da OpenAI, único provedor com visão: com a conta sem crédito ("You have no
-  // credits remaining") TODA leitura de nota falhava, depois de 3 tentativas, e
-  // o usuário digitava o número na mão. Visão fica para nota escaneada/foto.
+  // ── Caminho 1: a camada de texto do PDF (ver o cabeçalho do arquivo) ───────
+
+  // Boleto: a linha digitável sai do texto de forma DETERMINÍSTICA, com os DVs
+  // conferindo dígito por dígito — melhor que qualquer OCR, então achando-a não
+  // há motivo para gastar uma chamada de visão. Favorecido e CNPJ vêm do mesmo
+  // texto, pelo provedor ativo.
+  const linhaDoPdf = kind === "boleto" && pdfText ? findLinhaDigitavelInStrings(pdfText.strings) : null;
+  if (linhaDoPdf) {
+    return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
+  }
+
+  // Nota fiscal: o número e o valor líquido saem do mesmo texto, lidos pelo
+  // provedor ATIVO (DeepSeek). Sem o número não adianta parar aqui — o valor
+  // líquido sozinho não preenche o campo —, então segue para a visão levando o
+  // que já conseguiu.
   const notaDoTexto = kind === "nota" && pdfText ? await readNotaFromText(pdfText) : null;
   if (notaDoTexto?.invoice_number) return { data: notaDoTexto };
 
-  // OCR usa visão — sempre OpenAI (o resolver força isso mesmo se o provedor
-  // ativo for outro). O consumo é registrado para aparecer no painel de IA.
+  // ── Caminho 2: visão, sempre OpenAI (o resolver força, mesmo com outro
+  // provedor ativo). O consumo é registrado para aparecer no painel de IA. ────
   const resolved = await resolveAiProvider({ capability: "vision" }).catch((e: unknown) =>
     e instanceof Error ? e : new Error(String(e)),
   );
   if (resolved instanceof Error) {
-    // Sem GPT o boleto ainda sai: linha digitável do texto do PDF e, para
-    // favorecido/CNPJ, o provedor ativo lendo esse mesmo texto (sem visão).
-    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
-    // Idem para a nota: o que o texto entregou (só o valor líquido, aqui — com
-    // o número a função já teria retornado) vale mais que a tela vazia.
+    // O que o texto já entregou (aqui, no máximo o valor líquido da nota — com
+    // o número a função teria retornado acima) vale mais que a tela vazia.
     if (notaDoTexto) return { data: notaDoTexto };
     await logOcrFailure(null, `resolveAiProvider: ${resolved.message}`);
-    return { error: `Leitura automática indisponível — ${resolved.message}` };
+    return { error: mensagemAoUsuario(resolved.message) };
   }
   // Imagens vão com detalhe ALTO — a linha digitável tem dígitos pequenos e o
   // detalhe padrão downscaleia a imagem, derrubando a precisão do OCR.
@@ -284,11 +296,29 @@ export async function extractAttachmentData(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Falha do GPT não derruba o que o texto do PDF já entregou.
-    if (linhaDoPdf) return { data: { barcode: linhaDoPdf, ...(await boletoParties(pdfText)) } };
     if (notaDoTexto) return { data: notaDoTexto };
     await logOcrFailure(resolved, msg);
-    return { error: `Não consegui interpretar o documento: ${msg}` };
+    return { error: mensagemAoUsuario(msg) };
   }
+}
+
+/**
+ * Traduz a falha técnica para quem está lançando a requisição.
+ *
+ * Chegar aqui significa que o texto do arquivo não resolveu e a visão também
+ * não — quase sempre porque a conta da OpenAI está sem crédito ou sem chave
+ * válida. Despejar "You have no credits remaining. Add credits at
+ * platform.openai.com/settings/organization/billing" para um solicitante é
+ * ruído: ele não tem acesso ao billing, e a ação dele é a mesma de sempre —
+ * digitar o campo. A causa técnica continua registrada no `ai_usage_log`
+ * (visível em /admin/ia), que é onde o administrador precisa dela.
+ */
+function mensagemAoUsuario(msg: string): string {
+  const contaForaDoAr = /no credits|insufficient|quota|billing|invalid[_ ]api[_ ]key|incorrect api key|401|403|429/i;
+  if (contaForaDoAr.test(msg)) {
+    return "documento sem camada de texto e a leitura por imagem está indisponível";
+  }
+  return `Não consegui interpretar o documento: ${msg}`;
 }
 
 // Leitura local nunca pode derrubar o fluxo: PDF corrompido/exótico só cai no OCR.
@@ -378,7 +408,7 @@ function invoicePresentInPdf(invoice: string | null, pdfText: PdfText): string |
   return haystack.includes(digits) ? invoice : null;
 }
 
-// Favorecido/CNPJ quando o GPT não está disponível — ver readBoletoPartiesFromText.
+// Favorecido/CNPJ do boleto — ver readBoletoPartiesFromText.
 async function boletoParties(
   pdfText: PdfText | null,
 ): Promise<{ favorecido: string | null; cnpj_cpf: string | null }> {
@@ -404,11 +434,10 @@ const PARTES_SCHEMA_HINT = JSON.stringify({
  * Favorecido + CNPJ/CPF a partir do TEXTO do boleto, usando o provedor ATIVO do
  * painel (DeepSeek hoje) — não precisa de visão, o texto já veio do PDF.
  *
- * REDE DE SEGURANÇA, não o caminho normal: a leitura de boleto roda no GPT
- * (visão), e isto só entra em cena se o GPT estiver indisponível — chave
- * ausente/expirada, cota estourada, API fora. Melhor devolver o boleto com
- * favorecido preenchido do que uma tela vazia. Best-effort: qualquer falha
- * devolve null e a linha digitável (validada pelos DVs) segue sozinha.
+ * É o CAMINHO NORMAL do boleto em PDF (era rede de segurança quando a visão
+ * vinha na frente). Best-effort: qualquer falha devolve null e a linha
+ * digitável, que já vem validada pelos DVs, segue sozinha — o campo do
+ * favorecido é preenchível na tela, a linha digitável não se adivinha.
  */
 async function readBoletoPartiesFromText(
   text: string,
