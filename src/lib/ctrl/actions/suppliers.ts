@@ -551,6 +551,8 @@ export async function createSupplier(data: {
   pix_padrao?: boolean;
   // Tipos de despesa pré-vinculados no cadastro (já vêm marcados na aprovação).
   expenseTypeIds?: string[];
+  // Anexos opcionais do cadastro (object paths no bucket ctrl-attachments).
+  attachmentPaths?: string[];
   // Fornecedor estrangeiro (sem CNPJ/CPF; exige País e Estado).
   estrangeiro?: boolean;
   pais?: string;
@@ -669,9 +671,8 @@ export async function createSupplier(data: {
     }
   }
 
-  const { data: inserted, error } = await supabase
-    .from("ctrl_suppliers")
-    .insert({
+  const attachmentPaths = (data.attachmentPaths ?? []).filter(Boolean);
+  const insertPayload: Record<string, unknown> = {
       name: trimmedName,
       nome_fantasia: trimmedNomeFantasia,
       cnpj_cpf: data.cnpj_cpf?.trim() || null,
@@ -705,17 +706,38 @@ export async function createSupplier(data: {
       status: "pendente",
       omie_sync_required: true,
       created_by: ctx.id,
-    })
+  };
+  if (attachmentPaths.length > 0) insertPayload.attachment_paths = attachmentPaths;
+
+  let { data: inserted, error } = await supabase
+    .from("ctrl_suppliers")
+    .insert(insertPayload)
     .select("id")
     .single();
 
-  if (error) {
+  // 42703 = coluna inexistente: migration 20260817120000 (attachment_paths)
+  // ainda não aplicada. Um anexo opcional não pode impedir o cadastro — refaz
+  // o insert sem ele e registra no log. Os arquivos ficam no bucket, mas o
+  // fornecedor entra normalmente na fila de homologação.
+  if (error && (error as { code?: string }).code === "42703" && attachmentPaths.length > 0) {
+    console.error(
+      "createSupplier: coluna attachment_paths ausente (migration 20260817120000 pendente) — cadastro salvo sem os anexos.",
+    );
+    delete insertPayload.attachment_paths;
+    ({ data: inserted, error } = await supabase
+      .from("ctrl_suppliers")
+      .insert(insertPayload)
+      .select("id")
+      .single());
+  }
+
+  if (error || !inserted) {
     // Índice único parcial (ctrl_suppliers_doc_norm_unique) — fallback caso o
     // dedupe acima perca uma corrida entre dois cadastros simultâneos.
-    if ((error as { code?: string }).code === "23505") {
+    if ((error as { code?: string } | null)?.code === "23505") {
       return { error: "Já existe um fornecedor com este CNPJ/CPF." };
     }
-    return { error: error.message };
+    return { error: error?.message ?? "Falha ao cadastrar o fornecedor." };
   }
 
   // Vínculos de tipo de despesa escolhidos no cadastro. Ficam gravados desde já
@@ -755,6 +777,62 @@ export async function createSupplier(data: {
   revalidatePath("/ctrl/admin/fornecedores");
   revalidatePath("/home");
   return { supplierId: inserted.id };
+}
+
+// ─── Anexos do cadastro ──────────────────────────────────────────────────────
+
+export interface SupplierAttachment {
+  name: string;
+  url: string;
+}
+
+// Gera URLs assinadas (5 min) dos anexos opcionais do cadastro do fornecedor.
+// Usado pela tela de Fornecedores (detalhe e homologação) para conferir os
+// documentos que o cadastrante anexou. Assina com o admin client: a leitura
+// vale para qualquer papel do módulo, não só para quem subiu o arquivo.
+export async function getSupplierAttachments(
+  supplierId: string,
+): Promise<{ attachments: SupplierAttachment[] } | { error: string }> {
+  await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+    "aprovacao_fornecedor",
+  );
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: supplier, error } = await supabase
+    .from("ctrl_suppliers")
+    .select("attachment_paths")
+    .eq("id", supplierId)
+    .maybeSingle<{ attachment_paths: string[] | null }>();
+
+  if (error) {
+    // 42703 = migration 20260817120000 ainda não aplicada. Sem coluna não há
+    // anexo para mostrar — a tela segue funcionando sem a seção.
+    if ((error as { code?: string }).code === "42703") return { attachments: [] };
+    return { error: error.message };
+  }
+  if (!supplier) return { error: "Fornecedor não encontrado." };
+
+  const paths = supplier.attachment_paths ?? [];
+  if (paths.length === 0) return { attachments: [] };
+
+  const attachments: SupplierAttachment[] = [];
+  for (const path of paths) {
+    const { data: signed, error: signErr } = await supabase.storage
+      .from("ctrl-attachments")
+      .createSignedUrl(path, 60 * 5);
+    if (signErr || !signed) continue;
+    // Nome original: o path é `${userId}/${timestamp}-${nomeSeguro}`.
+    const name = (path.split("/").pop() ?? "anexo").replace(/^\d+-/, "");
+    attachments.push({ name, url: signed.signedUrl });
+  }
+  return { attachments };
 }
 
 // ─── Historico ───────────────────────────────────────────────────────────────

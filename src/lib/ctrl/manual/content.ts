@@ -737,6 +737,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
           "**Fornecedor estrangeiro** dispensa CNPJ/CPF, mas exige País e Estado.",
           "Se marcar PIX ou transferência como **método padrão**, todos os dados daquele método precisam estar completos — é por ali que o pagamento vai sair sem ninguém perguntar nada depois.",
           "Fornecedor novo entra como **pendente**. Ele já pode ser usado em requisições; o que fica bloqueado é o envio do pagamento.",
+          "**Anexos são opcionais**: se julgar necessário, anexe no cadastro documentos de apoio (contrato social, cartão CNPJ, proposta, comprovante da conta bancária). Eles aparecem no detalhe do fornecedor e na tela de homologação — não vão para a Omie.",
         ],
       },
       {

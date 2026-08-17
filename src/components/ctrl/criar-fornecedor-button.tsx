@@ -1,11 +1,12 @@
 "use client";
 
-import { Banknote, Building2, Contact, Globe, KeyRound, Loader2, MapPin, Plus, Tags, User } from "lucide-react";
+import { Banknote, Building2, Contact, Globe, KeyRound, Loader2, MapPin, Paperclip, Plus, Tags, User, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 
 import { ExpenseTypePicker } from "@/components/ctrl/expense-type-picker";
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
+import { MAX_ATTACHMENT_SIZE, uploadCtrlAttachment } from "@/lib/ctrl/attachment-upload";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
 import {
   UFS_BR,
@@ -131,6 +132,46 @@ export function CriarFornecedorButton({
   const cepRequestRef = useRef("");
   const [, startTransition] = useTransition();
 
+  // ── Anexos (opcional) ──────────────────────────────────────────────────────
+  // Documentos de apoio ao cadastro — contrato social, cartão CNPJ, proposta,
+  // comprovante de conta bancária. Nada aqui é obrigatório: o usuário anexa se
+  // julgar necessário, e quem homologa vê os arquivos na tela de Fornecedores.
+  // Cada arquivo já sobe ao bucket no momento em que é escolhido; o submit só
+  // reaproveita os paths.
+  const [attachments, setAttachments] = useState<Array<{ file: File; path: string }>>([]);
+  const [attachUploading, setAttachUploading] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function addAttachments(files: FileList | null) {
+    setAttachError(null);
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files);
+    const tooBig = picked.find((f) => f.size > MAX_ATTACHMENT_SIZE);
+    if (tooBig) {
+      setAttachError(`"${tooBig.name}" excede o limite de 10 MB.`);
+      if (attachInputRef.current) attachInputRef.current.value = "";
+      return;
+    }
+    setAttachUploading(true);
+    try {
+      const uploaded: Array<{ file: File; path: string }> = [];
+      for (const file of picked) {
+        uploaded.push({ file, path: await uploadCtrlAttachment(file) });
+      }
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setAttachError(`Falha ao enviar o anexo: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAttachUploading(false);
+      if (attachInputRef.current) attachInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -177,6 +218,8 @@ export function CriarFornecedorButton({
     setOpen(false);
     setForm(emptyForm);
     setSelectedExpenseTypes(new Set());
+    setAttachments([]);
+    setAttachError(null);
     setError(null);
     setSubmitAttempted(false);
   }
@@ -345,6 +388,7 @@ export function CriarFornecedorButton({
       transf_tipo_conta: form.transf_padrao ? form.transf_tipo_conta || "corrente" : undefined,
       pix_padrao: form.pix_padrao,
       expenseTypeIds: Array.from(selectedExpenseTypes),
+      attachmentPaths: attachments.map((a) => a.path),
     });
     setLoading(false);
     if ("error" in result && result.error) {
@@ -354,6 +398,8 @@ export function CriarFornecedorButton({
     setOpen(false);
     setForm(emptyForm);
     setSelectedExpenseTypes(new Set());
+    setAttachments([]);
+    setAttachError(null);
     setSubmitAttempted(false);
     startTransition(() => router.refresh());
   }
@@ -1062,6 +1108,75 @@ export function CriarFornecedorButton({
                   </div>
                 </section>
 
+                {/* Anexos — opcional. Documentos de apoio à homologação. */}
+                <section className="rounded-lg border bg-background shadow-sm">
+                  <header className="flex items-center gap-2 border-b px-4 py-2.5">
+                    <Paperclip className="h-4 w-4 text-primary" />
+                    <h3 className="text-sm font-semibold">Anexos</h3>
+                    <span className="ml-auto text-xs text-muted-foreground">opcional</span>
+                  </header>
+                  <div className="space-y-3 p-4">
+                    <p className="text-xs text-muted-foreground">
+                      Anexe documentos de apoio se julgar necessário — contrato social,
+                      cartão CNPJ, proposta, comprovante da conta bancária. Ficam
+                      disponíveis na tela de Fornecedores para quem homologa o cadastro.
+                      Até 10 MB por arquivo.
+                    </p>
+                    <input
+                      ref={attachInputRef}
+                      id="new-supplier-attachments"
+                      type="file"
+                      multiple
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+                      onChange={(e) => addAttachments(e.target.files)}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => attachInputRef.current?.click()}
+                      disabled={attachUploading}
+                      className="inline-flex items-center gap-2 rounded-md border border-dashed px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                    >
+                      {attachUploading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Paperclip className="h-4 w-4" />
+                      )}
+                      {attachUploading ? "Enviando…" : "Adicionar anexos"}
+                    </button>
+                    {attachments.length > 0 && (
+                      <ul className="space-y-2">
+                        {attachments.map((att, i) => (
+                          <li
+                            key={`${att.path}-${i}`}
+                            className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2"
+                          >
+                            <div className="flex min-w-0 items-center gap-2 text-sm">
+                              <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="truncate">{att.file.name}</span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                ({(att.file.size / 1024 / 1024).toFixed(2)} MB)
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(i)}
+                              className="shrink-0 text-muted-foreground hover:text-destructive"
+                              aria-label={`Remover ${att.file.name}`}
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {attachError && <p className="text-xs text-destructive">{attachError}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      Formatos: PDF, JPG, PNG, DOC, XLS.
+                    </p>
+                  </div>
+                </section>
+
                 {!hasPix && !hasBank && (
                   <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
                     Sem chave PIX ou conta bancária informada, este fornecedor só poderá
@@ -1082,10 +1197,10 @@ export function CriarFornecedorButton({
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || attachUploading}
                   className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {loading ? "Criando…" : "Criar (Pendente)"}
+                  {loading ? "Criando…" : attachUploading ? "Enviando anexo…" : "Criar (Pendente)"}
                 </button>
               </div>
             </form>

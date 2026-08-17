@@ -6,15 +6,12 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
+import { MAX_ATTACHMENT_SIZE, uploadCtrlAttachment } from "@/lib/ctrl/attachment-upload";
 import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
 import { currentMonthBR, currentYearBR } from "@/lib/ctrl/datetime";
 import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
-import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
-
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
-const ATTACHMENT_BUCKET = "ctrl-attachments";
 
 // Rateio entre setores: fluxo completo de ponta a ponta (criação → orçamento por
 // setor → aprovação multi-setor → lançamento único no Omie com distribuicao por
@@ -166,22 +163,8 @@ export function NovaRequisicaoForm({
   // Dois anexos independentes: o documento de pagamento (boleto/comprovante) e a
   // NOTA FISCAL. Ambos são enviados JÁ no upload (para a leitura OCR); o submit
   // reaproveita os paths. Assim um boleto pode ter, além do boleto, a nota.
-  async function uploadAttachmentFile(file: File): Promise<string> {
-    const supabase = createSupabaseClient();
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) throw new Error("Sessão expirada — refaça o login.");
-    const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-    const objectPath = `${userId}/${Date.now()}-${safeName}`;
-    const { error: upErr } = await supabase.storage
-      .from(ATTACHMENT_BUCKET)
-      .upload(objectPath, file, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false,
-      });
-    if (upErr) throw upErr;
-    return objectPath;
-  }
+  // O upload em si vive em lib/ctrl/attachment-upload (compartilhado com o
+  // cadastro de fornecedor).
 
   // Anexo de pagamento (boleto/comprovante). No boleto, lê o código de barras.
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -205,7 +188,7 @@ export function NovaRequisicaoForm({
     }
     setAttachment(file);
     try {
-      const objectPath = await uploadAttachmentFile(file);
+      const objectPath = await uploadCtrlAttachment(file);
       setAttachmentPath(objectPath);
       // Só o boleto é lido aqui (código de barras). A nota fiscal tem o seu anexo.
       if (paymentMethod !== "boleto") return;
@@ -298,7 +281,7 @@ export function NovaRequisicaoForm({
     }
     setInvoiceAttachment(file);
     try {
-      const objectPath = await uploadAttachmentFile(file);
+      const objectPath = await uploadCtrlAttachment(file);
       setInvoiceAttachmentPath(objectPath);
       setInvoiceReading(true);
       const res = await extractAttachmentData(objectPath, "nota");
@@ -363,7 +346,7 @@ export function NovaRequisicaoForm({
     try {
       const uploaded: Array<{ file: File; path: string }> = [];
       for (const file of picked) {
-        const objectPath = await uploadAttachmentFile(file);
+        const objectPath = await uploadCtrlAttachment(file);
         uploaded.push({ file, path: objectPath });
       }
       setExtraAttachments((prev) => [...prev, ...uploaded]);
@@ -664,10 +647,10 @@ export function NovaRequisicaoForm({
     let finalInvoicePath: string | undefined = invoiceAttachmentPath ?? undefined;
     try {
       if (attachment && !finalAttachmentPath) {
-        finalAttachmentPath = await uploadAttachmentFile(attachment);
+        finalAttachmentPath = await uploadCtrlAttachment(attachment);
       }
       if (invoiceAttachment && !finalInvoicePath) {
-        finalInvoicePath = await uploadAttachmentFile(invoiceAttachment);
+        finalInvoicePath = await uploadCtrlAttachment(invoiceAttachment);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

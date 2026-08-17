@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Banknote, CheckCircle2, Contact, History, Loader2, Pencil, Tags, Truck, X, XCircle } from "lucide-react";
+import { Banknote, CheckCircle2, Contact, History, Loader2, Paperclip, Pencil, Tags, Truck, X, XCircle } from "lucide-react";
 
 import { ExpenseTypePicker } from "@/components/ctrl/expense-type-picker";
-import { approveSupplier, rejectSupplier, updateSupplier, resyncSupplierOmie } from "@/lib/ctrl/actions/suppliers";
+import {
+  approveSupplier,
+  getSupplierAttachments,
+  rejectSupplier,
+  updateSupplier,
+  resyncSupplierOmie,
+  type SupplierAttachment,
+} from "@/lib/ctrl/actions/suppliers";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
 import {
   UFS_BR,
@@ -1149,6 +1156,9 @@ export function FornecedoresTable({
                 </div>
               </section>
 
+              {/* Anexos do cadastro — some quando não há nenhum. */}
+              <SupplierAttachments supplierId={detailSupplier.id} />
+
               {editMode && (
                 <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
                   Ao salvar, o fornecedor voltará a <strong>pendente</strong> e precisará
@@ -1307,6 +1317,9 @@ export function FornecedoresTable({
                 </div>
               </section>
 
+              {/* Anexos enviados no cadastro — apoio à conferência. */}
+              <SupplierAttachments supplierId={approveModal.id} />
+
               {/* Tipos de despesa */}
               <section className="rounded-lg border bg-background shadow-sm">
                 <header className="flex items-center gap-2 border-b px-4 py-2.5">
@@ -1405,6 +1418,77 @@ export function FornecedoresTable({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Anexos opcionais do cadastro (contrato social, cartão CNPJ, proposta…).
+ *
+ * Carrega sob demanda ao abrir o fornecedor: a listagem da tela traz >1000
+ * cadastros e as URLs são assinadas (5 min), então não faz sentido gerá-las
+ * para todo mundo de uma vez. Sem anexo, a seção não aparece — inclusive
+ * enquanto a migration 20260817120000 não é aplicada (a action devolve lista
+ * vazia nesse caso).
+ */
+function SupplierAttachments({ supplierId }: { supplierId: string }) {
+  const [attachments, setAttachments] = useState<SupplierAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getSupplierAttachments(supplierId).then((res) => {
+      if (cancelled) return;
+      setLoading(false);
+      if ("error" in res) {
+        setError(res.error);
+        return;
+      }
+      setAttachments(res.attachments);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierId]);
+
+  if (loading) {
+    return (
+      <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Carregando anexos…
+      </p>
+    );
+  }
+  if (error) return <p className="px-1 text-xs text-destructive">{error}</p>;
+  if (attachments.length === 0) return null;
+
+  return (
+    <section className="rounded-lg border bg-background shadow-sm">
+      <header className="flex items-center gap-2 border-b px-4 py-2.5">
+        <Paperclip className="h-4 w-4 text-primary" />
+        <h4 className="text-sm font-semibold">Anexos do cadastro</h4>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {attachments.length} arquivo{attachments.length > 1 ? "s" : ""}
+        </span>
+      </header>
+      <ul className="space-y-2 p-4">
+        {attachments.map((att) => (
+          <li key={att.url}>
+            <a
+              href={att.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm hover:bg-muted"
+            >
+              <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{att.name}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
