@@ -233,6 +233,41 @@ function extractTokens(content: string): string[] {
   return out;
 }
 
+/**
+ * Converte um token gravado em UTF-16BE para texto normal.
+ *
+ * O PDF pode gravar a string de texto com 2 bytes por caractere, com ou sem o
+ * BOM FE FF. Lido como latin1, cada caractere vira um NUL colado no caractere
+ * real — "341-7" chega como "\0 3 \0 4 \0 1 \0 - \0 7" e, depois que
+ * buildPlainText troca os controles por espaço, o documento inteiro parece
+ * espaçado letra a letra ("O B V I O   B R A S I L").
+ *
+ * Não é cosmético: a varredura da linha digitável casa os dígitos com
+ * `[\d\s.-]` entre eles, e NUL **não** é `\s`. O boleto do Itaú/Óbvio trazia a
+ * linha inteira e íntegra no arquivo, e a varredura devolvia ZERO candidatos —
+ * o boleto era dado como "sem texto" e mandado para o OCR de visão. Por isso a
+ * conversão acontece aqui, na origem: varredura e modelo veem o mesmo texto.
+ */
+function decodeUtf16BE(s: string): string {
+  if (s.length < 2) return s;
+  const temBom = s.charCodeAt(0) === 0xfe && s.charCodeAt(1) === 0xff;
+  const corpo = temBom ? s.slice(2) : s;
+  if (corpo.length < 2 || corpo.length % 2 !== 0) return s;
+  if (!temBom) {
+    // Sem BOM, só tratamos como UTF-16BE quando TODO byte alto é zero: é a
+    // assinatura de texto ASCII/latino gravado em 2 bytes. Byte alto não nulo
+    // pode ser um caractere latin1 legítimo — nesse caso não mexemos.
+    for (let i = 0; i < corpo.length; i += 2) {
+      if (corpo.charCodeAt(i) !== 0) return s;
+    }
+  }
+  let out = "";
+  for (let i = 0; i + 1 < corpo.length; i += 2) {
+    out += String.fromCharCode((corpo.charCodeAt(i) << 8) | corpo.charCodeAt(i + 1));
+  }
+  return out;
+}
+
 /** Camada de texto do PDF. `strings` vazio = PDF escaneado (só imagem). */
 export function extractPdfText(bytes: Buffer): PdfText {
   const tokens: string[] = [];
@@ -240,7 +275,9 @@ export function extractPdfText(bytes: Buffer): PdfText {
   for (const chunk of pdfContentChunks(bytes)) {
     scanned += chunk.length;
     if (scanned > MAX_SCAN_CHARS) break;
-    tokens.push(...extractTokens(chunk));
+    for (const token of extractTokens(chunk)) {
+      tokens.push(token === BREAK ? token : decodeUtf16BE(token));
+    }
   }
 
   const strings = tokens.filter((t) => t !== BREAK);
