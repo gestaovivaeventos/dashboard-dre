@@ -487,20 +487,30 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   const rpMarcadaReembolso = isTipoPagamentoReembolso(req.tipo_pagamento)
 
   // ── Valor (ambas as faixas) ──────────────────────────────────────────────
-  // Soma dos valores dos documentos vs valor da RP. Estouro com parcela
+  // Soma dos valores dos documentos-base vs valor da RP. Estouro com parcela
   // compatível → pagamento parcial (verificar_saldo). RP abaixo de uma parcela
   // (ou do contrato, quando não há parcelas) também vai para verificar_saldo —
   // acontece quando o fundo não tem saldo para a parcela cheia; reprovar
   // esconderia um pagamento legítimo. Soma menor que a RP → reprova.
+  //
+  // Boleto NÃO entra na soma quando há outro documento (contrato/orçamento/NF/
+  // recibo): ele é a cobrança do que esse documento já diz, não valor extra —
+  // somar dobrava o total e o pagamento cheio virava "parcial" (RP 872343:
+  // orçamento 263,17 + boleto 263,17 → "parcela de 526,34"). O boleto é
+  // conferido contra a RP e contra o documento-base logo abaixo. RP só com
+  // boleto(s) segue usando o boleto como base.
   let partialPayment: null | { somaContratos: number; parcelaIdentificada: number } = null
   let pagamentoAbaixo: null | { somaContratos: number; parcelaReferencia: number | null } = null
+  const boletos = docs.filter((d) => d.tipo_documento === TIPO_BOLETO)
+  const naoBoletos = docs.filter((d) => d.tipo_documento !== TIPO_BOLETO)
+  const docsBase = naoBoletos.length > 0 ? naoBoletos : docs
   {
-    const soma = docs.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
+    const soma = docsBase.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
     const diff = soma - reqValor
     if (Math.abs(diff) <= VALUE_TOLERANCE) {
       // valor confere
     } else if (diff > 0) {
-      const todasParcelas = docs.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
+      const todasParcelas = docsBase.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
       const parcela = todasParcelas.find((v) => Math.abs(v - reqValor) <= VALUE_TOLERANCE)
       const parcelasAcima = todasParcelas.filter((v) => v > reqValor + VALUE_TOLERANCE)
       if (parcela !== undefined) {
@@ -521,6 +531,30 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
       motivos.push(
         `Soma dos valores dos documentos (${soma.toFixed(2)}) é menor que o valor da requisição (${reqValor.toFixed(2)})`,
       )
+    }
+  }
+
+  // ── Conferência do boleto contra o documento-base ────────────────────────
+  // Só quando há boleto E outro documento. O boleto tem que casar com o que
+  // está sendo pago (RP) ou com algo do documento-base (total ou parcela);
+  // boleto que não bate com nada é divergência explícita → reprova.
+  if (boletos.length > 0 && naoBoletos.length > 0) {
+    const totalBase = naoBoletos.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
+    const valoresBase = [
+      totalBase,
+      ...naoBoletos.map((d) => Number(d.valor_contrato) || 0),
+      ...naoBoletos.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0)),
+    ].filter((v) => v > 0)
+    for (const b of boletos) {
+      const vb = Number(b.valor_contrato) || 0
+      if (vb <= 0) continue
+      const bateRp = Math.abs(vb - reqValor) <= VALUE_TOLERANCE
+      const bateBase = valoresBase.some((v) => Math.abs(v - vb) <= VALUE_TOLERANCE)
+      if (!bateRp && !bateBase) {
+        motivos.push(
+          `Boleto de R$ ${vb.toFixed(2)} não confere com a requisição (R$ ${reqValor.toFixed(2)}) nem com o documento-base (total R$ ${totalBase.toFixed(2)})`,
+        )
+      }
     }
   }
 
