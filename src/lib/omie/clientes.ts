@@ -1,5 +1,6 @@
 import { omieCall, OMIE_CLIENTES_URL } from "@/lib/omie/client";
 import { parseBanco } from "@/lib/ctrl/bancos";
+import { CPF_LENGTH, normalizeDoc } from "@/lib/ctrl/cnpj";
 import { cidadeParaOmie } from "@/lib/ctrl/endereco";
 import { ESTADO_EXTERIOR } from "@/lib/ctrl/paises";
 
@@ -127,7 +128,10 @@ function buildClientePayload(
   supplier: OmieSupplierData,
   tag: string = "Fornecedor",
 ): Record<string, unknown> {
-  const doc = onlyDigits(supplier.cnpj_cpf);
+  // Documento normalizado: caixa alta + só alfanumérico. NÃO usa onlyDigits —
+  // o CNPJ alfanumérico (12 primeiras posições podem ter letra) perderia as
+  // letras e seria gravado errado no Omie.
+  const doc = normalizeDoc(supplier.cnpj_cpf);
   const phone = onlyDigits(supplier.phone);
   const payload: Record<string, unknown> = {
     codigo_cliente_integracao: supplier.id,
@@ -135,8 +139,8 @@ function buildClientePayload(
     nome_fantasia: supplier.nome_fantasia?.trim() || supplier.name,
     // Estrangeiro é sempre PJ. O CNPJ/CPF é OMITIDO (a Omie desabilita o campo
     // para cadastros do exterior e exibe "Estrangeiro"); enviar vazio pode ser
-    // rejeitado como documento inválido.
-    pessoa_fisica: supplier.estrangeiro ? "N" : doc.length === 11 ? "S" : "N",
+    // rejeitado como documento inválido. PF = 11 dígitos; CNPJ = 14 posições.
+    pessoa_fisica: supplier.estrangeiro ? "N" : doc.length === CPF_LENGTH ? "S" : "N",
     email: supplier.email ?? "",
     tags: [{ tag }],
   };
@@ -184,7 +188,7 @@ function buildClientePayload(
       // dígito no número (ex.: "20377589-9" → "203775899"), parecendo incompleto
       // no Omie. A agência já vai crua; a conta segue o mesmo padrão.
       conta_corrente: (supplier.conta_corrente ?? "").trim(),
-      doc_titular: onlyDigits(supplier.doc_titular) || doc,
+      doc_titular: normalizeDoc(supplier.doc_titular) || doc,
       nome_titular: supplier.titular_banco ?? supplier.name,
       cChavePix: chavePix,
       // "Definir transferência como forma de pagamento padrão" no Omie ("S"/"N").
@@ -220,10 +224,10 @@ export function clienteRowToOmieData(row: {
     doc_titular: null,
     chave_pix: null,
   };
-  if (onlyDigits(row.cnpj_cpf)) {
+  if (normalizeDoc(row.cnpj_cpf)) {
     return { ...base, name: row.name, cnpj_cpf: row.cnpj_cpf };
   }
-  if (onlyDigits(row.cpf_resp_legal)) {
+  if (normalizeDoc(row.cpf_resp_legal)) {
     return {
       ...base,
       name: (row.resp_legal ?? "").trim() || row.name,
@@ -247,7 +251,7 @@ export async function syncSupplierToOmieUnit(
   supplier: OmieSupplierData,
   tag: string = "Fornecedor",
 ): Promise<{ codigoCliente: number }> {
-  const doc = onlyDigits(supplier.cnpj_cpf);
+  const doc = normalizeDoc(supplier.cnpj_cpf);
   if (!doc && !supplier.estrangeiro) {
     throw new Error("Cadastro sem CNPJ/CPF — não é possível cadastrar no Omie.");
   }
@@ -263,7 +267,7 @@ export async function syncSupplierToOmieUnit(
     if (!list.notFound) {
       const arr =
         (list.data.clientes_cadastro as Array<Record<string, unknown>> | undefined) ?? [];
-      const match = arr.find((c) => onlyDigits(String(c.cnpj_cpf ?? "")) === doc) ?? arr[0];
+      const match = arr.find((c) => normalizeDoc(String(c.cnpj_cpf ?? "")) === doc) ?? arr[0];
       if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
     }
   } else {

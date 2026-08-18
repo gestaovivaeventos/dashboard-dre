@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
+import { CNPJ_LENGTH, CPF_LENGTH, normalizeDoc } from "@/lib/ctrl/cnpj";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
 import { notifyAdmins } from "@/lib/ctrl/notifications";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
@@ -373,7 +374,7 @@ export async function updateSupplier(
   if (data.cnpj_cpf !== undefined) {
     payload.cnpj_cpf = data.cnpj_cpf?.trim() || null;
     // Impede editar o documento para um que já pertence a outro fornecedor.
-    const normalizedDoc = (payload.cnpj_cpf as string | null)?.replace(/\D/g, "") ?? "";
+    const normalizedDoc = normalizeDoc(payload.cnpj_cpf as string | null);
     if (normalizedDoc) {
       const { data: existing, error: dupErr } = await supabase.rpc(
         "ctrl_find_supplier_by_doc",
@@ -585,6 +586,18 @@ export async function createSupplier(data: {
       // identificado de forma unica e cria duplicatas no Omie.
       return { error: "Informe o CNPJ ou CPF do fornecedor." };
     }
+    // Tamanho mínimo do documento (defesa em profundidade — o formulário já
+    // valida). CNPJ (numérico ou alfanumérico) tem 14 posições; CPF, 11 dígitos.
+    // Documento com letra é sempre CNPJ.
+    const docNorm = normalizeDoc(data.cnpj_cpf);
+    if (docNorm.length !== CPF_LENGTH && docNorm.length !== CNPJ_LENGTH) {
+      const pareceCnpj = /[A-Z]/.test(docNorm) || docNorm.length > CPF_LENGTH;
+      return {
+        error: pareceCnpj
+          ? `O CNPJ informado contém menos de ${CNPJ_LENGTH} caracteres, abaixo do mínimo.`
+          : `O documento informado é inválido: informe um CPF (${CPF_LENGTH} dígitos) ou um CNPJ (${CNPJ_LENGTH} caracteres).`,
+      };
+    }
     // Endereço completo é exigência da Omie no cadastro de fornecedor — sem
     // ele o IncluirCliente é recusado lá.
     const faltaEndereco = enderecoMissing(data);
@@ -653,7 +666,7 @@ export async function createSupplier(data: {
   // aprovação. A comparação roda no banco (ctrl_find_supplier_by_doc): o scan
   // antigo no JS era cortado em 1000 linhas pelo PostgREST e, com >1000
   // fornecedores, documentos além desse limite escapavam e permitiam recadastro.
-  const normalizedDoc = (data.cnpj_cpf ?? "").replace(/\D/g, "");
+  const normalizedDoc = normalizeDoc(data.cnpj_cpf);
   if (normalizedDoc) {
     const { data: existing, error: dupErr } = await supabase.rpc(
       "ctrl_find_supplier_by_doc",

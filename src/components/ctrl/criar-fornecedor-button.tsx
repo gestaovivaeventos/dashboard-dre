@@ -8,6 +8,7 @@ import { ExpenseTypePicker } from "@/components/ctrl/expense-type-picker";
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { MAX_ATTACHMENT_SIZE, uploadCtrlAttachment } from "@/lib/ctrl/attachment-upload";
 import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
+import { CNPJ_LENGTH, CPF_LENGTH, cnpjIsComplete, maskCnpj } from "@/lib/ctrl/cnpj";
 import {
   UFS_BR,
   cepDigits,
@@ -88,21 +89,16 @@ const emptyForm: FormState = {
 };
 
 // Light masks — apenas pra ajudar visualmente. Não bloqueia input livre.
+// PJ usa o CNPJ alfanumérico (letras + números nas 12 primeiras posições); PF
+// segue 100% numérico.
 function maskCpfCnpj(value: string, type: PersonType): string {
-  const digits = value.replace(/\D/g, "");
-  if (type === "pf") {
-    return digits
-      .slice(0, 11)
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d)/, "$1.$2")
-      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-  }
-  return digits
-    .slice(0, 14)
-    .replace(/(\d{2})(\d)/, "$1.$2")
+  if (type === "pj") return maskCnpj(value);
+  return value
+    .replace(/\D/g, "")
+    .slice(0, 11)
     .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1/$2")
-    .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
 function maskPhone(value: string): string {
@@ -281,6 +277,16 @@ export function CriarFornecedorButton({
     form.estado,
   ]);
 
+  // Documento incompleto: CNPJ < 14 caracteres (alfanumérico) ou CPF < 11
+  // dígitos. Não vale para estrangeiro (que não tem documento) nem para o campo
+  // vazio (tratado como "obrigatório", não como "incompleto").
+  const docIncompleto = useMemo(() => {
+    if (form.estrangeiro || !form.cnpj_cpf.trim()) return false;
+    return form.personType === "pj"
+      ? !cnpjIsComplete(form.cnpj_cpf)
+      : form.cnpj_cpf.replace(/\D/g, "").length < CPF_LENGTH;
+  }, [form.estrangeiro, form.cnpj_cpf, form.personType]);
+
   // Só pinta o campo de vermelho depois que o usuário tentou salvar.
   function invalidCls(isMissing: boolean) {
     return submitAttempted && isMissing ? ` ${INVALID_CLS}` : "";
@@ -326,6 +332,17 @@ export function CriarFornecedorButton({
       }
     } else if (!form.cnpj_cpf.trim()) {
       setError(form.personType === "pf" ? "Informe o CPF." : "Informe o CNPJ.");
+      return;
+    } else if (form.personType === "pj" && !cnpjIsComplete(form.cnpj_cpf)) {
+      // CNPJ (numérico ou alfanumérico) tem 14 posições — bloqueia se vier menor.
+      setError(
+        `O CNPJ informado contém menos de ${CNPJ_LENGTH} caracteres, abaixo do mínimo. Confira e complete o número antes de continuar.`,
+      );
+      return;
+    } else if (form.personType === "pf" && form.cnpj_cpf.replace(/\D/g, "").length < CPF_LENGTH) {
+      setError(
+        `O CPF informado contém menos de ${CPF_LENGTH} dígitos, abaixo do mínimo. Confira e complete o número antes de continuar.`,
+      );
       return;
     }
     if (enderecoFaltando.length) {
@@ -583,17 +600,31 @@ export function CriarFornecedorButton({
                           className={`${INPUT_CLS} font-mono italic text-muted-foreground disabled:opacity-100`}
                         />
                       ) : (
-                        <input
-                          id="new-supplier-cnpj"
-                          type="text"
-                          required
-                          value={form.cnpj_cpf}
-                          onChange={(e) =>
-                            update("cnpj_cpf", maskCpfCnpj(e.target.value, form.personType))
-                          }
-                          placeholder={form.personType === "pj" ? "00.000.000/0000-00" : "000.000.000-00"}
-                          className={`${INPUT_CLS} font-mono`}
-                        />
+                        <>
+                          <input
+                            id="new-supplier-cnpj"
+                            type="text"
+                            required
+                            value={form.cnpj_cpf}
+                            onChange={(e) =>
+                              update("cnpj_cpf", maskCpfCnpj(e.target.value, form.personType))
+                            }
+                            placeholder={form.personType === "pj" ? "00.000.000/0000-00" : "000.000.000-00"}
+                            className={`${INPUT_CLS} font-mono${invalidCls(docIncompleto)}`}
+                          />
+                          {form.personType === "pj" && (
+                            <p className="text-xs text-muted-foreground">
+                              Aceita o novo CNPJ alfanumérico (letras e números). São 14 caracteres.
+                            </p>
+                          )}
+                          {submitAttempted && docIncompleto && (
+                            <p className="text-xs text-destructive">
+                              {form.personType === "pj"
+                                ? `CNPJ incompleto — são ${CNPJ_LENGTH} caracteres.`
+                                : `CPF incompleto — são ${CPF_LENGTH} dígitos.`}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="space-y-1.5">
