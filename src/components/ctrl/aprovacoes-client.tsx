@@ -2,12 +2,13 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { Paperclip, X } from "lucide-react";
 
 import {
   approveRequest,
   rejectRequest,
   batchApproveRequests,
+  getRequestAttachmentUrl,
 } from "@/lib/ctrl/actions/requests";
 import { InfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-history";
@@ -38,7 +39,11 @@ type Req = {
   // Preenchido quando o título foi efetivamente PAGO (baixado) no Omie — vira o
   // status "Pago", sobrepondo "Enviado Pgto" (igual à tela de Requisições).
   omie_paid_at?: string | null;
+  // Anexo principal (boleto/nota/contrato) + anexos diversos — o aprovador
+  // precisa ver o documento antes de aprovar.
+  attachment_path?: string | null;
   extra_attachment_paths?: string[] | null;
+  favorecido?: string | null;
   ctrl_sectors?: { name: string } | { name: string }[] | null;
   ctrl_expense_types?: { name: string } | { name: string }[] | null;
   ctrl_events?: { name: string } | { name: string }[] | null;
@@ -192,6 +197,11 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
       { key: "numero", type: "number", getValue: (r) => r.request_number, label: (r) => `#${r.request_number}` },
       { key: "requisicao", type: "text", getValue: (r) => r.title },
       {
+        key: "fornecedor",
+        type: "text",
+        getValue: (r) => resolve(r.ctrl_suppliers)?.name ?? r.favorecido ?? "",
+      },
+      {
         key: "setor",
         type: "text",
         getValue: (r) =>
@@ -239,7 +249,9 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   // requisição (fora daqui já há o vazio "Nenhuma requisição nesta categoria").
   const showSectorGroups = groupByOwnSector;
   const showCheckboxCol = activeTab === "pendente" && canApprove;
-  const colCount = (showCheckboxCol ? 1 : 0) + 8;
+  // Colunas fixas: #, Requisição, Fornecedor, Setor, Valor, Vencimento, Criado,
+  // Solicitante, Anexos, Ações = 10 (+ checkbox quando na aba Pendentes).
+  const colCount = (showCheckboxCol ? 1 : 0) + 10;
 
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
@@ -260,6 +272,16 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   function notify(msg: string, ok = true) {
     setFeedback({ msg, ok });
     setTimeout(() => setFeedback(null), 4000);
+  }
+
+  // Abre o anexo principal (boleto/nota/contrato) em nova aba, via URL assinada.
+  async function openAttachment(requestId: string) {
+    const res = await getRequestAttachmentUrl(requestId);
+    if (res && "url" in res && res.url) {
+      window.open(res.url, "_blank", "noopener,noreferrer");
+    } else if (res && "error" in res && res.error) {
+      notify(res.error, false);
+    }
   }
 
   function toggleSelect(id: string) {
@@ -387,11 +409,13 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                 {activeTab === "pendente" && canApprove && <th className="w-10 px-3 py-2" />}
                 <th className="px-3 py-2"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-3 py-2"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Criado em" {...headerProps("criado")} /></th>
                 <th className="px-3 py-2"><ExcelHeaderCell label="Solicitante" menuSide="right" {...headerProps("solicitante")} /></th>
+                <th className="px-3 py-2 font-medium uppercase tracking-wide text-muted-foreground">Anexos</th>
                 <th className="px-3 py-2 font-medium text-right uppercase tracking-wide">Ações</th>
               </tr>
             </thead>
@@ -453,12 +477,12 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                           </span>
                         )}
                       </div>
-                      {supplier && (
-                        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                          {supplier.name}
-                          <SupplierNotApprovedBadge status={supplier.status} />
-                        </p>
-                      )}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {supplier?.name || req.favorecido || "—"}
+                        {supplier ? <SupplierNotApprovedBadge status={supplier.status} /> : null}
+                      </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       {req.is_rateio ? (
@@ -480,6 +504,31 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{formatDateBR(req.created_at)}</td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{req.creator ? (req.creator.name ?? req.creator.email) : "—"}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      {req.attachment_path ? (
+                        <button
+                          type="button"
+                          onClick={() => openAttachment(req.id)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                          title="Abrir o anexo principal (boleto/nota/contrato)"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          Anexo
+                        </button>
+                      ) : (req.extra_attachment_paths?.length ?? 0) > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => openModal(req, "detail")}
+                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                          title="Ver anexos nos detalhes"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          Anexos
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex shrink-0 flex-wrap justify-end gap-2">
                         <button

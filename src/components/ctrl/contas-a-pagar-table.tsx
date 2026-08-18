@@ -19,6 +19,7 @@ import {
   resolveSupplier,
   resolveNamed,
   fmt,
+  valueMatchesSearch,
   type Supplier,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
@@ -263,6 +264,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         if (sup?.name && sup.name.toLowerCase().includes(term)) return true;
         if (r.title.toLowerCase().includes(term)) return true;
         if (termDigits && String(r.request_number).startsWith(termDigits)) return true;
+        // Busca por VALOR (ex.: "222,60", "1.234,56", "1234").
+        if (valueMatchesSearch(r.amount, term)) return true;
         return false;
       })
       .sort((a, b) => b.request_number - a.request_number);
@@ -487,7 +490,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por fornecedor, título ou nº..."
+            placeholder="Buscar por fornecedor, título, nº ou valor..."
             className="w-full rounded-md border bg-background py-2 pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           {search && (
@@ -521,7 +524,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             : "Nenhuma requisição nesta categoria."}
         </div>
       ) : (
-        <div className="rounded-lg border">
+        <div className="rounded-lg border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
