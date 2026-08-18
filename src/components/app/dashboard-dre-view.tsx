@@ -798,10 +798,10 @@ export function DashboardDreView({
         const gridTemplate = `minmax(320px, 2.6fr) repeat(${gridCols}, minmax(100px, 1fr))`;
 
         return (
-          <div className="overflow-x-auto rounded-xl border bg-muted/50">
+          <div className="max-h-[calc(100vh-8rem)] overflow-auto rounded-xl border bg-muted/50">
             <div style={{ minWidth: `${320 + gridCols * 110}px` }}>
               {/* Header */}
-              <div className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
+              <div className="sticky top-0 z-20 grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>
                 <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
                 {orderedCols.map((col, idx) =>
                   col.type === "company" ? (
@@ -864,11 +864,18 @@ export function DashboardDreView({
         );
       })() : (
         // Standard mode: monthly columns + total
-        <div className="overflow-x-auto rounded-xl border bg-muted/50">
+        // A rolagem VERTICAL acontece dentro da tabela (max-h + overflow-auto),
+        // e nao na pagina: so assim o cabecalho com os meses pode ficar preso
+        // no topo (`sticky top-0`). Com `overflow-x-auto` o eixo Y vira `auto`
+        // do mesmo jeito, mas a caixa cresce com o conteudo e nunca rola, entao
+        // o sticky nao teria a que se prender. A altura maxima deixa a caixa
+        // caber sob a topbar quando a pagina esta rolada ate o fim; tabela curta
+        // nao ganha barra propria (max-h nao chega a limitar).
+        <div className="max-h-[calc(100vh-8rem)] overflow-auto rounded-xl border bg-muted/50">
           <div style={{ minWidth: `${320 + totalCols * 120}px` }}>
             {/* Header */}
             <div
-              className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground"
+              className="sticky top-0 z-20 grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground"
               style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
             >
               <span className="sticky left-0 z-10 bg-muted">Plano de Contas</span>
