@@ -121,6 +121,18 @@ function varColor(a: number, b: number, isExpense = false): string {
   return favorable ? "text-emerald-700" : "text-red-700";
 }
 
+// Celula de rotulo sticky em linhas com fundo TRANSLUCIDO (blocos "Fluxo de
+// Caixa", "Acumulados" e "Custodia"). Herdar o fundo tingido da linha deixa a
+// celula semitransparente: ao rolar na horizontal os valores passam POR BAIXO
+// do rotulo e aparecem atraves do tom, sobrepondo o texto do titulo. Aqui a
+// pilha e remontada com base OPACA: bg-background tampa a rolagem, ::before
+// repoe o bg-muted/50 do container e ::after o tom da propria linha — assim a
+// coluna fica com a mesma cor das celulas de valor, sem emenda visivel. O
+// z-index negativo mantem as duas camadas atras do texto e do chevron.
+function stickyLabelClass(tintClass: string) {
+  return `sticky left-0 z-[2] flex items-center gap-2 bg-background before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:bg-muted/50 before:content-[''] after:pointer-events-none after:absolute after:inset-0 after:-z-10 after:content-[''] ${tintClass}`;
+}
+
 const MONTHS = [
   { value: 1, label: "Janeiro" },
   { value: 2, label: "Fevereiro" },
@@ -974,7 +986,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-viva-500 bg-viva-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-viva-700"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span className="sticky left-0 z-[2] bg-transparent">Fluxo de Caixa</span>
+                  <span className={stickyLabelClass("after:bg-viva-500/10")}>Fluxo de Caixa</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`hl-h-${i}`} />
                   ))}
@@ -985,7 +997,7 @@ export function CashFlowView({
                     className="grid border-t border-viva-500/40 bg-viva-500/5 px-4 py-2 text-sm font-semibold"
                     style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                   >
-                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
+                    <div className={stickyLabelClass("after:bg-viva-500/5")}>
                       <span className="w-4" />
                       <span className="truncate">{row.name}</span>
                     </div>
@@ -1013,7 +1025,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-indigo-500 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span className="sticky left-0 z-[2] bg-transparent">Acumulados</span>
+                  <span className={stickyLabelClass("after:bg-indigo-500/10")}>Acumulados</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`acc-h-${i}`} />
                   ))}
@@ -1025,7 +1037,7 @@ export function CashFlowView({
                       className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
-                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
+                      <div className={stickyLabelClass("after:bg-indigo-500/10")}>
                         {accumulatedSection.aportes.partners.length > 0 ? (
                           <button
                             type="button"
@@ -1055,7 +1067,7 @@ export function CashFlowView({
                         className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
                         style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                       >
-                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit pl-4">
+                        <div className={`${stickyLabelClass("after:bg-indigo-500/[0.03]")} pl-4`}>
                           <span className="w-4" />
                           <span className="truncate text-muted-foreground">{p.name}</span>
                         </div>
@@ -1078,7 +1090,7 @@ export function CashFlowView({
                       className="grid border-t border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-bold uppercase"
                       style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                     >
-                      <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
+                      <div className={stickyLabelClass("after:bg-indigo-500/10")}>
                         {accumulatedSection.dividends.partners.length > 0 ? (
                           <button
                             type="button"
@@ -1108,7 +1120,7 @@ export function CashFlowView({
                         className="grid border-t border-indigo-500/20 bg-indigo-500/[0.03] px-4 py-2 text-sm"
                         style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                       >
-                        <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit pl-4">
+                        <div className={`${stickyLabelClass("after:bg-indigo-500/[0.03]")} pl-4`}>
                           <span className="w-4" />
                           <span className="truncate text-muted-foreground">{p.name}</span>
                         </div>
@@ -1137,7 +1149,7 @@ export function CashFlowView({
                   className="grid border-t-4 border-amber-400 bg-amber-400/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-amber-700"
                   style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                 >
-                  <span className="sticky left-0 z-[2] bg-transparent">{competenciaSection.title}</span>
+                  <span className={stickyLabelClass("after:bg-amber-400/10")}>{competenciaSection.title}</span>
                   {Array.from({ length: totalCols }).map((_, i) => (
                     <span key={`comp-h-${i}`} />
                   ))}
@@ -1153,7 +1165,7 @@ export function CashFlowView({
                     }`}
                     style={{ gridTemplateColumns: `minmax(320px, 2.6fr) repeat(${totalCols}, minmax(110px, 1fr))` }}
                   >
-                    <div className="sticky left-0 z-[2] flex items-center gap-2 bg-inherit">
+                    <div className={stickyLabelClass(line.emphasis ? "after:bg-amber-400/[0.06]" : "after:bg-amber-400/[0.02]")}>
                       <span className="w-4" />
                       <span className="truncate">{line.label}</span>
                     </div>
