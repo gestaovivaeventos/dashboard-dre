@@ -49,6 +49,7 @@ import {
   saveUsdBrlRate,
   saveUsdIofRate,
   setActiveProvider,
+  setOcrProvider,
   setUsdRateAuto,
   testProviderConnection,
   type AiPanelData,
@@ -240,6 +241,20 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
       setData((prev) => ({ ...prev, activeProvider: provider }));
       const label = data.providers.find((p) => p.provider === provider)?.label ?? provider;
       toast(true, `Provedor ativo: ${label}.`);
+    });
+  }
+
+  // Provedor dedicado à leitura de documentos (OCR). "" = usar o provedor geral.
+  function handleOcrChange(value: string) {
+    const provider = value === "__geral__" ? null : value;
+    startTransition(async () => {
+      const res = await setOcrProvider(provider);
+      if ("error" in res) return toast(false, res.error);
+      setData((prev) => ({ ...prev, ocrProvider: provider }));
+      const label = provider
+        ? data.providers.find((p) => p.provider === provider)?.label ?? provider
+        : "Provedor geral";
+      toast(true, `Provedor de OCR: ${label}.`);
     });
   }
 
@@ -447,10 +462,11 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
       {/* Provedor ativo */}
       <Card className="border-primary/40">
         <CardHeader>
-          <CardTitle className="text-lg">Provedor ativo</CardTitle>
+          <CardTitle className="text-lg">Provedor ativo (geral)</CardTitle>
           <CardDescription>
-            Vale para BI, relatórios, projeções, comparações e contratos. A leitura de documentos (OCR)
-            e a busca de preços na web (Viagens) usam recursos exclusivos da OpenAI e seguem sempre nela.
+            Vale para BI, relatórios, projeções, comparações e contratos. A leitura de documentos
+            (OCR de notas/boletos) tem provedor próprio, configurado logo abaixo. A busca de preços na
+            web (Viagens) usa recursos exclusivos da OpenAI e segue sempre nela.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -470,6 +486,45 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
           </div>
           <Badge variant="secondary" className="w-fit">
             Em uso: {data.providers.find((p) => p.provider === data.activeProvider)?.label ?? data.activeProvider}
+          </Badge>
+        </CardContent>
+      </Card>
+
+      {/* Provedor de leitura de documentos (OCR) — separado do geral */}
+      <Card className="border-primary/40">
+        <CardHeader>
+          <CardTitle className="text-lg">Provedor de leitura de documentos (OCR)</CardTitle>
+          <CardDescription>
+            IA usada só para LER notas fiscais e boletos (Compras) e contratos (CASE). Escolha um
+            provedor com visão (ex.: Google Gemini). Para usar o Gemini, configure a chave dele no
+            card do provedor mais abaixo. Se ficar em “Provedor geral”, o OCR usa a OpenAI (visão).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="w-full sm:w-72">
+            <Select
+              value={data.ocrProvider ?? "__geral__"}
+              onValueChange={handleOcrChange}
+              disabled={pending}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__geral__">Provedor geral (OpenAI para OCR)</SelectItem>
+                {data.providers.map((p) => (
+                  <SelectItem key={p.provider} value={p.provider}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Badge variant="secondary" className="w-fit">
+            OCR:{" "}
+            {data.ocrProvider
+              ? data.providers.find((p) => p.provider === data.ocrProvider)?.label ?? data.ocrProvider
+              : "Provedor geral"}
           </Badge>
         </CardContent>
       </Card>

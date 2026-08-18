@@ -133,6 +133,8 @@ export const DEFAULT_USD_BRL_RATE = 5.5;
 
 interface AiConfigRow {
   active_provider: AiProviderName;
+  // Provedor DEDICADO à leitura de documentos (OCR). null = usa o active_provider.
+  ocr_provider: AiProviderName | null;
   usd_brl_rate: number | string | null;
   model_prices: Record<string, ModelPrice> | null;
 }
@@ -208,6 +210,13 @@ export async function resolveAiProvider(
      * houver chave para o provedor pedido, a função lança normalmente.
      */
     forceProvider?: AiProviderName;
+    /**
+     * "ocr" resolve o provedor DEDICADO à leitura de documentos
+     * (ai_config.ocr_provider) em vez do provedor geral — e confia que ele faz
+     * visão (não força OpenAI). Sem OCR configurado (ou sem chave), cai no
+     * comportamento anterior (visão → OpenAI).
+     */
+    role?: "ocr";
   } = {},
 ): Promise<ResolvedAiProvider> {
   const capability = opts.capability ?? "text";
@@ -219,7 +228,11 @@ export async function resolveAiProvider(
   if (db) {
     try {
       const [{ data: cfgData }, { data: provData }] = await Promise.all([
-        db.from("ai_config").select("active_provider, usd_brl_rate, model_prices").eq("id", 1).maybeSingle(),
+        // `*` (não colunas explícitas): se a migração do `ocr_provider` ainda não
+        // rodou, um select nominal dela devolveria erro e derrubaria a config
+        // INTEIRA (o BI cairia na OpenAI). Com `*`, a coluna ausente só vem
+        // undefined e o resto segue normal.
+        db.from("ai_config").select("*").eq("id", 1).maybeSingle(),
         db.from("ai_provider_settings").select("provider, label, base_url, enabled, api_key_encrypted, model"),
       ]);
       cfg = (cfgData as AiConfigRow | null) ?? null;
@@ -233,9 +246,23 @@ export async function resolveAiProvider(
   const usdBrlRate = Number(cfg?.usd_brl_rate) || DEFAULT_USD_BRL_RATE;
   const rowFor = (name: AiProviderName) => rows.find((r) => r.provider === name) ?? null;
 
-  // 1. Provedor desejado (forçado > config), com override de capacidade.
-  let activeName: AiProviderName = opts.forceProvider ?? cfg?.active_provider ?? "openai";
-  if (!providerSupports(activeName, capability)) activeName = "openai";
+  // 1. Provedor desejado (forçado > OCR dedicado > config ativo), com override de
+  //    capacidade. Para role "ocr" com provedor de OCR escolhido, confiamos que
+  //    ele faz visão e NÃO forçamos OpenAI (é justamente pra isso que foi
+  //    escolhido). Sem OCR dedicado, mantém o comportamento antigo (visão →
+  //    OpenAI). Se o provedor de OCR não tiver chave, o passo 3 abaixo já cai
+  //    para OpenAI — então nada quebra antes de configurar a chave.
+  const wantsOcr = opts.role === "ocr";
+  const ocrConfigured = wantsOcr && Boolean(cfg?.ocr_provider);
+  // role "ocr" É leitura de documento (visão). Sem OCR dedicado configurado, cai
+  // no comportamento antigo: força OpenAI (a visão só a OpenAI faz no stack) —
+  // NUNCA o provedor de texto (DeepSeek), que não lê imagem.
+  const effCapability: AiCapability = wantsOcr && !ocrConfigured ? "vision" : capability;
+  let activeName: AiProviderName =
+    opts.forceProvider ??
+    (ocrConfigured ? (cfg?.ocr_provider as AiProviderName) : cfg?.active_provider) ??
+    "openai";
+  if (!ocrConfigured && !providerSupports(activeName, effCapability)) activeName = "openai";
 
   // 2. Se o provedor ativo está desabilitado no painel, cai para OpenAI.
   const activeRow = rowFor(activeName);
