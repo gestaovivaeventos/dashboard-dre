@@ -354,7 +354,8 @@ export async function getAiPanelData(): Promise<AiPanelData> {
   const [{ data: cfg }, { data: provRows }] = await Promise.all([
     db
       .from("ai_config")
-      .select("active_provider, ocr_provider, usd_brl_rate, usd_brl_auto, usd_brl_updated_at, usd_iof_rate, model_prices")
+      // `*` para não quebrar se a coluna `ocr_provider` ainda não foi migrada.
+      .select("*")
       .eq("id", 1)
       .maybeSingle(),
     db.from("ai_provider_settings").select("provider, label, base_url, enabled, api_key_encrypted, model"),

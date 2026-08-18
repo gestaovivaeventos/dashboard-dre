@@ -228,7 +228,11 @@ export async function resolveAiProvider(
   if (db) {
     try {
       const [{ data: cfgData }, { data: provData }] = await Promise.all([
-        db.from("ai_config").select("active_provider, ocr_provider, usd_brl_rate, model_prices").eq("id", 1).maybeSingle(),
+        // `*` (não colunas explícitas): se a migração do `ocr_provider` ainda não
+        // rodou, um select nominal dela devolveria erro e derrubaria a config
+        // INTEIRA (o BI cairia na OpenAI). Com `*`, a coluna ausente só vem
+        // undefined e o resto segue normal.
+        db.from("ai_config").select("*").eq("id", 1).maybeSingle(),
         db.from("ai_provider_settings").select("provider, label, base_url, enabled, api_key_encrypted, model"),
       ]);
       cfg = (cfgData as AiConfigRow | null) ?? null;
@@ -248,12 +252,17 @@ export async function resolveAiProvider(
   //    escolhido). Sem OCR dedicado, mantém o comportamento antigo (visão →
   //    OpenAI). Se o provedor de OCR não tiver chave, o passo 3 abaixo já cai
   //    para OpenAI — então nada quebra antes de configurar a chave.
-  const ocrConfigured = opts.role === "ocr" && Boolean(cfg?.ocr_provider);
+  const wantsOcr = opts.role === "ocr";
+  const ocrConfigured = wantsOcr && Boolean(cfg?.ocr_provider);
+  // role "ocr" É leitura de documento (visão). Sem OCR dedicado configurado, cai
+  // no comportamento antigo: força OpenAI (a visão só a OpenAI faz no stack) —
+  // NUNCA o provedor de texto (DeepSeek), que não lê imagem.
+  const effCapability: AiCapability = wantsOcr && !ocrConfigured ? "vision" : capability;
   let activeName: AiProviderName =
     opts.forceProvider ??
     (ocrConfigured ? (cfg?.ocr_provider as AiProviderName) : cfg?.active_provider) ??
     "openai";
-  if (!ocrConfigured && !providerSupports(activeName, capability)) activeName = "openai";
+  if (!ocrConfigured && !providerSupports(activeName, effCapability)) activeName = "openai";
 
   // 2. Se o provedor ativo está desabilitado no painel, cai para OpenAI.
   const activeRow = rowFor(activeName);
