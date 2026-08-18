@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Paperclip, Search, X
 import { createRequest, verifyBudget } from "@/lib/ctrl/actions/requests";
 import { extractAttachmentData } from "@/lib/ctrl/actions/attachment-ocr";
 import { MAX_ATTACHMENT_SIZE, uploadCtrlAttachment } from "@/lib/ctrl/attachment-upload";
+import { maskPixTelefone, pixTelefoneIsComplete } from "@/lib/ctrl/bancos";
 import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
 import { currentMonthBR, currentYearBR } from "@/lib/ctrl/datetime";
 import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
@@ -620,6 +621,18 @@ export function NovaRequisicaoForm({
       return;
     }
 
+    // Chave PIX de telefone digitada manualmente: exige os 11 dígitos (DDD +
+    // celular). Quando a chave vem do fornecedor cadastrado, não revalida aqui.
+    if (
+      paymentMethod === "pix" &&
+      pixKeyType === "telefone" &&
+      !selectedSupplier &&
+      !pixTelefoneIsComplete(pixKey)
+    ) {
+      setError("A chave PIX de telefone está incompleta. Informe os 11 dígitos (DDD + número).");
+      return;
+    }
+
     // Defensive due-date check: HTML `min` is enforced by most browsers but
     // some mobile webviews ignore it. Belt + suspenders.
     if (dueDate && dueDate < minDueDate) {
@@ -1121,7 +1134,34 @@ export function NovaRequisicaoForm({
           </div>
           <div className="space-y-1.5">
             <label htmlFor="pix_key" className={LABEL_CLS}>Chave PIX</label>
-            <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
+            {pixKeyType === "telefone" && !selectedSupplier ? (
+              // Telefone (chave manual): +55 fixo (exigência da Omie) + máscara
+              // nacional (XX) XXXXX-XXXX. Vai normalizado para +55DDDNUMERO no envio.
+              <>
+                <div className="flex">
+                  <span className="inline-flex items-center rounded-l-md border border-r-0 bg-muted px-3 text-sm text-muted-foreground">
+                    +55
+                  </span>
+                  <input
+                    id="pix_key"
+                    name="pix_key"
+                    type="tel"
+                    inputMode="numeric"
+                    value={maskPixTelefone(pixKey)}
+                    onChange={(e) => setPixKey(maskPixTelefone(e.target.value))}
+                    placeholder="(11) 99999-9999"
+                    className={`${INPUT_CLS} rounded-l-none`}
+                  />
+                </div>
+                {pixKey.trim() && !pixTelefoneIsComplete(pixKey) && (
+                  <p className="text-xs text-destructive">
+                    Telefone incompleto — informe os 11 dígitos (DDD + número).
+                  </p>
+                )}
+              </>
+            ) : (
+              <input id="pix_key" name="pix_key" type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} disabled={!!selectedSupplier} placeholder="Informe a chave" className={INPUT_CLS} />
+            )}
           </div>
           <div className="space-y-1.5">
             <label htmlFor="favorecido" className={LABEL_CLS}>Favorecido</label>

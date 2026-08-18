@@ -12,7 +12,13 @@ import {
   resyncSupplierOmie,
   type SupplierAttachment,
 } from "@/lib/ctrl/actions/suppliers";
-import { BANCOS_BR, PIX_KEY_TYPES, formatBanco } from "@/lib/ctrl/bancos";
+import {
+  BANCOS_BR,
+  PIX_KEY_TYPES,
+  formatBanco,
+  maskPixTelefone,
+  pixTelefoneIsComplete,
+} from "@/lib/ctrl/bancos";
 import {
   UFS_BR,
   cepDigits,
@@ -213,6 +219,15 @@ export function FornecedoresTable({
         );
         return;
       }
+    }
+    // Chave PIX de telefone: exige os 11 dígitos (DDD + celular).
+    if (
+      editForm.pix_key_type === "telefone" &&
+      editForm.chave_pix.trim() &&
+      !pixTelefoneIsComplete(editForm.chave_pix)
+    ) {
+      setEditError("A chave PIX de telefone está incompleta. Informe os 11 dígitos (DDD + número).");
+      return;
     }
     setEditSaving(true);
     setEditError(null);
@@ -1017,12 +1032,42 @@ export function FornecedoresTable({
                         ...PIX_KEY_TYPES.map((p) => ({ value: p.value, label: p.label })),
                       ]}
                     />
-                    <EditField
-                      label="Chave PIX"
-                      value={editForm.chave_pix}
-                      onChange={(v) => setEditForm({ ...editForm, chave_pix: v })}
-                      mono
-                    />
+                    {editForm.pix_key_type === "telefone" ? (
+                      // Telefone: +55 fixo (exigência da Omie) + máscara nacional
+                      // (XX) XXXXX-XXXX. Vai normalizado para +55DDDNUMERO ao salvar.
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Chave PIX
+                        </label>
+                        <div className="flex">
+                          <span className="inline-flex items-center rounded-l-md border border-r-0 bg-muted px-3 text-sm text-muted-foreground">
+                            +55
+                          </span>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            value={maskPixTelefone(editForm.chave_pix)}
+                            onChange={(e) =>
+                              setEditForm({ ...editForm, chave_pix: maskPixTelefone(e.target.value) })
+                            }
+                            placeholder="(11) 99999-9999"
+                            className="w-full rounded-l-none rounded-r-md border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </div>
+                        {editForm.chave_pix.trim() && !pixTelefoneIsComplete(editForm.chave_pix) && (
+                          <p className="text-xs text-destructive">
+                            Telefone incompleto — informe os 11 dígitos (DDD + número).
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <EditField
+                        label="Chave PIX"
+                        value={editForm.chave_pix}
+                        onChange={(v) => setEditForm({ ...editForm, chave_pix: v })}
+                        mono
+                      />
+                    )}
                     <EditSelect
                       label="Banco"
                       value={editForm.banco}

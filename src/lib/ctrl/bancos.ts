@@ -95,11 +95,33 @@ export interface PixKeyTypeOption {
 export function normalizePixTelefone(raw: string | null | undefined): string {
   const s = String(raw ?? "").trim();
   if (!s) return "";
-  let digits = s.replace(/\D/g, "");
+  const digits = pixTelefoneNacionalDigits(s);
   if (!digits) return "";
-  // Remove o código do país se já veio embutido (55 + 10/11 dígitos nacionais).
-  if (digits.length >= 12 && digits.startsWith("55")) digits = digits.slice(2);
   return `+55${digits}`;
+}
+
+// Dígitos NACIONAIS do telefone (sem o código do país +55), no máximo 11
+// (2 do DDD + 9 do celular). Aceita entrada mascarada ou já com +55/55 embutido.
+export function pixTelefoneNacionalDigits(raw: string | null | undefined): string {
+  let digits = String(raw ?? "").replace(/\D/g, "");
+  // Remove o código do país se veio embutido (55 + 10/11 dígitos nacionais).
+  if (digits.length >= 12 && digits.startsWith("55")) digits = digits.slice(2);
+  return digits.slice(0, 11);
+}
+
+// Máscara VISUAL da parte nacional do telefone (sem o +55): (XX) XXXXX-XXXX.
+// O +55 é mostrado fixo na tela e só entra no valor ao enviar para a Omie
+// (normalizePixTelefone) — que exige o formato internacional.
+export function maskPixTelefone(raw: string | null | undefined): string {
+  const d = pixTelefoneNacionalDigits(raw);
+  if (d.length <= 2) return d ? `(${d}` : "";
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+// true quando o telefone tem os 11 dígitos (DDD + celular).
+export function pixTelefoneIsComplete(raw: string | null | undefined): boolean {
+  return pixTelefoneNacionalDigits(raw).length === 11;
 }
 
 export const PIX_KEY_TYPES: PixKeyTypeOption[] = [

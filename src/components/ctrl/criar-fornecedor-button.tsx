@@ -7,7 +7,15 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { ExpenseTypePicker } from "@/components/ctrl/expense-type-picker";
 import { createSupplier } from "@/lib/ctrl/actions/suppliers";
 import { MAX_ATTACHMENT_SIZE, uploadCtrlAttachment } from "@/lib/ctrl/attachment-upload";
-import { BANCOS_BR, PIX_KEY_TYPES, formatBanco, normalizePixTelefone, type PixKeyType } from "@/lib/ctrl/bancos";
+import {
+  BANCOS_BR,
+  PIX_KEY_TYPES,
+  formatBanco,
+  maskPixTelefone,
+  normalizePixTelefone,
+  pixTelefoneIsComplete,
+  type PixKeyType,
+} from "@/lib/ctrl/bancos";
 import { CNPJ_LENGTH, CPF_LENGTH, cnpjIsComplete, maskCnpj } from "@/lib/ctrl/cnpj";
 import {
   UFS_BR,
@@ -287,6 +295,13 @@ export function CriarFornecedorButton({
       : form.cnpj_cpf.replace(/\D/g, "").length < CPF_LENGTH;
   }, [form.estrangeiro, form.cnpj_cpf, form.personType]);
 
+  // Chave PIX de telefone com menos de 11 dígitos (DDD + celular). Só vale
+  // quando o tipo é telefone e há algo digitado.
+  const telefonePixIncompleto = useMemo(() => {
+    if (form.pix_key_type !== "telefone" || !form.chave_pix.trim()) return false;
+    return !pixTelefoneIsComplete(form.chave_pix);
+  }, [form.pix_key_type, form.chave_pix]);
+
   // Só pinta o campo de vermelho depois que o usuário tentou salvar.
   function invalidCls(isMissing: boolean) {
     return submitAttempted && isMissing ? ` ${INVALID_CLS}` : "";
@@ -358,6 +373,11 @@ export function CriarFornecedorButton({
     }
     if (form.pix_key_type && !form.chave_pix.trim()) {
       setError("Informe a chave PIX correspondente ao tipo selecionado.");
+      return;
+    }
+    // Chave PIX de telefone: exige os 11 dígitos (DDD + celular).
+    if (telefonePixIncompleto) {
+      setError("A chave PIX de telefone está incompleta. Informe os 11 dígitos (DDD + número).");
       return;
     }
     if (pixMissing.length) {
@@ -939,25 +959,54 @@ export function CriarFornecedorButton({
                       <label htmlFor="new-supplier-pix" className={LABEL_CLS}>
                         Chave {form.pix_padrao && <span className="text-destructive">*</span>}
                       </label>
-                      <input
-                        id="new-supplier-pix"
-                        type="text"
-                        value={form.chave_pix}
-                        onChange={(e) => update("chave_pix", e.target.value)}
-                        onBlur={(e) => {
-                          if (form.pix_key_type === "telefone" && e.target.value.trim()) {
-                            update("chave_pix", normalizePixTelefone(e.target.value));
-                          }
-                        }}
-                        placeholder={pixTypeOption?.placeholder ?? "Selecione o tipo primeiro"}
-                        disabled={!form.pix_key_type}
-                        required={form.pix_padrao}
-                        className={`${INPUT_CLS} font-mono disabled:opacity-60${invalidCls(
-                          pixMissing.includes("Chave"),
-                        )}`}
-                      />
-                      {pixTypeOption && (
-                        <p className="text-xs text-muted-foreground">{pixTypeOption.hint}</p>
+                      {form.pix_key_type === "telefone" ? (
+                        // Telefone: +55 fixo (a Omie exige) + máscara nacional
+                        // (XX) XXXXX-XXXX. O valor vai normalizado para +55DDDNUMERO no envio.
+                        <div className="flex">
+                          <span className="inline-flex items-center rounded-l-md border border-r-0 bg-muted px-3 text-sm text-muted-foreground">
+                            +55
+                          </span>
+                          <input
+                            id="new-supplier-pix"
+                            type="tel"
+                            inputMode="numeric"
+                            value={maskPixTelefone(form.chave_pix)}
+                            onChange={(e) => update("chave_pix", maskPixTelefone(e.target.value))}
+                            placeholder="(11) 99999-9999"
+                            required={form.pix_padrao}
+                            className={`${INPUT_CLS} rounded-l-none font-mono${invalidCls(
+                              pixMissing.includes("Chave") || telefonePixIncompleto,
+                            )}`}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          id="new-supplier-pix"
+                          type="text"
+                          value={form.chave_pix}
+                          onChange={(e) => update("chave_pix", e.target.value)}
+                          placeholder={pixTypeOption?.placeholder ?? "Selecione o tipo primeiro"}
+                          disabled={!form.pix_key_type}
+                          required={form.pix_padrao}
+                          className={`${INPUT_CLS} font-mono disabled:opacity-60${invalidCls(
+                            pixMissing.includes("Chave"),
+                          )}`}
+                        />
+                      )}
+                      {form.pix_key_type === "telefone" ? (
+                        submitAttempted && telefonePixIncompleto ? (
+                          <p className="text-xs text-destructive">
+                            Telefone incompleto — informe os 11 dígitos (DDD + número).
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Digite só o DDD e o número; o +55 já está fixo. São 11 dígitos.
+                          </p>
+                        )
+                      ) : (
+                        pixTypeOption && (
+                          <p className="text-xs text-muted-foreground">{pixTypeOption.hint}</p>
+                        )
                       )}
                     </div>
                     <label className="flex items-center gap-2 text-sm sm:col-span-2">
