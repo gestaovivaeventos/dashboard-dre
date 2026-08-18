@@ -174,6 +174,8 @@ export interface AiProviderView {
 
 export interface AiPanelData {
   activeProvider: AiProviderName;
+  /** Provedor dedicado à leitura de documentos (OCR). null = usa o geral. */
+  ocrProvider: AiProviderName | null;
   usdBrlRate: number;
   usdBrlAuto: boolean;
   usdBrlUpdatedAt: string | null;
@@ -352,7 +354,7 @@ export async function getAiPanelData(): Promise<AiPanelData> {
   const [{ data: cfg }, { data: provRows }] = await Promise.all([
     db
       .from("ai_config")
-      .select("active_provider, usd_brl_rate, usd_brl_auto, usd_brl_updated_at, usd_iof_rate, model_prices")
+      .select("active_provider, ocr_provider, usd_brl_rate, usd_brl_auto, usd_brl_updated_at, usd_iof_rate, model_prices")
       .eq("id", 1)
       .maybeSingle(),
     db.from("ai_provider_settings").select("provider, label, base_url, enabled, api_key_encrypted, model"),
@@ -437,6 +439,7 @@ export async function getAiPanelData(): Promise<AiPanelData> {
 
   return {
     activeProvider: (cfg?.active_provider as AiProviderName) ?? "openai",
+    ocrProvider: (cfg?.ocr_provider as AiProviderName | null) ?? null,
     usdBrlRate,
     usdBrlAuto,
     usdBrlUpdatedAt,
@@ -470,6 +473,28 @@ export async function setActiveProvider(
   const { error } = await db
     .from("ai_config")
     .update({ active_provider: slug, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/ia");
+  return { ok: true };
+}
+
+// Escolhe o provedor DEDICADO à leitura de documentos (OCR de boletos/notas/
+// contratos). null/"" = usar o provedor geral (active_provider). Igual ao
+// setActiveProvider, valida que o provedor existe.
+export async function setOcrProvider(
+  provider: string | null,
+): Promise<{ ok: true } | { error: string }> {
+  await requireAdmin();
+  const slug = (provider ?? "").trim();
+  const db = createAdminClient();
+  if (slug && !isBuiltin(slug)) {
+    const { data } = await db.from("ai_provider_settings").select("provider").eq("provider", slug).maybeSingle();
+    if (!data) return { error: "Provedor não encontrado." };
+  }
+  const { error } = await db
+    .from("ai_config")
+    .update({ ocr_provider: slug || null, updated_at: new Date().toISOString() })
     .eq("id", 1);
   if (error) return { error: error.message };
   revalidatePath("/admin/ia");

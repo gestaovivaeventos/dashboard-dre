@@ -203,9 +203,10 @@ export async function extractAttachmentData(
   const notaDoTexto = kind === "nota" && pdfText ? await readNotaFromText(pdfText) : null;
   if (notaDoTexto?.invoice_number) return { data: notaDoTexto };
 
-  // ── Caminho 2: visão, sempre OpenAI (o resolver força, mesmo com outro
-  // provedor ativo). O consumo é registrado para aparecer no painel de IA. ────
-  const resolved = await resolveAiProvider({ capability: "vision" }).catch((e: unknown) =>
+  // ── Caminho 2: visão. Usa o provedor DEDICADO à leitura de documentos
+  // (Plataforma > IA → "Provedor de OCR" — ex.: Gemini). Sem OCR configurado/sem
+  // chave, o resolver cai na OpenAI (visão), como antes. Consumo no painel. ────
+  const resolved = await resolveAiProvider({ role: "ocr" }).catch((e: unknown) =>
     e instanceof Error ? e : new Error(String(e)),
   );
   if (resolved instanceof Error) {
@@ -228,11 +229,15 @@ export async function extractAttachmentData(
         };
 
   const provider = resolved.provider;
+  // Modelo por provedor: a OpenAI usa gpt-4o (visão); qualquer outro provedor de
+  // OCR (ex.: Gemini) usa o modelo configurado dele.
+  const isOpenAiOcr = resolved.providerName === "openai";
+  const ocrModelName = isOpenAiOcr ? OCR_MODEL : resolved.modelName;
 
   try {
     if (kind === "nota") {
       const { object, usage } = await generateObject({
-        model: provider(OCR_MODEL),
+        model: provider(ocrModelName),
         schema: NotaSchema,
         messages: [
           {
@@ -250,7 +255,7 @@ export async function extractAttachmentData(
           },
         ],
       });
-      await logResolvedUsage(resolved, "ocr", usage, { modelName: OCR_MODEL });
+      await logResolvedUsage(resolved, "ocr", usage, { modelName: ocrModelName });
       return {
         data: {
           invoice_number: cleanInvoice(object.invoice_number),
@@ -262,7 +267,7 @@ export async function extractAttachmentData(
     }
 
     const { object, usage } = await generateObject({
-      model: provider(OCR_MODEL),
+      model: provider(ocrModelName),
       schema: BoletoSchema,
       messages: [
         {
@@ -283,7 +288,7 @@ export async function extractAttachmentData(
         },
       ],
     });
-    await logResolvedUsage(resolved, "ocr", usage, { modelName: OCR_MODEL });
+    await logResolvedUsage(resolved, "ocr", usage, { modelName: ocrModelName });
     return {
       data: {
         // A linha lida do texto do PDF vem na frente: os DVs já conferiram cada

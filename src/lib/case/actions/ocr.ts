@@ -197,7 +197,7 @@ async function readContractDoc<T extends z.ZodTypeAny>(
   attachmentPath: string,
   opts: { schema: T; schemaHint: string; instrucao: string; system: string },
 ): Promise<{ object: z.infer<T> } | { error: string }> {
-  const resolved = await resolveAiProvider({ capability: "text" }).catch(() => null);
+  const resolved = await resolveAiProvider({ role: "ocr" }).catch(() => null);
   if (!resolved) {
     return { error: "Leitura automática indisponível: configure o provedor de IA em Plataforma > IA." };
   }
