@@ -233,11 +233,11 @@ function MediaRow({
             ) : item.manual ? (
               "editada manualmente"
             ) : item.calculadoEm ? (
-              `${item.mesesConsiderados ?? item.realizado.mesesComValor} de 12 meses`
+              `média sobre ${item.mesesConsiderados ?? item.realizado.mesesConsiderados} mês(es) fechado(s)`
             ) : item.realizado.media == null ? (
               `sem realizado em ${baseYear}`
             ) : (
-              `${item.realizado.mesesComValor} de 12 meses`
+              `média sobre ${item.realizado.mesesConsiderados} mês(es) fechado(s)`
             )}
           </div>
         </td>
@@ -284,31 +284,40 @@ function MediaRow({
           <td colSpan={4} className="px-3 pb-3 pt-1">
             <div className="rounded-md border bg-background p-3">
               <p className="mb-2 text-xs font-medium text-muted-foreground">
-                Realizado {baseYear} (Omie) — meses sem pagamento não entram na média
+                Realizado {baseYear} (Omie) — mês fechado zerado entra como 0; o mês em curso e os
+                futuros ficam de fora até fecharem
               </p>
               <div className="grid grid-cols-6 gap-2 sm:grid-cols-12">
-                {item.realizado.meses.map((v, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "rounded border px-1.5 py-1 text-center",
-                      v == null ? "border-dashed text-muted-foreground/60" : "bg-muted/30",
-                    )}
-                  >
-                    <div className="text-[10px] uppercase text-muted-foreground">{MESES[i]}</div>
-                    <div className="text-[11px] tabular-nums">
-                      {v == null ? "—" : formatBRL(v)}
+                {item.realizado.meses.map((v, i) => {
+                  const fechado = i < item.realizado.mesesConsiderados;
+                  return (
+                    <div
+                      key={i}
+                      title={fechado ? undefined : "mês ainda não fechado — fora da média"}
+                      className={cn(
+                        "rounded border px-1.5 py-1 text-center",
+                        !fechado
+                          ? "border-dashed text-muted-foreground/50"
+                          : v == null
+                            ? "bg-muted/30 text-muted-foreground"
+                            : "bg-muted/30",
+                      )}
+                    >
+                      <div className="text-[10px] uppercase text-muted-foreground">{MESES[i]}</div>
+                      <div className="text-[11px] tabular-nums">
+                        {!fechado ? "—" : formatBRL(v ?? 0)}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
                 <span>
                   Total: <span className="tabular-nums text-foreground">{formatBRL(item.realizado.total)}</span>
                 </span>
                 <span>
-                  Meses com pagamento:{" "}
-                  <span className="tabular-nums text-foreground">{item.realizado.mesesComValor}</span>
+                  Meses considerados:{" "}
+                  <span className="tabular-nums text-foreground">{item.realizado.mesesConsiderados}</span>
                 </span>
                 <span>
                   Média:{" "}
@@ -470,8 +479,9 @@ export function MediaCorrecaoManager({
         <>
           <p className="text-sm text-muted-foreground">
             {items.length} categoria(s) orçada(s) por média. A média usa o realizado de{" "}
-            <span className="font-medium text-foreground">{baseYear}</span> (Omie); meses sem
-            pagamento no ano-base não entram no cálculo.
+            <span className="font-medium text-foreground">{baseYear}</span> (Omie) sobre os meses já
+            fechados — um mês fechado sem pagamento conta como 0; o mês em curso só entra depois de
+            fechar.
           </p>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
