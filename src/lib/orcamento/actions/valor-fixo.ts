@@ -7,7 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import { INDICES, type IndiceKey } from "@/lib/orcamento/indices";
+import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
 const PATH = "/orcamento";
 
@@ -24,10 +24,13 @@ export interface ValorFixoItem {
   mesReajuste: number | null;
 }
 
-/** Índice de correção disponível, com o valor (%) do ano do orçamento. */
+/** Índice de correção disponível, com o valor do ano do orçamento. */
 export interface IndiceOption {
   key: IndiceKey;
   label: string;
+  /** 'percent' (base × (1+%)) ou 'brl' (o valor corrigido É o próprio índice). */
+  unit: IndiceUnit;
+  /** Percentual, ou o próprio valor em R$ quando unit='brl' (salário mínimo). */
   value: number | null;
 }
 
@@ -42,9 +45,9 @@ function db() {
   return createAdminClientIfAvailable();
 }
 
-/** Só os índices percentuais servem para correção (salário mínimo é valor R$). */
-const INDICES_PERCENT = INDICES.filter((i) => i.unit === "percent");
-const INDICE_KEYS = new Set<string>(INDICES_PERCENT.map((i) => i.key));
+// Todos os índices servem de correção no valor fixo: os percentuais aplicam
+// base × (1+%); o salário mínimo (unit 'brl') substitui pelo próprio valor em R$.
+const INDICE_KEYS = new Set<string>(INDICES.map((i) => i.key));
 
 function isIndiceKey(value: unknown): value is IndiceKey {
   return typeof value === "string" && INDICE_KEYS.has(value);
@@ -86,16 +89,18 @@ export async function getValorFixoCategorias(
 
   const supabase = db() ?? (await createClient());
 
-  // Índices percentuais do ano do orçamento (para o seletor de correção).
+  // Índices do ano do orçamento (para o seletor de correção). Inclui o salário
+  // mínimo, cujo valor cadastrado é o próprio orçado quando escolhido.
   const { data: indiceRowRaw } = await supabase
     .from("orcamento_indices")
     .select("*")
     .eq("year", year)
     .maybeSingle();
   const indiceRow = (indiceRowRaw ?? null) as Record<string, number | null> | null;
-  const indices: IndiceOption[] = INDICES_PERCENT.map((meta) => ({
+  const indices: IndiceOption[] = INDICES.map((meta) => ({
     key: meta.key,
     label: meta.label,
+    unit: meta.unit,
     value: indiceRow?.[meta.key] == null ? null : Number(indiceRow[meta.key]),
   }));
 

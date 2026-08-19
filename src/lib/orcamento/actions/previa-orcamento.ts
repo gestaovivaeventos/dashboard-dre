@@ -15,7 +15,10 @@ import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
-import type { IndiceKey } from "@/lib/orcamento/indices";
+import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
+
+/** Unidade de cada índice (percent × brl), para o valor fixo corrigir certo. */
+const INDICE_UNIT = new Map<string, IndiceUnit>(INDICES.map((i) => [i.key, i.unit]));
 
 // =============================================================================
 // Prévia do Orçamento — a DRE da empresa preenchida com os valores ORÇADOS.
@@ -254,7 +257,9 @@ export async function getPreviaOrcamento(
           continue;
         }
         const mes = snap?.mes_reajuste == null ? null : Number(snap.mes_reajuste);
-        const meses = projetarValorFixoSerie(base, indicePercent(snap?.indice_key ?? null), mes);
+        // O salário mínimo corrige por valor absoluto (unit 'brl'); os demais, %.
+        const unit = INDICE_UNIT.get(snap?.indice_key ?? "") ?? "percent";
+        const meses = projetarValorFixoSerie(base, indicePercent(snap?.indice_key ?? null), mes, unit);
         if (somar(meses) === 0) {
           valorFixoSemValor += 1;
           continue;

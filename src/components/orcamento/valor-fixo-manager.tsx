@@ -13,7 +13,7 @@ import {
 } from "@/lib/orcamento/actions/valor-fixo";
 import { projetarValorFixoSerie, corrigirValorFixo } from "@/lib/orcamento/valor-fixo-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
-import type { IndiceKey } from "@/lib/orcamento/indices";
+import { formatIndice, type IndiceKey } from "@/lib/orcamento/indices";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -141,9 +141,10 @@ function ValorFixoRow({
 
   const indiceSel = indices.find((i) => i.key === item.indiceKey) ?? null;
   const indiceValue = indiceSel?.value ?? null;
+  const indiceUnit = indiceSel?.unit ?? "percent";
   const indiceIndefinido = item.indiceKey != null && indiceValue == null;
-  const corrigido = corrigirValorFixo(item.valorBase, indiceValue);
-  const serie = projetarValorFixoSerie(item.valorBase, indiceValue, item.mesReajuste);
+  const corrigido = corrigirValorFixo(item.valorBase, indiceValue, indiceUnit);
+  const serie = projetarValorFixoSerie(item.valorBase, indiceValue, item.mesReajuste, indiceUnit);
   const totalAno = serie.reduce((a, b) => a + b, 0);
   // Reajuste com índice escolhido mas sem mês → o reajuste ainda não vale.
   const faltaMes = item.valorBase != null && item.indiceKey != null && item.mesReajuste == null;
@@ -196,7 +197,7 @@ function ValorFixoRow({
             {indices.map((i) => (
               <option key={i.key} value={i.key}>
                 {i.label}
-                {i.value != null ? ` — ${i.value.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%` : " — n/d"}
+                {i.value != null ? ` — ${formatIndice(i.value, i.unit)}` : " — n/d"}
               </option>
             ))}
           </select>
