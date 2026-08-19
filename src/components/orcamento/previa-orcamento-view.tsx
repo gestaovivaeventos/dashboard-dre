@@ -164,6 +164,17 @@ export function PreviaOrcamentoView({ companyId, year }: { companyId: string; ye
               )}
             </span>
           )}
+          {resumo.valorFixoCategorias > 0 && (
+            <span className="text-muted-foreground">
+              Valor fixo: {resumo.valorFixoCategorias} categoria(s)
+              {resumo.valorFixoSemValor > 0 && (
+                <span className="text-amber-600 dark:text-amber-500">
+                  {" "}
+                  · {resumo.valorFixoSemValor} sem valor
+                </span>
+              )}
+            </span>
+          )}
         </div>
         <button
           type="button"

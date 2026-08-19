@@ -12,6 +12,7 @@ import {
   type DashboardRow,
 } from "@/lib/dashboard/dre";
 import { projetarMedia } from "@/lib/orcamento/media-calc";
+import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import type { IndiceKey } from "@/lib/orcamento/indices";
@@ -73,6 +74,8 @@ export interface PreviaOrcamentoData {
     temReceita: boolean;
     mediaCategorias: number;
     mediaSemValor: number;
+    valorFixoCategorias: number;
+    valorFixoSemValor: number;
     totalDespesa: number;
     totalReceita: number;
   };
@@ -86,6 +89,12 @@ interface MediaSnapshotRow {
   category_code: string;
   media_valor: number | string | null;
   indice_key: string | null;
+}
+interface ValorFixoSnapshotRow {
+  category_code: string;
+  valor_base: number | string | null;
+  indice_key: string | null;
+  mes_reajuste: number | string | null;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
@@ -131,41 +140,35 @@ export async function getPreviaOrcamento(
   const pessoalNaoClassificado: PreviaOrfao[] = [];
   const categoriasNaoMapeadas: PreviaOrfao[] = [];
 
-  // ── MÉDIA ──────────────────────────────────────────────────────────────────
-  // Categorias marcadas 'media' + snapshot do valor + índice do ano.
+  // ── MÉTODOS POR CATEGORIA (média + valor fixo) ──────────────────────────────
+  // Ambos ligam na DRE pela mesma chave (category_code → category_mapping) e
+  // usam os mesmos índices do ano; só a ORIGEM do valor difere (realizado médio
+  // vs. valor base digitado). Uma consulta pega os dois métodos; índice e
+  // mapeamento são resolvidos uma vez e compartilhados.
   let mediaCategorias = 0;
   let mediaSemValor = 0;
+  let valorFixoCategorias = 0;
+  let valorFixoSemValor = 0;
   const { data: metodoRows, error: metodoErr } = await supabase
     .from("orcamento_categoria_metodo")
-    .select("category_code, category_name")
+    .select("category_code, category_name, metodo")
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("metodo", "media");
+    .in("metodo", ["media", "valor_fixo"]);
   if (metodoErr) {
     if (isSchemaMissing(metodoErr.message)) return { needsMigration: true };
     return { error: metodoErr.message };
   }
-  const mediaCats = (metodoRows ?? []) as CategoriaMetodoRow[];
+  const metodoCats = (metodoRows ?? []) as (CategoriaMetodoRow & { metodo: string })[];
+  const mediaCats = metodoCats.filter((c) => c.metodo === "media");
+  const vfCats = metodoCats.filter((c) => c.metodo === "valor_fixo");
   mediaCategorias = mediaCats.length;
+  valorFixoCategorias = vfCats.length;
 
-  if (mediaCats.length > 0) {
-    const codes = mediaCats.map((c) => c.category_code);
+  if (metodoCats.length > 0) {
+    const allCodes = Array.from(new Set(metodoCats.map((c) => c.category_code)));
 
-    // Snapshots salvos (valor + índice).
-    const { data: snapRows, error: snapErr } = await supabase
-      .from("orcamento_media_categorias")
-      .select("category_code, media_valor, indice_key")
-      .eq("company_id", companyId)
-      .eq("year", year);
-    if (snapErr) {
-      if (isSchemaMissing(snapErr.message)) return { needsMigration: true };
-      return { error: snapErr.message };
-    }
-    const snapByCode = new Map<string, MediaSnapshotRow>(
-      ((snapRows ?? []) as MediaSnapshotRow[]).map((r) => [r.category_code, r]),
-    );
-
-    // Índices percentuais do ano do orçamento.
+    // Índices percentuais do ano (compartilhado pelos dois métodos).
     const { data: indiceRowRaw } = await supabase
       .from("orcamento_indices")
       .select("*")
@@ -178,11 +181,11 @@ export async function getPreviaOrcamento(
       return v == null ? null : Number(v);
     };
 
-    // Mapeamento categoria→conta (override da empresa > global).
+    // Mapeamento categoria→conta (override da empresa > global), uma vez só.
     const { data: mapRows, error: mapErr } = await supabase
       .from("category_mapping")
       .select("omie_category_code, dre_account_id, company_id")
-      .in("omie_category_code", codes)
+      .in("omie_category_code", allCodes)
       .or(`company_id.eq.${companyId},company_id.is.null`);
     if (mapErr) return { error: mapErr.message };
     const mapByCode = new Map<string, string | null>();
@@ -192,27 +195,72 @@ export async function getPreviaOrcamento(
       else if (!mapByCode.has(r.omie_category_code)) mapByCode.set(r.omie_category_code, r.dre_account_id);
     }
 
-    for (const cat of mediaCats) {
-      const snap = snapByCode.get(cat.category_code);
-      const bruto = snap?.media_valor == null ? null : Number(snap.media_valor);
-      const projetado = projetarMedia(bruto, indicePercent(snap?.indice_key ?? null));
-      if (projetado == null || projetado === 0) {
-        mediaSemValor += 1;
-        continue;
-      }
-      // A média é um valor MENSAL: entra igual nos 12 meses.
-      const meses = Array<number>(12).fill(projetado);
-      const rawAccountId = mapByCode.get(cat.category_code) ?? null;
+    // Resolve o code para a folha escopada; empurra os 12 meses ou registra o órfão.
+    const aplicar = (code: string, chave: string, meses: number[]) => {
+      const rawAccountId = mapByCode.get(code) ?? null;
       const scopedId = rawAccountId ? scope.translateToScopedId(rawAccountId) : null;
       if (!scopedId) {
-        categoriasNaoMapeadas.push({
-          chave: cat.category_name ?? cat.category_code,
-          meses,
-          totalAno: somar(meses),
-        });
-        continue;
+        categoriasNaoMapeadas.push({ chave, meses, totalAno: somar(meses) });
+        return;
       }
       pushMeses(leafByScopedId, scopedId, meses);
+    };
+
+    // MÉDIA — valor mensal médio, igual nos 12 meses.
+    if (mediaCats.length > 0) {
+      const { data: snapRows, error: snapErr } = await supabase
+        .from("orcamento_media_categorias")
+        .select("category_code, media_valor, indice_key")
+        .eq("company_id", companyId)
+        .eq("year", year);
+      if (snapErr) {
+        if (isSchemaMissing(snapErr.message)) return { needsMigration: true };
+        return { error: snapErr.message };
+      }
+      const snapByCode = new Map<string, MediaSnapshotRow>(
+        ((snapRows ?? []) as MediaSnapshotRow[]).map((r) => [r.category_code, r]),
+      );
+      for (const cat of mediaCats) {
+        const snap = snapByCode.get(cat.category_code);
+        const bruto = snap?.media_valor == null ? null : Number(snap.media_valor);
+        const projetado = projetarMedia(bruto, indicePercent(snap?.indice_key ?? null));
+        if (projetado == null || projetado === 0) {
+          mediaSemValor += 1;
+          continue;
+        }
+        aplicar(cat.category_code, cat.category_name ?? cat.category_code, Array<number>(12).fill(projetado));
+      }
+    }
+
+    // VALOR FIXO — valor base + índice, com o degrau do mês de reajuste.
+    if (vfCats.length > 0) {
+      const { data: vfRows, error: vfErr } = await supabase
+        .from("orcamento_valor_fixo_categorias")
+        .select("category_code, valor_base, indice_key, mes_reajuste")
+        .eq("company_id", companyId)
+        .eq("year", year);
+      if (vfErr) {
+        if (isSchemaMissing(vfErr.message)) return { needsMigration: true };
+        return { error: vfErr.message };
+      }
+      const vfByCode = new Map<string, ValorFixoSnapshotRow>(
+        ((vfRows ?? []) as ValorFixoSnapshotRow[]).map((r) => [r.category_code, r]),
+      );
+      for (const cat of vfCats) {
+        const snap = vfByCode.get(cat.category_code);
+        const base = snap?.valor_base == null ? null : Number(snap.valor_base);
+        if (base == null) {
+          valorFixoSemValor += 1;
+          continue;
+        }
+        const mes = snap?.mes_reajuste == null ? null : Number(snap.mes_reajuste);
+        const meses = projetarValorFixoSerie(base, indicePercent(snap?.indice_key ?? null), mes);
+        if (somar(meses) === 0) {
+          valorFixoSemValor += 1;
+          continue;
+        }
+        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses);
+      }
     }
   }
 
@@ -294,6 +342,8 @@ export async function getPreviaOrcamento(
         temReceita,
         mediaCategorias,
         mediaSemValor,
+        valorFixoCategorias,
+        valorFixoSemValor,
         totalDespesa,
         totalReceita,
       },
