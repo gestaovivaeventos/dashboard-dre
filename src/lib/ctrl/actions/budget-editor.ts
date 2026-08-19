@@ -179,14 +179,23 @@ export async function deleteBudgetLine(
  * Move uma linha (setor × tipo) para outro setor e/ou tipo, no mesmo ano. Se o
  * destino já tiver uma linha daquele setor × tipo, os valores são SOMADOS mês a
  * mês (orçado e realizado) — vira uma linha só. A origem é removida.
- * Move apenas o orçamento (previsto + realizado-base); as requisições já lançadas
- * seguem no setor delas.
+ *
+ * `moveRequests`: quando true, RE-ETIQUETA também as requisições de 1 setor desse
+ * tipo (sector_id/expense_type_id da ORIGEM → DESTINO), para o realizado dinâmico
+ * seguir junto. As requisições RATEADAS não são movidas automaticamente (o rateio
+ * divide por setor e mover uma parcela pode colidir com outra do mesmo pedido) —
+ * elas só são CONTADAS no retorno, para o usuário tratar à mão. Requisição já
+ * lançada no Omie mantém o departamento do título antigo; só o vínculo de setor
+ * (que rege o orçamento) muda — o realizado no orçamento passa a bater.
  */
 export async function moveBudgetLine(
   from: { sectorId: string; expenseTypeId: string },
   to: { sectorId: string; expenseTypeId: string },
   year: number,
-): Promise<{ error: string } | { ok: true; merged: boolean }> {
+  opts: { moveRequests?: boolean } = {},
+): Promise<
+  { error: string } | { ok: true; merged: boolean; requestsMoved: number; rateioSkipped: number }
+> {
   await requireCtrlRole("admin");
   const admin = createAdminClientIfAvailable();
   if (!admin) return { error: "Operação indisponível: credencial de serviço ausente." };
@@ -249,7 +258,43 @@ export async function moveBudgetLine(
     .eq("period_year", year);
   if (delErr) return { error: delErr.message };
 
+  // Move também as requisições, para o realizado dinâmico seguir o novo setor/tipo.
+  let requestsMoved = 0;
+  let rateioSkipped = 0;
+  if (opts.moveRequests) {
+    // Requisições de 1 setor: re-etiqueta setor (+ tipo, se mudou). É o que o
+    // orçamento soma como realizado/pendente daquele setor × tipo.
+    const { data: moved, error: reqErr } = await admin
+      .from("ctrl_requests")
+      .update({
+        sector_id: to.sectorId,
+        expense_type_id: to.expenseTypeId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("sector_id", from.sectorId)
+      .eq("expense_type_id", from.expenseTypeId)
+      .eq("is_rateio", false)
+      .is("deleted_at", null)
+      .select("id");
+    if (reqErr) {
+      return { error: `Orçamento movido, mas falhou ao mover as requisições: ${reqErr.message}` };
+    }
+    requestsMoved = moved?.length ?? 0;
+
+    // Rateadas: só CONTA (não move — mover uma parcela poderia colidir com outra
+    // parcela do mesmo pedido no setor de destino). O usuário trata essas à mão.
+    const { data: rateio } = await admin
+      .from("ctrl_request_sectors")
+      .select("id, ctrl_requests!inner(expense_type_id, deleted_at)")
+      .eq("sector_id", from.sectorId)
+      .eq("ctrl_requests.expense_type_id", from.expenseTypeId)
+      .is("ctrl_requests.deleted_at", null);
+    rateioSkipped = rateio?.length ?? 0;
+  }
+
   revalidatePath("/ctrl/orcamento");
   revalidatePath("/ctrl/orcamento/editar");
-  return { ok: true as const, merged };
+  revalidatePath("/ctrl/requisicoes");
+  revalidatePath("/ctrl/aprovacoes");
+  return { ok: true as const, merged, requestsMoved, rateioSkipped };
 }

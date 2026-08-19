@@ -14,7 +14,9 @@ import {
   RequestDetailModal,
   fmt,
   resolveNamed,
+  resolveSupplier,
   resolveUser,
+  valueMatchesSearch,
   type RequestDetail,
 } from "@/components/ctrl/request-detail-modal";
 import {
@@ -45,6 +47,11 @@ interface Props {
 function requesterName(req: RequestDetail): string {
   const creator = resolveUser(req.creator ?? null);
   return creator?.name?.trim() || creator?.email?.trim() || "—";
+}
+
+/** Fornecedor da requisição (razão social) ou o favorecido avulso. */
+function supplierName(req: RequestDetail): string {
+  return resolveSupplier(req.ctrl_suppliers)?.name?.trim() || req.favorecido?.trim() || "—";
 }
 
 /** Setor da requisição; em rateio, lista os setores das parcelas. */
@@ -163,6 +170,8 @@ export function RequisicoesTable({
     return requests.filter((r) => {
       if (termDigits && String(r.request_number).startsWith(termDigits)) return true;
       if (r.title.toLowerCase().includes(term)) return true;
+      // Busca por VALOR (ex.: "222,60", "1.234,56", "1234").
+      if (valueMatchesSearch(r.amount, term)) return true;
       // Solicitante e setor só entram na busca quando estão visíveis na tela.
       if (showRequester && requesterName(r).toLowerCase().includes(term)) return true;
       if (showRequester && sectorName(r).toLowerCase().includes(term)) return true;
@@ -179,6 +188,7 @@ export function RequisicoesTable({
     () => [
       { key: "numero", type: "number", getValue: (r) => r.request_number, label: (r) => `#${r.request_number}` },
       { key: "titulo", type: "text", getValue: (r) => r.title },
+      { key: "fornecedor", type: "text", getValue: (r) => supplierName(r) },
       ...(showRequester
         ? ([
             { key: "solicitante", type: "text", getValue: (r) => requesterName(r) },
@@ -229,7 +239,7 @@ export function RequisicoesTable({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por número, título ou status..."
+            placeholder="Buscar por número, título, valor ou status..."
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           {search && (
@@ -293,12 +303,13 @@ export function RequisicoesTable({
             : "Nenhuma requisição."}
         </div>
       ) : (
-        <div className="rounded-lg border">
+        <div className="rounded-lg border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50 text-left text-xs font-semibold">
                 <th className="px-4 py-3"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Título" {...headerProps("titulo")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("titulo")} /></th>
+                <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
                 {showRequester && (
                   <>
                     <th className="px-4 py-3"><ExcelHeaderCell label="Solicitante" {...headerProps("solicitante")} /></th>
@@ -323,6 +334,7 @@ export function RequisicoesTable({
                       #{req.request_number}
                     </td>
                     <td className="px-4 py-3 font-medium">{req.title}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{supplierName(req)}</td>
                     {showRequester && (
                       <>
                         <td className="px-4 py-3 text-muted-foreground">

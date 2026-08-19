@@ -18,6 +18,7 @@ import {
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 import { parseBanco } from "@/lib/ctrl/bancos";
+import { normalizeDoc } from "@/lib/ctrl/cnpj";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" | "previsao_editada" }
@@ -123,7 +124,9 @@ function buildPixPorChave(
 ): Record<string, unknown> | null {
   const key = chave.trim();
   if (!key) return null;
-  const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+  // Documento do favorecido: normalizeDoc preserva as letras do CNPJ
+  // alfanumérico (onlyDigits as descartaria e mandaria o documento errado).
+  const doc = normalizeDoc(supplier.doc_titular) || normalizeDoc(supplier.cnpj_cpf);
   const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
   const banco = parseBanco(supplier.banco)?.codigo ?? "";
   const agencia = onlyDigits(supplier.agencia);
@@ -187,7 +190,7 @@ function buildIntegracaoBancaria(
     const banco = parseBanco(supplier.banco)?.codigo ?? "";
     const agencia = onlyDigits(supplier.agencia);
     const conta = (supplier.conta_corrente ?? "").trim();
-    const doc = onlyDigits(supplier.doc_titular) || onlyDigits(supplier.cnpj_cpf);
+    const doc = normalizeDoc(supplier.doc_titular) || normalizeDoc(supplier.cnpj_cpf);
     const nome = (supplier.titular_banco ?? supplier.name ?? "").slice(0, 60);
     if (banco && agencia && conta && doc && nome) {
       // Conta poupança usa uma finalidade diferente de conta corrente. O tipo

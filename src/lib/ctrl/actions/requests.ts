@@ -10,6 +10,7 @@ import {
   approverSectorRestrictionFor,
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
+import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
@@ -268,6 +269,21 @@ function syncNaoOrcadoPrefix(
   return base.length > 0 ? `${NAO_ORCADO_PREFIX}${base}` : "NÃO ORÇADO";
 }
 
+// Chave PIX de telefone vai para a Omie no formato internacional +55DDDNUMERO.
+// A tela mostra (XX) XXXXX-XXXX com o +55 fixo; aqui normalizamos antes de
+// gravar. Só se aplica ao PIX por chave do tipo telefone — não ao copia-e-cola
+// (que reusa a mesma coluna pix_key).
+function normalizedPixKey(data: {
+  pix_key?: string | null;
+  pix_key_type?: string | null;
+  payment_method?: string | null;
+}): string | null {
+  if (data.payment_method === "pix" && data.pix_key_type === "telefone") {
+    return normalizePixTelefone(data.pix_key ?? "") || null;
+  }
+  return data.pix_key ?? null;
+}
+
 // ─── Installment date calculation ────────────────────────────────────────────
 
 function calculateInstallmentDates(
@@ -403,7 +419,7 @@ async function createRateioRequest(
       bank_account: data.bank_account ?? null,
       bank_account_digit: data.bank_account_digit ?? null,
       bank_cpf_cnpj: data.bank_cpf_cnpj ?? null,
-      pix_key: data.pix_key ?? null,
+      pix_key: normalizedPixKey(data),
       pix_key_type: data.pix_key_type ?? null,
       favorecido: data.favorecido ?? null,
       barcode: data.barcode ?? null,
@@ -639,7 +655,7 @@ export async function createRequest(data: CreateRequestInput) {
     bank_account: data.bank_account ?? null,
     bank_account_digit: data.bank_account_digit ?? null,
     bank_cpf_cnpj: data.bank_cpf_cnpj ?? null,
-    pix_key: data.pix_key ?? null,
+    pix_key: normalizedPixKey(data),
     pix_key_type: data.pix_key_type ?? null,
     favorecido: data.favorecido ?? null,
     barcode: data.barcode ?? null,

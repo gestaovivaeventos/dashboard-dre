@@ -299,6 +299,8 @@ function MoveModal({
 }) {
   const [toSector, setToSector] = useState(line.sector_id);
   const [toType, setToType] = useState(line.expense_type_id);
+  // Padrão LIGADO: mover as requisições junto faz o realizado seguir o novo setor.
+  const [moveRequests, setMoveRequests] = useState(true);
   const [isPending, startTransition] = useTransition();
 
   const unchanged = toSector === line.sector_id && toType === line.expense_type_id;
@@ -310,16 +312,24 @@ function MoveModal({
         { sectorId: line.sector_id, expenseTypeId: line.expense_type_id },
         { sectorId: toSector, expenseTypeId: toType },
         year,
+        { moveRequests },
       );
       if ("error" in res) {
         onError(res.error);
-      } else {
-        onMoved(
-          res.merged
-            ? "Linha movida e somada à linha já existente no destino."
-            : "Linha movida com sucesso.",
-        );
+        return;
       }
+      const parts = [
+        res.merged ? "Linha movida e somada à linha já existente no destino." : "Linha movida com sucesso.",
+      ];
+      if (moveRequests) {
+        parts.push(`${res.requestsMoved} requisição(ões) movida(s) junto.`);
+        if (res.rateioSkipped > 0) {
+          parts.push(
+            `${res.rateioSkipped} requisição(ões) RATEADA(s) NÃO foram movidas — ajuste o setor delas manualmente.`,
+          );
+        }
+      }
+      onMoved(parts.join(" "));
     });
   }
 
@@ -354,10 +364,27 @@ function MoveModal({
           </div>
         </div>
 
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-muted/10 px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={moveRequests}
+            onChange={(e) => setMoveRequests(e.target.checked)}
+            disabled={isPending}
+            className="mt-0.5 h-4 w-4 rounded border-input"
+          />
+          <span>
+            <strong>Mover também as requisições</strong> deste tipo para o novo setor.
+            <span className="block text-xs text-muted-foreground">
+              Faz o <strong>realizado</strong> seguir junto — sem isso, o orçado muda de setor
+              mas o consumo das requisições fica no setor antigo (descasa). Requisições rateadas
+              não são movidas automaticamente.
+            </span>
+          </span>
+        </label>
+
         <p className="text-xs text-muted-foreground">
           Se o destino já tiver uma linha desse setor × tipo, os valores serão{" "}
-          <strong>somados</strong> (mês a mês). A origem é removida. As requisições já
-          lançadas seguem no setor delas.
+          <strong>somados</strong> (mês a mês). A origem é removida.
         </p>
 
         <div className="flex justify-end gap-3">

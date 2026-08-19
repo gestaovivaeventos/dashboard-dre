@@ -1,4 +1,5 @@
 import { omieCall } from "@/lib/omie/client";
+import { normalizeDoc } from "@/lib/ctrl/cnpj";
 
 const CONTAPAGAR_URL = "https://app.omie.com.br/api/v1/financas/contapagar/";
 const PROJETOS_URL = "https://app.omie.com.br/api/v1/geral/projetos/";
@@ -78,7 +79,9 @@ export async function findContaPagarByCnpjValor(
   cnpj: string,
   valor: number,
 ): Promise<{ codigoLancamentoOmie: number } | null> {
-  const doc = (cnpj ?? "").replace(/\D/g, "");
+  // Documento normalizado (alfanumérico + caixa alta). NÃO usa replace(/\D/g):
+  // o CNPJ alfanumérico perderia as letras e o filtro do Omie não casaria.
+  const doc = normalizeDoc(cnpj);
   if (!doc) return null;
   let pagina = 1;
   let total = 1;
@@ -192,7 +195,7 @@ export async function findPrevisaoContaPagar(
   | { codigoLancamentoOmie: number; valorAtual: number; vencimento: string; observacao: string }
   | null
 > {
-  const doc = (cnpj ?? "").replace(/\D/g, "");
+  const doc = normalizeDoc(cnpj);
   if (!doc) return null;
   const [ano, mes] = dueDateIso.split("-");
   if (!ano || !mes) return null;

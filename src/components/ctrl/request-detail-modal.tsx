@@ -158,6 +158,23 @@ export const fmt = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 2,
 });
 
+// Casa o termo da busca com o VALOR da requisição. Aceita as formas que o usuário
+// digita: "1.234,56", "1234,56", "1234.56", "234,56" ou só "1234". Retorna false
+// quando o termo não tem número — assim a busca por texto (fornecedor/título) não
+// é afetada.
+export function valueMatchesSearch(amount: number, term: string): boolean {
+  const canon = (s: string): string => {
+    let t = s.toLowerCase().replace(/r\$/g, "").replace(/\s/g, "");
+    if (t.includes(",")) t = t.replace(/\./g, ""); // vírgula = decimal → tira milhares
+    else if ((t.match(/\./g)?.length ?? 0) === 1) t = t.replace(".", ","); // ponto decimal → vírgula
+    else t = t.replace(/\./g, ""); // vários pontos = milhares
+    return t;
+  };
+  const t = canon(term);
+  if (!/\d/.test(t)) return false; // termo sem dígito não busca por valor
+  return canon(fmt.format(amount)).includes(t);
+}
+
 export function formatIssuesInvoice(value: string | null | undefined): string {
   if (!value) return "—";
   if (value === "sim") return "Sim";

@@ -733,6 +733,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "list",
         items: [
           "**CNPJ ou CPF é obrigatório** — é o que identifica o fornecedor e evita cadastro duplicado no Omie.",
+          "**O CNPJ tem 14 caracteres** e aceita o novo formato **alfanumérico** (letras e números). Um CNPJ com menos de 14 caracteres é recusado no cadastro — complete o número antes de salvar. O CPF continua com 11 dígitos.",
           "**Endereço completo é obrigatório** no cadastro nacional: a Omie recusa o cadastro sem ele.",
           "**Fornecedor estrangeiro** dispensa CNPJ/CPF, mas exige País e Estado.",
           "Se marcar PIX ou transferência como **método padrão**, todos os dados daquele método precisam estar completos — é por ali que o pagamento vai sair sem ninguém perguntar nada depois.",
