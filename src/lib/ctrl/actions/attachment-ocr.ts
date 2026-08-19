@@ -198,7 +198,7 @@ export async function extractAttachmentData(
   attachmentPath: string,
   kind: "nota" | "boleto",
 ): Promise<{ data: AttachmentReadResult } | { error: string }> {
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
+  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin");
 
   if (!attachmentPath) return { error: "Anexo não informado." };
 

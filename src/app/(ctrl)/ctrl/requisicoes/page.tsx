@@ -32,6 +32,7 @@ export default async function RequisicoesPage() {
     "gerente",
     "diretor",
     "csc",
+    "contas_a_pagar",
     "admin",
   );
 

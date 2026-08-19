@@ -482,6 +482,7 @@ export async function createRequest(data: CreateRequestInput) {
     "gerente",
     "diretor",
     "csc",
+    "contas_a_pagar",
     "admin"
   );
   const adminClient = createAdminClientIfAvailable();
@@ -3337,7 +3338,7 @@ export async function verifyBudget(
   if (!sectorId || !expenseTypeId || amount <= 0) {
     return { error: "Preencha setor, tipo de despesa e valor para verificar." };
   }
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
+  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin");
   // Usa o admin client (igual ao createRequest): a RLS de ctrl_budget só libera
   // leitura para admin/gerente/diretor/csc/contas_a_pagar — um solicitante via
   // client com RLS veria orçamento zerado e a verificação mostraria "não consta"

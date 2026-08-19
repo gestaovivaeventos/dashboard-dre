@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { CNPJ_LENGTH, CPF_LENGTH, normalizeDoc } from "@/lib/ctrl/cnpj";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
@@ -21,8 +21,20 @@ import { syncSupplierToOmieUnit, type OmieSupplierData } from "@/lib/omie/client
 export async function getSuppliers(
   status?: CtrlSupplierStatus | CtrlSupplierStatus[],
 ) {
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin", "aprovacao_fornecedor");
-  const supabase = await createClient();
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+    "aprovacao_fornecedor",
+  );
+  // Idem ctrl_suppliers: a policy de leitura para no csc. O contas_a_pagar ja
+  // enxerga o modulo inteiro, entao le pelo admin client.
+  const supabase = hasCtrlRole(ctx, "contas_a_pagar")
+    ? createAdminClientIfAvailable() ?? (await createClient())
+    : await createClient();
 
   // A API limita 1000 linhas/requisição e já há >1000 fornecedores — pagina em
   // blocos para não cortar a cauda da lista (nomes com "T" em diante sumiam).

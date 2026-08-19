@@ -2,13 +2,26 @@
 
 import { revalidatePath } from "next/cache";
 
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
 import type { CtrlSector } from "@/lib/supabase/types";
 
 export async function getSectors() {
-  const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
-  const supabase = await createClient();
+  const ctx = await requireCtrlRole(
+    "solicitante",
+    "gerente",
+    "diretor",
+    "csc",
+    "contas_a_pagar",
+    "admin",
+  );
+  // O RLS de ctrl_sectors concede leitura a csc mas nao a contas_a_pagar (no
+  // banco get_ctrl_role devolve 'contas_a_pagar'), entao pelo client do usuario
+  // a lista voltaria vazia. Mesmo caminho ja usado na tela de Contas a Pagar.
+  const supabase = hasCtrlRole(ctx, "contas_a_pagar")
+    ? createAdminClientIfAvailable() ?? (await createClient())
+    : await createClient();
 
   let query = supabase
     .from("ctrl_sectors")
@@ -16,8 +29,10 @@ export async function getSectors() {
     .eq("active", true)
     .order("name");
 
-  // admin vê todos os setores ativos; demais roles só os vinculados em user_sectors.
-  if (!hasCtrlRole(ctx, "admin")) {
+  // admin e contas_a_pagar veem todos os setores ativos: o Contas a Pagar opera
+  // requisicoes de qualquer area, entao a lista nao pode ficar presa aos
+  // vinculos de user_sectors dele. Demais roles seguem restritos aos vinculados.
+  if (!hasCtrlRole(ctx, "admin", "contas_a_pagar")) {
     const { data: links, error: linkErr } = await supabase
       .from("user_sectors")
       .select("sector_id")

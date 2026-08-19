@@ -22,7 +22,10 @@ export default async function NovaRequisicaoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "solicitante", "gerente", "diretor", "csc", "admin")) {
+  // Contas a Pagar tambem cria requisicao (para qualquer setor) — ver getSectors.
+  if (
+    !hasCtrlRole(ctx, "solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin")
+  ) {
     redirect("/ctrl/requisicoes");
   }
 
