@@ -155,6 +155,8 @@ export interface ResolvedAiProvider {
   modelName: string;
   /** Chave de API resolvida (para callers que fazem fetch cru). */
   apiKey: string;
+  /** baseURL efetiva do provedor (undefined = default da OpenAI). */
+  baseURL: string | undefined;
   /** Endpoint de chat completions do provedor ativo (API crua). */
   chatCompletionsUrl: string;
   /** Preços mesclados (defaults + overrides do banco), por modelo. */
@@ -298,6 +300,7 @@ export async function resolveAiProvider(
     providerName: activeName,
     modelName,
     apiKey: key.apiKey,
+    baseURL,
     chatCompletionsUrl: chatUrlFor(baseURL),
     modelPrices,
     usdBrlRate,
@@ -606,4 +609,163 @@ export async function generateJsonViaChat(
       )} · ${raw}`,
     );
   }
+}
+
+// ============================================================================
+// Leitura de DOCUMENTO (visão) no Gemini — pela API nativa, não pelo shim
+// OpenAI.
+//
+// O Gemini publica uma camada de compatibilidade OpenAI em /v1beta/openai, e é
+// tentador tratá-lo como "mais um provedor com outra baseURL". Não dá, por dois
+// motivos que só aparecem em produção:
+//
+//   1. `provider(model)` do AI SDK fala a **Responses API** (/responses), que só
+//      a OpenAI implementa — no Gemini isso é 404 "Not Found";
+//   2. mesmo apontando para /chat/completions, o shim recusa PDF: o content
+//      part `file` volta 400 "Invalid content part type: file". Ele aceita
+//      imagem (image_url) e mais nada.
+//
+// Foi assim que o Gemini, escolhido como Provedor de OCR, ficou de 18/08 a
+// 19/08/2026 sem ler UM documento sequer — `ai_usage_log` com três registros,
+// todos "Not Found". A API nativa aceita o PDF inteiro em inline_data e devolve
+// o JSON pedido, então é por ela que a visão do Gemini passa.
+// ============================================================================
+
+/** A API de verdade fica um nível acima da camada de compatibilidade OpenAI. */
+function geminiNativeBase(baseURL: string | undefined): string {
+  const b = (baseURL ?? "https://generativelanguage.googleapis.com/v1beta").replace(/\/+$/, "");
+  return b.replace(/\/openai$/, "");
+}
+
+/** True quando a leitura de documento deste provedor precisa da rota nativa. */
+export function usesNativeDocumentApi(resolved: ResolvedAiProvider): boolean {
+  return resolved.providerName === "gemini";
+}
+
+interface GeminiPart {
+  text?: string;
+  thought?: boolean;
+}
+
+interface GeminiPayload {
+  candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+  error?: { message?: string };
+}
+
+/**
+ * JSON extraído de um documento (PDF ou imagem) pela API nativa do Gemini.
+ *
+ * Devolve o objeto cru — quem chama valida com o próprio schema Zod, como já
+ * faz com `generateJsonViaChat`.
+ */
+export async function generateJsonFromDocumentNative(
+  resolved: ResolvedAiProvider,
+  opts: {
+    prompt: string;
+    schemaHint: string;
+    data: Buffer;
+    mediaType: string;
+    modelName?: string;
+    maxTokens?: number;
+  },
+): Promise<{ object: unknown; usage: AiUsageTokens }> {
+  const model = opts.modelName ?? resolved.modelName;
+  const url = `${geminiNativeBase(resolved.baseURL)}/models/${model}:generateContent`;
+
+  const call = async (): Promise<GeminiPayload> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": resolved.apiKey },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text:
+                    opts.prompt +
+                    "\n\nO JSON de resposta DEVE seguir EXATAMENTE este JSON Schema — mesmos " +
+                    "campos, tipos e enums, sem campos a mais nem a menos:\n" +
+                    opts.schemaHint,
+                },
+                { inline_data: { mime_type: opts.mediaType, data: opts.data.toString("base64") } },
+              ],
+            },
+          ],
+          // maxOutputTokens generoso de propósito: os modelos 3.x raciocinam por
+          // padrão e o raciocínio consome esse teto ANTES do JSON — teto curto
+          // devolve finishReason=MAX_TOKENS com texto vazio.
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: "application/json",
+            maxOutputTokens: opts.maxTokens ?? 8192,
+          },
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        const err = new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+        // 429 (cota) e 5xx (o "high demand" do Gemini) passam sozinhos —
+        // derrubar a leitura na cara de quem está lançando a requisição por
+        // causa deles é desperdício.
+        (err as { retriable?: boolean }).retriable = res.status === 429 || res.status >= 500;
+        throw err;
+      }
+      return (await res.json()) as GeminiPayload;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const MAX_ATTEMPTS = 3;
+  let last: GeminiPayload | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    let payload: GeminiPayload;
+    try {
+      payload = await call();
+    } catch (e) {
+      const retriable = Boolean((e as { retriable?: boolean })?.retriable);
+      if (!retriable || attempt === MAX_ATTEMPTS) throw e;
+      console.warn(
+        `[ai] ${model}: ${e instanceof Error ? e.message : String(e)} — tentativa ${attempt}/${MAX_ATTEMPTS}`,
+      );
+      await sleep(1500 * attempt);
+      continue;
+    }
+    last = payload;
+    const candidate = payload.candidates?.[0];
+    // As partes de raciocínio vêm marcadas com `thought` e não fazem parte da
+    // resposta — concatenar tudo quebraria o JSON.parse.
+    const text = (candidate?.content?.parts ?? [])
+      .filter((p) => p.thought !== true && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("")
+      .trim();
+    if (text) {
+      return {
+        object: JSON.parse(text),
+        usage: {
+          inputTokens: payload.usageMetadata?.promptTokenCount ?? 0,
+          outputTokens: payload.usageMetadata?.candidatesTokenCount ?? 0,
+          totalTokens: payload.usageMetadata?.totalTokenCount ?? 0,
+          cachedInputTokens: 0,
+        },
+      };
+    }
+    console.warn(
+      `[ai] ${model}: resposta vazia na tentativa ${attempt}/${MAX_ATTEMPTS} ` +
+        `[finishReason=${candidate?.finishReason ?? "sem candidate"}] · maxOutputTokens=${opts.maxTokens ?? 8192}`,
+    );
+    if (attempt < MAX_ATTEMPTS) await sleep(1500);
+  }
+
+  const finish = last?.candidates?.[0]?.finishReason ?? "sem candidate";
+  throw new Error(
+    `resposta vazia do provedor apos ${MAX_ATTEMPTS} tentativas [finishReason=${finish}] · ` +
+      JSON.stringify(last ?? {}).slice(0, 300),
+  );
 }

@@ -8,6 +8,8 @@ import {
   logResolvedUsage,
   logAiUsage,
   generateJsonViaChat,
+  generateJsonFromDocumentNative,
+  usesNativeDocumentApi,
 } from "@/lib/ai/provider";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
@@ -27,16 +29,23 @@ const ATTACHMENT_BUCKET = "ctrl-attachments";
 //    mod10/mod11 conferindo cada dígito — ver boleto-pdf.ts) e o número da nota
 //    pelo modelo de TEXTO. É de graça, responde em ~1s e não depende da OpenAI.
 //
-// 2. VISÃO (plano B, gpt-4o na OpenAI). Só para o que NÃO tem camada de texto:
-//    documento escaneado e foto. `resolveAiProvider({ capability: "vision" })`
-//    força a OpenAI mesmo com o DeepSeek ativo, porque a API do DeepSeek aceita
-//    exclusivamente texto (o endpoint recusa o content part: "unknown variant
-//    `image_url`, expected `text`").
+// 2. VISÃO (plano B). Só para o que NÃO tem camada de texto: documento
+//    escaneado e foto. Usa o provedor DEDICADO de OCR do painel
+//    (`resolveAiProvider({ role: "ocr" })` → Plataforma > IA > "Provedor de
+//    OCR"); sem OCR configurado cai na OpenAI/gpt-4o, que era o comportamento
+//    anterior. O DeepSeek nunca atende aqui: a API dele aceita exclusivamente
+//    texto (recusa o content part com "unknown variant `image_url`, expected
+//    `text`").
+//
+//    Cada provedor de OCR entra pela porta que ele realmente tem — ver
+//    `lerPorVisao` mais abaixo. Só a OpenAI fala a Responses API; o Gemini
+//    precisa da API nativa dele. Tratar todos como "OpenAI com outra baseURL"
+//    é o que deixou o Gemini 100% quebrado por dois dias.
 //
 // A ordem já foi a inversa, com a visão na frente, e isso deixou o módulo
 // inteiro refém de UMA conta externa: em três episódios seguidos (chave ausente,
 // chave inválida e conta sem crédito) nenhum documento foi lido, nem os PDFs
-// que o próprio arquivo entregava de graça. Com o crédito da OpenAI zerado só
+// que o próprio arquivo entregava de graça. Hoje, com a visão fora do ar, só
 // escaneado/foto ficam no manual.
 const OCR_MODEL = "gpt-4o";
 
@@ -118,6 +127,33 @@ const BoletoSchema = z.object({
     .nullable()
     .describe("CNPJ ou CPF do beneficiário/cedente. Null se não encontrar."),
 });
+
+const BOLETO_SCHEMA_HINT = JSON.stringify({
+  type: "object",
+  properties: {
+    linha_digitavel: { type: ["string", "null"] },
+    codigo_barras: { type: ["string", "null"] },
+    favorecido: { type: ["string", "null"] },
+    cnpj_cpf: { type: ["string", "null"] },
+  },
+  required: ["linha_digitavel", "codigo_barras", "favorecido", "cnpj_cpf"],
+});
+
+// Enunciados da visão. Ficam aqui, fora da chamada, porque as duas rotas de
+// visão (a nativa do Gemini e a do AI SDK) mandam o MESMO texto — um prompt por
+// rota é como um caminho aprende uma armadilha e o outro não.
+const NOTA_VISION_PROMPT =
+  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia dois dados: o NÚMERO da " +
+  "nota fiscal e o VALOR LÍQUIDO da nota.\n\n" +
+  NOTA_RULES;
+
+const BOLETO_VISION_PROMPT =
+  "Leia este boleto bancário (imagem ou PDF) e extraia, separadamente: " +
+  "(1) a LINHA DIGITÁVEL impressa no topo (47 ou 48 dígitos, em blocos); " +
+  "(2) o número do CÓDIGO DE BARRAS (44 dígitos) impresso abaixo das barras, se houver; " +
+  "(3) o nome do beneficiário/cedente; (4) o CNPJ/CPF dele. " +
+  "Leia cada dígito com extrema atenção, um a um, sem inventar nem completar. " +
+  "Confira a quantidade de dígitos antes de responder. Retorne só números nos campos numéricos.";
 
 // Escolhe a melhor leitura: linha digitável e código de barras codificam o mesmo
 // dado, então tenta ambos e a reconstrução, retornando o primeiro que valida.
@@ -234,28 +270,40 @@ export async function extractAttachmentData(
   const isOpenAiOcr = resolved.providerName === "openai";
   const ocrModelName = isOpenAiOcr ? OCR_MODEL : resolved.modelName;
 
-  try {
-    if (kind === "nota") {
-      const { object, usage } = await generateObject({
-        model: provider(ocrModelName),
-        schema: NotaSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text:
-                  "Leia este documento (imagem ou PDF de uma nota fiscal) e extraia dois dados: o NÚMERO da " +
-                  "nota fiscal e o VALOR LÍQUIDO da nota.\n\n" +
-                  NOTA_RULES,
-              },
-              docPart,
-            ],
-          },
-        ],
+  // Uma porta só para as duas rotas de visão. O Gemini vai pela API NATIVA (o
+  // shim OpenAI dele não tem /responses e recusa PDF — ver o cabeçalho de
+  // `generateJsonFromDocumentNative`); o resto segue pelo AI SDK, e aí só a
+  // OpenAI fala a Responses API — nos demais é `.chat()`, senão é 404.
+  const lerPorVisao = async (
+    schema: z.ZodTypeAny,
+    schemaHint: string,
+    prompt: string,
+  ): Promise<unknown> => {
+    if (usesNativeDocumentApi(resolved)) {
+      const { object, usage } = await generateJsonFromDocumentNative(resolved, {
+        prompt,
+        schemaHint,
+        data: bytes,
+        mediaType,
+        modelName: ocrModelName,
       });
       await logResolvedUsage(resolved, "ocr", usage, { modelName: ocrModelName });
+      return schema.parse(object);
+    }
+    const { object, usage } = await generateObject({
+      model: isOpenAiOcr ? provider(ocrModelName) : provider.chat(ocrModelName),
+      schema,
+      messages: [{ role: "user", content: [{ type: "text", text: prompt }, docPart] }],
+    });
+    await logResolvedUsage(resolved, "ocr", usage, { modelName: ocrModelName });
+    return object;
+  };
+
+  try {
+    if (kind === "nota") {
+      const object = NotaSchema.parse(
+        await lerPorVisao(NotaSchema, NOTA_SCHEMA_HINT, NOTA_VISION_PROMPT),
+      );
       return {
         data: {
           invoice_number: cleanInvoice(object.invoice_number),
@@ -266,29 +314,9 @@ export async function extractAttachmentData(
       };
     }
 
-    const { object, usage } = await generateObject({
-      model: provider(ocrModelName),
-      schema: BoletoSchema,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Leia este boleto bancário (imagem ou PDF) e extraia, separadamente: " +
-                "(1) a LINHA DIGITÁVEL impressa no topo (47 ou 48 dígitos, em blocos); " +
-                "(2) o número do CÓDIGO DE BARRAS (44 dígitos) impresso abaixo das barras, se houver; " +
-                "(3) o nome do beneficiário/cedente; (4) o CNPJ/CPF dele. " +
-                "Leia cada dígito com extrema atenção, um a um, sem inventar nem completar. " +
-                "Confira a quantidade de dígitos antes de responder. Retorne só números nos campos numéricos.",
-            },
-            docPart,
-          ],
-        },
-      ],
-    });
-    await logResolvedUsage(resolved, "ocr", usage, { modelName: ocrModelName });
+    const object = BoletoSchema.parse(
+      await lerPorVisao(BoletoSchema, BOLETO_SCHEMA_HINT, BOLETO_VISION_PROMPT),
+    );
     return {
       data: {
         // A linha lida do texto do PDF vem na frente: os DVs já conferiram cada
