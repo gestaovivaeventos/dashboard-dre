@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, TriangleAlert, Eye, EyeOff, Info } from "lucide-react";
+import { Loader2, TriangleAlert, Eye, EyeOff, Info, Download } from "lucide-react";
 
 import {
   getPreviaOrcamento,
   type PreviaOrcamentoData,
   type PreviaDreLinha,
 } from "@/lib/orcamento/actions/previa-orcamento";
+import { downloadPreviaOrcamentoXlsx } from "@/lib/orcamento/previa-orcamento-export";
 import { formatBRL } from "@/lib/orcamento/format";
 import { cn } from "@/lib/utils";
 
@@ -71,12 +72,21 @@ function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
   );
 }
 
-export function PreviaOrcamentoView({ companyId, year }: { companyId: string; year: number }) {
+export function PreviaOrcamentoView({
+  companyId,
+  year,
+  empresaLabel,
+}: {
+  companyId: string;
+  year: number;
+  empresaLabel?: string;
+}) {
   const [data, setData] = useState<PreviaOrcamentoData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
   const [ocultarZeros, setOcultarZeros] = useState(true);
+  const [exportando, setExportando] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -110,6 +120,21 @@ export function PreviaOrcamentoView({ companyId, year }: { companyId: string; ye
       (l) => l.totalAno !== 0 || l.isSummary || l.isCalculado || l.hasChildren,
     );
   }, [data, ocultarZeros]);
+
+  // Exporta o que está na tela (respeita o filtro de linhas zeradas), na mesma
+  // ordem. O import do xlsx é dinâmico, então nada pesa no bundle da rota.
+  async function handleExport() {
+    if (exportando || linhasVisiveis.length === 0) return;
+    setExportando(true);
+    try {
+      await downloadPreviaOrcamentoXlsx(linhasVisiveis, {
+        empresaLabel: empresaLabel ?? companyId,
+        ano: year,
+      });
+    } finally {
+      setExportando(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -176,14 +201,29 @@ export function PreviaOrcamentoView({ companyId, year }: { companyId: string; ye
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setOcultarZeros((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          {ocultarZeros ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-          {ocultarZeros ? "Mostrar linhas zeradas" : "Ocultar linhas zeradas"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOcultarZeros((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {ocultarZeros ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            {ocultarZeros ? "Mostrar linhas zeradas" : "Ocultar linhas zeradas"}
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exportando || linhasVisiveis.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {exportando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Exportar Excel
+          </button>
+        </div>
       </div>
 
       {/* Avisos de valores que não caíram na DRE */}
