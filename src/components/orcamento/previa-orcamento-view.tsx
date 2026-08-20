@@ -25,21 +25,26 @@ function Valor({ v, className }: { v: number; className?: string }) {
 function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
   const destaque = linha.isSummary || linha.isCalculado;
   const resultado = linha.code === "11";
+  // Fundo OPACO (não translúcido): as colunas fixas ficam por cima das células
+  // de mês quando a tabela rola na horizontal — com fundo transparente o valor
+  // do mês vazava por baixo do total do ano. Mesmo tom na linha inteira e nas
+  // células fixas, para não haver emenda de cor.
+  const surface = resultado
+    ? "bg-emerald-100 dark:bg-emerald-950"
+    : destaque
+      ? "bg-muted"
+      : "bg-card";
   return (
     <tr
       className={cn(
         "border-b last:border-0",
-        destaque && "bg-muted/30 font-semibold",
-        resultado && "bg-emerald-500/10 font-bold",
+        surface,
+        destaque && "font-semibold",
+        resultado && "font-bold",
       )}
     >
-      {/* Nome (coluna fixa) */}
-      <td
-        className={cn(
-          "sticky left-0 z-10 whitespace-nowrap px-3 py-1.5",
-          resultado ? "bg-emerald-500/10" : destaque ? "bg-muted/30" : "bg-card",
-        )}
-      >
+      {/* Nome (coluna fixa à esquerda) */}
+      <td className={cn("sticky left-0 z-10 whitespace-nowrap border-r px-3 py-1.5", surface)}>
         <span style={{ paddingLeft: `${Math.max(0, linha.level - 1) * 14}px` }} className="flex items-center gap-1.5">
           <span className="text-[11px] text-muted-foreground tabular-nums">{linha.code}</span>
           <span className={cn(linha.isReceita && linha.totalAno === 0 && "text-muted-foreground")}>
@@ -58,13 +63,8 @@ function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
           <Valor v={v} />
         </td>
       ))}
-      {/* Total do ano */}
-      <td
-        className={cn(
-          "sticky right-0 z-10 px-3 py-1.5 text-right",
-          resultado ? "bg-emerald-500/10" : destaque ? "bg-muted/30" : "bg-card",
-        )}
-      >
+      {/* Total do ano (coluna fixa à direita) */}
+      <td className={cn("sticky right-0 z-10 border-l px-3 py-1.5 text-right", surface)}>
         <Valor v={linha.totalAno} className="font-semibold" />
       </td>
     </tr>
@@ -228,18 +228,24 @@ export function PreviaOrcamentoView({ companyId, year }: { companyId: string; ye
         </div>
       )}
 
-      {/* Tabela DRE */}
-      <div className="overflow-x-auto rounded-lg border">
+      {/* Tabela DRE — rolagem própria (x e y) para congelar o cabeçalho no topo
+          e a 1ª/última coluna nas laterais. Só `overflow-x` não seguraria o
+          `sticky top`, porque o eixo vertical continuaria rolando com a página. */}
+      <div className="max-h-[75vh] overflow-auto rounded-lg border">
         <table className="w-full border-collapse text-sm">
-          <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="sticky left-0 z-20 bg-muted/40 px-3 py-2 text-left font-medium">Linha</th>
+              <th className="sticky left-0 top-0 z-30 border-b border-r bg-muted px-3 py-2 text-left font-medium">
+                Linha
+              </th>
               {MESES.map((m) => (
-                <th key={m} className="px-3 py-2 text-right font-medium">
+                <th key={m} className="sticky top-0 z-20 border-b bg-muted px-3 py-2 text-right font-medium">
                   {m}
                 </th>
               ))}
-              <th className="sticky right-0 z-20 bg-muted/40 px-3 py-2 text-right font-medium">Ano</th>
+              <th className="sticky right-0 top-0 z-30 border-b border-l bg-muted px-3 py-2 text-right font-medium">
+                Ano
+              </th>
             </tr>
           </thead>
           <tbody>
