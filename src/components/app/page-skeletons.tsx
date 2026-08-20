@@ -93,3 +93,35 @@ export function UsersPageSkeleton() {
     </div>
   );
 }
+
+/**
+ * Esqueleto genérico de tela — o fallback dos `loading.tsx` de grupo de rota.
+ *
+ * Não tenta imitar nenhuma página específica: cabeçalho, faixa de filtros e um
+ * bloco de conteúdo, que é a forma comum a praticamente todas as telas do app.
+ * O objetivo é a navegação responder no clique em vez de congelar a tela
+ * anterior enquanto o servidor renderiza. Telas que já têm um esqueleto próprio
+ * (Dashboard, KPIs, Usuários, Configurações) continuam usando o delas — o
+ * `loading.tsx` mais próximo do segmento é o que vale.
+ */
+export function GenericPageSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-background p-4">
+        <Skeleton className="h-7 w-52" />
+        <Skeleton className="mt-2 h-4 w-72" />
+      </div>
+      <div className="rounded-xl border bg-background p-4">
+        <Skeleton className="h-10 w-full" />
+      </div>
+      <div className="rounded-xl border bg-background p-4">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
+        <Skeleton className="mt-2 h-10 w-full" />
+      </div>
+    </div>
+  );
+}

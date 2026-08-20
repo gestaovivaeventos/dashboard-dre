@@ -372,7 +372,7 @@ export function BudgetForecastView({
         showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
         return;
       }
-      downloadDrilldownXlsx(allRows, {
+      await downloadDrilldownXlsx(allRows, {
         origem: "Budget e Forecast",
         accountName: drilldown.accountName,
         periodLabel: drilldown.bucket.label,

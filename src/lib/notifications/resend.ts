@@ -1,3 +1,4 @@
+import { resolveAppUrl } from "@/lib/app-url";
 import { sendEmail } from "@/lib/email/gmail";
 
 interface SyncFailureItem {
@@ -21,20 +22,6 @@ interface UnmappedEntryItem {
   totalValue: number;
   oldestPayment: string;
   newestPayment: string;
-}
-
-// Resolve a URL canônica priorizando a de produção quando rodando no Vercel
-// (evita o caso em que NEXT_PUBLIC_APP_URL aponta pra localhost na prod).
-function resolveAppUrl(): string {
-  if (
-    process.env.VERCEL_ENV === "production" &&
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  }
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
 }
 
 /**

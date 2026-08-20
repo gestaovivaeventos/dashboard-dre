@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -441,7 +440,7 @@ export function CashFlowView({
         showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
         return;
       }
-      downloadDrilldownXlsx(allRows, {
+      await downloadDrilldownXlsx(allRows, {
         origem: "Fluxo de Caixa",
         accountName: drilldown.accountName,
         periodLabel: drilldown.bucket.label,
@@ -485,7 +484,10 @@ export function CashFlowView({
   // bloco "Fluxo de Caixa" e secao "Acumulados" no final). Inclui sempre
   // TODOS os niveis e sub-niveis de socio, independentemente do estado de
   // expand/collapse na UI: o usuario que exporta quer a foto completa.
-  const exportCashFlowExcel = () => {
+  const exportCashFlowExcel = async () => {
+    // xlsx pesa ~430 KB minificado e so serve a exportacao. Import dinamico no
+    // clique para nao entrar no bundle inicial da rota (Dashboard/Fluxo/KPIs).
+    const XLSX = await import("xlsx");
     try {
       setExporting("excel");
       const totalLabel = accumulatedBucket.label || "Total";

@@ -67,6 +67,24 @@ export default function LoginPage() {
       return;
     }
 
+    // Link de e-mail que o Supabase recusou (expirado ou já usado). Ele volta
+    // com `error`/`error_description` — na query (encaminhada pelo middleware)
+    // ou no fragmento. Sem isto o usuário só via esta tela, sem entender por
+    // que o link "não funcionou".
+    const query = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+    if (
+      query.has("error") ||
+      query.has("error_code") ||
+      hashParams.has("error") ||
+      hashParams.has("error_code")
+    ) {
+      setStatus(
+        "O link do e-mail expirou ou já foi utilizado. Clique em \"Esqueci minha senha\" para receber um novo.",
+      );
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     const checkSession = async () => {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();

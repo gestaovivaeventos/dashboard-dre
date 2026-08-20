@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasContratosGrant } from "@/lib/auth/contratos";
@@ -52,7 +54,7 @@ export function hasContratosAccess(ctx: SessionContext): boolean {
 
 // ─── Função principal ─────────────────────────────────────────────────────────
 
-export async function getSessionContext(): Promise<SessionContext> {
+async function loadSessionContext(): Promise<SessionContext> {
   const isDevMode = process.env.NODE_ENV !== "production";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -105,7 +107,7 @@ export async function getSessionContext(): Promise<SessionContext> {
             { onConflict: "id" },
           );
           // Re-fetch after promotion
-          return getSessionContext();
+          return loadSessionContext();
         }
       } else {
         await supabase.rpc("promote_first_admin_if_none");
@@ -268,6 +270,23 @@ function deriveCtrlRoles(
       return [];
   }
 }
+
+/**
+ * Contexto de sessão do request corrente.
+ *
+ * Memoizado com o `cache()` do React: o escopo é UM request do servidor, não
+ * um cache entre requests — nada de dado de usuário vazando de uma requisição
+ * para outra. Serve para colapsar as chamadas repetidas dentro do MESMO render:
+ * o layout `(app)`, o layout de segmento e a própria page chamam esta função,
+ * e cada chamada custava um `auth.getUser()` (ida à rede no Supabase Auth) mais
+ * a query de `users` com três joins. Em `/s/[slug]/...` isso eram 4 pares de
+ * round-trips idênticos por navegação; agora é um só.
+ *
+ * A carga de verdade fica em `loadSessionContext`, que continua sem cache — a
+ * promoção do primeiro admin em dev chama a si mesma, e recursão dentro de uma
+ * função memoizada devolveria a promise ainda em voo (deadlock).
+ */
+export const getSessionContext = cache(loadSessionContext);
 
 /** Alias retrocompatível — código existente continua funcionando sem alteração */
 export const getCurrentSessionContext = getSessionContext;

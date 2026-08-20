@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { resolveAppUrl } from "@/lib/app-url";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -18,21 +19,6 @@ const VALID_PROFILES: UserProfileType[] = [
   // Relatório. As mesmas restrições de módulo/setor abaixo se aplicam.
   "csc",
 ];
-
-// Resolve a URL canônica da aplicação, preferindo a URL de produção do Vercel
-// quando rodando em prod. Evita o caso em que NEXT_PUBLIC_APP_URL acidentalmente
-// está apontando para localhost na production env.
-function resolveAppUrl(): string {
-  if (
-    process.env.VERCEL_ENV === "production" &&
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  }
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
 
 export async function POST(request: Request) {
   const { user, profile } = await getCurrentSessionContext();

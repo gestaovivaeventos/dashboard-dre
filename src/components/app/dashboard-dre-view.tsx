@@ -17,7 +17,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import {
   Area,
   AreaChart,
@@ -416,7 +415,7 @@ export function DashboardDreView({
         showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
         return;
       }
-      downloadDrilldownXlsx(allRows, {
+      await downloadDrilldownXlsx(allRows, {
         origem: "DRE",
         accountName: drilldown.accountName,
         periodLabel: drilldown.bucket.label,
@@ -464,7 +463,10 @@ export function DashboardDreView({
           .join("_");
   const periodLabel = range.label.replace(/\s+/g, "_");
 
-  const exportDreExcel = () => {
+  const exportDreExcel = async () => {
+    // xlsx pesa ~430 KB minificado e so serve a exportacao. Import dinamico no
+    // clique para nao entrar no bundle inicial da rota (Dashboard/Fluxo/KPIs).
+    const XLSX = await import("xlsx");
     try {
       setExporting("excel");
       const sheetRows = visibleRows.map((row) => {

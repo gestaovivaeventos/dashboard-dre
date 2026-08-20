@@ -6,7 +6,6 @@ import { FormEvent, useState } from "react";
 import { LogoFull } from "@/components/app/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { createClient } from "@/lib/supabase/client";
 
 export default function RecuperarSenhaPage() {
   const [email, setEmail] = useState("");
@@ -19,18 +18,33 @@ export default function RecuperarSenhaPage() {
     setLoading(true);
     setStatus(null);
 
-    const supabase = createClient();
-    // Envia o e-mail de recuperação. O link volta DIRETO para a página cliente
-    // /redefinir-senha — o browser client (detectSessionInUrl) estabelece a
-    // sessão de recovery a partir da URL (seja ?code= do PKCE ou #access_token).
-    // Mandar para uma rota de SERVIDOR (/auth/callback) quebraria o caso do
-    // fragmento #, que nunca chega ao servidor.
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/redefinir-senha`,
-    });
+    // O e-mail sai pelo NOSSO servidor (POST abaixo), não pelo
+    // `resetPasswordForEmail` do Supabase. Motivo em
+    // src/lib/auth/password-recovery.ts: o link do GoTrue passa por
+    // `/auth/v1/verify?...&redirect_to=`, e quando o destino não está na
+    // allowlist de Redirect URLs do projeto ele é trocado pelo Site URL sem
+    // aviso — foi assim que o link de recuperação passou a cair na tela de
+    // login. O link que montamos aponta direto para /redefinir-senha.
+    let failed = false;
+    try {
+      const response = await fetch("/api/auth/recuperar-senha", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setStatus(payload?.error ?? "Não foi possível enviar o e-mail agora.");
+        failed = true;
+      }
+    } catch {
+      setStatus("Não foi possível enviar o e-mail agora. Verifique sua conexão.");
+      failed = true;
+    }
 
-    if (error) {
-      setStatus(error.message);
+    if (failed) {
       setLoading(false);
       return;
     }

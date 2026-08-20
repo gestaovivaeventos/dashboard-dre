@@ -236,7 +236,7 @@ export function ComparativosAnuaisView({
         showToast({ title: "Nada para exportar", description: "Nenhum lancamento neste drilldown.", variant: "destructive" });
         return;
       }
-      downloadDrilldownXlsx(allRows, {
+      await downloadDrilldownXlsx(allRows, {
         origem: "Comparativos Anuais",
         accountName: drilldown.accountName,
         periodLabel: drilldown.bucket.label,

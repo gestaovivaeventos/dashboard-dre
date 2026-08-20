@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 
 import type { FeatContaReceberDetalhe } from "@/lib/financeiro/relatorios/feat-contas-receber-aberto";
 
@@ -23,10 +22,16 @@ export interface FeatContasReceberExportMeta {
 
 // Monta a planilha (cabeçalho + uma linha por título + TOTAL) e dispara o
 // download do .xlsx. As datas já vêm no formato dd/mm/aaaa da Omie.
-export function downloadFeatContasReceberXlsx(
+export async function downloadFeatContasReceberXlsx(
   detalhes: FeatContaReceberDetalhe[],
   meta: FeatContasReceberExportMeta,
-): void {
+): Promise<void> {
+  // O xlsx (~430 KB minificado) so e necessario no momento do download. Import
+  // dinamico aqui em vez de estatico no topo: senao toda tela que apenas
+  // IMPORTA este modulo (DRE, Fluxo, Budget, Comparativos) carrega a lib
+  // inteira no bundle inicial da rota, mesmo sem ninguem exportar nada.
+  const XLSX = await import("xlsx");
+
   const header = [
     "Cliente (nome fantasia)",
     "Data de vencimento",

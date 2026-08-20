@@ -17,16 +17,66 @@ export default function RedefinirSenhaPage() {
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [hasSession, setHasSession] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  // O link do e-mail entrega a sessão de recovery NA URL desta página (via
-  // ?code= do PKCE ou #access_token do fluxo implícito). O browser client
-  // (@supabase/ssr, detectSessionInUrl ligado) processa isso automaticamente ao
-  // carregar e dispara onAuthStateChange ("PASSWORD_RECOVERY"/"SIGNED_IN").
-  // Escutamos esse evento + checamos a sessão atual; se em ~3s nada chegar,
-  // tratamos como link inválido/expirado.
+  // Como a sessão de recovery chega aqui, em ordem de preferência:
+  //
+  //   1. `?token_hash=...&type=recovery` — o formato dos links que o app passou
+  //      a enviar (ver src/lib/auth/password-recovery.ts). Trocamos o token por
+  //      sessão com `verifyOtp`. Não depende de Site URL, allowlist de Redirect
+  //      URLs nem de PKCE, então funciona até em outro navegador/celular.
+  //   2. `?code=` (PKCE) ou `#access_token` (implícito) — formato dos links
+  //      antigos, ainda em caixas de entrada. O browser client
+  //      (detectSessionInUrl) resolve sozinho e dispara onAuthStateChange.
+  //   3. `#error=...` / `?error=...` — o GoTrue recusou o link (expirado ou já
+  //      usado). Antes isso terminava numa tela de login muda; aqui vira uma
+  //      mensagem explícita.
   useEffect(() => {
     const supabase = createClient();
+    let cancelled = false;
+
+    const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+    const errorDescription =
+      params.get("error_description") ??
+      hashParams.get("error_description") ??
+      params.get("error") ??
+      hashParams.get("error");
+
+    if (errorDescription) {
+      setLinkError(
+        "O link expirou ou já foi utilizado. Solicite um novo link de recuperação.",
+      );
+      setChecking(false);
+      return;
+    }
+
+    const tokenHash = params.get("token_hash");
+    if (tokenHash) {
+      // Limpa a URL antes de consumir: o token é de uso único, e deixá-lo na
+      // barra de endereços faz um F5 tentar reusar um token já gasto.
+      window.history.replaceState({}, "", window.location.pathname);
+
+      void supabase.auth
+        .verifyOtp({ type: "recovery", token_hash: tokenHash })
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error || !data.session) {
+            setLinkError(
+              "O link expirou ou já foi utilizado. Solicite um novo link de recuperação.",
+            );
+          } else {
+            setHasSession(true);
+          }
+          setChecking(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -41,8 +91,10 @@ export default function RedefinirSenhaPage() {
         setChecking(false);
       }
     });
+    // Sem sinal em ~3s: link antigo inválido/expirado.
     const timeout = setTimeout(() => setChecking(false), 3000);
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
       clearTimeout(timeout);
     };
@@ -103,7 +155,8 @@ export default function RedefinirSenhaPage() {
         ) : !hasSession ? (
           <div className="space-y-4">
             <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30">
-              Link invalido ou expirado. Solicite um novo link de recuperacao.
+              {linkError ??
+                "Link inválido ou expirado. Solicite um novo link de recuperação."}
             </div>
             <Link
               href="/recuperar-senha"

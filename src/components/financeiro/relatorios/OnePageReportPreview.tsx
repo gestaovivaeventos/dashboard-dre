@@ -2749,11 +2749,13 @@ function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock 
         {data.detalhes.length > 0 ? (
           <button
             type="button"
-            onClick={() =>
-              downloadFeatContasReceberXlsx(data.detalhes, {
+            onClick={() => {
+              // A lib do .xlsx entra por import dinamico: o erro vira rejeicao,
+              // entao o catch fica aqui em vez de subir sem dono.
+              void downloadFeatContasReceberXlsx(data.detalhes, {
                 referenciaLabel: data.referenciaLabel,
-              })
-            }
+              });
+            }}
             // Ignora este botão na captura do PDF (html2canvas) — é interativo,
             // não faz parte do documento impresso.
             data-html2canvas-ignore="true"

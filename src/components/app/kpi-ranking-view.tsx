@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { ArrowDownUp, FileSpreadsheet, Inbox, Loader2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,7 +113,10 @@ export function KpiRankingView({
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  const exportKpiExcel = () => {
+  const exportKpiExcel = async () => {
+    // xlsx pesa ~430 KB minificado e so serve a exportacao. Import dinamico no
+    // clique para nao entrar no bundle inicial da rota (Dashboard/Fluxo/KPIs).
+    const XLSX = await import("xlsx");
     try {
       setExporting(true);
       const worksheetRows = sortedRows.map((row, index) => ({

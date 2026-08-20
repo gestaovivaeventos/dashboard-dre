@@ -143,6 +143,15 @@ export async function getPreviaOrcamento(
   const pessoalNaoClassificado: PreviaOrfao[] = [];
   const categoriasNaoMapeadas: PreviaOrfao[] = [];
 
+  // Ids das contas que a prévia REALMENTE renderiza (core = top-level 1..19).
+  // `translateToScopedId` casa contra o plano COMPLETO (`scopedAccounts`), que
+  // inclui contas fora da faixa core (ex.: grupo Financeiras em planos que o
+  // colocam ≥20, ou linhas auxiliares). Um valor mapeado para uma conta fora
+  // desse conjunto não teria linha onde pousar e sumiria em silêncio — então
+  // só aceitamos o pouso quando o id está em `coreAccounts`; senão vira órfão
+  // visível no aviso "Valores fora da DRE".
+  const coreIds = new Set(scope.coreAccounts.map((a) => a.id));
+
   // ── MÉTODOS POR CATEGORIA (média + valor fixo) ──────────────────────────────
   // Ambos ligam na DRE pela mesma chave (category_code → category_mapping) e
   // usam os mesmos índices do ano; só a ORIGEM do valor difere (realizado médio
@@ -202,7 +211,9 @@ export async function getPreviaOrcamento(
     const aplicar = (code: string, chave: string, meses: number[]) => {
       const rawAccountId = mapByCode.get(code) ?? null;
       const scopedId = rawAccountId ? scope.translateToScopedId(rawAccountId) : null;
-      if (!scopedId) {
+      // Sem conta mapeada, ou mapeada para fora da faixa renderizada (coreIds):
+      // fica órfão visível, nunca descartado.
+      if (!scopedId || !coreIds.has(scopedId)) {
         categoriasNaoMapeadas.push({ chave, meses, totalAno: somar(meses) });
         return;
       }
@@ -288,7 +299,8 @@ export async function getPreviaOrcamento(
       const rotulo = rotuloOrcamento(linha.label);
       const rawAccountId = accountByLabel.get(rotulo) ?? null;
       const scopedId = rawAccountId ? scope.translateToScopedId(rawAccountId) : null;
-      if (!scopedId) {
+      // Mesma guarda da média/valor fixo: sem conta, ou fora da faixa core → órfão.
+      if (!scopedId || !coreIds.has(scopedId)) {
         pessoalNaoClassificado.push({
           chave: linha.label,
           meses: linha.meses,

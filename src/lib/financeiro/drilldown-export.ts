@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 
 // ============================================================================
 // Exportação do DRILLDOWN do módulo financeiro para Excel (.xlsx).
@@ -85,10 +84,16 @@ export interface DrilldownExportMeta {
 }
 
 // Monta a planilha (cabeçalho + linhas + TOTAL) e dispara o download do .xlsx.
-export function downloadDrilldownXlsx(
+export async function downloadDrilldownXlsx(
   rows: DrilldownExportRow[],
   meta: DrilldownExportMeta,
-): void {
+): Promise<void> {
+  // O xlsx (~430 KB minificado) so e necessario no momento do download. Import
+  // dinamico aqui em vez de estatico no topo: senao toda tela que apenas
+  // IMPORTA este modulo (DRE, Fluxo, Budget, Comparativos) carrega a lib
+  // inteira no bundle inicial da rota, mesmo sem ninguem exportar nada.
+  const XLSX = await import("xlsx");
+
   const showCompany = meta.multiCompany;
   const header = [
     meta.dateLabel ?? "Data",

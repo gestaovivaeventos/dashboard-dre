@@ -20,13 +20,33 @@ export async function updateSession(request: NextRequest) {
   // usuário cai numa tela de login sem erro nenhum, como se o link não
   // valesse. O fragmento (#access_token) não chega ao servidor: aquele caso é
   // tratado no cliente, em /login.
+  //
+  // Os links que o app envia hoje já apontam direto para /redefinir-senha com
+  // `token_hash` (ver src/lib/auth/password-recovery.ts) — este desvio cobre os
+  // links antigos, ainda em caixas de entrada, e qualquer e-mail disparado pelo
+  // painel do Supabase.
   if (
     (pathname === "/" || pathname === "/login") &&
     (request.nextUrl.searchParams.has("code") ||
+      request.nextUrl.searchParams.has("token_hash") ||
       request.nextUrl.searchParams.get("type") === "recovery")
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/redefinir-senha";
+    return NextResponse.redirect(url);
+  }
+
+  // Link de e-mail recusado pelo GoTrue (expirado/já usado): ele devolve
+  // `error`/`error_code` no destino. Na raiz esses parâmetros morreriam no
+  // redirect para /login — o usuário via a tela de login sem explicação
+  // nenhuma. Preserva a query para o login conseguir mostrar o motivo.
+  if (
+    pathname === "/" &&
+    (request.nextUrl.searchParams.has("error") ||
+      request.nextUrl.searchParams.has("error_code"))
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
