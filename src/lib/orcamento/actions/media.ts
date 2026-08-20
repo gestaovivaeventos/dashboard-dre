@@ -8,24 +8,19 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { INDICES, type IndiceKey } from "@/lib/orcamento/indices";
-import { currentYearBR, currentMonthBR } from "@/lib/ctrl/datetime";
+import {
+  fetchRealizados,
+  REALIZADO_VAZIO,
+  type MediaRealizado,
+} from "@/lib/orcamento/media-realizado";
 
 const PATH = "/orcamento/despesas/media";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-/** Realizado do ano-base de uma categoria, mês a mês. */
-export interface MediaRealizado {
-  /** 12 posições (jan…dez). null = mês sem pagamento no ano-base. */
-  meses: (number | null)[];
-  /** Soma dos meses FECHADOS do ano-base (o mês corrente e futuros ficam fora). */
-  total: number;
-  /** Quantos meses do ano-base já fecharam = denominador da média. Um mês
-   * fechado zerado ENTRA na conta (conta como 0); o mês corrente não. */
-  mesesConsiderados: number;
-  /** total / mesesConsiderados. null quando nenhum mês fechou (ou sem realizado). */
-  media: number | null;
-}
+// MediaRealizado + o cálculo do realizado (meses fechados, média) vivem em
+// `@/lib/orcamento/media-realizado` (fonte única, compartilhada com a Prévia).
+export type { MediaRealizado };
 
 export interface MediaCategoriaItem {
   categoryCode: string;
@@ -71,87 +66,6 @@ const INDICE_KEYS = new Set<string>(INDICES_PERCENT.map((i) => i.key));
 
 function isIndiceKey(value: unknown): value is IndiceKey {
   return typeof value === "string" && INDICE_KEYS.has(value);
-}
-
-interface RealizadoRow {
-  category_code: string;
-  month: number;
-  total: number | string;
-}
-
-/**
- * Quantos meses do ano-base já FECHARAM, contados em Brasília.
- * - ano-base no passado → 12 (ano fechado).
- * - ano-base = ano corrente → mês corrente − 1 (o mês em curso ainda não fechou;
- *   ex.: 19/08 → jan…jul = 7 meses fechados; agosto entra só em 01/09).
- * - ano-base no futuro → 0.
- * Contamos em Brasília para não "fechar" um mês cedo demais à meia-noite UTC.
- */
-function mesesFechados(baseYear: number): number {
-  const anoAtual = currentYearBR();
-  if (baseYear < anoAtual) return 12;
-  if (baseYear > anoAtual) return 0;
-  return Math.max(0, currentMonthBR() - 1);
-}
-
-/** Agrupa as linhas do RPC (categoria × mês) em um realizado por categoria. */
-function buildRealizados(
-  rows: RealizadoRow[],
-  mesesFechadosCount: number,
-): Map<string, MediaRealizado> {
-  const byCode = new Map<string, (number | null)[]>();
-  for (const r of rows) {
-    const code = r.category_code;
-    if (!byCode.has(code)) byCode.set(code, Array(12).fill(null));
-    const meses = byCode.get(code)!;
-    const idx = Number(r.month) - 1;
-    if (idx >= 0 && idx < 12) meses[idx] = Number(r.total);
-  }
-  const out = new Map<string, MediaRealizado>();
-  byCode.forEach((meses, code) => out.set(code, resumirRealizado(meses, mesesFechadosCount)));
-  return out;
-}
-
-/**
- * Média = soma dos meses FECHADOS ÷ nº de meses fechados. Um mês fechado sem
- * pagamento (null) entra como 0; o mês corrente e os futuros ficam de fora,
- * mesmo que já tenham algum pagamento parcial.
- */
-function resumirRealizado(
-  meses: (number | null)[],
-  mesesFechadosCount: number,
-): MediaRealizado {
-  let total = 0;
-  for (let i = 0; i < 12; i += 1) {
-    if (i >= mesesFechadosCount) break; // mês ainda não fechado: fora da conta
-    total += meses[i] ?? 0; // mês fechado zerado conta como 0
-  }
-  const media = mesesFechadosCount > 0 ? total / mesesFechadosCount : null;
-  return { meses, total, mesesConsiderados: mesesFechadosCount, media };
-}
-
-const REALIZADO_VAZIO: MediaRealizado = {
-  meses: Array(12).fill(null),
-  total: 0,
-  mesesConsiderados: 0,
-  media: null,
-};
-
-/** Lê o realizado do ano-base para um conjunto de categorias (via RPC). */
-async function fetchRealizados(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  companyId: string,
-  baseYear: number,
-  codes: string[],
-): Promise<Map<string, MediaRealizado>> {
-  if (codes.length === 0) return new Map();
-  const { data, error } = await supabase.rpc("orcamento_media_realizado", {
-    p_company_id: companyId,
-    p_base_year: baseYear,
-    p_category_codes: codes,
-  });
-  if (error) return new Map();
-  return buildRealizados((data ?? []) as RealizadoRow[], mesesFechados(baseYear));
 }
 
 /** Códigos + nomes das categorias marcadas com o método 'media' na empresa/ano. */

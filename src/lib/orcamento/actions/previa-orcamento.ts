@@ -12,6 +12,7 @@ import {
   type DashboardRow,
 } from "@/lib/dashboard/dre";
 import { projetarMedia } from "@/lib/orcamento/media-calc";
+import { fetchRealizados } from "@/lib/orcamento/media-realizado";
 import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
@@ -234,9 +235,19 @@ export async function getPreviaOrcamento(
       const snapByCode = new Map<string, MediaSnapshotRow>(
         ((snapRows ?? []) as MediaSnapshotRow[]).map((r) => [r.category_code, r]),
       );
+      // Realizado do ano-base AO VIVO — mesmo cálculo da tela de Média. A prévia
+      // lia só o snapshot salvo, mas a tela mostra `mediaValor ?? realizado.media`
+      // (sugestão viva antes de "Recalcular p/ salvar"): categoria com valor
+      // vivo mas sem snapshot aparecia zerada aqui. Usamos o MESMO efetivo.
+      const mediaCodes = mediaCats.map((c) => c.category_code);
+      const realizados = await fetchRealizados(supabase, companyId, year - 1, mediaCodes);
       for (const cat of mediaCats) {
         const snap = snapByCode.get(cat.category_code);
-        const bruto = snap?.media_valor == null ? null : Number(snap.media_valor);
+        // Efetiva = snapshot salvo; sem ele, a média viva do realizado.
+        const bruto =
+          snap?.media_valor != null
+            ? Number(snap.media_valor)
+            : realizados.get(cat.category_code)?.media ?? null;
         const projetado = projetarMedia(bruto, indicePercent(snap?.indice_key ?? null));
         if (projetado == null || projetado === 0) {
           mediaSemValor += 1;
