@@ -11,6 +11,7 @@ import {
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
+import { semDocumentoError } from "@/lib/ctrl/cnpj";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
@@ -2717,22 +2718,22 @@ export async function enqueueSendToPayment(
   // parcial silencioso — o operador desmarca as travadas ou homologa o cadastro.
   const { data: comFornecedor, error: supErr } = await supabase
     .from("ctrl_requests")
-    .select("request_number, ctrl_suppliers(name, status)")
+    .select("request_number, ctrl_suppliers(name, status, cnpj_cpf, estrangeiro)")
     .in("id", requestIds)
     .not("supplier_id", "is", null);
 
   if (supErr) return { error: supErr.message };
 
-  const naoHomologados = (comFornecedor ?? [])
-    .map((r) => {
-      const raw = (r as { ctrl_suppliers: unknown }).ctrl_suppliers;
-      const sup = (Array.isArray(raw) ? raw[0] : raw) as
-        | { name: string; status: string }
-        | null
-        | undefined;
-      return { number: r.request_number as number, sup };
-    })
-    .filter(({ sup }) => sup && sup.status !== "aprovado");
+  const fornecedores = (comFornecedor ?? []).map((r) => {
+    const raw = (r as { ctrl_suppliers: unknown }).ctrl_suppliers;
+    const sup = (Array.isArray(raw) ? raw[0] : raw) as
+      | { name: string; status: string; cnpj_cpf: string | null; estrangeiro: boolean | null }
+      | null
+      | undefined;
+    return { number: r.request_number as number, sup };
+  });
+
+  const naoHomologados = fornecedores.filter(({ sup }) => sup && sup.status !== "aprovado");
 
   if (naoHomologados.length > 0) {
     const lista = naoHomologados
@@ -2743,6 +2744,18 @@ export async function enqueueSendToPayment(
         `Fornecedor não homologado em ${lista}. ` +
         "Acesse a tela de Fornecedores para homologar o cadastro antes de enviar para pagamento.",
     };
+  }
+
+  // Sem documento e sem a marcação de estrangeiro o cadastro não existe na Omie:
+  // o lançamento acontece minutos depois, na fila, e a requisição voltaria com
+  // "Fornecedor sem CNPJ/CPF" sem ninguém olhando. Erra aqui, na hora do clique.
+  const semDocumento = fornecedores.filter(
+    ({ sup }) => sup && !(sup.cnpj_cpf ?? "").trim() && !sup.estrangeiro,
+  );
+
+  if (semDocumento.length > 0) {
+    const lista = semDocumento.map(({ number }) => `#${number}`).join(", ");
+    return { error: `${semDocumentoError(semDocumento[0].sup!.name)} (${lista})` };
   }
 
   const now = new Date().toISOString();

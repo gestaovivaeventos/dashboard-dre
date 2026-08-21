@@ -52,3 +52,18 @@ export function maskCnpj(value: string | null | undefined): string {
 export function cnpjIsComplete(value: string | null | undefined): boolean {
   return cleanCnpj(value).length === CNPJ_LENGTH;
 }
+
+/**
+ * Fornecedor sem CNPJ/CPF e sem a marcação de estrangeiro não tem como ser
+ * cadastrado na Omie. A mesma mensagem é usada nas três travas do caminho
+ * (homologação, envio ao pagamento e lançamento) para que o operador sempre
+ * leia a mesma instrução: informar o documento OU marcar "Fornecedor
+ * estrangeiro" no cadastro.
+ */
+export function semDocumentoError(supplierName: string): string {
+  return (
+    `Fornecedor "${supplierName}" está sem CNPJ/CPF. ` +
+    'Edite o cadastro na tela de Fornecedores: informe o documento ou, se for do exterior, ' +
+    'marque "Fornecedor estrangeiro (sem CNPJ/CPF)" e selecione o País.'
+  );
+}

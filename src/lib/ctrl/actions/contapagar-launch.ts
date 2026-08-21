@@ -18,7 +18,7 @@ import {
 } from "@/lib/omie/contapagar";
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 import { parseBanco } from "@/lib/ctrl/bancos";
-import { normalizeDoc } from "@/lib/ctrl/cnpj";
+import { normalizeDoc, semDocumentoError } from "@/lib/ctrl/cnpj";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" | "previsao_editada" }
@@ -237,7 +237,7 @@ export async function launchRequestToOmie(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, status, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
+      "id, name, status, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_tipo_conta, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep, omie_id",
     )
     .eq("id", request.supplier_id)
     .maybeSingle();
@@ -258,7 +258,7 @@ export async function launchRequestToOmie(
   // (exibindo "Estrangeiro" no campo de documento). Só bloqueamos quando o
   // fornecedor brasileiro está sem documento.
   if (!supplier.cnpj_cpf && !supplier.estrangeiro) {
-    return { error: "Fornecedor sem CNPJ/CPF." };
+    return { error: semDocumentoError(supplier.name as string) };
   }
 
   // 1. Fetch company
@@ -431,6 +431,9 @@ export async function launchRequestToOmie(
         // Sem estes campos o syncSupplierToOmieUnit rejeitaria por falta de documento.
         estrangeiro: Boolean(supplier.estrangeiro),
         codigo_pais: supplier.codigo_pais as string | null,
+        // Cadastro legado importado da Omie: sem documento, é a única chave de
+        // dedupe que evita duplicar o fornecedor lá (ver syncSupplierToOmieUnit).
+        omie_id: (supplier.omie_id as number | null) ?? null,
         estado: supplier.estado as string | null,
         cidade: supplier.cidade as string | null,
         endereco: supplier.endereco as string | null,

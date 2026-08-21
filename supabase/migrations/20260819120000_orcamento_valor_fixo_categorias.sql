@@ -44,6 +44,7 @@ FOR EACH ROW EXECUTE FUNCTION public.orcamento_touch_updated_at();
 -- ─── RLS — admin-only, como o resto do módulo ───────────────────────────────
 ALTER TABLE public.orcamento_valor_fixo_categorias ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "orcamento_valor_fixo_categorias admin all" ON public.orcamento_valor_fixo_categorias;
 CREATE POLICY "orcamento_valor_fixo_categorias admin all"
 ON public.orcamento_valor_fixo_categorias
 FOR ALL

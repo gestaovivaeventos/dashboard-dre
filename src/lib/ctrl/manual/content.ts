@@ -736,6 +736,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
           "**O CNPJ tem 14 caracteres** e aceita o novo formato **alfanumérico** (letras e números). Um CNPJ com menos de 14 caracteres é recusado no cadastro — complete o número antes de salvar. O CPF continua com 11 dígitos.",
           "**Endereço completo é obrigatório** no cadastro nacional: a Omie recusa o cadastro sem ele.",
           "**Fornecedor estrangeiro** dispensa CNPJ/CPF, mas exige País e Estado.",
+          "**A homologação exige uma das duas coisas**: documento preenchido ou a marcação de estrangeiro. É comum em cadastro antigo, importado da Omie, que veio sem CNPJ e sem a marcação — edite o cadastro (informe o documento ou marque estrangeiro e escolha o País) antes de homologar, senão a requisição percorre a aprovação inteira e falha lá na frente, no envio para a Omie.",
           "Se marcar PIX ou transferência como **método padrão**, todos os dados daquele método precisam estar completos — é por ali que o pagamento vai sair sem ninguém perguntar nada depois.",
           "Fornecedor novo entra como **pendente**. Ele já pode ser usado em requisições; o que fica bloqueado é o envio do pagamento.",
           "**Anexos são opcionais**: se julgar necessário, anexe no cadastro documentos de apoio (contrato social, cartão CNPJ, proposta, comprovante da conta bancária). Eles aparecem no detalhe do fornecedor e na tela de homologação — não vão para a Omie.",

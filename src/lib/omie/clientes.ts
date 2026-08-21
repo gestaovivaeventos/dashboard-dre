@@ -110,6 +110,12 @@ export interface OmieSupplierData {
   // (tabela BACEN) e o campo cnpj_cpf vazio (a interface mostra "Estrangeiro").
   estrangeiro?: boolean;
   codigo_pais?: string | null;
+  /**
+   * Código do cadastro na Omie de origem, quando o fornecedor veio de lá
+   * (`from_omie`). Usado só como chave de dedupe do fornecedor SEM documento —
+   * ver syncSupplierToOmieUnit.
+   */
+  omie_id?: number | null;
   // Endereço — obrigatório no cadastro brasileiro (a Omie recusa sem ele).
   estado?: string | null;
   cidade?: string | null;
@@ -238,13 +244,51 @@ export function clienteRowToOmieData(row: {
   return null;
 }
 
+/**
+ * ConsultarCliente tolerante ao "não encontrado": quando o cliente ainda não
+ * existe, a Omie NÃO devolve o "não encontrado" padrão — lança "Cliente não
+ * cadastrado para o Código [0]" (ou "…para o Código de Integração [uuid]"), que
+ * o omieCall trata como erro. Aqui isso vira `null`; qualquer outro erro (rede,
+ * credenciais…) propaga.
+ */
+async function consultarClienteOuNull(
+  appKey: string,
+  appSecret: string,
+  param: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await omieCall(OMIE_CLIENTES_URL, "ConsultarCliente", appKey, appSecret, param);
+    if (res.notFound) return null;
+    return Number(res.data.codigo_cliente_omie) ? res.data : null;
+  } catch (err) {
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    const isNotFound =
+      /n[ãa]o cadastrado|n[ãa]o encontrado|not found|c[óo]digo \[?0\]?/.test(msg);
+    if (!isNotFound) throw err;
+    return null;
+  }
+}
+
+/** Compara razão social ignorando caixa, acento e espaço repetido. */
+function sameRazaoSocial(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) =>
+    String(v ?? "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+  const na = norm(a);
+  return Boolean(na) && na === norm(b);
+}
+
 // Cadastra/atualiza o fornecedor em UMA unidade Omie, sem duplicar:
 //   1. Procura por CNPJ (cobre legado e re-sync) → AlterarCliente (por
 //      codigo_cliente_omie, SEM código de integração — ver nota abaixo).
 //   2. Não achou → IncluirCliente (com código de integração = supplier.id).
 // Fornecedor estrangeiro não tem CNPJ: a busca de duplicata é pelo código de
-// integração (supplier.id) via ConsultarCliente, garantindo idempotência no
-// re-sync sem depender do documento.
+// integração (supplier.id) via ConsultarCliente e, no cadastro legado que veio
+// da própria Omie, pelo omie_id (conferindo a razão social).
 export async function syncSupplierToOmieUnit(
   appKey: string,
   appSecret: string,
@@ -271,23 +315,25 @@ export async function syncSupplierToOmieUnit(
       if (match?.codigo_cliente_omie) existingCode = Number(match.codigo_cliente_omie);
     }
   } else {
-    // Estrangeiro (sem documento): dedupe pelo código de integração. Quando o
-    // cliente ainda não existe, a Omie NÃO devolve o "não encontrado" padrão —
-    // lança "Cliente não cadastrado para o Código [0]", que o omieCall trata
-    // como erro. Capturamos essa mensagem e seguimos para o IncluirCliente
-    // (primeiro cadastro). Qualquer outro erro (rede, credenciais…) propaga.
-    try {
-      const consulta = await omieCall(OMIE_CLIENTES_URL, "ConsultarCliente", appKey, appSecret, {
-        codigo_cliente_integracao: supplier.id,
+    // Estrangeiro (sem documento): dedupe pelo código de integração, o que
+    // garante idempotência no re-sync sem depender do documento.
+    const porIntegracao = await consultarClienteOuNull(appKey, appSecret, {
+      codigo_cliente_integracao: supplier.id,
+    });
+    existingCode = porIntegracao ? Number(porIntegracao.codigo_cliente_omie) || null : null;
+
+    // Cadastro legado importado da Omie (`from_omie`) nunca teve código de
+    // integração — sem esta segunda tentativa o IncluirCliente abaixo criaria um
+    // fornecedor DUPLICADO na unidade. O código da Omie é por unidade, então
+    // confere a razão social antes de assumir: em outra unidade o mesmo número
+    // pode pertencer a outro cadastro.
+    if (!existingCode && supplier.omie_id) {
+      const legado = await consultarClienteOuNull(appKey, appSecret, {
+        codigo_cliente_omie: supplier.omie_id,
       });
-      if (!consulta.notFound) {
-        existingCode = Number(consulta.data.codigo_cliente_omie) || null;
+      if (legado && sameRazaoSocial(legado.razao_social, supplier.name)) {
+        existingCode = Number(legado.codigo_cliente_omie) || null;
       }
-    } catch (err) {
-      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-      const isNotFound =
-        /n[ãa]o cadastrado|n[ãa]o encontrado|not found|c[óo]digo \[?0\]?/.test(msg);
-      if (!isNotFound) throw err;
     }
   }
 

@@ -119,7 +119,7 @@ export default function SignupPage() {
                 Conta criada com sucesso!
               </p>
               <p className="mt-1 text-sm text-green-700 dark:text-green-400">
-                Verifique seu e-mail para confirmar o cadastro. Apos a confirmacao, um administrador precisara aprovar seu acesso.
+                Em breve um administrador ira liberar seu acesso ao sistema.
               </p>
             </div>
           ) : (

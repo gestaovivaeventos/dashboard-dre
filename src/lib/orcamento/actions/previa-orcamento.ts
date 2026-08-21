@@ -268,20 +268,26 @@ export async function getPreviaOrcamento(
         if (isSchemaMissing(vfErr.message)) return { needsMigration: true };
         return { error: vfErr.message };
       }
-      const vfByCode = new Map<string, ValorFixoSnapshotRow>(
-        ((vfRows ?? []) as ValorFixoSnapshotRow[]).map((r) => [r.category_code, r]),
-      );
+      // Uma categoria pode ter N contratos (linhas) — agrupa por código e SOMA
+      // as séries de cada contrato antes de aplicar na linha da DRE.
+      const vfByCode = new Map<string, ValorFixoSnapshotRow[]>();
+      for (const r of (vfRows ?? []) as ValorFixoSnapshotRow[]) {
+        if (!vfByCode.has(r.category_code)) vfByCode.set(r.category_code, []);
+        vfByCode.get(r.category_code)!.push(r);
+      }
       for (const cat of vfCats) {
-        const snap = vfByCode.get(cat.category_code);
-        const base = snap?.valor_base == null ? null : Number(snap.valor_base);
-        if (base == null) {
-          valorFixoSemValor += 1;
-          continue;
+        const contratos = vfByCode.get(cat.category_code) ?? [];
+        const meses = Array<number>(12).fill(0);
+        for (const snap of contratos) {
+          const base = snap.valor_base == null ? null : Number(snap.valor_base);
+          if (base == null) continue;
+          const mes = snap.mes_reajuste == null ? null : Number(snap.mes_reajuste);
+          // O salário mínimo corrige por valor absoluto (unit 'brl'); os demais, %.
+          const unit = INDICE_UNIT.get(snap.indice_key ?? "") ?? "percent";
+          const serie = projetarValorFixoSerie(base, indicePercent(snap.indice_key ?? null), mes, unit);
+          for (let m = 0; m < 12; m += 1) meses[m] += serie[m] ?? 0;
         }
-        const mes = snap?.mes_reajuste == null ? null : Number(snap.mes_reajuste);
-        // O salário mínimo corrige por valor absoluto (unit 'brl'); os demais, %.
-        const unit = INDICE_UNIT.get(snap?.indice_key ?? "") ?? "percent";
-        const meses = projetarValorFixoSerie(base, indicePercent(snap?.indice_key ?? null), mes, unit);
+        // "Sem valor" quando nenhum contrato tem base (a soma zera).
         if (somar(meses) === 0) {
           valorFixoSemValor += 1;
           continue;

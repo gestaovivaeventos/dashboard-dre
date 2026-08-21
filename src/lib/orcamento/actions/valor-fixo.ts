@@ -13,14 +13,33 @@ const PATH = "/orcamento";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export interface ValorFixoItem {
-  categoryCode: string;
-  categoryName: string;
+/** Um contrato dentro de uma categoria orçada por valor fixo. */
+export interface ValorFixoContrato {
+  /** id da linha em orcamento_valor_fixo_categorias. */
+  id: string;
+  /** Rótulo do contrato (obrigatório na tela quando a categoria tem 2+). */
+  descricao: string | null;
   /** Valor base informado (ex.: custo atual). null = ainda não preenchido. */
   valorBase: number | null;
   /** Índice de correção escolhido (null = sem correção). */
   indiceKey: IndiceKey | null;
   /** Mês (1..12) em que o reajuste passa a valer. null = sem reajuste no ano. */
+  mesReajuste: number | null;
+}
+
+/** Uma categoria orçada por valor fixo, com seus N contratos. */
+export interface ValorFixoItem {
+  categoryCode: string;
+  categoryName: string;
+  contratos: ValorFixoContrato[];
+}
+
+/** Payload de um contrato ao salvar (id ausente = inserir). */
+export interface ValorFixoContratoInput {
+  id?: string | null;
+  descricao: string | null;
+  valorBase: number | null;
+  indiceKey: IndiceKey | null;
   mesReajuste: number | null;
 }
 
@@ -76,6 +95,15 @@ async function fetchCategoriasValorFixo(
   return { codes };
 }
 
+interface ContratoRow {
+  id: string;
+  category_code: string;
+  descricao: string | null;
+  valor_base: number | string | null;
+  indice_key: string | null;
+  mes_reajuste: number | string | null;
+}
+
 // ─── Leitura ────────────────────────────────────────────────────────────────
 
 export async function getValorFixoCategorias(
@@ -111,28 +139,38 @@ export async function getValorFixoCategorias(
   const codes = Array.from(cats.codes.keys());
   if (codes.length === 0) return { setup: { items: [], indices } };
 
-  // Snapshots salvos.
+  // Contratos salvos (N por categoria). Ordena por created_at/id para a lista
+  // ficar estável entre recargas.
   const { data: saved, error: savedError } = await supabase
     .from("orcamento_valor_fixo_categorias")
-    .select("category_code, valor_base, indice_key, mes_reajuste")
+    .select("id, category_code, descricao, valor_base, indice_key, mes_reajuste")
     .eq("company_id", companyId)
-    .eq("year", year);
+    .eq("year", year)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
   if (savedError) {
     if (isSchemaMissing(savedError.message)) return { needsMigration: true };
     return { error: savedError.message };
   }
-  const savedByCode = new Map((saved ?? []).map((r) => [r.category_code as string, r]));
 
-  const items: ValorFixoItem[] = codes.map((code) => {
-    const row = savedByCode.get(code);
-    return {
-      categoryCode: code,
-      categoryName: cats.codes.get(code) ?? code,
-      valorBase: row?.valor_base == null ? null : Number(row.valor_base),
-      indiceKey: isIndiceKey(row?.indice_key) ? (row!.indice_key as IndiceKey) : null,
-      mesReajuste: row?.mes_reajuste == null ? null : Number(row.mes_reajuste),
-    };
-  });
+  const contratosByCode = new Map<string, ValorFixoContrato[]>();
+  for (const raw of (saved ?? []) as ContratoRow[]) {
+    const code = raw.category_code;
+    if (!contratosByCode.has(code)) contratosByCode.set(code, []);
+    contratosByCode.get(code)!.push({
+      id: raw.id,
+      descricao: raw.descricao ?? null,
+      valorBase: raw.valor_base == null ? null : Number(raw.valor_base),
+      indiceKey: isIndiceKey(raw.indice_key) ? (raw.indice_key as IndiceKey) : null,
+      mesReajuste: raw.mes_reajuste == null ? null : Number(raw.mes_reajuste),
+    });
+  }
+
+  const items: ValorFixoItem[] = codes.map((code) => ({
+    categoryCode: code,
+    categoryName: cats.codes.get(code) ?? code,
+    contratos: contratosByCode.get(code) ?? [],
+  }));
 
   items.sort((a, b) => a.categoryName.localeCompare(b.categoryName, "pt-BR"));
 
@@ -140,85 +178,121 @@ export async function getValorFixoCategorias(
 }
 
 // ─── Edição ───────────────────────────────────────────────────────────────────
-// Um upsert genérico por campo, para a tela salvar cada célula de forma
-// otimista sem apagar os outros campos da linha.
 
-async function upsertCampo(
+function validarContrato(
+  contrato: ValorFixoContratoInput,
+  requireDescricao: boolean,
+): string | null {
+  const descricao = (contrato.descricao ?? "").trim();
+  if (requireDescricao && descricao === "") {
+    return "Descrição obrigatória quando há mais de um contrato na categoria.";
+  }
+  if (descricao.length > 200) return "Descrição muito longa (máx. 200 caracteres).";
+  if (
+    contrato.valorBase != null &&
+    (!Number.isFinite(contrato.valorBase) || contrato.valorBase < 0)
+  ) {
+    return "Valor base inválido.";
+  }
+  if (contrato.indiceKey != null && !isIndiceKey(contrato.indiceKey)) {
+    return "Índice inválido.";
+  }
+  if (
+    contrato.mesReajuste != null &&
+    (!Number.isInteger(contrato.mesReajuste) || contrato.mesReajuste < 1 || contrato.mesReajuste > 12)
+  ) {
+    return "Mês de reajuste inválido.";
+  }
+  return null;
+}
+
+/**
+ * Salva um contrato (linha inteira). Sem `id` → insere e devolve o id novo;
+ * com `id` → atualiza a linha. `requireDescricao` (a tela envia true quando a
+ * categoria tem 2+ contratos) obriga a descrição — validado também aqui.
+ */
+export async function saveValorFixoContrato(
   companyId: string,
   year: number,
   categoryCode: string,
   categoryName: string,
-  patch: Record<string, unknown>,
-  updatedBy: string,
-): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  contrato: ValorFixoContratoInput,
+  requireDescricao: boolean,
+): Promise<{ id?: string; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const validationError = validarContrato(contrato, requireDescricao);
+  if (validationError) return { error: validationError };
+
   const supabase = db() ?? (await createClient());
-  const { error } = await supabase.from("orcamento_valor_fixo_categorias").upsert(
-    {
+  const descricao = (contrato.descricao ?? "").trim() || null;
+  const patch = {
+    descricao,
+    valor_base: contrato.valorBase,
+    indice_key: contrato.indiceKey,
+    mes_reajuste: contrato.mesReajuste,
+    updated_by: admin.userId,
+  };
+
+  // Atualização de contrato existente.
+  if (contrato.id) {
+    const { error } = await supabase
+      .from("orcamento_valor_fixo_categorias")
+      .update({ ...patch, category_name: categoryName })
+      .eq("id", contrato.id)
+      .eq("company_id", companyId);
+    if (error) {
+      if (isSchemaMissing(error.message)) return { needsMigration: true };
+      return { error: error.message };
+    }
+    revalidatePath(PATH);
+    return { id: contrato.id };
+  }
+
+  // Novo contrato.
+  const { data, error } = await supabase
+    .from("orcamento_valor_fixo_categorias")
+    .insert({
       company_id: companyId,
       year,
       category_code: categoryCode,
       category_name: categoryName,
       ...patch,
-      updated_by: updatedBy,
-    },
-    { onConflict: "company_id,year,category_code" },
-  );
+    })
+    .select("id")
+    .single();
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { id: (data as { id: string }).id };
+}
+
+/** Remove um contrato pelo id. */
+export async function removeValorFixoContrato(
+  companyId: string,
+  year: number,
+  contratoId: string,
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !contratoId) return { error: "Contrato inválido." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = db() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_valor_fixo_categorias")
+    .delete()
+    .eq("id", contratoId)
+    .eq("company_id", companyId);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
   revalidatePath(PATH);
   return { ok: true };
-}
-
-/** Valor base (custo atual). null limpa o valor. */
-export async function setValorFixoBase(
-  companyId: string,
-  year: number,
-  categoryCode: string,
-  categoryName: string,
-  valor: number | null,
-): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
-  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
-  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
-  if (valor != null && (!Number.isFinite(valor) || valor < 0)) {
-    return { error: "Valor base inválido." };
-  }
-  return upsertCampo(companyId, year, categoryCode, categoryName, { valor_base: valor }, admin.userId);
-}
-
-/** Índice de correção (null remove). */
-export async function setValorFixoIndice(
-  companyId: string,
-  year: number,
-  categoryCode: string,
-  categoryName: string,
-  indiceKey: IndiceKey | null,
-): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
-  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
-  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
-  if (indiceKey != null && !isIndiceKey(indiceKey)) return { error: "Índice inválido." };
-  return upsertCampo(companyId, year, categoryCode, categoryName, { indice_key: indiceKey }, admin.userId);
-}
-
-/** Mês do reajuste (1..12; null = sem reajuste no ano). */
-export async function setValorFixoMesReajuste(
-  companyId: string,
-  year: number,
-  categoryCode: string,
-  categoryName: string,
-  mes: number | null,
-): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
-  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
-  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
-  if (mes != null && (!Number.isInteger(mes) || mes < 1 || mes > 12)) {
-    return { error: "Mês de reajuste inválido." };
-  }
-  return upsertCampo(companyId, year, categoryCode, categoryName, { mes_reajuste: mes }, admin.userId);
 }

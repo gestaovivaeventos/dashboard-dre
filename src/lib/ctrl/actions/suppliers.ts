@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
-import { CNPJ_LENGTH, CPF_LENGTH, normalizeDoc } from "@/lib/ctrl/cnpj";
+import { CNPJ_LENGTH, CPF_LENGTH, normalizeDoc, semDocumentoError } from "@/lib/ctrl/cnpj";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
 import { notifyAdmins } from "@/lib/ctrl/notifications";
 import { omieNameError } from "@/lib/ctrl/supplier-name";
@@ -78,12 +78,21 @@ export async function approveSupplier(
   const { data: supplier, error: supErr } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, omie_sync_required, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep, omie_id",
     )
     .eq("id", supplierId)
     .maybeSingle();
 
   if (supErr || !supplier) return { error: "Fornecedor não encontrado." };
+
+  // Sem documento e sem a marcação de estrangeiro não existe cadastro possível
+  // na Omie. Homologar assim só empurra a falha para o fim do fluxo: a
+  // requisição percorre a aprovação inteira e quebra no lançamento ("Fornecedor
+  // sem CNPJ/CPF"). Os cadastros legados vindos da Omie (`from_omie`) são o caso
+  // típico — vieram sem a flag de estrangeiro.
+  if (!normalizeDoc(supplier.cnpj_cpf) && !supplier.estrangeiro) {
+    return { error: semDocumentoError(supplier.name) };
+  }
 
   if (supplier.omie_sync_required && companyIds.length === 0) {
     return { error: "Selecione ao menos uma unidade para cadastro no Omie." };
@@ -142,6 +151,9 @@ export async function approveSupplier(
       transf_padrao: supplier.transf_padrao ?? false,
       estrangeiro: supplier.estrangeiro ?? false,
       codigo_pais: supplier.codigo_pais,
+      // Cadastro legado que veio da Omie: sem documento é a única chave de
+      // dedupe que evita duplicar o fornecedor lá (ver syncSupplierToOmieUnit).
+      omie_id: supplier.omie_id ?? null,
       estado: supplier.estado,
       cidade: supplier.cidade,
       endereco: supplier.endereco,
@@ -222,7 +234,7 @@ export async function resyncSupplierOmie(supplierId: string, companyId: string) 
   const { data: supplier } = await supabase
     .from("ctrl_suppliers")
     .select(
-      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep",
+      "id, name, nome_fantasia, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, transf_padrao, estrangeiro, codigo_pais, estado, cidade, endereco, endereco_numero, bairro, complemento, cep, omie_id",
     )
     .eq("id", supplierId)
     .maybeSingle();
