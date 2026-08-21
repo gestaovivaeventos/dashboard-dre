@@ -8,7 +8,7 @@
 // the next run picks up where it left off because extraction is keyed off
 // "tipo_documento IS NULL".
 
-import { extractContract, mergeCpfCnpj } from './extract'
+import { extractContract, mergeContas, mergeCpfCnpj } from './extract'
 import { decidirPorSaldoFee, loadFeeSaldo, type FeeSaldoMap } from './fee-saldo'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
@@ -406,6 +406,9 @@ export async function processBatch(
       numero_documento: (i.raw_extraction?.numero_documento ?? '').toString().trim() || null,
       chave_acesso: (i.raw_extraction?.chave_acesso ?? '').toString().trim() || null,
       conta: i.extracted_conta,
+      // Todas as contas do documento, reidratadas do raw_extraction salvo.
+      // Itens anteriores ao campo caem só na principal (retrocompat).
+      contas_todas: mergeContas(i.extracted_conta, i.raw_extraction?.contas_encontradas),
       valor_contrato: Number(i.extracted_valor_contrato) || null,
       valores_pagamentos: i.extracted_pagamentos ?? [],
       assinatura_contratante: i.assinatura_contratante,

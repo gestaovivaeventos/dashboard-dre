@@ -1,12 +1,13 @@
 // Saldo FEE por fundo — planilha "BACKEND FLUXO PROJETADO FRANQUIAS", aba
-// "CONTROLE FEE QUOKKA (IMPORT)". Coluna C = nome do fundo, coluna I =
-// "Valor a receber": quanto o fundo ainda tem disponível para receber de FEE.
+// "CONTROLE FEE QUOKKA (IMPORT)". Coluna C = nome do fundo, coluna K =
+// "Valor Disponível Para Retirada Conforme Saldo SPDX" (o saque disponível),
+// coluna L = data da última atualização da linha.
 // Regra (decisão 2026-08-13): RP de FEE/Cerimonial é aprovada se o valor
 // couber no saldo do fundo e reprovada se estourar; qualquer situação em que
 // o saldo não possa ser determinado cai em análise especialista — o fallback
 // nunca aprova nem reprova às cegas.
 
-import { fetchSheetTabTitleByGid, fetchSheetValues } from '@/lib/sheets/client'
+import { fetchSheetTabTitleByGid, fetchSheetValues, sheetSerialToDate } from '@/lib/sheets/client'
 
 const FEE_SALDO_SPREADSHEET_ID = '1ymgmW6ISadb8xKBpcNDXTnGr0buoOFVszSZmxaOxKBQ'
 // As abas são resolvidas pelo gid (estável a renomeação). A aba "FUNDOS
@@ -23,6 +24,16 @@ const FEE_SALDO_GID = 1986082110
 const COL_UNIDADE = 0
 const COL_NOME = 2
 const COL_SALDO = 10
+// L = "Data da última atualização" da linha. Decisão 2026-08-21: sem olhar
+// esta coluna, uma linha congelada é indistinguível de uma fresca — e o
+// validador reprovava com saldo de meses atrás (caso real: RP 873266, fundo
+// BRYAN.FARIAS, planilha em 753,95 desde 17/02 quando o saque real era
+// 7.015,33). Dado velho não decide: cai em análise especialista.
+const COL_ATUALIZACAO = 11
+
+// Idade máxima aceita para a linha do fundo. Acima disso o saldo é tratado
+// como não determinável.
+const SALDO_MAX_DIAS = 30
 
 // A carteira_realizado não tem o saldo SPDX, então NÃO serve para decidir —
 // ela só distingue a mensagem: fundo que existe lá mas não na importação é
@@ -39,6 +50,8 @@ export interface FeeSaldoEntry {
   unidade: string
   /** Coluna K: saque disponível conforme saldo SPDX. */
   saldo: number
+  /** Coluna L: quando a linha foi atualizada pela última vez. */
+  atualizadoEm: Date | null
 }
 
 export interface FeeSaldoMap {
@@ -63,6 +76,31 @@ export function normFundo(value: string | null | undefined): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
+// A coluna L vem como serial do Sheets (UNFORMATTED_VALUE), mas aceita string
+// de data também — a planilha é editada à mão.
+function parseAtualizacao(cell: unknown): Date | null {
+  if (typeof cell === 'number' && Number.isFinite(cell) && cell > 0) {
+    const d = sheetSerialToDate(cell)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  if (typeof cell === 'string' && cell.trim()) {
+    const m = cell.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/)
+    if (m) {
+      let ano = Number(m[3])
+      if (ano < 100) ano += 2000
+      const d = new Date(Date.UTC(ano, Number(m[2]) - 1, Number(m[1])))
+      return Number.isNaN(d.getTime()) ? null : d
+    }
+    const d = new Date(cell.trim())
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
+export function diasDesde(data: Date, hoje: Date): number {
+  return Math.floor((hoje.getTime() - data.getTime()) / 86400000)
+}
+
 function parseSaldo(cell: unknown): number | null {
   if (typeof cell === 'number') return Number.isFinite(cell) ? cell : null
   if (typeof cell === 'string' && cell.trim() !== '') {
@@ -79,7 +117,7 @@ export async function loadFeeSaldo(): Promise<FeeSaldoMap> {
     fetchSheetTabTitleByGid(FEE_SALDO_SPREADSHEET_ID, CARTEIRA_GID),
   ])
   const [rowsImport, rowsCarteira] = await Promise.all([
-    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabImport.replace(/'/g, "''")}'!A2:K`),
+    fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabImport.replace(/'/g, "''")}'!A2:L`),
     fetchSheetValues(FEE_SALDO_SPREADSHEET_ID, `'${tabCarteira.replace(/'/g, "''")}'!A2:C`),
   ])
 
@@ -108,6 +146,7 @@ export async function loadFeeSaldo(): Promise<FeeSaldoMap> {
       nome,
       unidade: String(row[COL_UNIDADE] ?? '').trim(),
       saldo,
+      atualizadoEm: parseAtualizacao(row[COL_ATUALIZACAO]),
     })
     semSaldo.delete(key)
   }
@@ -139,6 +178,7 @@ export function decidirPorSaldoFee(
   valorRp: number | string | null | undefined,
   saldoMap: FeeSaldoMap | null,
   loadError: string | null,
+  hoje: Date = new Date(),
 ): FeeDecisao {
   const especialista = (motivo: string): FeeDecisao => ({
     status: 'analise_especialista',
@@ -183,7 +223,22 @@ export function decidirPorSaldoFee(
     )
   }
 
-  const detalhe = `fundo "${entry.nome}" (${entry.unidade || 'sem unidade'}): saque disponível ${fmt(entry.saldo)}, RP ${fmt(valor)}`
+  // Frescor da linha. Saldo é um número que muda toda semana; decidir com uma
+  // foto de meses atrás é pior do que não decidir, porque parece confiável.
+  if (!entry.atualizadoEm) {
+    return especialista(
+      `fundo "${entry.nome}" sem data de última atualização na planilha de saldo FEE — não é possível saber se o saque disponível está vigente`,
+    )
+  }
+  const idade = diasDesde(entry.atualizadoEm, hoje)
+  if (idade > SALDO_MAX_DIAS) {
+    const quando = entry.atualizadoEm.toISOString().slice(0, 10).split('-').reverse().join('/')
+    return especialista(
+      `saque disponível do fundo "${entry.nome}" desatualizado: última atualização em ${quando} (${idade} dias atrás, limite ${SALDO_MAX_DIAS}) — pedir a reimportação da planilha antes de decidir`,
+    )
+  }
+
+  const detalhe = `fundo "${entry.nome}" (${entry.unidade || 'sem unidade'}): saque disponível ${fmt(entry.saldo)}, RP ${fmt(valor)}, atualizado em ${entry.atualizadoEm.toISOString().slice(0, 10).split('-').reverse().join('/')}`
   if (valor <= entry.saldo + SALDO_TOLERANCE) {
     return {
       status: 'aprovada',

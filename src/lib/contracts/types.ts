@@ -35,6 +35,11 @@ export interface ContractExtraction {
   // favorecido, etc.). A IA varre o documento inteiro — a validação aprova se o
   // CPF/CNPJ da requisição casar com QUALQUER um destes, não só o favorecido.
   cpf_cnpj_encontrados?: string[]
+  // Todas as contas bancárias presentes no documento. Em NFS-e o favorecido
+  // extraído é o TOMADOR, mas a conta impressa é a do PRESTADOR — sem esta
+  // varredura `favorecido.conta` volta vazio e a conferência bancária não
+  // acontece (caso real: RP 873260).
+  contas_encontradas?: string[]
   // Idoneidade do documento fiscal (NF/Fatura/Boleto). Usados na Faixa 2-B:
   // documento fiscal avulso precisa de número ou chave de acesso.
   numero_documento?: string
@@ -114,6 +119,9 @@ export interface ExtractedContract {
   numero_documento: string | null
   chave_acesso: string | null
   conta: string | null
+  // TODAS as contas do documento, já incluindo a principal. A conferência
+  // bancária casa contra esta lista, não só contra `conta`.
+  contas_todas: string[]
   valor_contrato: number | null
   valores_pagamentos: number[]
   assinatura_contratante: string | null

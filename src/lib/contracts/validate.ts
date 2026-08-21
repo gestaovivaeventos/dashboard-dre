@@ -131,6 +131,51 @@ function digitsOnly(value: string | null | undefined): string {
   return value.replace(/\D/g, '')
 }
 
+// Conta bancária tem grafia instável entre os dois lados: a RP guarda número e
+// dígito em campos separados ("484" + "5"), o documento imprime tudo junto
+// ("577870469-7"). Comparamos só os dígitos, aceitando que um dos lados traga
+// o dígito verificador a mais.
+//
+// A comparação antiga era `includes`, que dava por conferida qualquer conta do
+// documento que contivesse os dígitos da RP em QUALQUER posição — com contas
+// curtas isso casava com quase tudo. O que protege contra falso positivo aqui
+// é a igualdade, NÃO o comprimento: contas curtas são comuns e legítimas (a RP
+// 873260 tem conta "484"), e um piso alto de dígitos silenciaria justamente
+// elas. O piso abaixo só descarta ruído de OCR ("0", "-").
+const CONTA_MIN_DIGITOS = 2
+
+type ConferenciaConta = 'confere' | 'diverge' | 'indeterminado'
+
+function conferirConta(
+  reqConta: string | null | undefined,
+  contasDoc: string[],
+): ConferenciaConta {
+  const alvo = digitsOnly(reqConta)
+  const candidatas = contasDoc.map(digitsOnly).filter((c) => c.length >= CONTA_MIN_DIGITOS)
+  if (alvo.length < CONTA_MIN_DIGITOS || candidatas.length === 0) return 'indeterminado'
+  const bate = candidatas.some(
+    (c) => alvo === c || alvo === c.slice(0, -1) || c === alvo.slice(0, -1),
+  )
+  return bate ? 'confere' : 'diverge'
+}
+
+/** Todas as contas legíveis dos documentos da requisição, para exibição. */
+function contasDosDocumentos(docs: ExtractedContract[]): string[] {
+  const vistas = new Set<string>()
+  const resultado: string[] = []
+  for (const d of docs) {
+    const lista = d.contas_todas?.length ? d.contas_todas : d.conta ? [d.conta] : []
+    for (const conta of lista) {
+      const texto = (conta ?? '').toString().trim()
+      const chave = digitsOnly(texto)
+      if (!texto || !chave || vistas.has(chave)) continue
+      vistas.add(chave)
+      resultado.push(texto)
+    }
+  }
+  return resultado
+}
+
 function isAssinaturaPresente(value: string | null | undefined): boolean {
   if (!value) return false
   const normalized = value.trim().toLowerCase()
@@ -465,7 +510,6 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   const reqForn = limparNomeEmpresa(req.fornecedor)
   const reqFav = limparNomeEmpresa(req.favorecido)
   const reqCnpj = digitsOnly(req.cpf_cnpj)
-  const reqConta = digitsOnly(req.conta)
   const matchNome = docs.some((d) => {
     const docName = limparNomeEmpresa(d.fornecedor)
     if (!docName) return false
@@ -558,6 +602,21 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
+  // ── Conferência bancária (vale em QUALQUER faixa de valor) ────────────────
+  // Decisão 2026-08-21: conta divergente reprova em qualquer valor. Antes a
+  // checagem vivia dentro da Faixa 2 + "tem contrato", então uma RP de rotina
+  // (R$ 800, uma NF) podia apontar para outra conta sem ninguém ver — que é
+  // justamente a divergência que indica pagamento para a pessoa errada.
+  const contasDoc = contasDosDocumentos(docs)
+  const conferencia = conferirConta(req.conta, contasDoc)
+  if (conferencia === 'diverge') {
+    motivos.push(
+      `Conta bancária dos documentos (${contasDoc.join(' / ')}) não confere com a requisição (${req.conta ?? ''})`,
+    )
+  } else if (contasDoc.length > 0 && !digitsOnly(req.conta)) {
+    revisar.push('Documento com conta bancária, mas a requisição está sem conta para conferência')
+  }
+
   if (reqValor <= LIMITE_ALTO_VALOR) {
     // ═══════════ FAIXA 1 — RP até R$ 10.000 (validação flexível) ═══════════
     // Aprova com: favorecido identificável (CNPJ OU nome) + valor compatível +
@@ -613,17 +672,11 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
         ressalvas.push('Assinatura do contratado sem atribuição clara (rabisco/digital) — aceita como assinada')
       }
 
-      // Dados bancários compatíveis com o favorecido. Sem conta no documento →
-      // ressalva (a conta pode estar na própria RP), não reprova. Conta presente
-      // mas divergente → reprova (divergência explícita).
-      const docsComConta = docs.filter((d) => digitsOnly(d.conta))
-      if (docsComConta.length === 0) {
+      // Acima de R$ 10.000 o contrato PRECISA trazer dados bancários — ausência
+      // é ressalva própria desta faixa. A comparação em si (e a reprova por
+      // divergência) já rodou acima, para todas as faixas.
+      if (contasDoc.length === 0) {
         ressalvas.push('Contrato acima de R$ 10.000 sem dados bancários no documento — confira a conta antes de pagar')
-      } else if (!reqConta) {
-        revisar.push('Documento com conta bancária, mas a requisição está sem conta para conferência')
-      } else if (!docsComConta.some((d) => digitsOnly(d.conta).includes(reqConta))) {
-        const contas = docsComConta.map((d) => d.conta || '—').join(' / ')
-        motivos.push(`Conta bancária dos documentos (${contas}) não confere com a requisição (${req.conta ?? ''})`)
       }
 
       // Valores das parcelas presentes; vencimentos ausentes só geram ressalva.
@@ -676,6 +729,26 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     const al = alertaCronograma(req.modulo, req.data_evento, contratoComData?.data_contrato)
     if (al) alertas.push(al)
   }
+  // Mensagens de saldo (pagamento parcial / RP abaixo da parcela), montadas uma
+  // vez só para servirem tanto ao retorno `verificar_saldo` quanto ao alerta.
+  const referenciaAbaixo = pagamentoAbaixo
+    ? pagamentoAbaixo.parcelaReferencia !== null
+      ? `abaixo da parcela prevista em contrato de R$ ${pagamentoAbaixo.parcelaReferencia.toFixed(2)}`
+      : `abaixo do valor do contrato de R$ ${pagamentoAbaixo.somaContratos.toFixed(2)} (sem parcelas declaradas no documento)`
+    : null
+  const motivoSaldo = partialPayment
+    ? `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`
+    : pagamentoAbaixo && referenciaAbaixo
+      ? `Valor da RP (R$ ${reqValor.toFixed(2)}) está ${referenciaAbaixo}. Possível pagamento parcial por falta de saldo do fundo — confirme o saldo do contrato e o valor restante da parcela antes de pagar.`
+      : null
+
+  // Reprovação/revisão têm prioridade sobre `verificar_saldo`, mas o aviso de
+  // saldo não pode sumir junto: sem isto, uma RP reprovada por conta divergente
+  // deixava de mostrar que também era pagamento parcial (RP 873260).
+  if (motivoSaldo && (motivos.length > 0 || revisar.length > 0)) {
+    alertas.push(motivoSaldo)
+  }
+
   const comAlertas = alertas.length ? { alertas } : {}
 
   // ── Ressalva: vencimento do documento posterior à data prevista da RP ─────
@@ -720,29 +793,21 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
-  if (partialPayment) {
+  if (partialPayment && motivoSaldo) {
     return {
       status: 'verificar_saldo',
-      motivos: [
-        `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`,
-      ],
+      motivos: [motivoSaldo],
       resumo: `Verificar saldo — parcela de R$ ${partialPayment.parcelaIdentificada.toFixed(2)} identificada em contrato de R$ ${partialPayment.somaContratos.toFixed(2)} (${docs.length} doc${docs.length === 1 ? '' : 's'})`,
       ...comAlertas,
     }
   }
 
-  if (pagamentoAbaixo) {
+  if (pagamentoAbaixo && motivoSaldo && referenciaAbaixo) {
     const { somaContratos, parcelaReferencia } = pagamentoAbaixo
-    const referencia =
-      parcelaReferencia !== null
-        ? `abaixo da parcela prevista em contrato de R$ ${parcelaReferencia.toFixed(2)}`
-        : `abaixo do valor do contrato de R$ ${somaContratos.toFixed(2)} (sem parcelas declaradas no documento)`
     return {
       status: 'verificar_saldo',
-      motivos: [
-        `Valor da RP (R$ ${reqValor.toFixed(2)}) está ${referencia}. Possível pagamento parcial por falta de saldo do fundo — confirme o saldo do contrato e o valor restante da parcela antes de pagar.`,
-      ],
-      resumo: `Verificar saldo — RP R$ ${reqValor.toFixed(2)} ${referencia}${parcelaReferencia !== null ? ` (contrato R$ ${somaContratos.toFixed(2)})` : ''}`,
+      motivos: [motivoSaldo],
+      resumo: `Verificar saldo — RP R$ ${reqValor.toFixed(2)} ${referenciaAbaixo}${parcelaReferencia !== null ? ` (contrato R$ ${somaContratos.toFixed(2)})` : ''}`,
       ...comAlertas,
     }
   }
