@@ -353,16 +353,18 @@ async function createRateioRequest(
     return { error: "Mês de referência inválido." };
   }
 
-  // Fornecedor em aprovação não é suportado no rateio (v1).
+  // Fornecedor ainda não homologado NÃO impede o rateio — igual ao fluxo de 1
+  // setor: a requisição segue o trâmite normal e a trava é só no Contas a Pagar,
+  // no envio para pagamento (ver enqueueSendToPayment). Aqui só guardamos o nome
+  // para avisar os admins depois da criação.
+  let supplierPendingName: string | null = null;
   if (data.supplier_id) {
     const { data: sup } = await supabase
       .from("ctrl_suppliers")
-      .select("status")
+      .select("name, status")
       .eq("id", data.supplier_id)
-      .single();
-    if (sup?.status === "pendente") {
-      return { error: "Fornecedor em aprovação — aprove-o antes de criar um rateio." };
-    }
+      .maybeSingle();
+    if (sup && sup.status !== "aprovado") supplierPendingName = sup.name as string;
   }
 
   const total = Math.round(parts.reduce((s, p) => s + p.amount, 0) * 100) / 100;
@@ -465,6 +467,22 @@ async function createRateioRequest(
     comment: `Requisição rateada entre ${parts.length} setores (total ${total}).`,
     metadata: { rateio: perSector.map((s) => ({ sector_id: s.sector_id, amount: s.amount, tier: s.tier })) },
   });
+
+  if (supplierPendingName) {
+    await supabase.from("ctrl_history").insert({
+      request_id: newReq.id,
+      user_id: ctx.id,
+      action: "criado",
+      comment: `Fornecedor "${supplierPendingName}" ainda não homologado — o envio para pagamento ficará bloqueado até a homologação.`,
+    });
+
+    await notifyAdmins({
+      requestId: newReq.id,
+      title: "Fornecedor não homologado em requisição",
+      message: `Requisição #${newReq.request_number} usa o fornecedor "${supplierPendingName}", ainda não homologado. Homologue em Fornecedores para liberar o envio ao pagamento.`,
+      type: "fornecedor_pendente",
+    });
+  }
 
   revalidatePath("/ctrl/requisicoes");
   return {

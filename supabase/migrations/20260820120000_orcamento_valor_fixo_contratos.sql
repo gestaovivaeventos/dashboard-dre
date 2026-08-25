@@ -16,10 +16,24 @@
 
 -- Descrição do contrato (obrigatória na tela quando a categoria tem 2+ contratos;
 -- opcional no schema para não travar o contrato único, que dispensa rótulo).
+-- Coluna e constraint em passos separados (idempotentes): o inline
+-- "ADD COLUMN IF NOT EXISTS ... CONSTRAINT ... CHECK" é frágil e, se falhar,
+-- o editor faz rollback de tudo — a coluna nem chega a existir.
 ALTER TABLE public.orcamento_valor_fixo_categorias
-  ADD COLUMN IF NOT EXISTS descricao text
-  CONSTRAINT orcamento_valor_fixo_categorias_descricao_len
-    CHECK (descricao IS NULL OR char_length(descricao) <= 200);
+  ADD COLUMN IF NOT EXISTS descricao text;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'orcamento_valor_fixo_categorias_descricao_len'
+      AND conrelid = 'public.orcamento_valor_fixo_categorias'::regclass
+  ) THEN
+    ALTER TABLE public.orcamento_valor_fixo_categorias
+      ADD CONSTRAINT orcamento_valor_fixo_categorias_descricao_len
+      CHECK (descricao IS NULL OR char_length(descricao) <= 200);
+  END IF;
+END $$;
 
 -- Remove o UNIQUE (company_id, year, category_code): agora há N linhas por
 -- categoria. O nome auto-gerado desse constraint passa de 63 chars e é truncado
@@ -41,3 +55,8 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- Recarrega o cache de schema da API (PostgREST) para a coluna nova aparecer
+-- imediatamente — sem isso a API pode responder "column descricao does not
+-- exist" mesmo com a coluna já criada.
+NOTIFY pgrst, 'reload schema';

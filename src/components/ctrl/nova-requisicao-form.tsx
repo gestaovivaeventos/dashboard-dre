@@ -367,6 +367,11 @@ export function NovaRequisicaoForm({
   const [verifying, setVerifying] = useState(false);
   const [verification, setVerification] = useState<BudgetVerification | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Rateio: a verificação é POR SETOR — cada parcela contra o orçamento do seu
+  // próprio setor, que é exatamente o cálculo que o servidor refaz na criação.
+  const [rateioVerifications, setRateioVerifications] = useState<
+    { sectorId: string; amount: number; verification: BudgetVerification }[] | null
+  >(null);
 
   // ── Derived values ───────────────────────────────────────────────────────────
 
@@ -459,15 +464,38 @@ export function NovaRequisicaoForm({
     parsedAmount > 0 &&
     Math.abs(invoiceNetAmount - parsedAmount) > 0.01;
 
-  // Budget check is only required when an expense type is selected. No rateio a
-  // verificação é POR SETOR e roda no servidor na criação — a checagem única aqui
-  // não se aplica, então não bloqueia o envio.
-  const needsVerification = !!expenseTypeId && !isRateio;
-  const canVerify = !isRateio && !!sectorId && !!expenseTypeId && parsedAmount > 0;
-  const canSubmit = !needsVerification || !!verification;
+  // Parcelas válidas do rateio (setor escolhido + valor > 0), na ordem das linhas.
+  const rateioParts = useMemo(
+    () =>
+      rateioRows
+        .map((r) => ({
+          sectorId: r.sectorId,
+          amount: Number(r.valueStr.replace(/./g, "").replace(",", ".")),
+        }))
+        .filter((p) => p.sectorId && Number.isFinite(p.amount) && p.amount > 0),
+    [rateioRows],
+  );
+  // Só verifica com TODAS as linhas preenchidas e sem setor repetido — verificar
+  // um rateio pela metade mostraria um saldo que não é o desta requisição.
+  const rateioPartsReady =
+    rateioParts.length >= 2 &&
+    rateioParts.length === rateioRows.length &&
+    new Set(rateioParts.map((p) => p.sectorId)).size === rateioParts.length;
 
-  // Justification required when verification says nivel_3
-  const justificationRequired = verification?.justificationRequired ?? false;
+  // A verificação orçamentária é obrigatória sempre que há tipo de despesa —
+  // inclusive no rateio, onde ela roda uma vez POR SETOR. O servidor recalcula
+  // tudo na criação, mas o solicitante precisa ver o saldo antes de enviar.
+  const needsVerification = !!expenseTypeId;
+  const canVerify =
+    !!expenseTypeId && (isRateio ? rateioPartsReady : !!sectorId && parsedAmount > 0);
+  const verificationDone = isRateio ? !!rateioVerifications : !!verification;
+  const canSubmit = !needsVerification || verificationDone;
+
+  // Justification required when verification says nivel_3 (no rateio basta UM
+  // setor fora do orçamento — mesmo critério que o servidor aplica).
+  const justificationRequired = isRateio
+    ? (rateioVerifications ?? []).some((v) => v.verification.justificationRequired)
+    : verification?.justificationRequired ?? false;
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
@@ -475,8 +503,19 @@ export function NovaRequisicaoForm({
   // dólar/câmbio, que altera o valor efetivo em reais verificado no orçamento).
   useEffect(() => {
     setVerification(null);
+    setRateioVerifications(null);
     setVerifyError(null);
-  }, [sectorId, expenseTypeId, amountStr, isUsd, usdAmountStr, refMonth, refYear]);
+  }, [
+    sectorId,
+    expenseTypeId,
+    amountStr,
+    isUsd,
+    usdAmountStr,
+    refMonth,
+    refYear,
+    isRateio,
+    rateioRows,
+  ]);
 
   // Clear recurrence when incompatible with installments
   useEffect(() => {
@@ -562,6 +601,34 @@ export function NovaRequisicaoForm({
     setVerifying(true);
     setVerifyError(null);
     setVerification(null);
+    setRateioVerifications(null);
+
+    if (isRateio) {
+      // Uma verificação por setor: a parcela DAQUELE setor contra o orçamento
+      // DELE. Se qualquer uma falhar, nada é dado como verificado (o envio
+      // continua bloqueado) — verificação parcial enganaria o solicitante.
+      const results: { sectorId: string; amount: number; verification: BudgetVerification }[] = [];
+      for (const part of rateioParts) {
+        const result = await verifyBudget(
+          part.sectorId,
+          expenseTypeId,
+          part.amount,
+          refMonth,
+          refYear,
+        );
+        if ("error" in result) {
+          setVerifying(false);
+          const name = sectors.find((sec) => sec.id === part.sectorId)?.name ?? "Setor";
+          setVerifyError(`${name}: ${result.error}`);
+          return;
+        }
+        results.push({ ...part, verification: result });
+      }
+      setVerifying(false);
+      setRateioVerifications(results);
+      return;
+    }
+
     const result = await verifyBudget(sectorId, expenseTypeId, parsedAmount, refMonth, refYear);
     setVerifying(false);
     if ("error" in result) { setVerifyError(result.error); return; }
@@ -1528,9 +1595,12 @@ export function NovaRequisicaoForm({
       </div>
 
       {/* ── Verificação Orçamentária ─────────────────────────────────────────── */}
+      {/* Obrigatória em toda requisição com tipo de despesa. No rateio há uma
+          verificação por setor — a parcela daquele setor contra o orçamento
+          dele —, exatamente o que o servidor recalcula na criação. */}
       {needsVerification && (
         <div className={`space-y-3 rounded-lg border p-4 transition-colors ${
-          verification
+          verificationDone
             ? "border-border"
             : "border-amber-300 bg-amber-50/60 ring-1 ring-amber-200 dark:border-amber-800 dark:bg-amber-950/20 dark:ring-amber-900"
         }`}>
@@ -1538,16 +1608,20 @@ export function NovaRequisicaoForm({
             <div>
               <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                 Verificação Orçamentária
-                {!verification && (
+                {!verificationDone && (
                   <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:ring-amber-700">
                     Obrigatório
                   </span>
                 )}
               </p>
               <p className="text-xs text-muted-foreground">
-                {verification
-                  ? "Consulta o saldo disponível para este setor e tipo de despesa antes de enviar."
-                  : "Passo obrigatório: verifique o orçamento para liberar o envio da requisição."}
+                {verificationDone
+                  ? isRateio
+                    ? "Saldo consultado em cada setor do rateio, com a parcela daquele setor."
+                    : "Consulta o saldo disponível para este setor e tipo de despesa antes de enviar."
+                  : isRateio
+                    ? "Passo obrigatório: verifique o orçamento de cada setor do rateio para liberar o envio."
+                    : "Passo obrigatório: verifique o orçamento para liberar o envio da requisição."}
               </p>
             </div>
             <button
@@ -1555,13 +1629,13 @@ export function NovaRequisicaoForm({
               onClick={handleVerify}
               disabled={!canVerify || verifying}
               className={`shrink-0 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                verification
+                verificationDone
                   ? "border font-medium hover:bg-muted"
                   : "bg-amber-500 font-semibold text-white shadow-sm hover:bg-amber-600"
               }`}
             >
-              {!verification && !verifying && <AlertTriangle className="h-4 w-4 shrink-0" />}
-              {verifying ? "Verificando..." : verification ? "Reverificar" : "Verificar Orçamento"}
+              {!verificationDone && !verifying && <AlertTriangle className="h-4 w-4 shrink-0" />}
+              {verifying ? "Verificando..." : verificationDone ? "Reverificar" : "Verificar Orçamento"}
             </button>
           </div>
 
@@ -1569,82 +1643,21 @@ export function NovaRequisicaoForm({
             <p className="text-sm text-destructive">{verifyError}</p>
           )}
 
-          {verification && (
-            <div className={`rounded-lg p-4 ring-1 space-y-3 ${
-              verification.autoApproved
-                ? "bg-green-50 ring-green-200 dark:bg-green-950/20 dark:ring-green-800"
-                : verification.approvalTier === "nivel_3"
-                ? "bg-red-50 ring-red-200 dark:bg-red-950/20 dark:ring-red-800"
-                : "bg-amber-50 ring-amber-200 dark:bg-amber-950/20 dark:ring-amber-800"
-            }`}>
+          {!isRateio && verification && <BudgetResultCard verification={verification} />}
 
-              {/* Status header */}
-              <div className="flex items-center gap-2">
-                {verification.autoApproved ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
-                ) : (
-                  <AlertTriangle className={`h-5 w-5 shrink-0 ${verification.approvalTier === "nivel_3" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`} />
-                )}
-                <span className={`text-sm font-bold ${
-                  verification.autoApproved
-                    ? "text-green-700 dark:text-green-300"
-                    : verification.approvalTier === "nivel_3"
-                    ? "text-red-700 dark:text-red-300"
-                    : "text-amber-700 dark:text-amber-300"
-                }`}>
-                  {verification.statusLabel}
-                </span>
-                {verification.autoApproved && (
-                  <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700 ring-1 ring-green-300 dark:bg-green-900/40 dark:text-green-300">
-                    <Zap className="h-3 w-3" />
-                    Aprovação automática
-                  </span>
-                )}
-              </div>
-
-              {/* Budget breakdown */}
-              <div className="rounded-md bg-white/70 dark:bg-background/50 p-3 text-xs">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  <span className="text-muted-foreground">Orçamento até o mês:</span>
-                  <span className="font-semibold text-right">{fmt.format(verification.budgetedUpToMonth)}</span>
-                  <span className="text-muted-foreground">Orçamento anual:</span>
-                  <span className="font-semibold text-right">{fmt.format(verification.budgetedAnnual)}</span>
-                  <span className="text-muted-foreground">Total aprovado no ano:</span>
-                  <span className="font-semibold text-right">{fmt.format(verification.totalApproved)}</span>
-                </div>
-                <div className="my-2 border-t" />
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  <span className="font-medium">Saldo Atual:</span>
-                  <span className={`font-bold text-right ${verification.currentBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {fmt.format(verification.currentBalance)}
-                  </span>
-                  <span className="font-medium">Saldo Futuro (anual):</span>
-                  <span className={`font-bold text-right ${verification.futureBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {fmt.format(verification.futureBalance)}
-                  </span>
-                </div>
-              </div>
-
-              {!verification.isBudgeted && (
-                <p className="text-xs text-amber-700 dark:text-amber-300">
-                  Nenhum orçamento cadastrado para este tipo de despesa neste setor.
-                </p>
-              )}
-
-              {verification.approvalTier === "nivel_3" && (
-                <p className="text-xs text-red-700 dark:text-red-300 font-medium">
-                  Fora do orçamento (saldo anual insuficiente) — requer aprovação do Gerente e depois do Diretor, com justificativa obrigatória.
-                </p>
-              )}
-              {verification.approvalTier === "nivel_2" && (
-                <p className="text-xs text-amber-700 dark:text-amber-300">
-                  Dentro do orçamento — requer aprovação do gerente do setor.
-                </p>
-              )}
+          {isRateio && rateioVerifications && (
+            <div className="space-y-3">
+              {rateioVerifications.map((r) => (
+                <BudgetResultCard
+                  key={r.sectorId}
+                  verification={r.verification}
+                  heading={`${sectors.find((sec) => sec.id === r.sectorId)?.name ?? "Setor"} — parcela de R$ ${fmt.format(r.amount)}`}
+                />
+              ))}
             </div>
           )}
 
-          {!verification && !verifyError && canVerify && (
+          {!verificationDone && !verifyError && canVerify && (
             <p className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               Clique em &quot;Verificar Orçamento&quot; para liberar o envio da requisição.
@@ -1652,7 +1665,9 @@ export function NovaRequisicaoForm({
           )}
           {!canVerify && (
             <p className="text-xs text-muted-foreground">
-              Preencha setor, tipo de despesa e valor para habilitar a verificação.
+              {isRateio
+                ? "Preencha o tipo de despesa e todos os setores do rateio (cada um com valor) para habilitar a verificação."
+                : "Preencha setor, tipo de despesa e valor para habilitar a verificação."}
             </p>
           )}
         </div>
@@ -1729,7 +1744,9 @@ export function NovaRequisicaoForm({
       {justificationRequired && (
         <div className="space-y-1.5 rounded-lg border border-red-300 bg-red-50 p-4 dark:bg-red-950/20">
           <p className="text-xs font-semibold text-red-700 dark:text-red-300">
-            Saldo anual insuficiente — justificativa obrigatória para aprovação pelo Diretor.
+            {isRateio
+              ? "Há setor fora do orçamento — justificativa obrigatória para aprovação pelo Diretor."
+              : "Saldo anual insuficiente — justificativa obrigatória para aprovação pelo Diretor."}
           </p>
           <label htmlFor="justification" className={LABEL_CLS}>
             Justificativa <span className="text-destructive">*</span>
@@ -1826,6 +1843,98 @@ export function NovaRequisicaoForm({
         </p>
       )}
     </form>
+  );
+}
+
+// ── Resultado da verificação orçamentária ───────────────────────────────────
+// Um cartão por verificação: o fluxo de 1 setor mostra um; o rateio mostra um
+// POR SETOR, com o cabeçalho identificando o setor e a parcela dele.
+function BudgetResultCard({
+  verification,
+  heading,
+}: {
+  verification: BudgetVerification;
+  heading?: string;
+}) {
+  return (
+    <div className={`rounded-lg p-4 ring-1 space-y-3 ${
+      verification.autoApproved
+        ? "bg-green-50 ring-green-200 dark:bg-green-950/20 dark:ring-green-800"
+        : verification.approvalTier === "nivel_3"
+        ? "bg-red-50 ring-red-200 dark:bg-red-950/20 dark:ring-red-800"
+        : "bg-amber-50 ring-amber-200 dark:bg-amber-950/20 dark:ring-amber-800"
+    }`}>
+
+      {heading && (
+        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          {heading}
+        </p>
+      )}
+
+      {/* Status header */}
+      <div className="flex items-center gap-2">
+        {verification.autoApproved ? (
+          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+        ) : (
+          <AlertTriangle className={`h-5 w-5 shrink-0 ${verification.approvalTier === "nivel_3" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`} />
+        )}
+        <span className={`text-sm font-bold ${
+          verification.autoApproved
+            ? "text-green-700 dark:text-green-300"
+            : verification.approvalTier === "nivel_3"
+            ? "text-red-700 dark:text-red-300"
+            : "text-amber-700 dark:text-amber-300"
+        }`}>
+          {verification.statusLabel}
+        </span>
+        {verification.autoApproved && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-bold text-green-700 ring-1 ring-green-300 dark:bg-green-900/40 dark:text-green-300">
+            <Zap className="h-3 w-3" />
+            Aprovação automática
+          </span>
+        )}
+      </div>
+
+      {/* Budget breakdown */}
+      <div className="rounded-md bg-white/70 dark:bg-background/50 p-3 text-xs">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <span className="text-muted-foreground">Orçamento até o mês:</span>
+          <span className="font-semibold text-right">{fmt.format(verification.budgetedUpToMonth)}</span>
+          <span className="text-muted-foreground">Orçamento anual:</span>
+          <span className="font-semibold text-right">{fmt.format(verification.budgetedAnnual)}</span>
+          <span className="text-muted-foreground">Total aprovado no ano:</span>
+          <span className="font-semibold text-right">{fmt.format(verification.totalApproved)}</span>
+        </div>
+        <div className="my-2 border-t" />
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <span className="font-medium">Saldo Atual:</span>
+          <span className={`font-bold text-right ${verification.currentBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {fmt.format(verification.currentBalance)}
+          </span>
+          <span className="font-medium">Saldo Futuro (anual):</span>
+          <span className={`font-bold text-right ${verification.futureBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {fmt.format(verification.futureBalance)}
+          </span>
+        </div>
+      </div>
+
+      {!verification.isBudgeted && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          Nenhum orçamento cadastrado para este tipo de despesa neste setor.
+        </p>
+      )}
+
+      {verification.approvalTier === "nivel_3" && (
+        <p className="text-xs text-red-700 dark:text-red-300 font-medium">
+          Fora do orçamento (saldo anual insuficiente) — requer aprovação do Gerente e depois do Diretor, com justificativa obrigatória.
+        </p>
+      )}
+      {verification.approvalTier === "nivel_2" && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          Dentro do orçamento — requer aprovação do gerente do setor.
+        </p>
+      )}
+    </div>
   );
 }
 
