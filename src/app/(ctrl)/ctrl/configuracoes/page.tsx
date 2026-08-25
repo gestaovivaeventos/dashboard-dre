@@ -12,7 +12,8 @@ interface ConfigCard {
   icon: LucideIcon;
 }
 
-// Telas de configuração do módulo Compras, agrupadas neste hub (admin-only).
+// Telas de configuração do módulo Compras, agrupadas neste hub (admin + perfil
+// Contas a Pagar).
 const CARDS: ConfigCard[] = [
   {
     title: "Editar Orçamento",
@@ -49,8 +50,9 @@ const CARDS: ConfigCard[] = [
 export default async function ConfiguracoesPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
-  // Hub e todas as suas telas são exclusivas de admin.
-  if (!hasCtrlRole(ctx, "admin")) redirect("/ctrl/requisicoes");
+  // Hub e todas as suas telas: admin + perfil Contas a Pagar, que opera esses
+  // cadastros no dia a dia (ver @/lib/auth/access, canAccessPathByProfile).
+  if (!hasCtrlRole(ctx, "contas_a_pagar", "admin")) redirect("/ctrl/requisicoes");
 
   return (
     <div className="space-y-6">

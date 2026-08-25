@@ -12,7 +12,9 @@ export default async function EditarOrcamentoPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "admin")) {
+  // Configurações do módulo: admin + perfil Contas a Pagar (ver
+  // @/lib/auth/access, canAccessPathByProfile).
+  if (!hasCtrlRole(ctx, "contas_a_pagar", "admin")) {
     redirect("/ctrl/orcamento");
   }
 

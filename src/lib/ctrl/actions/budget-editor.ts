@@ -157,7 +157,8 @@ export async function deleteBudgetLine(
   expenseTypeId: string,
   year: number,
 ): Promise<{ error: string } | { ok: true }> {
-  await requireCtrlRole("admin");
+  // Editar Orçamento é uma tela do hub Configurações: admin + Contas a Pagar.
+  await requireCtrlRole("contas_a_pagar", "admin");
   const admin = createAdminClientIfAvailable();
   if (!admin) return { error: "Operação indisponível: credencial de serviço ausente." };
   if (!sectorId || !expenseTypeId) return { error: "Linha inválida." };
@@ -196,7 +197,8 @@ export async function moveBudgetLine(
 ): Promise<
   { error: string } | { ok: true; merged: boolean; requestsMoved: number; rateioSkipped: number }
 > {
-  await requireCtrlRole("admin");
+  // Editar Orçamento é uma tela do hub Configurações: admin + Contas a Pagar.
+  await requireCtrlRole("contas_a_pagar", "admin");
   const admin = createAdminClientIfAvailable();
   if (!admin) return { error: "Operação indisponível: credencial de serviço ausente." };
   if (!from.sectorId || !from.expenseTypeId || !to.sectorId || !to.expenseTypeId) {

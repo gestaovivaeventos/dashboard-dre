@@ -24,7 +24,8 @@
 //     o módulo inteiro. Sem nenhum setor vinculado, nada muda em relação ao
 //     comportamento atual do perfil.
 //   - Configurações do módulo (/ctrl/configuracoes e /ctrl/admin/*, incluindo
-//     Editar Orçamento): seguem admin-only.
+//     Editar Orçamento): reservadas a admin + perfil Contas a Pagar. Este
+//     override não entra lá.
 //   - Lembrete diário de aprovações por e-mail: quem recebe o quê continua
 //     saindo de user_sectors + DIRECTOR_HIGHLIGHT_SECTORS (routing.ts). Este
 //     override não coloca ninguém na rotina de e-mail.

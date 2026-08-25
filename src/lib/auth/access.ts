@@ -179,7 +179,7 @@ export function canAccessPathByProfile(
     // Visão completa (leitura) do módulo por liberação nominal — ver
     // @/lib/ctrl/full-view. Vale para as telas operacionais abaixo; NÃO vale
     // para Configurações (/ctrl/configuracoes, /ctrl/admin/* e Editar
-    // Orçamento), que seguem admin-only mais adiante.
+    // Orçamento), reservadas a admin + perfil Contas a Pagar mais adiante.
     const fullView = hasCtrlFullView(email);
     // Manual do módulo: liberado a todo mundo que tem Compras (a regra geral no
     // fim desta função já bastaria; explícito aqui para que uma futura restrição
@@ -198,11 +198,13 @@ export function canAccessPathByProfile(
     if (pathname.startsWith("/ctrl/contas-a-pagar")) {
       return fullView || profile === "contas_a_pagar";
     }
-    // Editar Orçamento é admin-only (vive no hub Configurações). Precisa vir
-    // ANTES da regra geral /ctrl/orcamento abaixo, senão gerente/diretor/csc
-    // herdariam acesso. Admin já retornou true no topo desta função.
+    // Editar Orçamento vive no hub Configurações: admin + perfil Contas a
+    // Pagar. Precisa vir ANTES da regra geral /ctrl/orcamento abaixo, senão
+    // gerente/diretor herdariam acesso. Admin já retornou true no topo desta
+    // função. A visão completa (fullView) NÃO entra aqui — ela é leitura do
+    // módulo operacional, não das Configurações.
     if (pathname.startsWith("/ctrl/orcamento/editar")) {
-      return false;
+      return profile === "contas_a_pagar";
     }
     // Orcamento (visualizacao): gerente + gerente_setor + diretor +
     // contas_a_pagar (csc). O gerente_setor entra na tela, mas só enxerga os
@@ -228,14 +230,17 @@ export function canAccessPathByProfile(
         )
       );
     }
-    // Configurações do módulo Compras (admin-only): o hub /ctrl/configuracoes e
-    // as demais áreas administrativas — Eventos, Mapeamento Omie, Setores e
-    // Tipos de Despesa.
+    // Configurações do módulo Compras: o hub /ctrl/configuracoes e as demais
+    // áreas administrativas — Eventos, Mapeamento Omie, Setores e Tipos de
+    // Despesa. Admin (já liberado no topo) + perfil Contas a Pagar, que opera
+    // esses cadastros no dia a dia. Fornecedores já foi liberado acima, para
+    // todos os perfis. A visão completa (fullView) segue de fora: ela é leitura
+    // do módulo operacional, não das Configurações.
     if (
       pathname.startsWith("/ctrl/configuracoes") ||
       pathname.startsWith("/ctrl/admin")
     ) {
-      return false;
+      return profile === "contas_a_pagar";
     }
     // Padrão dentro de /ctrl (requisicoes, orçamento, notificações, etc.)
     return true;

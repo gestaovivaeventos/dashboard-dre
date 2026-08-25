@@ -288,9 +288,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "ct-orc", title: "Orcamento", icon: DollarSign, scope: "global", href: "/ctrl/orcamento", ctrlRoles: ["gerente", "diretor", "csc", "admin"] },
       { key: "ct-rel", title: "Relatorios", icon: BarChart3, scope: "global", href: "/ctrl/relatorios", ctrlRoles: ["diretor", "csc", "contas_a_pagar", "admin"] },
       { key: "ct-forn", title: "Fornecedores", icon: Truck, scope: "global", href: "/ctrl/admin/fornecedores", ctrlRoles: ["solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin", "aprovacao_fornecedor"] },
-      // Configurações: hub admin-only que agrupa Editar Orçamento, Eventos,
-      // Mapeamento Omie, Setores e Tipos de Despesa (ver /ctrl/configuracoes).
-      { key: "ct-config", title: "Configurações", icon: Cog, scope: "global", href: "/ctrl/configuracoes", ctrlRoles: ["admin"] },
+      // Configurações: hub que agrupa Editar Orçamento, Eventos, Mapeamento
+      // Omie, Setores e Tipos de Despesa (ver /ctrl/configuracoes). Admin +
+      // perfil Contas a Pagar, que opera esses cadastros no dia a dia.
+      { key: "ct-config", title: "Configurações", icon: Cog, scope: "global", href: "/ctrl/configuracoes", ctrlRoles: ["contas_a_pagar", "admin"] },
       // Manual: último item do grupo de propósito — é referência, não operação.
       // Liberado para TODOS os papéis do módulo (inclusive os que só solicitam):
       // é o material de entrada de quem está chegando.
@@ -373,7 +374,8 @@ export const CSC_NAV_KEYS: ReadonlySet<string> = new Set(
  * (@/lib/ctrl/full-view) — o override nominal que dá a um líder de área a
  * leitura do módulo inteiro sem mudar o perfil dele.
  *
- * É o módulo TODO menos "Configurações" (ct-config), que segue admin-only.
+ * É o módulo TODO menos "Configurações" (ct-config), reservado a admin +
+ * perfil Contas a Pagar.
  * Deve espelhar as liberações do bloco `/ctrl` em `@/lib/auth/access.ts`: ao
  * incluir uma tela nova aqui, libere a rota lá também (senão o item aparece no
  * menu e o middleware redireciona).
