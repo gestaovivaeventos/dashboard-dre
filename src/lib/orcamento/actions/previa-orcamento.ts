@@ -14,6 +14,7 @@ import {
 import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { fetchRealizados } from "@/lib/orcamento/media-realizado";
 import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
+import { categoriaSerie } from "@/lib/orcamento/planejamento-calc";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
@@ -102,10 +103,10 @@ interface ValorFixoSnapshotRow {
   indice_key: string | null;
   mes_reajuste: number | string | null;
 }
-interface PlanejamentoSnapshotRow {
+interface PlanejamentoItemRow {
   category_code: string;
-  /** jsonb: array de 12 números (jan..dez), ou null. */
-  valores: unknown;
+  valor_mensal: number | string | null;
+  mes_inicio: number | string | null;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
@@ -307,30 +308,32 @@ export async function getPreviaOrcamento(
       }
     }
 
-    // PLANEJAMENTO DOS SÓCIOS — os 12 valores mensais DECIDIDOS na entrevista com
-    // a IA (já congelados na tabela; nada é recalculado aqui). Cai na linha da DRE
-    // pela mesma chave category_code → category_mapping dos outros métodos.
+    // PLANEJAMENTO DOS SÓCIOS — os ITENS decididos na entrevista com a IA (cada
+    // plataforma tem valor mensal + mês de início). O orçado da categoria é a
+    // SOMA das séries dos itens; cai na linha da DRE pela mesma chave
+    // category_code → category_mapping dos outros métodos.
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
-        .from("orcamento_planejamento_socios")
-        .select("category_code, valores")
+        .from("orcamento_planejamento_socios_itens")
+        .select("category_code, valor_mensal, mes_inicio")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
       // métodos continuam) — essas categorias só contam como "sem valor".
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
-      const psByCode = new Map<string, PlanejamentoSnapshotRow>();
-      ((psRows ?? []) as PlanejamentoSnapshotRow[]).forEach((r) => psByCode.set(r.category_code, r));
+      const psByCode = new Map<string, { valorMensal: number; mesInicio: number }[]>();
+      ((psRows ?? []) as PlanejamentoItemRow[]).forEach((r) => {
+        const arr = psByCode.get(r.category_code) ?? [];
+        const valor = r.valor_mensal == null ? 0 : Number(r.valor_mensal);
+        const mes = r.mes_inicio == null ? 1 : Number(r.mes_inicio);
+        arr.push({
+          valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
+          mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+        });
+        psByCode.set(r.category_code, arr);
+      });
       for (const cat of psCats) {
-        const row = psByCode.get(cat.category_code);
-        const arr = Array.isArray(row?.valores) ? (row!.valores as unknown[]) : null;
-        const meses = Array<number>(12).fill(0);
-        if (arr) {
-          for (let m = 0; m < 12; m += 1) {
-            const n = Number(arr[m]);
-            meses[m] = Number.isFinite(n) && n > 0 ? n : 0;
-          }
-        }
+        const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);
         if (somar(meses) === 0) {
           planejamentoSemValor += 1;
           continue;

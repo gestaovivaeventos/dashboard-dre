@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Paperclip, X } from "lucide-react";
+import { Check, Eye, MessageSquare, Paperclip, Reply, X } from "lucide-react";
 
 import {
   approveRequest,
@@ -106,6 +106,11 @@ const PAYMENT_LABELS: Record<string, string> = {
 };
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Botão de ação da tabela: só ícone (o rótulo vai no title/aria-label) para as
+// 4 ações caberem numa linha só e a coluna não empilhar.
+const ACTION_BTN =
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors";
 
 function resolve<T>(v: T | T[] | null | undefined): T | null {
   if (!v) return null;
@@ -456,26 +461,30 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                       </td>
                     )}
                     <td className="px-3 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">#{req.request_number}</td>
-                    <td className="px-3 py-3 min-w-[200px]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{req.title}</span>
-                        {(() => { const b = isPaid(req) ? PAGO_BADGE : STATUS_BADGE[req.status]; return b ? <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
+                    <td className="px-3 py-2.5 min-w-[200px]">
+                      {/* Descrição em uma única linha: o texto completo fica no
+                          tooltip (title) para a linha não crescer na vertical. */}
+                      <div className="flex max-w-[24rem] items-center gap-2">
+                        <span className="min-w-0 truncate font-medium" title={req.title}>{req.title}</span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                        {(() => { const b = isPaid(req) ? PAGO_BADGE : STATUS_BADGE[req.status]; return b ? <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
                         {isOverBudget && (
-                          <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
+                          <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
                             Fora do orçamento
                           </span>
                         )}
                         {isForcedDirector && (
-                          <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                          <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
                             Direto ao Diretor
                           </span>
                         )}
                         {awaitingSet.has(req.id) && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
                             <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
                             Nova resposta
                           </span>
                         )}
+                        </span>
                       </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
@@ -529,36 +538,50 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-3">
-                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    <td className="px-3 py-2.5">
+                      {/* Ações em ícones, numa única linha: com 4 botões de texto
+                          a coluna quebrava e empilhava um abaixo do outro. */}
+                      <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
                         <button
+                          type="button"
                           onClick={() => openModal(req, "detail")}
-                          className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+                          title="Ver detalhes"
+                          aria-label="Ver detalhes"
+                          className={`${ACTION_BTN} border hover:bg-muted`}
                         >
-                          Detalhes
+                          <Eye className="h-4 w-4" />
                         </button>
 
                         {/* Approver actions on pendente / pendente_diretor */}
                         {actionable && (
                           <>
                             <button
+                              type="button"
                               onClick={() => handleAction(() => approveRequest(req.id))}
                               disabled={isPending}
-                              className="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                              title="Aprovar"
+                              aria-label="Aprovar"
+                              className={`${ACTION_BTN} bg-green-600 text-white hover:bg-green-700 disabled:opacity-50`}
                             >
-                              Aprovar
+                              <Check className="h-4 w-4" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => setThreadModal({ req, mode: "ask" })}
-                              className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                              title="Pedir informação ao solicitante"
+                              aria-label="Pedir informação ao solicitante"
+                              className={`${ACTION_BTN} bg-blue-600 text-white hover:bg-blue-700`}
                             >
-                              Pedir Info
+                              <MessageSquare className="h-4 w-4" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => openModal(req, "reject")}
-                              className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 transition-colors"
+                              title="Rejeitar"
+                              aria-label="Rejeitar"
+                              className={`${ACTION_BTN} bg-red-600 text-white hover:bg-red-700`}
                             >
-                              Rejeitar
+                              <X className="h-4 w-4" />
                             </button>
                           </>
                         )}
@@ -567,10 +590,13 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                             o aprovador decide via Aprovar/Rejeitar/Pedir Info acima. */}
                         {req.status === "aguardando_complementacao" && !actionable && inActionScope(req) && (
                           <button
+                            type="button"
                             onClick={() => setThreadModal({ req, mode: "answer" })}
-                            className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+                            title="Responder"
+                            aria-label="Responder"
+                            className={`${ACTION_BTN} bg-blue-600 text-white hover:bg-blue-700`}
                           >
-                            Responder
+                            <Reply className="h-4 w-4" />
                           </button>
                         )}
                       </div>
