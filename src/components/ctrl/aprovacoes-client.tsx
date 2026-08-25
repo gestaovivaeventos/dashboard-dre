@@ -255,8 +255,9 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
   const showSectorGroups = groupByOwnSector;
   const showCheckboxCol = activeTab === "pendente" && canApprove;
   // Colunas fixas: #, Requisição, Fornecedor, Setor, Valor, Vencimento, Criado,
-  // Solicitante, Anexos, Ações = 10 (+ checkbox quando na aba Pendentes).
-  const colCount = (showCheckboxCol ? 1 : 0) + 10;
+  // Solicitante, Ações = 9 (+ checkbox quando na aba Pendentes). O anexo não tem
+  // coluna própria: o clipe é o primeiro ícone da coluna Ações.
+  const colCount = (showCheckboxCol ? 1 : 0) + 9;
 
   const pendentes = requests.filter((r) => isPendingStatus(r.status));
   // Só dá pra selecionar/aprovar em lote as que o usuário pode agir nesta etapa.
@@ -411,17 +412,16 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                {activeTab === "pendente" && canApprove && <th className="w-10 px-3 py-2" />}
-                <th className="px-3 py-2"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Criado em" {...headerProps("criado")} /></th>
-                <th className="px-3 py-2"><ExcelHeaderCell label="Solicitante" menuSide="right" {...headerProps("solicitante")} /></th>
-                <th className="px-3 py-2 font-medium uppercase tracking-wide text-muted-foreground">Anexos</th>
-                <th className="px-3 py-2 font-medium text-right uppercase tracking-wide">Ações</th>
+                {activeTab === "pendente" && canApprove && <th className="w-9 px-2 py-2" />}
+                <th className="px-2 py-2"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Criado em" {...headerProps("criado")} /></th>
+                <th className="px-2 py-2"><ExcelHeaderCell label="Solicitante" menuSide="right" {...headerProps("solicitante")} /></th>
+                <th className="px-2 py-2 font-medium text-right uppercase tracking-wide">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -442,14 +442,19 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                 // foi marcado nível 3 pela regra de setor).
                 const isOverBudget = req.approval_tier === "nivel_3" && !isForcedDirector;
                 const isSelected = canSelectThis && selected.has(req.id);
+                const statusBadge = isPaid(req) ? PAGO_BADGE : STATUS_BADGE[req.status];
+                const hasNewAnswer = awaitingSet.has(req.id);
+                // As tags vão numa segunda linha, abaixo da descrição — assim a
+                // descrição usa a largura inteira da coluna e cabe mais texto.
+                const hasBadges = Boolean(statusBadge) || isOverBudget || isForcedDirector || hasNewAnswer;
 
                 return (
                   <tr
                     key={req.id}
-                    className={`align-top transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"} ${showSectorGroups && isOwnSector(req) ? "shadow-[inset_3px_0_0_#8b5cf6]" : ""}`}
+                    className={`align-middle transition-colors ${isSelected ? "bg-violet-50 dark:bg-violet-950/20" : "hover:bg-muted/20"} ${showSectorGroups && isOwnSector(req) ? "shadow-[inset_3px_0_0_#8b5cf6]" : ""}`}
                   >
                     {activeTab === "pendente" && canApprove && (
-                      <td className="px-3 py-3">
+                      <td className="px-2 py-2.5">
                         {canSelectThis && (
                           <input
                             type="checkbox"
@@ -460,40 +465,50 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         )}
                       </td>
                     )}
-                    <td className="px-3 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">#{req.request_number}</td>
-                    <td className="px-3 py-2.5 min-w-[200px]">
-                      {/* Descrição em uma única linha: o texto completo fica no
-                          tooltip (title) para a linha não crescer na vertical. */}
-                      <div className="flex max-w-[24rem] items-center gap-2">
-                        <span className="min-w-0 truncate font-medium" title={req.title}>{req.title}</span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                        {(() => { const b = isPaid(req) ? PAGO_BADGE : STATUS_BADGE[req.status]; return b ? <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${b.cls}`}>{b.label}</span> : null; })()}
-                        {isOverBudget && (
-                          <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
-                            Fora do orçamento
-                          </span>
+                    <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground whitespace-nowrap">#{req.request_number}</td>
+                    <td className="px-2 py-2.5 min-w-[220px]">
+                      <div className="max-w-[30rem]">
+                        {/* Descrição em uma única linha: o texto completo fica no
+                            tooltip (title) para a linha não crescer na vertical. */}
+                        <div className="truncate font-medium" title={req.title}>{req.title}</div>
+                        {hasBadges && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {statusBadge && (
+                              <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge.cls}`}>
+                                {statusBadge.label}
+                              </span>
+                            )}
+                            {isOverBudget && (
+                              <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/30">
+                                Fora do orçamento
+                              </span>
+                            )}
+                            {isForcedDirector && (
+                              <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                                Direto ao Diretor
+                              </span>
+                            )}
+                            {hasNewAnswer && (
+                              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                                Nova resposta
+                              </span>
+                            )}
+                          </div>
                         )}
-                        {isForcedDirector && (
-                          <span className="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                            Direto ao Diretor
-                          </span>
-                        )}
-                        {awaitingSet.has(req.id) && (
-                          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                            <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                            Nova resposta
-                          </span>
-                        )}
-                        </span>
                       </div>
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
-                      <span className="inline-flex flex-wrap items-center gap-1.5">
-                        {supplier?.name || req.favorecido || "—"}
-                        {supplier ? <SupplierNotApprovedBadge status={supplier.status} /> : null}
-                      </span>
+                    <td className="px-2 py-2.5 text-muted-foreground">
+                      {/* O selo "Não homologado" vai abaixo do nome: ao lado ele
+                          comia quase toda a coluna e sobrava só um pedaço do nome. */}
+                      <div className="max-w-[10rem]">
+                        <div className="truncate" title={supplier?.name || req.favorecido || undefined}>
+                          {supplier?.name || req.favorecido || "—"}
+                        </div>
+                        {supplier ? <SupplierNotApprovedBadge status={supplier.status} className="mt-1" /> : null}
+                      </div>
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
+                    <td className="px-2 py-2.5 whitespace-nowrap">
                       {req.is_rateio ? (
                         <span
                           className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
@@ -507,41 +522,47 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         sector?.name ?? "—"
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
-                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">
+                    <td className="px-2 py-2.5 text-right whitespace-nowrap tabular-nums">{fmt.format(req.amount)}</td>
+                    <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                       {formatDayBR(req.due_date)}
                     </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{formatDateBR(req.created_at)}</td>
-                    <td className="px-3 py-3 whitespace-nowrap text-muted-foreground">{req.creator ? (req.creator.name ?? req.creator.email) : "—"}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {req.attachment_path ? (
-                        <button
-                          type="button"
-                          onClick={() => openAttachment(req.id)}
-                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                          title="Abrir o anexo principal (boleto/nota/contrato)"
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                          Anexo
-                        </button>
-                      ) : (req.extra_attachment_paths?.length ?? 0) > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => openModal(req, "detail")}
-                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                          title="Ver anexos nos detalhes"
-                        >
-                          <Paperclip className="h-3.5 w-3.5" />
-                          Anexos
-                        </button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                    <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">{formatDateBR(req.created_at)}</td>
+                    <td className="px-2 py-2.5 text-muted-foreground">
+                      <span className="block max-w-[11rem] truncate" title={req.creator ? (req.creator.name ?? req.creator.email) : undefined}>
+                        {req.creator ? (req.creator.name ?? req.creator.email) : "—"}
+                      </span>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       {/* Ações em ícones, numa única linha: com 4 botões de texto
                           a coluna quebrava e empilhava um abaixo do outro. */}
                       <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+                        {/* Anexo: abre direto quando há o principal (boleto/nota),
+                            senão cai nos detalhes, onde ficam os anexos diversos.
+                            Sem anexo nenhum vira espaçador, para os ícones das
+                            linhas continuarem alinhados entre si. */}
+                        {req.attachment_path ? (
+                          <button
+                            type="button"
+                            onClick={() => openAttachment(req.id)}
+                            title="Abrir o anexo principal (boleto/nota/contrato)"
+                            aria-label="Abrir o anexo principal"
+                            className={`${ACTION_BTN} border hover:bg-muted`}
+                          >
+                            <Paperclip className="h-4 w-4" />
+                          </button>
+                        ) : (req.extra_attachment_paths?.length ?? 0) > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => openModal(req, "detail")}
+                            title={`Ver ${req.extra_attachment_paths?.length ?? 0} anexo(s) nos detalhes`}
+                            aria-label="Ver anexos nos detalhes"
+                            className={`${ACTION_BTN} border hover:bg-muted`}
+                          >
+                            <Paperclip className="h-4 w-4" />
+                          </button>
+                        ) : (
+                          <span className="h-8 w-8 shrink-0" aria-hidden="true" />
+                        )}
                         <button
                           type="button"
                           onClick={() => openModal(req, "detail")}
@@ -807,7 +828,7 @@ function SectorGroupHeader({
     <tr className="bg-muted/50">
       <td
         colSpan={colCount}
-        className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+        className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
       >
         <span className="inline-flex items-center gap-1.5">
           <span
