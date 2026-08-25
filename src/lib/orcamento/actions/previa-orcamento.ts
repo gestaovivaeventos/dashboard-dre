@@ -80,6 +80,8 @@ export interface PreviaOrcamentoData {
     mediaSemValor: number;
     valorFixoCategorias: number;
     valorFixoSemValor: number;
+    planejamentoCategorias: number;
+    planejamentoSemValor: number;
     totalDespesa: number;
     totalReceita: number;
   };
@@ -99,6 +101,11 @@ interface ValorFixoSnapshotRow {
   valor_base: number | string | null;
   indice_key: string | null;
   mes_reajuste: number | string | null;
+}
+interface PlanejamentoSnapshotRow {
+  category_code: string;
+  /** jsonb: array de 12 números (jan..dez), ou null. */
+  valores: unknown;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
@@ -162,12 +169,14 @@ export async function getPreviaOrcamento(
   let mediaSemValor = 0;
   let valorFixoCategorias = 0;
   let valorFixoSemValor = 0;
+  let planejamentoCategorias = 0;
+  let planejamentoSemValor = 0;
   const { data: metodoRows, error: metodoErr } = await supabase
     .from("orcamento_categoria_metodo")
     .select("category_code, category_name, metodo")
     .eq("company_id", companyId)
     .eq("year", year)
-    .in("metodo", ["media", "valor_fixo"]);
+    .in("metodo", ["media", "valor_fixo", "planejamento_socios"]);
   if (metodoErr) {
     if (isSchemaMissing(metodoErr.message)) return { needsMigration: true };
     return { error: metodoErr.message };
@@ -175,8 +184,10 @@ export async function getPreviaOrcamento(
   const metodoCats = (metodoRows ?? []) as (CategoriaMetodoRow & { metodo: string })[];
   const mediaCats = metodoCats.filter((c) => c.metodo === "media");
   const vfCats = metodoCats.filter((c) => c.metodo === "valor_fixo");
+  const psCats = metodoCats.filter((c) => c.metodo === "planejamento_socios");
   mediaCategorias = mediaCats.length;
   valorFixoCategorias = vfCats.length;
+  planejamentoCategorias = psCats.length;
 
   if (metodoCats.length > 0) {
     const allCodes = Array.from(new Set(metodoCats.map((c) => c.category_code)));
@@ -295,6 +306,38 @@ export async function getPreviaOrcamento(
         aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses);
       }
     }
+
+    // PLANEJAMENTO DOS SÓCIOS — os 12 valores mensais DECIDIDOS na entrevista com
+    // a IA (já congelados na tabela; nada é recalculado aqui). Cai na linha da DRE
+    // pela mesma chave category_code → category_mapping dos outros métodos.
+    if (psCats.length > 0) {
+      const { data: psRows, error: psErr } = await supabase
+        .from("orcamento_planejamento_socios")
+        .select("category_code, valores")
+        .eq("company_id", companyId)
+        .eq("year", year);
+      // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
+      // métodos continuam) — essas categorias só contam como "sem valor".
+      if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
+      const psByCode = new Map<string, PlanejamentoSnapshotRow>();
+      ((psRows ?? []) as PlanejamentoSnapshotRow[]).forEach((r) => psByCode.set(r.category_code, r));
+      for (const cat of psCats) {
+        const row = psByCode.get(cat.category_code);
+        const arr = Array.isArray(row?.valores) ? (row!.valores as unknown[]) : null;
+        const meses = Array<number>(12).fill(0);
+        if (arr) {
+          for (let m = 0; m < 12; m += 1) {
+            const n = Number(arr[m]);
+            meses[m] = Number.isFinite(n) && n > 0 ? n : 0;
+          }
+        }
+        if (somar(meses) === 0) {
+          planejamentoSemValor += 1;
+          continue;
+        }
+        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses);
+      }
+    }
   }
 
   // ── PESSOAL ─────────────────────────────────────────────────────────────────
@@ -378,6 +421,8 @@ export async function getPreviaOrcamento(
         mediaSemValor,
         valorFixoCategorias,
         valorFixoSemValor,
+        planejamentoCategorias,
+        planejamentoSemValor,
         totalDespesa,
         totalReceita,
       },

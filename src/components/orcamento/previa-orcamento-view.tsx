@@ -200,6 +200,17 @@ export function PreviaOrcamentoView({
               )}
             </span>
           )}
+          {resumo.planejamentoCategorias > 0 && (
+            <span className="text-muted-foreground">
+              Planejamento dos sócios: {resumo.planejamentoCategorias} categoria(s)
+              {resumo.planejamentoSemValor > 0 && (
+                <span className="text-amber-600 dark:text-amber-500">
+                  {" "}
+                  · {resumo.planejamentoSemValor} sem valor
+                </span>
+              )}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
