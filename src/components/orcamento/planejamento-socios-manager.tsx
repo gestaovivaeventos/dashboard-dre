@@ -24,7 +24,7 @@ import {
   getPlanejamentoCategoria,
   enviarMensagemPlanejamento,
   salvarPlanejamentoItens,
-  removerPlanejamentoSocios,
+  reiniciarConversaPlanejamento,
   type PlanejamentoListItem,
   type PlanejamentoCategoriaDetalhe,
 } from "@/lib/orcamento/actions/planejamento-socios";
@@ -472,20 +472,20 @@ function CategoriaInterview({
     onSaved();
   }
 
+  // Reinicia SOMENTE a Entrevista com a IA. A seção "Pagos em {ano-1}" (itens,
+  // justificativa e status) é preservada exatamente como foi salva.
   async function recomecar() {
     setConfirmReset(false);
-    const res = await removerPlanejamentoSocios(companyId, year, categoryCode);
+    const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode);
+    if (res.needsMigration) {
+      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      return;
+    }
     if (res.error) {
       setLocalErr(res.error);
       return;
     }
-    if (detalhe) {
-      setConversa([]);
-      setJustificativa("");
-      setStatusLocal("rascunho");
-      // ressemeia a partir do realizado (curadoria limpa)
-      seedFrom({ ...detalhe, itens: [], conversa: [], justificativa: null });
-    }
+    setConversa([]);
     setLocalErr(null);
   }
 
@@ -547,7 +547,7 @@ function CategoriaInterview({
           (conversaIniciada || statusLocal === "concluido") &&
           (confirmReset ? (
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Apagar tudo?</span>
+              <span className="text-muted-foreground">Reiniciar a entrevista? (os itens são mantidos)</span>
               <button
                 type="button"
                 onClick={recomecar}

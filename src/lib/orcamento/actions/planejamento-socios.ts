@@ -641,6 +641,36 @@ export async function salvarPlanejamentoItens(
   return { ok: true };
 }
 
+/**
+ * Reinicia SOMENTE a entrevista com a IA: zera a conversa da categoria e mantém
+ * intactos os itens já cadastrados (a base "Pagos em {ano-1}") e a justificativa.
+ * Não apaga nada da seção que o admin preencheu.
+ */
+export async function reiniciarConversaPlanejamento(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_planejamento_socios")
+    .update({ conversa: [], updated_by: admin.userId })
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
 export async function removerPlanejamentoSocios(
   companyId: string,
   year: number,
