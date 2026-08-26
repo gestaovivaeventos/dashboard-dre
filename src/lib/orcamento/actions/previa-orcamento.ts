@@ -107,6 +107,7 @@ interface PlanejamentoItemRow {
   category_code: string;
   valor_mensal: number | string | null;
   mes_inicio: number | string | null;
+  periodicidade: string | null;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
@@ -315,13 +316,13 @@ export async function getPreviaOrcamento(
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
         .from("orcamento_planejamento_socios_itens")
-        .select("category_code, valor_mensal, mes_inicio")
+        .select("category_code, valor_mensal, mes_inicio, periodicidade")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
       // métodos continuam) — essas categorias só contam como "sem valor".
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
-      const psByCode = new Map<string, { valorMensal: number; mesInicio: number }[]>();
+      const psByCode = new Map<string, { valorMensal: number; mesInicio: number; periodicidade: "mensal" | "anual" }[]>();
       ((psRows ?? []) as PlanejamentoItemRow[]).forEach((r) => {
         const arr = psByCode.get(r.category_code) ?? [];
         const valor = r.valor_mensal == null ? 0 : Number(r.valor_mensal);
@@ -329,6 +330,7 @@ export async function getPreviaOrcamento(
         arr.push({
           valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
           mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+          periodicidade: r.periodicidade === "anual" ? "anual" : "mensal",
         });
         psByCode.set(r.category_code, arr);
       });

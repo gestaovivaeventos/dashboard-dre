@@ -21,12 +21,16 @@ import {
   getPlanejamentoCategoria,
   enviarMensagemPlanejamento,
   salvarPlanejamentoItens,
+  salvarCuradoria,
   removerPlanejamentoSocios,
   type PlanejamentoListItem,
   type PlanejamentoCategoriaDetalhe,
+  type PlanejamentoCuradoriaItem,
 } from "@/lib/orcamento/actions/planejamento-socios";
 import {
   categoriaTotal,
+  totalItem,
+  type Periodicidade,
   type PlanejamentoMensagem,
   type PlanejamentoItem,
 } from "@/lib/orcamento/planejamento-calc";
@@ -76,7 +80,7 @@ function StatusChip({ selo }: { selo: Selo }) {
   );
 }
 
-// ─── Célula de moeda (valor mensal do item) ─────────────────────────────────
+// ─── Célula de moeda ─────────────────────────────────────────────────────────
 
 function CurrencyCell({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
   const [draft, setDraft] = useState(numberToInput(value));
@@ -120,11 +124,6 @@ function CurrencyCell({ value, onCommit }: { value: number; onCommit: (n: number
   );
 }
 
-/** Meses ativos de um item (do mês de início até dezembro). */
-function mesesAtivos(mesInicio: number): number {
-  return 12 - Math.min(12, Math.max(1, mesInicio)) + 1;
-}
-
 // ─── Linha de item ──────────────────────────────────────────────────────────
 
 interface LocalItem extends PlanejamentoItem {
@@ -141,7 +140,8 @@ function ItemRow({
   onRemove: () => void;
 }) {
   const descFaltando = item.descricao.trim() === "";
-  const totalItem = item.valorMensal * mesesAtivos(item.mesInicio);
+  const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade);
+  const anual = item.periodicidade === "anual";
   return (
     <tr className="align-top">
       <td className="px-2 py-2">
@@ -172,9 +172,20 @@ function ItemRow({
       </td>
       <td className="px-2 py-2">
         <select
+          value={item.periodicidade}
+          onChange={(e) => onChange({ periodicidade: e.target.value === "anual" ? "anual" : "mensal" })}
+          className={cn(INPUT_CLS, "w-24 py-1.5")}
+        >
+          <option value="mensal">mensal</option>
+          <option value="anual">anual</option>
+        </select>
+      </td>
+      <td className="px-2 py-2">
+        <select
           value={item.mesInicio}
           onChange={(e) => onChange({ mesInicio: Number(e.target.value) })}
           className={cn(INPUT_CLS, "w-32 py-1.5")}
+          title={anual ? "Mês da renovação" : "Mês de início"}
         >
           {MESES_LONGO.map((m, i) => (
             <option key={i} value={i + 1}>
@@ -186,9 +197,13 @@ function ItemRow({
       <td className="px-2 py-2 text-right">
         <div className="flex items-start justify-end gap-2">
           <div>
-            <span className="font-semibold tabular-nums">{formatBRL(totalItem)}</span>
+            <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
             <div className="text-[11px] text-muted-foreground">
-              {item.mesInicio > 1 ? `${MESES[item.mesInicio - 1]}–dez` : "ano todo"}
+              {anual
+                ? `1×/ano em ${MESES[item.mesInicio - 1]}`
+                : item.mesInicio > 1
+                  ? `${MESES[item.mesInicio - 1]}–dez`
+                  : "ano todo"}
             </div>
           </div>
           <button
@@ -227,6 +242,7 @@ function CategoriaInterview({
 
   const [conversa, setConversa] = useState<PlanejamentoMensagem[]>([]);
   const [itens, setItens] = useState<LocalItem[]>([]);
+  const [curadoria, setCuradoria] = useState<PlanejamentoCuradoriaItem[]>([]);
   const [justificativa, setJustificativa] = useState("");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -236,13 +252,23 @@ function CategoriaInterview({
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  function toLocal(list: { descricao: string; valorMensal: number; mesInicio: number; origem: "mantido" | "novo"; fornecedor: string | null }[]): LocalItem[] {
+  function toLocal(
+    list: {
+      descricao: string;
+      valorMensal: number;
+      mesInicio: number;
+      periodicidade: Periodicidade;
+      origem: "mantido" | "novo";
+      fornecedor: string | null;
+    }[],
+  ): LocalItem[] {
     return list.map((it) => ({
       key: `it-${seq.current++}`,
       id: `it-${seq.current}`,
       descricao: it.descricao,
       valorMensal: it.valorMensal,
       mesInicio: it.mesInicio,
+      periodicidade: it.periodicidade,
       origem: it.origem,
       fornecedor: it.fornecedor,
     }));
@@ -265,6 +291,7 @@ function CategoriaInterview({
       setDetalhe(res.detalhe);
       setConversa(res.detalhe.conversa);
       setItens(toLocal(res.detalhe.itens));
+      setCuradoria(res.detalhe.curadoria);
       setJustificativa(res.detalhe.justificativa ?? "");
     });
     return () => {
@@ -277,10 +304,45 @@ function CategoriaInterview({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [conversa, sending]);
 
+  // ── Curadoria (o admin seleciona/renomeia os fornecedores do ano anterior) ──
+  async function persistCuradoria(next: PlanejamentoCuradoriaItem[]) {
+    setCuradoria(next);
+    const res = await salvarCuradoria(
+      companyId,
+      year,
+      categoryCode,
+      detalhe?.categoryName ?? categoryCode,
+      next.map((c) => ({ fornecedor: c.fornecedor, nome: c.nome, incluir: c.incluir })),
+    );
+    if (res?.error) setLocalErr(res.error);
+  }
+
+  function toggleIncluir(fornecedor: string) {
+    void persistCuradoria(
+      curadoria.map((c) => (c.fornecedor === fornecedor ? { ...c, incluir: !c.incluir } : c)),
+    );
+  }
+
+  function renameCuradoria(fornecedor: string, nome: string) {
+    // atualização local imediata (sem persistir a cada tecla)
+    setCuradoria((prev) => prev.map((c) => (c.fornecedor === fornecedor ? { ...c, nome } : c)));
+  }
+
+  function commitRename() {
+    void persistCuradoria(curadoria.map((c) => ({ ...c, nome: c.nome.trim() || c.fornecedor })));
+  }
+
   async function enviar(texto: string) {
     setSending(true);
     setLocalErr(null);
-    const res = await enviarMensagemPlanejamento(companyId, year, categoryCode, detalhe?.categoryName ?? categoryCode, conversa, texto);
+    const res = await enviarMensagemPlanejamento(
+      companyId,
+      year,
+      categoryCode,
+      detalhe?.categoryName ?? categoryCode,
+      conversa,
+      texto,
+    );
     setSending(false);
     if (res.needsMigration) {
       onError("Migration do Planejamento dos sócios ainda não aplicada.");
@@ -288,13 +350,18 @@ function CategoriaInterview({
     }
     if (res.conversa) setConversa(res.conversa);
     if (res.proposta) {
-      setItens(toLocal(res.proposta.itens.map((i) => ({
-        descricao: i.descricao,
-        valorMensal: i.valorMensal,
-        mesInicio: i.mesInicio,
-        origem: i.origem,
-        fornecedor: i.fornecedor ?? null,
-      }))));
+      setItens(
+        toLocal(
+          res.proposta.itens.map((i) => ({
+            descricao: i.descricao,
+            valorMensal: i.valorMensal,
+            mesInicio: i.mesInicio,
+            periodicidade: i.periodicidade,
+            origem: i.origem,
+            fornecedor: i.fornecedor ?? null,
+          })),
+        ),
+      );
       setJustificativa(res.proposta.justificativa);
     }
     if (res.error) setLocalErr(res.error);
@@ -316,6 +383,7 @@ function CategoriaInterview({
         descricao: seed?.descricao ?? "",
         valorMensal: seed?.valorMensal ?? 0,
         mesInicio: seed?.mesInicio ?? 1,
+        periodicidade: seed?.periodicidade ?? "mensal",
         origem: seed?.origem ?? "novo",
         fornecedor: seed?.fornecedor ?? null,
       },
@@ -342,6 +410,7 @@ function CategoriaInterview({
         descricao: i.descricao,
         valorMensal: i.valorMensal,
         mesInicio: i.mesInicio,
+        periodicidade: i.periodicidade,
         origem: i.origem,
         fornecedor: i.fornecedor,
       })),
@@ -391,6 +460,7 @@ function CategoriaInterview({
     detalhe.status === "concluido" && temItens ? "concluido" : conversaIniciada || temItens ? "andamento" : "nao_iniciado";
   const r = detalhe.realizadoAnterior;
   const fornecedoresUsados = new Set(itens.map((i) => (i.fornecedor ?? "").toLowerCase()).filter(Boolean));
+  const incluidos = curadoria.filter((c) => c.incluir).length;
 
   return (
     <div className="space-y-4">
@@ -457,6 +527,93 @@ function CategoriaInterview({
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{localErr}</div>
       )}
 
+      {/* Curadoria — o admin decide quais fornecedores do ano anterior entram na
+          entrevista e com que nome. Sempre visível (com aviso quando vazio). */}
+      <div className="rounded-lg border bg-muted/10 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Pagos em {year - 1} — o que a IA deve considerar</p>
+            <p className="text-xs text-muted-foreground">
+              {curadoria.length > 0
+                ? `Marque quais entram na entrevista e ajuste o nome do fornecedor. ${incluidos} de ${curadoria.length} incluído(s).`
+                : `Nenhum pagamento encontrado em ${year - 1} nesta categoria (ou os dados ainda não sincronizaram da Omie). Cadastre os itens manualmente em "+ item".`}
+            </p>
+          </div>
+        </div>
+        {curadoria.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1 font-medium">Incluir</th>
+                  <th className="px-2 py-1 font-medium">Fornecedor (editável)</th>
+                  <th className="px-2 py-1 font-medium">Original (Omie)</th>
+                  <th className="px-2 py-1 text-right font-medium">Média/mês</th>
+                  <th className="px-2 py-1 text-right font-medium">Total {year - 1}</th>
+                  <th className="px-2 py-1"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {curadoria.map((c) => {
+                  const jaUsado = fornecedoresUsados.has(c.fornecedor.toLowerCase());
+                  return (
+                    <tr key={c.fornecedor} className={cn(!c.incluir && "opacity-50")}>
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={c.incluir}
+                          onChange={() => toggleIncluir(c.fornecedor)}
+                          className="h-4 w-4 accent-emerald-600"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          value={c.nome}
+                          onChange={(e) => renameCuradoria(c.fornecedor, e.target.value)}
+                          onBlur={commitRename}
+                          className={cn(INPUT_CLS, "py-1")}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5 text-xs text-muted-foreground">
+                        <span title={c.fornecedor}>{c.fornecedor}</span>
+                        <span className="ml-1">· {c.lancamentos} lçto(s)</span>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {c.media == null ? "—" : formatBRL(c.media)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{formatBRL(c.total)}</td>
+                      <td className="px-2 py-1.5 text-right">
+                        <button
+                          type="button"
+                          disabled={jaUsado || !c.incluir}
+                          onClick={() =>
+                            addItem({
+                              descricao: c.nome,
+                              valorMensal: c.media != null ? Math.round(c.media * 100) / 100 : 0,
+                              mesInicio: 1,
+                              periodicidade: "mensal",
+                              origem: "mantido",
+                              fornecedor: c.fornecedor,
+                            })
+                          }
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px]",
+                            jaUsado || !c.incluir ? "opacity-40" : "hover:border-emerald-500/50 hover:bg-emerald-500/5",
+                          )}
+                          title={jaUsado ? "Já adicionado" : "Adicionar como item"}
+                        >
+                          <Plus className="h-3 w-3" /> item
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Chat */}
         <div className="flex min-h-[28rem] flex-col rounded-lg border">
@@ -469,8 +626,8 @@ function CategoriaInterview({
             {!conversaIniciada && !sending && (
               <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
                 <p className="max-w-xs text-sm text-muted-foreground">
-                  A IA vai listar as plataformas pagas em {year - 1}, perguntar quais serão mantidas e se
-                  há novas contratações — e propor os itens do orçamento de {year}.
+                  A IA usa os fornecedores incluídos acima, pergunta quais serão mantidos (mensal ou
+                  anual) e se há novas contratações — e propõe os itens do orçamento de {year}.
                 </p>
                 <button
                   type="button"
@@ -551,50 +708,10 @@ function CategoriaInterview({
           </div>
 
           <div className="flex-1 space-y-3 p-3">
-            {/* Referência do ano anterior (plataformas já pagas) */}
-            {detalhe.realizadoItens.length > 0 && (
-              <div className="rounded-md border bg-muted/20 p-2">
-                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Pagas em {year - 1} — clique para adicionar
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {detalhe.realizadoItens.map((ri, i) => {
-                    const jaUsado = fornecedoresUsados.has(ri.fornecedor.toLowerCase());
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        disabled={jaUsado}
-                        onClick={() =>
-                          addItem({
-                            descricao: ri.fornecedor,
-                            valorMensal: Math.round((ri.total / 12) * 100) / 100,
-                            mesInicio: 1,
-                            origem: "mantido",
-                            fornecedor: ri.fornecedor,
-                          })
-                        }
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-                          jaUsado
-                            ? "opacity-40"
-                            : "hover:border-emerald-500/50 hover:bg-emerald-500/5",
-                        )}
-                        title={`${formatBRL(ri.total)} no ano · ${ri.lancamentos} lançamento(s)`}
-                      >
-                        {!jaUsado && <Plus className="h-3 w-3" />}
-                        {ri.fornecedor} · {formatBRL(ri.total / 12)}/mês
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {itens.length === 0 ? (
               <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-                Nenhum item ainda. Rode a entrevista para a IA propor, use as plataformas do ano anterior
-                acima, ou adicione com <span className="font-medium">+ item</span>.
+                Nenhum item ainda. Rode a entrevista para a IA propor, use os fornecedores do ano
+                anterior acima, ou adicione com <span className="font-medium">+ item</span>.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -602,8 +719,9 @@ function CategoriaInterview({
                   <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-2 py-1 font-medium">Item</th>
-                      <th className="px-2 py-1 font-medium">Valor/mês</th>
-                      <th className="px-2 py-1 font-medium">Início</th>
+                      <th className="px-2 py-1 font-medium">Valor</th>
+                      <th className="px-2 py-1 font-medium">Período</th>
+                      <th className="px-2 py-1 font-medium">Início/Renov.</th>
                       <th className="px-2 py-1 text-right font-medium">Ano</th>
                     </tr>
                   </thead>
@@ -735,8 +853,10 @@ export function PlanejamentoSociosManager({
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
         <p className="font-medium">Migration pendente</p>
         <p className="mt-1 text-muted-foreground">
-          Aplique a migration{" "}
+          Aplique as migrations{" "}
           <code className="rounded bg-muted px-1 py-0.5">20260825120000_orcamento_planejamento_socios</code>{" "}
+          e{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260826120000_orcamento_planejamento_socios_curadoria</code>{" "}
           para habilitar esta tela.
         </p>
       </div>

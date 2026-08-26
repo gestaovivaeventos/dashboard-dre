@@ -9,11 +9,13 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
-import { fetchRealizados, type MediaRealizado } from "@/lib/orcamento/media-realizado";
+import { fetchRealizados, mesesFechados, type MediaRealizado } from "@/lib/orcamento/media-realizado";
 import { formatBRL } from "@/lib/orcamento/format";
 import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import {
   categoriaTotal,
+  type CuradoriaEntry,
+  type Periodicidade,
   type PlanejamentoItem,
   type PlanejamentoItemProposto,
   type PlanejamentoMensagem,
@@ -25,21 +27,31 @@ const PATH = "/orcamento";
 
 // ─── Tipos de retorno ──────────────────────────────────────────────────────────
 
-/** Um card da lista (landing): a categoria + o resumo do que já foi orçado. */
 export interface PlanejamentoListItem {
   categoryCode: string;
   categoryName: string;
   dreLineCode: string;
   dreLineName: string;
   status: "rascunho" | "concluido";
-  /** true = entrevista iniciada (há conversa) ou já há itens. */
   iniciado: boolean;
   itemCount: number;
   totalOrcado: number;
   realizadoAnterior: { total: number; media: number | null } | null;
 }
 
-/** Detalhe de uma categoria: itens + conversa + referência do ano anterior. */
+/** Fornecedor do ano anterior já resolvido pela curadoria do administrador. */
+export interface PlanejamentoCuradoriaItem {
+  /** Nome ORIGINAL do fornecedor no lançamento (chave). */
+  fornecedor: string;
+  /** Nome de exibição (renomeável). */
+  nome: string;
+  /** Entra (ou não) na entrevista. */
+  incluir: boolean;
+  media: number | null;
+  total: number;
+  lancamentos: number;
+}
+
 export interface PlanejamentoCategoriaDetalhe {
   categoryCode: string;
   categoryName: string;
@@ -50,7 +62,8 @@ export interface PlanejamentoCategoriaDetalhe {
   conversa: PlanejamentoMensagem[];
   status: "rascunho" | "concluido";
   realizadoAnterior: { total: number; media: number | null } | null;
-  realizadoItens: PlanejamentoRealizadoItem[];
+  /** Pagamentos do ano anterior por fornecedor, já com a curadoria aplicada. */
+  curadoria: PlanejamentoCuradoriaItem[];
 }
 
 interface CategoriaRow {
@@ -58,6 +71,7 @@ interface CategoriaRow {
   category_name: string | null;
   justificativa: string | null;
   conversa: unknown;
+  curadoria: unknown;
   status: string | null;
 }
 interface ItemRow {
@@ -66,6 +80,7 @@ interface ItemRow {
   descricao: string;
   valor_mensal: number | string | null;
   mes_inicio: number | string | null;
+  periodicidade: string | null;
   origem: string | null;
   fornecedor: string | null;
 }
@@ -87,6 +102,25 @@ function sanitizeConversa(raw: unknown): PlanejamentoMensagem[] {
   return out;
 }
 
+function sanitizeCuradoria(raw: unknown): CuradoriaEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CuradoriaEntry[] = [];
+  raw.forEach((c) => {
+    if (c && typeof c === "object") {
+      const fornecedor = String((c as { fornecedor?: unknown }).fornecedor ?? "").trim();
+      if (!fornecedor) return;
+      const nome = String((c as { nome?: unknown }).nome ?? "").trim() || fornecedor;
+      const incluir = (c as { incluir?: unknown }).incluir !== false;
+      out.push({ fornecedor, nome, incluir });
+    }
+  });
+  return out;
+}
+
+function toPeriodicidade(v: unknown): Periodicidade {
+  return v === "anual" ? "anual" : "mensal";
+}
+
 function rowToItem(r: ItemRow): PlanejamentoItem {
   const valor = Number(r.valor_mensal);
   const mes = Number(r.mes_inicio);
@@ -95,12 +129,12 @@ function rowToItem(r: ItemRow): PlanejamentoItem {
     descricao: r.descricao,
     valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
     mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+    periodicidade: toPeriodicidade(r.periodicidade),
     origem: r.origem === "mantido" ? "mantido" : "novo",
     fornecedor: r.fornecedor ?? null,
   };
 }
 
-/** Normaliza os itens propostos pela IA (aceita camelCase e snake_case). */
 function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
   if (!Array.isArray(raw)) return [];
   const out: PlanejamentoItemProposto[] = [];
@@ -109,12 +143,13 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
     const o = it as Record<string, unknown>;
     const descricao = String(o.descricao ?? "").trim();
     if (!descricao) return;
-    const valor = Number(o.valorMensal ?? o.valor_mensal ?? 0);
+    const valor = Number(o.valorMensal ?? o.valor_mensal ?? o.valor ?? 0);
     const mes = Number(o.mesInicio ?? o.mes_inicio ?? 1);
     out.push({
       descricao,
       valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
       mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+      periodicidade: toPeriodicidade(o.periodicidade),
       origem: o.origem === "mantido" ? "mantido" : "novo",
       fornecedor: typeof o.fornecedor === "string" ? o.fornecedor : null,
     });
@@ -122,7 +157,6 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
   return out;
 }
 
-/** Extrai o objeto JSON da resposta do modelo, tolerando cercas de markdown. */
 function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProposta | null } {
   let t = (text ?? "").trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -159,22 +193,43 @@ function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProp
   return { reply: reply || "…", proposta };
 }
 
+/** Junta o realizado por fornecedor (RPC) com a curadoria salva do administrador. */
+function resolverCuradoria(
+  realizado: PlanejamentoRealizadoItem[],
+  curadoria: CuradoriaEntry[],
+): PlanejamentoCuradoriaItem[] {
+  const byFornecedor = new Map<string, CuradoriaEntry>();
+  curadoria.forEach((c) => byFornecedor.set(c.fornecedor, c));
+  return realizado.map((r) => {
+    const c = byFornecedor.get(r.fornecedor);
+    return {
+      fornecedor: r.fornecedor,
+      nome: c?.nome?.trim() || r.fornecedor,
+      incluir: c ? c.incluir : true, // sem curadoria ainda → incluído por padrão
+      media: r.media,
+      total: r.total,
+      lancamentos: r.lancamentos,
+    };
+  });
+}
+
 function realizadoMensalContexto(r: MediaRealizado | undefined): string {
   if (!r) return "sem dados do ano anterior.";
   const media = r.media == null ? "n/d" : formatBRL(r.media);
   return `total ${formatBRL(r.total)} · média mensal ${media}`;
 }
 
-function realizadoItensContexto(itens: PlanejamentoRealizadoItem[]): string {
-  if (itens.length === 0) return "Sem detalhamento por fornecedor no ano anterior.";
-  return itens
-    .map((i) => `- ${i.fornecedor}: ${formatBRL(i.total)} no ano (${i.lancamentos} lançamento(s))`)
+function curadoriaContexto(curados: PlanejamentoCuradoriaItem[]): string {
+  if (curados.length === 0) return "Sem fornecedores selecionados pelo administrador para o ano anterior.";
+  return curados
+    .map(
+      (c) =>
+        `- ${c.nome}: ${c.media == null ? "n/d" : formatBRL(c.media)}/mês (média dos meses fechados; ` +
+        `${c.lancamentos} lançamento(s), total ${formatBRL(c.total)} no ano)`,
+    )
     .join("\n");
 }
 
-// Provedor: usa o Gemini (cadastrado no painel de IA). Sem chave para ele, cai
-// no provedor ATIVO da config. A entrevista é 100% texto → o shim OpenAI-compat
-// do Gemini basta (a armadilha do Gemini é só visão/PDF).
 async function resolvePlanejamentoProvider() {
   try {
     return await resolveAiProvider({ forceProvider: "gemini", capability: "text" });
@@ -190,13 +245,13 @@ function buildSystemPrompt(opts: {
   dreLineName: string;
   year: number;
   realizado: MediaRealizado | undefined;
-  realizadoItens: PlanejamentoRealizadoItem[];
+  curados: PlanejamentoCuradoriaItem[];
 }): string {
   return [
     'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
     'categoria de despesa pelo método "Planejamento dos sócios".',
     "",
-    "IMPORTANTE: esta categoria costuma reunir VÁRIOS ITENS independentes — cada",
+    "IMPORTANTE: esta categoria reúne VÁRIOS ITENS independentes — cada",
     "plataforma/serviço/contrato é um item próprio. O orçado da categoria é a SOMA",
     "de todos os itens.",
     "",
@@ -205,35 +260,35 @@ function buildSystemPrompt(opts: {
     `Ano do orçamento: ${opts.year}`,
     `Realizado do ano anterior (${opts.year - 1}) na categoria: ${realizadoMensalContexto(opts.realizado)}`,
     "",
-    `Plataformas/serviços JÁ PAGOS em ${opts.year - 1} nesta categoria (por fornecedor):`,
-    realizadoItensContexto(opts.realizadoItens),
+    `Fornecedores do ano anterior (${opts.year - 1}) SELECIONADOS pelo administrador para esta`,
+    "entrevista (considere SOMENTE estes; os valores são a média mensal dos meses já fechados):",
+    curadoriaContexto(opts.curados),
     "",
     "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
-    `1. Para CADA plataforma/serviço já pago em ${opts.year - 1} (lista acima),`,
-    `   pergunte se será MANTIDA no orçamento de ${opts.year} e com qual valor mensal`,
-    "   (confirme se muda de valor). Trate cada uma individualmente.",
-    "2. Depois, pergunte se o gestor pretende CONTRATAR algum serviço NOVO de",
-    "   softwares/sistemas/servidores e peça a JUSTIFICATIVA da nova contratação",
-    "   (para que serve, valor mensal estimado e a partir de qual mês entra).",
-    "3. Nunca invente plataformas que não estão na lista acima nem foram citadas pelo",
-    "   gestor. Se a lista do ano anterior estiver vazia, pergunte quais serviços a",
-    "   empresa mantém hoje.",
+    "1. Para CADA fornecedor da lista acima, pergunte se será MANTIDO no orçamento de",
+    `   ${opts.year}, com qual valor e se o pagamento é MENSAL ou ANUAL (alguns têm poucos`,
+    "   lançamentos no ano = provavelmente anuais). Se anual, pergunte em qual MÊS renova",
+    "   (o valor será lançado só nesse mês); se mensal, a partir de qual mês vale.",
+    "2. Depois pergunte se o gestor pretende CONTRATAR algo NOVO e peça a JUSTIFICATIVA",
+    "   (para que serve, valor, mensal ou anual, e a partir de qual mês entra).",
+    "3. NUNCA invente fornecedores fora da lista acima nem citados pelo gestor. Se a lista",
+    "   estiver vazia, pergunte quais serviços a empresa mantém hoje.",
     "",
-    "Quando tiver as respostas (o que mantém, com que valor, e o que entra de novo),",
-    "PROPONHA a LISTA de itens do orçamento. Cada item:",
+    "Quando tiver as respostas, PROPONHA a LISTA de itens. Cada item:",
     "  - descricao: nome da plataforma/serviço;",
-    "  - valorMensal: valor MENSAL em reais (número);",
-    "  - mesInicio: mês (1..12) em que passa a valer — 1 para quem já roda o ano todo,",
-    "    o mês previsto para uma contratação nova;",
-    "  - origem: 'mantido' (já era pago no ano anterior) ou 'novo';",
+    "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
+    "    ANUAL quando periodicidade='anual';",
+    "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
+    "  - periodicidade: 'mensal' ou 'anual';",
+    "  - origem: 'mantido' (já pago no ano anterior) ou 'novo';",
     "  - fornecedor: o nome do fornecedor da lista acima quando o item corresponde a um.",
-    "E uma justificativa curta (2 a 4 frases) com as premissas gerais.",
+    "E uma justificativa curta (2 a 4 frases) com as premissas.",
     "",
     "Responda SEMPRE com um ÚNICO objeto JSON, sem nenhum texto fora dele:",
     '{ "reply": "sua mensagem ao gestor", "proposta": null }',
     'Enquanto entrevista, "proposta" é null e "reply" é a próxima pergunta.',
     "Ao propor, preencha:",
-    '{ "reply": "texto curto apresentando a proposta", "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "origem": "mantido", "fornecedor": "..." } ], "justificativa": "..." } }',
+    '{ "reply": "texto curto apresentando a proposta", "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "periodicidade": "mensal", "origem": "mantido", "fornecedor": "..." } ], "justificativa": "..." } }',
     "Se o gestor pedir ajustes depois de uma proposta, devolva uma NOVA proposta revisada.",
   ].join("\n");
 }
@@ -244,28 +299,33 @@ async function fetchRealizadoItens(
   baseYear: number,
   categoryCode: string,
 ): Promise<PlanejamentoRealizadoItem[]> {
+  const fechados = mesesFechados(baseYear);
   const { data, error } = await supabase.rpc("orcamento_planejamento_realizado_itens", {
     p_company_id: companyId,
     p_base_year: baseYear,
     p_category_code: categoryCode,
+    p_meses_fechados: fechados,
   });
   if (error) return [];
-  return ((data ?? []) as Array<{ fornecedor: string; total: number | string; lancamentos: number | string }>).map(
-    (r) => ({
+  return ((data ?? []) as Array<{
+    fornecedor: string;
+    total: number | string;
+    total_fechado: number | string | null;
+    lancamentos: number | string;
+  }>).map((r) => {
+    const total = Number(r.total) || 0; // ano inteiro (referência completa)
+    const totalFechado = Number(r.total_fechado) || 0; // só meses fechados
+    return {
       fornecedor: String(r.fornecedor),
-      total: Number(r.total) || 0,
+      total,
+      media: fechados > 0 && totalFechado > 0 ? totalFechado / fechados : null,
       lancamentos: Number(r.lancamentos) || 0,
-    }),
-  );
+    };
+  });
 }
 
 // ─── Leitura: lista (landing) ───────────────────────────────────────────────────
 
-/**
- * Lista as categorias da empresa marcadas com 'planejamento_socios' no ano, com o
- * resumo do que já foi orçado (nº de itens, total, status) e a referência do
- * realizado do ano anterior. É a porta de entrada: o gestor escolhe por qual começar.
- */
 export async function getPlanejamentoSocios(
   companyId: string,
   year: number,
@@ -298,15 +358,15 @@ export async function getPlanejamentoSocios(
 
   const { data: itemRows, error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
-    .select("category_code, valor_mensal, mes_inicio")
+    .select("category_code, valor_mensal, mes_inicio, periodicidade")
     .eq("company_id", companyId)
     .eq("year", year);
   if (itemErr) {
     if (isSchemaMissing(itemErr.message)) return { needsMigration: true };
     return { error: itemErr.message };
   }
-  const itensByCode = new Map<string, { valorMensal: number; mesInicio: number }[]>();
-  ((itemRows ?? []) as { category_code: string; valor_mensal: number | string | null; mes_inicio: number | string | null }[]).forEach(
+  const itensByCode = new Map<string, { valorMensal: number; mesInicio: number; periodicidade: Periodicidade }[]>();
+  ((itemRows ?? []) as { category_code: string; valor_mensal: number | string | null; mes_inicio: number | string | null; periodicidade: string | null }[]).forEach(
     (r) => {
       const arr = itensByCode.get(r.category_code) ?? [];
       const valor = Number(r.valor_mensal);
@@ -314,6 +374,7 @@ export async function getPlanejamentoSocios(
       arr.push({
         valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
         mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+        periodicidade: toPeriodicidade(r.periodicidade),
       });
       itensByCode.set(r.category_code, arr);
     },
@@ -363,7 +424,7 @@ export async function getPlanejamentoCategoria(
 
   const { data: catRow, error: catErr } = await supabase
     .from("orcamento_planejamento_socios")
-    .select("category_code, category_name, justificativa, conversa, status")
+    .select("category_code, category_name, justificativa, conversa, curadoria, status")
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
@@ -375,7 +436,7 @@ export async function getPlanejamentoCategoria(
 
   const { data: itemRows, error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
-    .select("id, category_code, descricao, valor_mensal, mes_inicio, origem, fornecedor")
+    .select("id, category_code, descricao, valor_mensal, mes_inicio, periodicidade, origem, fornecedor")
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
@@ -388,6 +449,7 @@ export async function getPlanejamentoCategoria(
 
   const realizados = await fetchRealizados(supabase, companyId, year - 1, [categoryCode]);
   const realizadoItens = await fetchRealizadoItens(supabase, companyId, year - 1, categoryCode);
+  const curadoria = resolverCuradoria(realizadoItens, sanitizeCuradoria(catRow?.curadoria));
   const r = realizados.get(categoryCode);
 
   return {
@@ -401,19 +463,47 @@ export async function getPlanejamentoCategoria(
       conversa: sanitizeConversa(catRow?.conversa),
       status: catRow?.status === "concluido" ? "concluido" : "rascunho",
       realizadoAnterior: r ? { total: r.total, media: r.media } : null,
-      realizadoItens,
+      curadoria,
     },
   };
 }
 
+// ─── Curadoria (o administrador seleciona/renomeia os fornecedores) ─────────────
+
+export async function salvarCuradoria(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  categoryName: string,
+  curadoria: CuradoriaEntry[],
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase.from("orcamento_planejamento_socios").upsert(
+    {
+      company_id: companyId,
+      year,
+      category_code: categoryCode,
+      category_name: categoryName,
+      curadoria: sanitizeCuradoria(curadoria),
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year,category_code" },
+  );
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
 // ─── Entrevista (chat) ─────────────────────────────────────────────────────────
 
-/**
- * Um turno da entrevista: recebe a conversa atual + a nova fala do gestor, chama
- * a IA (Gemini) e devolve a resposta e, quando a IA decidir, uma PROPOSTA com a
- * lista de itens + justificativa. Persiste o transcript (status 'rascunho').
- * `textoUsuario` vazio com conversa vazia = INICIAR (a fala de arranque não é gravada).
- */
 export async function enviarMensagemPlanejamento(
   companyId: string,
   year: number,
@@ -444,8 +534,19 @@ export async function enviarMensagemPlanejamento(
 
   const cats = await getCategoriaMetodo(companyId, year);
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
+
+  // Curadoria salva → só os fornecedores INCLUÍDOS guiam a IA (com o nome dado).
+  const { data: catRow } = await supabase
+    .from("orcamento_planejamento_socios")
+    .select("curadoria")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode)
+    .maybeSingle<{ curadoria: unknown }>();
+
   const realizados = await fetchRealizados(supabase, companyId, year - 1, [categoryCode]);
   const realizadoItens = await fetchRealizadoItens(supabase, companyId, year - 1, categoryCode);
+  const curados = resolverCuradoria(realizadoItens, sanitizeCuradoria(catRow?.curadoria)).filter((c) => c.incluir);
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
@@ -457,7 +558,7 @@ export async function enviarMensagemPlanejamento(
     dreLineName: cat?.dreLineName ?? "",
     year,
     realizado: realizados.get(categoryCode),
-    realizadoItens,
+    curados,
   });
 
   const messages: ModelMessage[] = historico.map((m) =>
@@ -521,10 +622,6 @@ export async function enviarMensagemPlanejamento(
 
 // ─── Salvar / remover ──────────────────────────────────────────────────────────
 
-/**
- * Grava a LISTA de itens da categoria (substitui a anterior) + a justificativa +
- * o transcript, e marca a categoria como 'concluido'. Congela os valores do ano.
- */
 export async function salvarPlanejamentoItens(
   companyId: string,
   year: number,
@@ -544,7 +641,6 @@ export async function salvarPlanejamentoItens(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  // Categoria: conversa + justificativa + status (upsert).
   const { error: catErr } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
       company_id: companyId,
@@ -563,7 +659,6 @@ export async function salvarPlanejamentoItens(
     return { error: catErr.message };
   }
 
-  // Itens: substitui o conjunto inteiro (apaga e reinsere).
   const { error: delErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
     .delete()
@@ -579,6 +674,7 @@ export async function salvarPlanejamentoItens(
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
+    periodicidade: i.periodicidade,
     origem: i.origem,
     fornecedor: i.fornecedor ?? null,
     updated_by: admin.userId,
@@ -590,7 +686,6 @@ export async function salvarPlanejamentoItens(
   return { ok: true };
 }
 
-/** Limpa o planejamento de uma categoria (recomeçar do zero): itens + conversa. */
 export async function removerPlanejamentoSocios(
   companyId: string,
   year: number,
