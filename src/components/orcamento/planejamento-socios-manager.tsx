@@ -952,6 +952,15 @@ function CategoriaInterview({
                   ))}
               </div>
 
+              {/* Total do ano anterior — dado FRESCO (soma categoria + irmãs "(*)").
+                  Fica sempre correto, mesmo que a fala da IA no chat esteja antiga. */}
+              <div className="flex items-center justify-between gap-2 border-b bg-emerald-500/5 px-3 py-1.5 text-xs">
+                <span className="text-muted-foreground">Total gasto em {year - 1} nesta categoria</span>
+                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {r && r.total > 0 ? formatBRL(r.total) : "sem gasto registrado"}
+                </span>
+              </div>
+
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "24rem" }}>
                 {!conversaIniciada && !sending && (
                   <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
