@@ -59,6 +59,7 @@ export interface PlanejamentoContextoItem {
   valorMensal: number;
   periodicidade: Periodicidade;
   mesInicio: number;
+  mesFim: number | null;
 }
 
 interface CategoriaRow {
@@ -74,10 +75,17 @@ interface ItemRow {
   descricao: string;
   valor_mensal: number | string | null;
   mes_inicio: number | string | null;
+  mes_fim: number | string | null;
   periodicidade: string | null;
   origem: string | null;
   fornecedor: string | null;
   incluir: boolean | null;
+}
+
+/** Mês opcional (1..12) ou null quando ausente/inválido. */
+function optMes(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 && n <= 12 ? Math.round(n) : null;
 }
 
 // ─── Helpers puros ─────────────────────────────────────────────────────────────
@@ -109,6 +117,7 @@ function rowToItem(r: ItemRow): PlanejamentoItem {
     descricao: r.descricao,
     valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
     mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+    mesFim: optMes(r.mes_fim),
     periodicidade: toPeriodicidade(r.periodicidade),
     origem: r.origem === "mantido" ? "mantido" : "novo",
     fornecedor: r.fornecedor ?? null,
@@ -130,6 +139,7 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
       descricao,
       valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
       mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+      mesFim: optMes(o.mesFim ?? o.mes_fim),
       periodicidade: toPeriodicidade(o.periodicidade),
       origem: o.origem === "mantido" ? "mantido" : "novo",
       fornecedor: typeof o.fornecedor === "string" ? o.fornecedor : null,
@@ -196,11 +206,12 @@ function considerarContexto(
     return itensContexto
       .map((i) => {
         const mes = MESES_NOME[Math.min(12, Math.max(1, Math.round(i.mesInicio))) - 1];
-        const quando =
-          i.periodicidade === "anual"
-            ? `${formatBRL(i.valorMensal)}/ano, pago em ${mes}`
-            : `${formatBRL(i.valorMensal)}/mês, a partir de ${mes}`;
-        return `- ${i.descricao}: ${quando}`;
+        if (i.periodicidade === "anual") {
+          return `- ${i.descricao}: ${formatBRL(i.valorMensal)}/ano, pago em ${mes}`;
+        }
+        const fim = i.mesFim != null && i.mesFim >= 1 && i.mesFim <= 12 ? i.mesFim : null;
+        const ate = fim != null && fim < 12 ? `, até ${MESES_NOME[fim - 1]} (cancela depois)` : "";
+        return `- ${i.descricao}: ${formatBRL(i.valorMensal)}/mês, a partir de ${mes}${ate}`;
       })
       .join("\n");
   }
@@ -262,6 +273,12 @@ function buildSystemPrompt(opts: {
     "   NÃO pergunte o valor nem o mês por padrão. MAS se o gestor, ao responder,",
     "   informar um valor/mês/período diferente (ex.: 'sim, mas mude para R$ 40/mês'),",
     "   REGISTRE o valor NOVO que ele deu e confirme de volta o valor atualizado.",
+    "   Se o gestor disser que o item NÃO será mantido, ele fica FORA da proposta.",
+    "   Se disser que será CANCELADO no meio do ano (ex.: 'cancelo o SERASA em julho'),",
+    "   o item continua na proposta como MENSAL, mas você define o mesFim = ÚLTIMO mês",
+    "   que ainda será pago. Confirme com o gestor qual é o último mês pago (ex.: se",
+    "   cancela em julho, o último pago costuma ser junho → mesFim=6). Não deixe um item",
+    "   cancelado com os 12 meses cheios.",
     "2. Depois pergunte se o gestor pretende CONTRATAR algo NOVO. Para CADA item novo,",
     "   você OBRIGATORIAMENTE precisa dos 5 dados abaixo antes de aceitá-lo:",
     "   (a) NOME da plataforma/serviço;",
@@ -290,6 +307,8 @@ function buildSystemPrompt(opts: {
     "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
     "    ANUAL quando periodicidade='anual';",
     "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
+    "  - mesFim: mês (1..12) do ÚLTIMO pagamento quando o item é MENSAL e será cancelado",
+    "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
     "  - periodicidade: 'mensal' ou 'anual';",
     "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
     "E uma justificativa curta (2 a 4 frases) com as premissas.",
@@ -298,7 +317,7 @@ function buildSystemPrompt(opts: {
     '{ "reply": "sua mensagem ao gestor", "proposta": null }',
     'Enquanto entrevista, "proposta" é null e "reply" é a próxima pergunta.',
     "Ao propor, preencha:",
-    '{ "reply": "texto curto", "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
+    '{ "reply": "texto curto", "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
     "Se o gestor pedir ajustes depois de uma proposta, devolva uma NOVA proposta revisada.",
   ].join("\n");
 }
@@ -368,18 +387,22 @@ export async function getPlanejamentoSocios(
 
   const { data: itemRows, error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
-    .select("category_code, valor_mensal, mes_inicio, periodicidade, incluir")
+    .select("category_code, valor_mensal, mes_inicio, mes_fim, periodicidade, incluir")
     .eq("company_id", companyId)
     .eq("year", year);
   if (itemErr) {
     if (isSchemaMissing(itemErr.message)) return { needsMigration: true };
     return { error: itemErr.message };
   }
-  const itensByCode = new Map<string, { valorMensal: number; mesInicio: number; periodicidade: Periodicidade }[]>();
+  const itensByCode = new Map<
+    string,
+    { valorMensal: number; mesInicio: number; mesFim: number | null; periodicidade: Periodicidade }[]
+  >();
   ((itemRows ?? []) as {
     category_code: string;
     valor_mensal: number | string | null;
     mes_inicio: number | string | null;
+    mes_fim: number | string | null;
     periodicidade: string | null;
     incluir: boolean | null;
   }[]).forEach((r) => {
@@ -390,6 +413,7 @@ export async function getPlanejamentoSocios(
     arr.push({
       valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
       mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+      mesFim: optMes(r.mes_fim),
       periodicidade: toPeriodicidade(r.periodicidade),
     });
     itensByCode.set(r.category_code, arr);
@@ -451,7 +475,7 @@ export async function getPlanejamentoCategoria(
 
   const { data: itemRows, error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
-    .select("id, category_code, descricao, valor_mensal, mes_inicio, periodicidade, origem, fornecedor, incluir")
+    .select("id, category_code, descricao, valor_mensal, mes_inicio, mes_fim, periodicidade, origem, fornecedor, incluir")
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
@@ -654,6 +678,7 @@ export async function salvarPlanejamentoItens(
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
+    mes_fim: i.periodicidade === "anual" ? null : i.mesFim ?? null,
     periodicidade: i.periodicidade,
     origem: i.origem,
     fornecedor: i.fornecedor ?? null,

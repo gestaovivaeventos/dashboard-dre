@@ -107,6 +107,7 @@ interface PlanejamentoItemRow {
   category_code: string;
   valor_mensal: number | string | null;
   mes_inicio: number | string | null;
+  mes_fim: number | string | null;
   periodicidade: string | null;
   incluir: boolean | null;
 }
@@ -317,21 +318,26 @@ export async function getPreviaOrcamento(
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
         .from("orcamento_planejamento_socios_itens")
-        .select("category_code, valor_mensal, mes_inicio, periodicidade, incluir")
+        .select("category_code, valor_mensal, mes_inicio, mes_fim, periodicidade, incluir")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
       // métodos continuam) — essas categorias só contam como "sem valor".
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
-      const psByCode = new Map<string, { valorMensal: number; mesInicio: number; periodicidade: "mensal" | "anual" }[]>();
+      const psByCode = new Map<
+        string,
+        { valorMensal: number; mesInicio: number; mesFim: number | null; periodicidade: "mensal" | "anual" }[]
+      >();
       ((psRows ?? []) as PlanejamentoItemRow[]).forEach((r) => {
         if (r.incluir === false) return; // só os itens incluídos entram no orçado
         const arr = psByCode.get(r.category_code) ?? [];
         const valor = r.valor_mensal == null ? 0 : Number(r.valor_mensal);
         const mes = r.mes_inicio == null ? 1 : Number(r.mes_inicio);
+        const fim = r.mes_fim == null ? null : Number(r.mes_fim);
         arr.push({
           valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
           mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+          mesFim: fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
           periodicidade: r.periodicidade === "anual" ? "anual" : "mensal",
         });
         psByCode.set(r.category_code, arr);

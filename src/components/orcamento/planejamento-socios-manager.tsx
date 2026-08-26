@@ -141,7 +141,15 @@ function ItemRow({
 }) {
   const descFaltando = item.incluir && item.descricao.trim() === "";
   const anual = item.periodicidade === "anual";
-  const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade);
+  const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade, item.mesFim);
+  const fim = item.mesFim != null && item.mesFim >= 1 && item.mesFim <= 12 ? item.mesFim : null;
+  const rangeLabel = anual
+    ? `1×/ano em ${MESES[item.mesInicio - 1]}`
+    : fim != null && fim < 12
+      ? `${MESES[item.mesInicio - 1]}–${MESES[fim - 1]} (cancela)`
+      : item.mesInicio > 1
+        ? `${MESES[item.mesInicio - 1]}–dez`
+        : "ano todo";
   return (
     <tr className={cn("align-top", !item.incluir && "opacity-50")}>
       <td className="px-2 py-2 text-center">
@@ -204,6 +212,24 @@ function ItemRow({
             </option>
           ))}
         </select>
+        {!anual && (
+          <select
+            value={fim ?? 0}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onChange({ mesFim: n === 0 ? null : n });
+            }}
+            className={cn(INPUT_CLS, "mt-1 w-32 py-1.5 text-xs")}
+            title="Último mês pago (cancelamento no meio do ano)"
+          >
+            <option value={0}>até dezembro</option>
+            {MESES_LONGO.map((m, i) => (
+              <option key={i} value={i + 1}>
+                até {m}
+              </option>
+            ))}
+          </select>
+        )}
       </td>
       <td className="px-2 py-2 text-right text-xs tabular-nums text-muted-foreground">
         {refInfo ? (
@@ -219,9 +245,7 @@ function ItemRow({
         <div className="flex items-start justify-end gap-2">
           <div>
             <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
-            <div className="text-[11px] text-muted-foreground">
-              {anual ? `1×/ano em ${MESES[item.mesInicio - 1]}` : item.mesInicio > 1 ? `${MESES[item.mesInicio - 1]}–dez` : "ano todo"}
-            </div>
+            <div className="text-[11px] text-muted-foreground">{rangeLabel}</div>
           </div>
           {onRemove && (
             <button
@@ -293,6 +317,7 @@ function CategoriaInterview({
         descricao: ri.fornecedor,
         valorMensal: ri.media != null ? Math.round(ri.media * 100) / 100 : 0,
         mesInicio: 1,
+        mesFim: null,
         periodicidade: "mensal" as Periodicidade,
         origem: "mantido" as const,
         fornecedor: ri.fornecedor,
@@ -345,7 +370,7 @@ function CategoriaInterview({
       detalhe?.categoryName ?? categoryCode,
       conversa,
       texto,
-      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade, mesInicio: i.mesInicio })),
+      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade, mesInicio: i.mesInicio, mesFim: i.mesFim })),
     );
     setSending(false);
     if (res.needsMigration) {
@@ -360,13 +385,16 @@ function CategoriaInterview({
     if (res.error) setLocalErr(res.error);
   }
 
-  // Aplica a proposta da IA SEM apagar a curadoria: atualiza a linha existente
-  // (por descrição/fornecedor) ou acrescenta uma nova; marca como incluída.
+  // Aplica a proposta da IA SEM apagar a curadoria: a proposta é a lista COMPLETA
+  // de incluídos. Atualiza a linha existente (por descrição/fornecedor) ou
+  // acrescenta uma nova; e DESMARCA os itens "mantido" que a IA não trouxe — ou
+  // seja, os que o gestor disse NÃO manter (a linha fica lembrada, mas fora).
   function mergeProposta(
     propostos: {
       descricao: string;
       valorMensal: number;
       mesInicio: number;
+      mesFim?: number | null;
       periodicidade: Periodicidade;
       origem: "mantido" | "novo";
       fornecedor?: string | null;
@@ -376,28 +404,35 @@ function CategoriaInterview({
     setItens((prev) => {
       const next = [...prev];
       const norm = (s: string) => s.trim().toLowerCase();
+      const matched = new Set<string>();
       propostos.forEach((p) => {
         const idx = next.findIndex(
           (r) =>
-            norm(r.descricao) === norm(p.descricao) ||
-            (p.fornecedor && r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor)),
+            !matched.has(r.key) &&
+            (norm(r.descricao) === norm(p.descricao) ||
+              (!!p.fornecedor && !!r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor))),
         );
         if (idx >= 0) {
+          matched.add(next[idx].key);
           next[idx] = {
             ...next[idx],
             valorMensal: p.valorMensal,
             mesInicio: p.mesInicio,
+            mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
             periodicidade: p.periodicidade,
             origem: p.origem,
             incluir: true,
           };
         } else {
+          const key = `it-${seq.current++}`;
+          matched.add(key);
           next.push({
-            key: `it-${seq.current++}`,
+            key,
             id: `ai-${seq.current}`,
             descricao: p.descricao,
             valorMensal: p.valorMensal,
             mesInicio: p.mesInicio,
+            mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
             periodicidade: p.periodicidade,
             origem: p.origem,
             fornecedor: p.fornecedor ?? null,
@@ -405,7 +440,10 @@ function CategoriaInterview({
           });
         }
       });
-      return next;
+      // Item "mantido" fora da proposta = o gestor não quis manter → desmarca.
+      return next.map((r) =>
+        !matched.has(r.key) && r.origem === "mantido" && r.incluir ? { ...r, incluir: false } : r,
+      );
     });
     if (just) setJustificativa(just);
   }
@@ -426,6 +464,7 @@ function CategoriaInterview({
         descricao: "",
         valorMensal: 0,
         mesInicio: 1,
+        mesFim: null,
         periodicidade: "mensal",
         origem: "novo",
         fornecedor: null,
@@ -454,6 +493,7 @@ function CategoriaInterview({
         descricao: i.descricao,
         valorMensal: i.valorMensal,
         mesInicio: i.mesInicio,
+        mesFim: i.mesFim,
         periodicidade: i.periodicidade,
         origem: i.origem,
         fornecedor: i.fornecedor,
@@ -810,10 +850,15 @@ function CategoriaInterview({
               <ul className="divide-y divide-emerald-500/15 text-sm">
                 {incluidos.map((it) => {
                   const mes = MESES_LONGO[Math.min(12, Math.max(1, it.mesInicio)) - 1];
+                  const fimIt = it.mesFim != null && it.mesFim >= 1 && it.mesFim <= 12 ? it.mesFim : null;
+                  const cancela =
+                    it.periodicidade !== "anual" && fimIt != null && fimIt < 12
+                      ? ` · até ${MESES_LONGO[fimIt - 1]} (cancela)`
+                      : "";
                   const quando =
                     it.periodicidade === "anual"
                       ? `${formatBRL(it.valorMensal)}/ano · pago em ${mes}`
-                      : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}`;
+                      : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}${cancela}`;
                   return (
                     <li key={it.key} className="flex items-baseline justify-between gap-3 py-1.5">
                       <div className="min-w-0">
@@ -821,7 +866,7 @@ function CategoriaInterview({
                         <div className="text-xs text-muted-foreground">{quando}</div>
                       </div>
                       <span className="shrink-0 font-semibold tabular-nums">
-                        {formatBRL(totalItem(it.valorMensal, it.mesInicio, it.periodicidade))}
+                        {formatBRL(totalItem(it.valorMensal, it.mesInicio, it.periodicidade, it.mesFim))}
                       </span>
                     </li>
                   );
