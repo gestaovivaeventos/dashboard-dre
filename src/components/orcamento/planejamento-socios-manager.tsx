@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   CheckCircle2,
   Circle,
   CircleDot,
+  ListChecks,
   Loader2,
   Plus,
   RotateCcw,
@@ -14,6 +16,7 @@ import {
   Sparkles,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 import {
@@ -267,6 +270,8 @@ function CategoriaInterview({
   const [saving, setSaving] = useState(false);
   const [localErr, setLocalErr] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+  const [statusLocal, setStatusLocal] = useState<"rascunho" | "concluido">("rascunho");
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -313,6 +318,7 @@ function CategoriaInterview({
       setDetalhe(res.detalhe);
       setConversa(res.detalhe.conversa);
       setJustificativa(res.detalhe.justificativa ?? "");
+      setStatusLocal(res.detalhe.status);
       seedFrom(res.detalhe);
     });
     return () => {
@@ -461,6 +467,8 @@ function CategoriaInterview({
       setLocalErr(res.error);
       return;
     }
+    setStatusLocal("concluido");
+    setShowEditor(false);
     onSaved();
   }
 
@@ -474,6 +482,7 @@ function CategoriaInterview({
     if (detalhe) {
       setConversa([]);
       setJustificativa("");
+      setStatusLocal("rascunho");
       // ressemeia a partir do realizado (curadoria limpa)
       seedFrom({ ...detalhe, itens: [], conversa: [], justificativa: null });
     }
@@ -493,7 +502,7 @@ function CategoriaInterview({
   const conversaIniciada = conversa.length > 0;
   const descFaltando = incluidos.some((i) => i.descricao.trim() === "");
   const selo: Selo =
-    detalhe.status === "concluido" && incluidos.length > 0
+    statusLocal === "concluido" && incluidos.length > 0
       ? "concluido"
       : conversaIniciada || itens.some((i) => i.incluir)
         ? "andamento"
@@ -535,7 +544,7 @@ function CategoriaInterview({
         </div>
 
         {isAdmin &&
-          (conversaIniciada || detalhe.status === "concluido") &&
+          (conversaIniciada || statusLocal === "concluido") &&
           (confirmReset ? (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Apagar tudo?</span>
@@ -566,32 +575,90 @@ function CategoriaInterview({
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{localErr}</div>
       )}
 
-      {/* Editor (admin) — a base do orçamento: pagos em {ano-1} + novos itens. */}
+      {/* Etapa do admin: botão-destaque que abre a base da entrevista (modal). */}
       {isAdmin && (
-        <div className="rounded-lg border">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
-            <div>
-              <p className="text-sm font-medium">
-                Pagos em {year - 1} — o que a IA deve considerar
-                <span className="ml-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                  admin
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Marque o que entra no orçamento, ajuste o nome, valor, período e mês. O total é a soma
-                dos itens marcados.
-              </p>
+        <button
+          type="button"
+          onClick={() => setShowEditor(true)}
+          className={cn(
+            "group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+            statusLocal === "concluido"
+              ? "border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10"
+              : "border-amber-500/60 bg-amber-500/5 hover:bg-amber-500/10",
+          )}
+        >
+          <span
+            className={cn(
+              "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+              statusLocal === "concluido"
+                ? "bg-emerald-600/10 text-emerald-600 dark:text-emerald-400"
+                : "bg-amber-500/15 text-amber-600 dark:text-amber-500",
+            )}
+          >
+            <ListChecks className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">Pagos em {year - 1} — o que a IA deve considerar</span>
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                  statusLocal === "concluido"
+                    ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+                    : "border-amber-500/50 text-amber-600 dark:text-amber-500",
+                )}
+              >
+                {statusLocal === "concluido" ? "revisado" : "etapa do admin — comece aqui"}
+              </span>
             </div>
-            <button
-              type="button"
-              onClick={addItem}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
-            >
-              <Plus className="h-3.5 w-3.5" /> item novo
-            </button>
+            <p className="text-xs text-muted-foreground">
+              {incluidos.length > 0
+                ? `${incluidos.length} item(ns) marcados · ${formatBRL(total)} no ano — clique para revisar/editar`
+                : `Revise os pagamentos de ${year - 1} e monte a base antes de conversar com a IA`}
+            </p>
           </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+        </button>
+      )}
 
-          <div className="space-y-3 p-3">
+      {/* Modal (admin): a base — pagos em {ano-1} + itens novos. */}
+      {isAdmin && showEditor && (
+        <div
+          className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4 sm:p-6"
+          onClick={() => setShowEditor(false)}
+        >
+          <div
+            className="m-auto w-full max-w-5xl rounded-lg border bg-background shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold">Pagos em {year - 1} — o que a IA deve considerar</p>
+                <p className="text-xs text-muted-foreground">
+                  Marque o que entra no orçamento, ajuste o nome, valor, período e mês. O total é a soma
+                  dos itens marcados.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+                >
+                  <Plus className="h-3.5 w-3.5" /> item novo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditor(false)}
+                  title="Fechar"
+                  className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[68vh] space-y-3 overflow-y-auto p-4">
             {itens.length === 0 ? (
               <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
                 Nenhum pagamento encontrado em {year - 1} nesta categoria. Adicione itens com{" "}
@@ -651,37 +718,49 @@ function CategoriaInterview({
               />
             </div>
 
-            <button
-              type="button"
-              onClick={salvar}
-              disabled={saving || total <= 0 || descFaltando}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Salvar orçamento da categoria
-            </button>
-            {total <= 0 && (
-              <p className="text-center text-[11px] text-muted-foreground">
-                Marque ao menos um item com valor para salvar.
-              </p>
-            )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
+              {total <= 0 && (
+                <span className="mr-auto text-[11px] text-muted-foreground">
+                  Marque ao menos um item com valor para salvar.
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowEditor(false)}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={salvar}
+                disabled={saving || total <= 0 || descFaltando}
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Salvar orçamento da categoria
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Chat da entrevista */}
-      <div className="flex min-h-[24rem] flex-col rounded-lg border">
+      {/* Tela principal: a Entrevista com a IA (todos veem). */}
+      <div className="flex min-h-[30rem] flex-col rounded-lg border">
         <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium">
           <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           Entrevista com a IA
         </div>
 
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "22rem" }}>
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "26rem" }}>
           {!conversaIniciada && !sending && (
             <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
               <p className="max-w-md text-sm text-muted-foreground">
-                A IA usa os itens marcados acima, confirma quais serão mantidos (mensal ou anual) e se
-                há novas contratações — e devolve a proposta na tabela.
+                {isAdmin
+                  ? "A IA usa os itens marcados na base (botão acima), confirma quais serão mantidos (mensal ou anual) e se há novas contratações — e devolve a proposta lá."
+                  : "A IA vai perguntar quais serviços serão mantidos (mensal ou anual) e se há novas contratações para montar o orçamento do ano."}
               </p>
               <button
                 type="button"
@@ -837,11 +916,11 @@ export function PlanejamentoSociosManager({
         year={year}
         categoryCode={selected}
         isAdmin={isAdmin}
-        onBack={() => setSelected(null)}
-        onSaved={() => {
+        onBack={() => {
           setSelected(null);
           void reload();
         }}
+        onSaved={() => void reload()}
         onError={(msg) => {
           setSelected(null);
           setLoadError(msg);
