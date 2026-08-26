@@ -9,7 +9,13 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
-import { fetchRealizados, mesesFechados, type MediaRealizado } from "@/lib/orcamento/media-realizado";
+import {
+  fetchRealizados,
+  mesesFechados,
+  resumirRealizado,
+  REALIZADO_VAZIO,
+  type MediaRealizado,
+} from "@/lib/orcamento/media-realizado";
 import { formatBRL } from "@/lib/orcamento/format";
 import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
 import {
@@ -470,6 +476,78 @@ async function fetchRealizadoItens(
   });
 }
 
+// ─── Categorias IRMÃS (a divisão "(*)" é interna à contabilidade) ────────────────
+// Ex.: "Manutenção de Imobilizado" e "Manutenção de Imobilizado (*)" são duas
+// categorias Omie (dois códigos) com o MESMO nome a menos do sufixo " (*)". Para
+// o gestor, o realizado do ano anterior é o TOTAL das duas. Só o realizado que a
+// IA mostra agrega os irmãos — o mapeamento/DRE/Prévia continuam por código.
+
+/** Nome sem o sufixo " (*)" (e sem acento/caixa), para casar irmãos. */
+function normNomeCategoria(s: string): string {
+  return s
+    .replace(/\s*\(\*\)\s*$/i, "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
+/** Códigos de todas as categorias irmãs (mesmo nome-base), incluindo a própria. */
+function codigosIrmaos(
+  items: { categoryCode: string; categoryName: string }[],
+  categoryCode: string,
+  categoryName: string,
+): string[] {
+  const alvo = normNomeCategoria(categoryName);
+  const set = new Set<string>([categoryCode]);
+  for (const it of items) if (normNomeCategoria(it.categoryName) === alvo) set.add(it.categoryCode);
+  return Array.from(set);
+}
+
+/** Soma o realizado (mês a mês) de vários códigos num único MediaRealizado. */
+function combinarRealizados(
+  map: Map<string, MediaRealizado>,
+  codes: string[],
+  baseYear: number,
+): MediaRealizado {
+  const meses = Array<number | null>(12).fill(null);
+  let algum = false;
+  for (const code of codes) {
+    const r = map.get(code);
+    if (!r) continue;
+    algum = true;
+    for (let i = 0; i < 12; i += 1) {
+      const v = r.meses[i];
+      if (v != null) meses[i] = (meses[i] ?? 0) + v;
+    }
+  }
+  if (!algum) return REALIZADO_VAZIO;
+  return resumirRealizado(meses, mesesFechados(baseYear));
+}
+
+/** Fornecedores do ano anterior somando TODOS os códigos irmãos (merge por nome). */
+async function fetchRealizadoItensIrmaos(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  baseYear: number,
+  codes: string[],
+): Promise<PlanejamentoRealizadoItem[]> {
+  const listas = await Promise.all(codes.map((c) => fetchRealizadoItens(supabase, companyId, baseYear, c)));
+  const byForn = new Map<string, PlanejamentoRealizadoItem>();
+  for (const lista of listas) {
+    for (const it of lista) {
+      const key = it.fornecedor.toLocaleLowerCase("pt-BR");
+      const cur = byForn.get(key);
+      if (!cur) {
+        byForn.set(key, { ...it });
+      } else {
+        cur.total += it.total;
+        cur.lancamentos += it.lancamentos;
+        if (it.media != null) cur.media = (cur.media ?? 0) + it.media;
+      }
+    }
+  }
+  return Array.from(byForn.values()).sort((a, b) => b.total - a.total);
+}
+
 // ─── Leitura: lista (landing) ───────────────────────────────────────────────────
 
 export async function getPlanejamentoSocios(
@@ -511,11 +589,20 @@ export async function getPlanejamentoSocios(
     }),
   );
 
-  const realizados = await fetchRealizados(supabase, companyId, year - 1, doMetodo.map((c) => c.categoryCode));
+  // Realizado por categoria já somando as irmãs "(*)" — busca a UNIÃO dos códigos
+  // irmãos de todas as categorias do método e combina por categoria.
+  const irmaosPorCat = new Map<string, string[]>();
+  const todosCodigos = new Set<string>();
+  doMetodo.forEach((c) => {
+    const irmaos = codigosIrmaos(cats.items ?? [], c.categoryCode, c.categoryName);
+    irmaosPorCat.set(c.categoryCode, irmaos);
+    irmaos.forEach((code) => todosCodigos.add(code));
+  });
+  const realizados = await fetchRealizados(supabase, companyId, year - 1, Array.from(todosCodigos));
 
   const items: PlanejamentoListItem[] = doMetodo.map((c) => {
     const st = byCode.get(c.categoryCode);
-    const r = realizados.get(c.categoryCode);
+    const r = combinarRealizados(realizados, irmaosPorCat.get(c.categoryCode) ?? [c.categoryCode], year - 1);
     return {
       categoryCode: c.categoryCode,
       categoryName: c.categoryName,
@@ -526,7 +613,7 @@ export async function getPlanejamentoSocios(
       propostaConfirmada: st?.confirmada ?? false,
       itemCount: st?.proposta?.itens.length ?? 0,
       totalOrcado: propostaTotal(st?.proposta ?? null),
-      realizadoAnterior: r ? { total: r.total, media: r.media } : null,
+      realizadoAnterior: r.total > 0 || r.media != null ? { total: r.total, media: r.media } : null,
     };
   });
 
@@ -578,9 +665,14 @@ export async function getPlanejamentoCategoria(
     return { error: itemErr.message };
   }
 
-  const realizados = await fetchRealizados(supabase, companyId, year - 1, [categoryCode]);
-  const realizadoItens = await fetchRealizadoItens(supabase, companyId, year - 1, categoryCode);
-  const r = realizados.get(categoryCode);
+  // Realizado do ano anterior somando a categoria + suas irmãs "(*)" (divisão
+  // interna da contabilidade) — total e fornecedores completos.
+  const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
+  const [realizados, realizadoItens] = await Promise.all([
+    fetchRealizados(supabase, companyId, year - 1, irmaos),
+    fetchRealizadoItensIrmaos(supabase, companyId, year - 1, irmaos),
+  ]);
+  const r = combinarRealizados(realizados, irmaos, year - 1);
 
   return {
     detalhe: {
@@ -593,7 +685,7 @@ export async function getPlanejamentoCategoria(
       conversa: sanitizeConversa(catRow?.conversa),
       proposta: parsePropostaColumn(catRow?.proposta),
       propostaConfirmada: catRow?.proposta_confirmada === true,
-      realizadoAnterior: r ? { total: r.total, media: r.media } : null,
+      realizadoAnterior: r.total > 0 || r.media != null ? { total: r.total, media: r.media } : null,
       realizadoItens,
     },
   };
@@ -630,17 +722,20 @@ export async function enviarMensagemPlanejamento(
   // Treinamento). A IA faz uma entrevista ABERTA, sem lista para confirmar.
   const semBase = contexto.length === 0;
 
-  // Leituras pré-IA em PARALELO (a distância Vercel↔Supabase custa uma ida-e-volta
-  // por consulta; em série eram várias, agora ~1×). O RPC de fornecedores do ano
-  // anterior NÃO é usado na entrevista (a base já é a fonte) — foi removido daqui.
-  const [companyRes, cats, realizados] = await Promise.all([
+  // Nome da empresa + catálogo de categorias em paralelo. As categorias servem
+  // para achar os códigos IRMÃOS ("(*)") e somar o realizado completo.
+  const [companyRes, cats] = await Promise.all([
     supabase.from("companies").select("name").eq("id", companyId).maybeSingle<{ name: string }>(),
     getCategoriaMetodo(companyId, year),
-    fetchRealizados(supabase, companyId, year - 1, [categoryCode]),
   ]);
   const companyName = companyRes.data?.name ?? "Empresa";
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
   const nomeCategoria = cat?.categoryName ?? categoryName;
+
+  // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
+  const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
+  const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
+  const realizadoCat = combinarRealizados(realizados, irmaos, year - 1);
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
@@ -651,7 +746,7 @@ export async function enviarMensagemPlanejamento(
     dreLineCode: cat?.dreLineCode ?? "",
     dreLineName: cat?.dreLineName ?? "",
     year,
-    realizado: realizados.get(categoryCode),
+    realizado: realizadoCat,
     considerar: semBase ? "" : considerarContexto(contexto, []),
     semBase,
     descricaoCategoria: descricaoCategoria(nomeCategoria),
