@@ -58,6 +58,7 @@ export interface PlanejamentoContextoItem {
   descricao: string;
   valorMensal: number;
   periodicidade: Periodicidade;
+  mesInicio: number;
 }
 
 interface CategoriaRow {
@@ -182,16 +183,25 @@ function realizadoMensalContexto(r: MediaRealizado | undefined): string {
 
 /** Lista que guia a IA: o que o admin já selecionou (contexto vivo) ou, na
  * falta, todos os fornecedores do ano anterior. */
+const MESES_NOME = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+
 function considerarContexto(
   itensContexto: PlanejamentoContextoItem[],
   realizadoItens: PlanejamentoRealizadoItem[],
 ): string {
   if (itensContexto.length > 0) {
     return itensContexto
-      .map(
-        (i) =>
-          `- ${i.descricao}: ${formatBRL(i.valorMensal)} ${i.periodicidade === "anual" ? "/ano" : "/mês"}`,
-      )
+      .map((i) => {
+        const mes = MESES_NOME[Math.min(12, Math.max(1, Math.round(i.mesInicio))) - 1];
+        const quando =
+          i.periodicidade === "anual"
+            ? `${formatBRL(i.valorMensal)}/ano, pago em ${mes}`
+            : `${formatBRL(i.valorMensal)}/mês, a partir de ${mes}`;
+        return `- ${i.descricao}: ${quando}`;
+      })
       .join("\n");
   }
   if (realizadoItens.length === 0) return "Sem fornecedores do ano anterior.";
@@ -234,14 +244,17 @@ function buildSystemPrompt(opts: {
     `Ano do orçamento: ${opts.year}`,
     `Realizado do ano anterior (${opts.year - 1}) na categoria: ${realizadoMensalContexto(opts.realizado)}`,
     "",
-    "Itens/fornecedores SELECIONADOS pelo administrador para esta categoria",
-    "(considere SOMENTE estes):",
+    "Itens desta categoria (valor e mês JÁ FORAM DEFINIDOS pelo administrador —",
+    "considere SOMENTE estes; NÃO os trate como valores a decidir):",
     opts.considerar,
     "",
     "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
-    "1. Para CADA item da lista acima, confirme se será MANTIDO no orçamento de",
-    `   ${opts.year}, com qual valor e se o pagamento é MENSAL ou ANUAL. Se anual,`,
-    "   pergunte o MÊS de renovação; se mensal, a partir de qual mês vale.",
+    "1. Para CADA item da lista acima, a ÚNICA dúvida é se ele será MANTIDO em",
+    `   ${opts.year}. INFORME ao gestor o valor e o mês que o administrador já`,
+    "   cadastrou (em tom de FATO, nunca como pergunta) e pergunte apenas:",
+    '   "este item será mantido em ' + opts.year + '?". NÃO pergunte o valor nem o',
+    "   mês — o sistema já tem esses dados. Só se o gestor disser que muda algo é",
+    "   que você registra o novo valor/mês.",
     "2. Depois pergunte se o gestor pretende CONTRATAR algo NOVO e peça a JUSTIFICATIVA",
     "   (para que serve, valor, mensal ou anual, e a partir de qual mês entra).",
     "3. NUNCA invente itens fora da lista acima nem citados pelo gestor.",

@@ -344,7 +344,7 @@ function CategoriaInterview({
       detalhe?.categoryName ?? categoryCode,
       conversa,
       texto,
-      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade })),
+      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade, mesInicio: i.mesInicio })),
     );
     setSending(false);
     if (res.needsMigration) {
