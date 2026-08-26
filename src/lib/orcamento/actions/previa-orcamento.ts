@@ -108,6 +108,7 @@ interface PlanejamentoItemRow {
   valor_mensal: number | string | null;
   mes_inicio: number | string | null;
   periodicidade: string | null;
+  incluir: boolean | null;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
@@ -316,7 +317,7 @@ export async function getPreviaOrcamento(
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
         .from("orcamento_planejamento_socios_itens")
-        .select("category_code, valor_mensal, mes_inicio, periodicidade")
+        .select("category_code, valor_mensal, mes_inicio, periodicidade, incluir")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
@@ -324,6 +325,7 @@ export async function getPreviaOrcamento(
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
       const psByCode = new Map<string, { valorMensal: number; mesInicio: number; periodicidade: "mensal" | "anual" }[]>();
       ((psRows ?? []) as PlanejamentoItemRow[]).forEach((r) => {
+        if (r.incluir === false) return; // só os itens incluídos entram no orçado
         const arr = psByCode.get(r.category_code) ?? [];
         const valor = r.valor_mensal == null ? 0 : Number(r.valor_mensal);
         const mes = r.mes_inicio == null ? 1 : Number(r.mes_inicio);

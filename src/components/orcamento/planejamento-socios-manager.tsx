@@ -21,11 +21,9 @@ import {
   getPlanejamentoCategoria,
   enviarMensagemPlanejamento,
   salvarPlanejamentoItens,
-  salvarCuradoria,
   removerPlanejamentoSocios,
   type PlanejamentoListItem,
   type PlanejamentoCategoriaDetalhe,
-  type PlanejamentoCuradoriaItem,
 } from "@/lib/orcamento/actions/planejamento-socios";
 import {
   categoriaTotal,
@@ -48,8 +46,6 @@ const MESES_LONGO = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
-// ─── Selo de status ─────────────────────────────────────────────────────────
-
 type Selo = "nao_iniciado" | "andamento" | "concluido";
 
 function StatusChip({ selo }: { selo: Selo }) {
@@ -68,19 +64,12 @@ function StatusChip({ selo }: { selo: Selo }) {
   }[selo];
   const Icon = map.icon;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        map.cls,
-      )}
-    >
+    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium", map.cls)}>
       <Icon className="h-3 w-3" />
       {map.label}
     </span>
   );
 }
-
-// ─── Célula de moeda ─────────────────────────────────────────────────────────
 
 function CurrencyCell({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
   const [draft, setDraft] = useState(numberToInput(value));
@@ -124,45 +113,64 @@ function CurrencyCell({ value, onCommit }: { value: number; onCommit: (n: number
   );
 }
 
-// ─── Linha de item ──────────────────────────────────────────────────────────
-
 interface LocalItem extends PlanejamentoItem {
   key: string;
 }
 
+interface RefInfo {
+  media: number | null;
+  total: number;
+  lancamentos: number;
+}
+
+// ─── Linha do editor (um item) ──────────────────────────────────────────────
+
 function ItemRow({
   item,
+  refInfo,
   onChange,
   onRemove,
 }: {
   item: LocalItem;
+  refInfo: RefInfo | null;
   onChange: (partial: Partial<LocalItem>) => void;
-  onRemove: () => void;
+  onRemove: (() => void) | null;
 }) {
-  const descFaltando = item.descricao.trim() === "";
-  const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade);
+  const descFaltando = item.incluir && item.descricao.trim() === "";
   const anual = item.periodicidade === "anual";
+  const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade);
   return (
-    <tr className="align-top">
+    <tr className={cn("align-top", !item.incluir && "opacity-50")}>
+      <td className="px-2 py-2 text-center">
+        <input
+          type="checkbox"
+          checked={item.incluir}
+          onChange={() => onChange({ incluir: !item.incluir })}
+          className="h-4 w-4 accent-emerald-600"
+          title={item.incluir ? "Incluído no orçamento" : "Fora do orçamento"}
+        />
+      </td>
       <td className="px-2 py-2">
         <input
           value={item.descricao}
           onChange={(e) => onChange({ descricao: e.target.value })}
-          placeholder="ex.: Omie, Google Workspace…"
+          placeholder="ex.: Trello, Microsoft…"
           className={cn(INPUT_CLS, "py-1.5", descFaltando && "border-amber-500/60 focus:ring-amber-500")}
         />
         <div className="mt-1 flex items-center gap-2">
-          <select
-            value={item.origem}
-            onChange={(e) => onChange({ origem: e.target.value === "mantido" ? "mantido" : "novo" })}
-            className="rounded border bg-background px-1.5 py-0.5 text-[11px] outline-none"
+          <span
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[10px] font-medium",
+              item.origem === "mantido"
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+            )}
           >
-            <option value="mantido">mantido</option>
-            <option value="novo">novo</option>
-          </select>
-          {item.fornecedor && (
-            <span className="truncate text-[11px] text-muted-foreground" title={item.fornecedor}>
-              {item.fornecedor}
+            {item.origem === "mantido" ? "mantido" : "novo"}
+          </span>
+          {item.fornecedor && item.fornecedor.toLowerCase() !== item.descricao.trim().toLowerCase() && (
+            <span className="truncate text-[11px] text-muted-foreground" title={`Omie: ${item.fornecedor}`}>
+              Omie: {item.fornecedor}
             </span>
           )}
         </div>
@@ -194,26 +202,34 @@ function ItemRow({
           ))}
         </select>
       </td>
+      <td className="px-2 py-2 text-right text-xs tabular-nums text-muted-foreground">
+        {refInfo ? (
+          <>
+            <div>{refInfo.media == null ? "—" : `${formatBRL(refInfo.media)}/mês`}</div>
+            <div className="text-[10px]">total {formatBRL(refInfo.total)}</div>
+          </>
+        ) : (
+          "—"
+        )}
+      </td>
       <td className="px-2 py-2 text-right">
         <div className="flex items-start justify-end gap-2">
           <div>
             <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
             <div className="text-[11px] text-muted-foreground">
-              {anual
-                ? `1×/ano em ${MESES[item.mesInicio - 1]}`
-                : item.mesInicio > 1
-                  ? `${MESES[item.mesInicio - 1]}–dez`
-                  : "ano todo"}
+              {anual ? `1×/ano em ${MESES[item.mesInicio - 1]}` : item.mesInicio > 1 ? `${MESES[item.mesInicio - 1]}–dez` : "ano todo"}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            title="Remover item"
-            className="mt-0.5 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              title="Remover item"
+              className="mt-0.5 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -226,6 +242,7 @@ function CategoriaInterview({
   companyId,
   year,
   categoryCode,
+  isAdmin,
   onBack,
   onSaved,
   onError,
@@ -233,6 +250,7 @@ function CategoriaInterview({
   companyId: string;
   year: number;
   categoryCode: string;
+  isAdmin: boolean;
   onBack: () => void;
   onSaved: () => void;
   onError: (msg: string) => void;
@@ -242,7 +260,7 @@ function CategoriaInterview({
 
   const [conversa, setConversa] = useState<PlanejamentoMensagem[]>([]);
   const [itens, setItens] = useState<LocalItem[]>([]);
-  const [curadoria, setCuradoria] = useState<PlanejamentoCuradoriaItem[]>([]);
+  const [refMap, setRefMap] = useState<Map<string, RefInfo>>(new Map());
   const [justificativa, setJustificativa] = useState("");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -252,26 +270,30 @@ function CategoriaInterview({
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  function toLocal(
-    list: {
-      descricao: string;
-      valorMensal: number;
-      mesInicio: number;
-      periodicidade: Periodicidade;
-      origem: "mantido" | "novo";
-      fornecedor: string | null;
-    }[],
-  ): LocalItem[] {
-    return list.map((it) => ({
-      key: `it-${seq.current++}`,
-      id: `it-${seq.current}`,
-      descricao: it.descricao,
-      valorMensal: it.valorMensal,
-      mesInicio: it.mesInicio,
-      periodicidade: it.periodicidade,
-      origem: it.origem,
-      fornecedor: it.fornecedor,
-    }));
+  // Semeia as linhas: itens já salvos + fornecedores do ano anterior ainda não
+  // virados item (a lista fica completa; o admin inclui/exclui e edita).
+  function seedFrom(d: PlanejamentoCategoriaDetalhe) {
+    const ref = new Map<string, RefInfo>();
+    d.realizadoItens.forEach((ri) =>
+      ref.set(ri.fornecedor.toLowerCase(), { media: ri.media, total: ri.total, lancamentos: ri.lancamentos }),
+    );
+    const usados = new Set(d.itens.map((i) => (i.fornecedor ?? "").toLowerCase()).filter(Boolean));
+    const persistidos: LocalItem[] = d.itens.map((i) => ({ ...i, key: `it-${seq.current++}` }));
+    const novos: LocalItem[] = d.realizadoItens
+      .filter((ri) => !usados.has(ri.fornecedor.toLowerCase()))
+      .map((ri) => ({
+        key: `it-${seq.current++}`,
+        id: `seed-${seq.current}`,
+        descricao: ri.fornecedor,
+        valorMensal: ri.media != null ? Math.round(ri.media * 100) / 100 : 0,
+        mesInicio: 1,
+        periodicidade: "mensal" as Periodicidade,
+        origem: "mantido" as const,
+        fornecedor: ri.fornecedor,
+        incluir: true,
+      }));
+    setRefMap(ref);
+    setItens([...persistidos, ...novos]);
   }
 
   useEffect(() => {
@@ -290,9 +312,8 @@ function CategoriaInterview({
       }
       setDetalhe(res.detalhe);
       setConversa(res.detalhe.conversa);
-      setItens(toLocal(res.detalhe.itens));
-      setCuradoria(res.detalhe.curadoria);
       setJustificativa(res.detalhe.justificativa ?? "");
+      seedFrom(res.detalhe);
     });
     return () => {
       alive = false;
@@ -304,33 +325,8 @@ function CategoriaInterview({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [conversa, sending]);
 
-  // ── Curadoria (o admin seleciona/renomeia os fornecedores do ano anterior) ──
-  async function persistCuradoria(next: PlanejamentoCuradoriaItem[]) {
-    setCuradoria(next);
-    const res = await salvarCuradoria(
-      companyId,
-      year,
-      categoryCode,
-      detalhe?.categoryName ?? categoryCode,
-      next.map((c) => ({ fornecedor: c.fornecedor, nome: c.nome, incluir: c.incluir })),
-    );
-    if (res?.error) setLocalErr(res.error);
-  }
-
-  function toggleIncluir(fornecedor: string) {
-    void persistCuradoria(
-      curadoria.map((c) => (c.fornecedor === fornecedor ? { ...c, incluir: !c.incluir } : c)),
-    );
-  }
-
-  function renameCuradoria(fornecedor: string, nome: string) {
-    // atualização local imediata (sem persistir a cada tecla)
-    setCuradoria((prev) => prev.map((c) => (c.fornecedor === fornecedor ? { ...c, nome } : c)));
-  }
-
-  function commitRename() {
-    void persistCuradoria(curadoria.map((c) => ({ ...c, nome: c.nome.trim() || c.fornecedor })));
-  }
+  const incluidos = useMemo(() => itens.filter((i) => i.incluir), [itens]);
+  const total = categoriaTotal(incluidos);
 
   async function enviar(texto: string) {
     setSending(true);
@@ -342,6 +338,7 @@ function CategoriaInterview({
       detalhe?.categoryName ?? categoryCode,
       conversa,
       texto,
+      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade })),
     );
     setSending(false);
     if (res.needsMigration) {
@@ -349,22 +346,58 @@ function CategoriaInterview({
       return;
     }
     if (res.conversa) setConversa(res.conversa);
-    if (res.proposta) {
-      setItens(
-        toLocal(
-          res.proposta.itens.map((i) => ({
-            descricao: i.descricao,
-            valorMensal: i.valorMensal,
-            mesInicio: i.mesInicio,
-            periodicidade: i.periodicidade,
-            origem: i.origem,
-            fornecedor: i.fornecedor ?? null,
-          })),
-        ),
-      );
-      setJustificativa(res.proposta.justificativa);
-    }
+    if (res.proposta) mergeProposta(res.proposta.itens, res.proposta.justificativa);
     if (res.error) setLocalErr(res.error);
+  }
+
+  // Aplica a proposta da IA SEM apagar a curadoria: atualiza a linha existente
+  // (por descrição/fornecedor) ou acrescenta uma nova; marca como incluída.
+  function mergeProposta(
+    propostos: {
+      descricao: string;
+      valorMensal: number;
+      mesInicio: number;
+      periodicidade: Periodicidade;
+      origem: "mantido" | "novo";
+      fornecedor?: string | null;
+    }[],
+    just: string,
+  ) {
+    setItens((prev) => {
+      const next = [...prev];
+      const norm = (s: string) => s.trim().toLowerCase();
+      propostos.forEach((p) => {
+        const idx = next.findIndex(
+          (r) =>
+            norm(r.descricao) === norm(p.descricao) ||
+            (p.fornecedor && r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor)),
+        );
+        if (idx >= 0) {
+          next[idx] = {
+            ...next[idx],
+            valorMensal: p.valorMensal,
+            mesInicio: p.mesInicio,
+            periodicidade: p.periodicidade,
+            origem: p.origem,
+            incluir: true,
+          };
+        } else {
+          next.push({
+            key: `it-${seq.current++}`,
+            id: `ai-${seq.current}`,
+            descricao: p.descricao,
+            valorMensal: p.valorMensal,
+            mesInicio: p.mesInicio,
+            periodicidade: p.periodicidade,
+            origem: p.origem,
+            fornecedor: p.fornecedor ?? null,
+            incluir: true,
+          });
+        }
+      });
+      return next;
+    });
+    if (just) setJustificativa(just);
   }
 
   function handleSend() {
@@ -374,18 +407,19 @@ function CategoriaInterview({
     void enviar(t);
   }
 
-  function addItem(seed?: Partial<LocalItem>) {
+  function addItem() {
     setItens((prev) => [
       ...prev,
       {
         key: `it-${seq.current++}`,
-        id: `it-new-${seq.current}`,
-        descricao: seed?.descricao ?? "",
-        valorMensal: seed?.valorMensal ?? 0,
-        mesInicio: seed?.mesInicio ?? 1,
-        periodicidade: seed?.periodicidade ?? "mensal",
-        origem: seed?.origem ?? "novo",
-        fornecedor: seed?.fornecedor ?? null,
+        id: `new-${seq.current}`,
+        descricao: "",
+        valorMensal: 0,
+        mesInicio: 1,
+        periodicidade: "mensal",
+        origem: "novo",
+        fornecedor: null,
+        incluir: true,
       },
     ]);
   }
@@ -413,6 +447,7 @@ function CategoriaInterview({
         periodicidade: i.periodicidade,
         origem: i.origem,
         fornecedor: i.fornecedor,
+        incluir: i.incluir,
       })),
       justificativa,
       conversa,
@@ -436,9 +471,12 @@ function CategoriaInterview({
       setLocalErr(res.error);
       return;
     }
-    setConversa([]);
-    setItens([]);
-    setJustificativa("");
+    if (detalhe) {
+      setConversa([]);
+      setJustificativa("");
+      // ressemeia a partir do realizado (curadoria limpa)
+      seedFrom({ ...detalhe, itens: [], conversa: [], justificativa: null });
+    }
     setLocalErr(null);
   }
 
@@ -452,15 +490,15 @@ function CategoriaInterview({
   }
   if (!detalhe) return null;
 
-  const total = categoriaTotal(itens);
   const conversaIniciada = conversa.length > 0;
-  const temItens = itens.length > 0;
-  const descFaltando = itens.some((i) => i.descricao.trim() === "");
+  const descFaltando = incluidos.some((i) => i.descricao.trim() === "");
   const selo: Selo =
-    detalhe.status === "concluido" && temItens ? "concluido" : conversaIniciada || temItens ? "andamento" : "nao_iniciado";
+    detalhe.status === "concluido" && incluidos.length > 0
+      ? "concluido"
+      : conversaIniciada || itens.some((i) => i.incluir)
+        ? "andamento"
+        : "nao_iniciado";
   const r = detalhe.realizadoAnterior;
-  const fornecedoresUsados = new Set(itens.map((i) => (i.fornecedor ?? "").toLowerCase()).filter(Boolean));
-  const incluidos = curadoria.filter((c) => c.incluir).length;
 
   return (
     <div className="space-y-4">
@@ -496,7 +534,8 @@ function CategoriaInterview({
           </div>
         </div>
 
-        {(conversaIniciada || temItens) &&
+        {isAdmin &&
+          (conversaIniciada || detalhe.status === "concluido") &&
           (confirmReset ? (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Apagar tudo?</span>
@@ -527,201 +566,48 @@ function CategoriaInterview({
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{localErr}</div>
       )}
 
-      {/* Curadoria — o admin decide quais fornecedores do ano anterior entram na
-          entrevista e com que nome. Sempre visível (com aviso quando vazio). */}
-      <div className="rounded-lg border bg-muted/10 p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Pagos em {year - 1} — o que a IA deve considerar</p>
-            <p className="text-xs text-muted-foreground">
-              {curadoria.length > 0
-                ? `Marque quais entram na entrevista e ajuste o nome do fornecedor. ${incluidos} de ${curadoria.length} incluído(s).`
-                : `Nenhum pagamento encontrado em ${year - 1} nesta categoria (ou os dados ainda não sincronizaram da Omie). Cadastre os itens manualmente em "+ item".`}
-            </p>
-          </div>
-        </div>
-        {curadoria.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1 font-medium">Incluir</th>
-                  <th className="px-2 py-1 font-medium">Fornecedor (editável)</th>
-                  <th className="px-2 py-1 font-medium">Original (Omie)</th>
-                  <th className="px-2 py-1 text-right font-medium">Média/mês</th>
-                  <th className="px-2 py-1 text-right font-medium">Total {year - 1}</th>
-                  <th className="px-2 py-1"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {curadoria.map((c) => {
-                  const jaUsado = fornecedoresUsados.has(c.fornecedor.toLowerCase());
-                  return (
-                    <tr key={c.fornecedor} className={cn(!c.incluir && "opacity-50")}>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="checkbox"
-                          checked={c.incluir}
-                          onChange={() => toggleIncluir(c.fornecedor)}
-                          className="h-4 w-4 accent-emerald-600"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          value={c.nome}
-                          onChange={(e) => renameCuradoria(c.fornecedor, e.target.value)}
-                          onBlur={commitRename}
-                          className={cn(INPUT_CLS, "py-1")}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5 text-xs text-muted-foreground">
-                        <span title={c.fornecedor}>{c.fornecedor}</span>
-                        <span className="ml-1">· {c.lancamentos} lçto(s)</span>
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {c.media == null ? "—" : formatBRL(c.media)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">{formatBRL(c.total)}</td>
-                      <td className="px-2 py-1.5 text-right">
-                        <button
-                          type="button"
-                          disabled={jaUsado || !c.incluir}
-                          onClick={() =>
-                            addItem({
-                              descricao: c.nome,
-                              valorMensal: c.media != null ? Math.round(c.media * 100) / 100 : 0,
-                              mesInicio: 1,
-                              periodicidade: "mensal",
-                              origem: "mantido",
-                              fornecedor: c.fornecedor,
-                            })
-                          }
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px]",
-                            jaUsado || !c.incluir ? "opacity-40" : "hover:border-emerald-500/50 hover:bg-emerald-500/5",
-                          )}
-                          title={jaUsado ? "Já adicionado" : "Adicionar como item"}
-                        >
-                          <Plus className="h-3 w-3" /> item
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Chat */}
-        <div className="flex min-h-[28rem] flex-col rounded-lg border">
-          <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium">
-            <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            Entrevista com a IA
-          </div>
-
-          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "26rem" }}>
-            {!conversaIniciada && !sending && (
-              <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
-                <p className="max-w-xs text-sm text-muted-foreground">
-                  A IA usa os fornecedores incluídos acima, pergunta quais serão mantidos (mensal ou
-                  anual) e se há novas contratações — e propõe os itens do orçamento de {year}.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void enviar("")}
-                  className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Iniciar entrevista
-                </button>
-              </div>
-            )}
-
-            {conversa.map((m, i) => (
-              <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
-                    m.role === "user" ? "bg-emerald-600 text-white" : "bg-muted text-foreground",
-                  )}
-                >
-                  {m.content}
-                </div>
-              </div>
-            ))}
-
-            {sending && (
-              <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  A IA está pensando…
-                </div>
-              </div>
-            )}
-          </div>
-
-          {conversaIniciada && (
-            <div className="border-t p-2">
-              <div className="flex items-end gap-2">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  rows={2}
-                  placeholder="Responda à IA… (Enter envia, Shift+Enter quebra linha)"
-                  disabled={sending}
-                  className={cn(INPUT_CLS, "resize-none")}
-                />
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={sending || !input.trim()}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
-                  title="Enviar"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </div>
+      {/* Editor (admin) — a base do orçamento: pagos em {ano-1} + novos itens. */}
+      {isAdmin && (
+        <div className="rounded-lg border">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">
+                Pagos em {year - 1} — o que a IA deve considerar
+                <span className="ml-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                  admin
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Marque o que entra no orçamento, ajuste o nome, valor, período e mês. O total é a soma
+                dos itens marcados.
+              </p>
             </div>
-          )}
-        </div>
-
-        {/* Itens do orçamento */}
-        <div className="flex flex-col rounded-lg border">
-          <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2 text-sm font-medium">
-            <span>Itens do orçamento {year}</span>
             <button
               type="button"
-              onClick={() => addItem()}
-              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              onClick={addItem}
+              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
             >
-              <Plus className="h-3.5 w-3.5" /> item
+              <Plus className="h-3.5 w-3.5" /> item novo
             </button>
           </div>
 
-          <div className="flex-1 space-y-3 p-3">
+          <div className="space-y-3 p-3">
             {itens.length === 0 ? (
               <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-                Nenhum item ainda. Rode a entrevista para a IA propor, use os fornecedores do ano
-                anterior acima, ou adicione com <span className="font-medium">+ item</span>.
+                Nenhum pagamento encontrado em {year - 1} nesta categoria. Adicione itens com{" "}
+                <span className="font-medium">+ item novo</span> ou rode a entrevista.
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                     <tr>
+                      <th className="px-2 py-1 text-center font-medium">Incluir</th>
                       <th className="px-2 py-1 font-medium">Item</th>
                       <th className="px-2 py-1 font-medium">Valor</th>
                       <th className="px-2 py-1 font-medium">Período</th>
                       <th className="px-2 py-1 font-medium">Início/Renov.</th>
+                      <th className="px-2 py-1 text-right font-medium">Ref. {year - 1}</th>
                       <th className="px-2 py-1 text-right font-medium">Ano</th>
                     </tr>
                   </thead>
@@ -730,8 +616,9 @@ function CategoriaInterview({
                       <ItemRow
                         key={it.key}
                         item={it}
+                        refInfo={it.fornecedor ? refMap.get(it.fornecedor.toLowerCase()) ?? null : null}
                         onChange={(partial) => updateItem(it.key, partial)}
-                        onRemove={() => removeItem(it.key)}
+                        onRemove={it.origem === "novo" ? () => removeItem(it.key) : null}
                       />
                     ))}
                   </tbody>
@@ -742,12 +629,14 @@ function CategoriaInterview({
             {descFaltando && (
               <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
                 <TriangleAlert className="h-3 w-3" />
-                Todos os itens precisam de descrição para salvar.
+                Todo item incluído precisa de descrição para salvar.
               </div>
             )}
 
             <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">Total da categoria ({year})</span>
+              <span className="text-muted-foreground">
+                Total da categoria ({year}) · {incluidos.length} item(ns)
+              </span>
               <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
             </div>
 
@@ -761,9 +650,7 @@ function CategoriaInterview({
                 className={cn(INPUT_CLS, "resize-none")}
               />
             </div>
-          </div>
 
-          <div className="border-t p-3">
             <button
               type="button"
               onClick={salvar}
@@ -774,12 +661,91 @@ function CategoriaInterview({
               Salvar orçamento da categoria
             </button>
             {total <= 0 && (
-              <p className="mt-1 text-center text-[11px] text-muted-foreground">
-                Adicione ao menos um item com valor para salvar.
+              <p className="text-center text-[11px] text-muted-foreground">
+                Marque ao menos um item com valor para salvar.
               </p>
             )}
           </div>
         </div>
+      )}
+
+      {/* Chat da entrevista */}
+      <div className="flex min-h-[24rem] flex-col rounded-lg border">
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium">
+          <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+          Entrevista com a IA
+        </div>
+
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "22rem" }}>
+          {!conversaIniciada && !sending && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
+              <p className="max-w-md text-sm text-muted-foreground">
+                A IA usa os itens marcados acima, confirma quais serão mantidos (mensal ou anual) e se
+                há novas contratações — e devolve a proposta na tabela.
+              </p>
+              <button
+                type="button"
+                onClick={() => void enviar("")}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                <Sparkles className="h-4 w-4" />
+                Iniciar entrevista
+              </button>
+            </div>
+          )}
+
+          {conversa.map((m, i) => (
+            <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+              <div
+                className={cn(
+                  "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+                  m.role === "user" ? "bg-emerald-600 text-white" : "bg-muted text-foreground",
+                )}
+              >
+                {m.content}
+              </div>
+            </div>
+          ))}
+
+          {sending && (
+            <div className="flex justify-start">
+              <div className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                A IA está pensando…
+              </div>
+            </div>
+          )}
+        </div>
+
+        {conversaIniciada && (
+          <div className="border-t p-2">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                rows={2}
+                placeholder="Responda à IA… (Enter envia, Shift+Enter quebra linha)"
+                disabled={sending}
+                className={cn(INPUT_CLS, "resize-none")}
+              />
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={sending || !input.trim()}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                title="Enviar"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -790,9 +756,11 @@ function CategoriaInterview({
 export function PlanejamentoSociosManager({
   companyId,
   year,
+  isAdmin = true,
 }: {
   companyId: string;
   year: number;
+  isAdmin?: boolean;
 }) {
   const [items, setItems] = useState<PlanejamentoListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -853,11 +821,10 @@ export function PlanejamentoSociosManager({
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
         <p className="font-medium">Migration pendente</p>
         <p className="mt-1 text-muted-foreground">
-          Aplique as migrations{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260825120000_orcamento_planejamento_socios</code>{" "}
-          e{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260826120000_orcamento_planejamento_socios_curadoria</code>{" "}
-          para habilitar esta tela.
+          Aplique as migrations do Planejamento dos sócios (
+          <code className="rounded bg-muted px-1 py-0.5">20260825120000</code>,{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260826120000</code> e{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260827120000</code>) para habilitar esta tela.
         </p>
       </div>
     );
@@ -869,6 +836,7 @@ export function PlanejamentoSociosManager({
         companyId={companyId}
         year={year}
         categoryCode={selected}
+        isAdmin={isAdmin}
         onBack={() => setSelected(null)}
         onSaved={() => {
           setSelected(null);

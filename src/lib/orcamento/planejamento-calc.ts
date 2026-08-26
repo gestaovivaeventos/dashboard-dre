@@ -30,6 +30,9 @@ export interface PlanejamentoItem {
   origem: "mantido" | "novo";
   /** Fornecedor de referência do ano anterior (quando o item veio de lá). */
   fornecedor: string | null;
+  /** Entra no orçamento (e na entrevista da IA)? Desmarcado = ignorado, mas
+   * lembrado (não volta a ser sugerido). */
+  incluir: boolean;
 }
 
 /** Item como a IA propõe (sem id — ainda não persistido). */
@@ -40,6 +43,7 @@ export interface PlanejamentoItemProposto {
   periodicidade: Periodicidade;
   origem: "mantido" | "novo";
   fornecedor?: string | null;
+  incluir?: boolean;
 }
 
 export interface PlanejamentoProposta {
