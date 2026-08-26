@@ -184,7 +184,11 @@ function propostaTotal(p: PlanejamentoProposta | null): number {
   );
 }
 
-function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProposta | null } {
+function parseAiReply(text: string): {
+  reply: string;
+  proposta: PlanejamentoProposta | null;
+  podeFechar: boolean;
+} {
   let t = (text ?? "").trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) t = fence[1].trim();
@@ -199,6 +203,7 @@ function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProp
     return {
       reply: (text ?? "").trim() || "Pode me contar um pouco mais sobre essa despesa?",
       proposta: null,
+      podeFechar: false,
     };
   }
 
@@ -217,7 +222,11 @@ function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProp
     }
   }
 
-  return { reply: reply || "…", proposta };
+  const flagFechar =
+    typeof obj === "object" && obj !== null && (obj as { podeFechar?: unknown }).podeFechar === true;
+  const podeFechar = flagFechar || proposta != null;
+
+  return { reply: reply || "…", proposta, podeFechar };
 }
 
 function realizadoMensalContexto(r: MediaRealizado | undefined): string {
@@ -327,17 +336,22 @@ function buildSystemPrompt(opts: {
     "   valor, mês ou justificativa de um item novo.",
     "3. NUNCA invente itens fora da lista acima nem citados pelo gestor.",
     "",
-    "TRAVA DA PROPOSTA: só monte a proposta final quando (i) todos os itens da lista",
-    "acima tiverem sido confirmados como mantidos ou não e (ii) todo item NOVO tiver os",
-    "5 dados (a–e) completos. Se faltar qualquer coisa, 'proposta' continua null e você",
-    "faz a próxima pergunta. É PROIBIDO dizer que montou a proposta e mesmo assim mandar",
-    "'proposta': null — se você anuncia a proposta, ela DEVE vir preenchida no JSON.",
+    "NÃO monte a proposta por conta própria durante a entrevista — enquanto houver",
+    "QUALQUER pergunta pendente, 'proposta' é null, 'podeFechar' é false e 'reply' é a",
+    "próxima pergunta (uma por vez).",
     "",
-    "Quando tiver TODAS as respostas, PROPONHA a LISTA COMPLETA de itens: cada item",
-    "mantido (com o valor/mês que o gestor CONFIRMOU — já atualizado se ele mudou),",
-    "MAIS cada item NOVO que o gestor pediu, EXCLUINDO os que ele disse não manter.",
-    "Confira item por item contra a conversa: nenhuma alteração do gestor pode faltar.",
-    "Cada item:",
+    "FIM DAS PERGUNTAS: quando (i) TODOS os itens da lista tiverem sido confirmados como",
+    "mantidos/alterados/cancelados ou não-mantidos E (ii) todo item NOVO tiver os 5 dados",
+    "(a–e) completos, você NÃO tem mais o que perguntar. Nesse turno, responda com",
+    "'proposta': null, 'podeFechar': true e um 'reply' avisando que terminou (ex.: \"Terminei",
+    "as perguntas. Clique em 'Concluir entrevista e gerar proposta' para eu montar a proposta.\").",
+    "NÃO monte a proposta ainda — espere o pedido de encerramento.",
+    "",
+    "MONTAR A PROPOSTA: só quando você receber a instrução de ENCERRAR a entrevista.",
+    "Aí devolva a LISTA COMPLETA de itens: cada item mantido (com o valor/mês que o gestor",
+    "CONFIRMOU — já atualizado se ele mudou), MAIS cada item NOVO pedido, EXCLUINDO os que",
+    "ele disse não manter. Confira item por item contra a conversa: nenhuma alteração pode",
+    "faltar. Cada item:",
     "  - descricao: nome da plataforma/serviço;",
     "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
     "    ANUAL quando periodicidade='anual';",
@@ -346,14 +360,16 @@ function buildSystemPrompt(opts: {
     "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
     "  - periodicidade: 'mensal' ou 'anual';",
     "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
-    "E uma justificativa curta (2 a 4 frases) com as premissas.",
+    "E uma justificativa curta (2 a 4 frases) com as premissas. Se ao encerrar ainda faltar",
+    "um dado OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e",
+    "pergunte só o que falta.",
     "",
     "Responda SEMPRE com um ÚNICO objeto JSON, sem nenhum texto fora dele:",
-    '{ "reply": "sua mensagem ao gestor", "proposta": null }',
-    'Enquanto entrevista, "proposta" é null e "reply" é a próxima pergunta.',
-    "Ao propor, preencha:",
-    '{ "reply": "texto curto", "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
-    "Se o gestor pedir ajustes depois de uma proposta, devolva uma NOVA proposta revisada.",
+    '{ "reply": "sua mensagem ao gestor", "proposta": null, "podeFechar": false }',
+    'Enquanto entrevista: "proposta" null, "podeFechar" false, "reply" = próxima pergunta.',
+    'Terminou as perguntas (sem propor ainda): "proposta" null, "podeFechar" true.',
+    "Ao ENCERRAR (montar a proposta), preencha:",
+    '{ "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
   ].join("\n");
 }
 
@@ -527,9 +543,11 @@ export async function enviarMensagemPlanejamento(
   conversaAtual: PlanejamentoMensagem[],
   textoUsuario: string,
   itensContexto: PlanejamentoContextoItem[] = [],
+  finalizar = false,
 ): Promise<{
   reply?: string;
   proposta?: PlanejamentoProposta | null;
+  podeFechar?: boolean;
   conversa?: PlanejamentoMensagem[];
   error?: string;
   needsMigration?: boolean;
@@ -573,8 +591,22 @@ export async function enviarMensagemPlanejamento(
   );
   if (texto) {
     messages.push({ role: "user", content: texto });
-  } else if (messages.length === 0) {
+  } else if (messages.length === 0 && !finalizar) {
     messages.push({ role: "user", content: "Inicie a entrevista fazendo a primeira pergunta." });
+  }
+  // O gestor clicou "Concluir entrevista e gerar proposta": mande a IA FECHAR a
+  // proposta agora com tudo que já foi dito. Só se faltar dado OBRIGATÓRIO de um
+  // item NOVO ela pode perguntar em vez de propor.
+  if (finalizar) {
+    messages.push({
+      role: "user",
+      content:
+        "Encerrar a entrevista AGORA. Com base em TUDO que já foi respondido, monte a proposta " +
+        "final (campo 'proposta' PREENCHIDO no JSON): todos os itens mantidos com o valor/mês " +
+        "confirmados, mais os itens novos completos, sem os que eu disse não manter. Só NÃO proponha " +
+        "se faltar algum dado OBRIGATÓRIO (nome, valor, mensal/anual, mês, justificativa) de um item " +
+        "NOVO — nesse caso pergunte apenas o que falta.",
+    });
   }
 
   const resolved = await resolvePlanejamentoProvider();
@@ -598,7 +630,13 @@ export async function enviarMensagemPlanejamento(
     return { error: `Falha ao consultar a IA: ${e instanceof Error ? e.message : String(e)}` };
   }
 
-  const { reply, proposta } = parseAiReply(replyText);
+  const parsed = parseAiReply(replyText);
+  const reply = parsed.reply;
+  const podeFechar = parsed.podeFechar;
+  // A proposta (Etapa 3) SÓ é aceita quando o gestor ENCERRA a entrevista
+  // (finalizar). Durante o chat, mesmo que a IA escorregue e mande uma proposta,
+  // ela é ignorada — quem destrava a Etapa 3 é o botão "Concluir".
+  const proposta = finalizar ? parsed.proposta : null;
 
   const novaConversa: PlanejamentoMensagem[] = [
     ...historico,
@@ -606,10 +644,9 @@ export async function enviarMensagemPlanejamento(
     { role: "assistant" as const, content: reply },
   ];
 
-  // Preserva o status já gravado (não rebaixa 'proposto'/'concluido' para
-  // Persiste a conversa sempre; e, quando a IA PROPÕE, grava a proposta (Etapa 3)
-  // na coluna jsonb e DESCONGELA (proposta_confirmada=false) — uma proposta nova
-  // pede nova confirmação. A BASE (itens) NÃO é tocada aqui.
+  // Persiste a conversa sempre; e, quando a proposta é fechada (Etapa 3), grava-a
+  // na coluna jsonb e DESCONGELA (proposta_confirmada=false) — proposta nova pede
+  // nova confirmação. A BASE (itens) NÃO é tocada aqui.
   const payload: Record<string, unknown> = {
     company_id: companyId,
     year,
@@ -629,11 +666,11 @@ export async function enviarMensagemPlanejamento(
     .upsert(payload, { onConflict: "company_id,year,category_code" });
   if (upErr) {
     if (isSchemaMissing(upErr.message)) return { needsMigration: true };
-    return { reply, proposta, conversa: novaConversa, error: upErr.message };
+    return { reply, proposta, podeFechar, conversa: novaConversa, error: upErr.message };
   }
 
   revalidatePath(PATH);
-  return { reply, proposta, conversa: novaConversa };
+  return { reply, proposta, podeFechar, conversa: novaConversa };
 }
 
 // ─── Salvar / remover ──────────────────────────────────────────────────────────

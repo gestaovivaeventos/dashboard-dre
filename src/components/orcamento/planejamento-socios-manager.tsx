@@ -466,6 +466,7 @@ function CategoriaInterview({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [podeFechar, setPodeFechar] = useState(false);
 
   // ETAPA 3 — proposta
   const [proposta, setProposta] = useState<PlanejamentoProposta | null>(null);
@@ -532,6 +533,7 @@ function CategoriaInterview({
       setConversa(d.conversa);
       setProposta(d.proposta);
       setPropostaConfirmada(d.propostaConfirmada);
+      setPodeFechar(d.proposta != null);
     });
     return () => {
       alive = false;
@@ -614,7 +616,7 @@ function CategoriaInterview({
   }
 
   // ── Etapa 2: entrevista ────────────────────────────────────────────────────
-  async function enviar(texto: string) {
+  async function enviar(texto: string, finalizar = false) {
     setSending(true);
     setLocalErr(null);
     const res = await enviarMensagemPlanejamento(
@@ -633,6 +635,7 @@ function CategoriaInterview({
           mesInicio: i.mesInicio,
           mesFim: i.mesFim,
         })),
+      finalizar,
     );
     setSending(false);
     if (res.needsMigration) {
@@ -640,6 +643,7 @@ function CategoriaInterview({
       return;
     }
     if (res.conversa) setConversa(res.conversa);
+    setPodeFechar(res.podeFechar === true);
     if (res.proposta) {
       // A proposta é a saída da entrevista (já persistida no servidor). Ela
       // SUBSTITUI a anterior — nada de merge com a base.
@@ -671,6 +675,7 @@ function CategoriaInterview({
     setProposta(null);
     setPropostaConfirmada(false);
     setPropostaEdit(null);
+    setPodeFechar(false);
     setLocalErr(null);
     onSaved();
   }
@@ -882,7 +887,7 @@ function CategoriaInterview({
         <Step
           n={2}
           title="Entrevista com a IA"
-          description="Com a base validada, a IA conduz a entrevista com o gestor. Cada decisão dele alimenta a proposta."
+          description="Com a base validada, a IA entrevista o gestor item por item. Ao terminar, clique em “Concluir entrevista e gerar proposta” para destravar a Etapa 3."
           state={step2State}
           chip={
             conversaIniciada ? (
@@ -977,7 +982,7 @@ function CategoriaInterview({
               </div>
 
               {conversaIniciada && (
-                <div className="border-t p-2">
+                <div className="space-y-2 border-t p-2">
                   <div className="flex items-end gap-2">
                     <textarea
                       value={input}
@@ -1003,6 +1008,25 @@ function CategoriaInterview({
                       <Send className="h-4 w-4" />
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => void enviar("", true)}
+                    disabled={sending || !podeFechar}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/5 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-400"
+                    title={
+                      podeFechar
+                        ? "Fecha a proposta com o que já foi respondido"
+                        : "Disponível quando a IA terminar todas as perguntas"
+                    }
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Concluir entrevista e gerar proposta
+                  </button>
+                  {!podeFechar && (
+                    <p className="text-center text-[11px] text-muted-foreground">
+                      Disponível quando a IA terminar todas as perguntas.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
