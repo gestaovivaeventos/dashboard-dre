@@ -317,8 +317,6 @@ function buildSystemPrompt(opts: {
 
   // Bloco de CONDUÇÃO — muda conforme haja ou não uma base cadastrada.
   const comBase: string[] = [
-    `Realizado do ano anterior (${year - 1}) na categoria: ${realizadoMensalContexto(opts.realizado)}`,
-    "",
     "Itens JÁ CADASTRADOS pela administração para esta categoria (valor e mês são o",
     "PONTO DE PARTIDA — o padrão, não um teto). NÃO invente itens MANTIDOS fora desta",
     "lista, mas o gestor PODE alterar qualquer valor/mês e PODE adicionar itens novos:",
@@ -393,6 +391,12 @@ function buildSystemPrompt(opts: {
     `Empresa: ${opts.companyName}`,
     `Categoria: ${categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
     `Ano do orçamento: ${year}`,
+    `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado)}`,
+    "",
+    `ABERTURA (regra fixa): a sua PRIMEIRA mensagem deve SEMPRE começar informando ao`,
+    `gestor o TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total"`,
+    `acima (mesmo que não haja base cadastrada; se não houver dado, diga que não houve`,
+    `gasto registrado). Só DEPOIS siga a condução abaixo.`,
     "",
     ...(opts.semBase ? semBase : comBase),
     "",
