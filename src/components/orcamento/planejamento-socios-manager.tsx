@@ -272,6 +272,7 @@ function CategoriaInterview({
   const [confirmReset, setConfirmReset] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [statusLocal, setStatusLocal] = useState<"rascunho" | "concluido">("rascunho");
+  const [propostaRecebida, setPropostaRecebida] = useState(false);
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -352,7 +353,10 @@ function CategoriaInterview({
       return;
     }
     if (res.conversa) setConversa(res.conversa);
-    if (res.proposta) mergeProposta(res.proposta.itens, res.proposta.justificativa);
+    if (res.proposta) {
+      mergeProposta(res.proposta.itens, res.proposta.justificativa);
+      setPropostaRecebida(true);
+    }
     if (res.error) setLocalErr(res.error);
   }
 
@@ -486,6 +490,7 @@ function CategoriaInterview({
       return;
     }
     setConversa([]);
+    setPropostaRecebida(false);
     setLocalErr(null);
   }
 
@@ -500,6 +505,7 @@ function CategoriaInterview({
   if (!detalhe) return null;
 
   const conversaIniciada = conversa.length > 0;
+  const mostrarResumo = (propostaRecebida || statusLocal === "concluido") && incluidos.length > 0;
   const descFaltando = incluidos.some((i) => i.descricao.trim() === "");
   const selo: Selo =
     statusLocal === "concluido" && incluidos.length > 0
@@ -792,6 +798,52 @@ function CategoriaInterview({
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 A IA está pensando…
               </div>
+            </div>
+          )}
+
+          {mostrarResumo && (
+            <div className="rounded-lg border border-emerald-500/40 bg-emerald-50/60 p-3 dark:bg-emerald-950/20">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                <CheckCircle2 className="h-4 w-4" />
+                Proposta do orçamento de {year}
+              </div>
+              <ul className="divide-y divide-emerald-500/15 text-sm">
+                {incluidos.map((it) => {
+                  const mes = MESES_LONGO[Math.min(12, Math.max(1, it.mesInicio)) - 1];
+                  const quando =
+                    it.periodicidade === "anual"
+                      ? `${formatBRL(it.valorMensal)}/ano · pago em ${mes}`
+                      : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}`;
+                  return (
+                    <li key={it.key} className="flex items-baseline justify-between gap-3 py-1.5">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">{it.descricao || "—"}</div>
+                        <div className="text-xs text-muted-foreground">{quando}</div>
+                      </div>
+                      <span className="shrink-0 font-semibold tabular-nums">
+                        {formatBRL(totalItem(it.valorMensal, it.mesInicio, it.periodicidade))}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-2 flex items-center justify-between border-t border-emerald-500/20 pt-2 text-sm">
+                <span className="font-medium text-muted-foreground">Total da categoria ({year})</span>
+                <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                  {formatBRL(total)}
+                </span>
+              </div>
+              {justificativa.trim() && (
+                <p className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-muted-foreground">
+                  <span className="font-medium">Justificativa:</span> {justificativa.trim()}
+                </p>
+              )}
+              {isAdmin && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Revise, ajuste ou salve na base{" "}
+                  <span className="font-medium">“Pagos em {year - 1}”</span> (botão acima).
+                </p>
+              )}
             </div>
           )}
         </div>
