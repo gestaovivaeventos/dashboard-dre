@@ -47,7 +47,7 @@ export interface PlanejamentoCategoriaDetalhe {
   itens: PlanejamentoItem[];
   justificativa: string | null;
   conversa: PlanejamentoMensagem[];
-  status: "rascunho" | "concluido";
+  status: "rascunho" | "proposto" | "concluido";
   realizadoAnterior: { total: number; media: number | null } | null;
   /** Pagamentos do ano anterior por fornecedor (para semear/mostrar a referência). */
   realizadoItens: PlanejamentoRealizadoItem[];
@@ -499,7 +499,12 @@ export async function getPlanejamentoCategoria(
       itens: ((itemRows ?? []) as ItemRow[]).map(rowToItem),
       justificativa: catRow?.justificativa ?? null,
       conversa: sanitizeConversa(catRow?.conversa),
-      status: catRow?.status === "concluido" ? "concluido" : "rascunho",
+      status:
+        catRow?.status === "concluido"
+          ? "concluido"
+          : catRow?.status === "proposto"
+            ? "proposto"
+            : "rascunho",
       realizadoAnterior: r ? { total: r.total, media: r.media } : null,
       realizadoItens,
     },
@@ -595,6 +600,19 @@ export async function enviarMensagemPlanejamento(
     { role: "assistant" as const, content: reply },
   ];
 
+  // Preserva o status já gravado (não rebaixa 'proposto'/'concluido' para
+  // 'rascunho' numa pergunta intermediária). A gravação da proposta em si é
+  // feita pelo cliente logo após, via salvarPlanejamentoItens(statusFinal).
+  const { data: statusRow } = await supabase
+    .from("orcamento_planejamento_socios")
+    .select("status")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode)
+    .maybeSingle<{ status: string | null }>();
+  const statusAtual =
+    statusRow?.status === "concluido" || statusRow?.status === "proposto" ? statusRow.status : "rascunho";
+
   const { error: upErr } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
       company_id: companyId,
@@ -602,7 +620,7 @@ export async function enviarMensagemPlanejamento(
       category_code: categoryCode,
       category_name: categoryName,
       conversa: novaConversa,
-      status: "rascunho",
+      status: statusAtual,
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code" },
@@ -631,6 +649,7 @@ export async function salvarPlanejamentoItens(
   itens: PlanejamentoItemProposto[],
   justificativa: string,
   conversa: PlanejamentoMensagem[],
+  statusFinal: "concluido" | "proposto" = "concluido",
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -653,7 +672,7 @@ export async function salvarPlanejamentoItens(
       category_name: categoryName,
       justificativa: (justificativa ?? "").trim() || null,
       conversa: sanitizeConversa(conversa),
-      status: "concluido",
+      status: statusFinal,
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code" },

@@ -295,10 +295,16 @@ function CategoriaInterview({
   const [localErr, setLocalErr] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
-  const [statusLocal, setStatusLocal] = useState<"rascunho" | "concluido">("rascunho");
+  const [statusLocal, setStatusLocal] = useState<"rascunho" | "proposto" | "concluido">("rascunho");
   const [propostaRecebida, setPropostaRecebida] = useState(false);
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Espelho de `itens` p/ o merge da proposta ler o estado atual sem depender do
+  // closure (setState é assíncrono).
+  const itensRef = useRef<LocalItem[]>([]);
+  useEffect(() => {
+    itensRef.current = itens;
+  }, [itens]);
 
   // Semeia as linhas: itens já salvos + fornecedores do ano anterior ainda não
   // virados item (a lista fica completa; o admin inclui/exclui e edita).
@@ -379,8 +385,36 @@ function CategoriaInterview({
     }
     if (res.conversa) setConversa(res.conversa);
     if (res.proposta) {
-      mergeProposta(res.proposta.itens, res.proposta.justificativa);
+      const just = res.proposta.justificativa;
+      const merged = mergeInto(itensRef.current, res.proposta.itens);
+      setItens(merged);
+      if (just) setJustificativa(just);
       setPropostaRecebida(true);
+      setStatusLocal("proposto");
+      // PERSISTE a proposta na hora (status 'proposto'): assim ela sobrevive ao
+      // reload/refresh e o resumo não volta ao estado antigo. O admin ainda pode
+      // ajustar na base e 'Salvar' (finaliza = 'concluido').
+      void salvarPlanejamentoItens(
+        companyId,
+        year,
+        categoryCode,
+        detalhe?.categoryName ?? categoryCode,
+        merged.map((i) => ({
+          descricao: i.descricao,
+          valorMensal: i.valorMensal,
+          mesInicio: i.mesInicio,
+          mesFim: i.mesFim,
+          periodicidade: i.periodicidade,
+          origem: i.origem,
+          fornecedor: i.fornecedor,
+          incluir: i.incluir,
+        })),
+        just || justificativa,
+        res.conversa ?? conversa,
+        "proposto",
+      ).then((r) => {
+        if (r.error && !r.needsMigration) setLocalErr(r.error);
+      });
     }
     if (res.error) setLocalErr(res.error);
   }
@@ -389,7 +423,9 @@ function CategoriaInterview({
   // de incluídos. Atualiza a linha existente (por descrição/fornecedor) ou
   // acrescenta uma nova; e DESMARCA os itens "mantido" que a IA não trouxe — ou
   // seja, os que o gestor disse NÃO manter (a linha fica lembrada, mas fora).
-  function mergeProposta(
+  // Função PURA (recebe a base e devolve o novo array) para poder persistir.
+  function mergeInto(
+    prev: LocalItem[],
     propostos: {
       descricao: string;
       valorMensal: number;
@@ -399,53 +435,49 @@ function CategoriaInterview({
       origem: "mantido" | "novo";
       fornecedor?: string | null;
     }[],
-    just: string,
-  ) {
-    setItens((prev) => {
-      const next = [...prev];
-      const norm = (s: string) => s.trim().toLowerCase();
-      const matched = new Set<string>();
-      propostos.forEach((p) => {
-        const idx = next.findIndex(
-          (r) =>
-            !matched.has(r.key) &&
-            (norm(r.descricao) === norm(p.descricao) ||
-              (!!p.fornecedor && !!r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor))),
-        );
-        if (idx >= 0) {
-          matched.add(next[idx].key);
-          next[idx] = {
-            ...next[idx],
-            valorMensal: p.valorMensal,
-            mesInicio: p.mesInicio,
-            mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
-            periodicidade: p.periodicidade,
-            origem: p.origem,
-            incluir: true,
-          };
-        } else {
-          const key = `it-${seq.current++}`;
-          matched.add(key);
-          next.push({
-            key,
-            id: `ai-${seq.current}`,
-            descricao: p.descricao,
-            valorMensal: p.valorMensal,
-            mesInicio: p.mesInicio,
-            mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
-            periodicidade: p.periodicidade,
-            origem: p.origem,
-            fornecedor: p.fornecedor ?? null,
-            incluir: true,
-          });
-        }
-      });
-      // Item "mantido" fora da proposta = o gestor não quis manter → desmarca.
-      return next.map((r) =>
-        !matched.has(r.key) && r.origem === "mantido" && r.incluir ? { ...r, incluir: false } : r,
+  ): LocalItem[] {
+    const next = [...prev];
+    const norm = (s: string) => s.trim().toLowerCase();
+    const matched = new Set<string>();
+    propostos.forEach((p) => {
+      const idx = next.findIndex(
+        (r) =>
+          !matched.has(r.key) &&
+          (norm(r.descricao) === norm(p.descricao) ||
+            (!!p.fornecedor && !!r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor))),
       );
+      if (idx >= 0) {
+        matched.add(next[idx].key);
+        next[idx] = {
+          ...next[idx],
+          valorMensal: p.valorMensal,
+          mesInicio: p.mesInicio,
+          mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
+          periodicidade: p.periodicidade,
+          origem: p.origem,
+          incluir: true,
+        };
+      } else {
+        const key = `it-${seq.current++}`;
+        matched.add(key);
+        next.push({
+          key,
+          id: `ai-${seq.current}`,
+          descricao: p.descricao,
+          valorMensal: p.valorMensal,
+          mesInicio: p.mesInicio,
+          mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
+          periodicidade: p.periodicidade,
+          origem: p.origem,
+          fornecedor: p.fornecedor ?? null,
+          incluir: true,
+        });
+      }
     });
-    if (just) setJustificativa(just);
+    // Item "mantido" fora da proposta = o gestor não quis manter → desmarca.
+    return next.map((r) =>
+      !matched.has(r.key) && r.origem === "mantido" && r.incluir ? { ...r, incluir: false } : r,
+    );
   }
 
   function handleSend() {
@@ -545,12 +577,13 @@ function CategoriaInterview({
   if (!detalhe) return null;
 
   const conversaIniciada = conversa.length > 0;
-  const mostrarResumo = (propostaRecebida || statusLocal === "concluido") && incluidos.length > 0;
+  const mostrarResumo =
+    (propostaRecebida || statusLocal === "proposto" || statusLocal === "concluido") && incluidos.length > 0;
   const descFaltando = incluidos.some((i) => i.descricao.trim() === "");
   const selo: Selo =
     statusLocal === "concluido" && incluidos.length > 0
       ? "concluido"
-      : conversaIniciada || itens.some((i) => i.incluir)
+      : conversaIniciada || statusLocal === "proposto" || itens.some((i) => i.incluir)
         ? "andamento"
         : "nao_iniciado";
   const r = detalhe.realizadoAnterior;
@@ -1024,8 +1057,9 @@ export function PlanejamentoSociosManager({
         <p className="mt-1 text-muted-foreground">
           Aplique as migrations do Planejamento dos sócios (
           <code className="rounded bg-muted px-1 py-0.5">20260825120000</code>,{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260826120000</code> e{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260827120000</code>) para habilitar esta tela.
+          <code className="rounded bg-muted px-1 py-0.5">20260826120000</code>,{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260827120000</code> e{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260828120000</code>) para habilitar esta tela.
         </p>
       </div>
     );
