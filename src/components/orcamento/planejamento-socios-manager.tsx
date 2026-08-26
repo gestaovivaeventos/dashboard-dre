@@ -983,6 +983,31 @@ export function PlanejamentoSociosManager({
     );
   }, [items, search]);
 
+  // A categoria selecionada renderiza ANTES do gate de `loading` da lista: um
+  // reload em segundo plano (ex.: onSaved) NÃO pode desmontar a entrevista — se
+  // desmontasse, ao remontar ela re-semearia os itens dos persistidos e o resumo
+  // da proposta (em memória) sumiria/oscilaria.
+  if (selected) {
+    return (
+      <CategoriaInterview
+        companyId={companyId}
+        year={year}
+        categoryCode={selected}
+        isAdmin={isAdmin}
+        onBack={() => {
+          setSelected(null);
+          void reload();
+        }}
+        onSaved={() => void reload()}
+        onError={(msg) => {
+          setSelected(null);
+          setLoadError(msg);
+          void reload();
+        }}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center gap-2 rounded-lg border p-12 text-sm text-muted-foreground">
@@ -1003,27 +1028,6 @@ export function PlanejamentoSociosManager({
           <code className="rounded bg-muted px-1 py-0.5">20260827120000</code>) para habilitar esta tela.
         </p>
       </div>
-    );
-  }
-
-  if (selected) {
-    return (
-      <CategoriaInterview
-        companyId={companyId}
-        year={year}
-        categoryCode={selected}
-        isAdmin={isAdmin}
-        onBack={() => {
-          setSelected(null);
-          void reload();
-        }}
-        onSaved={() => void reload()}
-        onError={(msg) => {
-          setSelected(null);
-          setLoadError(msg);
-          void reload();
-        }}
-      />
     );
   }
 
