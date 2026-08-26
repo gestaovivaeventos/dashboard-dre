@@ -277,6 +277,31 @@ async function resolvePlanejamentoProvider() {
   }
 }
 
+/** Descrição do que é a despesa, para orientar o gestor quando NÃO há base.
+ * O admin pode ampliar; sem match, a IA descreve a partir do nome. */
+const CATEGORIA_DESCRICOES: { match: string; descricao: string }[] = [
+  {
+    match: "consultoria",
+    descricao:
+      "Previsão de despesas com contratação de parceiros para estruturar algum processo, " +
+      "apoiar no desenvolvimento de uma área, ou até mesmo dar um salto em algum indicador de resultado.",
+  },
+  {
+    match: "treinamento",
+    descricao:
+      "Previsão de despesas com capacitação e desenvolvimento da equipe — cursos, treinamentos " +
+      "e parceiros que ajudem a estruturar processos ou evoluir uma área.",
+  },
+];
+
+function descricaoCategoria(name: string): string | null {
+  const n = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  return CATEGORIA_DESCRICOES.find((d) => n.includes(d.match))?.descricao ?? null;
+}
+
 function buildSystemPrompt(opts: {
   companyName: string;
   categoryName: string;
@@ -285,19 +310,14 @@ function buildSystemPrompt(opts: {
   year: number;
   realizado: MediaRealizado | undefined;
   considerar: string;
+  semBase: boolean;
+  descricaoCategoria: string | null;
 }): string {
-  return [
-    'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
-    'categoria de despesa pelo método "Planejamento dos sócios".',
-    "",
-    "IMPORTANTE: esta categoria reúne VÁRIOS ITENS independentes — cada",
-    "plataforma/serviço/contrato é um item próprio. O orçado da categoria é a SOMA",
-    "de todos os itens.",
-    "",
-    `Empresa: ${opts.companyName}`,
-    `Categoria: ${opts.categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
-    `Ano do orçamento: ${opts.year}`,
-    `Realizado do ano anterior (${opts.year - 1}) na categoria: ${realizadoMensalContexto(opts.realizado)}`,
+  const { year, categoryName } = opts;
+
+  // Bloco de CONDUÇÃO — muda conforme haja ou não uma base cadastrada.
+  const comBase: string[] = [
+    `Realizado do ano anterior (${year - 1}) na categoria: ${realizadoMensalContexto(opts.realizado)}`,
     "",
     "Itens JÁ CADASTRADOS pela administração para esta categoria (valor e mês são o",
     "PONTO DE PARTIDA — o padrão, não um teto). NÃO invente itens MANTIDOS fora desta",
@@ -312,8 +332,8 @@ function buildSystemPrompt(opts: {
     "",
     "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
     "1. Para CADA item da lista acima, a ÚNICA dúvida é se ele será MANTIDO em",
-    `   ${opts.year}. INFORME ao gestor o valor e o mês pré-cadastrados (em tom de`,
-    '   FATO, nunca como pergunta) e pergunte apenas: "este item será mantido em ' + opts.year + '?".',
+    `   ${year}. INFORME ao gestor o valor e o mês pré-cadastrados (em tom de`,
+    '   FATO, nunca como pergunta) e pergunte apenas: "este item será mantido em ' + year + '?".',
     "   NÃO pergunte o valor nem o mês por padrão. MAS se o gestor, ao responder,",
     "   informar um valor/mês/período diferente (ex.: 'sim, mas mude para R$ 40/mês'),",
     "   REGISTRE o valor NOVO que ele deu e confirme de volta o valor atualizado.",
@@ -335,17 +355,59 @@ function buildSystemPrompt(opts: {
     "   TODOS os 5 estiverem respondidos. Nunca preencha por conta própria nem 'chute'",
     "   valor, mês ou justificativa de um item novo.",
     "3. NUNCA invente itens fora da lista acima nem citados pelo gestor.",
+  ];
+
+  const semBase: string[] = [
+    "Esta categoria NÃO tem itens pré-cadastrados: o administrador NÃO definiu uma base de",
+    "contratos/assinaturas para você considerar. Portanto NÃO existe lista para confirmar",
+    "item por item — a entrevista é ABERTA, e você deve GUIAR o gestor.",
+    "",
+    "O QUE É esta despesa (explique ao gestor para ele reconhecer o cenário):",
+    opts.descricaoCategoria
+      ? opts.descricaoCategoria
+      : `Descreva, em 1–2 frases, o que costuma ser a despesa "${categoryName}" para orientar o gestor.`,
+    "",
+    "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
+    "1. ABRA explicando em 1–2 frases o que é esse tipo de despesa (use a descrição acima),",
+    `   e então pergunte de forma ABERTA se o gestor pretende contratar/investir em`,
+    `   "${categoryName}" em ${year}.`,
+    "2. Se o gestor disser que SIM (ou já citar algo), trate como ITEM NOVO e cobre os 4",
+    "   dados OBRIGATÓRIOS abaixo, um de cada vez, sem chutar nada:",
+    "   (a) O QUE seria a contratação (qual consultoria/treinamento/serviço);",
+    "   (b) VALOR de reserva em reais;",
+    "   (c) será despesa MENSAL ou ANUAL e a partir de QUAL mês;",
+    "   (d) a JUSTIFICATIVA (para que serve / por que contratar).",
+    "   Faltando QUALQUER um, peça SOMENTE o que falta e não avance. Pode haver mais de um",
+    "   item — depois de fechar um, pergunte se há outro.",
+    "3. Se o gestor disser que NÃO pretende nada nesta categoria, tudo bem: não haverá itens.",
+    "4. NUNCA invente itens que o gestor não citou.",
+  ];
+
+  return [
+    'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
+    'categoria de despesa pelo método "Planejamento dos sócios".',
+    "",
+    "IMPORTANTE: o orçado da categoria é a SOMA de VÁRIOS ITENS independentes (cada",
+    "contratação/serviço é um item próprio).",
+    "",
+    `Empresa: ${opts.companyName}`,
+    `Categoria: ${categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
+    `Ano do orçamento: ${year}`,
+    "",
+    ...(opts.semBase ? semBase : comBase),
     "",
     "NÃO monte a proposta por conta própria durante a entrevista — enquanto houver",
     "QUALQUER pergunta pendente, 'proposta' é null, 'podeFechar' é false e 'reply' é a",
     "próxima pergunta (uma por vez).",
     "",
-    "FIM DAS PERGUNTAS: quando (i) TODOS os itens da lista tiverem sido confirmados como",
-    "mantidos/alterados/cancelados ou não-mantidos E (ii) todo item NOVO tiver os 5 dados",
-    "(a–e) completos, você NÃO tem mais o que perguntar. Nesse turno, responda com",
-    "'proposta': null, 'podeFechar': true e um 'reply' avisando que terminou (ex.: \"Terminei",
-    "as perguntas. Clique em 'Concluir entrevista e gerar proposta' para eu montar a proposta.\").",
-    "NÃO monte a proposta ainda — espere o pedido de encerramento.",
+    "FIM DAS PERGUNTAS: quando não houver mais nada a perguntar — todos os itens da base",
+    "(se houver) confirmados/alterados/cancelados/não-mantidos, todo item NOVO com seus",
+    "dados obrigatórios completos, e o gestor já indicou que não há mais contratações —",
+    "você NÃO tem mais o que perguntar. Nesse turno, responda com 'proposta': null,",
+    "'podeFechar': true e um 'reply' avisando que terminou (ex.: \"Terminei as perguntas.",
+    "Clique em 'Concluir entrevista e gerar proposta' para eu montar a proposta.\").",
+    "NÃO monte a proposta ainda — espere o pedido de encerramento. (Se o gestor não previu",
+    "NENHUM item, ainda assim sinalize 'podeFechar': true e explique que não há despesa prevista.)",
     "",
     "MONTAR A PROPOSTA: só quando você receber a instrução de ENCERRAR a entrevista.",
     "Aí devolva a LISTA COMPLETA de itens: cada item mantido (com o valor/mês que o gestor",
@@ -560,35 +622,35 @@ export async function enviarMensagemPlanejamento(
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const contexto = (itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
-  // A lista de fornecedores do ano anterior (RPC) SÓ é usada quando o cliente não
-  // manda a base (itensContexto). Durante a entrevista a base já está validada,
-  // então esse RPC é puro desperdício — só busca no caso raro sem contexto.
-  const precisaRealizadoItens = contexto.length === 0;
+  // BASE VAZIA = o admin validou a categoria sem itens (ex.: Consultoria e
+  // Treinamento). A IA faz uma entrevista ABERTA, sem lista para confirmar.
+  const semBase = contexto.length === 0;
 
-  // Todas as leituras pré-IA em PARALELO (a distância Vercel↔Supabase custa uma
-  // ida-e-volta por consulta; em série eram ~4×, agora ~1×).
-  const [companyRes, cats, realizados, realizadoItens] = await Promise.all([
+  // Leituras pré-IA em PARALELO (a distância Vercel↔Supabase custa uma ida-e-volta
+  // por consulta; em série eram várias, agora ~1×). O RPC de fornecedores do ano
+  // anterior NÃO é usado na entrevista (a base já é a fonte) — foi removido daqui.
+  const [companyRes, cats, realizados] = await Promise.all([
     supabase.from("companies").select("name").eq("id", companyId).maybeSingle<{ name: string }>(),
     getCategoriaMetodo(companyId, year),
     fetchRealizados(supabase, companyId, year - 1, [categoryCode]),
-    precisaRealizadoItens
-      ? fetchRealizadoItens(supabase, companyId, year - 1, categoryCode)
-      : Promise.resolve([] as PlanejamentoRealizadoItem[]),
   ]);
   const companyName = companyRes.data?.name ?? "Empresa";
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
+  const nomeCategoria = cat?.categoryName ?? categoryName;
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
 
   const system = buildSystemPrompt({
     companyName,
-    categoryName: cat?.categoryName ?? categoryName,
+    categoryName: nomeCategoria,
     dreLineCode: cat?.dreLineCode ?? "",
     dreLineName: cat?.dreLineName ?? "",
     year,
     realizado: realizados.get(categoryCode),
-    considerar: considerarContexto(contexto, realizadoItens),
+    considerar: semBase ? "" : considerarContexto(contexto, []),
+    semBase,
+    descricaoCategoria: descricaoCategoria(nomeCategoria),
   });
 
   const messages: ModelMessage[] = historico.map((m) =>
@@ -702,11 +764,10 @@ export async function salvarBasePlanejamento(
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
+  // A base PODE ser vazia (categorias sem contratos/assinaturas pré-existentes,
+  // ex.: Consultoria e Treinamento) — nesse caso a entrevista é aberta. Não há
+  // trava de "mínimo 1 item".
   const limpos = sanitizeItensProposta(itens).filter((i) => i.descricao.trim() !== "");
-  const incluidos = limpos.filter((i) => i.incluir !== false);
-  if (incluidos.length === 0) {
-    return { error: "Marque ao menos um item para a IA considerar." };
-  }
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 

@@ -575,10 +575,8 @@ function CategoriaInterview({
   }
 
   async function salvarBase() {
-    if (baseIncluidos.length === 0) {
-      setLocalErr("Marque ao menos um item para a IA considerar.");
-      return;
-    }
+    // A base pode ser VAZIA (categorias sem contratos prévios, ex.: Consultoria e
+    // Treinamento) — a entrevista vira aberta. Só exigimos descrição do que existe.
     if (baseDescFaltando) {
       setLocalErr("Todo item incluído precisa de descrição.");
       return;
@@ -823,13 +821,21 @@ function CategoriaInterview({
           {!isAdmin ? (
             <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
               {baseSalva
-                ? `Base definida pelo administrador: ${baseIncluidos.length} item(ns).`
+                ? baseIncluidos.length > 0
+                  ? `Base definida pelo administrador: ${baseIncluidos.length} item(ns).`
+                  : "Base validada sem itens prévios — a IA fará uma entrevista aberta."
                 : "Aguardando o administrador validar a base."}
             </div>
           ) : baseSalva && !baseEdit ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-emerald-500/5 p-3 text-sm">
               <span className="text-muted-foreground">
-                {baseIncluidos.length} item(ns) marcados · referência de {formatBRL(baseTotal)}/ano.{" "}
+                {baseIncluidos.length > 0 ? (
+                  <>
+                    {baseIncluidos.length} item(ns) marcados · referência de {formatBRL(baseTotal)}/ano.{" "}
+                  </>
+                ) : (
+                  <>Sem itens prévios — a entrevista será aberta. </>
+                )}
                 <span className="font-medium text-emerald-600 dark:text-emerald-400">Base validada.</span>
               </span>
               <button
@@ -850,6 +856,12 @@ function CategoriaInterview({
                 onRemove={removeBaseItem}
                 onAdd={addBaseItem}
               />
+              {baseIncluidos.length === 0 && (
+                <p className="rounded-md border border-dashed bg-muted/20 p-2 text-[11px] text-muted-foreground">
+                  Categoria sem contratos/assinaturas prévios? Pode validar a base <b>vazia</b> — a IA fará
+                  uma <b>entrevista aberta</b>, perguntando se o gestor pretende contratar algo.
+                </p>
+              )}
               {baseDescFaltando && (
                 <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
                   <TriangleAlert className="h-3 w-3" />
@@ -872,7 +884,7 @@ function CategoriaInterview({
                 <button
                   type="button"
                   onClick={salvarBase}
-                  disabled={savingBase || baseIncluidos.length === 0 || baseDescFaltando}
+                  disabled={savingBase || baseDescFaltando}
                   className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
                   {savingBase ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -944,8 +956,9 @@ function CategoriaInterview({
                 {!conversaIniciada && !sending && (
                   <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
                     <p className="max-w-md text-sm text-muted-foreground">
-                      A IA vai confirmar item por item da base (mantém? muda valor? cancela no meio do ano?) e
-                      perguntar se há novas contratações — e então montar a proposta.
+                      {baseIncluidos.length > 0
+                        ? "A IA vai confirmar item por item da base (mantém? muda valor? cancela no meio do ano?) e perguntar se há novas contratações — e então montar a proposta."
+                        : "Sem base prévia: a IA explica o que é esta despesa e pergunta, de forma aberta, se você pretende contratar algo nesta categoria — e então monta a proposta."}
                     </p>
                     <button
                       type="button"
