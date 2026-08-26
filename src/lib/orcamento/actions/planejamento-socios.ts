@@ -559,19 +559,24 @@ export async function enviarMensagemPlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const { data: companyData } = await supabase
-    .from("companies")
-    .select("name")
-    .eq("id", companyId)
-    .maybeSingle<{ name: string }>();
-  const companyName = companyData?.name ?? "Empresa";
-
-  const cats = await getCategoriaMetodo(companyId, year);
-  const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
-  const realizados = await fetchRealizados(supabase, companyId, year - 1, [categoryCode]);
-  const realizadoItens = await fetchRealizadoItens(supabase, companyId, year - 1, categoryCode);
-
   const contexto = (itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
+  // A lista de fornecedores do ano anterior (RPC) SÓ é usada quando o cliente não
+  // manda a base (itensContexto). Durante a entrevista a base já está validada,
+  // então esse RPC é puro desperdício — só busca no caso raro sem contexto.
+  const precisaRealizadoItens = contexto.length === 0;
+
+  // Todas as leituras pré-IA em PARALELO (a distância Vercel↔Supabase custa uma
+  // ida-e-volta por consulta; em série eram ~4×, agora ~1×).
+  const [companyRes, cats, realizados, realizadoItens] = await Promise.all([
+    supabase.from("companies").select("name").eq("id", companyId).maybeSingle<{ name: string }>(),
+    getCategoriaMetodo(companyId, year),
+    fetchRealizados(supabase, companyId, year - 1, [categoryCode]),
+    precisaRealizadoItens
+      ? fetchRealizadoItens(supabase, companyId, year - 1, categoryCode)
+      : Promise.resolve([] as PlanejamentoRealizadoItem[]),
+  ]);
+  const companyName = companyRes.data?.name ?? "Empresa";
+  const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
@@ -611,6 +616,7 @@ export async function enviarMensagemPlanejamento(
 
   const resolved = await resolvePlanejamentoProvider();
   let replyText: string;
+  let usageOk: Awaited<ReturnType<typeof generateText>>["usage"] | null = null;
   try {
     const { text, usage } = await generateText({
       model: resolved.provider.chat(resolved.modelName),
@@ -619,7 +625,7 @@ export async function enviarMensagemPlanejamento(
       temperature: 0.4,
     });
     replyText = text;
-    await logResolvedUsage(resolved, "orcamento", usage, { companyId, userId: admin.userId });
+    usageOk = usage;
   } catch (e) {
     await logResolvedUsage(resolved, "orcamento", null, {
       companyId,
@@ -661,9 +667,12 @@ export async function enviarMensagemPlanejamento(
     payload.status = "rascunho";
   }
 
-  const { error: upErr } = await supabase
-    .from("orcamento_planejamento_socios")
-    .upsert(payload, { onConflict: "company_id,year,category_code" });
+  // Grava a conversa e registra o uso da IA em PARALELO.
+  const [upsertRes] = await Promise.all([
+    supabase.from("orcamento_planejamento_socios").upsert(payload, { onConflict: "company_id,year,category_code" }),
+    logResolvedUsage(resolved, "orcamento", usageOk, { companyId, userId: admin.userId }),
+  ]);
+  const upErr = upsertRes.error;
   if (upErr) {
     if (isSchemaMissing(upErr.message)) return { needsMigration: true };
     return { reply, proposta, podeFechar, conversa: novaConversa, error: upErr.message };
