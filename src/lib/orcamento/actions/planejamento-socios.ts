@@ -31,9 +31,14 @@ export interface PlanejamentoListItem {
   categoryName: string;
   dreLineCode: string;
   dreLineName: string;
-  status: "rascunho" | "concluido";
-  iniciado: boolean;
+  /** Etapa 1 (base) finalizada pelo admin. */
+  baseSalva: boolean;
+  /** Existe proposta da entrevista (Etapa 3). */
+  temProposta: boolean;
+  /** Proposta confirmada (congelada, vai para a Prévia). */
+  propostaConfirmada: boolean;
   itemCount: number;
+  /** Total da PROPOSTA (0 se ainda não há proposta). */
   totalOrcado: number;
   realizadoAnterior: { total: number; media: number | null } | null;
 }
@@ -43,11 +48,16 @@ export interface PlanejamentoCategoriaDetalhe {
   categoryName: string;
   dreLineCode: string;
   dreLineName: string;
-  /** Itens já persistidos (com incluir + parametrização). */
+  /** ETAPA 1 — itens da BASE (o que a IA considera). */
   itens: PlanejamentoItem[];
-  justificativa: string | null;
+  /** Etapa 1 finalizada (habilita a entrevista). */
+  baseSalva: boolean;
+  /** ETAPA 2 — transcript da entrevista. */
   conversa: PlanejamentoMensagem[];
-  status: "rascunho" | "proposto" | "concluido";
+  /** ETAPA 3 — proposta final vinda da entrevista (null enquanto não existe). */
+  proposta: PlanejamentoProposta | null;
+  /** Proposta confirmada pelo gestor (congelada). */
+  propostaConfirmada: boolean;
   realizadoAnterior: { total: number; media: number | null } | null;
   /** Pagamentos do ano anterior por fornecedor (para semear/mostrar a referência). */
   realizadoItens: PlanejamentoRealizadoItem[];
@@ -68,6 +78,9 @@ interface CategoriaRow {
   justificativa: string | null;
   conversa: unknown;
   status: string | null;
+  base_salva: boolean | null;
+  proposta: unknown;
+  proposta_confirmada: boolean | null;
 }
 interface ItemRow {
   id: string;
@@ -147,6 +160,28 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
     });
   });
   return out;
+}
+
+/** Lê a proposta persistida (jsonb) da coluna `proposta`. */
+function parsePropostaColumn(raw: unknown): PlanejamentoProposta | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as { itens?: unknown; justificativa?: unknown };
+  const itens = sanitizeItensProposta(o.itens);
+  if (itens.length === 0) return null;
+  return { itens, justificativa: typeof o.justificativa === "string" ? o.justificativa : "" };
+}
+
+/** Total anual de uma proposta (soma das séries de cada item). */
+function propostaTotal(p: PlanejamentoProposta | null): number {
+  if (!p) return 0;
+  return categoriaTotal(
+    p.itens.map((i) => ({
+      valorMensal: i.valorMensal,
+      mesInicio: i.mesInicio,
+      periodicidade: i.periodicidade,
+      mesFim: i.mesFim ?? null,
+    })),
+  );
 }
 
 function parseAiReply(text: string): { reply: string; proposta: PlanejamentoProposta | null } {
@@ -373,67 +408,42 @@ export async function getPlanejamentoSocios(
 
   const { data: catRows, error: catErr } = await supabase
     .from("orcamento_planejamento_socios")
-    .select("category_code, status")
+    .select("category_code, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
     .eq("year", year);
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
   }
-  const statusByCode = new Map<string, string>();
-  ((catRows ?? []) as { category_code: string; status: string | null }[]).forEach((r) =>
-    statusByCode.set(r.category_code, r.status ?? "rascunho"),
-  );
-
-  const { data: itemRows, error: itemErr } = await supabase
-    .from("orcamento_planejamento_socios_itens")
-    .select("category_code, valor_mensal, mes_inicio, mes_fim, periodicidade, incluir")
-    .eq("company_id", companyId)
-    .eq("year", year);
-  if (itemErr) {
-    if (isSchemaMissing(itemErr.message)) return { needsMigration: true };
-    return { error: itemErr.message };
-  }
-  const itensByCode = new Map<
-    string,
-    { valorMensal: number; mesInicio: number; mesFim: number | null; periodicidade: Periodicidade }[]
-  >();
-  ((itemRows ?? []) as {
+  const byCode = new Map<string, { baseSalva: boolean; proposta: PlanejamentoProposta | null; confirmada: boolean }>();
+  ((catRows ?? []) as {
     category_code: string;
-    valor_mensal: number | string | null;
-    mes_inicio: number | string | null;
-    mes_fim: number | string | null;
-    periodicidade: string | null;
-    incluir: boolean | null;
-  }[]).forEach((r) => {
-    if (r.incluir === false) return; // só os incluídos contam no orçado
-    const arr = itensByCode.get(r.category_code) ?? [];
-    const valor = Number(r.valor_mensal);
-    const mes = Number(r.mes_inicio);
-    arr.push({
-      valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
-      mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
-      mesFim: optMes(r.mes_fim),
-      periodicidade: toPeriodicidade(r.periodicidade),
-    });
-    itensByCode.set(r.category_code, arr);
-  });
+    base_salva: boolean | null;
+    proposta: unknown;
+    proposta_confirmada: boolean | null;
+  }[]).forEach((r) =>
+    byCode.set(r.category_code, {
+      baseSalva: r.base_salva === true,
+      proposta: parsePropostaColumn(r.proposta),
+      confirmada: r.proposta_confirmada === true,
+    }),
+  );
 
   const realizados = await fetchRealizados(supabase, companyId, year - 1, doMetodo.map((c) => c.categoryCode));
 
   const items: PlanejamentoListItem[] = doMetodo.map((c) => {
-    const itens = itensByCode.get(c.categoryCode) ?? [];
+    const st = byCode.get(c.categoryCode);
     const r = realizados.get(c.categoryCode);
-    const status = statusByCode.get(c.categoryCode) === "concluido" ? "concluido" : "rascunho";
     return {
       categoryCode: c.categoryCode,
       categoryName: c.categoryName,
       dreLineCode: c.dreLineCode,
       dreLineName: c.dreLineName,
-      status,
-      iniciado: statusByCode.has(c.categoryCode) || itens.length > 0,
-      itemCount: itens.length,
-      totalOrcado: categoriaTotal(itens),
+      baseSalva: st?.baseSalva ?? false,
+      temProposta: !!st?.proposta,
+      propostaConfirmada: st?.confirmada ?? false,
+      itemCount: st?.proposta?.itens.length ?? 0,
+      totalOrcado: propostaTotal(st?.proposta ?? null),
       realizadoAnterior: r ? { total: r.total, media: r.media } : null,
     };
   });
@@ -463,7 +473,7 @@ export async function getPlanejamentoCategoria(
 
   const { data: catRow, error: catErr } = await supabase
     .from("orcamento_planejamento_socios")
-    .select("category_code, category_name, justificativa, conversa, status")
+    .select("category_code, category_name, justificativa, conversa, status, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
@@ -497,14 +507,10 @@ export async function getPlanejamentoCategoria(
       dreLineCode: cat.dreLineCode,
       dreLineName: cat.dreLineName,
       itens: ((itemRows ?? []) as ItemRow[]).map(rowToItem),
-      justificativa: catRow?.justificativa ?? null,
+      baseSalva: catRow?.base_salva === true,
       conversa: sanitizeConversa(catRow?.conversa),
-      status:
-        catRow?.status === "concluido"
-          ? "concluido"
-          : catRow?.status === "proposto"
-            ? "proposto"
-            : "rascunho",
+      proposta: parsePropostaColumn(catRow?.proposta),
+      propostaConfirmada: catRow?.proposta_confirmada === true,
       realizadoAnterior: r ? { total: r.total, media: r.media } : null,
       realizadoItens,
     },
@@ -601,30 +607,26 @@ export async function enviarMensagemPlanejamento(
   ];
 
   // Preserva o status já gravado (não rebaixa 'proposto'/'concluido' para
-  // 'rascunho' numa pergunta intermediária). A gravação da proposta em si é
-  // feita pelo cliente logo após, via salvarPlanejamentoItens(statusFinal).
-  const { data: statusRow } = await supabase
-    .from("orcamento_planejamento_socios")
-    .select("status")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("category_code", categoryCode)
-    .maybeSingle<{ status: string | null }>();
-  const statusAtual =
-    statusRow?.status === "concluido" || statusRow?.status === "proposto" ? statusRow.status : "rascunho";
+  // Persiste a conversa sempre; e, quando a IA PROPÕE, grava a proposta (Etapa 3)
+  // na coluna jsonb e DESCONGELA (proposta_confirmada=false) — uma proposta nova
+  // pede nova confirmação. A BASE (itens) NÃO é tocada aqui.
+  const payload: Record<string, unknown> = {
+    company_id: companyId,
+    year,
+    category_code: categoryCode,
+    category_name: categoryName,
+    conversa: novaConversa,
+    updated_by: admin.userId,
+  };
+  if (proposta) {
+    payload.proposta = proposta;
+    payload.proposta_confirmada = false;
+    payload.status = "rascunho";
+  }
 
-  const { error: upErr } = await supabase.from("orcamento_planejamento_socios").upsert(
-    {
-      company_id: companyId,
-      year,
-      category_code: categoryCode,
-      category_name: categoryName,
-      conversa: novaConversa,
-      status: statusAtual,
-      updated_by: admin.userId,
-    },
-    { onConflict: "company_id,year,category_code" },
-  );
+  const { error: upErr } = await supabase
+    .from("orcamento_planejamento_socios")
+    .upsert(payload, { onConflict: "company_id,year,category_code" });
   if (upErr) {
     if (isSchemaMissing(upErr.message)) return { needsMigration: true };
     return { reply, proposta, conversa: novaConversa, error: upErr.message };
@@ -637,19 +639,17 @@ export async function enviarMensagemPlanejamento(
 // ─── Salvar / remover ──────────────────────────────────────────────────────────
 
 /**
- * Grava a LISTA de itens da categoria (substitui a anterior). Persiste TODAS as
- * linhas — inclusive as EXCLUÍDAS (incluir=false) — para lembrar as exclusões e
- * a parametrização; só as incluídas contam no orçado e vão para a Prévia.
+ * ETAPA 1 — grava a BASE (o que a IA deve considerar) e a marca como FINALIZADA
+ * (base_salva=true), o que habilita a entrevista. Persiste TODAS as linhas —
+ * inclusive as EXCLUÍDAS (incluir=false), para lembrar as exclusões; só as
+ * incluídas viram contexto da IA. NÃO mexe na proposta (Etapa 3).
  */
-export async function salvarPlanejamentoItens(
+export async function salvarBasePlanejamento(
   companyId: string,
   year: number,
   categoryCode: string,
   categoryName: string,
   itens: PlanejamentoItemProposto[],
-  justificativa: string,
-  conversa: PlanejamentoMensagem[],
-  statusFinal: "concluido" | "proposto" = "concluido",
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -659,7 +659,7 @@ export async function salvarPlanejamentoItens(
   const limpos = sanitizeItensProposta(itens).filter((i) => i.descricao.trim() !== "");
   const incluidos = limpos.filter((i) => i.incluir !== false);
   if (incluidos.length === 0) {
-    return { error: "Marque ao menos um item para incluir no orçamento." };
+    return { error: "Marque ao menos um item para a IA considerar." };
   }
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -670,9 +670,7 @@ export async function salvarPlanejamentoItens(
       year,
       category_code: categoryCode,
       category_name: categoryName,
-      justificativa: (justificativa ?? "").trim() || null,
-      conversa: sanitizeConversa(conversa),
-      status: statusFinal,
+      base_salva: true,
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code" },
@@ -712,9 +710,79 @@ export async function salvarPlanejamentoItens(
 }
 
 /**
- * Reinicia SOMENTE a entrevista com a IA: zera a conversa da categoria e mantém
- * intactos os itens já cadastrados (a base "Pagos em {ano-1}") e a justificativa.
- * Não apaga nada da seção que o admin preencheu.
+ * ETAPA 3 — CONFIRMA a proposta (congela). Depois disso ela vai para a Prévia e
+ * só o admin altera os números (via editarPropostaPlanejamento).
+ */
+export async function confirmarPropostaPlanejamento(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_planejamento_socios")
+    .update({
+      proposta_confirmada: true,
+      proposta_confirmada_por: admin.userId,
+      status: "concluido",
+      updated_by: admin.userId,
+    })
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/**
+ * ETAPA 3 (admin) — edita os NÚMEROS da proposta. Reescreve a coluna `proposta`
+ * (jsonb) e mantém a confirmação.
+ */
+export async function editarPropostaPlanejamento(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  itens: PlanejamentoItemProposto[],
+  justificativa: string,
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const limpos = sanitizeItensProposta(itens).filter((i) => i.descricao.trim() !== "");
+  if (limpos.length === 0) return { error: "A proposta precisa de ao menos um item." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_planejamento_socios")
+    .update({
+      proposta: { itens: limpos, justificativa: (justificativa ?? "").trim() },
+      updated_by: admin.userId,
+    })
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/**
+ * Reinicia SOMENTE a entrevista com a IA: zera a conversa E a proposta (saída da
+ * entrevista), mantendo intacta a BASE (Etapa 1) que o admin salvou.
  */
 export async function reiniciarConversaPlanejamento(
   companyId: string,
@@ -729,7 +797,13 @@ export async function reiniciarConversaPlanejamento(
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
-    .update({ conversa: [], updated_by: admin.userId })
+    .update({
+      conversa: [],
+      proposta: null,
+      proposta_confirmada: false,
+      status: "rascunho",
+      updated_by: admin.userId,
+    })
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode);

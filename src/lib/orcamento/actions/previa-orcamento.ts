@@ -103,14 +103,6 @@ interface ValorFixoSnapshotRow {
   indice_key: string | null;
   mes_reajuste: number | string | null;
 }
-interface PlanejamentoItemRow {
-  category_code: string;
-  valor_mensal: number | string | null;
-  mes_inicio: number | string | null;
-  mes_fim: number | string | null;
-  periodicidade: string | null;
-  incluir: boolean | null;
-}
 interface CategoryMappingRow {
   omie_category_code: string;
   dre_account_id: string | null;
@@ -311,14 +303,15 @@ export async function getPreviaOrcamento(
       }
     }
 
-    // PLANEJAMENTO DOS SÓCIOS — os ITENS decididos na entrevista com a IA (cada
-    // plataforma tem valor mensal + mês de início). O orçado da categoria é a
-    // SOMA das séries dos itens; cai na linha da DRE pela mesma chave
-    // category_code → category_mapping dos outros métodos.
+    // PLANEJAMENTO DOS SÓCIOS — só a PROPOSTA CONFIRMADA (Etapa 3, saída da
+    // entrevista) entra na Prévia. Ela vive na coluna jsonb `proposta` da
+    // categoria; a base (o que a IA considera) NÃO é orçamento. Cada item tem
+    // valor + mês + periodicidade; o orçado = SOMA das séries; cai na linha da
+    // DRE pela mesma chave category_code → category_mapping.
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
-        .from("orcamento_planejamento_socios_itens")
-        .select("category_code, valor_mensal, mes_inicio, mes_fim, periodicidade, incluir")
+        .from("orcamento_planejamento_socios")
+        .select("category_code, proposta, proposta_confirmada")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
@@ -328,20 +321,27 @@ export async function getPreviaOrcamento(
         string,
         { valorMensal: number; mesInicio: number; mesFim: number | null; periodicidade: "mensal" | "anual" }[]
       >();
-      ((psRows ?? []) as PlanejamentoItemRow[]).forEach((r) => {
-        if (r.incluir === false) return; // só os itens incluídos entram no orçado
-        const arr = psByCode.get(r.category_code) ?? [];
-        const valor = r.valor_mensal == null ? 0 : Number(r.valor_mensal);
-        const mes = r.mes_inicio == null ? 1 : Number(r.mes_inicio);
-        const fim = r.mes_fim == null ? null : Number(r.mes_fim);
-        arr.push({
-          valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
-          mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
-          mesFim: fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
-          periodicidade: r.periodicidade === "anual" ? "anual" : "mensal",
-        });
-        psByCode.set(r.category_code, arr);
-      });
+      ((psRows ?? []) as { category_code: string; proposta: unknown; proposta_confirmada: boolean | null }[]).forEach(
+        (r) => {
+          if (r.proposta_confirmada !== true) return; // só a proposta CONFIRMADA
+          const p = r.proposta as { itens?: unknown } | null;
+          const itens = Array.isArray(p?.itens) ? (p!.itens as Record<string, unknown>[]) : [];
+          const arr = itens.map((it) => {
+            const valor = Number(it.valorMensal ?? it.valor_mensal ?? 0);
+            const mes = Number(it.mesInicio ?? it.mes_inicio ?? 1);
+            const fimRaw = it.mesFim ?? it.mes_fim;
+            const fim = fimRaw == null ? null : Number(fimRaw);
+            const periodicidade = it.periodicidade === "anual" ? ("anual" as const) : ("mensal" as const);
+            return {
+              valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
+              mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+              mesFim: fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
+              periodicidade,
+            };
+          });
+          if (arr.length > 0) psByCode.set(r.category_code, arr);
+        },
+      );
       for (const cat of psCats) {
         const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);
         if (somar(meses) === 0) {

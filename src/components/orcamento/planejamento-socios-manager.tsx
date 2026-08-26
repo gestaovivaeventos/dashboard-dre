@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowRight,
   CheckCircle2,
   Circle,
   CircleDot,
-  ListChecks,
+  Lock,
   Loader2,
+  MessageSquare,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
@@ -16,14 +17,15 @@ import {
   Sparkles,
   Trash2,
   TriangleAlert,
-  X,
 } from "lucide-react";
 
 import {
   getPlanejamentoSocios,
   getPlanejamentoCategoria,
   enviarMensagemPlanejamento,
-  salvarPlanejamentoItens,
+  salvarBasePlanejamento,
+  confirmarPropostaPlanejamento,
+  editarPropostaPlanejamento,
   reiniciarConversaPlanejamento,
   type PlanejamentoListItem,
   type PlanejamentoCategoriaDetalhe,
@@ -34,6 +36,7 @@ import {
   type Periodicidade,
   type PlanejamentoMensagem,
   type PlanejamentoItem,
+  type PlanejamentoProposta,
 } from "@/lib/orcamento/planejamento-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { cn } from "@/lib/utils";
@@ -61,7 +64,7 @@ function StatusChip({ selo }: { selo: Selo }) {
     },
     concluido: {
       icon: CheckCircle2,
-      label: "Concluído",
+      label: "Confirmado",
       cls: "text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/5",
     },
   }[selo];
@@ -158,7 +161,7 @@ function ItemRow({
           checked={item.incluir}
           onChange={() => onChange({ incluir: !item.incluir })}
           className="h-4 w-4 accent-emerald-600"
-          title={item.incluir ? "Incluído no orçamento" : "Fora do orçamento"}
+          title={item.incluir ? "Incluído" : "Fora"}
         />
       </td>
       <td className="px-2 py-2">
@@ -263,7 +266,172 @@ function ItemRow({
   );
 }
 
-// ─── Painel de entrevista de UMA categoria ──────────────────────────────────
+// ─── Tabela editável de itens (usada na Etapa 1 e na edição da proposta) ──────
+
+function ItensTable({
+  itens,
+  refMap,
+  year,
+  onChange,
+  onRemove,
+  onAdd,
+}: {
+  itens: LocalItem[];
+  refMap: Map<string, RefInfo>;
+  year: number;
+  onChange: (key: string, partial: Partial<LocalItem>) => void;
+  onRemove: (key: string) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {itens.length === 0 ? (
+        <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+          Nenhum item. Adicione com <span className="font-medium">+ item</span>.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-sm">
+            <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b">
+                <th className="px-2 py-1.5 text-center font-medium">Incluir</th>
+                <th className="px-2 py-1.5 font-medium">Item</th>
+                <th className="px-2 py-1.5 font-medium">Valor</th>
+                <th className="px-2 py-1.5 font-medium">Período</th>
+                <th className="px-2 py-1.5 font-medium">Início/Renov.</th>
+                <th className="px-2 py-1.5 text-right font-medium">Ref. {year - 1}</th>
+                <th className="px-2 py-1.5 text-right font-medium">Ano</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {itens.map((it) => (
+                <ItemRow
+                  key={it.key}
+                  item={it}
+                  refInfo={it.fornecedor ? refMap.get(it.fornecedor.toLowerCase()) ?? null : null}
+                  onChange={(partial) => onChange(it.key, partial)}
+                  onRemove={() => onRemove(it.key)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+      >
+        <Plus className="h-3.5 w-3.5" /> item
+      </button>
+    </div>
+  );
+}
+
+// ─── Card da proposta (somente leitura) ─────────────────────────────────────
+
+function PropostaCard({ proposta, year }: { proposta: PlanejamentoProposta; year: number }) {
+  const total = categoriaTotal(
+    proposta.itens.map((i) => ({
+      valorMensal: i.valorMensal,
+      mesInicio: i.mesInicio,
+      periodicidade: i.periodicidade,
+      mesFim: i.mesFim ?? null,
+    })),
+  );
+  return (
+    <div className="rounded-lg border border-emerald-500/40 bg-emerald-50/60 p-3 dark:bg-emerald-950/20">
+      <ul className="divide-y divide-emerald-500/15 text-sm">
+        {proposta.itens.map((it, idx) => {
+          const mes = MESES_LONGO[Math.min(12, Math.max(1, it.mesInicio)) - 1];
+          const fimIt = it.mesFim != null && it.mesFim >= 1 && it.mesFim <= 12 ? it.mesFim : null;
+          const cancela =
+            it.periodicidade !== "anual" && fimIt != null && fimIt < 12
+              ? ` · até ${MESES_LONGO[fimIt - 1]} (cancela)`
+              : "";
+          const quando =
+            it.periodicidade === "anual"
+              ? `${formatBRL(it.valorMensal)}/ano · pago em ${mes}`
+              : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}${cancela}`;
+          return (
+            <li key={idx} className="flex items-baseline justify-between gap-3 py-1.5">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{it.descricao || "—"}</div>
+                <div className="text-xs text-muted-foreground">{quando}</div>
+              </div>
+              <span className="shrink-0 font-semibold tabular-nums">
+                {formatBRL(totalItem(it.valorMensal, it.mesInicio, it.periodicidade, it.mesFim ?? null))}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-2 flex items-center justify-between border-t border-emerald-500/20 pt-2 text-sm">
+        <span className="font-medium text-muted-foreground">Total da categoria ({year})</span>
+        <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{formatBRL(total)}</span>
+      </div>
+      {proposta.justificativa.trim() && (
+        <p className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-muted-foreground">
+          <span className="font-medium">Justificativa:</span> {proposta.justificativa.trim()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Passo do fluxo (stepper vertical) ──────────────────────────────────────
+
+type StepState = "locked" | "active" | "done";
+
+function Step({
+  n,
+  title,
+  description,
+  state,
+  last,
+  chip,
+  children,
+}: {
+  n: number;
+  title: string;
+  description: string;
+  state: StepState;
+  last?: boolean;
+  chip?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const done = state === "done";
+  const locked = state === "locked";
+  return (
+    <div className="flex gap-4">
+      <div className="flex flex-col items-center">
+        <div
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-semibold",
+            done && "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+            state === "active" && "border-emerald-500/60 bg-emerald-600 text-white",
+            locked && "border-border bg-muted text-muted-foreground",
+          )}
+        >
+          {done ? <CheckCircle2 className="h-5 w-5" /> : locked ? <Lock className="h-4 w-4" /> : n}
+        </div>
+        {!last && <div className="my-1 w-px flex-1 bg-border" />}
+      </div>
+      <div className={cn("min-w-0 flex-1 pb-8", locked && "opacity-70")}>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-base font-semibold">
+            {n}. {title}
+          </h3>
+          {chip}
+        </div>
+        <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+        <div className="mt-3">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Painel de UMA categoria (fluxo em 3 etapas) ────────────────────────────
 
 function CategoriaInterview({
   companyId,
@@ -285,30 +453,39 @@ function CategoriaInterview({
   const [detalhe, setDetalhe] = useState<PlanejamentoCategoriaDetalhe | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [conversa, setConversa] = useState<PlanejamentoMensagem[]>([]);
-  const [itens, setItens] = useState<LocalItem[]>([]);
+  // ETAPA 1 — base
+  const [baseItens, setBaseItens] = useState<LocalItem[]>([]);
   const [refMap, setRefMap] = useState<Map<string, RefInfo>>(new Map());
-  const [justificativa, setJustificativa] = useState("");
+  const [baseSalva, setBaseSalva] = useState(false);
+  const [baseEdit, setBaseEdit] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
+  const baseRef = useRef<LocalItem[]>([]);
+
+  // ETAPA 2 — entrevista
+  const [conversa, setConversa] = useState<PlanejamentoMensagem[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [localErr, setLocalErr] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [showEditor, setShowEditor] = useState(false);
-  const [statusLocal, setStatusLocal] = useState<"rascunho" | "proposto" | "concluido">("rascunho");
-  const [propostaRecebida, setPropostaRecebida] = useState(false);
+
+  // ETAPA 3 — proposta
+  const [proposta, setProposta] = useState<PlanejamentoProposta | null>(null);
+  const [propostaConfirmada, setPropostaConfirmada] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [propostaEdit, setPropostaEdit] = useState<LocalItem[] | null>(null);
+  const [propostaEditJust, setPropostaEditJust] = useState("");
+  const [savingProposta, setSavingProposta] = useState(false);
+
+  const [localErr, setLocalErr] = useState<string | null>(null);
   const seq = useRef(1);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Espelho de `itens` p/ o merge da proposta ler o estado atual sem depender do
-  // closure (setState é assíncrono).
-  const itensRef = useRef<LocalItem[]>([]);
-  useEffect(() => {
-    itensRef.current = itens;
-  }, [itens]);
 
-  // Semeia as linhas: itens já salvos + fornecedores do ano anterior ainda não
+  useEffect(() => {
+    baseRef.current = baseItens;
+  }, [baseItens]);
+
+  // Semeia a base: itens já salvos + fornecedores do ano anterior ainda não
   // virados item (a lista fica completa; o admin inclui/exclui e edita).
-  function seedFrom(d: PlanejamentoCategoriaDetalhe) {
+  function seedBase(d: PlanejamentoCategoriaDetalhe) {
     const ref = new Map<string, RefInfo>();
     d.realizadoItens.forEach((ri) =>
       ref.set(ri.fornecedor.toLowerCase(), { media: ri.media, total: ri.total, lancamentos: ri.lancamentos }),
@@ -330,7 +507,7 @@ function CategoriaInterview({
         incluir: true,
       }));
     setRefMap(ref);
-    setItens([...persistidos, ...novos]);
+    setBaseItens([...persistidos, ...novos]);
   }
 
   useEffect(() => {
@@ -347,11 +524,14 @@ function CategoriaInterview({
         onError(res.error ?? "Falha ao carregar a categoria.");
         return;
       }
-      setDetalhe(res.detalhe);
-      setConversa(res.detalhe.conversa);
-      setJustificativa(res.detalhe.justificativa ?? "");
-      setStatusLocal(res.detalhe.status);
-      seedFrom(res.detalhe);
+      const d = res.detalhe;
+      setDetalhe(d);
+      seedBase(d);
+      setBaseSalva(d.baseSalva);
+      setBaseEdit(!d.baseSalva); // sem base salva → abre o editor; salva → colapsa
+      setConversa(d.conversa);
+      setProposta(d.proposta);
+      setPropostaConfirmada(d.propostaConfirmada);
     });
     return () => {
       alive = false;
@@ -363,132 +543,19 @@ function CategoriaInterview({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [conversa, sending]);
 
-  const incluidos = useMemo(() => itens.filter((i) => i.incluir), [itens]);
-  const total = categoriaTotal(incluidos);
+  const baseIncluidos = useMemo(() => baseItens.filter((i) => i.incluir), [baseItens]);
+  const baseTotal = categoriaTotal(baseIncluidos);
+  const baseDescFaltando = baseIncluidos.some((i) => i.descricao.trim() === "");
 
-  async function enviar(texto: string) {
-    setSending(true);
-    setLocalErr(null);
-    const res = await enviarMensagemPlanejamento(
-      companyId,
-      year,
-      categoryCode,
-      detalhe?.categoryName ?? categoryCode,
-      conversa,
-      texto,
-      incluidos.map((i) => ({ descricao: i.descricao, valorMensal: i.valorMensal, periodicidade: i.periodicidade, mesInicio: i.mesInicio, mesFim: i.mesFim })),
-    );
-    setSending(false);
-    if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
-      return;
-    }
-    if (res.conversa) setConversa(res.conversa);
-    if (res.proposta) {
-      const just = res.proposta.justificativa;
-      const merged = mergeInto(itensRef.current, res.proposta.itens);
-      setItens(merged);
-      if (just) setJustificativa(just);
-      setPropostaRecebida(true);
-      setStatusLocal("proposto");
-      // PERSISTE a proposta na hora (status 'proposto'): assim ela sobrevive ao
-      // reload/refresh e o resumo não volta ao estado antigo. O admin ainda pode
-      // ajustar na base e 'Salvar' (finaliza = 'concluido').
-      void salvarPlanejamentoItens(
-        companyId,
-        year,
-        categoryCode,
-        detalhe?.categoryName ?? categoryCode,
-        merged.map((i) => ({
-          descricao: i.descricao,
-          valorMensal: i.valorMensal,
-          mesInicio: i.mesInicio,
-          mesFim: i.mesFim,
-          periodicidade: i.periodicidade,
-          origem: i.origem,
-          fornecedor: i.fornecedor,
-          incluir: i.incluir,
-        })),
-        just || justificativa,
-        res.conversa ?? conversa,
-        "proposto",
-      ).then((r) => {
-        if (r.error && !r.needsMigration) setLocalErr(r.error);
-      });
-    }
-    if (res.error) setLocalErr(res.error);
+  // ── Etapa 1: CRUD da base ──────────────────────────────────────────────────
+  function updateBaseItem(key: string, partial: Partial<LocalItem>) {
+    setBaseItens((prev) => prev.map((it) => (it.key === key ? { ...it, ...partial } : it)));
   }
-
-  // Aplica a proposta da IA SEM apagar a curadoria: a proposta é a lista COMPLETA
-  // de incluídos. Atualiza a linha existente (por descrição/fornecedor) ou
-  // acrescenta uma nova; e DESMARCA os itens "mantido" que a IA não trouxe — ou
-  // seja, os que o gestor disse NÃO manter (a linha fica lembrada, mas fora).
-  // Função PURA (recebe a base e devolve o novo array) para poder persistir.
-  function mergeInto(
-    prev: LocalItem[],
-    propostos: {
-      descricao: string;
-      valorMensal: number;
-      mesInicio: number;
-      mesFim?: number | null;
-      periodicidade: Periodicidade;
-      origem: "mantido" | "novo";
-      fornecedor?: string | null;
-    }[],
-  ): LocalItem[] {
-    const next = [...prev];
-    const norm = (s: string) => s.trim().toLowerCase();
-    const matched = new Set<string>();
-    propostos.forEach((p) => {
-      const idx = next.findIndex(
-        (r) =>
-          !matched.has(r.key) &&
-          (norm(r.descricao) === norm(p.descricao) ||
-            (!!p.fornecedor && !!r.fornecedor && norm(r.fornecedor) === norm(p.fornecedor))),
-      );
-      if (idx >= 0) {
-        matched.add(next[idx].key);
-        next[idx] = {
-          ...next[idx],
-          valorMensal: p.valorMensal,
-          mesInicio: p.mesInicio,
-          mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
-          periodicidade: p.periodicidade,
-          origem: p.origem,
-          incluir: true,
-        };
-      } else {
-        const key = `it-${seq.current++}`;
-        matched.add(key);
-        next.push({
-          key,
-          id: `ai-${seq.current}`,
-          descricao: p.descricao,
-          valorMensal: p.valorMensal,
-          mesInicio: p.mesInicio,
-          mesFim: p.periodicidade === "anual" ? null : p.mesFim ?? null,
-          periodicidade: p.periodicidade,
-          origem: p.origem,
-          fornecedor: p.fornecedor ?? null,
-          incluir: true,
-        });
-      }
-    });
-    // Item "mantido" fora da proposta = o gestor não quis manter → desmarca.
-    return next.map((r) =>
-      !matched.has(r.key) && r.origem === "mantido" && r.incluir ? { ...r, incluir: false } : r,
-    );
+  function removeBaseItem(key: string) {
+    setBaseItens((prev) => prev.filter((it) => it.key !== key));
   }
-
-  function handleSend() {
-    const t = input.trim();
-    if (!t || sending) return;
-    setInput("");
-    void enviar(t);
-  }
-
-  function addItem() {
-    setItens((prev) => [
+  function addBaseItem() {
+    setBaseItens((prev) => [
       ...prev,
       {
         key: `it-${seq.current++}`,
@@ -505,23 +572,23 @@ function CategoriaInterview({
     ]);
   }
 
-  function updateItem(key: string, partial: Partial<LocalItem>) {
-    setItens((prev) => prev.map((it) => (it.key === key ? { ...it, ...partial } : it)));
-  }
-
-  function removeItem(key: string) {
-    setItens((prev) => prev.filter((it) => it.key !== key));
-  }
-
-  async function salvar() {
-    setSaving(true);
+  async function salvarBase() {
+    if (baseIncluidos.length === 0) {
+      setLocalErr("Marque ao menos um item para a IA considerar.");
+      return;
+    }
+    if (baseDescFaltando) {
+      setLocalErr("Todo item incluído precisa de descrição.");
+      return;
+    }
+    setSavingBase(true);
     setLocalErr(null);
-    const res = await salvarPlanejamentoItens(
+    const res = await salvarBasePlanejamento(
       companyId,
       year,
       categoryCode,
       detalhe?.categoryName ?? categoryCode,
-      itens.map((i) => ({
+      baseItens.map((i) => ({
         descricao: i.descricao,
         valorMensal: i.valorMensal,
         mesInicio: i.mesInicio,
@@ -531,10 +598,8 @@ function CategoriaInterview({
         fornecedor: i.fornecedor,
         incluir: i.incluir,
       })),
-      justificativa,
-      conversa,
     );
-    setSaving(false);
+    setSavingBase(false);
     if (res.needsMigration) {
       onError("Migration do Planejamento dos sócios ainda não aplicada.");
       return;
@@ -543,13 +608,54 @@ function CategoriaInterview({
       setLocalErr(res.error);
       return;
     }
-    setStatusLocal("concluido");
-    setShowEditor(false);
+    setBaseSalva(true);
+    setBaseEdit(false);
     onSaved();
   }
 
-  // Reinicia SOMENTE a Entrevista com a IA. A seção "Pagos em {ano-1}" (itens,
-  // justificativa e status) é preservada exatamente como foi salva.
+  // ── Etapa 2: entrevista ────────────────────────────────────────────────────
+  async function enviar(texto: string) {
+    setSending(true);
+    setLocalErr(null);
+    const res = await enviarMensagemPlanejamento(
+      companyId,
+      year,
+      categoryCode,
+      detalhe?.categoryName ?? categoryCode,
+      conversa,
+      texto,
+      baseRef.current
+        .filter((i) => i.incluir)
+        .map((i) => ({
+          descricao: i.descricao,
+          valorMensal: i.valorMensal,
+          periodicidade: i.periodicidade,
+          mesInicio: i.mesInicio,
+          mesFim: i.mesFim,
+        })),
+    );
+    setSending(false);
+    if (res.needsMigration) {
+      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      return;
+    }
+    if (res.conversa) setConversa(res.conversa);
+    if (res.proposta) {
+      // A proposta é a saída da entrevista (já persistida no servidor). Ela
+      // SUBSTITUI a anterior — nada de merge com a base.
+      setProposta(res.proposta);
+      setPropostaConfirmada(false);
+    }
+    if (res.error) setLocalErr(res.error);
+  }
+
+  function handleSend() {
+    const t = input.trim();
+    if (!t || sending) return;
+    setInput("");
+    void enviar(t);
+  }
+
   async function recomecar() {
     setConfirmReset(false);
     const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode);
@@ -562,8 +668,81 @@ function CategoriaInterview({
       return;
     }
     setConversa([]);
-    setPropostaRecebida(false);
+    setProposta(null);
+    setPropostaConfirmada(false);
+    setPropostaEdit(null);
     setLocalErr(null);
+    onSaved();
+  }
+
+  // ── Etapa 3: confirmar / editar proposta ───────────────────────────────────
+  async function confirmar() {
+    setConfirming(true);
+    setLocalErr(null);
+    const res = await confirmarPropostaPlanejamento(companyId, year, categoryCode);
+    setConfirming(false);
+    if (res.needsMigration) {
+      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      return;
+    }
+    if (res.error) {
+      setLocalErr(res.error);
+      return;
+    }
+    setPropostaConfirmada(true);
+    onSaved();
+  }
+
+  function abrirEdicaoProposta() {
+    if (!proposta) return;
+    setPropostaEditJust(proposta.justificativa);
+    setPropostaEdit(
+      proposta.itens.map((it) => ({
+        key: `pe-${seq.current++}`,
+        id: `pe-${seq.current}`,
+        descricao: it.descricao,
+        valorMensal: it.valorMensal,
+        mesInicio: it.mesInicio,
+        mesFim: it.mesFim ?? null,
+        periodicidade: it.periodicidade,
+        origem: it.origem,
+        fornecedor: it.fornecedor ?? null,
+        incluir: true,
+      })),
+    );
+  }
+
+  async function salvarEdicaoProposta() {
+    if (!propostaEdit) return;
+    const itens = propostaEdit.filter((i) => i.incluir && i.descricao.trim() !== "");
+    if (itens.length === 0) {
+      setLocalErr("A proposta precisa de ao menos um item.");
+      return;
+    }
+    setSavingProposta(true);
+    setLocalErr(null);
+    const payload = itens.map((i) => ({
+      descricao: i.descricao,
+      valorMensal: i.valorMensal,
+      mesInicio: i.mesInicio,
+      mesFim: i.mesFim,
+      periodicidade: i.periodicidade,
+      origem: i.origem,
+      fornecedor: i.fornecedor,
+    }));
+    const res = await editarPropostaPlanejamento(companyId, year, categoryCode, payload, propostaEditJust);
+    setSavingProposta(false);
+    if (res.needsMigration) {
+      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      return;
+    }
+    if (res.error) {
+      setLocalErr(res.error);
+      return;
+    }
+    setProposta({ itens: payload, justificativa: propostaEditJust });
+    setPropostaEdit(null);
+    onSaved();
   }
 
   if (loading) {
@@ -576,16 +755,10 @@ function CategoriaInterview({
   }
   if (!detalhe) return null;
 
+  const step1State: StepState = baseSalva ? "done" : "active";
+  const step2State: StepState = !baseSalva ? "locked" : "active";
+  const step3State: StepState = !proposta ? "locked" : propostaConfirmada ? "done" : "active";
   const conversaIniciada = conversa.length > 0;
-  const mostrarResumo =
-    (propostaRecebida || statusLocal === "proposto" || statusLocal === "concluido") && incluidos.length > 0;
-  const descFaltando = incluidos.some((i) => i.descricao.trim() === "");
-  const selo: Selo =
-    statusLocal === "concluido" && incluidos.length > 0
-      ? "concluido"
-      : conversaIniciada || statusLocal === "proposto" || itens.some((i) => i.incluir)
-        ? "andamento"
-        : "nao_iniciado";
   const r = detalhe.realizadoAnterior;
 
   return (
@@ -602,10 +775,7 @@ function CategoriaInterview({
             Categorias
           </button>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-semibold">{detalhe.categoryName}</h3>
-              <StatusChip selo={selo} />
-            </div>
+            <h3 className="text-lg font-semibold">{detalhe.categoryName}</h3>
             <p className="text-xs text-muted-foreground">
               {detalhe.categoryCode} · linha DRE {detalhe.dreLineCode} — {detalhe.dreLineName}
             </p>
@@ -621,340 +791,339 @@ function CategoriaInterview({
             </p>
           </div>
         </div>
-
-        {isAdmin &&
-          (conversaIniciada || statusLocal === "concluido") &&
-          (confirmReset ? (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Reiniciar a entrevista? (os itens são mantidos)</span>
-              <button
-                type="button"
-                onClick={recomecar}
-                className="rounded-md bg-destructive px-2 py-1 font-medium text-destructive-foreground"
-              >
-                Recomeçar
-              </button>
-              <button type="button" onClick={() => setConfirmReset(false)} className="rounded-md border px-2 py-1">
-                Cancelar
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmReset(true)}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted"
-            >
-              <RotateCcw className="h-4 w-4" />
-              Recomeçar
-            </button>
-          ))}
       </div>
 
       {localErr && (
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{localErr}</div>
       )}
 
-      {/* Etapa do admin: botão-destaque que abre a base da entrevista (modal). */}
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={() => setShowEditor(true)}
-          className={cn(
-            "group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-            statusLocal === "concluido"
-              ? "border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10"
-              : "border-amber-500/60 bg-amber-500/5 hover:bg-amber-500/10",
-          )}
-        >
-          <span
-            className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-              statusLocal === "concluido"
-                ? "bg-emerald-600/10 text-emerald-600 dark:text-emerald-400"
-                : "bg-amber-500/15 text-amber-600 dark:text-amber-500",
-            )}
-          >
-            <ListChecks className="h-5 w-5" strokeWidth={1.75} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">Pagos em {year - 1} — o que a IA deve considerar</span>
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                  statusLocal === "concluido"
-                    ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-                    : "border-amber-500/50 text-amber-600 dark:text-amber-500",
-                )}
-              >
-                {statusLocal === "concluido" ? "revisado" : "etapa do admin — comece aqui"}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {incluidos.length > 0
-                ? `${incluidos.length} item(ns) marcados · ${formatBRL(total)} no ano — clique para revisar/editar`
-                : `Revise os pagamentos de ${year - 1} e monte a base antes de conversar com a IA`}
-            </p>
-          </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-        </button>
-      )}
-
-      {/* Modal (admin): a base — pagos em {ano-1} + itens novos. */}
-      {isAdmin && showEditor && (
-        <div
-          className="fixed inset-0 z-50 flex overflow-y-auto bg-black/50 p-4 sm:p-6"
-          onClick={() => setShowEditor(false)}
-        >
-          <div
-            className="m-auto w-full max-w-5xl rounded-lg border bg-background shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold">Pagos em {year - 1} — o que a IA deve considerar</p>
-                <p className="text-xs text-muted-foreground">
-                  Marque o que entra no orçamento, ajuste o nome, valor, período e mês. O total é a soma
-                  dos itens marcados.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
-                >
-                  <Plus className="h-3.5 w-3.5" /> item novo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEditor(false)}
-                  title="Fechar"
-                  className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="max-h-[68vh] space-y-3 overflow-y-auto p-4">
-            {itens.length === 0 ? (
-              <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-                Nenhum pagamento encontrado em {year - 1} nesta categoria. Adicione itens com{" "}
-                <span className="font-medium">+ item novo</span> ou rode a entrevista.
-              </div>
+      {/* ─── Fluxo em etapas ─── */}
+      <div className="rounded-lg border p-4 sm:p-5">
+        {/* ETAPA 1 — Base */}
+        <Step
+          n={1}
+          title={`Pagos em ${year - 1} — o que a IA deve considerar`}
+          description="O administrador valida a base de itens. Após salvar, ela alimenta a entrevista. Não vira orçamento — é só a fonte de informação da IA."
+          state={step1State}
+          chip={
+            baseSalva ? (
+              <StatusChip selo="concluido" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-2 py-1 text-center font-medium">Incluir</th>
-                      <th className="px-2 py-1 font-medium">Item</th>
-                      <th className="px-2 py-1 font-medium">Valor</th>
-                      <th className="px-2 py-1 font-medium">Período</th>
-                      <th className="px-2 py-1 font-medium">Início/Renov.</th>
-                      <th className="px-2 py-1 text-right font-medium">Ref. {year - 1}</th>
-                      <th className="px-2 py-1 text-right font-medium">Ano</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {itens.map((it) => (
-                      <ItemRow
-                        key={it.key}
-                        item={it}
-                        refInfo={it.fornecedor ? refMap.get(it.fornecedor.toLowerCase()) ?? null : null}
-                        onChange={(partial) => updateItem(it.key, partial)}
-                        onRemove={it.origem === "novo" ? () => removeItem(it.key) : null}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {descFaltando && (
-              <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
-                <TriangleAlert className="h-3 w-3" />
-                Todo item incluído precisa de descrição para salvar.
-              </div>
-            )}
-
-            <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">
-                Total da categoria ({year}) · {incluidos.length} item(ns)
+              <span className="inline-flex items-center rounded-full border border-amber-500/50 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-500">
+                a validar
               </span>
-              <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
+            )
+          }
+        >
+          {!isAdmin ? (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              {baseSalva
+                ? `Base definida pelo administrador: ${baseIncluidos.length} item(ns).`
+                : "Aguardando o administrador validar a base."}
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Justificativa / premissas</label>
-              <textarea
-                value={justificativa}
-                onChange={(e) => setJustificativa(e.target.value)}
-                rows={3}
-                placeholder="O porquê do número (a IA preenche ao propor; você pode editar)."
-                className={cn(INPUT_CLS, "resize-none")}
+          ) : baseSalva && !baseEdit ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-emerald-500/5 p-3 text-sm">
+              <span className="text-muted-foreground">
+                {baseIncluidos.length} item(ns) marcados · referência de {formatBRL(baseTotal)}/ano.{" "}
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">Base validada.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setBaseEdit(true)}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Editar base
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <ItensTable
+                itens={baseItens}
+                refMap={refMap}
+                year={year}
+                onChange={updateBaseItem}
+                onRemove={removeBaseItem}
+                onAdd={addBaseItem}
               />
-            </div>
-
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
-              {total <= 0 && (
-                <span className="mr-auto text-[11px] text-muted-foreground">
-                  Marque ao menos um item com valor para salvar.
-                </span>
+              {baseDescFaltando && (
+                <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
+                  <TriangleAlert className="h-3 w-3" />
+                  Todo item incluído precisa de descrição.
+                </div>
               )}
-              <button
-                type="button"
-                onClick={() => setShowEditor(false)}
-                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                onClick={salvar}
-                disabled={saving || total <= 0 || descFaltando}
-                className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Salvar orçamento da categoria
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tela principal: a Entrevista com a IA (todos veem). */}
-      <div className="flex min-h-[30rem] flex-col rounded-lg border">
-        <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium">
-          <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-          Entrevista com a IA
-        </div>
-
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "26rem" }}>
-          {!conversaIniciada && !sending && (
-            <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
-              <p className="max-w-md text-sm text-muted-foreground">
-                {isAdmin
-                  ? "A IA usa os itens marcados na base (botão acima), confirma quais serão mantidos (mensal ou anual) e se há novas contratações — e devolve a proposta lá."
-                  : "A IA vai perguntar quais serviços serão mantidos (mensal ou anual) e se há novas contratações para montar o orçamento do ano."}
-              </p>
-              <button
-                type="button"
-                onClick={() => void enviar("")}
-                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-              >
-                <Sparkles className="h-4 w-4" />
-                Iniciar entrevista
-              </button>
-            </div>
-          )}
-
-          {conversa.map((m, i) => (
-            <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-              <div
-                className={cn(
-                  "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
-                  m.role === "user" ? "bg-emerald-600 text-white" : "bg-muted text-foreground",
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {baseSalva && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBaseEdit(false);
+                      if (detalhe) seedBase(detalhe);
+                    }}
+                    className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
+                  >
+                    Cancelar
+                  </button>
                 )}
-              >
-                {m.content}
-              </div>
-            </div>
-          ))}
-
-          {sending && (
-            <div className="flex justify-start">
-              <div className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                A IA está pensando…
+                <button
+                  type="button"
+                  onClick={salvarBase}
+                  disabled={savingBase || baseIncluidos.length === 0 || baseDescFaltando}
+                  className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  {savingBase ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  {baseSalva ? "Salvar alterações da base" : "Validar base e liberar entrevista"}
+                </button>
               </div>
             </div>
           )}
+        </Step>
 
-          {mostrarResumo && (
-            <div className="rounded-lg border border-emerald-500/40 bg-emerald-50/60 p-3 dark:bg-emerald-950/20">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-                <CheckCircle2 className="h-4 w-4" />
-                Proposta do orçamento de {year}
-              </div>
-              <ul className="divide-y divide-emerald-500/15 text-sm">
-                {incluidos.map((it) => {
-                  const mes = MESES_LONGO[Math.min(12, Math.max(1, it.mesInicio)) - 1];
-                  const fimIt = it.mesFim != null && it.mesFim >= 1 && it.mesFim <= 12 ? it.mesFim : null;
-                  const cancela =
-                    it.periodicidade !== "anual" && fimIt != null && fimIt < 12
-                      ? ` · até ${MESES_LONGO[fimIt - 1]} (cancela)`
-                      : "";
-                  const quando =
-                    it.periodicidade === "anual"
-                      ? `${formatBRL(it.valorMensal)}/ano · pago em ${mes}`
-                      : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}${cancela}`;
-                  return (
-                    <li key={it.key} className="flex items-baseline justify-between gap-3 py-1.5">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">{it.descricao || "—"}</div>
-                        <div className="text-xs text-muted-foreground">{quando}</div>
-                      </div>
-                      <span className="shrink-0 font-semibold tabular-nums">
-                        {formatBRL(totalItem(it.valorMensal, it.mesInicio, it.periodicidade, it.mesFim))}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="mt-2 flex items-center justify-between border-t border-emerald-500/20 pt-2 text-sm">
-                <span className="font-medium text-muted-foreground">Total da categoria ({year})</span>
-                <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
-                  {formatBRL(total)}
+        {/* ETAPA 2 — Entrevista */}
+        <Step
+          n={2}
+          title="Entrevista com a IA"
+          description="Com a base validada, a IA conduz a entrevista com o gestor. Cada decisão dele alimenta a proposta."
+          state={step2State}
+          chip={
+            conversaIniciada ? (
+              <span className="inline-flex items-center rounded-full border border-emerald-500/40 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                em andamento
+              </span>
+            ) : undefined
+          }
+        >
+          {!baseSalva ? (
+            <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              <Lock className="h-4 w-4" />
+              Conclua a Etapa 1 (validar a base) para liberar a entrevista.
+            </div>
+          ) : (
+            <div className="flex min-h-[24rem] flex-col rounded-lg border">
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium">
+                <span className="inline-flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  Entrevista com a IA
                 </span>
+                {(conversaIniciada || proposta) &&
+                  (confirmReset ? (
+                    <span className="inline-flex items-center gap-2 text-xs font-normal">
+                      <span className="text-muted-foreground">Reiniciar? (a base é mantida)</span>
+                      <button
+                        type="button"
+                        onClick={recomecar}
+                        className="rounded-md bg-destructive px-2 py-1 font-medium text-destructive-foreground"
+                      >
+                        Recomeçar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmReset(false)}
+                        className="rounded-md border px-2 py-1"
+                      >
+                        Cancelar
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmReset(true)}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-normal text-muted-foreground hover:bg-muted"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Recomeçar
+                    </button>
+                  ))}
               </div>
-              {justificativa.trim() && (
-                <p className="mt-2 border-t border-emerald-500/20 pt-2 text-xs text-muted-foreground">
-                  <span className="font-medium">Justificativa:</span> {justificativa.trim()}
-                </p>
-              )}
-              {isAdmin && (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  Revise, ajuste ou salve na base{" "}
-                  <span className="font-medium">“Pagos em {year - 1}”</span> (botão acima).
-                </p>
+
+              <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "24rem" }}>
+                {!conversaIniciada && !sending && (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      A IA vai confirmar item por item da base (mantém? muda valor? cancela no meio do ano?) e
+                      perguntar se há novas contratações — e então montar a proposta.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void enviar("")}
+                      className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      Iniciar entrevista
+                    </button>
+                  </div>
+                )}
+
+                {conversa.map((m, i) => (
+                  <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                    <div
+                      className={cn(
+                        "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm",
+                        m.role === "user" ? "bg-emerald-600 text-white" : "bg-muted text-foreground",
+                      )}
+                    >
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+
+                {sending && (
+                  <div className="flex justify-start">
+                    <div className="inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      A IA está pensando…
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {conversaIniciada && (
+                <div className="border-t p-2">
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                      rows={2}
+                      placeholder="Responda à IA… (Enter envia, Shift+Enter quebra linha)"
+                      disabled={sending}
+                      className={cn(INPUT_CLS, "resize-none")}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={sending || !input.trim()}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                      title="Enviar"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
-        </div>
+        </Step>
 
-        {conversaIniciada && (
-          <div className="border-t p-2">
-            <div className="flex items-end gap-2">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                rows={2}
-                placeholder="Responda à IA… (Enter envia, Shift+Enter quebra linha)"
-                disabled={sending}
-                className={cn(INPUT_CLS, "resize-none")}
-              />
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={sending || !input.trim()}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
-                title="Enviar"
-              >
-                <Send className="h-4 w-4" />
-              </button>
+        {/* ETAPA 3 — Proposta */}
+        <Step
+          n={3}
+          title={`Proposta do orçamento de ${year}`}
+          description="O resultado da entrevista. O gestor confirma para congelar; depois só o administrador altera os números. Ao confirmar, vai para a Prévia."
+          state={step3State}
+          last
+          chip={
+            propostaConfirmada ? (
+              <StatusChip selo="concluido" />
+            ) : proposta ? (
+              <span className="inline-flex items-center rounded-full border border-amber-500/50 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-500">
+                aguardando confirmação
+              </span>
+            ) : undefined
+          }
+        >
+          {!proposta ? (
+            <div className="flex items-center gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              <Lock className="h-4 w-4" />
+              A proposta aparece aqui quando a entrevista chegar a um fechamento.
             </div>
-          </div>
-        )}
+          ) : propostaEdit ? (
+            <div className="space-y-3">
+              <ItensTable
+                itens={propostaEdit}
+                refMap={refMap}
+                year={year}
+                onChange={(key, partial) =>
+                  setPropostaEdit((prev) => (prev ? prev.map((it) => (it.key === key ? { ...it, ...partial } : it)) : prev))
+                }
+                onRemove={(key) => setPropostaEdit((prev) => (prev ? prev.filter((it) => it.key !== key) : prev))}
+                onAdd={() =>
+                  setPropostaEdit((prev) =>
+                    prev
+                      ? [
+                          ...prev,
+                          {
+                            key: `pe-${seq.current++}`,
+                            id: `pe-${seq.current}`,
+                            descricao: "",
+                            valorMensal: 0,
+                            mesInicio: 1,
+                            mesFim: null,
+                            periodicidade: "mensal",
+                            origem: "novo",
+                            fornecedor: null,
+                            incluir: true,
+                          },
+                        ]
+                      : prev,
+                  )
+                }
+              />
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Justificativa / premissas</label>
+                <textarea
+                  value={propostaEditJust}
+                  onChange={(e) => setPropostaEditJust(e.target.value)}
+                  rows={2}
+                  className={cn(INPUT_CLS, "resize-none")}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPropostaEdit(null)}
+                  className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={salvarEdicaoProposta}
+                  disabled={savingProposta}
+                  className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  {savingProposta ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Salvar alterações
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <PropostaCard proposta={proposta} year={year} />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={abrirEdicaoProposta}
+                    className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Editar números
+                  </button>
+                )}
+                {propostaConfirmada ? (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Confirmada — enviada à Prévia
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={confirmar}
+                    disabled={confirming}
+                    className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+                  >
+                    {confirming ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Confirmar proposta
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </Step>
       </div>
     </div>
   );
@@ -1017,9 +1186,7 @@ export function PlanejamentoSociosManager({
   }, [items, search]);
 
   // A categoria selecionada renderiza ANTES do gate de `loading` da lista: um
-  // reload em segundo plano (ex.: onSaved) NÃO pode desmontar a entrevista — se
-  // desmontasse, ao remontar ela re-semearia os itens dos persistidos e o resumo
-  // da proposta (em memória) sumiria/oscilaria.
+  // reload em segundo plano (ex.: onSaved) NÃO pode desmontar a entrevista.
   if (selected) {
     return (
       <CategoriaInterview
@@ -1056,10 +1223,8 @@ export function PlanejamentoSociosManager({
         <p className="font-medium">Migration pendente</p>
         <p className="mt-1 text-muted-foreground">
           Aplique as migrations do Planejamento dos sócios (
-          <code className="rounded bg-muted px-1 py-0.5">20260825120000</code>,{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260826120000</code>,{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260827120000</code> e{" "}
-          <code className="rounded bg-muted px-1 py-0.5">20260828120000</code>) para habilitar esta tela.
+          <code className="rounded bg-muted px-1 py-0.5">20260825120000</code> …{" "}
+          <code className="rounded bg-muted px-1 py-0.5">20260830120000</code>) para habilitar esta tela.
         </p>
       </div>
     );
@@ -1090,18 +1255,17 @@ export function PlanejamentoSociosManager({
           </div>
 
           <p className="text-sm text-muted-foreground">
-            {items.length} categoria(s) por planejamento dos sócios. Escolha por qual começar — a
-            entrevista com a IA guarda o progresso de cada uma.
+            {items.length} categoria(s) por planejamento dos sócios. Escolha por qual começar — cada uma
+            guarda o progresso das etapas.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((item) => {
-              const selo: Selo =
-                item.status === "concluido" && item.itemCount > 0
-                  ? "concluido"
-                  : item.iniciado
-                    ? "andamento"
-                    : "nao_iniciado";
+              const selo: Selo = item.propostaConfirmada
+                ? "concluido"
+                : item.temProposta || item.baseSalva
+                  ? "andamento"
+                  : "nao_iniciado";
               return (
                 <button
                   key={item.categoryCode}
@@ -1120,18 +1284,20 @@ export function PlanejamentoSociosManager({
                   </div>
                   <div className="mt-3 flex items-end justify-between gap-2 text-sm">
                     <span className="text-xs text-muted-foreground">
-                      {item.itemCount > 0
-                        ? `${item.itemCount} item(ns)`
-                        : item.realizadoAnterior && item.realizadoAnterior.media != null
-                          ? `${year - 1}: ${formatBRL(item.realizadoAnterior.media)}/mês`
-                          : `sem realizado ${year - 1}`}
+                      {item.temProposta
+                        ? `${item.itemCount} item(ns) na proposta`
+                        : item.baseSalva
+                          ? "base validada — falta a entrevista"
+                          : item.realizadoAnterior && item.realizadoAnterior.media != null
+                            ? `${year - 1}: ${formatBRL(item.realizadoAnterior.media)}/mês`
+                            : `sem realizado ${year - 1}`}
                     </span>
-                    {item.totalOrcado > 0 ? (
+                    {item.propostaConfirmada && item.totalOrcado > 0 ? (
                       <span className="font-semibold tabular-nums">{formatBRL(item.totalOrcado)}</span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 group-hover:underline dark:text-emerald-400">
                         <Sparkles className="h-3.5 w-3.5" />
-                        Começar
+                        {item.temProposta ? "Revisar" : item.baseSalva ? "Entrevistar" : "Começar"}
                       </span>
                     )}
                   </div>
