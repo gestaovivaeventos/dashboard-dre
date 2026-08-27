@@ -637,6 +637,16 @@ function CategoriaInterview({
           mesFim: i.mesFim,
         })),
       finalizar,
+      // Contexto fixo do prompt (linha DRE + realizado ano-1) que já temos —
+      // evita a IA reconsultar catálogo/Omie a cada mensagem.
+      detalhe
+        ? {
+            dreLineCode: detalhe.dreLineCode,
+            dreLineName: detalhe.dreLineName,
+            realizadoTotal: detalhe.realizadoAnterior?.total ?? 0,
+            realizadoMedia: detalhe.realizadoAnterior?.media ?? null,
+          }
+        : undefined,
     );
     setSending(false);
     if (res.needsMigration) {

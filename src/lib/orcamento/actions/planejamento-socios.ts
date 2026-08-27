@@ -80,6 +80,19 @@ export interface PlanejamentoContextoItem {
   mesFim: number | null;
 }
 
+/**
+ * Contexto FIXO do prompt (linha da DRE + realizado do ano anterior) que o
+ * cliente já tem em `detalhe` e NÃO muda durante a conversa. Quando enviado,
+ * a entrevista pula as duas queries pesadas por turno (catálogo de categorias
+ * + realizado da Omie), que só existiam para remontar esta mesma informação.
+ */
+export interface PlanejamentoPromptContexto {
+  dreLineCode: string;
+  dreLineName: string;
+  realizadoTotal: number;
+  realizadoMedia: number | null;
+}
+
 interface CategoriaRow {
   category_code: string;
   category_name: string | null;
@@ -772,6 +785,7 @@ export async function enviarMensagemPlanejamento(
   textoUsuario: string,
   itensContexto: PlanejamentoContextoItem[] = [],
   finalizar = false,
+  promptCtx?: PlanejamentoPromptContexto,
 ): Promise<{
   reply?: string;
   proposta?: PlanejamentoProposta | null;
@@ -792,35 +806,60 @@ export async function enviarMensagemPlanejamento(
   // Treinamento). A IA faz uma entrevista ABERTA, sem lista para confirmar.
   const semBase = contexto.length === 0;
 
-  // Nome da empresa + catálogo de categorias + contexto do admin em paralelo. As
-  // categorias servem para achar os códigos IRMÃOS ("(*)") e somar o realizado.
-  const [companyRes, cats, ctxRes] = await Promise.all([
-    supabase.from("companies").select("name").eq("id", companyId).maybeSingle<{ name: string }>(),
-    getCategoriaMetodo(companyId, year),
-    supabase
-      .from("orcamento_planejamento_socios")
-      .select("contexto_admin")
-      .eq("company_id", companyId)
-      .eq("year", year)
-      .eq("category_code", categoryCode)
-      .maybeSingle<{ contexto_admin: string | null }>(),
-  ]);
-  const companyName = companyRes.data?.name ?? "Empresa";
-  const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
-  const nomeCategoria = cat?.categoryName ?? categoryName;
-  // Contexto livre do admin (Etapa 1). Se a coluna ainda não existe (migration
-  // pendente), o erro é IGNORADO — a entrevista roda sem esse direcionamento.
-  const contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
+  // A resolução do provedor (2 queries de config) NÃO depende de nada abaixo —
+  // dispara já, em paralelo com o resto, e só é aguardada na hora de chamar a IA.
+  const resolvedPromise = resolvePlanejamentoProvider();
 
-  // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
-  // O TOTAL mostrado é o do ANO INTEIRO (não só meses fechados) — é o "total gasto"
-  // que o gestor espera; a média mensal segue a lógica de meses fechados.
-  const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
-  const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
-  const realizadoCat: MediaRealizado = {
-    ...combinarRealizados(realizados, irmaos, year - 1),
-    total: totalGastoAno(realizados, irmaos),
-  };
+  // Query pequena e sempre presente: o contexto livre do admin (Etapa 1).
+  const ctxQuery = supabase
+    .from("orcamento_planejamento_socios")
+    .select("contexto_admin")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode)
+    .maybeSingle<{ contexto_admin: string | null }>();
+  const companyQuery = supabase
+    .from("companies")
+    .select("name")
+    .eq("id", companyId)
+    .maybeSingle<{ name: string }>();
+
+  let companyName: string;
+  let nomeCategoria: string;
+  let dreLineCode: string;
+  let dreLineName: string;
+  let realizadoCat: MediaRealizado;
+  let contextoAdmin: string;
+
+  // FAST PATH — o cliente já mandou a linha da DRE + o realizado do ano anterior
+  // (constantes na conversa). Pulamos o catálogo de categorias e o realizado da
+  // Omie, que antes rodavam a CADA mensagem só para remontar a mesma linha de
+  // contexto do prompt. Fica só empresa + contexto do admin (queries leves).
+  if (promptCtx && Number.isFinite(promptCtx.realizadoTotal)) {
+    const [companyRes, ctxRes] = await Promise.all([companyQuery, ctxQuery]);
+    companyName = companyRes.data?.name ?? "Empresa";
+    nomeCategoria = categoryName;
+    dreLineCode = promptCtx.dreLineCode;
+    dreLineName = promptCtx.dreLineName;
+    realizadoCat = { ...REALIZADO_VAZIO, total: promptCtx.realizadoTotal, media: promptCtx.realizadoMedia };
+    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
+  } else {
+    // FALLBACK (cliente antigo, sem promptCtx) — computa tudo no servidor, como
+    // antes: catálogo (nome + linha DRE + irmãs "(*)") e realizado da Omie.
+    const [companyRes, cats, ctxRes] = await Promise.all([companyQuery, getCategoriaMetodo(companyId, year), ctxQuery]);
+    companyName = companyRes.data?.name ?? "Empresa";
+    const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
+    nomeCategoria = cat?.categoryName ?? categoryName;
+    dreLineCode = cat?.dreLineCode ?? "";
+    dreLineName = cat?.dreLineName ?? "";
+    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
+    // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
+    // O TOTAL é o do ANO INTEIRO (não só meses fechados) — é o "total gasto"; a
+    // média mensal segue a lógica de meses fechados.
+    const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
+    const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
+    realizadoCat = { ...combinarRealizados(realizados, irmaos, year - 1), total: totalGastoAno(realizados, irmaos) };
+  }
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
@@ -828,8 +867,8 @@ export async function enviarMensagemPlanejamento(
   const system = buildSystemPrompt({
     companyName,
     categoryName: nomeCategoria,
-    dreLineCode: cat?.dreLineCode ?? "",
-    dreLineName: cat?.dreLineName ?? "",
+    dreLineCode,
+    dreLineName,
     year,
     realizado: realizadoCat,
     considerar: semBase ? "" : considerarContexto(contexto, []),
@@ -862,7 +901,7 @@ export async function enviarMensagemPlanejamento(
     });
   }
 
-  const resolved = await resolvePlanejamentoProvider();
+  const resolved = await resolvedPromise; // já resolvendo em paralelo desde o início
   let replyText: string;
   let usageOk: Awaited<ReturnType<typeof generateText>>["usage"] | null = null;
   try {
