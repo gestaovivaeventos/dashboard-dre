@@ -502,6 +502,22 @@ function codigosIrmaos(
   return Array.from(set);
 }
 
+/**
+ * TOTAL gasto no ano inteiro (todos os meses com dado, não só os fechados)
+ * somando os códigos irmãos. É o "total gasto no ano anterior" que o gestor
+ * espera — diferente do total de MESES FECHADOS usado pela Média. `abs` porque
+ * despesa pode vir com sinal negativo em financial_entries.
+ */
+function totalGastoAno(map: Map<string, MediaRealizado>, codes: string[]): number {
+  let soma = 0;
+  for (const code of codes) {
+    const r = map.get(code);
+    if (!r) continue;
+    for (let i = 0; i < 12; i += 1) soma += r.meses[i] ?? 0;
+  }
+  return Math.round(Math.abs(soma) * 100) / 100;
+}
+
 /** Soma o realizado (mês a mês) de vários códigos num único MediaRealizado. */
 function combinarRealizados(
   map: Map<string, MediaRealizado>,
@@ -602,7 +618,9 @@ export async function getPlanejamentoSocios(
 
   const items: PlanejamentoListItem[] = doMetodo.map((c) => {
     const st = byCode.get(c.categoryCode);
-    const r = combinarRealizados(realizados, irmaosPorCat.get(c.categoryCode) ?? [c.categoryCode], year - 1);
+    const codigos = irmaosPorCat.get(c.categoryCode) ?? [c.categoryCode];
+    const r = combinarRealizados(realizados, codigos, year - 1);
+    const totalAno = totalGastoAno(realizados, codigos);
     return {
       categoryCode: c.categoryCode,
       categoryName: c.categoryName,
@@ -613,7 +631,7 @@ export async function getPlanejamentoSocios(
       propostaConfirmada: st?.confirmada ?? false,
       itemCount: st?.proposta?.itens.length ?? 0,
       totalOrcado: propostaTotal(st?.proposta ?? null),
-      realizadoAnterior: r.total > 0 || r.media != null ? { total: r.total, media: r.media } : null,
+      realizadoAnterior: totalAno > 0 || r.media != null ? { total: totalAno, media: r.media } : null,
     };
   });
 
@@ -673,6 +691,7 @@ export async function getPlanejamentoCategoria(
     fetchRealizadoItensIrmaos(supabase, companyId, year - 1, irmaos),
   ]);
   const r = combinarRealizados(realizados, irmaos, year - 1);
+  const totalAno = totalGastoAno(realizados, irmaos); // ano inteiro, não só meses fechados
 
   return {
     detalhe: {
@@ -685,7 +704,7 @@ export async function getPlanejamentoCategoria(
       conversa: sanitizeConversa(catRow?.conversa),
       proposta: parsePropostaColumn(catRow?.proposta),
       propostaConfirmada: catRow?.proposta_confirmada === true,
-      realizadoAnterior: r.total > 0 || r.media != null ? { total: r.total, media: r.media } : null,
+      realizadoAnterior: totalAno > 0 || r.media != null ? { total: totalAno, media: r.media } : null,
       realizadoItens,
     },
   };
@@ -733,9 +752,14 @@ export async function enviarMensagemPlanejamento(
   const nomeCategoria = cat?.categoryName ?? categoryName;
 
   // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
+  // O TOTAL mostrado é o do ANO INTEIRO (não só meses fechados) — é o "total gasto"
+  // que o gestor espera; a média mensal segue a lógica de meses fechados.
   const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
   const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
-  const realizadoCat = combinarRealizados(realizados, irmaos, year - 1);
+  const realizadoCat: MediaRealizado = {
+    ...combinarRealizados(realizados, irmaos, year - 1),
+    total: totalGastoAno(realizados, irmaos),
+  };
 
   const historico = sanitizeConversa(conversaAtual);
   const texto = (textoUsuario ?? "").trim();
