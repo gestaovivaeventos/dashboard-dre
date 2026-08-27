@@ -17,6 +17,25 @@ export interface PlanejamentoMensagem {
   content: string;
 }
 
+// ─── Marcador de fim da entrevista (streaming) ───────────────────────────────
+// No modo streaming a IA responde em texto corrido; quando não há mais o que
+// perguntar, ela acrescenta esta linha no FIM. O marcador é interno (nunca
+// mostrado ao gestor) e destrava o botão "Concluir entrevista e gerar proposta".
+export const MARCADOR_FECHAR = "[[FECHAR]]";
+
+/**
+ * Separa o texto exibível do sinal de encerramento. `podeFechar` = a IA marcou
+ * fim; `texto` = a mensagem SEM o marcador. Para o streaming, cortamos a partir
+ * do primeiro "[[" (o marcador fica no fim) — assim um marcador ainda-parcial
+ * não "pisca" na tela enquanto os tokens chegam.
+ */
+export function limparMarcadorFechar(texto: string): { texto: string; podeFechar: boolean } {
+  const podeFechar = /\[\[\s*FECHAR\s*\]\]/i.test(texto);
+  const idx = texto.indexOf("[[");
+  const limpo = (idx >= 0 ? texto.slice(0, idx) : texto).trim();
+  return { texto: limpo, podeFechar };
+}
+
 /** Item persistido de uma categoria (uma plataforma/serviço). */
 export interface PlanejamentoItem {
   /** id real (persistido) ou chave temporária no estado local da tela. */

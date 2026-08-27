@@ -33,6 +33,7 @@ import {
 import {
   categoriaTotal,
   totalItem,
+  limparMarcadorFechar,
   type Periodicidade,
   type PlanejamentoMensagem,
   type PlanejamentoItem,
@@ -341,6 +342,12 @@ function PropostaCard({ proposta, year }: { proposta: PlanejamentoProposta; year
   );
   return (
     <div className="rounded-lg border border-emerald-500/40 bg-emerald-50/60 p-3 dark:bg-emerald-950/20">
+      {proposta.itens.length === 0 && (
+        <p className="rounded-md border border-dashed border-emerald-500/30 bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+          Nenhuma despesa prevista — <span className="font-medium text-foreground">orçamento zerado</span> para esta
+          categoria em {year}.
+        </p>
+      )}
       <ul className="divide-y divide-emerald-500/15 text-sm">
         {proposta.itens.map((it, idx) => {
           const mes = MESES_LONGO[Math.min(12, Math.max(1, it.mesInicio)) - 1];
@@ -616,8 +623,94 @@ function CategoriaInterview({
     onSaved();
   }
 
+  // Itens da base marcados (contexto vivo da IA) + contexto fixo do prompt
+  // (linha DRE + realizado ano-1), montados na hora do envio.
+  function baseContexto() {
+    return baseRef.current
+      .filter((i) => i.incluir)
+      .map((i) => ({
+        descricao: i.descricao,
+        valorMensal: i.valorMensal,
+        periodicidade: i.periodicidade,
+        mesInicio: i.mesInicio,
+        mesFim: i.mesFim,
+      }));
+  }
+  function promptContexto() {
+    return detalhe
+      ? {
+          dreLineCode: detalhe.dreLineCode,
+          dreLineName: detalhe.dreLineName,
+          realizadoTotal: detalhe.realizadoAnterior?.total ?? 0,
+          realizadoMedia: detalhe.realizadoAnterior?.media ?? null,
+        }
+      : undefined;
+  }
+
   // ── Etapa 2: entrevista ────────────────────────────────────────────────────
-  async function enviar(texto: string, finalizar = false) {
+  // Turno de PERGUNTA = STREAMING (a resposta aparece token a token, pela rota
+  // /api/orcamento/planejamento/chat). O ENCERRAR (gera a proposta em JSON)
+  // continua no server action, que precisa da resposta estruturada.
+  async function enviar(texto: string) {
+    setSending(true);
+    setLocalErr(null);
+    const historico = conversa;
+    const comUsuario: PlanejamentoMensagem[] = texto
+      ? [...historico, { role: "user", content: texto }]
+      : historico;
+    // Já mostra a mensagem do usuário + um balão vazio da IA (que vai enchendo).
+    setConversa([...comUsuario, { role: "assistant", content: "" }]);
+
+    try {
+      const resp = await fetch("/api/orcamento/planejamento/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          companyId,
+          year,
+          categoryCode,
+          categoryName: detalhe?.categoryName ?? categoryCode,
+          conversa: historico,
+          texto,
+          itensContexto: baseContexto(),
+          promptCtx: promptContexto(),
+        }),
+      });
+
+      if (!resp.ok || !resp.body) {
+        const j = await resp.json().catch(() => ({}) as { error?: string; needsMigration?: boolean });
+        setConversa(comUsuario); // desfaz o balão vazio
+        if (j.needsMigration) {
+          onError("Migration do Planejamento dos sócios ainda não aplicada.");
+        } else {
+          setLocalErr(j.error ?? "Falha ao consultar a IA.");
+        }
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        const { texto: parcial } = limparMarcadorFechar(acc);
+        setConversa([...comUsuario, { role: "assistant", content: parcial }]);
+      }
+      const { texto: final, podeFechar: pf } = limparMarcadorFechar(acc);
+      setConversa([...comUsuario, { role: "assistant", content: final }]);
+      setPodeFechar(pf);
+    } catch {
+      setConversa(comUsuario);
+      setLocalErr("Falha ao conectar com a IA. Tente novamente.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // ── Encerrar a entrevista → gerar a proposta (JSON, não-streaming) ──────────
+  async function finalizarEntrevista() {
     setSending(true);
     setLocalErr(null);
     const res = await enviarMensagemPlanejamento(
@@ -626,27 +719,10 @@ function CategoriaInterview({
       categoryCode,
       detalhe?.categoryName ?? categoryCode,
       conversa,
-      texto,
-      baseRef.current
-        .filter((i) => i.incluir)
-        .map((i) => ({
-          descricao: i.descricao,
-          valorMensal: i.valorMensal,
-          periodicidade: i.periodicidade,
-          mesInicio: i.mesInicio,
-          mesFim: i.mesFim,
-        })),
-      finalizar,
-      // Contexto fixo do prompt (linha DRE + realizado ano-1) que já temos —
-      // evita a IA reconsultar catálogo/Omie a cada mensagem.
-      detalhe
-        ? {
-            dreLineCode: detalhe.dreLineCode,
-            dreLineName: detalhe.dreLineName,
-            realizadoTotal: detalhe.realizadoAnterior?.total ?? 0,
-            realizadoMedia: detalhe.realizadoAnterior?.media ?? null,
-          }
-        : undefined,
+      "",
+      baseContexto(),
+      true,
+      promptContexto(),
     );
     setSending(false);
     if (res.needsMigration) {
@@ -995,15 +1071,8 @@ function CategoriaInterview({
                   ))}
               </div>
 
-              {/* Total do ano anterior — dado FRESCO (soma categoria + irmãs "(*)").
-                  Fica sempre correto, mesmo que a fala da IA no chat esteja antiga. */}
-              <div className="flex items-center justify-between gap-2 border-b bg-emerald-500/5 px-3 py-1.5 text-xs">
-                <span className="text-muted-foreground">Total gasto em {year - 1} nesta categoria</span>
-                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
-                  {r && r.total > 0 ? formatBRL(r.total) : "sem gasto registrado"}
-                </span>
-              </div>
-
+              {/* O total gasto no ano anterior NÃO tem mais banner: a própria IA o
+                  informa na PRIMEIRA frase da entrevista (regra de ABERTURA). */}
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: "24rem" }}>
                 {!conversaIniciada && !sending && (
                   <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
@@ -1075,7 +1144,7 @@ function CategoriaInterview({
                   </div>
                   <button
                     type="button"
-                    onClick={() => void enviar("", true)}
+                    onClick={() => void finalizarEntrevista()}
                     disabled={sending || !podeFechar}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/5 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-500/10 disabled:opacity-40 dark:text-emerald-400"
                     title={

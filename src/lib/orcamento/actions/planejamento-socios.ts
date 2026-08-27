@@ -184,13 +184,18 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
   return out;
 }
 
-/** Lê a proposta persistida (jsonb) da coluna `proposta`. */
+/** Lê a proposta persistida (jsonb) da coluna `proposta`. Uma proposta com
+ * `itens: []` (categoria ZERADA — ex.: Bônus sem sócio mantido) é VÁLIDA e deve
+ * ser retornada (resultado zero), NÃO tratada como "sem proposta". Só devolve
+ * null quando a coluna não é uma proposta (null/sem `itens` array). */
 function parsePropostaColumn(raw: unknown): PlanejamentoProposta | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as { itens?: unknown; justificativa?: unknown };
-  const itens = sanitizeItensProposta(o.itens);
-  if (itens.length === 0) return null;
-  return { itens, justificativa: typeof o.justificativa === "string" ? o.justificativa : "" };
+  if (!Array.isArray(o.itens)) return null;
+  return {
+    itens: sanitizeItensProposta(o.itens),
+    justificativa: typeof o.justificativa === "string" ? o.justificativa : "",
+  };
 }
 
 /** Total anual de uma proposta (soma das séries de cada item). */
@@ -236,12 +241,14 @@ function parseAiReply(text: string): {
 
   const rawProposta = obj && typeof obj === "object" ? (obj as { proposta?: unknown }).proposta : null;
   let proposta: PlanejamentoProposta | null = null;
-  if (rawProposta && typeof rawProposta === "object") {
+  // A proposta é aceita quando vem um OBJETO com `itens` array — MESMO vazio.
+  // itens:[] = categoria ZERADA (ex.: Bônus sem sócio mantido), que é um
+  // resultado LEGÍTIMO e precisa fechar a Etapa 3. Só `proposta: null` (ainda
+  // perguntando / falta dado) NÃO gera proposta.
+  if (rawProposta && typeof rawProposta === "object" && Array.isArray((rawProposta as { itens?: unknown }).itens)) {
     const itens = sanitizeItensProposta((rawProposta as { itens?: unknown }).itens);
     const justificativa = (rawProposta as { justificativa?: unknown }).justificativa;
-    if (itens.length > 0) {
-      proposta = { itens, justificativa: typeof justificativa === "string" ? justificativa : "" };
-    }
+    proposta = { itens, justificativa: typeof justificativa === "string" ? justificativa : "" };
   }
 
   const flagFechar =
@@ -379,6 +386,9 @@ function buildSystemPrompt(opts: {
   descricaoCategoria: string | null;
   regraCategoria: string | null;
   contextoAdmin: string;
+  /** true = turno de entrevista via STREAMING (texto corrido + marcador [[FECHAR]]);
+   *  false = turno de ENCERRAR (JSON estruturado com a proposta). */
+  streaming: boolean;
 }): string {
   const { year, categoryName } = opts;
 
@@ -473,6 +483,56 @@ function buildSystemPrompt(opts: {
     "4. NUNCA invente itens que o gestor não citou.",
   ];
 
+  // RABO do prompt — muda conforme o turno:
+  //  - streaming (entrevista): texto corrido + marcador [[FECHAR]] para sinalizar fim.
+  //  - json (encerrar): objeto JSON com a proposta estruturada.
+  const tailStream: string[] = [
+    "Durante a entrevista você só faz a PRÓXIMA pergunta (uma por vez). Responda em português",
+    "do Brasil, em TEXTO CORRIDO — SEM JSON e sem blocos de código. Escreva APENAS a sua",
+    "mensagem ao gestor.",
+    "",
+    "SINAL DE FIM: quando NÃO houver mais NADA a perguntar — todos os itens da base",
+    "confirmados/alterados/cancelados/não-mantidos, todo item NOVO com os dados obrigatórios",
+    "completos, e o gestor já indicou que não há mais contratações — escreva a mensagem final",
+    "avisando que terminou (ex.: \"Terminei as perguntas. Clique em 'Concluir entrevista e",
+    "gerar proposta' para eu montar a proposta.\") e, SOMENTE nesse caso, acrescente no FIM",
+    "uma última linha isolada com EXATAMENTE: [[FECHAR]]",
+    "NUNCA escreva [[FECHAR]] enquanto ainda houver qualquer pergunta pendente. NÃO comente o",
+    "marcador com o gestor — ele é só um sinal interno. (Se o gestor não previu NENHUM item,",
+    "ainda assim finalize, explique que não há despesa prevista e escreva [[FECHAR]].)",
+  ];
+
+  const tailJson: string[] = [
+    "MONTAR A PROPOSTA: você recebeu a instrução de ENCERRAR a entrevista.",
+    "Devolva a LISTA COMPLETA de itens: cada item mantido (com o valor/mês que o gestor",
+    "CONFIRMOU — já atualizado se ele mudou), MAIS cada item NOVO pedido, EXCLUINDO os que",
+    "ele disse não manter. Confira item por item contra a conversa: nenhuma alteração pode",
+    "faltar. Cada item:",
+    "  - descricao: nome da plataforma/serviço;",
+    "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
+    "    ANUAL quando periodicidade='anual';",
+    "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
+    "  - mesFim: mês (1..12) do ÚLTIMO pagamento quando o item é MENSAL e será cancelado",
+    "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
+    "  - periodicidade: 'mensal' ou 'anual';",
+    "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
+    "E uma justificativa curta (2 a 4 frases) com as premissas. Se ainda faltar um dado",
+    "OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e o 'reply'",
+    "pedindo só o que falta.",
+    "",
+    "CATEGORIA ZERADA: se NÃO houver nenhum item (nada mantido e nada novo — ex.: nenhum",
+    "sócio manteve o bônus), a proposta MESMO ASSIM deve ser montada com a LISTA VAZIA:",
+    "'proposta': { \"itens\": [], \"justificativa\": \"...explique que não há despesa prevista...\" }",
+    "e 'podeFechar': true. NUNCA devolva 'proposta': null nesse caso — itens:[] é o resultado",
+    "correto (orçamento zero para a categoria) e precisa fechar a etapa.",
+    "",
+    "Responda SEMPRE com um ÚNICO objeto JSON, sem nenhum texto fora dele.",
+    'Se ainda faltar dado obrigatório: { "reply": "pergunta do que falta", "proposta": null, "podeFechar": false }',
+    'Categoria zerada: { "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [], "justificativa": "..." } }',
+    "Ao montar a proposta, preencha:",
+    '{ "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
+  ];
+
   return [
     'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
     'categoria de despesa pelo método "Planejamento dos sócios".',
@@ -485,10 +545,10 @@ function buildSystemPrompt(opts: {
     `Ano do orçamento: ${year}`,
     `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado)}`,
     "",
-    `ABERTURA (regra fixa): a sua PRIMEIRA mensagem deve SEMPRE começar informando ao`,
-    `gestor o TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total"`,
-    `acima (mesmo que não haja base cadastrada; se não houver dado, diga que não houve`,
-    `gasto registrado). Só DEPOIS siga a condução abaixo.`,
+    `ABERTURA (regra fixa): a sua PRIMEIRA mensagem deve SEMPRE começar informando ao gestor o`,
+    `TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total" acima (mesmo`,
+    `sem base cadastrada; se não houver dado, diga que não houve gasto registrado). Só DEPOIS`,
+    `siga a condução abaixo.`,
     "",
     "INTERPRETE A CATEGORIA ANTES DE PERGUNTAR (regra permanente, vale para QUALQUER",
     `categoria): entenda a ESSÊNCIA do que é "${categoryName}" — pela natureza da despesa`,
@@ -507,42 +567,7 @@ function buildSystemPrompt(opts: {
     ...(opts.regraCategoria ? [opts.regraCategoria, ""] : []),
     ...(opts.semBase ? semBase : comBase),
     "",
-    "NÃO monte a proposta por conta própria durante a entrevista — enquanto houver",
-    "QUALQUER pergunta pendente, 'proposta' é null, 'podeFechar' é false e 'reply' é a",
-    "próxima pergunta (uma por vez).",
-    "",
-    "FIM DAS PERGUNTAS: quando não houver mais nada a perguntar — todos os itens da base",
-    "(se houver) confirmados/alterados/cancelados/não-mantidos, todo item NOVO com seus",
-    "dados obrigatórios completos, e o gestor já indicou que não há mais contratações —",
-    "você NÃO tem mais o que perguntar. Nesse turno, responda com 'proposta': null,",
-    "'podeFechar': true e um 'reply' avisando que terminou (ex.: \"Terminei as perguntas.",
-    "Clique em 'Concluir entrevista e gerar proposta' para eu montar a proposta.\").",
-    "NÃO monte a proposta ainda — espere o pedido de encerramento. (Se o gestor não previu",
-    "NENHUM item, ainda assim sinalize 'podeFechar': true e explique que não há despesa prevista.)",
-    "",
-    "MONTAR A PROPOSTA: só quando você receber a instrução de ENCERRAR a entrevista.",
-    "Aí devolva a LISTA COMPLETA de itens: cada item mantido (com o valor/mês que o gestor",
-    "CONFIRMOU — já atualizado se ele mudou), MAIS cada item NOVO pedido, EXCLUINDO os que",
-    "ele disse não manter. Confira item por item contra a conversa: nenhuma alteração pode",
-    "faltar. Cada item:",
-    "  - descricao: nome da plataforma/serviço;",
-    "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
-    "    ANUAL quando periodicidade='anual';",
-    "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
-    "  - mesFim: mês (1..12) do ÚLTIMO pagamento quando o item é MENSAL e será cancelado",
-    "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
-    "  - periodicidade: 'mensal' ou 'anual';",
-    "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
-    "E uma justificativa curta (2 a 4 frases) com as premissas. Se ao encerrar ainda faltar",
-    "um dado OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e",
-    "pergunte só o que falta.",
-    "",
-    "Responda SEMPRE com um ÚNICO objeto JSON, sem nenhum texto fora dele:",
-    '{ "reply": "sua mensagem ao gestor", "proposta": null, "podeFechar": false }',
-    'Enquanto entrevista: "proposta" null, "podeFechar" false, "reply" = próxima pergunta.',
-    'Terminou as perguntas (sem propor ainda): "proposta" null, "podeFechar" true.',
-    "Ao ENCERRAR (montar a proposta), preencha:",
-    '{ "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
+    ...(opts.streaming ? tailStream : tailJson),
   ].join("\n");
 }
 
@@ -816,6 +841,97 @@ export async function getPlanejamentoCategoria(
 
 // ─── Entrevista (chat) ─────────────────────────────────────────────────────────
 
+/**
+ * Preparo COMPARTILHADO do turno de entrevista: monta o system prompt + o
+ * histórico, resolvendo o contexto (linha DRE + realizado ano-1) pelo FAST PATH
+ * (cliente manda `promptCtx`) ou pelo fallback server-side. `streaming` escolhe
+ * o rabo do prompt (texto+marcador vs JSON). Usado pelo encerramento (JSON) e
+ * pela rota de streaming.
+ */
+async function montarSistemaEntrevista(params: {
+  companyId: string;
+  year: number;
+  categoryCode: string;
+  categoryName: string;
+  conversaAtual: PlanejamentoMensagem[];
+  itensContexto: PlanejamentoContextoItem[];
+  promptCtx?: PlanejamentoPromptContexto;
+  streaming: boolean;
+}): Promise<
+  | { system: string; historico: PlanejamentoMensagem[]; semBase: boolean }
+  | { needsMigration: true }
+  | { error: string }
+> {
+  const { companyId, year, categoryCode, categoryName, promptCtx, streaming } = params;
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const contexto = (params.itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
+  // BASE VAZIA = admin validou a categoria sem itens → entrevista ABERTA.
+  const semBase = contexto.length === 0;
+
+  const ctxQuery = supabase
+    .from("orcamento_planejamento_socios")
+    .select("contexto_admin")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode)
+    .maybeSingle<{ contexto_admin: string | null }>();
+  const companyQuery = supabase
+    .from("companies")
+    .select("name")
+    .eq("id", companyId)
+    .maybeSingle<{ name: string }>();
+
+  let companyName: string;
+  let nomeCategoria: string;
+  let dreLineCode: string;
+  let dreLineName: string;
+  let realizadoCat: MediaRealizado;
+  let contextoAdmin: string;
+
+  // FAST PATH — o cliente já mandou a linha da DRE + o realizado do ano anterior
+  // (constantes na conversa). Pulamos o catálogo de categorias e o realizado da
+  // Omie, que antes rodavam a CADA mensagem só para remontar a mesma informação.
+  if (promptCtx && Number.isFinite(promptCtx.realizadoTotal)) {
+    const [companyRes, ctxRes] = await Promise.all([companyQuery, ctxQuery]);
+    companyName = companyRes.data?.name ?? "Empresa";
+    nomeCategoria = categoryName;
+    dreLineCode = promptCtx.dreLineCode;
+    dreLineName = promptCtx.dreLineName;
+    realizadoCat = { ...REALIZADO_VAZIO, total: promptCtx.realizadoTotal, media: promptCtx.realizadoMedia };
+    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
+  } else {
+    // FALLBACK — computa tudo no servidor (catálogo + realizado da Omie).
+    const [companyRes, cats, ctxRes] = await Promise.all([companyQuery, getCategoriaMetodo(companyId, year), ctxQuery]);
+    companyName = companyRes.data?.name ?? "Empresa";
+    const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
+    nomeCategoria = cat?.categoryName ?? categoryName;
+    dreLineCode = cat?.dreLineCode ?? "";
+    dreLineName = cat?.dreLineName ?? "";
+    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
+    const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
+    const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
+    realizadoCat = { ...combinarRealizados(realizados, irmaos, year - 1), total: totalGastoAno(realizados, irmaos) };
+  }
+
+  const system = buildSystemPrompt({
+    companyName,
+    categoryName: nomeCategoria,
+    dreLineCode,
+    dreLineName,
+    year,
+    realizado: realizadoCat,
+    considerar: semBase ? "" : considerarContexto(contexto, []),
+    semBase,
+    descricaoCategoria: descricaoCategoria(nomeCategoria),
+    regraCategoria: regraCategoria(nomeCategoria),
+    contextoAdmin,
+    streaming,
+  });
+
+  return { system, historico: sanitizeConversa(params.conversaAtual), semBase };
+}
+
 export async function enviarMensagemPlanejamento(
   companyId: string,
   year: number,
@@ -839,84 +955,25 @@ export async function enviarMensagemPlanejamento(
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
-  const supabase = createAdminClientIfAvailable() ?? (await createClient());
-
-  const contexto = (itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
-  // BASE VAZIA = o admin validou a categoria sem itens (ex.: Consultoria e
-  // Treinamento). A IA faz uma entrevista ABERTA, sem lista para confirmar.
-  const semBase = contexto.length === 0;
-
-  // A resolução do provedor (2 queries de config) NÃO depende de nada abaixo —
-  // dispara já, em paralelo com o resto, e só é aguardada na hora de chamar a IA.
+  // Provedor resolve em paralelo com o preparo do prompt (não depende dele).
   const resolvedPromise = resolvePlanejamentoProvider();
 
-  // Query pequena e sempre presente: o contexto livre do admin (Etapa 1).
-  const ctxQuery = supabase
-    .from("orcamento_planejamento_socios")
-    .select("contexto_admin")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("category_code", categoryCode)
-    .maybeSingle<{ contexto_admin: string | null }>();
-  const companyQuery = supabase
-    .from("companies")
-    .select("name")
-    .eq("id", companyId)
-    .maybeSingle<{ name: string }>();
-
-  let companyName: string;
-  let nomeCategoria: string;
-  let dreLineCode: string;
-  let dreLineName: string;
-  let realizadoCat: MediaRealizado;
-  let contextoAdmin: string;
-
-  // FAST PATH — o cliente já mandou a linha da DRE + o realizado do ano anterior
-  // (constantes na conversa). Pulamos o catálogo de categorias e o realizado da
-  // Omie, que antes rodavam a CADA mensagem só para remontar a mesma linha de
-  // contexto do prompt. Fica só empresa + contexto do admin (queries leves).
-  if (promptCtx && Number.isFinite(promptCtx.realizadoTotal)) {
-    const [companyRes, ctxRes] = await Promise.all([companyQuery, ctxQuery]);
-    companyName = companyRes.data?.name ?? "Empresa";
-    nomeCategoria = categoryName;
-    dreLineCode = promptCtx.dreLineCode;
-    dreLineName = promptCtx.dreLineName;
-    realizadoCat = { ...REALIZADO_VAZIO, total: promptCtx.realizadoTotal, media: promptCtx.realizadoMedia };
-    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
-  } else {
-    // FALLBACK (cliente antigo, sem promptCtx) — computa tudo no servidor, como
-    // antes: catálogo (nome + linha DRE + irmãs "(*)") e realizado da Omie.
-    const [companyRes, cats, ctxRes] = await Promise.all([companyQuery, getCategoriaMetodo(companyId, year), ctxQuery]);
-    companyName = companyRes.data?.name ?? "Empresa";
-    const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
-    nomeCategoria = cat?.categoryName ?? categoryName;
-    dreLineCode = cat?.dreLineCode ?? "";
-    dreLineName = cat?.dreLineName ?? "";
-    contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
-    // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
-    // O TOTAL é o do ANO INTEIRO (não só meses fechados) — é o "total gasto"; a
-    // média mensal segue a lógica de meses fechados.
-    const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, nomeCategoria);
-    const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
-    realizadoCat = { ...combinarRealizados(realizados, irmaos, year - 1), total: totalGastoAno(realizados, irmaos) };
-  }
-
-  const historico = sanitizeConversa(conversaAtual);
-  const texto = (textoUsuario ?? "").trim();
-
-  const system = buildSystemPrompt({
-    companyName,
-    categoryName: nomeCategoria,
-    dreLineCode,
-    dreLineName,
+  // Este caminho é o de ENCERRAR (finalizar=true), que produz a proposta em JSON.
+  const prep = await montarSistemaEntrevista({
+    companyId,
     year,
-    realizado: realizadoCat,
-    considerar: semBase ? "" : considerarContexto(contexto, []),
-    semBase,
-    descricaoCategoria: descricaoCategoria(nomeCategoria),
-    regraCategoria: regraCategoria(nomeCategoria),
-    contextoAdmin,
+    categoryCode,
+    categoryName,
+    conversaAtual,
+    itensContexto,
+    promptCtx,
+    streaming: false,
   });
+  if ("needsMigration" in prep) return { needsMigration: true };
+  if ("error" in prep) return { error: prep.error };
+  const { system, historico } = prep;
+  const texto = (textoUsuario ?? "").trim();
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const messages: ModelMessage[] = historico.map((m) =>
     m.role === "user" ? { role: "user", content: m.content } : { role: "assistant", content: m.content },
@@ -935,9 +992,11 @@ export async function enviarMensagemPlanejamento(
       content:
         "Encerrar a entrevista AGORA. Com base em TUDO que já foi respondido, monte a proposta " +
         "final (campo 'proposta' PREENCHIDO no JSON): todos os itens mantidos com o valor/mês " +
-        "confirmados, mais os itens novos completos, sem os que eu disse não manter. Só NÃO proponha " +
-        "se faltar algum dado OBRIGATÓRIO (nome, valor, mensal/anual, mês, justificativa) de um item " +
-        "NOVO — nesse caso pergunte apenas o que falta.",
+        "confirmados, mais os itens novos completos, sem os que eu disse não manter. Se NÃO houver " +
+        "nenhum item (categoria zerada), devolva 'proposta' com \"itens\": [] (lista vazia) e uma " +
+        "justificativa — NÃO devolva proposta null. Só devolva proposta null se faltar algum dado " +
+        "OBRIGATÓRIO (nome, valor, mensal/anual, mês, justificativa) de um item NOVO — nesse caso " +
+        "pergunte apenas o que falta.",
     });
   }
 
@@ -1007,6 +1066,96 @@ export async function enviarMensagemPlanejamento(
 
   revalidatePath(PATH);
   return { reply, proposta, podeFechar, conversa: novaConversa };
+}
+
+/**
+ * STREAMING (turno de entrevista) — monta o `system` + `messages` (serializáveis)
+ * para a ROTA `/api/orcamento/planejamento/chat` fazer o `streamText`. NÃO chama
+ * a IA nem persiste aqui: a rota resolve o provedor, faz o streaming e persiste
+ * a conversa no `onFinish` via `persistirConversaEntrevista`. A resposta é TEXTO
+ * corrido; o fim da entrevista vem do marcador [[FECHAR]] (ver planejamento-calc).
+ */
+export async function montarPromptEntrevista(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  categoryName: string,
+  conversaAtual: PlanejamentoMensagem[],
+  textoUsuario: string,
+  itensContexto: PlanejamentoContextoItem[] = [],
+  promptCtx?: PlanejamentoPromptContexto,
+): Promise<{
+  system?: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
+  error?: string;
+  needsMigration?: boolean;
+}> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const prep = await montarSistemaEntrevista({
+    companyId,
+    year,
+    categoryCode,
+    categoryName,
+    conversaAtual,
+    itensContexto,
+    promptCtx,
+    streaming: true,
+  });
+  if ("needsMigration" in prep) return { needsMigration: true };
+  if ("error" in prep) return { error: prep.error };
+
+  const texto = (textoUsuario ?? "").trim();
+  const messages: Array<{ role: "user" | "assistant"; content: string }> = prep.historico.map((m) =>
+    m.role === "user" ? { role: "user", content: m.content } : { role: "assistant", content: m.content },
+  );
+  if (texto) {
+    messages.push({ role: "user", content: texto });
+  } else if (messages.length === 0) {
+    messages.push({ role: "user", content: "Inicie a entrevista fazendo a primeira pergunta." });
+  }
+
+  return { system: prep.system, messages };
+}
+
+/**
+ * Persiste a conversa da entrevista (SEM tocar em proposta/base/status).
+ * Chamado pelo `onFinish` do streaming, com a conversa completa já montada
+ * (a resposta da IA já sem o marcador [[FECHAR]]).
+ */
+export async function persistirConversaEntrevista(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  categoryName: string,
+  conversa: PlanejamentoMensagem[],
+): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase.from("orcamento_planejamento_socios").upsert(
+    {
+      company_id: companyId,
+      year,
+      category_code: categoryCode,
+      category_name: categoryName,
+      conversa: sanitizeConversa(conversa),
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year,category_code" },
+  );
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true };
 }
 
 // ─── Salvar / remover ──────────────────────────────────────────────────────────
