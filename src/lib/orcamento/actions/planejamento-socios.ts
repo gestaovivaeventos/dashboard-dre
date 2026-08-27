@@ -628,6 +628,11 @@ function normNomeCategoria(s: string): string {
     .toLocaleLowerCase("pt-BR");
 }
 
+/** A categoria é a "gêmea (*)" (subdivisão contábil interna), não a canônica? */
+function ehCategoriaEstrela(name: string): boolean {
+  return /\(\*\)\s*$/.test((name ?? "").trim());
+}
+
 /** Códigos de todas as categorias irmãs (mesmo nome-base), incluindo a própria. */
 function codigosIrmaos(
   items: { categoryCode: string; categoryName: string }[],
@@ -716,7 +721,18 @@ export async function getPlanejamentoSocios(
   const cats = await getCategoriaMetodo(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
-  const doMetodo = (cats.items ?? []).filter((c) => c.metodo === "planejamento_socios");
+  const doMetodoTodos = (cats.items ?? []).filter((c) => c.metodo === "planejamento_socios");
+  // Salvaguarda: a regra é marcar só a categoria canônica (sem "(*)"); o gasto da
+  // gêmea "(*)" já é somado no card dela (codigosIrmaos). Se por engano a "(*)"
+  // também foi marcada com o método E a canônica está presente, NÃO gera um card
+  // duplicado para a "(*)" — evitaria dupla contagem no total/progresso. Se só a
+  // "(*)" tiver o método (sem a canônica), o card dela é mantido.
+  const basesCanonicas = new Set(
+    doMetodoTodos.filter((c) => !ehCategoriaEstrela(c.categoryName)).map((c) => normNomeCategoria(c.categoryName)),
+  );
+  const doMetodo = doMetodoTodos.filter(
+    (c) => !(ehCategoriaEstrela(c.categoryName) && basesCanonicas.has(normNomeCategoria(c.categoryName))),
+  );
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 

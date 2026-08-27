@@ -470,7 +470,7 @@ export function NovaRequisicaoForm({
       rateioRows
         .map((r) => ({
           sectorId: r.sectorId,
-          amount: Number(r.valueStr.replace(/./g, "").replace(",", ".")),
+          amount: Number(r.valueStr.replace(/\./g, "").replace(",", ".")),
         }))
         .filter((p) => p.sectorId && Number.isFinite(p.amount) && p.amount > 0),
     [rateioRows],
