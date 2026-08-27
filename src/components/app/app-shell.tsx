@@ -108,12 +108,13 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={0}>
-      {/* Tour guiado do Financeiro. O autoStart é dos perfis que só enxergam
-          esse módulo (Visão Financeira / CSC) — para os demais o tour existe,
-          mas só pelo "?" da topbar, sem interromper quem já conhece o sistema. */}
+      {/* Tour guiado do Financeiro, para TODO MUNDO que tem o módulo. O gate é
+          o `userRole` (= navDreRole no layout), não-nulo exatamente quando o
+          usuário tem `can_financeiro` — quem só tem Compras/Contratos não é
+          interrompido. Roda uma vez por pessoa e o "?" da topbar traz de volta. */}
       <TourProvider
         userKey={userEmail || userName}
-        autoStart={Boolean(isFranqueado || isCsc)}
+        autoStart={userRole !== null}
         segmentSlug={tourSegmentSlug}
       >
       <div className="ch-shell">

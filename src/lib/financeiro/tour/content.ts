@@ -61,9 +61,12 @@ export interface TourScreen {
 export const TOUR_VERSION = 1;
 
 /**
- * Telas na ORDEM DO MENU do perfil "Visão Financeira" (ver FRANQUEADO_NAV_KEYS
- * em components/app/navigation.ts). A Home não é item de menu, mas é o pouso de
- * todos os perfis e por isso abre a sequência.
+ * Telas na ORDEM DO MENU do grupo FINANCEIRO (ver NAV_GROUPS em
+ * components/app/navigation.ts), limitadas ao que TODO usuário do módulo
+ * enxerga — as telas admin (Mapeamento, Lançamentos manuais, Configurações) e a
+ * Validação Relatório, de whitelist própria, ficam de fora de propósito: o tour
+ * é a mesma apresentação para todo mundo. A Home não é item de menu, mas é o
+ * pouso de todos os perfis e por isso abre a sequência.
  */
 export const TOUR_SCREENS: readonly TourScreen[] = [
   {
@@ -82,7 +85,7 @@ export const TOUR_SCREENS: readonly TourScreen[] = [
         anchor: "nav-menu",
         title: "O menu lateral",
         body:
-          "Todas as telas do Financeiro ficam aqui: DRE Gerencial, Fluxo de Caixa, Budget e Forecast, Business Intelligence, Documentos anexos e Comparativos Anuais. É por aqui que você troca de tela.",
+          "As telas ficam agrupadas por módulo. Em FINANCEIRO estão DRE Gerencial, Fluxo de Caixa, Budget e Forecast, Business Intelligence, Documentos anexos e Comparativos Anuais — as seis que este tour percorre. Se o seu acesso incluir outras telas ou módulos, eles aparecem aqui também.",
         placement: "right",
       },
       {

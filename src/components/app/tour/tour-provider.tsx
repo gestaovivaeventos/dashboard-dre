@@ -72,9 +72,9 @@ interface TourProviderProps {
    */
   userKey: string;
   /**
-   * Dispara o tour sozinho no primeiro acesso. Ligado para os perfis que só
-   * enxergam o Financeiro (Visão Financeira / CSC) — os demais continuam
-   * com o "?" à disposição, sem serem interrompidos.
+   * Dispara o tour sozinho no primeiro acesso. Ligado para TODO usuário com o
+   * módulo Financeiro; quem não tem (só Compras, só Contratos) não é
+   * interrompido — e nem teria as telas do roteiro.
    */
   autoStart: boolean;
   /** Segmento ativo, para montar o link das telas servidas em /s/<slug>/... */
