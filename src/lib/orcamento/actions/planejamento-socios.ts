@@ -317,6 +317,23 @@ const CATEGORIA_DESCRICOES: { match: string; descricao: string; regra?: string }
       "e parceiros que ajudem a estruturar processos ou evoluir uma área.",
   },
   {
+    match: "labore",
+    descricao:
+      "Pró-labore é o SALÁRIO DOS SÓCIOS (os donos da empresa). Cada item da base é o " +
+      "pró-labore de um sócio. Para o orçamento, o que importa é definir o valor ATUALIZADO " +
+      "do pró-labore de cada sócio para o ano seguinte.",
+    regra:
+      "ESSÊNCIA DESTA CATEGORIA (tem PRECEDÊNCIA sobre a condução padrão abaixo): Pró-labore é " +
+      "o SALÁRIO DOS SÓCIOS, que são os DONOS da empresa. Portanto o pró-labore NÃO deixa de " +
+      "existir no ano seguinte — é ERRADO perguntar se \"será mantido\", \"continua\" ou tratar " +
+      "qualquer sócio como cancelado/removido. Cada item da base é o pró-labore de UM sócio e é " +
+      "SEMPRE mantido. CONDUÇÃO CORRETA: para CADA sócio, INFORME o valor atual (em tom de fato) e " +
+      "pergunte APENAS qual será o VALOR ATUALIZADO do pró-labore dele para o ano do orçamento — " +
+      "pode ser o mesmo valor ou um reajuste. Registre o valor que o gestor informar. Se o gestor " +
+      "citar um SÓCIO NOVO, colete nome e valor mensal. O objetivo é fechar o valor mensal " +
+      "atualizado de cada sócio; não há item para \"não manter\".",
+  },
+  {
     match: "manutencao de imobilizado",
     descricao:
       "Previsão de despesas com MANUTENÇÃO e conservação de bens já existentes — imóveis, " +
@@ -380,8 +397,17 @@ function buildSystemPrompt(opts: {
       ]
     : [];
 
+  // Se a categoria tem uma REGRA própria (ex.: pró-labore), a condução dela
+  // PREVALECE — pode até trocar o tipo de pergunta ("mantém?" → "qual o valor
+  // atualizado?"). A condução padrão abaixo é o caso geral.
+  const precedenciaRegra = opts.regraCategoria
+    ? "IMPORTANTE: a REGRA DA CATEGORIA logo acima PREVALECE sobre a condução padrão a seguir — " +
+      "quando ela definir COMO conduzir (que pergunta fazer), siga a REGRA, não o passo padrão."
+    : "";
+
   // Bloco de CONDUÇÃO — muda conforme haja ou não uma base cadastrada.
   const comBase: string[] = [
+    ...(precedenciaRegra ? [precedenciaRegra, ""] : []),
     "Itens JÁ CADASTRADOS pela administração para esta categoria (valor e mês são o",
     "PONTO DE PARTIDA — o padrão, não um teto). NÃO invente itens MANTIDOS fora desta",
     "lista, mas o gestor PODE alterar qualquer valor/mês e PODE adicionar itens novos:",
@@ -421,6 +447,7 @@ function buildSystemPrompt(opts: {
   ];
 
   const semBase: string[] = [
+    ...(precedenciaRegra ? [precedenciaRegra, ""] : []),
     "Esta categoria NÃO tem itens pré-cadastrados: o administrador NÃO definiu uma base de",
     "contratos/assinaturas para você considerar. Portanto NÃO existe lista para confirmar",
     "item por item — a entrevista é ABERTA, e você deve GUIAR o gestor.",
@@ -462,6 +489,19 @@ function buildSystemPrompt(opts: {
     `gestor o TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total"`,
     `acima (mesmo que não haja base cadastrada; se não houver dado, diga que não houve`,
     `gasto registrado). Só DEPOIS siga a condução abaixo.`,
+    "",
+    "INTERPRETE A CATEGORIA ANTES DE PERGUNTAR (regra permanente, vale para QUALQUER",
+    `categoria): entenda a ESSÊNCIA do que é "${categoryName}" — pela natureza da despesa`,
+    `e pela linha da DRE (${opts.dreLineCode} — ${opts.dreLineName}) — e avalie se cada`,
+    "pergunta é PERTINENTE a esse tipo de despesa. Nem toda categoria aceita as mesmas",
+    "perguntas. Há despesas ESTRUTURAIS/obrigatórias que continuam por natureza (ex.:",
+    "salário dos sócios, impostos, aluguel, contas de consumo): para essas NÃO faz sentido",
+    "perguntar se 'serão mantidas' — elas não deixam de existir; o que importa é o VALOR",
+    "ATUALIZADO para o próximo ano. Há despesas OPCIONAIS/discricionárias (ex.: assinaturas,",
+    "consultorias, treinamentos): para essas cabe perguntar se serão mantidas e se há algo",
+    "novo. Ajuste as perguntas ao que faz sentido para ESTA categoria e NÃO faça perguntas",
+    "que soariam absurdas ao gestor dado o que a despesa é. (Se houver uma REGRA DA",
+    "CATEGORIA logo abaixo, ela já traz essa interpretação pronta — siga-a.)",
     "",
     ...blocoContexto,
     ...(opts.regraCategoria ? [opts.regraCategoria, ""] : []),
