@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   CheckCircle2,
   Circle,
   CircleDot,
   Lock,
   Loader2,
   MessageSquare,
+  PartyPopper,
   Pencil,
   Plus,
   RotateCcw,
@@ -386,6 +388,84 @@ function PropostaCard({ proposta, year }: { proposta: PlanejamentoProposta; year
   );
 }
 
+// ─── Painel de conclusão da categoria (fim da Etapa 3) ──────────────────────
+// Depois de CONFIRMAR a proposta, empurra o gestor para a próxima categoria
+// PENDENTE (ou celebra o fim) — evita que ele feche a categoria achando que
+// terminou o planejamento quando ainda faltam outras.
+
+function ConclusaoPanel({
+  categoryName,
+  year,
+  pendentes,
+  nextCode,
+  onNext,
+  onBack,
+}: {
+  categoryName: string;
+  year: number;
+  pendentes: number;
+  nextCode: string | null;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const completo = nextCode == null;
+  return (
+    <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4">
+      {completo ? (
+        <div className="flex items-start gap-2">
+          <PartyPopper className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div>
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+              Todas as categorias concluídas!
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              O planejamento dos sócios de {year} está completo — todas as categorias já têm proposta
+              confirmada e foram enviadas à Prévia.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div>
+            <p className="text-sm">
+              <span className="font-semibold">{categoryName}</span> concluída e enviada à Prévia. Ainda{" "}
+              {pendentes === 1 ? "falta" : "faltam"}{" "}
+              <span className="font-semibold text-emerald-700 dark:text-emerald-300">{pendentes}</span>{" "}
+              categoria{pendentes === 1 ? "" : "s"} para fechar o planejamento de {year}.
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {!completo && (
+          <button
+            type="button"
+            onClick={onNext}
+            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Próxima categoria pendente
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onBack}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium",
+            completo
+              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+              : "border hover:bg-muted",
+          )}
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Voltar às categorias
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Passo do fluxo (stepper vertical) ──────────────────────────────────────
 
 type StepState = "locked" | "active" | "done";
@@ -445,7 +525,9 @@ function CategoriaInterview({
   year,
   categoryCode,
   isAdmin,
+  allItems,
   onBack,
+  onNavigate,
   onSaved,
   onError,
 }: {
@@ -453,7 +535,11 @@ function CategoriaInterview({
   year: number;
   categoryCode: string;
   isAdmin: boolean;
+  /** Lista COMPLETA de categorias (ordem estável) — para posição "X de N" e a próxima pendente. */
+  allItems: PlanejamentoListItem[];
   onBack: () => void;
+  /** Salta direto para outra categoria (ex.: a próxima pendente), sem passar pela lista. */
+  onNavigate: (code: string) => void;
   onSaved: () => void;
   onError: (msg: string) => void;
 }) {
@@ -557,6 +643,29 @@ function CategoriaInterview({
   const baseIncluidos = useMemo(() => baseItens.filter((i) => i.incluir), [baseItens]);
   const baseTotal = categoriaTotal(baseIncluidos);
   const baseDescFaltando = baseIncluidos.some((i) => i.descricao.trim() === "");
+
+  // Posição desta categoria no plano + próxima PENDENTE (para o painel de
+  // conclusão e o "X de N" do cabeçalho). A categoria atual conta como concluída
+  // pelo estado local `propostaConfirmada` (a lista do servidor pode ainda estar
+  // recarregando após confirmar); as demais, pelo que veio da lista.
+  const positionInfo = useMemo(() => {
+    const total = allItems.length;
+    const idx = allItems.findIndex((i) => i.categoryCode === categoryCode);
+    const isDone = (i: PlanejamentoListItem) =>
+      i.categoryCode === categoryCode ? propostaConfirmada : i.propostaConfirmada;
+    const pendentes = allItems.filter((i) => !isDone(i)).length;
+    let next: string | null = null;
+    if (total > 0 && idx >= 0) {
+      for (let k = 1; k <= total; k += 1) {
+        const cand = allItems[(idx + k) % total];
+        if (!isDone(cand)) {
+          next = cand.categoryCode;
+          break;
+        }
+      }
+    }
+    return { position: idx >= 0 ? idx + 1 : 0, total, pendentes, next };
+  }, [allItems, categoryCode, propostaConfirmada]);
 
   // ── Etapa 1: CRUD da base ──────────────────────────────────────────────────
   function updateBaseItem(key: string, partial: Partial<LocalItem>) {
@@ -883,6 +992,25 @@ function CategoriaInterview({
             </p>
           </div>
         </div>
+        {positionInfo.total > 0 && (
+          <div className="flex flex-col items-end gap-1 text-right">
+            <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              Categoria {positionInfo.position} de {positionInfo.total}
+            </span>
+            <span
+              className={cn(
+                "text-[11px] font-medium",
+                positionInfo.pendentes === 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-amber-600 dark:text-amber-500",
+              )}
+            >
+              {positionInfo.pendentes === 0
+                ? "Todas confirmadas"
+                : `${positionInfo.pendentes} ainda sem confirmar`}
+            </span>
+          </div>
+        )}
       </div>
 
       {localErr && (
@@ -1262,12 +1390,7 @@ function CategoriaInterview({
                     <Pencil className="h-3.5 w-3.5" /> Editar números
                   </button>
                 )}
-                {propostaConfirmada ? (
-                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Confirmada — enviada à Prévia
-                  </span>
-                ) : (
+                {!propostaConfirmada && (
                   <button
                     type="button"
                     onClick={confirmar}
@@ -1279,6 +1402,16 @@ function CategoriaInterview({
                   </button>
                 )}
               </div>
+              {propostaConfirmada && (
+                <ConclusaoPanel
+                  categoryName={detalhe.categoryName}
+                  year={year}
+                  pendentes={positionInfo.pendentes}
+                  nextCode={positionInfo.next}
+                  onNext={() => positionInfo.next && onNavigate(positionInfo.next)}
+                  onBack={onBack}
+                />
+              )}
             </div>
           )}
         </Step>
@@ -1343,18 +1476,31 @@ export function PlanejamentoSociosManager({
     );
   }, [items, search]);
 
+  // Progresso global do planejamento (conta as categorias com proposta CONFIRMADA).
+  const concluidas = useMemo(() => items.filter((i) => i.propostaConfirmada).length, [items]);
+  const totalCategorias = items.length;
+  const pctConcluido = totalCategorias > 0 ? Math.round((concluidas / totalCategorias) * 100) : 0;
+  const planoCompleto = totalCategorias > 0 && concluidas === totalCategorias;
+
   // A categoria selecionada renderiza ANTES do gate de `loading` da lista: um
   // reload em segundo plano (ex.: onSaved) NÃO pode desmontar a entrevista.
   if (selected) {
     return (
       <CategoriaInterview
+        key={selected}
         companyId={companyId}
         year={year}
         categoryCode={selected}
         isAdmin={isAdmin}
+        allItems={items}
         onBack={() => {
           setSelected(null);
           void reload();
+        }}
+        onNavigate={(code) => {
+          setSelected(code);
+          void reload();
+          if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
         }}
         onSaved={() => void reload()}
         onError={(msg) => {
@@ -1402,6 +1548,47 @@ export function PlanejamentoSociosManager({
         </div>
       ) : (
         <>
+          {/* Progresso global — deixa sempre visível quantas categorias ainda faltam,
+              para o gestor não fechar o planejamento achando que terminou. */}
+          <div
+            className={cn(
+              "rounded-lg border p-4",
+              planoCompleto && "border-emerald-500/40 bg-emerald-500/5",
+            )}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  {planoCompleto && (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  )}
+                  Planejamento {year} — {concluidas} de {totalCategorias} categorias concluídas
+                </div>
+                {planoCompleto ? (
+                  <p className="mt-0.5 text-xs text-emerald-600 dark:text-emerald-400">
+                    Todas as categorias têm proposta confirmada — o planejamento está completo.
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {totalCategorias - concluidas} categoria(s) ainda sem proposta confirmada.
+                  </p>
+                )}
+              </div>
+              <span className="text-sm font-semibold tabular-nums text-muted-foreground">
+                {pctConcluido}%
+              </span>
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  planoCompleto ? "bg-emerald-500" : "bg-emerald-600/70",
+                )}
+                style={{ width: `${pctConcluido}%` }}
+              />
+            </div>
+          </div>
+
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
