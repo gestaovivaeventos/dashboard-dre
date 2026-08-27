@@ -459,6 +459,7 @@ function CategoriaInterview({
   const [baseSalva, setBaseSalva] = useState(false);
   const [baseEdit, setBaseEdit] = useState(false);
   const [savingBase, setSavingBase] = useState(false);
+  const [contextoAdmin, setContextoAdmin] = useState("");
   const baseRef = useRef<LocalItem[]>([]);
 
   // ETAPA 2 — entrevista
@@ -529,6 +530,7 @@ function CategoriaInterview({
       setDetalhe(d);
       seedBase(d);
       setBaseSalva(d.baseSalva);
+      setContextoAdmin(d.contextoAdmin);
       setBaseEdit(!d.baseSalva); // sem base salva → abre o editor; salva → colapsa
       setConversa(d.conversa);
       setProposta(d.proposta);
@@ -598,6 +600,7 @@ function CategoriaInterview({
         fornecedor: i.fornecedor,
         incluir: i.incluir,
       })),
+      contextoAdmin,
     );
     setSavingBase(false);
     if (res.needsMigration) {
@@ -827,24 +830,34 @@ function CategoriaInterview({
                 : "Aguardando o administrador validar a base."}
             </div>
           ) : baseSalva && !baseEdit ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-emerald-500/5 p-3 text-sm">
-              <span className="text-muted-foreground">
-                {baseIncluidos.length > 0 ? (
-                  <>
-                    {baseIncluidos.length} item(ns) marcados · referência de {formatBRL(baseTotal)}/ano.{" "}
-                  </>
-                ) : (
-                  <>Sem itens prévios — a entrevista será aberta. </>
-                )}
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">Base validada.</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setBaseEdit(true)}
-                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
-              >
-                <Pencil className="h-3.5 w-3.5" /> Editar base
-              </button>
+            <div className="space-y-2 rounded-md border bg-emerald-500/5 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-muted-foreground">
+                  {baseIncluidos.length > 0 ? (
+                    <>
+                      {baseIncluidos.length} item(ns) marcados · referência de {formatBRL(baseTotal)}/ano.{" "}
+                    </>
+                  ) : (
+                    <>Sem itens prévios — a entrevista será aberta. </>
+                  )}
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">Base validada.</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setBaseEdit(true)}
+                  className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Editar base
+                </button>
+              </div>
+              {contextoAdmin.trim() !== "" && (
+                <div className="flex items-start gap-1.5 rounded-md border border-emerald-500/20 bg-background/60 p-2 text-xs text-muted-foreground">
+                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>
+                    <span className="font-medium text-foreground">Contexto para a IA:</span> {contextoAdmin.trim()}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -856,6 +869,23 @@ function CategoriaInterview({
                 onRemove={removeBaseItem}
                 onAdd={addBaseItem}
               />
+              <div className="space-y-1">
+                <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                  Contexto para a IA <span className="font-normal">(opcional)</span>
+                </label>
+                <textarea
+                  value={contextoAdmin}
+                  onChange={(e) => setContextoAdmin(e.target.value)}
+                  rows={3}
+                  placeholder="Direcionamento extra que a IA deve considerar antes de entrevistar o gestor — ex.: “vamos trocar o fornecedor de limpeza em março”, “não renovar o contrato X”, “teto de R$ 5.000/mês nesta categoria”."
+                  className="w-full resize-y rounded-md border bg-background p-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Se preenchido, a IA lê e interpreta este texto <b>antes</b> de conduzir a entrevista, mantendo as
+                  perguntas condizentes com ele.
+                </p>
+              </div>
               {baseIncluidos.length === 0 && (
                 <p className="rounded-md border border-dashed bg-muted/20 p-2 text-[11px] text-muted-foreground">
                   Categoria sem contratos/assinaturas prévios? Pode validar a base <b>vazia</b> — a IA fará
@@ -874,7 +904,10 @@ function CategoriaInterview({
                     type="button"
                     onClick={() => {
                       setBaseEdit(false);
-                      if (detalhe) seedBase(detalhe);
+                      if (detalhe) {
+                        seedBase(detalhe);
+                        setContextoAdmin(detalhe.contextoAdmin);
+                      }
                     }}
                     className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
                   >

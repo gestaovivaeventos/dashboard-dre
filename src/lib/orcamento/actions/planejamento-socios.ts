@@ -58,6 +58,8 @@ export interface PlanejamentoCategoriaDetalhe {
   itens: PlanejamentoItem[];
   /** Etapa 1 finalizada (habilita a entrevista). */
   baseSalva: boolean;
+  /** ETAPA 1 — contexto livre que o admin escreve para orientar a IA. */
+  contextoAdmin: string;
   /** ETAPA 2 — transcript da entrevista. */
   conversa: PlanejamentoMensagem[];
   /** ETAPA 3 — proposta final vinda da entrevista (null enquanto não existe). */
@@ -85,6 +87,7 @@ interface CategoriaRow {
   conversa: unknown;
   status: string | null;
   base_salva: boolean | null;
+  contexto_admin: string | null;
   proposta: unknown;
   proposta_confirmada: boolean | null;
 }
@@ -284,8 +287,10 @@ async function resolvePlanejamentoProvider() {
 }
 
 /** Descrição do que é a despesa, para orientar o gestor quando NÃO há base.
- * O admin pode ampliar; sem match, a IA descreve a partir do nome. */
-const CATEGORIA_DESCRICOES: { match: string; descricao: string }[] = [
+ * O admin pode ampliar; sem match, a IA descreve a partir do nome.
+ * `regra` é uma calibração de vocabulário/condução específica da categoria
+ * (aplicada com ou sem base). */
+const CATEGORIA_DESCRICOES: { match: string; descricao: string; regra?: string }[] = [
   {
     match: "consultoria",
     descricao:
@@ -298,14 +303,38 @@ const CATEGORIA_DESCRICOES: { match: string; descricao: string }[] = [
       "Previsão de despesas com capacitação e desenvolvimento da equipe — cursos, treinamentos " +
       "e parceiros que ajudem a estruturar processos ou evoluir uma área.",
   },
+  {
+    match: "manutencao de imobilizado",
+    descricao:
+      "Previsão de despesas com MANUTENÇÃO e conservação de bens já existentes — imóveis, " +
+      "instalações, máquinas e equipamentos: reparos, consertos, revisões e serviços para " +
+      "manter em funcionamento o que a empresa já possui.",
+    regra:
+      "VOCABULÁRIO OBRIGATÓRIO desta categoria: NUNCA use as palavras \"investimento\" ou " +
+      "\"investir\" ao falar dela — nem na explicação, nem nas perguntas. Aqui são APENAS " +
+      "MANUTENÇÕES (reparos, consertos, revisões, conservação) de bens que a empresa JÁ tem; " +
+      "NÃO é compra de bem novo nem aquisição de ativo. Use sempre termos como \"manutenção\", " +
+      "\"reparo\" ou \"conserto\", nunca \"investimento\", para não induzir o gestor a incluir " +
+      "compras ou investimentos aqui.",
+  },
 ];
 
-function descricaoCategoria(name: string): string | null {
-  const n = name
+function normNomeDescricao(name: string): string {
+  return name
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
+}
+
+function descricaoCategoria(name: string): string | null {
+  const n = normNomeDescricao(name);
   return CATEGORIA_DESCRICOES.find((d) => n.includes(d.match))?.descricao ?? null;
+}
+
+/** Regra de calibração específica da categoria (vocabulário/condução), se houver. */
+function regraCategoria(name: string): string | null {
+  const n = normNomeDescricao(name);
+  return CATEGORIA_DESCRICOES.find((d) => n.includes(d.match))?.regra ?? null;
 }
 
 function buildSystemPrompt(opts: {
@@ -318,8 +347,25 @@ function buildSystemPrompt(opts: {
   considerar: string;
   semBase: boolean;
   descricaoCategoria: string | null;
+  regraCategoria: string | null;
+  contextoAdmin: string;
 }): string {
   const { year, categoryName } = opts;
+
+  // Contexto livre que o admin escreveu na Etapa 1 (direcionamento p/ a IA).
+  const ctx = opts.contextoAdmin.trim();
+  const blocoContexto: string[] = ctx
+    ? [
+        "CONTEXTO DO ADMINISTRADOR (leia ANTES de tudo e RESPEITE em toda a entrevista):",
+        "O administrador que monta o orçamento deixou este direcionamento sobre a categoria.",
+        "Interprete-o e conduza as perguntas de forma CONDIZENTE com ele — ele reflete decisões",
+        "já tomadas (trocas de fornecedor, contratos que não serão renovados, planos para o ano,",
+        "tetos de valor etc.). NÃO o contradiga nem ignore; se ele já responde algo que você",
+        "perguntaria, não repita a pergunta — apenas confirme com o gestor. Direcionamento:",
+        `"""${ctx}"""`,
+        "",
+      ]
+    : [];
 
   // Bloco de CONDUÇÃO — muda conforme haja ou não uma base cadastrada.
   const comBase: string[] = [
@@ -404,6 +450,8 @@ function buildSystemPrompt(opts: {
     `acima (mesmo que não haja base cadastrada; se não houver dado, diga que não houve`,
     `gasto registrado). Só DEPOIS siga a condução abaixo.`,
     "",
+    ...blocoContexto,
+    ...(opts.regraCategoria ? [opts.regraCategoria, ""] : []),
     ...(opts.semBase ? semBase : comBase),
     "",
     "NÃO monte a proposta por conta própria durante a entrevista — enquanto houver",
@@ -660,7 +708,9 @@ export async function getPlanejamentoCategoria(
 
   const { data: catRow, error: catErr } = await supabase
     .from("orcamento_planejamento_socios")
-    .select("category_code, category_name, justificativa, conversa, status, base_salva, proposta, proposta_confirmada")
+    .select(
+      "category_code, category_name, justificativa, conversa, status, base_salva, contexto_admin, proposta, proposta_confirmada",
+    )
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
@@ -701,6 +751,7 @@ export async function getPlanejamentoCategoria(
       dreLineName: cat.dreLineName,
       itens: ((itemRows ?? []) as ItemRow[]).map(rowToItem),
       baseSalva: catRow?.base_salva === true,
+      contextoAdmin: catRow?.contexto_admin ?? "",
       conversa: sanitizeConversa(catRow?.conversa),
       proposta: parsePropostaColumn(catRow?.proposta),
       propostaConfirmada: catRow?.proposta_confirmada === true,
@@ -741,15 +792,25 @@ export async function enviarMensagemPlanejamento(
   // Treinamento). A IA faz uma entrevista ABERTA, sem lista para confirmar.
   const semBase = contexto.length === 0;
 
-  // Nome da empresa + catálogo de categorias em paralelo. As categorias servem
-  // para achar os códigos IRMÃOS ("(*)") e somar o realizado completo.
-  const [companyRes, cats] = await Promise.all([
+  // Nome da empresa + catálogo de categorias + contexto do admin em paralelo. As
+  // categorias servem para achar os códigos IRMÃOS ("(*)") e somar o realizado.
+  const [companyRes, cats, ctxRes] = await Promise.all([
     supabase.from("companies").select("name").eq("id", companyId).maybeSingle<{ name: string }>(),
     getCategoriaMetodo(companyId, year),
+    supabase
+      .from("orcamento_planejamento_socios")
+      .select("contexto_admin")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .maybeSingle<{ contexto_admin: string | null }>(),
   ]);
   const companyName = companyRes.data?.name ?? "Empresa";
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
   const nomeCategoria = cat?.categoryName ?? categoryName;
+  // Contexto livre do admin (Etapa 1). Se a coluna ainda não existe (migration
+  // pendente), o erro é IGNORADO — a entrevista roda sem esse direcionamento.
+  const contextoAdmin = (ctxRes.data?.contexto_admin ?? "").trim();
 
   // Realizado do ano anterior somando a categoria + irmãs "(*)" (divisão interna).
   // O TOTAL mostrado é o do ANO INTEIRO (não só meses fechados) — é o "total gasto"
@@ -774,6 +835,8 @@ export async function enviarMensagemPlanejamento(
     considerar: semBase ? "" : considerarContexto(contexto, []),
     semBase,
     descricaoCategoria: descricaoCategoria(nomeCategoria),
+    regraCategoria: regraCategoria(nomeCategoria),
+    contextoAdmin,
   });
 
   const messages: ModelMessage[] = historico.map((m) =>
@@ -881,6 +944,7 @@ export async function salvarBasePlanejamento(
   categoryCode: string,
   categoryName: string,
   itens: PlanejamentoItemProposto[],
+  contextoAdmin = "",
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -891,6 +955,7 @@ export async function salvarBasePlanejamento(
   // ex.: Consultoria e Treinamento) — nesse caso a entrevista é aberta. Não há
   // trava de "mínimo 1 item".
   const limpos = sanitizeItensProposta(itens).filter((i) => i.descricao.trim() !== "");
+  const ctx = contextoAdmin.trim();
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -901,6 +966,7 @@ export async function salvarBasePlanejamento(
       category_code: categoryCode,
       category_name: categoryName,
       base_salva: true,
+      contexto_admin: ctx || null,
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code" },
