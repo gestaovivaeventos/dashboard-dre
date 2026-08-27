@@ -110,11 +110,13 @@ export function AppShell({
     <TooltipProvider delayDuration={0}>
       {/* Tour guiado do Financeiro, para TODO MUNDO que tem o módulo. O gate é
           o `userRole` (= navDreRole no layout), não-nulo exatamente quando o
-          usuário tem `can_financeiro` — quem só tem Compras/Contratos não é
-          interrompido. Roda uma vez por pessoa e o "?" da topbar traz de volta. */}
+          usuário tem `can_financeiro` — e vale para as DUAS entradas: o disparo
+          no primeiro acesso e o "?" da topbar. Gatear só por rota não bastava:
+          a /home é o pouso de todos os perfis, e quem só tem Compras via ali um
+          "?" de um tour sobre telas que nem enxerga. */}
       <TourProvider
         userKey={userEmail || userName}
-        autoStart={userRole !== null}
+        enabled={userRole !== null}
         segmentSlug={tourSegmentSlug}
       >
       <div className="ch-shell">

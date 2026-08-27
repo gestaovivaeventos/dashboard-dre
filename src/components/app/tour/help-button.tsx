@@ -5,8 +5,10 @@
 // É o que substitui o treinamento formal: quem pulou o tour de primeiro acesso,
 // ou simplesmente esqueceu, reabre a explicação DA TELA EM QUE ESTÁ, sozinho.
 //
-// Some nas telas sem tour definido (Compras, Contratos, admin…): um "?" que
-// não faz nada ensina o usuário a ignorar o "?".
+// Some para quem não tem o módulo Financeiro e nas telas sem tour definido
+// (Compras, Contratos, admin…): um "?" que não faz nada — ou que explica telas
+// que a pessoa nem enxerga — ensina o usuário a ignorar o "?". Quem decide as
+// duas coisas é o `available` do provider, não esta camada.
 
 import { HelpCircle } from "lucide-react";
 

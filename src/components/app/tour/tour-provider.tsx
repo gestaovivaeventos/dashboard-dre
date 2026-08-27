@@ -2,9 +2,10 @@
 
 // Motor do tour guiado do módulo Financeiro.
 //
-// Duas entradas, um só motor:
-//   1. Primeiro acesso — dispara sozinho na /home (só para quem `autoStart`
-//      permite) e caminha pelas telas na ordem do menu.
+// Duas entradas, um só motor — e um só gate, a prop `enabled` (ter o módulo
+// Financeiro), que vale para as duas:
+//   1. Primeiro acesso — dispara sozinho na /home e caminha pelas telas na
+//      ordem do menu.
 //   2. Botão "?" da topbar — reabre o tour DA TELA ATUAL, a qualquer momento.
 //
 // O conteúdo NÃO mora aqui: vem de @/lib/financeiro/tour/content.
@@ -47,7 +48,11 @@ function anchorElement(anchor: string): HTMLElement | null {
 }
 
 interface TourContextValue {
-  /** Há tour definido para a rota atual? (o "?" some quando não há) */
+  /**
+   * O "?" deve aparecer: o usuário tem o módulo Financeiro E a rota atual tem
+   * tour definido. As duas condições — a /home tem tour e é o pouso de todos
+   * os perfis, então a rota sozinha não basta.
+   */
   available: boolean;
   /** Abre o tour da tela atual — uso avulso, sem encadear as próximas. */
   openCurrent: () => void;
@@ -72,16 +77,19 @@ interface TourProviderProps {
    */
   userKey: string;
   /**
-   * Dispara o tour sozinho no primeiro acesso. Ligado para TODO usuário com o
-   * módulo Financeiro; quem não tem (só Compras, só Contratos) não é
-   * interrompido — e nem teria as telas do roteiro.
+   * O usuário tem o módulo Financeiro.
+   *
+   * Gate ÚNICO do tour inteiro — o disparo no primeiro acesso E o "?" da
+   * topbar. Não basta gatear por rota: a /home é o pouso de TODOS os perfis,
+   * então quem só tem Compras ou Contratos também passa por lá e via o "?" de
+   * um tour sobre telas que nem enxerga.
    */
-  autoStart: boolean;
+  enabled: boolean;
   /** Segmento ativo, para montar o link das telas servidas em /s/<slug>/... */
   segmentSlug: string | null;
 }
 
-export function TourProvider({ children, userKey, autoStart, segmentSlug }: TourProviderProps) {
+export function TourProvider({ children, userKey, enabled, segmentSlug }: TourProviderProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -162,9 +170,9 @@ export function TourProvider({ children, userKey, autoStart, segmentSlug }: Tour
     window.setTimeout(attempt, 250);
   }, []);
 
-  // Primeiro acesso: só na /home, só uma vez, só para quem autoStart libera.
+  // Primeiro acesso: só na /home, só uma vez, só para quem tem o módulo.
   useEffect(() => {
-    if (!autoStart || !mounted || pathname !== "/home") return;
+    if (!enabled || !mounted || pathname !== "/home") return;
     let done = false;
     try {
       done = window.localStorage.getItem(tourStorageKey(userKey)) === "done";
@@ -174,12 +182,12 @@ export function TourProvider({ children, userKey, autoStart, segmentSlug }: Tour
     if (done) return;
     const home = resolveTourScreen("/home");
     if (home) start(home, "sequence");
-  }, [autoStart, mounted, pathname, userKey, start]);
+  }, [enabled, mounted, pathname, userKey, start]);
 
   // Continuação da sequência: a tela anterior deixou o próximo id marcado
   // antes de navegar.
   useEffect(() => {
-    if (!mounted || !screenForPath) return;
+    if (!enabled || !mounted || !screenForPath) return;
     let pending: string | null = null;
     try {
       pending = window.sessionStorage.getItem(PENDING_KEY);
@@ -193,12 +201,12 @@ export function TourProvider({ children, userKey, autoStart, segmentSlug }: Tour
       /* idem */
     }
     start(screenForPath, "sequence");
-  }, [mounted, screenForPath, start]);
+  }, [enabled, mounted, screenForPath, start]);
 
   const openCurrent = useCallback(() => {
-    if (!screenForPath) return;
+    if (!enabled || !screenForPath) return;
     start(screenForPath, "single");
-  }, [screenForPath, start]);
+  }, [enabled, screenForPath, start]);
 
   const step = screen ? steps[index] : undefined;
 
@@ -322,8 +330,8 @@ export function TourProvider({ children, userKey, autoStart, segmentSlug }: Tour
   }, [screen, close, goNext]);
 
   const value = useMemo<TourContextValue>(
-    () => ({ available: Boolean(screenForPath), openCurrent, active: Boolean(screen) }),
-    [screenForPath, openCurrent, screen],
+    () => ({ available: enabled && Boolean(screenForPath), openCurrent, active: Boolean(screen) }),
+    [enabled, screenForPath, openCurrent, screen],
   );
 
   return (
