@@ -299,7 +299,7 @@ export function DocumentosAnexosClient({
       <Card>
         <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5" data-tour="doc-empresa">
               <label className="text-sm font-medium">Empresa / unidade</label>
               <Select value={companyId} onValueChange={setCompanyId}>
                 <SelectTrigger className="w-64">
@@ -322,7 +322,7 @@ export function DocumentosAnexosClient({
             </div>
 
             {/* Filtro opcional por mes/ano de referencia — disponivel a todos. */}
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5" data-tour="doc-referencia">
               <label className="text-sm font-medium">Data de referência</label>
               <div className="flex items-center gap-2">
                 <Input
@@ -364,7 +364,7 @@ export function DocumentosAnexosClient({
         </div>
       ) : null}
 
-      <Card>
+      <Card data-tour="doc-tabela">
         <CardContent className="p-0">
           {!companyId ? (
             <div className="p-8 text-center text-sm text-muted-foreground">

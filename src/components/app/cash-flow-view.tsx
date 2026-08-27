@@ -634,7 +634,7 @@ export function CashFlowView({
           </div>
           <div className="flex items-center gap-2">
             <SyncFreshnessIndicator lastSyncAt={lastSyncAt} />
-            <details className="relative">
+            <details className="relative" data-tour="btn-exportar">
               <summary className="list-none">
                 <span className={buttonVariants({ variant: "outline" })}>Exportar</span>
               </summary>
@@ -666,23 +666,25 @@ export function CashFlowView({
             <label className="text-xs font-medium text-muted-foreground">
               Segmento e empresas
             </label>
-            <SegmentCompanyPicker
-              segments={segments}
-              activeSegmentSlug={activeSegmentSlug}
-              companies={companies}
-              selected={companySelection}
-              onChange={(ids) => {
-                setCompanySelection(ids);
-                // Persiste imediatamente — a regra do produto e que a
-                // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
-                // e Budget e Forecast sem precisar clicar em Aplicar antes.
-                saveSharedCompanyFilter(ids);
-              }}
-              disabled={companies.length <= 1}
-            />
+            <div data-tour="filtro-empresa">
+              <SegmentCompanyPicker
+                segments={segments}
+                activeSegmentSlug={activeSegmentSlug}
+                companies={companies}
+                selected={companySelection}
+                onChange={(ids) => {
+                  setCompanySelection(ids);
+                  // Persiste imediatamente — a regra do produto e que a
+                  // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
+                  // e Budget e Forecast sem precisar clicar em Aplicar antes.
+                  saveSharedCompanyFilter(ids);
+                }}
+                disabled={companies.length <= 1}
+              />
+            </div>
             {/* Expandir / recolher todas — abaixo do seletor de empresa para
                 melhor visibilidade. Acao puramente client-side. */}
-            <div className="flex gap-1 pt-1">
+            <div className="flex gap-1 pt-1" data-tour="btn-expandir">
               <Button
                 type="button"
                 variant="outline"
@@ -708,7 +710,7 @@ export function CashFlowView({
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1" data-tour="filtro-periodo">
             <label className="text-xs font-medium text-muted-foreground">Periodo</label>
             <div className="flex gap-1">
               {(
@@ -795,12 +797,13 @@ export function CashFlowView({
               linha dos outros botoes apos mudanca para items-start. */}
           <div className="space-y-1">
             <span aria-hidden className="block text-xs font-medium opacity-0">.</span>
-            <Button type="button" onClick={handleApply}>Aplicar</Button>
+            <Button type="button" onClick={handleApply} data-tour="btn-aplicar">Aplicar</Button>
           </div>
         </div>
       </div>
 
       {/* Tabela */}
+      <div data-tour="tabela">
       {filter.compareCompanies && rows[0]?.valuesByCompany ? (() => {
         const selectedCompanies = companies.filter((c) => selectedCompanyIds.includes(c.id));
         const orderedCols: Array<
@@ -1213,6 +1216,7 @@ export function CashFlowView({
           </div>
         </div>
       )}
+      </div>
 
       {/* Drilldown */}
       <Sheet open={drilldown.open} onOpenChange={(open) => setDrilldown((prev) => ({ ...prev, open }))}>

@@ -458,7 +458,7 @@ export function BudgetForecastView({
         </div>
 
         {/* Tabs */}
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap gap-2" data-tour="bf-abas">
           {TAB_OPTIONS.map((tab) => (
             <Button
               key={tab.value}
@@ -480,21 +480,23 @@ export function BudgetForecastView({
             <label className="text-xs font-medium text-muted-foreground">
               Segmento e empresas
             </label>
-            <SegmentCompanyPicker
-              segments={segments}
-              activeSegmentSlug={activeSegmentSlug}
-              companies={companies}
-              selected={companySelection}
-              onChange={(ids) => {
-                setCompanySelection(ids);
-                // Persiste imediatamente — a regra do produto e que a
-                // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
-                // e Budget e Forecast sem precisar clicar em Aplicar antes.
-                saveSharedCompanyFilter(ids);
-              }}
-              disabled={companies.length <= 1}
-            />
-            <div className="flex gap-1 pt-1">
+            <div data-tour="filtro-empresa">
+              <SegmentCompanyPicker
+                segments={segments}
+                activeSegmentSlug={activeSegmentSlug}
+                companies={companies}
+                selected={companySelection}
+                onChange={(ids) => {
+                  setCompanySelection(ids);
+                  // Persiste imediatamente — a regra do produto e que a
+                  // selecao "siga" o usuario entre Dashboard, Fluxo de Caixa
+                  // e Budget e Forecast sem precisar clicar em Aplicar antes.
+                  saveSharedCompanyFilter(ids);
+                }}
+                disabled={companies.length <= 1}
+              />
+            </div>
+            <div className="flex gap-1 pt-1" data-tour="btn-expandir">
               <Button
                 type="button"
                 variant="outline"
@@ -520,7 +522,7 @@ export function BudgetForecastView({
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1" data-tour="filtro-periodo">
             <label className="text-xs font-medium text-muted-foreground">Periodo</label>
             <div className="flex gap-1">
               {(
@@ -646,12 +648,13 @@ export function BudgetForecastView({
               linha dos outros botoes apos mudanca para items-start. */}
           <div className="space-y-1">
             <span aria-hidden className="block text-xs font-medium opacity-0">.</span>
-            <Button type="button" onClick={handleApply}>Aplicar</Button>
+            <Button type="button" onClick={handleApply} data-tour="btn-aplicar">Aplicar</Button>
           </div>
         </div>
       </div>
 
       {/* Tables per view */}
+      <div data-tour="tabela">
       {view === "comparativo" ? (
         <ComparativoTable
           rows={visibleRows}
@@ -701,6 +704,7 @@ export function BudgetForecastView({
           isProjecao={view === "projecao"}
         />
       )}
+      </div>
 
       {/* Evolution chart */}
       <div className="rounded-xl border bg-background p-4">

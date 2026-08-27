@@ -192,7 +192,7 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
       )}
 
       {/* 8. Indicadores econômicos — todos os perfis ------------------ */}
-      <section className="ch-band">
+      <section className="ch-band" data-tour="home-indicadores">
         <SectionHead title="Indicadores econômicos" />
         {loadingIndicators ? (
           <div className="ch-cols">
@@ -228,7 +228,7 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
       </section>
 
       {/* 9. Notícias econômicas — todos os perfis --------------------- */}
-      <section className="ch-band">
+      <section className="ch-band" data-tour="home-noticias">
         <SectionHead title="Notícias econômicas" />
         {loadingNews ? (
           <div className="ch-2col">

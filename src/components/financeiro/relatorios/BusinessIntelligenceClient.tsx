@@ -441,7 +441,7 @@ export function BusinessIntelligenceClient({
       <Card className="border-slate-200 shadow-sm">
         <CardContent className="space-y-4 p-4">
           <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end">
-            <div className="space-y-1">
+            <div className="space-y-1" data-tour="bi-empresa">
               <label
                 htmlFor="bi-company"
                 className="text-xs font-medium text-muted-foreground"
@@ -463,7 +463,7 @@ export function BusinessIntelligenceClient({
                 ))}
               </select>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1" data-tour="bi-datas">
               <label
                 htmlFor="bi-date-from"
                 className="text-xs font-medium text-muted-foreground"
@@ -505,6 +505,7 @@ export function BusinessIntelligenceClient({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   type="button"
+                  data-tour="bi-gerar"
                   onClick={handleGenerate}
                   disabled={buttonDisabled}
                   className="w-full sm:w-auto"
@@ -546,6 +547,7 @@ export function BusinessIntelligenceClient({
                 <Button
                   type="button"
                   variant="outline"
+                  data-tour="bi-pdf"
                   onClick={handleExportPdf}
                   disabled={loading || exporting || !data}
                   className="w-full sm:w-auto"
@@ -566,7 +568,7 @@ export function BusinessIntelligenceClient({
 
                 {/* Historico dos relatorios gerados nos ultimos 30 dias.
                     Cada usuario ve apenas os seus proprios. */}
-                <div ref={historyRef} className="relative w-full sm:w-auto">
+                <div ref={historyRef} className="relative w-full sm:w-auto" data-tour="bi-historico">
                   <Button
                     type="button"
                     variant="outline"

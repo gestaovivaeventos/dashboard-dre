@@ -438,7 +438,7 @@ export function ComparativosAnuaisView({
               Realizado x Orçado x Ano Anterior | {range.label} <span className="text-muted-foreground/70">(anterior: {priorRange.label})</span>
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" data-tour="btn-exportar">
             <Button type="button" variant="outline" onClick={() => void handleExportPdf()} disabled={exportingPdf || visibleRows.length === 0}>
               {exportingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
               Exportar PDF
@@ -456,18 +456,20 @@ export function ComparativosAnuaisView({
         <div className="flex flex-wrap items-start gap-4">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Segmento e empresas</label>
-            <SegmentCompanyPicker
-              segments={segments}
-              activeSegmentSlug={activeSegmentSlug}
-              companies={companies}
-              selected={companySelection}
-              onChange={(ids) => {
-                setCompanySelection(ids);
-                saveSharedCompanyFilter(ids);
-              }}
-              disabled={companies.length <= 1}
-            />
-            <div className="flex gap-1 pt-1">
+            <div data-tour="filtro-empresa">
+              <SegmentCompanyPicker
+                segments={segments}
+                activeSegmentSlug={activeSegmentSlug}
+                companies={companies}
+                selected={companySelection}
+                onChange={(ids) => {
+                  setCompanySelection(ids);
+                  saveSharedCompanyFilter(ids);
+                }}
+                disabled={companies.length <= 1}
+              />
+            </div>
+            <div className="flex gap-1 pt-1" data-tour="btn-expandir">
               <Button type="button" variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setAll(true)} title="Expandir todas">
                 <ChevronsUpDown className="h-4 w-4" />
               </Button>
@@ -477,7 +479,7 @@ export function ComparativosAnuaisView({
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1" data-tour="filtro-periodo">
             <label className="text-xs font-medium text-muted-foreground">Periodo</label>
             <div className="flex gap-1">
               {([
@@ -522,13 +524,13 @@ export function ComparativosAnuaisView({
 
           <div className="space-y-1">
             <span aria-hidden className="block text-xs font-medium opacity-0">.</span>
-            <Button type="button" onClick={handleApply}>Aplicar</Button>
+            <Button type="button" onClick={handleApply} data-tour="btn-aplicar">Aplicar</Button>
           </div>
         </div>
       </div>
 
       {/* Tabela */}
-      <div className="overflow-x-auto rounded-xl border bg-muted/50">
+      <div className="overflow-x-auto rounded-xl border bg-muted/50" data-tour="tabela">
         <div style={{ minWidth: "920px" }}>
           {/* Header */}
           <div className="grid border-b bg-muted px-4 py-3 text-xs font-semibold uppercase text-muted-foreground" style={{ gridTemplateColumns: gridTemplate }}>

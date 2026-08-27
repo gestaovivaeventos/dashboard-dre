@@ -10,6 +10,8 @@ import { NotificationsLink } from "@/components/app/notifications-link";
 import { SegmentChip } from "@/components/app/segment-chip";
 import { SignOutButton } from "@/components/app/sign-out-button";
 import { ThemeToggle } from "@/components/app/theme-toggle";
+import { HelpButton } from "@/components/app/tour/help-button";
+import { TourProvider } from "@/components/app/tour/tour-provider";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
@@ -77,6 +79,13 @@ export function AppShell({
   // faixa); as demais telas continuam com o respiro do <main>.
   const isHome = pathname === "/home";
 
+  // Segmento usado para montar os links do tour — mesma regra do menu
+  // (buildGroups): o ativo quando ele existe na lista, senão o primeiro.
+  const tourSegmentSlug =
+    activeSegmentSlug && segments.some((s) => s.slug === activeSegmentSlug)
+      ? activeSegmentSlug
+      : segments[0]?.slug ?? null;
+
   const sidebarNav = (mobile: boolean) => (
     <NavLinks
       dreRole={userRole}
@@ -99,6 +108,14 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={0}>
+      {/* Tour guiado do Financeiro. O autoStart é dos perfis que só enxergam
+          esse módulo (Visão Financeira / CSC) — para os demais o tour existe,
+          mas só pelo "?" da topbar, sem interromper quem já conhece o sistema. */}
+      <TourProvider
+        userKey={userEmail || userName}
+        autoStart={Boolean(isFranqueado || isCsc)}
+        segmentSlug={tourSegmentSlug}
+      >
       <div className="ch-shell">
         {/* Sidebar fixa (>= 1100px). Abaixo disso vira drawer. */}
         <aside className={`ch-sidebar ${collapsed ? "ch-sidebar--collapsed" : ""}`}>
@@ -111,7 +128,9 @@ export function AppShell({
 
           {/* Só esta faixa rola; a marca no topo e o "Recolher menu" na base
               ficam sempre à vista. */}
-          <div className="ch-sidebar__scroll">{sidebarNav(false)}</div>
+          <div className="ch-sidebar__scroll" data-tour="nav-menu">
+            {sidebarNav(false)}
+          </div>
 
           <div className="ch-sidebar__foot">
             <button
@@ -170,7 +189,10 @@ export function AppShell({
                 unreadCount={unreadNotifications}
                 href={hasCtrl ? "/ctrl/notificacoes" : BI_VALIDATION_PATH}
               />
-              <ThemeToggle />
+              <HelpButton />
+              <span data-tour="topbar-tema" className="inline-flex">
+                <ThemeToggle />
+              </span>
               <div className="ch-user">
                 <p className="ch-user__name">{userName}</p>
                 <p className="ch-user__mail">{userEmail}</p>
@@ -182,6 +204,7 @@ export function AppShell({
           <main className={isHome ? undefined : "p-5 md:p-7"}>{children}</main>
         </div>
       </div>
+      </TourProvider>
     </TooltipProvider>
   );
 }
