@@ -6,12 +6,16 @@
 // hub e para os cards do painel. Nível governa a cor; label é o texto curto.
 // =============================================================================
 
-/** Contagens cruas por empresa (uma linha do RPC). */
+/** Contagens cruas por empresa (uma linha do RPC + planejamento). */
 export interface OrcamentoStatusRaw {
   colaboradores: number;
   mediaTotal: number;
   mediaComValor: number;
   metodoCount: number;
+  /** Nº de categorias do método "planejamento_socios" no ano. */
+  planejamentoTotal: number;
+  /** Quantas dessas já têm a PROPOSTA CONFIRMADA (congelada). */
+  planejamentoConfirmado: number;
 }
 
 export const STATUS_VAZIO: OrcamentoStatusRaw = {
@@ -19,6 +23,8 @@ export const STATUS_VAZIO: OrcamentoStatusRaw = {
   mediaTotal: 0,
   mediaComValor: 0,
   metodoCount: 0,
+  planejamentoTotal: 0,
+  planejamentoConfirmado: 0,
 };
 
 export type StatusNivel = "pendente" | "andamento" | "concluido";
@@ -42,8 +48,9 @@ export interface StatusSelo {
 //  - Concluído: as telas mensuráveis estão preenchidas (método definido, quadro
 //    de pessoal com gente e todas as categorias por média com valor).
 //
-// "Concluído" é heurístico: valor fixo e planejamento dos sócios ainda não têm
-// tela, então não entram na conta — quando existirem, a regra se estende.
+// "Concluído" é heurístico: já cobre método definido, pessoal, todas as médias com
+// valor E todas as categorias por planejamento dos sócios com a PROPOSTA CONFIRMADA.
+// (Valor fixo ainda não entra na conta — estender quando fizer sentido.)
 
 export function statusGeral(raw: OrcamentoStatusRaw): StatusSelo {
   const nada =
@@ -54,7 +61,10 @@ export function statusGeral(raw: OrcamentoStatusRaw): StatusSelo {
   if (nada) return { nivel: "pendente", label: "Não iniciado" };
 
   const mediaCompleta = raw.mediaTotal === 0 || raw.mediaComValor >= raw.mediaTotal;
-  const concluido = raw.metodoCount > 0 && raw.colaboradores > 0 && mediaCompleta;
+  const planejamentoCompleto =
+    raw.planejamentoTotal === 0 || raw.planejamentoConfirmado >= raw.planejamentoTotal;
+  const concluido =
+    raw.metodoCount > 0 && raw.colaboradores > 0 && mediaCompleta && planejamentoCompleto;
   if (concluido) return { nivel: "concluido", label: "Concluído" };
 
   return { nivel: "andamento", label: "Em andamento" };
