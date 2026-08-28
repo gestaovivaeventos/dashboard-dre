@@ -104,7 +104,7 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
              A faixa inteira some para quem não tem pendência sob sua
              responsabilidade (ver hasAttentionSection). */}
       {hasAttentionSection(caps) && (
-        <section className="ch-band">
+        <section className="ch-band" data-tour="home-atencao">
           <AttentionStrip data={ctrlData} caps={caps} />
         </section>
       )}
@@ -151,14 +151,14 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
 
       {/* 4. Fila de pagamento ---------------------------------------- */}
       {caps.canPay && ctrlData.payments && (
-        <section className="ch-band">
+        <section className="ch-band" data-tour="home-fila-pagamento">
           <WidgetFilaPagamento data={ctrlData.payments} />
         </section>
       )}
 
       {/* 5. Aprovações pendentes ------------------------------------- */}
       {caps.canApprove && ctrlData.approvals && (
-        <section className="ch-band">
+        <section className="ch-band" data-tour="home-aprovacoes">
           <WidgetAprovacoes data={ctrlData.approvals} />
         </section>
       )}
@@ -178,7 +178,9 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
               <WidgetFornecedores data={ctrlData.suppliers} />
             )}
             {caps.canRequest && ctrlData.myRequests && (
-              <WidgetMinhasRequisicoes data={ctrlData.myRequests} />
+              <div data-tour="home-minhas-requisicoes">
+                <WidgetMinhasRequisicoes data={ctrlData.myRequests} />
+              </div>
             )}
           </div>
         </section>

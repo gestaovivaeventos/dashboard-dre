@@ -820,7 +820,7 @@ export function NovaRequisicaoForm({
   const attachLabel = paymentMethod === "boleto" ? "Adicionar boleto" : "Adicionar comprovante";
 
   const attachmentBlock = (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-tour="nova-anexos">
       <label htmlFor="attachment" className={LABEL_CLS}>
         {paymentMethod === "boleto" ? "Boleto" : "Anexo"}{" "}
         {attachmentRequired ? (
@@ -956,7 +956,7 @@ export function NovaRequisicaoForm({
       )}
 
       {/* Descrição (identifica a requisição) */}
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" data-tour="nova-descricao">
         <label htmlFor="description" className={LABEL_CLS}>
           Descrição <span className="text-destructive">*</span>
         </label>
@@ -971,7 +971,7 @@ export function NovaRequisicaoForm({
       </div>
 
       {/* Setor + Tipo de Despesa */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-tour="nova-setor-tipo">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <label htmlFor="sector_id" className={LABEL_CLS}>
@@ -1093,7 +1093,7 @@ export function NovaRequisicaoForm({
       )}
 
       {/* Fornecedor */}
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" data-tour="nova-fornecedor">
         <label className={LABEL_CLS}>
           Fornecedor <span className="text-destructive">*</span>
         </label>
@@ -1114,7 +1114,7 @@ export function NovaRequisicaoForm({
       {/* Evento — obrigatório: o solicitante escolhe um evento ou "Nenhum
           evento" explicitamente (não vem pré-preenchido). */}
       {events.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" data-tour="nova-evento">
           <label htmlFor="event_id" className={LABEL_CLS}>
             Evento <span className="text-destructive">*</span>
           </label>
@@ -1134,7 +1134,7 @@ export function NovaRequisicaoForm({
       )}
 
       {/* Método de pagamento */}
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" data-tour="nova-metodo">
         <label className={LABEL_CLS}>Método de Pagamento <span className="text-destructive">*</span></label>
         <div className="flex flex-wrap gap-2">
           {[
@@ -1413,7 +1413,7 @@ export function NovaRequisicaoForm({
       )}
 
       {/* Valor + Vencimento */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-tour="nova-valor">
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label htmlFor="amount" className={LABEL_CLS}>
@@ -1626,6 +1626,7 @@ export function NovaRequisicaoForm({
             </div>
             <button
               type="button"
+              data-tour="nova-verificar"
               onClick={handleVerify}
               disabled={!canVerify || verifying}
               className={`shrink-0 inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -1829,6 +1830,7 @@ export function NovaRequisicaoForm({
         </button>
         <button
           type="submit"
+          data-tour="nova-enviar"
           disabled={loading || !canSubmit}
           title={!canSubmit ? "Verifique o orçamento antes de enviar" : undefined}
           className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"

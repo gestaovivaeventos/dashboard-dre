@@ -463,7 +463,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border bg-muted/40 p-1">
+      <div className="flex gap-1 rounded-lg border bg-muted/40 p-1" data-tour="cap-abas">
         {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
           <button
             key={tab}
@@ -524,7 +524,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             : "Nenhuma requisição nesta categoria."}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-x-auto">
+        <div className="rounded-lg border overflow-x-auto" data-tour="cap-tabela">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
@@ -736,7 +736,10 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 
       {/* Action bar — Aprovadas */}
       {activeTab === "aprovado" && canSendToPayment && displayed.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+        <div
+          className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
+          data-tour="cap-enviar"
+        >
           {selected.size > 0 ? (
             <span className="text-sm text-muted-foreground">{selected.size} selecionada(s) · {fmt.format(totalSelected)}</span>
           ) : (

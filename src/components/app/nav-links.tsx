@@ -12,6 +12,7 @@ import {
   type NavGroupId,
   type NavItem,
 } from "@/components/app/navigation";
+import { ModuleTourButton } from "@/components/app/tour/module-tour-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
@@ -154,6 +155,9 @@ export function NavLinks({
           {!collapsed && (
             <div className="ch-module">
               <span>{group.label}</span>
+              {/* Só rende algo nos grupos que têm tour (ver @/lib/tour) e para
+                  quem tem aquele módulo — nos demais o componente devolve null. */}
+              <ModuleTourButton navGroupId={group.id} />
             </div>
           )}
           {collapsed && idx > 0 && <div className="ch-rail-sep" aria-hidden />}
@@ -165,6 +169,21 @@ export function NavLinks({
     </nav>
   );
 }
+
+/**
+ * Chaves dos itens de menu que ESTE usuário enxerga.
+ *
+ * Existe para o tour guiado: é o gate de quais telas entram no roteiro. Derivar
+ * do mesmo `buildGroups` que desenha o menu é o ponto — uma lista de perfis
+ * paralela no conteúdo do tour sairia de sincronia na primeira mudança de
+ * permissão, e em silêncio.
+ */
+export function visibleNavKeys(input: NavVisibilityInput): string[] {
+  const groups = input.contractsOnly ? buildContractsOnlyGroups() : buildGroups(input);
+  return groups.flatMap((group) => group.items.map((item) => item.key));
+}
+
+export type NavVisibilityInput = BuildInput & { contractsOnly?: boolean };
 
 interface BuildInput {
   dreRole: DreRole | null;

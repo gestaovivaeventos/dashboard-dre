@@ -234,7 +234,7 @@ export function RequisicoesTable({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 max-w-md" data-tour="req-busca">
           <input
             type="text"
             value={search}
@@ -269,6 +269,7 @@ export function RequisicoesTable({
         {canReconcile && (
           <button
             type="button"
+            data-tour="req-atualizar-pagamentos"
             onClick={handleRefreshPayments}
             disabled={reconciling}
             title="Consulta no Omie quais títulos já foram efetivamente pagos (baixados) e atualiza o status para Pago."
@@ -303,7 +304,7 @@ export function RequisicoesTable({
             : "Nenhuma requisição."}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-x-auto">
+        <div className="rounded-lg border overflow-x-auto" data-tour="req-tabela">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50 text-left text-xs font-semibold">

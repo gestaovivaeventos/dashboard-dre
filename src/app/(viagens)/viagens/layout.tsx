@@ -64,6 +64,9 @@ export default async function ViagensLayout({ children }: { children: React.Reac
       // para quem já tem o módulo — não concede o módulo a ninguém.
       ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
+      // Perfil unificado: o tour guiado usa para escolher a variante de texto
+      // dos passos que mudam conforme quem lê (os cinco perfis do Compras).
+      userProfile={profile?.profile ?? null}
     >
       {children}
     </AppShell>

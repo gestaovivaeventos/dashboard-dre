@@ -318,6 +318,32 @@ html.ch-dark body {
   letter-spacing: 0.1em;
   color: var(--color-text);
 }
+/* Botão do tour guiado do módulo. Encostado à direita da régua, discreto:
+   é oferta permanente, não chamada para ação. */
+.ch-module__tour {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  /* Margem vertical negativa: a régua do módulo continua com a altura do texto,
+     sem crescer 4px em todo grupo do menu por causa do alvo de clique. */
+  margin: -2px 0 -2px auto;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-45);
+  cursor: pointer;
+  transition: background-color 110ms ease, color 110ms ease;
+}
+.ch-module__tour:hover {
+  background: var(--hover-tint);
+  color: var(--color-accent);
+}
+.ch-module__tour:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 .ch-nav {
   display: flex;

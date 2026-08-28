@@ -449,6 +449,7 @@ export function CriarFornecedorButton({
     <>
       <button
         type="button"
+        data-tour="forn-novo"
         onClick={() => setOpen(true)}
         className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >

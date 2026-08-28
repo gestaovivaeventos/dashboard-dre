@@ -285,6 +285,7 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
           )}
         </div>
         <button
+          data-tour="rel-exportar"
           onClick={handleExport}
           disabled={exporting || sorted.length === 0}
           className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
@@ -332,7 +333,7 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
               })}
             </tr>
             {/* Linha de filtros por coluna */}
-            <tr className="border-b bg-background">
+            <tr className="border-b bg-background" data-tour="rel-filtros">
               {COLUMNS.map((col) => (
                 <th key={col.key} className="px-2 py-1.5 align-top">
                   {col.kind === "text" && (

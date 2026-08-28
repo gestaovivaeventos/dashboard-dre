@@ -326,7 +326,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 overflow-x-auto">
+      <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 overflow-x-auto" data-tour="apr-abas">
         {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
           <button
             key={tab}
@@ -358,7 +358,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
 
       {/* Batch actions bar (pendentes) */}
       {activeTab === "pendente" && canApprove && pendentes.length > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-2">
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-2" data-tour="apr-lote">
           <label className="flex items-center gap-2 cursor-pointer text-sm">
             <input
               type="checkbox"
@@ -408,7 +408,7 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
             : "Nenhuma requisição nesta categoria."}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-x-auto">
+        <div className="rounded-lg border overflow-x-auto" data-tour="apr-tabela">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">

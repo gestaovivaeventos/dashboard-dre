@@ -201,7 +201,7 @@ export default async function OrcamentoPage() {
       {canEditBudget && <BudgetUpload defaultYear={year} />}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" data-tour="orc-kpis">
         <div className="rounded-lg border p-4 space-y-1">
           <p className="text-xs font-medium uppercase text-muted-foreground">Orçado</p>
           <p className="text-xl font-bold">{fmt.format(grandOrcado)}</p>
@@ -232,7 +232,9 @@ export default async function OrcamentoPage() {
           </p>
         </div>
       ) : (
-        <OrcamentoTable rows={rows} />
+        <div data-tour="orc-tabela">
+          <OrcamentoTable rows={rows} />
+        </div>
       )}
     </div>
   );

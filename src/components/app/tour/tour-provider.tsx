@@ -1,14 +1,19 @@
 "use client";
 
-// Motor do tour guiado do módulo Financeiro.
+// Motor do tour guiado. Serve os dois módulos com tour (Financeiro e Compras) —
+// o que muda entre eles é só o conteúdo, que vem de @/lib/tour.
 //
-// Duas entradas, um só motor — e um só gate, a prop `enabled` (ter o módulo
-// Financeiro), que vale para as duas:
-//   1. Primeiro acesso — dispara sozinho na /home e caminha pelas telas na
-//      ordem do menu.
-//   2. Botão "?" da topbar — reabre o tour DA TELA ATUAL, a qualquer momento.
+// Duas entradas, um só motor:
+//   1. Primeiro acesso — dispara sozinho na /home, no primeiro módulo que o
+//      usuário ainda não viu, e caminha pelas telas na ordem do menu.
+//   2. Botão "?" ao lado do nome do módulo, no menu lateral — reabre o tour
+//      daquele módulo começando pela tela em que o usuário está (ou pela
+//      primeira, quando ele está fora do módulo).
 //
-// O conteúdo NÃO mora aqui: vem de @/lib/financeiro/tour/content.
+// TRÊS GATES, cada um com a sua fonte, e nenhum deles escrito à mão no conteúdo:
+//   • o módulo — `moduleIds`, o que o usuário tem em "Módulos visíveis";
+//   • a tela — `navKeys`, as chaves que o menu daquele usuário realmente montou;
+//   • o passo — a âncora existir na tela + o `audiences` do passo.
 //
 // Sem dependência externa: o destaque é uma caixa com `box-shadow` gigante
 // (escurece tudo em volta sem precisar de máscara SVG) e a posição é
@@ -20,15 +25,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createPortal } from "react-dom";
 
 import {
-  nextTourScreen,
-  resolveTourScreen,
+  resolveScreenInModule,
+  stepsForAudience,
   tourHref,
+  tourModuleById,
   tourStorageKey,
+  visibleTourScreens,
+  type TourAudience,
+  type TourModule,
+  type TourModuleId,
   type TourScreen,
   type TourStep,
-} from "@/lib/financeiro/tour/content";
+} from "@/lib/tour";
 
-/** Sessão: qual tela deve abrir o tour logo após a navegação. */
+/** Sessão: "<moduleId>:<screenId>" que deve abrir logo após a navegação. */
 const PENDING_KEY = "ch-tour-pending";
 
 /** Largura fixa do balão; o clamp de viewport é feito em cima dela. */
@@ -48,21 +58,18 @@ function anchorElement(anchor: string): HTMLElement | null {
 }
 
 interface TourContextValue {
-  /**
-   * O "?" deve aparecer: o usuário tem o módulo Financeiro E a rota atual tem
-   * tour definido. As duas condições — a /home tem tour e é o pouso de todos
-   * os perfis, então a rota sozinha não basta.
-   */
-  available: boolean;
-  /** Abre o tour da tela atual — uso avulso, sem encadear as próximas. */
-  openCurrent: () => void;
-  active: boolean;
+  /** Módulos com tour que este usuário pode abrir. */
+  moduleIds: readonly TourModuleId[];
+  /** Abre o tour do módulo, a partir da tela atual quando ela é dele. */
+  startModule: (id: TourModuleId) => void;
+  /** Módulo cujo tour está aberto agora (desabilita os botões enquanto roda). */
+  activeModuleId: TourModuleId | null;
 }
 
 const TourContext = createContext<TourContextValue>({
-  available: false,
-  openCurrent: () => {},
-  active: false,
+  moduleIds: [],
+  startModule: () => {},
+  activeModuleId: null,
 });
 
 export function useTour(): TourContextValue {
@@ -77,138 +84,201 @@ interface TourProviderProps {
    */
   userKey: string;
   /**
-   * O usuário tem o módulo Financeiro.
+   * Módulos com tour que o usuário tem, na ordem do menu.
    *
-   * Gate ÚNICO do tour inteiro — o disparo no primeiro acesso E o "?" da
-   * topbar. Não basta gatear por rota: a /home é o pouso de TODOS os perfis,
-   * então quem só tem Compras ou Contratos também passa por lá e via o "?" de
-   * um tour sobre telas que nem enxerga.
+   * Gate do módulo inteiro — o disparo no primeiro acesso E o botão "?". Não
+   * basta gatear por rota: a /home é o pouso de TODOS os perfis, então quem
+   * não tem o módulo passa por lá e veria o botão de um tour sobre telas que
+   * nem enxerga.
+   *
+   * Precisa ter identidade estável entre renders (o AppShell memoiza): é
+   * dependência dos efeitos de disparo.
    */
-  enabled: boolean;
+  moduleIds: readonly TourModuleId[];
+  /** Chaves de item de menu visíveis a este usuário — gate das telas. */
+  navKeys: readonly string[];
+  /** Perfil do usuário — decide a variante de texto dos passos. */
+  audience: TourAudience | null;
   /** Segmento ativo, para montar o link das telas servidas em /s/<slug>/... */
   segmentSlug: string | null;
 }
 
-export function TourProvider({ children, userKey, enabled, segmentSlug }: TourProviderProps) {
+interface ActiveTour {
+  tourModule: TourModule;
+  screen: TourScreen;
+  steps: readonly TourStep[];
+}
+
+export function TourProvider({
+  children,
+  userKey,
+  moduleIds,
+  navKeys,
+  audience,
+  segmentSlug,
+}: TourProviderProps) {
   const pathname = usePathname();
   const router = useRouter();
 
   const [mounted, setMounted] = useState(false);
-  const [screen, setScreen] = useState<TourScreen | null>(null);
-  const [steps, setSteps] = useState<readonly TourStep[]>([]);
+  const [active, setActive] = useState<ActiveTour | null>(null);
   const [index, setIndex] = useState(0);
-  /** "sequence" encadeia as telas seguintes; "single" encerra nesta tela. */
-  const [mode, setMode] = useState<"sequence" | "single">("single");
 
   const startTokenRef = useRef(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const spotRef = useRef<HTMLDivElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
 
-  const screenForPath = useMemo(() => resolveTourScreen(pathname), [pathname]);
+  const navKeySet = useMemo(() => new Set(navKeys), [navKeys]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const markDone = useCallback(() => {
-    try {
-      window.localStorage.setItem(tourStorageKey(userKey), "done");
-    } catch {
-      // localStorage bloqueado (janela privada, política do navegador): o tour
-      // volta a aparecer no próximo acesso. É chato, não é erro.
-    }
-  }, [userKey]);
+  const isDone = useCallback(
+    (id: TourModuleId) => {
+      try {
+        return window.localStorage.getItem(tourStorageKey(userKey, id)) === "done";
+      } catch {
+        // localStorage bloqueado (janela privada, política do navegador): não
+        // insistimos com quem não conseguimos lembrar.
+        return true;
+      }
+    },
+    [userKey],
+  );
+
+  const markDone = useCallback(
+    (id: TourModuleId) => {
+      try {
+        window.localStorage.setItem(tourStorageKey(userKey, id), "done");
+      } catch {
+        // Sem localStorage o tour volta no próximo acesso. É chato, não é erro.
+      }
+    },
+    [userKey],
+  );
 
   const close = useCallback(
     (opts: { done: boolean }) => {
       startTokenRef.current += 1; // cancela abertura que ainda esteja esperando âncoras
-      setScreen(null);
-      setSteps([]);
+      if (opts.done && active) markDone(active.tourModule.id);
+      setActive(null);
       setIndex(0);
       try {
         window.sessionStorage.removeItem(PENDING_KEY);
       } catch {
         /* idem */
       }
-      if (opts.done) markDone();
     },
-    [markDone],
+    [active, markDone],
   );
 
   /**
-   * Abre um tour. Passo cujo elemento não está na tela é descartado aqui —
-   * é o que permite um mesmo roteiro servir variações da tela (aba diferente,
-   * usuário sem permissão para um botão) sem apontar para o vazio.
+   * Abre o tour numa tela. Passo cujo elemento não está na tela — ou que não é
+   * do perfil de quem está lendo — é descartado aqui. É o que permite um mesmo
+   * roteiro servir os cinco perfis do Compras sem apontar para o vazio.
    *
    * A tela pode ainda estar montando quando a navegação termina, então
    * tentamos algumas vezes antes de desistir das âncoras.
    */
-  const start = useCallback((target: TourScreen, nextMode: "sequence" | "single") => {
-    // Um pedido de abertura invalida os anteriores: se o usuário navegar
-    // enquanto esperamos as âncoras montarem, a tentativa antiga morre em vez
-    // de abrir o tour da tela errada.
-    const token = startTokenRef.current + 1;
-    startTokenRef.current = token;
-    let tries = 0;
-    const attempt = () => {
-      if (startTokenRef.current !== token) return;
-      const visible = target.steps.filter((step) => !step.anchor || anchorElement(step.anchor));
-      const anchored = target.steps.filter((step) => step.anchor).length;
-      const found = visible.filter((step) => step.anchor).length;
-      if (anchored > 0 && found === 0 && tries < 30) {
-        tries += 1;
-        window.setTimeout(attempt, 150);
-        return;
-      }
-      if (visible.length === 0) return;
-      setScreen(target);
-      setSteps(visible);
-      setIndex(0);
-      setMode(nextMode);
-    };
-    window.setTimeout(attempt, 250);
-  }, []);
+  const start = useCallback(
+    (tourModule: TourModule, screen: TourScreen) => {
+      // Um pedido de abertura invalida os anteriores: se o usuário navegar
+      // enquanto esperamos as âncoras montarem, a tentativa antiga morre em vez
+      // de abrir o tour da tela errada.
+      const token = startTokenRef.current + 1;
+      startTokenRef.current = token;
+      const candidates = stepsForAudience(screen, audience);
+      let tries = 0;
+      const attempt = () => {
+        if (startTokenRef.current !== token) return;
+        const visible = candidates.filter((step) => !step.anchor || anchorElement(step.anchor));
+        const anchored = candidates.filter((step) => step.anchor).length;
+        const found = visible.filter((step) => step.anchor).length;
+        if (anchored > 0 && found === 0 && tries < 30) {
+          tries += 1;
+          window.setTimeout(attempt, 150);
+          return;
+        }
+        if (visible.length === 0) return;
+        setActive({ tourModule, screen, steps: visible });
+        setIndex(0);
+      };
+      window.setTimeout(attempt, 250);
+    },
+    [audience],
+  );
 
-  // Primeiro acesso: só na /home, só uma vez, só para quem tem o módulo.
+  // Primeiro acesso: só na /home, e no primeiro módulo ainda não visto. Quem
+  // tem os dois vê o Financeiro primeiro e recebe o Compras como continuação
+  // no fim (ver `followingModule`).
   useEffect(() => {
-    if (!enabled || !mounted || pathname !== "/home") return;
-    let done = false;
-    try {
-      done = window.localStorage.getItem(tourStorageKey(userKey)) === "done";
-    } catch {
-      done = true; // sem localStorage, não insistimos.
+    if (!mounted || pathname !== "/home" || active) return;
+    for (const id of moduleIds) {
+      if (isDone(id)) continue;
+      const tourModule = tourModuleById(id);
+      const home = tourModule ? resolveScreenInModule(tourModule, "/home") : null;
+      if (tourModule && home) start(tourModule, home);
+      return;
     }
-    if (done) return;
-    const home = resolveTourScreen("/home");
-    if (home) start(home, "sequence");
-  }, [enabled, mounted, pathname, userKey, start]);
+  }, [mounted, pathname, active, moduleIds, isDone, start]);
 
-  // Continuação da sequência: a tela anterior deixou o próximo id marcado
-  // antes de navegar.
+  // Continuação da sequência: a tela anterior deixou "<módulo>:<tela>" marcado
+  // antes de navegar. Passa por sessionStorage porque a navegação entre módulos
+  // troca de route group — o provider desmonta e remonta, e o estado se perde.
   useEffect(() => {
-    if (!enabled || !mounted || !screenForPath) return;
+    if (!mounted) return;
     let pending: string | null = null;
     try {
       pending = window.sessionStorage.getItem(PENDING_KEY);
     } catch {
       pending = null;
     }
-    if (pending !== screenForPath.id) return;
+    if (!pending) return;
+    const [moduleId, screenId] = pending.split(":");
+    const tourModule = moduleIds.includes(moduleId as TourModuleId)
+      ? tourModuleById(moduleId as TourModuleId)
+      : null;
+    if (!tourModule) return;
+    const screen = resolveScreenInModule(tourModule, pathname);
+    if (!screen || screen.id !== screenId) return;
     try {
       window.sessionStorage.removeItem(PENDING_KEY);
     } catch {
       /* idem */
     }
-    start(screenForPath, "sequence");
-  }, [enabled, mounted, screenForPath, start]);
+    start(tourModule, screen);
+  }, [mounted, pathname, moduleIds, start]);
 
-  const openCurrent = useCallback(() => {
-    if (!enabled || !screenForPath) return;
-    start(screenForPath, "single");
-  }, [enabled, screenForPath, start]);
+  const startModule = useCallback(
+    (id: TourModuleId) => {
+      if (!moduleIds.includes(id)) return;
+      const tourModule = tourModuleById(id);
+      if (!tourModule) return;
+      const screens = visibleTourScreens(tourModule, navKeySet);
+      if (screens.length === 0) return;
+      // Está numa tela do módulo? Começa por ela — é o "como usar esta tela".
+      // Fora do módulo, começa do início e navega até lá.
+      const here = resolveScreenInModule(tourModule, pathname);
+      const target = here && screens.some((s) => s.id === here.id) ? here : screens[0];
+      if (target === here) {
+        start(tourModule, target);
+        return;
+      }
+      const href = tourHref(target, segmentSlug);
+      if (!href) return;
+      try {
+        window.sessionStorage.setItem(PENDING_KEY, `${tourModule.id}:${target.id}`);
+      } catch {
+        /* sem sessionStorage o tour não retoma após a navegação */
+      }
+      router.push(href);
+    },
+    [moduleIds, navKeySet, pathname, segmentSlug, router, start],
+  );
 
-  const step = screen ? steps[index] : undefined;
+  const step = active ? active.steps[index] : undefined;
 
   // Rola até o elemento no início de cada passo. A medição em si acontece no
   // laço de animação abaixo, então não importa quando a rolagem terminar.
@@ -221,7 +291,7 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
   // termina de carregar, janela redimensionada). Escrever direto no style
   // evita um re-render por frame.
   useEffect(() => {
-    if (!screen || !step) return;
+    if (!active || !step) return;
     let frame = 0;
 
     const tick = () => {
@@ -237,8 +307,8 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
       const el = step.anchor ? anchorElement(step.anchor) : null;
 
       if (!el) {
-        // Passo sem âncora (abertura da tela): balão centralizado, tela toda
-        // escurecida pelo overlay.
+        // Passo sem âncora (abertura da tela, explicação do fluxo): balão
+        // centralizado, tela toda escurecida pelo overlay.
         if (spot) spot.style.display = "none";
         if (overlayRef.current) overlayRef.current.style.background = "rgba(2, 6, 23, 0.55)";
         pop.style.left = `${Math.max(12, (vw - POPOVER_WIDTH) / 2)}px`;
@@ -286,40 +356,78 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
 
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [screen, step]);
+  }, [active, step]);
 
-  const following = screen && mode === "sequence" ? nextTourScreen(screen.id) : null;
-  const isLast = screen ? index === steps.length - 1 : false;
+  // Próxima tela do MESMO módulo, já filtrada pelo que o usuário enxerga.
+  const followingScreen = useMemo(() => {
+    if (!active) return null;
+    const screens = visibleTourScreens(active.tourModule, navKeySet);
+    const at = screens.findIndex((s) => s.id === active.screen.id);
+    if (at < 0 || at === screens.length - 1) return null;
+    return screens[at + 1];
+  }, [active, navKeySet]);
+
+  // Acabou o módulo e o usuário tem outro que ainda não viu: oferecemos a
+  // continuação em vez de um "Concluir" que esconde metade do sistema.
+  const followingModule = useMemo(() => {
+    if (!active || followingScreen) return null;
+    const next = moduleIds.find((id) => id !== active.tourModule.id && !isDone(id));
+    return next ? tourModuleById(next) : null;
+  }, [active, followingScreen, moduleIds, isDone]);
+
+  const isLast = active ? index === active.steps.length - 1 : false;
 
   const goNext = useCallback(() => {
-    if (!screen) return;
+    if (!active) return;
     if (!isLast) {
       setIndex((prev) => prev + 1);
       return;
     }
-    if (!following) {
+
+    const target = followingScreen
+      ? { tourModule: active.tourModule, screen: followingScreen }
+      : followingModule
+        ? (() => {
+            const screens = visibleTourScreens(followingModule, navKeySet);
+            return screens.length > 0 ? { tourModule: followingModule, screen: screens[0] } : null;
+          })()
+        : null;
+
+    if (!target) {
       close({ done: true });
       return;
     }
-    const href = tourHref(following, segmentSlug);
+
+    const href = tourHref(target.screen, segmentSlug);
     if (!href) {
       close({ done: true });
       return;
     }
+    // Trocar de módulo encerra o anterior: ele foi percorrido até o fim.
+    if (target.tourModule.id !== active.tourModule.id) markDone(active.tourModule.id);
     try {
-      window.sessionStorage.setItem(PENDING_KEY, following.id);
+      window.sessionStorage.setItem(PENDING_KEY, `${target.tourModule.id}:${target.screen.id}`);
     } catch {
       /* sem sessionStorage a sequência para aqui; o "?" segue disponível. */
     }
-    setScreen(null);
-    setSteps([]);
+    setActive(null);
     setIndex(0);
     router.push(href);
-  }, [screen, isLast, following, segmentSlug, router, close]);
+  }, [
+    active,
+    isLast,
+    followingScreen,
+    followingModule,
+    navKeySet,
+    segmentSlug,
+    markDone,
+    router,
+    close,
+  ]);
 
   // Esc encerra — sempre. Um tour do qual não se sai é uma armadilha.
   useEffect(() => {
-    if (!screen) return;
+    if (!active) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close({ done: true });
       else if (event.key === "ArrowRight") goNext();
@@ -327,19 +435,27 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, close, goNext]);
+  }, [active, close, goNext]);
 
   const value = useMemo<TourContextValue>(
-    () => ({ available: enabled && Boolean(screenForPath), openCurrent, active: Boolean(screen) }),
-    [enabled, screenForPath, openCurrent, screen],
+    () => ({ moduleIds, startModule, activeModuleId: active?.tourModule.id ?? null }),
+    [moduleIds, startModule, active],
   );
+
+  const nextLabel = !isLast
+    ? "Próximo"
+    : followingScreen
+      ? `Ir para ${followingScreen.label}`
+      : followingModule
+        ? `Ver o tour de ${followingModule.label}`
+        : "Concluir";
 
   return (
     <TourContext.Provider value={value}>
       {children}
-      {mounted && screen && step
+      {mounted && active && step
         ? createPortal(
-            <div className="ch-tour" role="dialog" aria-modal="true" aria-label="Tour do módulo Financeiro">
+            <div className="ch-tour" role="dialog" aria-modal="true" aria-label="Tour guiado">
               {/* Bloqueia o clique fora do balão: o passo é explicativo, e um
                   clique perdido no meio do tour desloca tudo. */}
               <div ref={overlayRef} className="fixed inset-0 z-[100]" />
@@ -364,7 +480,7 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {screen.label}
+                      {active.tourModule.label} · {active.screen.label}
                     </p>
                     <h3 className="mt-0.5 text-base font-semibold leading-tight">{step.title}</h3>
                   </div>
@@ -383,7 +499,7 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
                 <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-primary transition-[width] duration-200"
-                    style={{ width: `${((index + 1) / steps.length) * 100}%` }}
+                    style={{ width: `${((index + 1) / active.steps.length) * 100}%` }}
                   />
                 </div>
 
@@ -397,7 +513,7 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
                   </button>
                   <div className="flex items-center gap-2">
                     <span className="text-xs tabular-nums text-muted-foreground">
-                      {index + 1} de {steps.length}
+                      {index + 1} de {active.steps.length}
                     </span>
                     {index > 0 && (
                       <button
@@ -413,7 +529,7 @@ export function TourProvider({ children, userKey, enabled, segmentSlug }: TourPr
                       onClick={goNext}
                       className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
                     >
-                      {!isLast ? "Próximo" : following ? `Ir para ${following.label}` : "Concluir"}
+                      {nextLabel}
                     </button>
                   </div>
                 </div>

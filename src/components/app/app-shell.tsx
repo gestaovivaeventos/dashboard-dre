@@ -2,22 +2,22 @@
 
 import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Logo, LogoFull } from "@/components/app/logo";
-import { NavLinks } from "@/components/app/nav-links";
+import { NavLinks, visibleNavKeys } from "@/components/app/nav-links";
 import { NotificationsLink } from "@/components/app/notifications-link";
 import { SegmentChip } from "@/components/app/segment-chip";
 import { SignOutButton } from "@/components/app/sign-out-button";
 import { ThemeToggle } from "@/components/app/theme-toggle";
-import { HelpButton } from "@/components/app/tour/help-button";
 import { TourProvider } from "@/components/app/tour/tour-provider";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
 import type { ActiveModule } from "@/lib/context/active-context";
 import type { ModuleDefinition } from "@/lib/context/modules";
-import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, Segment, UserProfileType } from "@/lib/supabase/types";
+import { tourAudienceForProfile, type TourModuleId } from "@/lib/tour";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -44,6 +44,12 @@ interface AppShellProps {
   /** Visão completa (leitura) do módulo Compras — override nominal por e-mail. */
   ctrlFullView?: boolean;
   unreadNotifications?: number;
+  /**
+   * Perfil unificado do usuário. Serve ao tour guiado: é o que separa os cinco
+   * perfis do Compras nos passos que mudam de significado conforme quem lê
+   * (o solicitante aguarda a aprovação; o Contas a Pagar é quem envia ao Omie).
+   */
+  userProfile?: UserProfileType | null;
 }
 
 export function AppShell({
@@ -68,6 +74,7 @@ export function AppShell({
   canBiValidation,
   ctrlFullView,
   unreadNotifications = 0,
+  userProfile,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -79,12 +86,63 @@ export function AppShell({
   // faixa); as demais telas continuam com o respiro do <main>.
   const isHome = pathname === "/home";
 
+  // ── Tour guiado ────────────────────────────────────────────────────────────
   // Segmento usado para montar os links do tour — mesma regra do menu
   // (buildGroups): o ativo quando ele existe na lista, senão o primeiro.
   const tourSegmentSlug =
     activeSegmentSlug && segments.some((s) => s.slug === activeSegmentSlug)
       ? activeSegmentSlug
       : segments[0]?.slug ?? null;
+
+  // Módulos com tour que este usuário tem, na ordem do menu. `userRole`
+  // (= navDreRole no layout) é não-nulo exatamente quando há `can_financeiro`;
+  // `ctrlRoles` vem vazio para quem não tem Compras.
+  //
+  // Os dois memos abaixo NÃO são otimização: são dependência dos efeitos de
+  // disparo do tour. Array recriado a cada render (e o shell re-renderiza ao
+  // abrir/recolher o menu) faria o efeito de primeiro acesso rodar de novo a
+  // cada clique na interface.
+  const tourModuleIds = useMemo<TourModuleId[]>(() => {
+    const ids: TourModuleId[] = [];
+    if (userRole !== null) ids.push("financeiro");
+    if (hasCtrl) ids.push("compras");
+    return ids;
+  }, [userRole, hasCtrl]);
+
+  // Telas que entram no roteiro: as mesmas chaves que o menu montou para ele.
+  const tourNavKeys = useMemo(
+    () =>
+      visibleNavKeys({
+        dreRole: userRole,
+        ctrlRoles,
+        canCase,
+        canViagens,
+        canViagensAprovar,
+        canContratos,
+        segments,
+        activeSegmentSlug,
+        contractsOnly,
+        isFranqueado,
+        isCsc,
+        canBiValidation,
+        ctrlFullView,
+      }),
+    [
+      userRole,
+      ctrlRoles,
+      canCase,
+      canViagens,
+      canViagensAprovar,
+      canContratos,
+      segments,
+      activeSegmentSlug,
+      contractsOnly,
+      isFranqueado,
+      isCsc,
+      canBiValidation,
+      ctrlFullView,
+    ],
+  );
 
   const sidebarNav = (mobile: boolean) => (
     <NavLinks
@@ -108,15 +166,14 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={0}>
-      {/* Tour guiado do Financeiro, para TODO MUNDO que tem o módulo. O gate é
-          o `userRole` (= navDreRole no layout), não-nulo exatamente quando o
-          usuário tem `can_financeiro` — e vale para as DUAS entradas: o disparo
-          no primeiro acesso e o "?" da topbar. Gatear só por rota não bastava:
-          a /home é o pouso de todos os perfis, e quem só tem Compras via ali um
-          "?" de um tour sobre telas que nem enxerga. */}
+      {/* Tour guiado. Um módulo só entra para quem o tem, e uma tela só entra
+          se o menu daquele usuário a montou — gatear por rota não bastaria: a
+          /home é o pouso de TODOS os perfis. */}
       <TourProvider
         userKey={userEmail || userName}
-        enabled={userRole !== null}
+        moduleIds={tourModuleIds}
+        navKeys={tourNavKeys}
+        audience={tourAudienceForProfile(userProfile)}
         segmentSlug={tourSegmentSlug}
       >
       <div className="ch-shell">
@@ -192,7 +249,6 @@ export function AppShell({
                 unreadCount={unreadNotifications}
                 href={hasCtrl ? "/ctrl/notificacoes" : BI_VALIDATION_PATH}
               />
-              <HelpButton />
               <span data-tour="topbar-tema" className="inline-flex">
                 <ThemeToggle />
               </span>

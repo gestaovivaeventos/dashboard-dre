@@ -25,6 +25,7 @@ export function NotificationsLink({
   return (
     <Link
       href={href}
+      data-tour="topbar-sino"
       aria-label={
         unreadCount > 0
           ? `Notificações (${unreadCount} não lida${unreadCount === 1 ? "" : "s"})`

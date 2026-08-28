@@ -462,7 +462,7 @@ export function FornecedoresTable({
       ) : null}
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b" role="tablist">
+      <div className="flex gap-1 border-b" role="tablist" data-tour="forn-abas">
         {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => {
           const active = activeTab === key;
           return (
@@ -530,7 +530,7 @@ export function FornecedoresTable({
 
       {/* Search */}
       <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 max-w-md" data-tour="forn-busca">
           <input
             type="text"
             value={search}
