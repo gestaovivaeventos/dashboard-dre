@@ -22,6 +22,8 @@ export const FINANCEIRO_TOUR: TourModule = {
   id: "financeiro",
   navGroupId: "financeiro",
   label: "Financeiro",
+  summary:
+    "DRE Gerencial, Fluxo de Caixa, Budget e Forecast, relatório de IA e comparativos — as telas de consulta dos números.",
   screens: [
     {
       id: "home",

@@ -82,6 +82,12 @@ export interface TourModule {
   navGroupId: string;
   /** Nome do módulo em texto corrido ("do módulo Compras"). */
   label: string;
+  /**
+   * Uma linha sobre o que o módulo cobre. Aparece na escolha oferecida a quem
+   * tem os dois módulos — é o que deixa a pessoa decidir por onde começar sem
+   * precisar já conhecer o sistema.
+   */
+  summary: string;
   screens: readonly TourScreen[];
 }
 

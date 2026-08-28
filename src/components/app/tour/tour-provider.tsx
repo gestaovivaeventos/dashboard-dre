@@ -45,7 +45,7 @@ import {
 } from "@/lib/tour";
 
 /**
- * Sessão: "<moduleId>:<screenId>:<chained>:<timestamp>" que deve abrir logo
+ * Sessão: "<moduleId>:<screenId>:<chainDepth>:<timestamp>" que deve abrir logo
  * após a navegação. Passa por sessionStorage porque navegar entre módulos troca
  * de route group — o provider desmonta e remonta, e o estado em memória se
  * perde.
@@ -73,6 +73,15 @@ function anchorElement(anchor: string): HTMLElement | null {
   const el = document.querySelector(`[data-tour="${anchor}"]`) as HTMLElement | null;
   if (!el) return null;
   return el.getClientRects().length > 0 ? el : null;
+}
+
+/**
+ * O que o balão de espera anuncia. Abrir a PRIMEIRA tela de um módulo é, para
+ * quem lê, "começar o tour do Compras" — não "abrir o Início": as duas abrem a
+ * mesma /home, e o nome da tela não diria o que está acontecendo.
+ */
+function openingLabel(tourModule: TourModule, screen: TourScreen): string {
+  return tourModule.screens[0]?.id === screen.id ? tourModule.label : screen.label;
 }
 
 interface TourContextValue {
@@ -134,11 +143,14 @@ interface ActiveTour {
   screen: TourScreen;
   steps: readonly TourStep[];
   /**
-   * O passeio começou sozinho (primeiro acesso). Só nesse caso o fim de um
-   * módulo oferece o outro: quem abriu o Compras pelo "?" pediu o Compras, e
-   * emendar o Financeiro seria atropelo.
+   * Quantos módulos AINDA podem ser emendados depois deste.
+   *
+   * 0 = encerra aqui, e é o caso de quem abriu pelo "?": pediu um módulo
+   * específico, emendar o outro seria atropelo. No passeio de primeiro acesso
+   * começa em (nº de módulos − 1) e decrementa a cada emenda — sem essa
+   * contagem, o fim do segundo módulo ofereceria o primeiro de novo, em laço.
    */
-  chained: boolean;
+  chainDepth: number;
 }
 
 export function TourProvider({
@@ -165,6 +177,12 @@ export function TourProvider({
    * continua na tela dizendo o que está sendo aberto.
    */
   const [navLabel, setNavLabel] = useState<string | null>(null);
+  /**
+   * Quem tem os dois módulos escolhe por onde começar, em vez de cair no
+   * Financeiro por ser o primeiro do menu. O outro módulo continua vindo em
+   * seguida — muda a ordem, não o conteúdo.
+   */
+  const [choosing, setChoosing] = useState(false);
 
   const startTokenRef = useRef(0);
   const autoStartRecordedRef = useRef(false);
@@ -201,6 +219,7 @@ export function TourProvider({
     startTokenRef.current += 1; // cancela abertura que ainda esteja esperando âncoras
     setActive(null);
     setNavLabel(null);
+    setChoosing(false);
     setIndex(0);
     try {
       window.sessionStorage.removeItem(PENDING_KEY);
@@ -218,7 +237,7 @@ export function TourProvider({
    * tentamos algumas vezes antes de desistir das âncoras.
    */
   const start = useCallback(
-    (tourModule: TourModule, screen: TourScreen, chained: boolean) => {
+    (tourModule: TourModule, screen: TourScreen, chainDepth: number) => {
       // Um pedido de abertura invalida os anteriores: se o usuário navegar
       // enquanto esperamos as âncoras montarem, a tentativa antiga morre em vez
       // de abrir o tour da tela errada.
@@ -242,7 +261,7 @@ export function TourProvider({
         }
         setNavLabel(null);
         if (visible.length === 0) return;
-        setActive({ tourModule, screen, steps: visible, chained });
+        setActive({ tourModule, screen, steps: visible, chainDepth });
         setIndex(0);
       };
       // Primeira tentativa imediata: quem chama `start` é sempre um efeito, que
@@ -253,11 +272,24 @@ export function TourProvider({
     [audience],
   );
 
-  // Primeiro acesso: uma vez na vida, na /home, começando pelo primeiro módulo
-  // que o usuário tem. Quem tem os dois recebe o segundo como continuação, no
-  // mesmo passeio (ver `followingModule`) — não como um segundo disparo.
+  /** Abre o passeio de primeiro acesso pelo módulo escolhido. */
+  const startChainAt = useCallback(
+    (id: TourModuleId) => {
+      const tourModule = tourModuleById(id);
+      const home = tourModule ? resolveScreenInModule(tourModule, "/home") : null;
+      if (!tourModule || !home) return;
+      setChoosing(false);
+      // Os demais módulos que a pessoa tem podem ser emendados depois deste.
+      start(tourModule, home, Math.max(0, moduleIds.length - 1));
+    },
+    [moduleIds, start],
+  );
+
+  // Primeiro acesso: uma vez na vida, na /home. Com um módulo só, abre direto;
+  // com os dois, pergunta por onde começar — o outro vem como continuação, no
+  // mesmo passeio (ver `followingModule`), nunca como um segundo disparo.
   useEffect(() => {
-    if (!autoStart || !mounted || pathname !== "/home" || active) return;
+    if (!autoStart || !mounted || pathname !== "/home" || active || choosing) return;
     if (autoStartRecordedRef.current) return;
     // Supressor local: cobre a janela entre o disparo e a marca do servidor
     // chegar (o layout já foi renderizado com o tour_seen antigo).
@@ -266,13 +298,26 @@ export function TourProvider({
     } catch {
       /* sem storage seguimos com a marca do servidor apenas */
     }
-    const first = moduleIds[0];
-    const tourModule = first ? tourModuleById(first) : null;
-    const home = tourModule ? resolveScreenInModule(tourModule, "/home") : null;
-    if (!tourModule || !home) return;
+    if (moduleIds.length === 0) return;
+    // O tour "apareceu" tanto na escolha quanto no passeio: marcar aqui é o que
+    // garante uma única aparição mesmo se a pessoa fechar na pergunta.
     recordAutoStart();
-    start(tourModule, home, true);
-  }, [autoStart, mounted, pathname, active, moduleIds, userKey, recordAutoStart, start]);
+    if (moduleIds.length > 1) {
+      setChoosing(true);
+      return;
+    }
+    startChainAt(moduleIds[0]);
+  }, [
+    autoStart,
+    mounted,
+    pathname,
+    active,
+    choosing,
+    moduleIds,
+    userKey,
+    recordAutoStart,
+    startChainAt,
+  ]);
 
   // Continuação da sequência: a tela anterior deixou "<módulo>:<tela>" marcado
   // antes de navegar. Passa por sessionStorage porque a navegação entre módulos
@@ -286,7 +331,7 @@ export function TourProvider({
       pending = null;
     }
     if (!pending) return;
-    const [moduleId, screenId, chainedFlag, stamp] = pending.split(":");
+    const [moduleId, screenId, depthFlag, stamp] = pending.split(":");
     // Marcador velho é lixo de uma sequência abandonada: descarta em vez de
     // abrir um tour que ninguém pediu.
     if (!stamp || Date.now() - Number(stamp) > PENDING_MAX_AGE_MS) {
@@ -305,7 +350,7 @@ export function TourProvider({
     // route group): mostra o balão de "abrindo" antes mesmo de a tela existir,
     // senão sobra uma tela nua e a impressão de que o tour acabou.
     const target = tourModule.screens.find((s) => s.id === screenId);
-    if (target) setNavLabel(target.label);
+    if (target) setNavLabel(openingLabel(tourModule, target));
     const screen = resolveScreenInModule(tourModule, pathname);
     if (!screen || screen.id !== screenId) return;
     try {
@@ -313,7 +358,7 @@ export function TourProvider({
     } catch {
       /* idem */
     }
-    start(tourModule, screen, chainedFlag === "1");
+    start(tourModule, screen, Number(depthFlag) || 0);
   }, [mounted, pathname, moduleIds, start]);
 
   const startModule = useCallback(
@@ -328,7 +373,7 @@ export function TourProvider({
       const here = resolveScreenInModule(tourModule, pathname);
       const target = here && screens.some((s) => s.id === here.id) ? here : screens[0];
       if (target === here) {
-        start(tourModule, target, false);
+        start(tourModule, target, 0);
         return;
       }
       const href = tourHref(target, segmentSlug);
@@ -338,7 +383,7 @@ export function TourProvider({
       } catch {
         /* sem sessionStorage o tour não retoma após a navegação */
       }
-      setNavLabel(target.label);
+      setNavLabel(openingLabel(tourModule, target));
       router.push(href);
     },
     [moduleIds, navKeySet, pathname, segmentSlug, router, start],
@@ -438,7 +483,7 @@ export function TourProvider({
   // sistema de quem só vai ver isso uma vez. Quem abriu pelo "?" não recebe a
   // emenda — pediu um módulo específico.
   const followingModule = useMemo(() => {
-    if (!active || followingScreen || !active.chained) return null;
+    if (!active || followingScreen || active.chainDepth <= 0) return null;
     const next = moduleIds.find((id) => id !== active.tourModule.id);
     return next ? tourModuleById(next) : null;
   }, [active, followingScreen, moduleIds]);
@@ -496,10 +541,16 @@ export function TourProvider({
       close();
       return;
     }
+    // Seguir para outra TELA mantém a profundidade; emendar outro MÓDULO gasta
+    // uma — é o que impede o fim do segundo módulo oferecer o primeiro de novo.
+    const nextDepth =
+      target.tourModule.id === active.tourModule.id
+        ? active.chainDepth
+        : Math.max(0, active.chainDepth - 1);
     try {
       window.sessionStorage.setItem(
         PENDING_KEY,
-        `${target.tourModule.id}:${target.screen.id}:${active.chained ? "1" : "0"}:${Date.now()}`,
+        `${target.tourModule.id}:${target.screen.id}:${nextDepth}:${Date.now()}`,
       );
     } catch {
       /* sem sessionStorage a sequência para aqui; o "?" segue disponível. */
@@ -508,14 +559,14 @@ export function TourProvider({
     setIndex(0);
     // O balão troca para "abrindo <tela>" em vez de sumir: a tela seguinte pode
     // levar segundos para montar, e sem sinal nenhum isso lê como fim do tour.
-    setNavLabel(target.screen.label);
+    setNavLabel(openingLabel(target.tourModule, target.screen));
     router.push(href);
   }, [active, isLast, followingScreen, followingModule, navKeySet, segmentSlug, router, close]);
 
-  // Esc encerra — sempre, inclusive durante a espera da próxima tela. Um tour
-  // do qual não se sai é uma armadilha.
+  // Esc encerra — sempre, inclusive na pergunta inicial e na espera da próxima
+  // tela. Um tour do qual não se sai é uma armadilha.
   useEffect(() => {
-    if (!active && !navLabel) return;
+    if (!active && !navLabel && !choosing) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
       if (!active) return;
@@ -524,7 +575,7 @@ export function TourProvider({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, navLabel, close, goNext]);
+  }, [active, navLabel, choosing, close, goNext]);
 
   const value = useMemo<TourContextValue>(
     () => ({ moduleIds, startModule, activeModuleId: active?.tourModule.id ?? null }),
@@ -542,6 +593,60 @@ export function TourProvider({
   return (
     <TourContext.Provider value={value}>
       {children}
+      {/* Pergunta inicial de quem tem os dois módulos. */}
+      {mounted && choosing
+        ? createPortal(
+            <div className="ch-tour" role="dialog" aria-modal="true" aria-label="Escolha do tour guiado">
+              <div className="fixed inset-0 z-[100]" style={{ background: "rgba(2, 6, 23, 0.55)" }} />
+              <div
+                className="fixed left-1/2 top-1/2 z-[102] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-5 shadow-xl"
+                style={{ width: 460, maxWidth: "calc(100vw - 24px)" }}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Tour guiado
+                </p>
+                <h3 className="mt-0.5 text-lg font-semibold leading-tight">
+                  Por onde você quer começar?
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  Você tem acesso aos dois módulos. Escolha qual apresentar primeiro — ao
+                  terminar, o tour segue para o outro.
+                </p>
+
+                <div className="mt-4 space-y-2">
+                  {moduleIds.map((id) => {
+                    const tourModule = tourModuleById(id);
+                    if (!tourModule) return null;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => startChainAt(id)}
+                        className="flex w-full flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-muted/60"
+                      >
+                        <span className="text-sm font-semibold">{tourModule.label}</span>
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          {tourModule.summary}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex justify-start">
+                  <button
+                    type="button"
+                    onClick={() => close()}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  >
+                    Pular tour
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
       {/* Espera da próxima tela. Mesma moldura do balão do passo, para o tour
           parecer contínuo — o que ele é: a tela é que está carregando. */}
       {mounted && !active && navLabel

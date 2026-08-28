@@ -26,6 +26,8 @@ export const COMPRAS_TOUR: TourModule = {
   id: "compras",
   navGroupId: "compras",
   label: "Compras",
+  summary:
+    "O caminho de uma despesa: requisição, orçamento, aprovações e o pagamento lançado no Omie.",
   screens: [
     // ─────────────────────────────────────────────────────────────── início
     {
