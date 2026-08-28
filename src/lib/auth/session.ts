@@ -3,6 +3,7 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasContratosGrant } from "@/lib/auth/contratos";
+import { hasSeenTour } from "@/lib/tour/seen";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type {
   DreRole,
@@ -178,6 +179,9 @@ async function loadSessionContext(): Promise<SessionContext> {
     can_viagens: canViagens,
     can_viagens_aprovar: canViagensAprovar,
     can_contratos: canContratos,
+    // Tour guiado de boas-vindas: linha em user_module_roles (module='tour'),
+    // pelo mesmo motivo do módulo Contratos — sem coluna nova, sem migration.
+    tour_seen: hasSeenTour(moduleRoleRows),
     sector_ids: sectorIds,
     company_ids: companyIds,
     active: profileRow.active,

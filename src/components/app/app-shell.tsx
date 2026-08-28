@@ -50,6 +50,11 @@ interface AppShellProps {
    * (o solicitante aguarda a aprovação; o Contas a Pagar é quem envia ao Omie).
    */
   userProfile?: UserProfileType | null;
+  /**
+   * O usuário JÁ viu o tour guiado (`profile.tour_seen`). Quando true, o tour
+   * não abre sozinho — só pelo "?" ao lado do módulo, no menu.
+   */
+  tourSeen?: boolean;
 }
 
 export function AppShell({
@@ -75,6 +80,7 @@ export function AppShell({
   ctrlFullView,
   unreadNotifications = 0,
   userProfile,
+  tourSeen,
 }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -168,13 +174,15 @@ export function AppShell({
     <TooltipProvider delayDuration={0}>
       {/* Tour guiado. Um módulo só entra para quem o tem, e uma tela só entra
           se o menu daquele usuário a montou — gatear por rota não bastaria: a
-          /home é o pouso de TODOS os perfis. */}
+          /home é o pouso de TODOS os perfis. O passeio automático acontece uma
+          vez por pessoa; depois, só pelo "?" ao lado do módulo. */}
       <TourProvider
         userKey={userEmail || userName}
         moduleIds={tourModuleIds}
         navKeys={tourNavKeys}
         audience={tourAudienceForProfile(userProfile)}
         segmentSlug={tourSegmentSlug}
+        autoStart={!tourSeen}
       >
       <div className="ch-shell">
         {/* Sidebar fixa (>= 1100px). Abaixo disso vira drawer. */}

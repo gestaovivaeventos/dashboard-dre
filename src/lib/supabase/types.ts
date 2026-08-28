@@ -90,6 +90,13 @@ export interface UnifiedProfile {
    * 'validador_contrato' continua implicando o módulo.
    */
   can_contratos: boolean;
+  /**
+   * Já viu o tour guiado de boas-vindas. Como `can_contratos`, NÃO é coluna de
+   * `users`: é derivada da linha em `user_module_roles` (module='tour') — ver
+   * `@/lib/tour/seen`. Falso significa "ainda não apresentamos o sistema a esta
+   * pessoa", e é o que dispara o tour automático uma única vez.
+   */
+  tour_seen: boolean;
   /** Setores aos quais este usuário está vinculado (relevante pra Gerente/Solicitante). */
   sector_ids: string[];
   /** Empresas (unidades) que o usuário enxerga. Ignorado para admin (vê tudo). */

@@ -86,15 +86,24 @@ export interface TourModule {
 }
 
 /**
- * Versão do tour. Subir este número faz TODO MUNDO ver o tour de novo —
- * a marca de "já vi" no localStorage é gravada com a versão embutida.
- * Suba apenas quando o conteúdo mudar a ponto de valer reapresentar.
+ * Versão do tour. Subir este número reapresenta o tour a quem já o viu — mas só
+ * a trava LOCAL entende de versão; a marca definitiva é a linha em
+ * `user_module_roles` (ver @/lib/tour/seen), que precisaria ser apagada em
+ * lote. Suba apenas junto de uma decisão consciente de reapresentar.
  */
 export const TOUR_VERSION = 1;
 
-/** Chave do localStorage que marca um módulo como já visto por este usuário. */
-export function tourStorageKey(userKey: string, moduleId: TourModuleId): string {
-  return `ch-tour-v${TOUR_VERSION}:${moduleId}:${userKey}`;
+/**
+ * Chave do localStorage que impede o tour automático de reabrir no mesmo
+ * navegador antes de a marca do servidor propagar.
+ *
+ * É apenas um SUPRESSOR: nunca autoriza o tour a aparecer, só evita que ele
+ * apareça duas vezes na janela entre o disparo e a gravação. Quem decide se o
+ * tour aparece é `profile.tour_seen`, que vem do banco — localStorage sozinho
+ * mostraria o tour de novo em cada navegador da mesma pessoa.
+ */
+export function tourStorageKey(userKey: string): string {
+  return `ch-tour-autostart-v${TOUR_VERSION}:${userKey}`;
 }
 
 /**
