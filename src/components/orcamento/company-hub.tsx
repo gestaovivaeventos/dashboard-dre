@@ -28,7 +28,7 @@ const METODO_UI: Record<OrcamentoMetodo, { icon: LucideIcon; desc: string }> = {
   valor_fixo: { icon: Coins, desc: "Valores fixos por categoria, corrigidos por índice." },
   planejamento_socios: {
     icon: Handshake,
-    desc: "Definições dos sócios (pró-labore, dividendos, aportes).",
+    desc: "Entrevista com o gestor, item a item, nas categorias definidas por ele.",
   },
   // VE não aparecem no hub padrão (telas construídas depois).
   viagens_ve: { icon: Coins, desc: "" },
@@ -91,7 +91,7 @@ function Tile({ icon: Icon, title, desc, href, comingSoon }: TileProps) {
 
 /**
  * Hub de "caixas" da empresa: uma caixa por MÉTODO de orçamento (Pessoal,
- * Média, Valor fixo, Planejamento dos sócios) + a caixa de Configuração. É a
+ * Média, Valor fixo, Planejamento dos gestores) + a caixa de Configuração. É a
  * porta de entrada dos módulos daquela empresa. O andamento aparece como um selo
  * ÚNICO da empresa no topo (não por caixa) — Não iniciado / Em andamento /
  * Concluído.

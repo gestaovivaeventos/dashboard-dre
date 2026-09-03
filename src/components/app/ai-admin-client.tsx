@@ -208,7 +208,7 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
   const providerRows = useMemo(() => mergeProviderRows(data), [data]);
 
   // Roteamento efetivo por módulo (qual IA cada um usa DE FATO). A maioria segue
-  // o provedor ativo; alguns são FIXOS. O Orçamento (Planejamento dos sócios) é
+  // o provedor ativo; alguns são FIXOS. O Orçamento (Planejamento dos gestores) é
   // fixado no Google Gemini — mas cai para o provedor ativo se o Gemini estiver
   // sem chave ou desabilitado, então mostramos o provedor REAL em uso.
   const ativoLabel = data.providers.find((p) => p.provider === data.activeProvider)?.label ?? data.activeProvider;
@@ -557,7 +557,7 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
             nota="Segue o provedor ativo (geral)."
           />
           <ModuloIaRow
-            modulo="Orçamento — Planejamento dos sócios"
+            modulo="Orçamento — Planejamento dos gestores"
             ia={orcamentoLabel}
             nota={
               geminiPronto

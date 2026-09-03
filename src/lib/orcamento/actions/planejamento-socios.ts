@@ -26,6 +26,8 @@ import {
   type PlanejamentoMensagem,
   type PlanejamentoProposta,
   type PlanejamentoRealizadoItem,
+  periodicidadeLabel,
+  toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
 
 const PATH = "/orcamento";
@@ -138,10 +140,6 @@ function sanitizeConversa(raw: unknown): PlanejamentoMensagem[] {
     }
   });
   return out;
-}
-
-function toPeriodicidade(v: unknown): Periodicidade {
-  return v === "anual" ? "anual" : "mensal";
 }
 
 function rowToItem(r: ItemRow): PlanejamentoItem {
@@ -284,7 +282,13 @@ function considerarContexto(
         }
         const fim = i.mesFim != null && i.mesFim >= 1 && i.mesFim <= 12 ? i.mesFim : null;
         const ate = fim != null && fim < 12 ? `, até ${MESES_NOME[fim - 1]} (cancela depois)` : "";
-        return `- ${i.descricao}: ${formatBRL(i.valorMensal)}/mês, a partir de ${mes}${ate}`;
+        // Bimestral/trimestral/semestral: diz o intervalo, para a IA não tratar
+        // o valor como mensal ao conversar com o gestor.
+        const cada =
+          i.periodicidade === "mensal"
+            ? "/mês"
+            : `/${periodicidadeLabel(i.periodicidade).replace(/al$/, "e")}`;
+        return `- ${i.descricao}: ${formatBRL(i.valorMensal)}${cada}, a partir de ${mes}${ate}`;
       })
       .join("\n");
   }
@@ -514,12 +518,14 @@ function buildSystemPrompt(opts: {
     "ele disse não manter. Confira item por item contra a conversa: nenhuma alteração pode",
     "faltar. Cada item:",
     "  - descricao: nome da plataforma/serviço;",
-    "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
-    "    ANUAL quando periodicidade='anual';",
-    "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
-    "  - mesFim: mês (1..12) do ÚLTIMO pagamento quando o item é MENSAL e será cancelado",
-    "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
-    "  - periodicidade: 'mensal' ou 'anual';",
+    "  - valorMensal: o VALOR em reais de CADA pagamento — mensal na periodicidade",
+    "    'mensal', do bimestre na 'bimestral', do trimestre na 'trimestral', do",
+    "    semestre na 'semestral' e o valor anual na 'anual';",
+    "  - mesInicio: mês (1..12) do PRIMEIRO pagamento (na 'anual', o mês da renovação);",
+    "  - mesFim: mês (1..12) do ÚLTIMO pagamento, quando o item será cancelado no meio",
+    "    do ano; use null (ou omita) quando vai até dezembro; ignorado se 'anual';",
+    "  - periodicidade: 'mensal', 'bimestral', 'trimestral', 'semestral' ou 'anual' — o",
+    "    INTERVALO entre pagamentos (a cada 1, 2, 3, 6 ou 12 meses);",
     "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
     "E uma justificativa curta (2 a 4 frases) com as premissas. Se ainda faltar um dado",
     "OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e o 'reply'",
@@ -540,7 +546,7 @@ function buildSystemPrompt(opts: {
 
   return [
     'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
-    'categoria de despesa pelo método "Planejamento dos sócios".',
+    'categoria de despesa pelo método "Planejamento dos gestores".',
     "",
     "IMPORTANTE: o orçado da categoria é a SOMA de VÁRIOS ITENS independentes (cada",
     "contratação/serviço é um item próprio).",

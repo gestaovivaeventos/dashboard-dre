@@ -11,7 +11,7 @@ import {
 } from "@/lib/orcamento/actions/planejamento-socios";
 import { limparMarcadorFechar, type PlanejamentoMensagem } from "@/lib/orcamento/planejamento-calc";
 
-// Streaming de UM turno da ENTREVISTA (Planejamento dos sócios). Retorna a
+// Streaming de UM turno da ENTREVISTA (Planejamento dos gestores). Retorna a
 // resposta da IA em texto corrido (o cliente lê o stream e vai desenhando).
 // O ENCERRAR (que gera a proposta em JSON) NÃO passa por aqui — segue no server
 // action `enviarMensagemPlanejamento`, que precisa da resposta estruturada.

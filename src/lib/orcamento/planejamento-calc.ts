@@ -1,16 +1,61 @@
-// Cálculo puro do método "Planejamento dos sócios" — compartilhado por UI,
+// Cálculo puro do método "Planejamento dos gestores" — compartilhado por UI,
 // server actions e Prévia (sem "use server", para poder ser importado pelo
 // cliente). Uma categoria reúne N ITENS (ex.: cada plataforma/serviço de
 // "Softwares, Sistemas e Servidores"); o orçado da categoria = SOMA das séries
 // dos itens.
 //
-// Cada item tem uma PERIODICIDADE:
-//  - 'mensal': o valor vale de `mesInicio` até `mesFim` (padrão dezembro). Um
-//    serviço novo em julho conta jul..dez; um serviço cancelado em julho (último
-//    pagamento em junho) tem mesFim=6 e conta jan..jun;
-//  - 'anual':  pagamento ÚNICO no mês de renovação (`mesInicio`), 0 nos demais.
+// Cada item tem uma PERIODICIDADE, que é o INTERVALO entre pagamentos: mensal
+// (todo mês), bimestral (a cada 2), trimestral (3), semestral (6) e anual
+// (pagamento único no mês de renovação).
+//
+// O primeiro pagamento é sempre em `mesInicio`, e a série segue de passo em
+// passo até `mesFim` (padrão dezembro): um serviço novo em julho conta a partir
+// de julho; um cancelado em julho (último pagamento em junho) tem mesFim=6.
+// 'anual' é o único que ignora `mesFim` — paga uma vez e pronto.
+//
+// `valorMensal` é o valor de CADA pagamento: mensal na periodicidade mensal, do
+// trimestre na trimestral, e assim por diante.
 
-export type Periodicidade = "mensal" | "anual";
+export type Periodicidade =
+  | "mensal"
+  | "bimestral"
+  | "trimestral"
+  | "semestral"
+  | "anual";
+
+export interface PeriodicidadeMeta {
+  key: Periodicidade;
+  label: string;
+  /** Meses entre um pagamento e o seguinte. */
+  passo: number;
+}
+
+// Ordem do seletor, do mais frequente ao menos frequente.
+export const PERIODICIDADES: readonly PeriodicidadeMeta[] = [
+  { key: "mensal", label: "mensal", passo: 1 },
+  { key: "bimestral", label: "bimestral", passo: 2 },
+  { key: "trimestral", label: "trimestral", passo: 3 },
+  { key: "semestral", label: "semestral", passo: 6 },
+  { key: "anual", label: "anual", passo: 12 },
+] as const;
+
+export function isPeriodicidade(v: unknown): v is Periodicidade {
+  return PERIODICIDADES.some((p) => p.key === v);
+}
+
+/** Normaliza o que vem do banco ou da IA. Desconhecido cai em mensal. */
+export function toPeriodicidade(v: unknown): Periodicidade {
+  return isPeriodicidade(v) ? v : "mensal";
+}
+
+/** Meses entre pagamentos. */
+export function passoMeses(p: Periodicidade): number {
+  return PERIODICIDADES.find((x) => x.key === p)?.passo ?? 1;
+}
+
+export function periodicidadeLabel(p: Periodicidade): string {
+  return PERIODICIDADES.find((x) => x.key === p)?.label ?? p;
+}
 
 export interface PlanejamentoMensagem {
   role: "user" | "assistant";
@@ -110,12 +155,11 @@ export function serieItem(
   const arr = Array<number>(12).fill(0);
   const inicio = clampMes(mesInicio);
   const v = Number.isFinite(valor) && valor > 0 ? valor : 0;
-  if (periodicidade === "anual") {
-    arr[inicio - 1] = v; // pagamento único no mês de renovação
-  } else {
-    const fim = mesFim == null ? 12 : clampMes(mesFim);
-    for (let m = 0; m < 12; m += 1) if (m + 1 >= inicio && m + 1 <= fim) arr[m] = v;
-  }
+  const passo = passoMeses(periodicidade);
+  // 'anual' paga uma vez só, no mês da renovação, e ignora mesFim. Nas demais,
+  // paga em mesInicio e depois a cada `passo` meses, até mesFim (ou dezembro).
+  const fim = periodicidade === "anual" ? inicio : mesFim == null ? 12 : clampMes(mesFim);
+  for (let mes = inicio; mes <= fim; mes += passo) arr[mes - 1] = v;
   return arr;
 }
 

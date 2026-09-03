@@ -354,6 +354,7 @@ export async function GET(request: Request) {
     ok: boolean;
     checked?: number;
     paid?: number;
+    reverted?: number;
     companies?: number;
     error?: string;
   } | null = null;
@@ -363,6 +364,7 @@ export async function GET(request: Request) {
       ok: true,
       checked: r.checked,
       paid: r.paid,
+      reverted: r.reverted,
       companies: r.companies,
     };
   } catch (error) {

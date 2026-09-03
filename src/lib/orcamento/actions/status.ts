@@ -21,7 +21,7 @@ export async function getOrcamentoStatus(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  // RPC agregado + status do planejamento dos sócios (categorias do método ×
+  // RPC agregado + status do planejamento dos gestores (categorias do método ×
   // propostas confirmadas). O planejamento vem de duas tabelas — busca junto.
   const [rpc, metodoRes, psRes] = await Promise.all([
     supabase.rpc("orcamento_status_por_empresa", { p_year: y }),

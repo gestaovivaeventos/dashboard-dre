@@ -202,7 +202,7 @@ export function PreviaOrcamentoView({
           )}
           {resumo.planejamentoCategorias > 0 && (
             <span className="text-muted-foreground">
-              Planejamento dos sócios: {resumo.planejamentoCategorias} categoria(s)
+              Planejamento dos gestores: {resumo.planejamentoCategorias} categoria(s)
               {resumo.planejamentoSemValor > 0 && (
                 <span className="text-amber-600 dark:text-amber-500">
                   {" "}
