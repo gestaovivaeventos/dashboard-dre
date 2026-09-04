@@ -162,6 +162,8 @@ SQL functions: `get_dre_consolidated()` (account aggregation), `get_dre_drilldow
 
 Omie credentials (app_key/app_secret) are encrypted with AES-256-GCM before storage, decrypted on-demand for API calls.
 
+**Funções `SECURITY DEFINER` ignoram RLS, e no Supabase toda função nova nasce executável por `anon` e `authenticated`** (default privileges do projeto — um `DROP`+`CREATE` também zera revogações anteriores). Por isso, toda função `SECURITY DEFINER` que lê ou grava dados de empresa tem que terminar com `REVOKE EXECUTE ... FROM PUBLIC, anon, authenticated; GRANT EXECUTE ... TO service_role;` e ser chamada pelo app com o admin client. Só os predicados usados dentro de policies (`is_admin()`, `has_ctrl_role()`, `user_has_company_access()` etc.) ficam liberados para `authenticated`. A auditoria de 03/09/2026 (`20260903120000_security_hardening.sql`) fechou as existentes; uma migration posterior que recrie a função reabre o buraco sem aviso — `get_advisors` do MCP acusa como `authenticated_security_definer_function_executable`.
+
 **Migrations**: timestamped, applied in order. `schema_migrations` records the *application* timestamp, which does **not** match the file-name prefix — match migrations by name, not by timestamp. Per Marcelo's global instructions, run DDL/DML yourself via the Supabase MCP or CLI rather than pasting SQL for him to run.
 
 ## Deployment
