@@ -5,6 +5,7 @@ import { ArrowRightLeft, Loader2 } from "lucide-react";
 
 import {
   moverLinhaDeSetor,
+  removerLinhaDoSetor,
   type MetodoComSetor,
 } from "@/lib/orcamento/actions/mover-setor";
 import type { OrcamentoSetor } from "@/lib/orcamento/actions/setores";
@@ -62,7 +63,36 @@ export function MoverSetorButton({
   }, [aberto]);
 
   const destinos = setores.filter((s) => s.id !== origemSetorId);
-  if (destinos.length === 0) return null;
+  // Com um setor só ainda faz sentido: dá para TIRAR a categoria dele.
+  if (destinos.length === 0 && !origemSetorId) return null;
+
+  /** Tira a categoria DESTE setor (apaga a linha daqui). É a saída para o
+   * resíduo da migração, quando a mesma categoria ficou em dois setores. */
+  async function remover() {
+    if (!origemSetorId) return;
+    if (
+      !window.confirm(
+        "Remover esta categoria deste setor? O valor orçado dela AQUI será apagado (os outros setores não são afetados).",
+      )
+    ) {
+      return;
+    }
+    setAberto(false);
+    setMovendo(true);
+    const res = await removerLinhaDoSetor({
+      companyId,
+      year,
+      metodo,
+      categoryCode,
+      setorId: origemSetorId,
+    });
+    setMovendo(false);
+    if (res?.error) {
+      onError(res.error);
+      return;
+    }
+    onMoved();
+  }
 
   async function mover(destinoSetorId: string) {
     setAberto(false);
@@ -118,6 +148,18 @@ export function MoverSetorButton({
               {s.name}
             </button>
           ))}
+          {origemSetorId && (
+            <>
+              <div className="my-1 border-t" />
+              <button
+                type="button"
+                onClick={() => void remover()}
+                className="block w-full rounded px-2 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10"
+              >
+                Tirar deste setor
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -155,3 +155,82 @@ export async function moverLinhaDeSetor(params: {
   revalidatePath(PATH);
   return { ok: true as const, movidas: (movidas ?? []).length };
 }
+
+/**
+ * Tira uma categoria de um setor: apaga a linha de orçamento e a atribuição.
+ *
+ * Serve para o resíduo da migração — a categoria ficou atribuída a dois setores
+ * e ganhou linha nos dois, mostrando o mesmo valor duas vezes. Também é a saída
+ * quando "Mover" recusa porque o destino já tem orçamento daquela categoria.
+ *
+ * Apaga DADO de orçamento, então a tela confirma antes.
+ */
+export async function removerLinhaDoSetor(params: {
+  companyId: string;
+  year: number;
+  metodo: MetodoComSetor;
+  categoryCode: string;
+  setorId: string;
+}) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  const { companyId, year, metodo, categoryCode, setorId } = params;
+  if (!companyId || !categoryCode || !setorId) return { error: "Dados inválidos." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { error } = await supabase
+    .from(TABELA[metodo])
+    .delete()
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+
+  // O planejamento guarda os itens à parte.
+  if (metodo === "planejamento_socios") {
+    const { error: itensErr } = await supabase
+      .from("orcamento_planejamento_socios_itens")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .eq("setor_id", setorId);
+    if (itensErr) return { error: itensErr.message };
+  }
+
+  // Sem linha em nenhum método, a categoria sai do setor — senão ela continua
+  // listada e a próxima recalculada recria a linha.
+  let sobrou = false;
+  for (const tabela of Object.values(TABELA)) {
+    const { count } = await supabase
+      .from(tabela)
+      .select("company_id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .eq("setor_id", setorId);
+    if ((count ?? 0) > 0) {
+      sobrou = true;
+      break;
+    }
+  }
+  if (!sobrou) {
+    const { error: limpaErr } = await supabase
+      .from("orcamento_categoria_setores")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .eq("setor_id", setorId);
+    if (limpaErr) return { error: limpaErr.message };
+  }
+
+  revalidatePath(PATH);
+  return { ok: true as const };
+}

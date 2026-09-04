@@ -216,7 +216,7 @@ function MediaRow({
               </span>
             </span>
           </button>
-          {setores.length > 1 && (
+          {setores.length > 0 && (
             <div className="mt-1">
               <MoverSetorButton
                 companyId={companyId}

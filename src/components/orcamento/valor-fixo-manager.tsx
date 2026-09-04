@@ -385,7 +385,7 @@ function ValorFixoCategoryGroup({
       >
         <Plus className="h-3 w-3" /> contrato
       </button>
-      {setores.length > 1 && (
+      {setores.length > 0 && (
         <MoverSetorButton
           companyId={companyId}
           year={budgetYear}
