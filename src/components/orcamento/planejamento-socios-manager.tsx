@@ -48,6 +48,7 @@ import {
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { analisarBase } from "@/lib/orcamento/planejamento-analise";
 import { PlanejamentoAlertasBase } from "@/components/orcamento/planejamento-alertas-base";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -562,6 +563,7 @@ function CategoriaInterview({
   companyId,
   year,
   categoryCode,
+  setorId,
   isAdmin,
   allItems,
   onBack,
@@ -572,6 +574,8 @@ function CategoriaInterview({
   companyId: string;
   year: number;
   categoryCode: string;
+  /** Setor da tela: o planejamento desta categoria é o DESTE setor. */
+  setorId: string | null;
   isAdmin: boolean;
   /** Lista COMPLETA de categorias (ordem estável) — para posição "X de N" e a próxima pendente. */
   allItems: PlanejamentoListItem[];
@@ -646,7 +650,7 @@ function CategoriaInterview({
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    void getPlanejamentoCategoria(companyId, year, categoryCode).then((res) => {
+    void getPlanejamentoCategoria(companyId, year, categoryCode, setorId).then((res) => {
       if (!alive) return;
       setLoading(false);
       if (res.needsMigration) {
@@ -768,6 +772,7 @@ function CategoriaInterview({
         incluir: i.incluir,
       })),
       contextoAdmin,
+      setorId,
     );
     setSavingBase(false);
     if (res.needsMigration) {
@@ -834,6 +839,7 @@ function CategoriaInterview({
           texto,
           itensContexto: baseContexto(),
           promptCtx: promptContexto(),
+          setorId,
         }),
       });
 
@@ -883,6 +889,7 @@ function CategoriaInterview({
       baseContexto(),
       true,
       promptContexto(),
+      setorId,
     );
     setSending(false);
     if (res.needsMigration) {
@@ -909,7 +916,7 @@ function CategoriaInterview({
 
   async function recomecar() {
     setConfirmReset(false);
-    const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode);
+    const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode, setorId);
     if (res.needsMigration) {
       onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
@@ -931,7 +938,7 @@ function CategoriaInterview({
   async function confirmar() {
     setConfirming(true);
     setLocalErr(null);
-    const res = await confirmarPropostaPlanejamento(companyId, year, categoryCode);
+    const res = await confirmarPropostaPlanejamento(companyId, year, categoryCode, setorId);
     setConfirming(false);
     if (res.needsMigration) {
       onError("Migration do Planejamento dos gestores ainda não aplicada.");
@@ -982,7 +989,14 @@ function CategoriaInterview({
       origem: i.origem,
       fornecedor: i.fornecedor,
     }));
-    const res = await editarPropostaPlanejamento(companyId, year, categoryCode, payload, propostaEditJust);
+    const res = await editarPropostaPlanejamento(
+      companyId,
+      year,
+      categoryCode,
+      payload,
+      propostaEditJust,
+      setorId,
+    );
     setSavingProposta(false);
     if (res.needsMigration) {
       onError("Migration do Planejamento dos gestores ainda não aplicada.");
@@ -1490,6 +1504,10 @@ export function PlanejamentoSociosManager({
   year: number;
   isAdmin?: boolean;
 }) {
+  // Cada categoria é planejada POR SETOR: a tela trabalha um setor por vez, e
+  // a lista mostra só as categorias atribuídas a ele.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [items, setItems] = useState<PlanejamentoListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1497,7 +1515,7 @@ export function PlanejamentoSociosManager({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
 
-  async function reload() {
+  async function reload(sid: string | null = setorId) {
     if (!companyId) {
       setItems([]);
       return;
@@ -1505,7 +1523,7 @@ export function PlanejamentoSociosManager({
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getPlanejamentoSocios(companyId, year);
+    const res = await getPlanejamentoSocios(companyId, year, sid);
     setLoading(false);
     if (res.needsMigration) {
       setNeedsMigration(true);
@@ -1521,11 +1539,29 @@ export function PlanejamentoSociosManager({
   }
 
   useEffect(() => {
-    void reload();
+    let cancelado = false;
     setSearch("");
     setSelected(null);
+    void (async () => {
+      const res = await getSetores(companyId, year);
+      if (cancelado) return;
+      const ativos = (res.items ?? []).filter((x) => x.active);
+      setSetores(ativos);
+      const primeiro = ativos[0]?.id ?? null;
+      setSetorId(primeiro);
+      await reload(primeiro);
+    })();
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  function handleSetor(sid: string) {
+    setSetorId(sid);
+    setSelected(null);
+    void reload(sid);
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1550,6 +1586,7 @@ export function PlanejamentoSociosManager({
         companyId={companyId}
         year={year}
         categoryCode={selected}
+        setorId={setorId}
         isAdmin={isAdmin}
         allItems={items}
         onBack={() => {
@@ -1647,6 +1684,25 @@ export function PlanejamentoSociosManager({
               />
             </div>
           </div>
+
+          {setores.length > 0 && (
+            <div className="w-64 space-y-1.5">
+              <label className="text-sm font-medium">Setor</label>
+              <select
+                value={setorId ?? ""}
+                onChange={(e) => handleSetor(e.target.value)}
+                disabled={loading}
+                title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+                className={INPUT_CLS}
+              >
+                {setores.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
