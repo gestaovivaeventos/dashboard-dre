@@ -194,3 +194,51 @@ export function totalItem(
 ): number {
   return serieItem(valor, mesInicio, periodicidade, mesFim).reduce((a, b) => a + b, 0);
 }
+
+// ─── Categorias IRMÃS (a divisão "(*)" é interna à contabilidade) ────────────
+// Ex.: "Marketing" e "Marketing (*)" são duas categorias Omie (dois códigos) com
+// o MESMO nome a menos do sufixo " (*)". Para o gestor é UMA despesa só: o card
+// canônico agrega o realizado das duas e produz UMA proposta.
+//
+// Vive aqui (módulo puro) porque a regra vale em dois lugares que precisam
+// concordar: a LISTA do Planejamento, que esconde o card da gêmea, e a PRÉVIA,
+// que não pode orçar uma proposta que a tela não mostra.
+
+/** Nome sem o sufixo " (*)" (e sem caixa), para casar irmãs. */
+export function normNomeCategoria(s: string): string {
+  return (s ?? "")
+    .replace(/\s*\(\*\)\s*$/i, "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
+/** A categoria é a "gêmea (*)" (subdivisão contábil interna), não a canônica? */
+export function ehCategoriaEstrela(name: string): boolean {
+  return /\(\*\)\s*$/.test((name ?? "").trim());
+}
+
+/** Códigos de todas as categorias irmãs (mesmo nome-base), incluindo a própria. */
+export function codigosIrmaos(
+  items: { categoryCode: string; categoryName: string }[],
+  categoryCode: string,
+  categoryName: string,
+): string[] {
+  const alvo = normNomeCategoria(categoryName);
+  const set = new Set<string>([categoryCode]);
+  for (const it of items) if (normNomeCategoria(it.categoryName) === alvo) set.add(it.categoryCode);
+  return Array.from(set);
+}
+
+/**
+ * Descarta a gêmea "(*)" quando a canônica de mesmo nome também está na lista.
+ * É a regra que faz as duas categorias virarem UM card — e, na Prévia, UM valor.
+ * Gêmea sozinha (sem canônica) é mantida: ali ela É a categoria do gestor.
+ */
+export function apenasCanonicas<T extends { categoryName: string }>(items: T[]): T[] {
+  const canonicas = new Set(
+    items.filter((c) => !ehCategoriaEstrela(c.categoryName)).map((c) => normNomeCategoria(c.categoryName)),
+  );
+  return items.filter(
+    (c) => !(ehCategoriaEstrela(c.categoryName) && canonicas.has(normNomeCategoria(c.categoryName))),
+  );
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, TriangleAlert, Eye, EyeOff, Info, Download } from "lucide-react";
+import { Loader2, TriangleAlert, Eye, EyeOff, Info, Download, ListTree } from "lucide-react";
 
 import {
   getPreviaOrcamento,
@@ -9,6 +9,7 @@ import {
   type PreviaDreLinha,
 } from "@/lib/orcamento/actions/previa-orcamento";
 import { downloadPreviaOrcamentoXlsx } from "@/lib/orcamento/previa-orcamento-export";
+import { PreviaFontesDialog } from "@/components/orcamento/previa-fontes-dialog";
 import { formatBRL } from "@/lib/orcamento/format";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +24,13 @@ function Valor({ v, className }: { v: number; className?: string }) {
   );
 }
 
-function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
+function LinhaDre({
+  linha,
+  onDrill,
+}: {
+  linha: PreviaDreLinha;
+  onDrill: ((linha: PreviaDreLinha) => void) | null;
+}) {
   const destaque = linha.isSummary || linha.isCalculado;
   const resultado = linha.code === "11";
   // Fundo OPACO (não translúcido): as colunas fixas ficam por cima das células
@@ -35,6 +42,8 @@ function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
     : destaque
       ? "bg-muted"
       : "bg-card";
+  // Linha calculada por fórmula não tem drilldown (ver a action).
+  const podeAbrir = onDrill != null && linha.fontes.length > 0;
   return (
     <tr
       className={cn(
@@ -42,7 +51,10 @@ function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
         surface,
         destaque && "font-semibold",
         resultado && "font-bold",
+        podeAbrir && "cursor-pointer hover:bg-emerald-500/5",
       )}
+      onClick={podeAbrir ? () => onDrill!(linha) : undefined}
+      title={podeAbrir ? "Ver de onde vem este valor" : undefined}
     >
       {/* Nome (coluna fixa à esquerda) */}
       <td className={cn("sticky left-0 z-10 whitespace-nowrap border-r px-3 py-1.5", surface)}>
@@ -55,6 +67,9 @@ function LinhaDre({ linha }: { linha: PreviaDreLinha }) {
             <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-normal text-amber-600 dark:text-amber-500">
               sem método de receita
             </span>
+          )}
+          {podeAbrir && (
+            <ListTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden />
           )}
         </span>
       </td>
@@ -87,6 +102,8 @@ export function PreviaOrcamentoView({
   const [needsMigration, setNeedsMigration] = useState(false);
   const [ocultarZeros, setOcultarZeros] = useState(true);
   const [exportando, setExportando] = useState(false);
+  // Linha aberta no drilldown (null = fechado).
+  const [drill, setDrill] = useState<PreviaDreLinha | null>(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -165,7 +182,8 @@ export function PreviaOrcamentoView({
 
   if (!data) return null;
 
-  const { resumo, pessoalNaoClassificado, categoriasNaoMapeadas } = data;
+  const { resumo, pessoalNaoClassificado, categoriasNaoMapeadas, planejamentoGemeaIgnorada } =
+    data;
 
   return (
     <div className="space-y-4">
@@ -238,7 +256,9 @@ export function PreviaOrcamentoView({
       </div>
 
       {/* Avisos de valores que não caíram na DRE */}
-      {(pessoalNaoClassificado.length > 0 || categoriasNaoMapeadas.length > 0) && (
+      {(pessoalNaoClassificado.length > 0 ||
+        categoriasNaoMapeadas.length > 0 ||
+        planejamentoGemeaIgnorada.length > 0) && (
         <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
           <div className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-500">
             <TriangleAlert className="h-4 w-4" />
@@ -251,6 +271,20 @@ export function PreviaOrcamentoView({
               </span>{" "}
               sem linha da DRE — ligue-as em <span className="font-medium">Mapeamento</span> (Financeiro):{" "}
               {categoriasNaoMapeadas
+                .map((o) => `${o.chave} (${formatBRL(o.totalAno)})`)
+                .join(", ")}
+              .
+            </p>
+          )}
+          {planejamentoGemeaIgnorada.length > 0 && (
+            <p className="text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {planejamentoGemeaIgnorada.length} categoria(s) “(*)”
+              </span>{" "}
+              têm planejamento gravado que <strong>não entra no orçamento</strong>: a categoria
+              canônica de mesmo nome já é planejada, e o card é um só (o realizado dele já soma as
+              duas). Traga esses itens para o card canônico se ainda valerem:{" "}
+              {planejamentoGemeaIgnorada
                 .map((o) => `${o.chave} (${formatBRL(o.totalAno)})`)
                 .join(", ")}
               .
@@ -301,11 +335,13 @@ export function PreviaOrcamentoView({
           </thead>
           <tbody>
             {linhasVisiveis.map((linha) => (
-              <LinhaDre key={linha.id} linha={linha} />
+              <LinhaDre key={linha.id} linha={linha} onDrill={setDrill} />
             ))}
           </tbody>
         </table>
       </div>
+
+      {drill && <PreviaFontesDialog linha={drill} onClose={() => setDrill(null)} />}
     </div>
   );
 }

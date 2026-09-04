@@ -26,6 +26,8 @@ import {
   type PlanejamentoMensagem,
   type PlanejamentoProposta,
   type PlanejamentoRealizadoItem,
+  apenasCanonicas,
+  codigosIrmaos,
   periodicidadeLabel,
   toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
@@ -620,37 +622,6 @@ async function fetchRealizadoItens(
   });
 }
 
-// ─── Categorias IRMÃS (a divisão "(*)" é interna à contabilidade) ────────────────
-// Ex.: "Manutenção de Imobilizado" e "Manutenção de Imobilizado (*)" são duas
-// categorias Omie (dois códigos) com o MESMO nome a menos do sufixo " (*)". Para
-// o gestor, o realizado do ano anterior é o TOTAL das duas. Só o realizado que a
-// IA mostra agrega os irmãos — o mapeamento/DRE/Prévia continuam por código.
-
-/** Nome sem o sufixo " (*)" (e sem acento/caixa), para casar irmãos. */
-function normNomeCategoria(s: string): string {
-  return s
-    .replace(/\s*\(\*\)\s*$/i, "")
-    .trim()
-    .toLocaleLowerCase("pt-BR");
-}
-
-/** A categoria é a "gêmea (*)" (subdivisão contábil interna), não a canônica? */
-function ehCategoriaEstrela(name: string): boolean {
-  return /\(\*\)\s*$/.test((name ?? "").trim());
-}
-
-/** Códigos de todas as categorias irmãs (mesmo nome-base), incluindo a própria. */
-function codigosIrmaos(
-  items: { categoryCode: string; categoryName: string }[],
-  categoryCode: string,
-  categoryName: string,
-): string[] {
-  const alvo = normNomeCategoria(categoryName);
-  const set = new Set<string>([categoryCode]);
-  for (const it of items) if (normNomeCategoria(it.categoryName) === alvo) set.add(it.categoryCode);
-  return Array.from(set);
-}
-
 /**
  * TOTAL gasto no ano inteiro (todos os meses com dado, não só os fechados)
  * somando os códigos irmãos. É o "total gasto no ano anterior" que o gestor
@@ -733,12 +704,7 @@ export async function getPlanejamentoSocios(
   // também foi marcada com o método E a canônica está presente, NÃO gera um card
   // duplicado para a "(*)" — evitaria dupla contagem no total/progresso. Se só a
   // "(*)" tiver o método (sem a canônica), o card dela é mantido.
-  const basesCanonicas = new Set(
-    doMetodoTodos.filter((c) => !ehCategoriaEstrela(c.categoryName)).map((c) => normNomeCategoria(c.categoryName)),
-  );
-  const doMetodo = doMetodoTodos.filter(
-    (c) => !(ehCategoriaEstrela(c.categoryName) && basesCanonicas.has(normNomeCategoria(c.categoryName))),
-  );
+  const doMetodo = apenasCanonicas(doMetodoTodos);
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 

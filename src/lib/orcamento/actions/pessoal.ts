@@ -510,12 +510,27 @@ export interface ColaboradorResumo {
   cargoAtual: string | null;
 }
 
+/** Contribuição de UM colaborador para cada linha da prévia — o 2º nível do
+ * drilldown da Prévia do Orçamento. */
+export interface PreviaColaboradorDetalhe {
+  id: string;
+  nome: string | null;
+  vinculo: VinculoKey;
+  linhas: { key: string; label: string; meses: number[]; totalAno: number }[];
+}
+
 export interface PreviaPayload {
   previa: PreviaResultado;
   regimeApuracao: RegimeApuracao;
   encargos: EncargoValues;
   /** Total de colaboradores no quadro da empresa (todos os setores). */
   totalColaboradores: number;
+  /**
+   * Abertura por colaborador (só quando `detalharColaboradores`). A soma bate
+   * exatamente com `previa`: o motor é linear em cada linha, então rodar por
+   * pessoa e somar dá o mesmo que rodar com todo mundo junto.
+   */
+  porColaborador?: PreviaColaboradorDetalhe[];
   /** Quadro inteiro da empresa, para o seletor da aba Colaborador. */
   roster: ColaboradorResumo[];
 }
@@ -525,6 +540,9 @@ export interface PreviaFiltro {
   colaboradorId?: string | null;
   /** Setor da tela: null = quadro único, SETOR_TODOS = consolidado da empresa. */
   setorId?: string | null;
+  /** Devolve também a abertura por colaborador (custo só de CPU: o motor é
+   * puro e roda sobre os mesmos dados já carregados). */
+  detalharColaboradores?: boolean;
 }
 
 /**
@@ -628,6 +646,30 @@ export async function getPrevia(
     ? colaboradores.filter((c) => c.id === filtro.colaboradorId)
     : colaboradores;
 
+  // Abertura por colaborador: roda o MESMO motor uma vez por pessoa. Como
+  // cada linha é linear no colaborador (inclusive férias/13º, que usam a média
+  // corrida de cada um, e a defasagem do caixa), a soma das partes reproduz o
+  // agregado exatamente — é o que permite o drilldown fechar com o total.
+  const porColaborador: PreviaColaboradorDetalhe[] | undefined = filtro?.detalharColaboradores
+    ? alvo.map((c) => {
+        const individual = calcularPrevia({
+          colaboradores: [c],
+          encargos: enc.values!,
+          regimeApuracao,
+          beneficiosSeparados,
+          encargosPorEmpresa,
+        });
+        return {
+          id: c.id,
+          nome: c.nome,
+          vinculo: c.vinculo,
+          linhas: individual.linhas
+            .filter((l) => l.total !== 0)
+            .map((l) => ({ key: l.key, label: l.label, meses: l.meses, totalAno: l.total })),
+        };
+      })
+    : undefined;
+
   return {
     payload: {
       previa: calcularPrevia({
@@ -640,6 +682,7 @@ export async function getPrevia(
       regimeApuracao,
       encargos: enc.values,
       totalColaboradores: colaboradores.length,
+      porColaborador,
       roster,
     },
   };
