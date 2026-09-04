@@ -129,6 +129,9 @@ export interface PlanejamentoRealizadoItem {
   /** Média mensal = total ÷ meses fechados (mesma lógica da tela Média). */
   media: number | null;
   lancamentos: number;
+  /** Departamento (Omie) dos lançamentos deste fornecedor na categoria.
+   * null = sem departamento, ou espalhado por vários (fornecedor ambíguo). */
+  departamento?: string | null;
 }
 
 /** Curadoria do administrador sobre um fornecedor do ano anterior. */
