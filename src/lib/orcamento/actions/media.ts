@@ -69,10 +69,18 @@ function isIndiceKey(value: unknown): value is IndiceKey {
 }
 
 /** Códigos + nomes das categorias marcadas com o método 'media' na empresa/ano. */
+/**
+ * Categorias por média, restritas ao SETOR quando ele é informado.
+ *
+ * A categoria só aparece no setor a que foi atribuída (tela Método por
+ * categoria). Sem isso, toda categoria apareceria em todos os setores e o
+ * mesmo gasto seria orçado várias vezes.
+ */
 async function fetchCategoriasMedia(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
   year: number,
+  setorId: string | null,
 ): Promise<{ codes: Map<string, string>; needsMigration?: boolean; error?: string }> {
   const { data, error } = await supabase
     .from("orcamento_categoria_metodo")
@@ -84,9 +92,27 @@ async function fetchCategoriasMedia(
     if (isSchemaMissing(error.message)) return { codes: new Map(), needsMigration: true };
     return { codes: new Map(), error: error.message };
   }
+
+  let permitidas: Set<string> | null = null;
+  if (setorId) {
+    const { data: atrib, error: atribErr } = await supabase
+      .from("orcamento_categoria_setores")
+      .select("category_code")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("setor_id", setorId);
+    if (atribErr) {
+      if (isSchemaMissing(atribErr.message)) return { codes: new Map(), needsMigration: true };
+      return { codes: new Map(), error: atribErr.message };
+    }
+    permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
+  }
+
   const codes = new Map<string, string>();
   for (const r of data ?? []) {
-    codes.set(r.category_code as string, (r.category_name as string) ?? (r.category_code as string));
+    const code = r.category_code as string;
+    if (permitidas && !permitidas.has(code)) continue;
+    codes.set(code, (r.category_name as string) ?? code);
   }
   return { codes };
 }
@@ -96,6 +122,8 @@ async function fetchCategoriasMedia(
 export async function getMediaCategorias(
   companyId: string,
   year: number,
+  /** Setor da tela. As categorias e os valores são os DESTE setor. */
+  setorId: string | null = null,
 ): Promise<{ setup?: MediaSetup; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -124,7 +152,7 @@ export async function getMediaCategorias(
   });
 
   // Categorias marcadas como 'media'.
-  const cats = await fetchCategoriasMedia(supabase, companyId, year);
+  const cats = await fetchCategoriasMedia(supabase, companyId, year, setorId);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const codes = Array.from(cats.codes.keys());
@@ -179,6 +207,8 @@ export async function calcularMedia(
   year: number,
   categoryCode: string,
   categoryName: string,
+  /** Setor da tela — a linha do orçamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; item?: MediaCategoriaItem; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -197,6 +227,7 @@ export async function calcularMedia(
       year,
       category_code: categoryCode,
       category_name: categoryName,
+      setor_id: setorId,
       media_valor: realizado.media,
       manual: false,
       base_year: baseYear,
@@ -204,7 +235,7 @@ export async function calcularMedia(
       calculado_em: calculadoEm,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
@@ -231,6 +262,7 @@ export async function calcularMedia(
 export async function recalcularTodasMedias(
   companyId: string,
   year: number,
+  setorId: string | null = null,
 ): Promise<{ ok?: true; atualizadas?: number; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -238,7 +270,7 @@ export async function recalcularTodasMedias(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
-  const cats = await fetchCategoriasMedia(supabase, companyId, year);
+  const cats = await fetchCategoriasMedia(supabase, companyId, year, setorId);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const codes = Array.from(cats.codes.keys());
@@ -255,6 +287,7 @@ export async function recalcularTodasMedias(
       year,
       category_code: code,
       category_name: cats.codes.get(code) ?? code,
+      setor_id: setorId,
       media_valor: realizado.media,
       manual: false,
       base_year: baseYear,
@@ -266,7 +299,7 @@ export async function recalcularTodasMedias(
 
   const { error } = await supabase
     .from("orcamento_media_categorias")
-    .upsert(rows, { onConflict: "company_id,year,category_code" });
+    .upsert(rows, { onConflict: "company_id,year,category_code,setor_id" });
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -282,6 +315,8 @@ export async function setMediaValor(
   categoryCode: string,
   categoryName: string,
   valor: number | null,
+  /** Setor da tela — a linha do orçamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -298,11 +333,12 @@ export async function setMediaValor(
       year,
       category_code: categoryCode,
       category_name: categoryName,
+      setor_id: setorId,
       media_valor: valor,
       manual: valor != null,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
@@ -319,6 +355,8 @@ export async function setMediaIndice(
   categoryCode: string,
   categoryName: string,
   indiceKey: IndiceKey | null,
+  /** Setor da tela — a linha do orçamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -333,10 +371,11 @@ export async function setMediaIndice(
       year,
       category_code: categoryCode,
       category_name: categoryName,
+      setor_id: setorId,
       indice_key: indiceKey,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };

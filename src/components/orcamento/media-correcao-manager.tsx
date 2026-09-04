@@ -22,6 +22,7 @@ import {
 import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import type { IndiceKey } from "@/lib/orcamento/indices";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -82,6 +83,7 @@ function MediaRow({
   onPatch,
   onError,
   companyId,
+  setorId,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
@@ -90,6 +92,8 @@ function MediaRow({
   onPatch: (code: string, partial: Partial<MediaCategoriaItem>) => void;
   onError: (msg: string) => void;
   companyId: string;
+  /** Setor da tela: a linha de orçamento desta categoria pertence a ele. */
+  setorId: string | null;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
   // ao vivo do realizado enquanto nada foi salvo.
@@ -125,6 +129,7 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         parsed,
+        setorId,
       );
       if (res?.error) onError(res.error);
     });
@@ -139,6 +144,7 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         next,
+        setorId,
       );
       if (res?.error) onError(res.error);
     });
@@ -152,6 +158,7 @@ function MediaRow({
         budgetYear,
         item.categoryCode,
         item.categoryName,
+        setorId,
       );
       setRecalcing(false);
       if (res?.error) {
@@ -341,6 +348,10 @@ export function MediaCorrecaoManager({
   companyId: string;
   year: number;
 }) {
+  // Setor da tela. Cada categoria é orçada por setor, então tudo aqui — o que
+  // se lê, o que se grava e o recálculo em lote — é do setor selecionado.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [items, setItems] = useState<MediaCategoriaItem[]>([]);
   const [indices, setIndices] = useState<IndiceOption[]>([]);
   const [baseYear, setBaseYear] = useState<number>(year - 1);
@@ -352,7 +363,7 @@ export function MediaCorrecaoManager({
   const [search, setSearch] = useState("");
   const [, startTransition] = useTransition();
 
-  async function reload(id: string, y: number) {
+  async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
       setItems([]);
       return;
@@ -360,7 +371,7 @@ export function MediaCorrecaoManager({
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getMediaCategorias(id, y);
+    const res = await getMediaCategorias(id, y, sid);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -377,12 +388,31 @@ export function MediaCorrecaoManager({
     setBaseYear(res.setup.baseYear);
   }
 
+  // Empresa/ano mudou: recarrega a lista de setores e cai no primeiro deles.
   useEffect(() => {
-    void reload(companyId, year);
+    let cancelado = false;
     setSearch("");
     setFeedback(null);
+    void (async () => {
+      const res = await getSetores(companyId, year);
+      if (cancelado) return;
+      const ativos = (res.items ?? []).filter((x) => x.active);
+      setSetores(ativos);
+      const primeiro = ativos[0]?.id ?? null;
+      setSetorId(primeiro);
+      await reload(companyId, year, primeiro);
+    })();
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  function handleSetor(sid: string) {
+    setSetorId(sid);
+    setFeedback(null);
+    void reload(companyId, year, sid);
+  }
 
   function patchItem(code: string, partial: Partial<MediaCategoriaItem>) {
     setItems((prev) => prev.map((it) => (it.categoryCode === code ? { ...it, ...partial } : it)));
@@ -393,13 +423,13 @@ export function MediaCorrecaoManager({
     setRecalcAll(true);
     setFeedback(null);
     startTransition(async () => {
-      const res = await recalcularTodasMedias(companyId, year);
+      const res = await recalcularTodasMedias(companyId, year, setorId);
       setRecalcAll(false);
       if (res?.error) {
         setLoadError(res.error);
         return;
       }
-      await reload(companyId, year);
+      await reload(companyId, year, setorId);
       setFeedback(`${res?.atualizadas ?? 0} média(s) recalculada(s) pela Omie (base ${year - 1}).`);
     });
   }
@@ -417,6 +447,24 @@ export function MediaCorrecaoManager({
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3">
+        {setores.length > 0 && (
+          <div className="w-56 space-y-1.5">
+            <label className="text-sm font-medium">Setor</label>
+            <select
+              value={setorId ?? ""}
+              onChange={(e) => handleSetor(e.target.value)}
+              disabled={loading}
+              title="Cada categoria é orçada por setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+              className={INPUT_CLS}
+            >
+              {setores.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <button
           type="button"
           onClick={handleRecalcAll}
@@ -502,6 +550,7 @@ export function MediaCorrecaoManager({
                     baseYear={baseYear}
                     budgetYear={year}
                     companyId={companyId}
+                    setorId={setorId}
                     onPatch={patchItem}
                     onError={setLoadError}
                   />
