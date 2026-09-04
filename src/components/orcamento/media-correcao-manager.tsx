@@ -23,6 +23,7 @@ import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import type { IndiceKey } from "@/lib/orcamento/indices";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -84,6 +85,8 @@ function MediaRow({
   onError,
   companyId,
   setorId,
+  setores,
+  onMoved,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
@@ -94,6 +97,9 @@ function MediaRow({
   companyId: string;
   /** Setor da tela: a linha de orçamento desta categoria pertence a ele. */
   setorId: string | null;
+  /** Setores ativos, para o destino do "Mover". */
+  setores: OrcamentoSetor[];
+  onMoved: () => void;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
   // ao vivo do realizado enquanto nada foi salvo.
@@ -204,6 +210,20 @@ function MediaRow({
               <span className="block text-xs text-muted-foreground">{item.categoryCode}</span>
             </span>
           </button>
+          {setores.length > 1 && (
+            <div className="mt-1">
+              <MoverSetorButton
+                companyId={companyId}
+                year={budgetYear}
+                metodo="media"
+                categoryCode={item.categoryCode}
+                origemSetorId={setorId}
+                setores={setores}
+                onMoved={onMoved}
+                onError={onError}
+              />
+            </div>
+          )}
         </td>
 
         {/* Média */}
@@ -551,6 +571,8 @@ export function MediaCorrecaoManager({
                     budgetYear={year}
                     companyId={companyId}
                     setorId={setorId}
+                    setores={setores}
+                    onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}
                     onError={setLoadError}
                   />

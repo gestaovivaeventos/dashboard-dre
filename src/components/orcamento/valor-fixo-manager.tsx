@@ -15,6 +15,7 @@ import { projetarValorFixoSerie, corrigirValorFixo } from "@/lib/orcamento/valor
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { formatIndice, type IndiceKey } from "@/lib/orcamento/indices";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -251,6 +252,8 @@ function ValorFixoCategoryGroup({
   companyId,
   budgetYear,
   setorId,
+  setores,
+  onMoved,
   onError,
 }: {
   item: ValorFixoItem;
@@ -259,6 +262,9 @@ function ValorFixoCategoryGroup({
   budgetYear: number;
   /** Setor a que os contratos desta categoria pertencem. */
   setorId: string | null;
+  /** Setores ativos, para o destino do "Mover". */
+  setores: OrcamentoSetor[];
+  onMoved: () => void;
   onError: (msg: string) => void;
 }) {
   const [contratos, setContratos] = useState<LocalContrato[]>(() => seedContratos(item));
@@ -370,13 +376,27 @@ function ValorFixoCategoryGroup({
   );
 
   const addBtn = (
-    <button
-      type="button"
-      onClick={addContrato}
-      className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-    >
-      <Plus className="h-3 w-3" /> contrato
-    </button>
+    <div className="mt-1 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={addContrato}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+      >
+        <Plus className="h-3 w-3" /> contrato
+      </button>
+      {setores.length > 1 && (
+        <MoverSetorButton
+          companyId={companyId}
+          year={budgetYear}
+          metodo="valor_fixo"
+          categoryCode={item.categoryCode}
+          origemSetorId={setorId}
+          setores={setores}
+          onMoved={onMoved}
+          onError={onError}
+        />
+      )}
+    </div>
   );
 
   const detailRow = expanded && (
@@ -656,6 +676,8 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
                     companyId={companyId}
                     budgetYear={year}
                     setorId={setorId}
+                    setores={setores}
+                    onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}
                   />
                 ))}
