@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -40,7 +41,13 @@ export function SetoresMultiSelect({
 }) {
   const [aberto, setAberto] = useState(false);
   const [rascunho, setRascunho] = useState<string[]>(selecionados);
+  // A tabela desta tela fica dentro de um `overflow-x-auto`, que recortaria um
+  // painel absoluto. Portal + posição fixa medida no botão resolve, e o nome
+  // do setor aparece inteiro.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const caixaRef = useRef<HTMLDivElement>(null);
+  const botaoRef = useRef<HTMLButtonElement>(null);
+  const painelRef = useRef<HTMLDivElement>(null);
 
   // O pai pode recarregar (troca de ano/empresa) — ressincroniza.
   useEffect(() => {
@@ -58,20 +65,30 @@ export function SetoresMultiSelect({
       if (mudou) onCommit(rascunho);
     };
     const onClick = (e: MouseEvent) => {
-      if (caixaRef.current && !caixaRef.current.contains(e.target as Node)) fechar();
+      const alvo = e.target as Node;
+      if (caixaRef.current?.contains(alvo) || painelRef.current?.contains(alvo))
+        return;
+      fechar();
     };
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") fechar();
     };
+    // Painel fixo: rolar a página o deixaria para trás.
     document.addEventListener("mousedown", onClick);
     document.addEventListener("keydown", onEsc);
+    window.addEventListener("scroll", fechar, true);
+    window.addEventListener("resize", fechar);
     return () => {
       document.removeEventListener("mousedown", onClick);
       document.removeEventListener("keydown", onEsc);
+      window.removeEventListener("scroll", fechar, true);
+      window.removeEventListener("resize", fechar);
     };
   }, [aberto, rascunho, selecionados, onCommit]);
 
-  const nomes = setores.filter((s) => selecionados.includes(s.id)).map((s) => s.name);
+  const nomes = setores
+    .filter((s) => selecionados.includes(s.id))
+    .map((s) => s.name);
   const rotulo =
     nomes.length === 0
       ? "nenhum setor"
@@ -84,7 +101,16 @@ export function SetoresMultiSelect({
       <button
         type="button"
         disabled={disabled || setores.length === 0}
-        onClick={() => setAberto((v) => !v)}
+        ref={botaoRef}
+        onClick={() => {
+          if (aberto) {
+            setAberto(false);
+            return;
+          }
+          const r = botaoRef.current?.getBoundingClientRect();
+          if (r) setPos({ top: r.bottom + 4, left: r.left });
+          setAberto(true);
+        }}
         title={nomes.length > 2 ? nomes.join(", ") : undefined}
         className={cn(
           "inline-flex w-full max-w-[15rem] items-center justify-between gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs outline-none hover:bg-muted focus:ring-2 focus:ring-ring disabled:opacity-50",
@@ -99,45 +125,55 @@ export function SetoresMultiSelect({
         )}
       </button>
 
-      {aberto && (
-        <div className="absolute left-0 z-30 mt-1 max-h-64 w-56 overflow-auto rounded-md border bg-popover p-1 shadow-md">
-          {setores.map((s) => {
-            const marcado = rascunho.includes(s.id);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() =>
-                  setRascunho((prev) =>
-                    unico
-                      ? prev.includes(s.id)
-                        ? []
-                        : [s.id]
-                      : prev.includes(s.id)
-                        ? prev.filter((x) => x !== s.id)
-                        : [...prev, s.id],
-                  )
-                }
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
-              >
-                <span
-                  className={cn(
-                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center border",
-                    unico ? "rounded-full" : "rounded",
-                    marcado ? "border-emerald-600 bg-emerald-600 text-white" : "border-input",
-                  )}
+      {aberto &&
+        pos &&
+        createPortal(
+          <div
+            ref={painelRef}
+            style={{ top: pos.top, left: pos.left }}
+            className="fixed z-50 max-h-72 min-w-[14rem] max-w-[22rem] overflow-auto rounded-md border bg-popover p-1 shadow-lg"
+          >
+            {setores.map((s) => {
+              const marcado = rascunho.includes(s.id);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() =>
+                    setRascunho((prev) =>
+                      unico
+                        ? prev.includes(s.id)
+                          ? []
+                          : [s.id]
+                        : prev.includes(s.id)
+                          ? prev.filter((x) => x !== s.id)
+                          : [...prev, s.id],
+                    )
+                  }
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
                 >
-                  {marcado && <Check className="h-2.5 w-2.5" />}
-                </span>
-                <span className="truncate">{s.name}</span>
-              </button>
-            );
-          })}
-          <p className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground">
-            {unico ? "Um setor só (método média). " : ""}Fecha e salva ao clicar fora.
-          </p>
-        </div>
-      )}
+                  <span
+                    className={cn(
+                      "flex h-3.5 w-3.5 shrink-0 items-center justify-center border",
+                      unico ? "rounded-full" : "rounded",
+                      marcado
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-input",
+                    )}
+                  >
+                    {marcado && <Check className="h-2.5 w-2.5" />}
+                  </span>
+                  <span className="break-words">{s.name}</span>
+                </button>
+              );
+            })}
+            <p className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground">
+              {unico ? "Um setor só (método média). " : ""}Fecha e salva ao
+              clicar fora.
+            </p>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
