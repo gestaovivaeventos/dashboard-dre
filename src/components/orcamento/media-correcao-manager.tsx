@@ -223,7 +223,7 @@ function MediaRow({
                 year={budgetYear}
                 metodo="media"
                 categoryCode={item.categoryCode}
-                origemSetorId={setorId}
+                origemSetorId={item.setorId}
                 setores={setores}
                 onMoved={onMoved}
                 onError={onError}

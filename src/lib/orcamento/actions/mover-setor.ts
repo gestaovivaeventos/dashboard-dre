@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { isTodosSetores } from "@/lib/orcamento/setor-filtro";
 
 // =============================================================================
 // Mover uma linha de orçamento de um SETOR para outro (só admin).
@@ -56,6 +57,12 @@ export async function moverLinhaDeSetor(params: {
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!destinoSetorId) return { error: "Escolha o setor de destino." };
+  if (!origemSetorId || isTodosSetores(origemSetorId)) {
+    return {
+      error:
+        "Não dá para mover a partir de \"Todos os setores\" — abra o setor de origem e mova de lá.",
+    };
+  }
   if (destinoSetorId === origemSetorId) return { ok: true as const, movidas: 0 };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -70,23 +77,6 @@ export async function moverLinhaDeSetor(params: {
     .eq("year", year)
     .maybeSingle();
   if (!setor) return { error: "Setor de destino não pertence a esta empresa/ano." };
-
-  // A categoria precisa existir no setor de destino, senão a linha fica órfã:
-  // no orçamento, mas fora de qualquer card.
-  const { error: atribErr } = await supabase.from("orcamento_categoria_setores").upsert(
-    {
-      company_id: companyId,
-      year,
-      category_code: categoryCode,
-      setor_id: destinoSetorId,
-      updated_by: admin.userId,
-    },
-    { onConflict: "company_id,year,category_code,setor_id" },
-  );
-  if (atribErr) {
-    if (isSchemaMissing(atribErr.message)) return { needsMigration: true };
-    return { error: atribErr.message };
-  }
 
   let query = supabase
     .from(TABELA[metodo])
@@ -107,6 +97,23 @@ export async function moverLinhaDeSetor(params: {
       };
     }
     return { error: error.message };
+  }
+
+  // A categoria precisa existir no setor de destino, senão a linha fica órfã:
+  // no orçamento, mas fora de qualquer card.
+  const { error: atribErr } = await supabase.from("orcamento_categoria_setores").upsert(
+    {
+      company_id: companyId,
+      year,
+      category_code: categoryCode,
+      setor_id: destinoSetorId,
+      updated_by: admin.userId,
+    },
+    { onConflict: "company_id,year,category_code,setor_id" },
+  );
+  if (atribErr) {
+    if (isSchemaMissing(atribErr.message)) return { needsMigration: true };
+    return { error: atribErr.message };
   }
 
   // O planejamento guarda os ITENS numa tabela à parte — eles seguem a linha.

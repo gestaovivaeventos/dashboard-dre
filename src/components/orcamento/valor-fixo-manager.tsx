@@ -15,7 +15,7 @@ import { projetarValorFixoSerie, corrigirValorFixo } from "@/lib/orcamento/valor
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { formatIndice, type IndiceKey } from "@/lib/orcamento/indices";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
-import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
@@ -391,7 +391,7 @@ function ValorFixoCategoryGroup({
           year={budgetYear}
           metodo="valor_fixo"
           categoryCode={item.categoryCode}
-          origemSetorId={setorId}
+          origemSetorId={setorEspecifico(setorId)}
           setores={setores}
           onMoved={onMoved}
           onError={onError}
