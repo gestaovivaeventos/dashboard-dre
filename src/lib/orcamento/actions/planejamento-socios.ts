@@ -258,10 +258,32 @@ function parseAiReply(text: string): {
   return { reply: reply || "…", proposta, podeFechar };
 }
 
-function realizadoMensalContexto(r: MediaRealizado | undefined): string {
-  if (!r) return "sem dados do ano anterior.";
+/**
+ * Retrato do realizado do ano-base para a IA — honesto sobre o que ele É.
+ *
+ * O ano-base costuma AINDA ESTAR CORRENDO quando o orçamento é montado (o de
+ * 2027 é feito no meio de 2026). O `total` é o gasto REGISTRADO até agora, não
+ * o do ano inteiro; comparar um orçamento de 12 meses contra ele acusaria um
+ * aumento que não existe. Por isso o prompt recebe também quantos meses já
+ * fecharam e a PROJEÇÃO ANUALIZADA (média dos meses fechados × 12), que é a
+ * base de comparação justa.
+ */
+function realizadoMensalContexto(r: MediaRealizado | undefined, baseYear: number): string {
+  if (!r || (r.total === 0 && r.media == null)) return "sem dados do ano anterior.";
+  const fechados = mesesFechados(baseYear);
   const media = r.media == null ? "n/d" : formatBRL(r.media);
-  return `total ${formatBRL(r.total)} · média mensal ${media}`;
+  if (fechados >= 12) {
+    return `ano FECHADO · total ${formatBRL(r.total)} · média mensal ${media}`;
+  }
+  const projecao = r.media == null ? null : formatBRL(r.media * 12);
+  return [
+    `ano AINDA EM CURSO (${fechados} de 12 meses fechados)`,
+    `gasto registrado até agora: ${formatBRL(r.total)}`,
+    `média mensal dos meses fechados: ${media}`,
+    projecao ? `PROJEÇÃO ANUALIZADA (média × 12): ${projecao}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Lista que guia a IA: o que o admin já selecionou (contexto vivo) ou, na
@@ -435,6 +457,30 @@ function buildSystemPrompt(opts: {
     "TEM de refletir exatamente isso. NUNCA descarte, esqueça ou 'volte ao padrão' uma",
     "mudança que o gestor declarou — reler TODA a conversa antes de propor é obrigatório.",
     "",
+    "LEITURA DO CONJUNTO (faça ANTES da primeira pergunta, junto da abertura):",
+    "Olhe a lista acima como um TODO — não item por item — e aponte no MÁXIMO 3",
+    "observações, as mais relevantes. Coisas que valem ser apontadas:",
+    "  • DUPLICATA PROVÁVEL: dois itens com nome quase igual, ou com nomes diferentes",
+    "    que aparentam ser o mesmo serviço/fornecedor. Muitos itens vêm de nomes de",
+    "    fornecedor da contabilidade, então grafias diferentes do mesmo gasto são comuns.",
+    "  • CONCENTRAÇÃO: um único item responde por boa parte do total da categoria —",
+    "    diga qual e quanto representa, e proponha começar por ele.",
+    "  • ITEM IRRISÓRIO: valor tão pequeno diante do total que não muda o orçamento;",
+    "    vale perguntar se ainda faz sentido mantê-lo na lista.",
+    "  • COMPARAÇÃO COM O ANO ANTERIOR: some os itens da lista e compare com o realizado",
+    "    informado acima (usando a PROJEÇÃO ANUALIZADA se o ano-base ainda corre). Se a",
+    "    diferença for relevante em qualquer direção, diga o número e PERGUNTE o que a",
+    "    explica. Não trate a diferença como erro — pode haver motivo.",
+    "",
+    "COMO apontar (regra que não pode ser quebrada):",
+    "  - Sempre como HIPÓTESE a confirmar, nunca como veredito: \"X e Y parecem o mesmo",
+    "    item — são?\" e nunca \"removi a duplicata\". Dois itens parecidos podem ser",
+    "    coisas distintas de verdade, e quem decide é o gestor.",
+    "  - NUNCA altere, remova ou some valores por conta dessas observações. Elas geram",
+    "    PERGUNTA, não mudança. Só a resposta do gestor muda a proposta.",
+    "  - No MÁXIMO 3 observações, curtas. Se não houver nada relevante a apontar, não",
+    "    invente observação: siga direto para a condução.",
+    "",
     "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
     "1. Para CADA item da lista acima, a ÚNICA dúvida é se ele será MANTIDO em",
     `   ${year}. INFORME ao gestor o valor e o mês pré-cadastrados (em tom de`,
@@ -529,9 +575,20 @@ function buildSystemPrompt(opts: {
     "  - periodicidade: 'mensal', 'bimestral', 'trimestral', 'semestral' ou 'anual' — o",
     "    INTERVALO entre pagamentos (a cada 1, 2, 3, 6 ou 12 meses);",
     "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
-    "E uma justificativa curta (2 a 4 frases) com as premissas. Se ainda faltar um dado",
-    "OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e o 'reply'",
-    "pedindo só o que falta.",
+    "A 'justificativa' NÃO é um resumo da lista (a lista já aparece na tela). É a LEITURA",
+    "CRÍTICA do orçamento fechado, em 3 a 5 frases, nesta ordem:",
+    "  (a) o TOTAL do ano proposto;",
+    "  (b) a VARIAÇÃO contra o ano anterior — em R$ e em %, comparando com a projeção",
+    "      anualizada quando o ano-base ainda estava em curso, e dizendo que é projeção;",
+    "  (c) os itens que mais PESAM no total (um ou dois) e quanto representam;",
+    "  (d) o que PERMANECE questionável — o ponto que você levantaria numa revisão.",
+    "Sobre (d): NÃO reabra o que o gestor já respondeu na conversa. Se ele explicou uma",
+    "duplicata, um aumento ou a permanência de um item, isso está DECIDIDO — no máximo",
+    "registre a explicação dele. Aponte só o que ficou sem resposta ou o que a própria",
+    "conversa deixou em aberto. Se não sobrou nada questionável, diga isso em uma frase,",
+    "sem inventar ressalva.",
+    "Se ainda faltar um dado OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null,",
+    "'podeFechar' false e o 'reply' pedindo só o que falta.",
     "",
     "CATEGORIA ZERADA: se NÃO houver nenhum item (nada mantido e nada novo — ex.: nenhum",
     "sócio manteve o bônus), a proposta MESMO ASSIM deve ser montada com a LISTA VAZIA:",
@@ -556,12 +613,15 @@ function buildSystemPrompt(opts: {
     `Empresa: ${opts.companyName}`,
     `Categoria: ${categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
     `Ano do orçamento: ${year}`,
-    `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado)}`,
+    `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado, year - 1)}`,
     "",
     `ABERTURA (regra fixa): a sua PRIMEIRA mensagem deve SEMPRE começar informando ao gestor o`,
-    `TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total" acima (mesmo`,
-    `sem base cadastrada; se não houver dado, diga que não houve gasto registrado). Só DEPOIS`,
-    `siga a condução abaixo.`,
+    `gasto desta categoria em ${year - 1} — use os números da linha "Realizado" acima, do jeito`,
+    `que eles são. Se o ano-base AINDA ESTÁ EM CURSO, diga isso com todas as letras ("até agora,`,
+    `com N meses fechados") e use a PROJEÇÃO ANUALIZADA como base de comparação, explicando que`,
+    `é projeção. NUNCA apresente um gasto parcial como se fosse o total do ano, e NUNCA compare`,
+    `um orçamento de 12 meses contra um realizado parcial — isso inventaria uma variação que`,
+    `não existe. Sem dado, diga que não houve gasto registrado. Só DEPOIS siga a condução abaixo.`,
     "",
     "INTERPRETE A CATEGORIA ANTES DE PERGUNTAR (regra permanente, vale para QUALQUER",
     `categoria): entenda a ESSÊNCIA do que é "${categoryName}" — pela natureza da despesa`,
