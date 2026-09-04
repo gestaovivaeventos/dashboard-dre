@@ -121,6 +121,37 @@ export async function moverLinhaDeSetor(params: {
     if (itensErr) return { error: itensErr.message };
   }
 
+  // Se não sobrou NENHUMA linha da categoria no setor de origem, a atribuição
+  // dele também sai. Sem isso a categoria continua listada na origem — e como
+  // a tela mostra a sugestão viva do realizado quando não há valor salvo, a
+  // despesa parece continuar lá, agora nos dois setores.
+  if (origemSetorId) {
+    let sobrou = false;
+    for (const tabela of Object.values(TABELA)) {
+      const { count } = await supabase
+        .from(tabela)
+        .select("company_id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("category_code", categoryCode)
+        .eq("setor_id", origemSetorId);
+      if ((count ?? 0) > 0) {
+        sobrou = true;
+        break;
+      }
+    }
+    if (!sobrou) {
+      const { error: limpaErr } = await supabase
+        .from("orcamento_categoria_setores")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("category_code", categoryCode)
+        .eq("setor_id", origemSetorId);
+      if (limpaErr) return { error: limpaErr.message };
+    }
+  }
+
   revalidatePath(PATH);
   return { ok: true as const, movidas: (movidas ?? []).length };
 }

@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { INDICES, type IndiceKey } from "@/lib/orcamento/indices";
 import {
   fetchRealizados,
@@ -25,6 +26,10 @@ export type { MediaRealizado };
 export interface MediaCategoriaItem {
   categoryCode: string;
   categoryName: string;
+  /** Setor DESTA linha. Uma categoria pode ter uma linha por setor, e é este
+   * campo (não o filtro da tela) que diz para onde a edição vai. */
+  setorId: string | null;
+  setorNome: string | null;
   /** Média efetiva salva (snapshot). null = ainda não calculada/salva. */
   mediaValor: number | null;
   /** true = valor editado à mão (≠ recalculado da Omie). */
@@ -81,7 +86,13 @@ async function fetchCategoriasMedia(
   companyId: string,
   year: number,
   setorId: string | null,
-): Promise<{ codes: Map<string, string>; needsMigration?: boolean; error?: string }> {
+): Promise<{
+  codes: Map<string, string>;
+  /** Setores atribuídos a cada categoria (para montar uma linha por par). */
+  setoresPorCodigo: Map<string, string[]>;
+  needsMigration?: boolean;
+  error?: string;
+}> {
   const { data, error } = await supabase
     .from("orcamento_categoria_metodo")
     .select("category_code, category_name")
@@ -89,23 +100,34 @@ async function fetchCategoriasMedia(
     .eq("year", year)
     .eq("metodo", "media");
   if (error) {
-    if (isSchemaMissing(error.message)) return { codes: new Map(), needsMigration: true };
-    return { codes: new Map(), error: error.message };
+    if (isSchemaMissing(error.message)) return { codes: new Map(), setoresPorCodigo: new Map(), needsMigration: true };
+    return { codes: new Map(), setoresPorCodigo: new Map(), error: error.message };
   }
 
+  // Atribuição categoria -> setores. Com um setor escolhido, filtra por ele;
+  // em "Todos os setores", traz tudo para montar uma linha por par.
+  const especifico = setorEspecifico(setorId);
+  let atribQuery = supabase
+    .from("orcamento_categoria_setores")
+    .select("category_code, setor_id")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  if (especifico) atribQuery = atribQuery.eq("setor_id", especifico);
+  const setoresPorCodigo = new Map<string, string[]>();
   let permitidas: Set<string> | null = null;
   if (setorId) {
-    const { data: atrib, error: atribErr } = await supabase
-      .from("orcamento_categoria_setores")
-      .select("category_code")
-      .eq("company_id", companyId)
-      .eq("year", year)
-      .eq("setor_id", setorId);
+    const { data: atrib, error: atribErr } = await atribQuery;
     if (atribErr) {
-      if (isSchemaMissing(atribErr.message)) return { codes: new Map(), needsMigration: true };
-      return { codes: new Map(), error: atribErr.message };
+      if (isSchemaMissing(atribErr.message)) return { codes: new Map(), setoresPorCodigo: new Map(), needsMigration: true };
+      return { codes: new Map(), setoresPorCodigo: new Map(), error: atribErr.message };
     }
     permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
+    for (const r of atrib ?? []) {
+      const code = r.category_code as string;
+      const lista = setoresPorCodigo.get(code) ?? [];
+      lista.push(r.setor_id as string);
+      setoresPorCodigo.set(code, lista);
+    }
   }
 
   const codes = new Map<string, string>();
@@ -114,7 +136,7 @@ async function fetchCategoriasMedia(
     if (permitidas && !permitidas.has(code)) continue;
     codes.set(code, (r.category_name as string) ?? code);
   }
-  return { codes };
+  return { codes, setoresPorCodigo };
 }
 
 // ─── Leitura ────────────────────────────────────────────────────────────────
@@ -160,29 +182,57 @@ export async function getMediaCategorias(
     return { setup: { items: [], baseYear, indices } };
   }
 
-  // Snapshots salvos.
+  // Snapshots salvos. A chave é (categoria, setor): a mesma categoria pode ter
+  // uma linha em cada setor, e ler só por código faria os dois setores
+  // mostrarem o mesmo valor.
   const { data: saved, error: savedError } = await supabase
     .from("orcamento_media_categorias")
-    .select("category_code, media_valor, manual, indice_key, base_year, meses_considerados, calculado_em")
+    .select("category_code, setor_id, media_valor, manual, indice_key, base_year, meses_considerados, calculado_em")
     .eq("company_id", companyId)
     .eq("year", year);
   if (savedError) {
     if (isSchemaMissing(savedError.message)) return { needsMigration: true };
     return { error: savedError.message };
   }
-  const savedByCode = new Map(
-    (saved ?? []).map((r) => [r.category_code as string, r]),
+  const chave = (code: string, sid: string | null) => `${code}|${sid ?? "-"}`;
+  const savedByKey = new Map(
+    (saved ?? []).map((r) => [chave(r.category_code as string, (r.setor_id as string) ?? null), r]),
+  );
+
+  // Nomes dos setores, para rotular as linhas na visão "Todos os setores".
+  const { data: setoresRows } = await supabase
+    .from("orcamento_setores")
+    .select("id, name")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  const nomeSetor = new Map(
+    (setoresRows ?? []).map((r) => [r.id as string, r.name as string]),
   );
 
   // Realizado do ano-base ao vivo (sugestão + detalhe mensal).
   const realizados = await fetchRealizados(supabase, companyId, baseYear, codes);
 
-  const items: MediaCategoriaItem[] = codes.map((code) => {
-    const row = savedByCode.get(code);
+  // Uma linha por (categoria × setor atribuído). Com um setor selecionado, é
+  // uma linha por categoria; em "Todos os setores", a categoria orçada por dois
+  // setores aparece duas vezes, cada uma com o seu valor.
+  const pares: { code: string; setorId: string | null }[] = [];
+  for (const code of codes) {
+    const doCode = cats.setoresPorCodigo?.get(code);
+    if (doCode && doCode.length > 0) {
+      for (const sid of doCode) pares.push({ code, setorId: sid });
+    } else {
+      pares.push({ code, setorId: setorEspecifico(setorId) });
+    }
+  }
+
+  const items: MediaCategoriaItem[] = pares.map(({ code, setorId: sid }) => {
+    const row = savedByKey.get(chave(code, sid));
     const indiceKey = isIndiceKey(row?.indice_key) ? (row!.indice_key as IndiceKey) : null;
     return {
       categoryCode: code,
       categoryName: cats.codes.get(code) ?? code,
+      setorId: sid,
+      setorNome: sid ? nomeSetor.get(sid) ?? null : null,
       mediaValor: row?.media_valor == null ? null : Number(row.media_valor),
       manual: Boolean(row?.manual),
       indiceKey,
@@ -193,7 +243,11 @@ export async function getMediaCategorias(
     };
   });
 
-  items.sort((a, b) => a.categoryName.localeCompare(b.categoryName, "pt-BR"));
+  items.sort(
+    (a, b) =>
+      a.categoryName.localeCompare(b.categoryName, "pt-BR") ||
+      (a.setorNome ?? "").localeCompare(b.setorNome ?? "", "pt-BR"),
+  );
 
   return { setup: { items, baseYear, indices } };
 }
@@ -247,6 +301,8 @@ export async function calcularMedia(
     item: {
       categoryCode,
       categoryName,
+      setorId,
+      setorNome: null,
       mediaValor: realizado.media,
       manual: false,
       indiceKey: null, // preservado no banco; a tela recarrega o índice do estado local

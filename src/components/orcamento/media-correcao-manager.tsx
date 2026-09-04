@@ -23,6 +23,7 @@ import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import type { IndiceKey } from "@/lib/orcamento/indices";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
@@ -92,7 +93,7 @@ function MediaRow({
   indices: IndiceOption[];
   baseYear: number;
   budgetYear: number;
-  onPatch: (code: string, partial: Partial<MediaCategoriaItem>) => void;
+  onPatch: (code: string, setorId: string | null, partial: Partial<MediaCategoriaItem>) => void;
   onError: (msg: string) => void;
   companyId: string;
   /** Setor da tela: a linha de orçamento desta categoria pertence a ele. */
@@ -127,7 +128,7 @@ function MediaRow({
       setDraft(numberToInput(item.mediaValor ?? item.realizado.media));
       return;
     }
-    onPatch(item.categoryCode, { mediaValor: parsed, manual: parsed != null });
+    onPatch(item.categoryCode, item.setorId, { mediaValor: parsed, manual: parsed != null });
     startTransition(async () => {
       const res = await setMediaValor(
         companyId,
@@ -135,14 +136,14 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         parsed,
-        setorId,
+        item.setorId ?? setorEspecifico(setorId),
       );
       if (res?.error) onError(res.error);
     });
   }
 
   function handleIndice(next: IndiceKey | null) {
-    onPatch(item.categoryCode, { indiceKey: next });
+    onPatch(item.categoryCode, item.setorId, { indiceKey: next });
     startTransition(async () => {
       const res = await setMediaIndice(
         companyId,
@@ -150,7 +151,7 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         next,
-        setorId,
+        item.setorId ?? setorEspecifico(setorId),
       );
       if (res?.error) onError(res.error);
     });
@@ -164,7 +165,7 @@ function MediaRow({
         budgetYear,
         item.categoryCode,
         item.categoryName,
-        setorId,
+        item.setorId ?? setorEspecifico(setorId),
       );
       setRecalcing(false);
       if (res?.error) {
@@ -173,7 +174,7 @@ function MediaRow({
       }
       if (res?.item) {
         // Preserva o índice (a action não o altera).
-        onPatch(item.categoryCode, {
+        onPatch(item.categoryCode, item.setorId, {
           mediaValor: res.item.mediaValor,
           manual: false,
           realizado: res.item.realizado,
@@ -207,7 +208,12 @@ function MediaRow({
             )}
             <span>
               <span className="font-medium">{item.categoryName}</span>
-              <span className="block text-xs text-muted-foreground">{item.categoryCode}</span>
+              <span className="block text-xs text-muted-foreground">
+                {item.categoryCode}
+                {/* Em "Todos os setores" a mesma categoria aparece uma vez por
+                    setor — sem o rótulo, as linhas ficariam indistinguíveis. */}
+                {isTodosSetores(setorId) && item.setorNome ? ` · ${item.setorNome}` : ""}
+              </span>
             </span>
           </button>
           {setores.length > 1 && (
@@ -434,8 +440,12 @@ export function MediaCorrecaoManager({
     void reload(companyId, year, sid);
   }
 
-  function patchItem(code: string, partial: Partial<MediaCategoriaItem>) {
-    setItems((prev) => prev.map((it) => (it.categoryCode === code ? { ...it, ...partial } : it)));
+  function patchItem(code: string, sid: string | null, partial: Partial<MediaCategoriaItem>) {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.categoryCode === code && it.setorId === sid ? { ...it, ...partial } : it,
+      ),
+    );
   }
 
   function handleRecalcAll() {
@@ -482,6 +492,7 @@ export function MediaCorrecaoManager({
                   {x.name}
                 </option>
               ))}
+              <option value={SETOR_TODOS}>Todos os setores</option>
             </select>
           </div>
         )}
@@ -564,7 +575,7 @@ export function MediaCorrecaoManager({
               <tbody className="divide-y">
                 {filtered.map((item) => (
                   <MediaRow
-                    key={item.categoryCode}
+                    key={`${item.categoryCode}|${item.setorId ?? "-"}`}
                     item={item}
                     indices={indices}
                     baseYear={baseYear}

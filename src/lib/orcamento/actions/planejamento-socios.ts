@@ -8,6 +8,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import {
   fetchRealizados,
@@ -843,7 +844,7 @@ export async function getPlanejamentoSocios(
       .select("category_code")
       .eq("company_id", companyId)
       .eq("year", year)
-      .eq("setor_id", setorId);
+      .eq("setor_id", setorEspecifico(setorId));
     if (atribErr && !isSchemaMissing(atribErr.message)) return { error: atribErr.message };
     const permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
     doMetodo = canonicas.filter((c) => permitidas.has(c.categoryCode));
@@ -856,7 +857,7 @@ export async function getPlanejamentoSocios(
     .select("category_code, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
@@ -938,7 +939,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId)
+    .eq("setor_id", setorEspecifico(setorId))
     .maybeSingle<CategoriaRow>();
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
@@ -951,7 +952,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId)
+    .eq("setor_id", setorEspecifico(setorId))
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (itemErr) {
@@ -1029,7 +1030,7 @@ async function montarSistemaEntrevista(params: {
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId)
+    .eq("setor_id", setorEspecifico(setorId))
     .maybeSingle<{ contexto_admin: string | null }>();
   const companyQuery = supabase
     .from("companies")
@@ -1201,7 +1202,7 @@ export async function enviarMensagemPlanejamento(
     company_id: companyId,
     year,
     category_code: categoryCode,
-    setor_id: setorId,
+    setor_id: setorEspecifico(setorId),
     category_name: categoryName,
     conversa: novaConversa,
     updated_by: admin.userId,
@@ -1299,6 +1300,10 @@ export async function persistirConversaEntrevista(
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1308,7 +1313,7 @@ export async function persistirConversaEntrevista(
       company_id: companyId,
       year,
       category_code: categoryCode,
-      setor_id: setorId,
+      setor_id: setorEspecifico(setorId),
       category_name: categoryName,
       conversa: sanitizeConversa(conversa),
       updated_by: admin.userId,
@@ -1343,6 +1348,10 @@ export async function salvarBasePlanejamento(
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1359,7 +1368,7 @@ export async function salvarBasePlanejamento(
       company_id: companyId,
       year,
       category_code: categoryCode,
-      setor_id: setorId,
+      setor_id: setorEspecifico(setorId),
       category_name: categoryName,
       base_salva: true,
       contexto_admin: ctx || null,
@@ -1378,14 +1387,14 @@ export async function salvarBasePlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (delErr) return { error: delErr.message };
 
   const rows = limpos.map((i) => ({
     company_id: companyId,
     year,
     category_code: categoryCode,
-    setor_id: setorId,
+    setor_id: setorEspecifico(setorId),
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
@@ -1416,6 +1425,10 @@ export async function confirmarPropostaPlanejamento(
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1431,7 +1444,7 @@ export async function confirmarPropostaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1455,6 +1468,10 @@ export async function editarPropostaPlanejamento(
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1471,7 +1488,7 @@ export async function editarPropostaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1493,6 +1510,10 @@ export async function reiniciarConversaPlanejamento(
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1509,7 +1530,7 @@ export async function reiniciarConversaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1527,6 +1548,10 @@ export async function removerPlanejamentoSocios(
 ): Promise<{ ok?: true; error?: string }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1537,7 +1562,7 @@ export async function removerPlanejamentoSocios(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (itemErr) return { error: itemErr.message };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1545,7 +1570,7 @@ export async function removerPlanejamentoSocios(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorId);
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { ok: true };

@@ -49,6 +49,7 @@ import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format"
 import { analisarBase } from "@/lib/orcamento/planejamento-analise";
 import { PlanejamentoAlertasBase } from "@/components/orcamento/planejamento-alertas-base";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -1700,6 +1701,7 @@ export function PlanejamentoSociosManager({
                     {x.name}
                   </option>
                 ))}
+                <option value={SETOR_TODOS}>Todos os setores</option>
               </select>
             </div>
           )}
