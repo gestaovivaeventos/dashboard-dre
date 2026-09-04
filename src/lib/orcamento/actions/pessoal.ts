@@ -516,6 +516,8 @@ export interface PreviaColaboradorDetalhe {
   id: string;
   nome: string | null;
   vinculo: VinculoKey;
+  /** Setor do colaborador — rotula o drilldown na visão consolidada. */
+  setorId: string | null;
   linhas: { key: string; label: string; meses: number[]; totalAno: number }[];
 }
 
@@ -663,6 +665,7 @@ export async function getPrevia(
           id: c.id,
           nome: c.nome,
           vinculo: c.vinculo,
+          setorId: c.setorId,
           linhas: individual.linhas
             .filter((l) => l.total !== 0)
             .map((l) => ({ key: l.key, label: l.label, meses: l.meses, totalAno: l.total })),

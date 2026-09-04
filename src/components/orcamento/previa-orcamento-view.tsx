@@ -9,6 +9,8 @@ import {
   type PreviaDreLinha,
 } from "@/lib/orcamento/actions/previa-orcamento";
 import { downloadPreviaOrcamentoXlsx } from "@/lib/orcamento/previa-orcamento-export";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS, isTodosSetores } from "@/lib/orcamento/setor-filtro";
 import { PreviaFontesDialog } from "@/components/orcamento/previa-fontes-dialog";
 import { formatBRL } from "@/lib/orcamento/format";
 import { cn } from "@/lib/utils";
@@ -102,15 +104,32 @@ export function PreviaOrcamentoView({
   const [needsMigration, setNeedsMigration] = useState(false);
   const [ocultarZeros, setOcultarZeros] = useState(true);
   const [exportando, setExportando] = useState(false);
+  // Escopo da prévia. Começa em "Todos os setores" de propósito: a leitura
+  // principal desta tela é o orçamento da EMPRESA — é ele que vai para a DRE.
+  // O setor é um recorte de conferência, não o padrão.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string>(SETOR_TODOS);
   // Linha aberta no drilldown (null = fechado).
   const [drill, setDrill] = useState<PreviaDreLinha | null>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    setSetorId((atual) => (atual === SETOR_TODOS ? atual : SETOR_TODOS));
+    void getSetores(companyId, year).then((res) => {
+      if (cancelado) return;
+      setSetores((res.items ?? []).filter((x) => x.active));
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [companyId, year]);
 
   useEffect(() => {
     let cancelado = false;
     setLoading(true);
     setError(null);
     setNeedsMigration(false);
-    void getPreviaOrcamento(companyId, year).then((res) => {
+    void getPreviaOrcamento(companyId, year, setorId).then((res) => {
       if (cancelado) return;
       setLoading(false);
       if (res.needsMigration) {
@@ -126,7 +145,9 @@ export function PreviaOrcamentoView({
     return () => {
       cancelado = true;
     };
-  }, [companyId, year]);
+  }, [companyId, year, setorId]);
+
+  const setorAtual = setores.find((x) => x.id === setorId) ?? null;
 
   const linhasVisiveis = useMemo(() => {
     if (!data) return [];
@@ -147,13 +168,14 @@ export function PreviaOrcamentoView({
       await downloadPreviaOrcamentoXlsx(linhasVisiveis, {
         empresaLabel: empresaLabel ?? companyId,
         ano: year,
+        setorLabel: setorAtual?.name ?? null,
       });
     } finally {
       setExportando(false);
     }
   }
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="flex items-center justify-center gap-2 rounded-lg border p-12 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -174,7 +196,7 @@ export function PreviaOrcamentoView({
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
     );
@@ -191,11 +213,16 @@ export function PreviaOrcamentoView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <span className="text-muted-foreground">
-            Despesa orçada:{" "}
+            Despesa orçada{setorAtual ? ` — ${setorAtual.name}` : ""}:{" "}
             <span className="font-semibold text-foreground tabular-nums">
               {formatBRL(resumo.totalDespesa)}
             </span>
           </span>
+          {resumo.pessoalColaboradores > 0 && (
+            <span className="text-muted-foreground">
+              Pessoal: {resumo.pessoalColaboradores} colaborador(es)
+            </span>
+          )}
           {resumo.mediaCategorias > 0 && (
             <span className="text-muted-foreground">
               Média: {resumo.mediaCategorias} categoria(s)
@@ -231,6 +258,23 @@ export function PreviaOrcamentoView({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {setores.length > 0 && (
+            <select
+              value={setorId}
+              onChange={(e) => setSetorId(e.target.value)}
+              disabled={loading}
+              title="Recorta a prévia num setor. Cada despesa pertence a um setor, então a soma dos setores é o orçamento da empresa."
+              className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+            >
+              <option value={SETOR_TODOS}>Todos os setores</option>
+              {setores.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           <button
             type="button"
             onClick={() => setOcultarZeros((v) => !v)}
@@ -254,6 +298,12 @@ export function PreviaOrcamentoView({
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error} — os números abaixo são do escopo anterior.
+        </div>
+      )}
 
       {/* Avisos de valores que não caíram na DRE */}
       {(pessoalNaoClassificado.length > 0 ||
@@ -305,6 +355,19 @@ export function PreviaOrcamentoView({
         </div>
       )}
 
+      {!isTodosSetores(setorId) && (
+        <div className="flex items-start gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600 dark:text-sky-500" />
+          <span>
+            Recorte do setor <strong className="text-foreground">{setorAtual?.name ?? "—"}</strong>:
+            só as despesas atribuídas a ele. O orçamento que vai para a DRE é o de{" "}
+            <strong className="text-foreground">Todos os setores</strong>. Colaborador cadastrado no
+            quadro sem setor entra no consolidado, mas não em setor nenhum — se as linhas de pessoal
+            dos setores não somarem o total da empresa, é aí que está a diferença.
+          </span>
+        </div>
+      )}
+
       {!resumo.temReceita && (
         <div className="flex items-start gap-1.5 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -316,7 +379,12 @@ export function PreviaOrcamentoView({
       {/* Tabela DRE — rolagem própria (x e y) para congelar o cabeçalho no topo
           e a 1ª/última coluna nas laterais. Só `overflow-x` não seguraria o
           `sticky top`, porque o eixo vertical continuaria rolando com a página. */}
-      <div className="max-h-[75vh] overflow-auto rounded-lg border">
+      <div
+        className={cn(
+          "max-h-[75vh] overflow-auto rounded-lg border transition-opacity",
+          loading && "pointer-events-none opacity-50",
+        )}
+      >
         <table className="w-full border-collapse text-sm">
           <thead className="text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
