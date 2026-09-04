@@ -749,6 +749,8 @@ async function fetchRealizadoItensIrmaos(
 export async function getPlanejamentoSocios(
   companyId: string,
   year: number,
+  /** Setor da tela: cada categoria é planejada por setor. */
+  setorId: string | null = null,
 ): Promise<{ items?: PlanejamentoListItem[]; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -764,7 +766,22 @@ export async function getPlanejamentoSocios(
   // também foi marcada com o método E a canônica está presente, NÃO gera um card
   // duplicado para a "(*)" — evitaria dupla contagem no total/progresso. Se só a
   // "(*)" tiver o método (sem a canônica), o card dela é mantido.
-  const doMetodo = apenasCanonicas(doMetodoTodos);
+  const canonicas = apenasCanonicas(doMetodoTodos);
+
+  // Só as categorias atribuídas a ESTE setor (tela Método por categoria).
+  let doMetodo = canonicas;
+  if (setorId) {
+    const { data: atrib, error: atribErr } = await (createAdminClientIfAvailable() ??
+      (await createClient()))
+      .from("orcamento_categoria_setores")
+      .select("category_code")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("setor_id", setorId);
+    if (atribErr && !isSchemaMissing(atribErr.message)) return { error: atribErr.message };
+    const permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
+    doMetodo = canonicas.filter((c) => permitidas.has(c.categoryCode));
+  }
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -772,7 +789,8 @@ export async function getPlanejamentoSocios(
     .from("orcamento_planejamento_socios")
     .select("category_code, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
-    .eq("year", year);
+    .eq("year", year)
+    .eq("setor_id", setorId);
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
@@ -830,6 +848,8 @@ export async function getPlanejamentoCategoria(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ detalhe?: PlanejamentoCategoriaDetalhe; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -852,6 +872,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorId)
     .maybeSingle<CategoriaRow>();
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
@@ -864,6 +885,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorId)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (itemErr) {
@@ -917,12 +939,14 @@ async function montarSistemaEntrevista(params: {
   itensContexto: PlanejamentoContextoItem[];
   promptCtx?: PlanejamentoPromptContexto;
   streaming: boolean;
+  /** Setor da linha de planejamento. */
+  setorId: string | null;
 }): Promise<
   | { system: string; historico: PlanejamentoMensagem[]; semBase: boolean }
   | { needsMigration: true }
   | { error: string }
 > {
-  const { companyId, year, categoryCode, categoryName, promptCtx, streaming } = params;
+  const { companyId, year, categoryCode, categoryName, promptCtx, streaming, setorId } = params;
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const contexto = (params.itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
@@ -935,6 +959,7 @@ async function montarSistemaEntrevista(params: {
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorId)
     .maybeSingle<{ contexto_admin: string | null }>();
   const companyQuery = supabase
     .from("companies")
@@ -1002,6 +1027,8 @@ export async function enviarMensagemPlanejamento(
   itensContexto: PlanejamentoContextoItem[] = [],
   finalizar = false,
   promptCtx?: PlanejamentoPromptContexto,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{
   reply?: string;
   proposta?: PlanejamentoProposta | null;
@@ -1020,6 +1047,7 @@ export async function enviarMensagemPlanejamento(
 
   // Este caminho é o de ENCERRAR (finalizar=true), que produz a proposta em JSON.
   const prep = await montarSistemaEntrevista({
+    setorId,
     companyId,
     year,
     categoryCode,
@@ -1103,6 +1131,7 @@ export async function enviarMensagemPlanejamento(
     company_id: companyId,
     year,
     category_code: categoryCode,
+    setor_id: setorId,
     category_name: categoryName,
     conversa: novaConversa,
     updated_by: admin.userId,
@@ -1115,7 +1144,7 @@ export async function enviarMensagemPlanejamento(
 
   // Grava a conversa e registra o uso da IA em PARALELO.
   const [upsertRes] = await Promise.all([
-    supabase.from("orcamento_planejamento_socios").upsert(payload, { onConflict: "company_id,year,category_code" }),
+    supabase.from("orcamento_planejamento_socios").upsert(payload, { onConflict: "company_id,year,category_code,setor_id" }),
     logResolvedUsage(resolved, "orcamento", usageOk, { companyId, userId: admin.userId }),
   ]);
   const upErr = upsertRes.error;
@@ -1144,6 +1173,8 @@ export async function montarPromptEntrevista(
   textoUsuario: string,
   itensContexto: PlanejamentoContextoItem[] = [],
   promptCtx?: PlanejamentoPromptContexto,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{
   system?: string;
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -1156,6 +1187,7 @@ export async function montarPromptEntrevista(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const prep = await montarSistemaEntrevista({
+    setorId,
     companyId,
     year,
     categoryCode,
@@ -1192,6 +1224,8 @@ export async function persistirConversaEntrevista(
   categoryCode: string,
   categoryName: string,
   conversa: PlanejamentoMensagem[],
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1204,11 +1238,12 @@ export async function persistirConversaEntrevista(
       company_id: companyId,
       year,
       category_code: categoryCode,
+      setor_id: setorId,
       category_name: categoryName,
       conversa: sanitizeConversa(conversa),
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
@@ -1233,6 +1268,8 @@ export async function salvarBasePlanejamento(
   categoryName: string,
   itens: PlanejamentoItemProposto[],
   contextoAdmin = "",
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1252,12 +1289,13 @@ export async function salvarBasePlanejamento(
       company_id: companyId,
       year,
       category_code: categoryCode,
+      setor_id: setorId,
       category_name: categoryName,
       base_salva: true,
       contexto_admin: ctx || null,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
@@ -1269,13 +1307,15 @@ export async function salvarBasePlanejamento(
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (delErr) return { error: delErr.message };
 
   const rows = limpos.map((i) => ({
     company_id: companyId,
     year,
     category_code: categoryCode,
+    setor_id: setorId,
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
@@ -1301,6 +1341,8 @@ export async function confirmarPropostaPlanejamento(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1318,7 +1360,8 @@ export async function confirmarPropostaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1337,6 +1380,8 @@ export async function editarPropostaPlanejamento(
   categoryCode: string,
   itens: PlanejamentoItemProposto[],
   justificativa: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1355,7 +1400,8 @@ export async function editarPropostaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1372,6 +1418,8 @@ export async function reiniciarConversaPlanejamento(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1390,7 +1438,8 @@ export async function reiniciarConversaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1403,6 +1452,8 @@ export async function removerPlanejamentoSocios(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -1415,14 +1466,16 @@ export async function removerPlanejamentoSocios(
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (itemErr) return { error: itemErr.message };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorId);
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { ok: true };

@@ -9,6 +9,13 @@ import {
   setCategoriaMetodo,
   type CategoriaMetodoItem,
 } from "@/lib/orcamento/actions/categoria-metodo";
+import {
+  getCategoriaSetores,
+  setCategoriaSetores,
+  type SetoresPorCategoria,
+} from "@/lib/orcamento/actions/categoria-setores";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SetoresMultiSelect } from "@/components/orcamento/setores-multi-select";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { YearSelect } from "@/components/orcamento/year-select";
@@ -38,6 +45,11 @@ export function CategoriaMetodoManager({
   const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
   const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [items, setItems] = useState<CategoriaMetodoItem[]>([]);
+  // Setores da empresa/ano + quais orçam cada categoria. É o que decide quais
+  // combinações categoria×setor viram card nas telas de método.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setoresPorCat, setSetoresPorCat] = useState<SetoresPorCategoria>({});
+  const [salvandoSetores, setSalvandoSetores] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
@@ -46,6 +58,20 @@ export function CategoriaMetodoManager({
   const [, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [search, setSearch] = useState("");
+
+  /** Grava os setores de uma categoria. A action recusa tirar um setor que já
+   * tem orçamento lançado — nesse caso desfaz e mostra o motivo. */
+  async function handleSetores(categoryCode: string, ids: string[]) {
+    const anterior = setoresPorCat[categoryCode] ?? [];
+    setSalvandoSetores(categoryCode);
+    setSetoresPorCat((prev) => ({ ...prev, [categoryCode]: ids }));
+    const res = await setCategoriaSetores(companyId, year, categoryCode, ids);
+    setSalvandoSetores(null);
+    if (res?.error) {
+      setSetoresPorCat((prev) => ({ ...prev, [categoryCode]: anterior }));
+      setFeedback({ ok: false, msg: res.error });
+    }
+  }
 
   async function reload(id: string, y: number) {
     if (!id) {
@@ -68,6 +94,11 @@ export function CategoriaMetodoManager({
       return;
     }
     setItems(res.items ?? []);
+
+    // Setores ativos do ano + a atribuição atual, em paralelo.
+    const [setoresRes, atribRes] = await Promise.all([getSetores(id, y), getCategoriaSetores(id, y)]);
+    setSetores((setoresRes.items ?? []).filter((x) => x.active));
+    setSetoresPorCat(atribRes.mapa ?? {});
   }
 
   useEffect(() => {
@@ -236,6 +267,12 @@ export function CategoriaMetodoManager({
                   <th className="px-4 py-2.5 font-medium">Categoria</th>
                   <th className="px-4 py-2.5 font-medium">Linha DRE</th>
                   <th className="px-4 py-2.5 font-medium">Método de orçamento</th>
+                  <th
+                    className="px-4 py-2.5 font-medium"
+                    title="Quais setores orçam esta categoria. Só as combinações marcadas viram card nas telas de método."
+                  >
+                    Setores
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -288,11 +325,23 @@ export function CategoriaMetodoManager({
                         )}
                       </div>
                     </td>
+                    <td className="px-4 py-2">
+                      {item.metodo == null ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <SetoresMultiSelect
+                          setores={setores}
+                          selecionados={setoresPorCat[item.categoryCode] ?? []}
+                          onCommit={(ids) => void handleSetores(item.categoryCode, ids)}
+                          salvando={salvandoSetores === item.categoryCode}
+                        />
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>
