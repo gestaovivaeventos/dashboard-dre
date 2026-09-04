@@ -36,6 +36,8 @@ interface ChatBody {
   texto?: string;
   itensContexto?: PlanejamentoContextoItem[];
   promptCtx?: PlanejamentoPromptContexto;
+  /** Setor da tela: o planejamento da categoria é o deste setor. */
+  setorId?: string | null;
 }
 
 function json(status: number, body: unknown): Response {
@@ -65,11 +67,22 @@ export async function POST(req: NextRequest): Promise<Response> {
     texto = "",
     itensContexto = [],
     promptCtx,
+    setorId = null,
   } = body;
 
   // Prompt (system + messages) e provedor em PARALELO.
   const [prep, resolved] = await Promise.all([
-    montarPromptEntrevista(companyId, year, categoryCode, categoryName, conversa, texto, itensContexto, promptCtx),
+    montarPromptEntrevista(
+      companyId,
+      year,
+      categoryCode,
+      categoryName,
+      conversa,
+      texto,
+      itensContexto,
+      promptCtx,
+      setorId ?? null,
+    ),
     resolverProvedor(),
   ]);
   if (prep.needsMigration) return json(409, { needsMigration: true });

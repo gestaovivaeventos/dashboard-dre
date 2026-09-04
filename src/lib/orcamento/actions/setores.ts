@@ -12,6 +12,16 @@ export interface OrcamentoSetor {
   id: string;
   name: string;
   active: boolean;
+  /** Setor correspondente no módulo Compras. É por ele que se sabe QUEM é o
+   * dono do setor (user_sectors aponta para ctrl_sectors), então sem esse
+   * vínculo o setor orça normalmente mas ninguém o "possui". */
+  ctrlSectorId: string | null;
+}
+
+/** Setor do módulo Compras, para o seletor de vínculo. */
+export interface CtrlSetorOption {
+  id: string;
+  name: string;
 }
 
 const PATH = "/orcamento/configuracoes/setores";
@@ -19,6 +29,7 @@ const PATH = "/orcamento/configuracoes/setores";
 /** Lista os setores (ativos e inativos) de uma empresa no ano do orçamento. */
 export async function getSetores(companyId: string, year: number): Promise<{
   items?: OrcamentoSetor[];
+  ctrlSetores?: CtrlSetorOption[];
   orcarPorSetor?: boolean;
   error?: string;
   needsMigration?: boolean;
@@ -31,7 +42,7 @@ export async function getSetores(companyId: string, year: number): Promise<{
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { data, error } = await supabase
     .from("orcamento_setores")
-    .select("id, name, active")
+    .select("id, name, active, ctrl_sector_id")
     .eq("company_id", companyId)
     .eq("year", year)
     .order("active", { ascending: false })
@@ -49,10 +60,47 @@ export async function getSetores(companyId: string, year: number): Promise<{
     .eq("year", year)
     .maybeSingle();
 
+  // Setores do Compras, para o admin ligar cada setor do orçamento ao seu par.
+  const { data: ctrlRows } = await supabase
+    .from("ctrl_sectors")
+    .select("id, name")
+    .eq("active", true)
+    .order("name");
+
   return {
-    items: (data ?? []) as OrcamentoSetor[],
+    items: (data ?? []).map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      active: Boolean(r.active),
+      ctrlSectorId: (r.ctrl_sector_id as string | null) ?? null,
+    })),
+    ctrlSetores: (ctrlRows ?? []).map((r) => ({ id: r.id as string, name: r.name as string })),
     orcarPorSetor: Boolean(cfg?.orcar_por_setor),
   };
+}
+
+/**
+ * Liga (ou desliga, com null) o setor do orçamento ao setor do módulo Compras.
+ * É esse vínculo que a Fase 3 usará para saber quais setores um gerente
+ * alcança — `user_sectors` aponta para `ctrl_sectors`, não para o cadastro do
+ * orçamento.
+ */
+export async function setSetorCtrlVinculo(id: string, ctrlSectorId: string | null) {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!id) return { error: "Setor inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { error } = await supabase
+    .from("orcamento_setores")
+    .update({ ctrl_sector_id: ctrlSectorId, updated_by: admin.userId })
+    .eq("id", id);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+  revalidatePath(PATH);
+  return { ok: true as const };
 }
 
 export async function createSetor(companyId: string, year: number, name: string) {
