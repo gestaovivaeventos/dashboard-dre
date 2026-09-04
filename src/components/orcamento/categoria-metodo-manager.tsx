@@ -73,6 +73,17 @@ export function CategoriaMetodoManager({
     }
   }
 
+  // Resíduo: categoria por MÉDIA em mais de um setor. A regra nova não deixa
+  // criar, mas a migração da Fase 1 pode ter deixado — e cada setor calcula a
+  // média da categoria inteira, contando a despesa duas vezes no orçamento.
+  const mediasDuplicadas = useMemo(
+    () =>
+      items.filter(
+        (i) => i.metodo === "media" && (setoresPorCat[i.categoryCode]?.length ?? 0) > 1,
+      ),
+    [items, setoresPorCat],
+  );
+
   async function reload(id: string, y: number) {
     if (!id) {
       setItems([]);
@@ -260,7 +271,22 @@ export function CategoriaMetodoManager({
           <p className="text-sm text-muted-foreground">
             {definedCount} de {items.length} categorias com método definido.
           </p>
-          <div className="overflow-x-auto rounded-lg border">
+          {mediasDuplicadas.length > 0 && (
+        <div className="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <p className="font-medium text-amber-700 dark:text-amber-500">
+            {mediasDuplicadas.length} categoria(s) por média em mais de um setor
+          </p>
+          <p className="text-muted-foreground">
+            A média sai do realizado da categoria inteira, então cada setor está calculando o
+            <strong> mesmo valor</strong> — e o orçamento conta a despesa mais de uma vez. Deixe
+            um setor só aqui e use <strong>Tirar deste setor</strong> na tela de Média para apagar
+            a linha que sobrar:{" "}
+            {mediasDuplicadas.map((i) => i.categoryName).join(", ")}.
+          </p>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -332,6 +358,7 @@ export function CategoriaMetodoManager({
                         <SetoresMultiSelect
                           setores={setores}
                           selecionados={setoresPorCat[item.categoryCode] ?? []}
+                          unico={item.metodo === "media"}
                           onCommit={(ids) => void handleSetores(item.categoryCode, ids)}
                           salvando={salvandoSetores === item.categoryCode}
                         />

@@ -22,6 +22,10 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 
 const PATH = "/orcamento/configuracoes/categoria-metodo";
 
+const ERRO_MEDIA_UM_SETOR =
+  "Categoria orçada por média pertence a um setor só — a média sai do realizado da " +
+  "categoria inteira, e dois setores contariam a mesma despesa duas vezes.";
+
 /** Setores atribuídos a cada categoria, indexado pelo código da categoria. */
 export type SetoresPorCategoria = Record<string, string[]>;
 
@@ -81,6 +85,25 @@ export async function setCategoriaSetores(
 
   const supabase = db() ?? (await createClient());
   const desejados = Array.from(new Set(setorIds.filter(Boolean)));
+
+  // MEDIA aceita UM setor so. O valor dela vem do realizado da categoria
+  // inteira - dois setores calculariam a mesma media e o orcamento contaria a
+  // despesa duas vezes. Planejamento e valor fixo nao tem esse problema: la
+  // cada item/contrato e uma despesa distinta, com o seu proprio setor.
+  if (desejados.length > 1) {
+    const { data: metodoRow } = await supabase
+      .from("orcamento_categoria_metodo")
+      .select("metodo")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .maybeSingle();
+    if (metodoRow?.metodo === "media") {
+      return {
+        error: ERRO_MEDIA_UM_SETOR,
+      };
+    }
+  }
 
   const { data: atuaisRows, error: atuaisErr } = await supabase
     .from("orcamento_categoria_setores")

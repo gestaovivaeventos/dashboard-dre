@@ -27,12 +27,16 @@ export function SetoresMultiSelect({
   onCommit,
   disabled,
   salvando,
+  unico,
 }: {
   setores: SetorOpcao[];
   selecionados: string[];
   onCommit: (ids: string[]) => void;
   disabled?: boolean;
   salvando?: boolean;
+  /** Escolha ÚNICA. A média é assim: o valor vem do realizado da categoria
+   * inteira, então dois setores contariam a mesma despesa duas vezes. */
+  unico?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [rascunho, setRascunho] = useState<string[]>(selecionados);
@@ -105,14 +109,21 @@ export function SetoresMultiSelect({
                 type="button"
                 onClick={() =>
                   setRascunho((prev) =>
-                    prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id],
+                    unico
+                      ? prev.includes(s.id)
+                        ? []
+                        : [s.id]
+                      : prev.includes(s.id)
+                        ? prev.filter((x) => x !== s.id)
+                        : [...prev, s.id],
                   )
                 }
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
               >
                 <span
                   className={cn(
-                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center border",
+                    unico ? "rounded-full" : "rounded",
                     marcado ? "border-emerald-600 bg-emerald-600 text-white" : "border-input",
                   )}
                 >
@@ -123,7 +134,7 @@ export function SetoresMultiSelect({
             );
           })}
           <p className="px-2 pb-1 pt-1.5 text-[10px] text-muted-foreground">
-            Fecha e salva ao clicar fora.
+            {unico ? "Um setor só (método média). " : ""}Fecha e salva ao clicar fora.
           </p>
         </div>
       )}
