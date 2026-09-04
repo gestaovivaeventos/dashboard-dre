@@ -46,6 +46,8 @@ import {
   type PlanejamentoProposta,
 } from "@/lib/orcamento/planejamento-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+import { analisarBase } from "@/lib/orcamento/planejamento-analise";
+import { PlanejamentoAlertasBase } from "@/components/orcamento/planejamento-alertas-base";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -679,6 +681,19 @@ function CategoriaInterview({
   const baseIncluidos = useMemo(() => baseItens.filter((i) => i.incluir), [baseItens]);
   const baseTotal = categoriaTotal(baseIncluidos);
   const baseDescFaltando = baseIncluidos.some((i) => i.descricao.trim() === "");
+  // Leitura do conjunto: as mesmas observações que a IA faz na abertura, só que
+  // AQUI — para o admin limpar a base antes de levá-la para a entrevista.
+  const alertasBase = useMemo(
+    () =>
+      analisarBase(
+        baseIncluidos.map((i) => ({
+          key: i.key,
+          descricao: i.descricao,
+          totalAno: totalItem(i.valorMensal, i.mesInicio, i.periodicidade, i.mesFim ?? null),
+        })),
+      ),
+    [baseIncluidos],
+  );
 
   // Posição desta categoria no plano + próxima PENDENTE (para o painel de
   // conclusão e o "X de N" do cabeçalho). A categoria atual conta como concluída
@@ -1100,6 +1115,7 @@ function CategoriaInterview({
                   <Pencil className="h-3.5 w-3.5" /> Editar base
                 </button>
               </div>
+              <PlanejamentoAlertasBase alertas={alertasBase} />
               {contextoAdmin.trim() !== "" && (
                 <div className="flex items-start gap-1.5 rounded-md border border-emerald-500/20 bg-background/60 p-2 text-xs text-muted-foreground">
                   <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -1111,6 +1127,7 @@ function CategoriaInterview({
             </div>
           ) : (
             <div className="space-y-3">
+              <PlanejamentoAlertasBase alertas={alertasBase} />
               <ItensTable
                 itens={baseItens}
                 refMap={refMap}
