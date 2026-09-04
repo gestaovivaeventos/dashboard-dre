@@ -338,9 +338,14 @@ export async function getPreviaOrcamento(
         if (isSchemaMissing(snapErr.message)) return { needsMigration: true };
         return { error: snapErr.message };
       }
-      const snapByCode = new Map<string, MediaSnapshotRow>(
-        ((snapRows ?? []) as MediaSnapshotRow[]).map((r) => [r.category_code, r]),
-      );
+      // Uma linha POR SETOR: a categoria pode ser orçada pelo Comercial e pelo
+      // Produto. Agrupa em lista e soma — um Map por código perderia setores.
+      const snapsByCode = new Map<string, MediaSnapshotRow[]>();
+      for (const r of (snapRows ?? []) as MediaSnapshotRow[]) {
+        const lista = snapsByCode.get(r.category_code) ?? [];
+        lista.push(r);
+        snapsByCode.set(r.category_code, lista);
+      }
       // Realizado do ano-base AO VIVO — mesmo cálculo da tela de Média. A prévia
       // lia só o snapshot salvo, mas a tela mostra `mediaValor ?? realizado.media`
       // (sugestão viva antes de "Recalcular p/ salvar"): categoria com valor
@@ -348,14 +353,29 @@ export async function getPreviaOrcamento(
       const mediaCodes = mediaCats.map((c) => c.category_code);
       const realizados = await fetchRealizados(supabase, companyId, year - 1, mediaCodes);
       for (const cat of mediaCats) {
-        const snap = snapByCode.get(cat.category_code);
-        // Efetiva = snapshot salvo; sem ele, a média viva do realizado.
-        const bruto =
-          snap?.media_valor != null
-            ? Number(snap.media_valor)
-            : realizados.get(cat.category_code)?.media ?? null;
-        const projetado = projetarMedia(bruto, indicePercent(snap?.indice_key ?? null));
-        if (projetado == null || projetado === 0) {
+        const snaps = snapsByCode.get(cat.category_code) ?? [];
+        // Sem nenhuma linha gravada, vale a média VIVA do realizado (é o que a
+        // tela mostra antes de "Recalcular p/ salvar"). Com linhas, soma-se o
+        // projetado de cada setor.
+        const parcelas = snaps.length > 0 ? snaps : [null];
+        let projetado = 0;
+        let bruto: number | null = null;
+        let snap: MediaSnapshotRow | null = null;
+        for (const s of parcelas) {
+          const brutoParcela =
+            s?.media_valor != null
+              ? Number(s.media_valor)
+              : realizados.get(cat.category_code)?.media ?? null;
+          const proj = projetarMedia(brutoParcela, indicePercent(s?.indice_key ?? null));
+          if (proj == null) continue;
+          projetado += proj;
+          // Guarda a maior parcela só para o texto do drilldown.
+          if (bruto == null || (brutoParcela ?? 0) > bruto) {
+            bruto = brutoParcela;
+            snap = s;
+          }
+        }
+        if (projetado === 0) {
           mediaSemValor += 1;
           continue;
         }
@@ -487,7 +507,13 @@ export async function getPreviaOrcamento(
               periodicidade,
             };
           });
-          if (arr.length > 0) psByCode.set(r.category_code, arr);
+          // ACUMULA: a categoria pode ter uma proposta POR SETOR, e o orçado da
+          // categoria é a soma de todas. Sobrescrever perderia setores.
+          if (arr.length > 0) {
+            const acumulado = psByCode.get(r.category_code) ?? [];
+            acumulado.push(...arr);
+            psByCode.set(r.category_code, acumulado);
+          }
         },
       );
       for (const cat of psCats) {

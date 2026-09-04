@@ -28,6 +28,7 @@ import {
   type PlanejamentoRealizadoItem,
   apenasCanonicas,
   codigosIrmaos,
+  normNomeCategoria,
   periodicidadeLabel,
   toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
@@ -651,6 +652,64 @@ function buildSystemPrompt(opts: {
   ].join("\n");
 }
 
+/**
+ * Resolve o SETOR do orçamento até o departamento da Omie, para filtrar os
+ * fornecedores do ano anterior. A corrente é:
+ *   orcamento_setores.ctrl_sector_id -> ctrl_sector_omie_departamento
+ *     -> codigo_departamento (o mesmo de financial_entries.department_code)
+ *
+ * Devolve também se o setor é o "Não atribuído", que é onde caem os
+ * fornecedores sem departamento ou espalhados por vários.
+ */
+async function resolverDepartamentoDoSetor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  setorId: string | null,
+): Promise<{ departamento: string | null; ehNaoAtribuido: boolean; temVinculo: boolean }> {
+  if (!setorId) return { departamento: null, ehNaoAtribuido: false, temVinculo: false };
+
+  const { data: setor } = await supabase
+    .from("orcamento_setores")
+    .select("name, ctrl_sector_id")
+    .eq("id", setorId)
+    .maybeSingle();
+  if (!setor) return { departamento: null, ehNaoAtribuido: false, temVinculo: false };
+
+  const ehNaoAtribuido = normNomeCategoria(String(setor.name ?? "")) === "não atribuído";
+  const ctrlId = (setor.ctrl_sector_id as string | null) ?? null;
+  if (!ctrlId) return { departamento: null, ehNaoAtribuido, temVinculo: false };
+
+  const { data: dep } = await supabase
+    .from("ctrl_sector_omie_departamento")
+    .select("codigo_departamento")
+    .eq("sector_id", ctrlId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  const departamento = (dep?.codigo_departamento as string | null) ?? null;
+  return { departamento, ehNaoAtribuido, temVinculo: departamento != null };
+}
+
+/**
+ * Mantém só os fornecedores que pertencem ao setor.
+ *
+ * Setor com departamento vinculado leva os fornecedores DAQUELE departamento.
+ * O "Não atribuído" recolhe o resto: fornecedor sem departamento no
+ * lançamento e fornecedor com lançamentos em vários departamentos (a função
+ * do banco devolve `departamento: null` nos dois casos).
+ *
+ * Setor sem vínculo com o Compras não tem como filtrar — recebe a lista
+ * inteira, que é o comportamento anterior à Fase 1 e falha para o lado de
+ * mostrar demais, não de esconder.
+ */
+function filtrarPorSetor(
+  itens: PlanejamentoRealizadoItem[],
+  ctx: { departamento: string | null; ehNaoAtribuido: boolean; temVinculo: boolean },
+): PlanejamentoRealizadoItem[] {
+  if (ctx.ehNaoAtribuido) return itens.filter((i) => !i.departamento);
+  if (!ctx.temVinculo) return itens;
+  return itens.filter((i) => i.departamento === ctx.departamento);
+}
+
 async function fetchRealizadoItens(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
@@ -670,6 +729,7 @@ async function fetchRealizadoItens(
     total: number | string;
     total_fechado: number | string | null;
     lancamentos: number | string;
+    departamento: string | null;
   }>).map((r) => {
     const total = Number(r.total) || 0;
     const totalFechado = Number(r.total_fechado) || 0;
@@ -678,6 +738,9 @@ async function fetchRealizadoItens(
       total,
       media: fechados > 0 && totalFechado > 0 ? totalFechado / fechados : null,
       lancamentos: Number(r.lancamentos) || 0,
+      // null = lançamento sem departamento OU fornecedor espalhado por
+      // vários; nos dois casos vai para "Não atribuído".
+      departamento: r.departamento == null ? null : String(r.departamento),
     };
   });
 }
@@ -738,6 +801,9 @@ async function fetchRealizadoItensIrmaos(
         cur.total += it.total;
         cur.lancamentos += it.lancamentos;
         if (it.media != null) cur.media = (cur.media ?? 0) + it.media;
+        // Departamentos divergentes entre as irmãs: o fornecedor deixa de
+        // pertencer a um setor com segurança.
+        if (cur.departamento !== it.departamento) cur.departamento = null;
       }
     }
   }
@@ -896,10 +962,14 @@ export async function getPlanejamentoCategoria(
   // Realizado do ano anterior somando a categoria + suas irmãs "(*)" (divisão
   // interna da contabilidade) — total e fornecedores completos.
   const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
-  const [realizados, realizadoItens] = await Promise.all([
+  const [realizados, realizadoItensTodos, ctxSetor] = await Promise.all([
     fetchRealizados(supabase, companyId, year - 1, irmaos),
     fetchRealizadoItensIrmaos(supabase, companyId, year - 1, irmaos),
+    resolverDepartamentoDoSetor(supabase, companyId, setorId),
   ]);
+  // A base semeada é só dos fornecedores DESTE setor: o gestor do Comercial
+  // não valida o que só o Produto usou.
+  const realizadoItens = filtrarPorSetor(realizadoItensTodos, ctxSetor);
   const r = combinarRealizados(realizados, irmaos, year - 1);
   const totalAno = totalGastoAno(realizados, irmaos); // ano inteiro, não só meses fechados
 
