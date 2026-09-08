@@ -1141,19 +1141,29 @@ Lugar dele: o "diagnosticoPrincipal" e, se merecer destaque, um item PROPRIO em
 que foi pago e o que foi recebido, com os valores literais do contexto, sem
 encaixa-lo em nenhuma linha da DRE que o contexto nao tenha nomeado.
 
+ATENCAO — nao e o mesmo que estar FORA da DRE. Venda de ativo entra na DRE como
+RECEITA NAO OPERACIONAL, e portanto COMPOE o resultado do exercicio. E PROIBIDO
+escrever "movimento societario que nao compoe o resultado", "nao compoe o
+resultado operacional", "fora da DRE", "nao impacta o resultado" ou qualquer
+variacao dessas. Relate o fato sem carimbar tratamento contabil: diga o que foi
+pago e o que foi recebido, e pare por ai. Quem decide onde o valor entrou e o
+plano de contas, nao voce.
+
 VALE TAMBEM PARA O "diagnosticoPrincipal", SEM alonga-lo (ele continua com no
 maximo 900 caracteres). Monte-o em frases SEPARADAS, nesta ordem:
   - frase 1: a linha da DRE e SO as causas que pertencem a ela. E PROIBIDO
     emendar nela a sequencia "..., alem do acerto / da venda / do recebimento";
   - frase 2, comecando por "Alem disso, no periodo": o fato societario, dizendo
-    o que foi pago e o que foi recebido. Se o contexto nao disser em que linha
-    da DRE o valor entrou, chame-o de movimento de caixa/societario do periodo
-    — nao afirme que reduziu o resultado do exercicio nem que elevou despesa.
+    apenas o que foi pago e o que foi recebido, com os valores literais. NAO
+    acrescente a essa frase nenhum julgamento sobre onde o valor entra ou deixa
+    de entrar (ver ATENCAO acima) e nao afirme que ele elevou a despesa da
+    linha comentada na frase 1.
 
 A frase de FECHO do diagnostico nao pode voltar a juntar os dois: e PROIBIDO
 concluir com "esses eventos explicam a elevacao das despesas" quando um deles
-nao e despesa. Conclua tratando cada fato pelo que ele e (o que pressionou a
-despesa e o que foi movimento de caixa/societario).
+nao e despesa. Conclua tratando cada fato pelo que ele e — de um lado o que
+pressionou a despesa, de outro o acerto/recebimento pelo nome que o contexto
+deu, sem classifica-lo contabilmente.
 
 Quando o fato societario for MATERIAL (valor da ordem do resultado do periodo
 ou maior), ele TEM de ganhar um item PROPRIO em "pontosAtencao" ou
