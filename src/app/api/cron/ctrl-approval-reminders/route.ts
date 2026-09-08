@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCronAuthorized } from "@/lib/auth/cron";
 
 import { runApprovalReminders } from "@/lib/ctrl/approval-reminders/send";
 import { sendEmail } from "@/lib/email/gmail";
@@ -30,9 +31,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 function isAuthorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  return isCronAuthorized(request);
 }
 
 export async function GET(request: Request) {

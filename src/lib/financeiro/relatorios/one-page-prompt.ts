@@ -752,6 +752,15 @@ consolidados). Voce pode comenta-los na \`leituraPorIndicador\`, mas o CENTRO da
 analise executiva e a COMPARACAO entre as empresas do grupo (o comparativo
 acima), nao a leitura isolada de uma unica DRE.
 
+## Como apresentar os numeros no texto
+
+Formatacao e APRESENTACAO, nao recalculo: o valor continua sendo exatamente o
+do input (regra 3 das REGRAS INVIOLAVEIS). Ao escrever qualquer valor no texto
+dos campos, use o padrao brasileiro — R$ com separador de milhar e duas casas
+decimais (R$ 38.341,50, nao 38341.5; R$ -8.482,55, nao -8482.55) e percentual
+com virgula (82,58%, nao 82.58%). Nao abrevie valores em "k" (escreva
+R$ 7.000,00, nao +7k), mesmo quando o contexto da controladoria vier assim.
+Nunca arredonde, nunca mude o sinal e nunca converta a escala.
 ## Leitura esperada (referencia de tom)
 
 "A comparacao por percentual de atingimento da meta permite observar a
@@ -1079,6 +1088,113 @@ pontuais: o desembolso do IPTU pode voltar a ocorrer conforme o desfecho da
 discussao judicial, de modo que a economia do periodo nao deve ser lida como
 ganho estrutural de eficiencia."`;
 
+// ============================================================================
+// HERO HOLDING + contexto da controladoria: ATRIBUICAO DE CAUSA.
+//
+// Anexada SOMENTE quando o template e "hero-holding" E existe contexto do CSC
+// — nenhuma outra empresa muda de comportamento, e a Hero sem contexto continua
+// com o prompt byte a byte de antes.
+//
+// POR QUE EXISTE (Agosto/2026): o contexto trazia DOIS fatos independentes —
+// bonus e pro labore de setembro antecipados para 27/08 (+R$ 19 mil, que
+// explicam a despesa com pessoal) e um acerto de R$ 72.324,24 ligado a venda da
+// Viva Cuiaba (evento societario, que nao explica pessoal nenhum). Obedecendo a
+// regra "se o contexto trouxer MAIS DE UM fator, cite TODOS", o modelo empilhou
+// os dois na MESMA frase do alerta "Despesas com pessoal acima do orcado" — e
+// ainda afirmou, por conta propria, que o acerto fora "registrado como despesa".
+// Alem de misturar assuntos, era aritmeticamente impossivel: a linha inteira de
+// pessoal realizou R$ 38.341,50; um item de R$ 72 mil nao cabe dentro dela.
+// ============================================================================
+const HERO_HOLDING_ATRIBUICAO_CAUSA_RULE = `# REGRA FINAL — CADA CAUSA NO INDICADOR CERTO
+
+Esta secao PREVALECE sobre qualquer instrucao anterior deste prompt a respeito
+de "citar TODOS os fatores do contexto" e de "trazer a ressalva junto no alerta
+agregado". Citar todos os fatores significa citar cada um NO ITEM A QUE ELE
+PERTENCE. Um item = UM assunto: titulo e descricao falam do MESMO fato.
+
+E PROIBIDO encaixar, num alerta, destaque ou leitura de indicador, um fato que
+o contexto NAO ligou aquela linha. A construcao "..., alem do acerto / da venda
+/ do recebimento ..." dentro de um alerta de DESPESA COM PESSOAL — ou de
+qualquer linha que nao recebeu aquele valor — esta ERRADA e nao pode aparecer
+no relatorio.
+
+Antes de citar um fato do contexto como CAUSA de uma linha (pessoal, despesas
+operacionais, receita, resultado...), faca as DUAS checagens. Se qualquer uma
+falhar, o fato NAO entra naquele item:
+
+1. PERTINENCIA. O contexto liga explicitamente aquele fato aquela linha? Se ele
+   nao disser em qual linha o valor entrou, NAO o atribua a nenhuma e NAO
+   invente a classificacao contabil dele. E PROIBIDO escrever "registrado como
+   despesa", "lancado em pessoal" ou "compoe as despesas operacionais" quando o
+   contexto nao afirmou isso.
+2. ORDEM DE GRANDEZA. O valor do fato cabe dentro do realizado e do desvio
+   daquela linha? Um pagamento MAIOR que o proprio realizado do indicador, ou
+   muito maior que o desvio contra o orcado, NAO pode ser componente dele —
+   atribuir assim produz um texto que os proprios numeros do input desmentem.
+
+VENDA DE UNIDADE E ACERTO ENTRE UNIDADES. Fato societario ou patrimonial —
+venda ou compra de unidade, acerto entre socios, entrada recebida pela venda de
+participacao, acerto pago a uma unidade por conta dessa venda — NAO e despesa
+operacional e NUNCA explica despesa com pessoal nem despesas operacionais.
+Lugar dele: o "diagnosticoPrincipal" e, se merecer destaque, um item PROPRIO em
+"destaques" ou "pontosAtencao", com titulo que fale do proprio acerto. Diga o
+que foi pago e o que foi recebido, com os valores literais do contexto, sem
+encaixa-lo em nenhuma linha da DRE que o contexto nao tenha nomeado.
+
+ATENCAO — nao e o mesmo que estar FORA da DRE. Venda de ativo entra na DRE como
+RECEITA NAO OPERACIONAL, e portanto COMPOE o resultado do exercicio. E PROIBIDO
+escrever "movimento societario que nao compoe o resultado", "nao compoe o
+resultado operacional", "fora da DRE", "nao impacta o resultado" ou qualquer
+variacao dessas. Relate o fato sem carimbar tratamento contabil: diga o que foi
+pago e o que foi recebido, e pare por ai. Quem decide onde o valor entrou e o
+plano de contas, nao voce.
+
+VALE TAMBEM PARA O "diagnosticoPrincipal", SEM alonga-lo (ele continua com no
+maximo 900 caracteres). Monte-o em frases SEPARADAS, nesta ordem:
+  - frase 1: a linha da DRE e SO as causas que pertencem a ela. E PROIBIDO
+    emendar nela a sequencia "..., alem do acerto / da venda / do recebimento";
+  - frase 2, comecando por "Alem disso, no periodo": o fato societario, dizendo
+    apenas o que foi pago e o que foi recebido, com os valores literais. NAO
+    acrescente a essa frase nenhum julgamento sobre onde o valor entra ou deixa
+    de entrar (ver ATENCAO acima) e nao afirme que ele elevou a despesa da
+    linha comentada na frase 1.
+
+A frase de FECHO do diagnostico nao pode voltar a juntar os dois: e PROIBIDO
+concluir com "esses eventos explicam a elevacao das despesas" quando um deles
+nao e despesa. Conclua tratando cada fato pelo que ele e — de um lado o que
+pressionou a despesa, de outro o acerto/recebimento pelo nome que o contexto
+deu, sem classifica-lo contabilmente.
+
+Quando o fato societario for MATERIAL (valor da ordem do resultado do periodo
+ou maior), ele TEM de ganhar um item PROPRIO em "pontosAtencao" ou
+"destaques", com titulo que fale dele mesmo. Sem esse item, o fato acaba
+espremido dentro do alerta de outra linha — que e exatamente o erro proibido
+acima.
+
+NAO TRANSFIRA A NATUREZA DE UM EVENTO DE UMA UNIDADE PARA OUTRA. Chame cada
+fato exatamente pelo nome que o contexto deu, e ligado a unidade que o
+contexto nomeou. Se o contexto diz "acerto da Viva X" numa frase e "venda da
+Viva Y" em outra, escreva "acerto da Viva X" — NUNCA "acerto da venda da
+Viva X". So chame de venda, compra, encerramento, fusao ou transferencia o
+que o contexto chamou assim, para a unidade que ele citou: dizer que uma
+unidade foi vendida quando o contexto nao disse isso e um FATO INVENTADO sobre
+o grupo, mesmo que a palavra apareca na frase vizinha, falando de outra
+unidade. Na duvida sobre a natureza do evento, use o termo neutro do proprio
+contexto ("acerto", "pagamento", "repasse") e nao qualifique.
+
+CHECAGEM FINAL OBRIGATORIA, antes de fechar a resposta: releia CADA item de
+"pontosAtencao", "destaques" e "leituraPorIndicador". Se a descricao citar mais
+de um fato do contexto, confirme que TODOS pertencem ao indicador do titulo.
+Apague do item o que nao pertencer — esse fato ja esta no diagnostico ou em
+item proprio, e nao se perde.
+
+Exemplo real do erro a evitar: "Despesas com pessoal acima do orcado — somaram
+R$ 38.341,50 contra R$ 21.000,00 orcados, impactadas por pagamentos antecipados
+de bonus e pro labore, alem do acerto da venda da Viva Uberaba." O acerto nao
+tem relacao com despesa de pessoal e o valor sequer cabe na linha. Certo: o
+alerta de pessoal cita SO os pagamentos antecipados (bonus e pro labore de
+setembro); o acerto aparece separado, como movimento societario do periodo.`;
+
 // ── Montagem dos prompts por segmento ───────────────────────────────────────
 export const FRANQUIAS_VIVA_SYSTEM_PROMPT = [
   ROLE_INTRO,
@@ -1152,6 +1268,11 @@ export function resolveOnePageSystemPrompt(
       ? CUSTOS_VARIAVEIS_RECEITA_RULE
       : null,
     opts.hasBusinessContext ? CONTEXTO_CONTROLADORIA_RULE : null,
+    // Só a Hero Holding, e só quando há contexto do CSC (ver o comentário da
+    // constante). Sem os dois gatilhos, nenhuma empresa muda de comportamento.
+    template.prompt.kind === "hero-holding" && opts.hasBusinessContext
+      ? HERO_HOLDING_ATRIBUICAO_CAUSA_RULE
+      : null,
   ].filter((rule): rule is string => rule !== null);
 
   return extras.length > 0 ? [base, ...extras].join("\n\n") : base;

@@ -14,7 +14,7 @@ export async function GET() {
   if (
     !user ||
     !profile ||
-    (profile.role !== "admin" && profile.role !== "gestor_hero")
+    profile.role !== "admin"
   ) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }

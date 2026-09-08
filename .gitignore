@@ -49,3 +49,16 @@ supabase/.temp/
 
 # Snapshots de dados antes de migrations estruturais (contêm dados das empresas).
 /backups/
+
+# Claude Code local permissions (ja vazou credencial Omie uma vez — nunca versionar)
+.claude/settings.local.json
+
+# Dumps de dados reais (Omie/CPFs/contratos) — ficam fora do repo
+omie_*.json
+vvr_*.json
+VVR_*.csv
+VVR_*.md
+candidatos_remocao_fundos.json
+*.pages
+/*.pdf
+docs/*.xlsx

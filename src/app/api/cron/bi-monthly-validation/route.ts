@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCronAuthorized } from "@/lib/auth/cron";
 
 import { sendEmail } from "@/lib/email/gmail";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
@@ -17,8 +18,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // DEPOIS da sincronizacao ampliada de 6 meses feita pelo /api/cron/sync-all do
 // mesmo dia (por isso o horario mais tarde no vercel.json). Sequencia do dia:
 //   1. sync-all sincroniza 6 meses de Omie   (06:00 UTC / 03:00 BRT)
-//   2. ESTA rotina gera os relatorios do MES ANTERIOR de cada empresa com
-//      destinatarios cadastrados e os coloca na fila de validacao
+//   2. ESTA rotina gera os relatorios do MES ANTERIOR de TODAS as empresas
+//      ativas com sync ligado (ter destinatario cadastrado NAO e requisito —
+//      o e-mail so importa no envio) e os coloca na fila de validacao
 //      (12:00 UTC / 09:00 BRT)
 //   3. cria a pendencia/notificacao no Control Hub para os usuarios CSC
 //
@@ -37,9 +39,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 function isAuthorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  return isCronAuthorized(request);
 }
 
 export async function GET(request: Request) {

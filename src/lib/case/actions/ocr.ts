@@ -193,6 +193,12 @@ const providerLabel = (name: string): string => AI_PROVIDER_LABELS[name] ?? name
  *     Imagem ou PDF escaneado (sem texto) não é possível nesse provedor — devolve
  *     um erro claro orientando a usar PDF com texto ou ativar a OpenAI.
  */
+// O download usa service role (ignora a policy do bucket), então a pasta
+// `<uid>/` do próprio usuário — regra do upload — é conferida antes.
+function ownsAttachment(userId: string, attachmentPath: string): boolean {
+  return attachmentPath.startsWith(`${userId}/`) && !attachmentPath.includes("..");
+}
+
 async function readContractDoc<T extends z.ZodTypeAny>(
   attachmentPath: string,
   opts: { schema: T; schemaHint: string; instrucao: string; system: string },
@@ -277,8 +283,9 @@ async function readContractDoc<T extends z.ZodTypeAny>(
 export async function extractFornecedorContract(
   attachmentPath: string,
 ): Promise<{ data: FornecedorOcrResult } | { error: string }> {
-  await requireCaseUser();
+  const ctx = await requireCaseUser();
   if (!attachmentPath) return { error: "Anexo não informado." };
+  if (!ownsAttachment(ctx.id, attachmentPath)) return { error: "Anexo não pertence a este usuário." };
 
   const r = await readContractDoc(attachmentPath, {
     schema: FornecedorContractSchema,
@@ -326,6 +333,7 @@ export async function extractArtistContract(
 ): Promise<{ data: ArtistOcrResult } | { error: string }> {
   const ctx = await requireCaseUser();
   if (!attachmentPath) return { error: "Anexo não informado." };
+  if (!ownsAttachment(ctx.id, attachmentPath)) return { error: "Anexo não pertence a este usuário." };
 
   const r = await readContractDoc(attachmentPath, {
     schema: ArtistContractSchema,

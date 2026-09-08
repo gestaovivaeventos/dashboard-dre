@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
 
   // Mudou o mapeamento de fluxo -> recalcula a pre-agregacao do Fluxo desta
   // empresa (e dos destinos de roteamento). Best-effort.
-  await refreshCashFlowAggregatesForSource(supabase, companyId);
+  await refreshCashFlowAggregatesForSource(createAdminClientIfAvailable() ?? supabase, companyId);
 
   revalidatePath("/(app)", "layout");
   return NextResponse.json({

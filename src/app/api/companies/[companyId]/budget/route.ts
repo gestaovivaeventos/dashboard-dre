@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
-import { fetchAllDreAccountRows } from "@/lib/dashboard/dre";
+import { fetchAllDreAccountRows, resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
 interface Params {
@@ -295,6 +295,14 @@ export async function GET(_: Request, { params }: Params) {
   const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user || !profile) {
     return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
+  }
+  if (profile.role !== "admin" && profile.can_financeiro === false) {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
+  // O admin client ignora RLS, então o escopo por empresa tem que ser explícito.
+  const allowed = await resolveAllowedCompanyIds(supabase, profile, [params.companyId]);
+  if (!allowed.includes(params.companyId)) {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
   const db = createAdminClientIfAvailable() ?? supabase;

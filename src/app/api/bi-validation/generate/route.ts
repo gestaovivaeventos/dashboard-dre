@@ -14,8 +14,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // POST /api/bi-validation/generate
 //
 // Dispara MANUALMENTE a mesma leva da rotina mensal: monta o relatório do mês
-// anterior de CADA empresa com destinatários cadastrados em
-// Plataforma > Relatório BI e coloca tudo na fila de validação.
+// anterior de CADA empresa ativa com sync ligado e coloca tudo na fila de
+// validação. Ter destinatário cadastrado em Plataforma > Relatório BI NÃO é
+// requisito para gerar — o e-mail só é exigido no envio.
 //
 // Por padrão só COMPLETA a leva — empresas que já têm relatório pronto no
 // período são puladas (não faz sentido gastar IA de novo). É assim que se

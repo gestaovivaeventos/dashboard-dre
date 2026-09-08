@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { isUuid } from "@/lib/utils/uuid";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
@@ -25,7 +27,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const companyId = url.searchParams.get("companyId");
-  if (!companyId) {
+  if (!isUuid(companyId)) {
     return NextResponse.json({ error: "Informe companyId." }, { status: 400 });
   }
 
@@ -173,7 +175,7 @@ export async function POST(request: Request) {
   }
 
   if (!cashFlowAccountId) {
-    await refreshCashFlowAggregatesForSource(supabase, companyId);
+    await refreshCashFlowAggregatesForSource(createAdminClientIfAvailable() ?? supabase, companyId);
     revalidatePath("/(app)", "layout");
     return NextResponse.json({ ok: true, mapping: null });
   }
@@ -194,7 +196,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  await refreshCashFlowAggregatesForSource(supabase, companyId);
+  await refreshCashFlowAggregatesForSource(createAdminClientIfAvailable() ?? supabase, companyId);
   revalidatePath("/(app)", "layout");
   return NextResponse.json({ ok: true, mapping: data });
 }

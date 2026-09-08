@@ -37,7 +37,8 @@ export async function sendNewUserPendingApprovalEmail(params: {
   if (!adminEmail) return;
 
   const appUrl = resolveAppUrl();
-  const safeName = params.userName?.trim() || "(sem nome)";
+  const safeName = escapeHtml(params.userName?.trim() || "(sem nome)");
+  const safeEmail = escapeHtml(params.userEmail);
 
   try {
     await sendEmail({
@@ -48,7 +49,7 @@ export async function sendNewUserPendingApprovalEmail(params: {
         <p>Um usuário criou conta no Control Hub e está aguardando a sua autorização para acessar o sistema:</p>
         <ul>
           <li><strong>Nome:</strong> ${safeName}</li>
-          <li><strong>E-mail:</strong> ${params.userEmail}</li>
+          <li><strong>E-mail:</strong> ${safeEmail}</li>
         </ul>
         <p>Para autorizar, abra a tela de usuários e defina o perfil + módulos do novo cadastro:</p>
         <p><a href="${appUrl}/usuarios" style="display:inline-block;padding:10px 16px;background:#7c3aed;color:white;text-decoration:none;border-radius:6px;">Abrir /usuarios</a></p>
@@ -180,4 +181,13 @@ export async function sendUnmappedEntriesAlertEmail(items: UnmappedEntryItem[]) 
     subject: `[Control Hub] ${items.length} grupo(s) de lancamentos invisiveis no Dashboard`,
     html: body,
   });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

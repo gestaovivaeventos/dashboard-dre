@@ -175,51 +175,79 @@ export async function getCompanyRecipients(
   return { companyId, companyName, emails: Array.from(emails) };
 }
 
-/** Todas as empresas com pelo menos um destinatario ativo cadastrado. */
-export async function listCompaniesWithRecipients(
+/**
+ * Empresas que entram na LEVA MENSAL de geração: TODAS as ativas com sync
+ * ligado — ter ou não destinatário cadastrado em Plataforma > Relatório BI
+ * NÃO decide mais quem tem relatório gerado.
+ *
+ * Por quê: a fila de validação existe para o CSC CONFERIR o relatório; o
+ * destinatário só importa no ENVIO, que vem depois. Enquanto a lista de
+ * e-mails ficava no caminho da geração, a empresa sem e-mail simplesmente não
+ * aparecia na tela — o CSC não tinha o que validar e a ausência passava
+ * despercebida. Agora todas aparecem; a que estiver sem destinatário exibe
+ * "Nenhum destinatário cadastrado" e mantém o botão Enviar travado até que os
+ * e-mails sejam cadastrados (os gestores cadastram ao longo do mês).
+ *
+ * `emails` vem junto apenas como informação. O envio NUNCA usa esta lista:
+ * `sendValidationReport` resolve os destinatários de novo, por company_id, em
+ * `getCompanyRecipients` — o isolamento por empresa continua intacto.
+ */
+export async function listCompaniesForMonthlyCycle(
   admin: SupabaseClient,
 ): Promise<CompanyRecipients[]> {
-  const { data, error } = await admin
-    .from("bi_report_subscriptions")
-    .select(
-      "company_id, users!bi_report_subscriptions_user_id_fkey(email,active), companies!bi_report_subscriptions_company_id_fkey(id,name,active,sync_enabled)",
-    )
-    .eq("active", true);
+  const { data: companiesData, error } = await admin
+    .from("companies")
+    .select("id,name,active,sync_enabled")
+    .eq("active", true)
+    .order("name");
 
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as unknown as Array<{
-    company_id: string;
-    users: { email: string; active: boolean } | null;
-    companies: {
-      id: string;
-      name: string;
-      active: boolean;
-      sync_enabled: boolean | null;
-    } | null;
+  const companies = (companiesData ?? []) as Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    sync_enabled: boolean | null;
   }>;
 
-  const byCompany = new Map<string, { companyName: string; emails: Set<string> }>();
-  for (const row of rows) {
-    if (!row.users?.active || !row.companies?.active) continue;
-    // Empresa fora do pacote (sync desligado) não entra no ciclo mensal: sem
-    // sync, o mês seguinte ao desligamento não tem dado real, então gerar o
-    // relatório só produz uma linha vazia para o CSC bloquear todo mês. É o
-    // caso da Viva Cuiabá (contrato encerrado em 31/05/2026). `active` NÃO
-    // serve para isso — ele controla visibilidade, não o ciclo de dados.
-    // null é tratado como ligado (empresas anteriores à coluna).
-    if (row.companies.sync_enabled === false) continue;
-    const entry =
-      byCompany.get(row.company_id) ??
-      { companyName: row.companies.name, emails: new Set<string>() };
-    entry.emails.add(row.users.email);
-    byCompany.set(row.company_id, entry);
+  // Empresa fora do pacote (sync desligado) não entra no ciclo mensal: sem
+  // sync, o mês seguinte ao desligamento não tem dado real, então gerar o
+  // relatório só produz uma linha vazia para o CSC bloquear todo mês. É o caso
+  // da Viva Cuiabá (contrato encerrado em 31/05/2026). `active` NÃO serve para
+  // isso — ele controla visibilidade, não o ciclo de dados. null é tratado
+  // como ligado (empresas anteriores à coluna).
+  const eligible = companies.filter((c) => c.sync_enabled !== false);
+  if (eligible.length === 0) return [];
+
+  const eligibleIds = new Set(eligible.map((c) => c.id));
+
+  const { data: subsData, error: subsError } = await admin
+    .from("bi_report_subscriptions")
+    .select("company_id, users!bi_report_subscriptions_user_id_fkey(email,active)")
+    .eq("active", true);
+
+  // Falha ao ler as assinaturas não pode derrubar a geração: sem elas a leva
+  // roda igual, só sem a lista informativa de e-mails.
+  if (subsError) {
+    console.error("[bi-validation] Falha ao carregar destinatários:", subsError.message);
   }
 
-  return Array.from(byCompany.entries()).map(([companyId, v]) => ({
-    companyId,
-    companyName: v.companyName,
-    emails: Array.from(v.emails),
+  const emailsByCompany = new Map<string, Set<string>>();
+  for (const row of (subsData ?? []) as unknown as Array<{
+    company_id: string;
+    users: { email: string; active: boolean } | null;
+  }>) {
+    if (!row.users?.active) continue;
+    if (!eligibleIds.has(row.company_id)) continue;
+    const entry = emailsByCompany.get(row.company_id) ?? new Set<string>();
+    entry.add(row.users.email);
+    emailsByCompany.set(row.company_id, entry);
+  }
+
+  return eligible.map((c) => ({
+    companyId: c.id,
+    companyName: c.name,
+    emails: Array.from(emailsByCompany.get(c.id) ?? []),
   }));
 }
 
@@ -373,7 +401,10 @@ export interface MonthlyRunResult {
 }
 
 /**
- * Gera a leva do mes para TODAS as empresas com destinatarios cadastrados.
+ * Gera a leva do mês para TODAS as empresas ativas com sync ligado — com ou
+ * sem destinatário cadastrado (ver `listCompaniesForMonthlyCycle`). Quem ainda
+ * não tem e-mail cadastrado entra na fila do CSC do mesmo jeito; só o envio
+ * fica travado até o cadastro.
  *
  * Retomavel: por padrao PULA as empresas que ja tem relatorio gerado com
  * sucesso naquele periodo. Isso importa porque cada geracao chama a IA + varias
@@ -395,7 +426,7 @@ export async function runMonthlyGeneration(
   },
 ): Promise<MonthlyRunResult[]> {
   const { range, actor, force } = params;
-  const companies = await listCompaniesWithRecipients(admin);
+  const companies = await listCompaniesForMonthlyCycle(admin);
 
   // Empresas que ja tem relatorio pronto (ou ja enviado) neste periodo.
   const { data: existingRows } = await admin

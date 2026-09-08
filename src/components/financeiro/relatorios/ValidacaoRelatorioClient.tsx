@@ -608,8 +608,15 @@ export function ValidacaoRelatorioClient({
                       </TableCell>
                       <TableCell>
                         {item.recipients.length === 0 ? (
-                          <span className="text-xs text-rose-700">
+                          /* Relatório é gerado para TODA empresa ativa — o
+                             destinatário só é exigido no envio. Por isso aqui
+                             é aviso (âmbar), não erro: falta cadastro, nada
+                             falhou. */
+                          <span className="text-xs text-amber-700">
                             Nenhum destinatário cadastrado
+                            <span className="block text-[11px] text-muted-foreground">
+                              Cadastre em Plataforma &gt; Relatório BI para liberar o envio.
+                            </span>
                           </span>
                         ) : (
                           <div className="max-w-[240px] text-xs text-muted-foreground">

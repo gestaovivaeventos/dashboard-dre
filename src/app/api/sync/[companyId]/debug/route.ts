@@ -13,7 +13,7 @@ interface Params {
 // REMOVER APOS DIAGNOSTICO.
 export async function GET(_: Request, { params }: Params) {
   const { user, profile } = await getCurrentSessionContext();
-  if (!user || !profile || (profile.role !== "admin" && profile.role !== "gestor_hero")) {
+  if (!user || !profile || profile.role !== "admin") {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
