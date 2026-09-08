@@ -1161,6 +1161,17 @@ ou maior), ele TEM de ganhar um item PROPRIO em "pontosAtencao" ou
 espremido dentro do alerta de outra linha — que e exatamente o erro proibido
 acima.
 
+NAO TRANSFIRA A NATUREZA DE UM EVENTO DE UMA UNIDADE PARA OUTRA. Chame cada
+fato exatamente pelo nome que o contexto deu, e ligado a unidade que o
+contexto nomeou. Se o contexto diz "acerto da Viva X" numa frase e "venda da
+Viva Y" em outra, escreva "acerto da Viva X" — NUNCA "acerto da venda da
+Viva X". So chame de venda, compra, encerramento, fusao ou transferencia o
+que o contexto chamou assim, para a unidade que ele citou: dizer que uma
+unidade foi vendida quando o contexto nao disse isso e um FATO INVENTADO sobre
+o grupo, mesmo que a palavra apareca na frase vizinha, falando de outra
+unidade. Na duvida sobre a natureza do evento, use o termo neutro do proprio
+contexto ("acerto", "pagamento", "repasse") e nao qualifique.
+
 CHECAGEM FINAL OBRIGATORIA, antes de fechar a resposta: releia CADA item de
 "pontosAtencao", "destaques" e "leituraPorIndicador". Se a descricao citar mais
 de um fato do contexto, confirme que TODOS pertencem ao indicador do titulo.
