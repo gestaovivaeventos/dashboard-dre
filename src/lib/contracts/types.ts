@@ -80,6 +80,11 @@ export interface ContractExtraction {
   assinatura_contratante: 'Sim' | 'Não' | string
   assinatura_contratado: 'Sim' | 'Não' | string
   assinatura_digital_detectada: 'Sim' | 'Não' | string
+  // Preenchidos pela extração (não pela IA) quando o PDF passou do limite de
+  // páginas do LandingAI e só o começo foi lido. Ficam no raw_extraction para
+  // a validação avisar que o documento foi lido parcialmente.
+  paginas_total?: number
+  paginas_lidas?: number
 }
 
 // Input for validation: the requisition row (from XLSX upload) plus the
@@ -131,6 +136,9 @@ export interface ExtractedContract {
   data_contrato?: string | null
   // Datas de vencimento das parcelas (DD/MM/AAAA). Usadas na regra de vencimento.
   datas_vencimento?: string[]
+  // Só quando o documento foi cortado antes da leitura (ver landingai.ts).
+  paginas_total?: number
+  paginas_lidas?: number
 }
 
 export type ValidationStatus =

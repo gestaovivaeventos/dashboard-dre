@@ -528,6 +528,11 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // estar marcada com tipo de pagamento "reembolso"; sem a marcação, vai para
   // análise do especialista confirmar que é reembolso mesmo.
   const soReembolso = docs.every((d) => d.tipo_documento === TIPO_REEMBOLSO)
+  // Comprovante junto de outros anexos (boleto, apólice, recibo…): alguém já
+  // pagou o fornecedor e a RP devolve a essa pessoa — o favorecido da RP não
+  // vai bater com o documento (RP 880704: seguro Chubb pago pelo cerimonialista).
+  // Mesma regra do reembolso puro, aplicada só quando o favorecido diverge.
+  const temComprovante = docs.some((d) => d.tipo_documento === TIPO_REEMBOLSO)
   const rpMarcadaReembolso = isTipoPagamentoReembolso(req.tipo_pagamento)
 
   // ── Valor (ambas as faixas) ──────────────────────────────────────────────
@@ -537,17 +542,26 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // acontece quando o fundo não tem saldo para a parcela cheia; reprovar
   // esconderia um pagamento legítimo. Soma menor que a RP → reprova.
   //
-  // Boleto NÃO entra na soma quando há outro documento (contrato/orçamento/NF/
-  // recibo): ele é a cobrança do que esse documento já diz, não valor extra —
-  // somar dobrava o total e o pagamento cheio virava "parcial" (RP 872343:
-  // orçamento 263,17 + boleto 263,17 → "parcela de 526,34"). O boleto é
-  // conferido contra a RP e contra o documento-base logo abaixo. RP só com
-  // boleto(s) segue usando o boleto como base.
+  // Boleto e comprovante de pagamento NÃO entram na soma quando há outro
+  // documento (contrato/orçamento/NF/recibo): são a cobrança e a quitação do
+  // que esse documento já diz, não valor extra — somar dobrava o total e o
+  // pagamento cheio virava "parcial" (RP 872343: orçamento 263,17 + boleto
+  // 263,17 → "parcela de 526,34"; RP 870813: recibo 700 + comprovante 700 →
+  // "abaixo do contrato de 1.400"). Os dois são conferidos contra a RP e
+  // contra o documento-base logo abaixo. A exclusão é em camadas: primeiro
+  // saem os comprovantes, depois os boletos — assim boleto + comprovante usa
+  // o boleto como base, e RP só com comprovante(s) ou só com boleto(s) segue
+  // usando o que tem.
   let partialPayment: null | { somaContratos: number; parcelaIdentificada: number } = null
   let pagamentoAbaixo: null | { somaContratos: number; parcelaReferencia: number | null } = null
-  const boletos = docs.filter((d) => d.tipo_documento === TIPO_BOLETO)
-  const naoBoletos = docs.filter((d) => d.tipo_documento !== TIPO_BOLETO)
-  const docsBase = naoBoletos.length > 0 ? naoBoletos : docs
+  const docsBase = (() => {
+    const semComprovantes = docs.filter((d) => d.tipo_documento !== TIPO_REEMBOLSO)
+    const base1 = semComprovantes.length > 0 ? semComprovantes : docs
+    const semBoletos = base1.filter((d) => d.tipo_documento !== TIPO_BOLETO)
+    return semBoletos.length > 0 ? semBoletos : base1
+  })()
+  // Boletos/comprovantes que ficaram fora da base: conferidos, não somados.
+  const docsCobranca = docs.filter((d) => !docsBase.includes(d))
   {
     const soma = docsBase.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
     const diff = soma - reqValor
@@ -578,25 +592,26 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     }
   }
 
-  // ── Conferência do boleto contra o documento-base ────────────────────────
-  // Só quando há boleto E outro documento. O boleto tem que casar com o que
-  // está sendo pago (RP) ou com algo do documento-base (total ou parcela);
-  // boleto que não bate com nada é divergência explícita → reprova.
-  if (boletos.length > 0 && naoBoletos.length > 0) {
-    const totalBase = naoBoletos.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
+  // ── Conferência de boleto/comprovante contra o documento-base ────────────
+  // Só para os que ficaram fora da soma. Cada um tem que casar com o que está
+  // sendo pago (RP) ou com algo do documento-base (total ou parcela); valor
+  // que não bate com nada é divergência explícita → reprova.
+  if (docsCobranca.length > 0) {
+    const totalBase = docsBase.reduce((acc, d) => acc + (Number(d.valor_contrato) || 0), 0)
     const valoresBase = [
       totalBase,
-      ...naoBoletos.map((d) => Number(d.valor_contrato) || 0),
-      ...naoBoletos.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0)),
+      ...docsBase.map((d) => Number(d.valor_contrato) || 0),
+      ...docsBase.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0)),
     ].filter((v) => v > 0)
-    for (const b of boletos) {
-      const vb = Number(b.valor_contrato) || 0
-      if (vb <= 0) continue
-      const bateRp = Math.abs(vb - reqValor) <= VALUE_TOLERANCE
-      const bateBase = valoresBase.some((v) => Math.abs(v - vb) <= VALUE_TOLERANCE)
+    for (const c of docsCobranca) {
+      const vc = Number(c.valor_contrato) || 0
+      if (vc <= 0) continue
+      const bateRp = Math.abs(vc - reqValor) <= VALUE_TOLERANCE
+      const bateBase = valoresBase.some((v) => Math.abs(v - vc) <= VALUE_TOLERANCE)
       if (!bateRp && !bateBase) {
+        const rotulo = c.tipo_documento === TIPO_BOLETO ? 'Boleto' : 'Comprovante de pagamento'
         motivos.push(
-          `Boleto de R$ ${vb.toFixed(2)} não confere com a requisição (R$ ${reqValor.toFixed(2)}) nem com o documento-base (total R$ ${totalBase.toFixed(2)})`,
+          `${rotulo} de R$ ${vc.toFixed(2)} não confere com a requisição (R$ ${reqValor.toFixed(2)}) nem com o documento-base (total R$ ${totalBase.toFixed(2)})`,
         )
       }
     }
@@ -639,9 +654,19 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
       if (!reqTemIdentificacao) {
         revisar.push('Favorecido da requisição em branco (sem nome e sem CPF/CNPJ)')
       } else if (!matchNome && !matchCnpj) {
-        motivos.push(
-          `Favorecido da requisição não confere com nenhum documento (Req: '${req.favorecido ?? req.fornecedor ?? ''}' / '${req.cpf_cnpj ?? ''}')`,
-        )
+        if (temComprovante && rpMarcadaReembolso) {
+          alertas.push(
+            `Reembolso: favorecido da RP (Req: '${req.favorecido ?? req.fornecedor ?? ''}') não consta nos documentos — permitido para reembolso com comprovante de pagamento anexo; validação feita pelo valor`,
+          )
+        } else if (temComprovante) {
+          revisar.push(
+            `Favorecido da RP (Req: '${req.favorecido ?? req.fornecedor ?? ''}') não consta nos documentos, mas há comprovante de pagamento anexo — confirme se a RP é um reembolso (tipo de pagamento não está marcado como reembolso)`,
+          )
+        } else {
+          motivos.push(
+            `Favorecido da requisição não confere com nenhum documento (Req: '${req.favorecido ?? req.fornecedor ?? ''}' / '${req.cpf_cnpj ?? ''}')`,
+          )
+        }
       }
     }
   } else {
@@ -750,6 +775,15 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   }
 
   const comAlertas = alertas.length ? { alertas } : {}
+
+  // ── Ressalva: documento lido parcialmente (cortado no limite de páginas) ──
+  for (const d of docs) {
+    if (d.paginas_total && d.paginas_lidas && d.paginas_lidas < d.paginas_total) {
+      ressalvas.push(
+        `Anexo "${d.tipo_documento}" tem ${d.paginas_total} páginas e só as ${d.paginas_lidas} primeiras foram lidas — confira o restante manualmente se precisar`,
+      )
+    }
+  }
 
   // ── Ressalva: vencimento do documento posterior à data prevista da RP ─────
   const prevista = parseDataBR(req.data_pagamento_prevista)

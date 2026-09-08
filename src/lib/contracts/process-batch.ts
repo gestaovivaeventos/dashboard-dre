@@ -415,7 +415,13 @@ export async function processBatch(
       assinatura_contratado: i.assinatura_contratado,
       data_contrato: i.data_contrato,
       datas_vencimento: i.extracted_vencimentos ?? [],
-      extraction_failed: i.status === 'erro',
+      paginas_total: i.raw_extraction?.paginas_total,
+      paginas_lidas: i.raw_extraction?.paginas_lidas,
+      // O veredito 'erro' é espelhado em todos os itens da RP (abaixo), então
+      // status sozinho não diz qual documento falhou: numa reavaliação os três
+      // itens de uma RP apareciam como "3 documentos com falha" quando só um
+      // tinha falhado (RP 880704). Falha de extração = erro SEM tipo extraído.
+      extraction_failed: i.status === 'erro' && !i.tipo_documento,
     }))
 
     const validation = analisarRequisicao({

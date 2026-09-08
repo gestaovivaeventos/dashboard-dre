@@ -18,6 +18,10 @@ export interface ContractExtractionResult {
 export async function extractContract(documentUrl: string): Promise<ContractExtractionResult> {
   const ocr = await parseDocumentWithLandingAI(documentUrl)
   const raw = await extractContractDataWithLlm(ocr.markdown)
+  if (ocr.pagesRead !== undefined && ocr.pagesRead < ocr.pageCount) {
+    raw.paginas_total = ocr.pageCount
+    raw.paginas_lidas = ocr.pagesRead
+  }
 
   return {
     raw,
@@ -123,5 +127,7 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     assinatura_contratado: (raw.assinatura_contratado ?? '').toString().trim() || null,
     data_contrato: (raw.data_contrato ?? '').toString().trim() || null,
     datas_vencimento: datasVencimento,
+    paginas_total: raw.paginas_total,
+    paginas_lidas: raw.paginas_lidas,
   }
 }
