@@ -4,6 +4,7 @@ import { sendEmail } from "@/lib/email/gmail";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
 import { BI_AUTOSEND_DAY } from "@/lib/financeiro/relatorios/schedule";
 import {
+  getCompanyRecipients,
   NOT_SENT_STATUSES,
   sendValidationReport,
   SYSTEM_ACTOR,
@@ -32,7 +33,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //     incorreto, ele NAO sai e vira alerta critico para Admin/CSC (comportamento
 //     seguro exigido pela regra 11.10);
 //   - relatorio sem conteudo gerado (erro na geracao) tambem nao e enviado —
-//     entra no mesmo alerta.
+//     entra no mesmo alerta;
+//   - empresa SEM DESTINATARIO cadastrado nao e falha de envio, e falta de
+//     cadastro: a leva mensal gera o relatorio de TODA empresa ativa (o e-mail
+//     so e exigido aqui), entao a linha e apenas PULADA — sem marcar
+//     'erro_envio' — e listada a parte no alerta ao admin. Marcar erro deixaria
+//     a tela cheia de "Erro no envio" que nao descreve falha nenhuma.
 // ============================================================================
 
 export const runtime = "nodejs";
@@ -81,10 +87,21 @@ export async function GET(request: Request) {
   // Casos que exigem olho humano: envio bloqueado pelo CSC ('em_revisao') ou
   // relatório sem conteúdo gerado.
   const blocked: Array<{ companyId: string; status: ValidationStatus }> = [];
+  // Gerado e pronto, mas ainda sem e-mail cadastrado em Plataforma > Relatório BI.
+  const semDestinatario: string[] = [];
 
   for (const row of rows) {
     if (row.status === "em_revisao" || !row.report_json) {
       blocked.push({ companyId: row.company_id, status: row.status });
+      continue;
+    }
+
+    // Sem destinatário não há o que enviar — e não é erro do sistema. Pula sem
+    // tocar no status da linha: ela continua pendente na tela, com a coluna
+    // Destinatários apontando o que falta.
+    const recipients = await getCompanyRecipients(admin, row.company_id).catch(() => null);
+    if (!recipients || recipients.emails.length === 0) {
+      semDestinatario.push(row.company_id);
       continue;
     }
 
@@ -107,9 +124,16 @@ export async function GET(request: Request) {
 
   // Alerta ao admin quando algo ficou de fora ou falhou. Usa o canal interno de
   // alertas (não é relatório para gestor — este segue exclusivamente no Resend).
-  if ((blocked.length > 0 || failed.length > 0) && process.env.ADMIN_EMAIL) {
+  if (
+    (blocked.length > 0 || failed.length > 0 || semDestinatario.length > 0) &&
+    process.env.ADMIN_EMAIL
+  ) {
     const companyIds = Array.from(
-      new Set([...blocked.map((b) => b.companyId), ...failed.map((f) => f.companyId)]),
+      new Set([
+        ...blocked.map((b) => b.companyId),
+        ...failed.map((f) => f.companyId),
+        ...semDestinatario,
+      ]),
     );
     const { data: companiesData } = await admin
       .from("companies")
@@ -133,6 +157,9 @@ export async function GET(request: Request) {
           `<li><strong>${nameById.get(f.companyId) ?? f.companyId}</strong>: ${f.error}</li>`,
       )
       .join("");
+    const semDestinatarioList = semDestinatario
+      .map((id) => `<li><strong>${nameById.get(id) ?? id}</strong></li>`)
+      .join("");
 
     await sendEmail({
       to: process.env.ADMIN_EMAIL,
@@ -143,7 +170,13 @@ export async function GET(request: Request) {
         (blockedList
           ? `<h3>Pendência crítica (não enviados)</h3><ul>${blockedList}</ul>`
           : "") +
-        (failedList ? `<h3>Falhas de envio</h3><ul>${failedList}</ul>` : ""),
+        (failedList ? `<h3>Falhas de envio</h3><ul>${failedList}</ul>` : "") +
+        (semDestinatarioList
+          ? `<h3>Sem destinatário cadastrado (relatório gerado, não enviado)</h3>` +
+            `<ul>${semDestinatarioList}</ul>` +
+            `<p>Cadastre os e-mails em Plataforma &gt; Relatório BI e envie pela tela ` +
+            `Financeiro &gt; Validação Relatório.</p>`
+          : ""),
     });
   }
 
@@ -153,7 +186,8 @@ export async function GET(request: Request) {
     candidates: rows.length,
     sent: sent.length,
     blocked: blocked.length,
+    semDestinatario: semDestinatario.length,
     failed: failed.length,
-    details: { sent, blocked, failed },
+    details: { sent, blocked, semDestinatario, failed },
   });
 }
