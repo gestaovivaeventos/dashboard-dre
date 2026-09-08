@@ -46,3 +46,6 @@ home-unificado*.png
 
 # Supabase CLI temp files
 supabase/.temp/
+
+# Snapshots de dados antes de migrations estruturais (contêm dados das empresas).
+/backups/

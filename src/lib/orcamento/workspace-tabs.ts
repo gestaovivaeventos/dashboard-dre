@@ -27,7 +27,7 @@ export const WORKSPACE_TABS: readonly WorkspaceTab[] = [
   { slug: "media", label: "Média com correção", group: "montagem" },
   // slug = chave do método (metodos.ts): o hub linka via workspaceTabHref(m.key).
   { slug: "valor_fixo", label: "Valor fixo com correção", group: "montagem" },
-  { slug: "planejamento_socios", label: "Planejamento dos sócios", group: "montagem" },
+  { slug: "planejamento_socios", label: "Planejamento dos gestores", group: "montagem" },
 ] as const;
 
 /** Primeira aba — destino padrão ao abrir o orçamento de uma empresa. */

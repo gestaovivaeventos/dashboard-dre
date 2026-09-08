@@ -49,7 +49,7 @@ export interface StatusSelo {
 //    de pessoal com gente e todas as categorias por média com valor).
 //
 // "Concluído" é heurístico: já cobre método definido, pessoal, todas as médias com
-// valor E todas as categorias por planejamento dos sócios com a PROPOSTA CONFIRMADA.
+// valor E todas as categorias por planejamento dos gestores com a PROPOSTA CONFIRMADA.
 // (Valor fixo ainda não entra na conta — estender quando fizer sentido.)
 
 export function statusGeral(raw: OrcamentoStatusRaw): StatusSelo {

@@ -8,8 +8,10 @@ import {
   cloneSetores,
   createSetor,
   getSetores,
+  setSetorCtrlVinculo,
   renameSetor,
   setSetorActive,
+  type CtrlSetorOption,
   type OrcamentoSetor,
 } from "@/lib/orcamento/actions/setores";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
@@ -34,6 +36,8 @@ export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) 
   const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
   const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [items, setItems] = useState<OrcamentoSetor[]>([]);
+  const [ctrlSetores, setCtrlSetores] = useState<CtrlSetorOption[]>([]);
+  const [vinculando, setVinculando] = useState<string | null>(null);
   const [orcarPorSetor, setOrcarPorSetor] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,6 +64,7 @@ export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) 
       return;
     }
     setItems(res.items ?? []);
+    setCtrlSetores(res.ctrlSetores ?? []);
     setOrcarPorSetor(Boolean(res.orcarPorSetor));
   }
 
@@ -125,6 +130,25 @@ export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) 
       setEditingId(null);
       setEditName("");
     });
+  }
+
+  /** Liga o setor do orçamento ao setor do Compras (o dono do setor). */
+  async function handleVinculo(setor: OrcamentoSetor, ctrlSectorId: string) {
+    const anterior = setor.ctrlSectorId;
+    const novo = ctrlSectorId || null;
+    if (novo === anterior) return;
+    setVinculando(setor.id);
+    setItems((prev) =>
+      prev.map((s) => (s.id === setor.id ? { ...s, ctrlSectorId: novo } : s)),
+    );
+    const res = await setSetorCtrlVinculo(setor.id, novo);
+    setVinculando(null);
+    if (res?.error) {
+      setItems((prev) =>
+        prev.map((s) => (s.id === setor.id ? { ...s, ctrlSectorId: anterior } : s)),
+      );
+      setFeedback({ ok: false, msg: res.error });
+    }
   }
 
   function handleToggleActive(setor: OrcamentoSetor) {
@@ -289,6 +313,25 @@ export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) 
                       >
                         {setor.active ? "Ativo" : "Inativo"}
                       </span>
+                      {ctrlSetores.length > 0 && (
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className="whitespace-nowrap">Setor no Compras:</span>
+                          <select
+                            value={setor.ctrlSectorId ?? ""}
+                            onChange={(e) => void handleVinculo(setor, e.target.value)}
+                            disabled={vinculando === setor.id}
+                            title="Define QUEM é o dono deste setor. O acesso por gerente/sócio virá deste vínculo."
+                            className="rounded-md border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                          >
+                            <option value="">— sem vínculo —</option>
+                            {ctrlSetores.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </div>
                   )}
 

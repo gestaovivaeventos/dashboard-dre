@@ -8,6 +8,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import {
   fetchRealizados,
@@ -26,6 +27,11 @@ import {
   type PlanejamentoMensagem,
   type PlanejamentoProposta,
   type PlanejamentoRealizadoItem,
+  apenasCanonicas,
+  codigosIrmaos,
+  normNomeCategoria,
+  periodicidadeLabel,
+  toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
 
 const PATH = "/orcamento";
@@ -138,10 +144,6 @@ function sanitizeConversa(raw: unknown): PlanejamentoMensagem[] {
     }
   });
   return out;
-}
-
-function toPeriodicidade(v: unknown): Periodicidade {
-  return v === "anual" ? "anual" : "mensal";
 }
 
 function rowToItem(r: ItemRow): PlanejamentoItem {
@@ -258,10 +260,32 @@ function parseAiReply(text: string): {
   return { reply: reply || "…", proposta, podeFechar };
 }
 
-function realizadoMensalContexto(r: MediaRealizado | undefined): string {
-  if (!r) return "sem dados do ano anterior.";
+/**
+ * Retrato do realizado do ano-base para a IA — honesto sobre o que ele É.
+ *
+ * O ano-base costuma AINDA ESTAR CORRENDO quando o orçamento é montado (o de
+ * 2027 é feito no meio de 2026). O `total` é o gasto REGISTRADO até agora, não
+ * o do ano inteiro; comparar um orçamento de 12 meses contra ele acusaria um
+ * aumento que não existe. Por isso o prompt recebe também quantos meses já
+ * fecharam e a PROJEÇÃO ANUALIZADA (média dos meses fechados × 12), que é a
+ * base de comparação justa.
+ */
+function realizadoMensalContexto(r: MediaRealizado | undefined, baseYear: number): string {
+  if (!r || (r.total === 0 && r.media == null)) return "sem dados do ano anterior.";
+  const fechados = mesesFechados(baseYear);
   const media = r.media == null ? "n/d" : formatBRL(r.media);
-  return `total ${formatBRL(r.total)} · média mensal ${media}`;
+  if (fechados >= 12) {
+    return `ano FECHADO · total ${formatBRL(r.total)} · média mensal ${media}`;
+  }
+  const projecao = r.media == null ? null : formatBRL(r.media * 12);
+  return [
+    `ano AINDA EM CURSO (${fechados} de 12 meses fechados)`,
+    `gasto registrado até agora: ${formatBRL(r.total)}`,
+    `média mensal dos meses fechados: ${media}`,
+    projecao ? `PROJEÇÃO ANUALIZADA (média × 12): ${projecao}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Lista que guia a IA: o que o admin já selecionou (contexto vivo) ou, na
@@ -284,7 +308,13 @@ function considerarContexto(
         }
         const fim = i.mesFim != null && i.mesFim >= 1 && i.mesFim <= 12 ? i.mesFim : null;
         const ate = fim != null && fim < 12 ? `, até ${MESES_NOME[fim - 1]} (cancela depois)` : "";
-        return `- ${i.descricao}: ${formatBRL(i.valorMensal)}/mês, a partir de ${mes}${ate}`;
+        // Bimestral/trimestral/semestral: diz o intervalo, para a IA não tratar
+        // o valor como mensal ao conversar com o gestor.
+        const cada =
+          i.periodicidade === "mensal"
+            ? "/mês"
+            : `/${periodicidadeLabel(i.periodicidade).replace(/al$/, "e")}`;
+        return `- ${i.descricao}: ${formatBRL(i.valorMensal)}${cada}, a partir de ${mes}${ate}`;
       })
       .join("\n");
   }
@@ -429,6 +459,30 @@ function buildSystemPrompt(opts: {
     "TEM de refletir exatamente isso. NUNCA descarte, esqueça ou 'volte ao padrão' uma",
     "mudança que o gestor declarou — reler TODA a conversa antes de propor é obrigatório.",
     "",
+    "LEITURA DO CONJUNTO (faça ANTES da primeira pergunta, junto da abertura):",
+    "Olhe a lista acima como um TODO — não item por item — e aponte no MÁXIMO 3",
+    "observações, as mais relevantes. Coisas que valem ser apontadas:",
+    "  • DUPLICATA PROVÁVEL: dois itens com nome quase igual, ou com nomes diferentes",
+    "    que aparentam ser o mesmo serviço/fornecedor. Muitos itens vêm de nomes de",
+    "    fornecedor da contabilidade, então grafias diferentes do mesmo gasto são comuns.",
+    "  • CONCENTRAÇÃO: um único item responde por boa parte do total da categoria —",
+    "    diga qual e quanto representa, e proponha começar por ele.",
+    "  • ITEM IRRISÓRIO: valor tão pequeno diante do total que não muda o orçamento;",
+    "    vale perguntar se ainda faz sentido mantê-lo na lista.",
+    "  • COMPARAÇÃO COM O ANO ANTERIOR: some os itens da lista e compare com o realizado",
+    "    informado acima (usando a PROJEÇÃO ANUALIZADA se o ano-base ainda corre). Se a",
+    "    diferença for relevante em qualquer direção, diga o número e PERGUNTE o que a",
+    "    explica. Não trate a diferença como erro — pode haver motivo.",
+    "",
+    "COMO apontar (regra que não pode ser quebrada):",
+    "  - Sempre como HIPÓTESE a confirmar, nunca como veredito: \"X e Y parecem o mesmo",
+    "    item — são?\" e nunca \"removi a duplicata\". Dois itens parecidos podem ser",
+    "    coisas distintas de verdade, e quem decide é o gestor.",
+    "  - NUNCA altere, remova ou some valores por conta dessas observações. Elas geram",
+    "    PERGUNTA, não mudança. Só a resposta do gestor muda a proposta.",
+    "  - No MÁXIMO 3 observações, curtas. Se não houver nada relevante a apontar, não",
+    "    invente observação: siga direto para a condução.",
+    "",
     "Como conduzir a ENTREVISTA (uma pergunta por vez, em português do Brasil):",
     "1. Para CADA item da lista acima, a ÚNICA dúvida é se ele será MANTIDO em",
     `   ${year}. INFORME ao gestor o valor e o mês pré-cadastrados (em tom de`,
@@ -514,16 +568,29 @@ function buildSystemPrompt(opts: {
     "ele disse não manter. Confira item por item contra a conversa: nenhuma alteração pode",
     "faltar. Cada item:",
     "  - descricao: nome da plataforma/serviço;",
-    "  - valorMensal: o VALOR em reais — mensal quando periodicidade='mensal', ou o valor",
-    "    ANUAL quando periodicidade='anual';",
-    "  - mesInicio: mês (1..12) — início da recorrência (mensal) OU mês da renovação (anual);",
-    "  - mesFim: mês (1..12) do ÚLTIMO pagamento quando o item é MENSAL e será cancelado",
-    "    no meio do ano; use null (ou omita) quando vai até dezembro; ignorado se anual;",
-    "  - periodicidade: 'mensal' ou 'anual';",
+    "  - valorMensal: o VALOR em reais de CADA pagamento — mensal na periodicidade",
+    "    'mensal', do bimestre na 'bimestral', do trimestre na 'trimestral', do",
+    "    semestre na 'semestral' e o valor anual na 'anual';",
+    "  - mesInicio: mês (1..12) do PRIMEIRO pagamento (na 'anual', o mês da renovação);",
+    "  - mesFim: mês (1..12) do ÚLTIMO pagamento, quando o item será cancelado no meio",
+    "    do ano; use null (ou omita) quando vai até dezembro; ignorado se 'anual';",
+    "  - periodicidade: 'mensal', 'bimestral', 'trimestral', 'semestral' ou 'anual' — o",
+    "    INTERVALO entre pagamentos (a cada 1, 2, 3, 6 ou 12 meses);",
     "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
-    "E uma justificativa curta (2 a 4 frases) com as premissas. Se ainda faltar um dado",
-    "OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar' false e o 'reply'",
-    "pedindo só o que falta.",
+    "A 'justificativa' NÃO é um resumo da lista (a lista já aparece na tela). É a LEITURA",
+    "CRÍTICA do orçamento fechado, em 3 a 5 frases, nesta ordem:",
+    "  (a) o TOTAL do ano proposto;",
+    "  (b) a VARIAÇÃO contra o ano anterior — em R$ e em %, comparando com a projeção",
+    "      anualizada quando o ano-base ainda estava em curso, e dizendo que é projeção;",
+    "  (c) os itens que mais PESAM no total (um ou dois) e quanto representam;",
+    "  (d) o que PERMANECE questionável — o ponto que você levantaria numa revisão.",
+    "Sobre (d): NÃO reabra o que o gestor já respondeu na conversa. Se ele explicou uma",
+    "duplicata, um aumento ou a permanência de um item, isso está DECIDIDO — no máximo",
+    "registre a explicação dele. Aponte só o que ficou sem resposta ou o que a própria",
+    "conversa deixou em aberto. Se não sobrou nada questionável, diga isso em uma frase,",
+    "sem inventar ressalva.",
+    "Se ainda faltar um dado OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null,",
+    "'podeFechar' false e o 'reply' pedindo só o que falta.",
     "",
     "CATEGORIA ZERADA: se NÃO houver nenhum item (nada mantido e nada novo — ex.: nenhum",
     "sócio manteve o bônus), a proposta MESMO ASSIM deve ser montada com a LISTA VAZIA:",
@@ -540,7 +607,7 @@ function buildSystemPrompt(opts: {
 
   return [
     'Você ajuda o gestor financeiro do Grupo Viva a montar o ORÇAMENTO ANUAL de UMA',
-    'categoria de despesa pelo método "Planejamento dos sócios".',
+    'categoria de despesa pelo método "Planejamento dos gestores".',
     "",
     "IMPORTANTE: o orçado da categoria é a SOMA de VÁRIOS ITENS independentes (cada",
     "contratação/serviço é um item próprio).",
@@ -548,12 +615,15 @@ function buildSystemPrompt(opts: {
     `Empresa: ${opts.companyName}`,
     `Categoria: ${categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
     `Ano do orçamento: ${year}`,
-    `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado)}`,
+    `Realizado do ano anterior (${year - 1}) nesta categoria: ${realizadoMensalContexto(opts.realizado, year - 1)}`,
     "",
     `ABERTURA (regra fixa): a sua PRIMEIRA mensagem deve SEMPRE começar informando ao gestor o`,
-    `TOTAL gasto nesta categoria no ano anterior (${year - 1}) — o valor "total" acima (mesmo`,
-    `sem base cadastrada; se não houver dado, diga que não houve gasto registrado). Só DEPOIS`,
-    `siga a condução abaixo.`,
+    `gasto desta categoria em ${year - 1} — use os números da linha "Realizado" acima, do jeito`,
+    `que eles são. Se o ano-base AINDA ESTÁ EM CURSO, diga isso com todas as letras ("até agora,`,
+    `com N meses fechados") e use a PROJEÇÃO ANUALIZADA como base de comparação, explicando que`,
+    `é projeção. NUNCA apresente um gasto parcial como se fosse o total do ano, e NUNCA compare`,
+    `um orçamento de 12 meses contra um realizado parcial — isso inventaria uma variação que`,
+    `não existe. Sem dado, diga que não houve gasto registrado. Só DEPOIS siga a condução abaixo.`,
     "",
     "INTERPRETE A CATEGORIA ANTES DE PERGUNTAR (regra permanente, vale para QUALQUER",
     `categoria): entenda a ESSÊNCIA do que é "${categoryName}" — pela natureza da despesa`,
@@ -583,6 +653,64 @@ function buildSystemPrompt(opts: {
   ].join("\n");
 }
 
+/**
+ * Resolve o SETOR do orçamento até o departamento da Omie, para filtrar os
+ * fornecedores do ano anterior. A corrente é:
+ *   orcamento_setores.ctrl_sector_id -> ctrl_sector_omie_departamento
+ *     -> codigo_departamento (o mesmo de financial_entries.department_code)
+ *
+ * Devolve também se o setor é o "Não atribuído", que é onde caem os
+ * fornecedores sem departamento ou espalhados por vários.
+ */
+async function resolverDepartamentoDoSetor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  setorId: string | null,
+): Promise<{ departamento: string | null; ehNaoAtribuido: boolean; temVinculo: boolean }> {
+  if (!setorId) return { departamento: null, ehNaoAtribuido: false, temVinculo: false };
+
+  const { data: setor } = await supabase
+    .from("orcamento_setores")
+    .select("name, ctrl_sector_id")
+    .eq("id", setorId)
+    .maybeSingle();
+  if (!setor) return { departamento: null, ehNaoAtribuido: false, temVinculo: false };
+
+  const ehNaoAtribuido = normNomeCategoria(String(setor.name ?? "")) === "não atribuído";
+  const ctrlId = (setor.ctrl_sector_id as string | null) ?? null;
+  if (!ctrlId) return { departamento: null, ehNaoAtribuido, temVinculo: false };
+
+  const { data: dep } = await supabase
+    .from("ctrl_sector_omie_departamento")
+    .select("codigo_departamento")
+    .eq("sector_id", ctrlId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  const departamento = (dep?.codigo_departamento as string | null) ?? null;
+  return { departamento, ehNaoAtribuido, temVinculo: departamento != null };
+}
+
+/**
+ * Mantém só os fornecedores que pertencem ao setor.
+ *
+ * Setor com departamento vinculado leva os fornecedores DAQUELE departamento.
+ * O "Não atribuído" recolhe o resto: fornecedor sem departamento no
+ * lançamento e fornecedor com lançamentos em vários departamentos (a função
+ * do banco devolve `departamento: null` nos dois casos).
+ *
+ * Setor sem vínculo com o Compras não tem como filtrar — recebe a lista
+ * inteira, que é o comportamento anterior à Fase 1 e falha para o lado de
+ * mostrar demais, não de esconder.
+ */
+function filtrarPorSetor(
+  itens: PlanejamentoRealizadoItem[],
+  ctx: { departamento: string | null; ehNaoAtribuido: boolean; temVinculo: boolean },
+): PlanejamentoRealizadoItem[] {
+  if (ctx.ehNaoAtribuido) return itens.filter((i) => !i.departamento);
+  if (!ctx.temVinculo) return itens;
+  return itens.filter((i) => i.departamento === ctx.departamento);
+}
+
 async function fetchRealizadoItens(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
@@ -602,6 +730,7 @@ async function fetchRealizadoItens(
     total: number | string;
     total_fechado: number | string | null;
     lancamentos: number | string;
+    departamento: string | null;
   }>).map((r) => {
     const total = Number(r.total) || 0;
     const totalFechado = Number(r.total_fechado) || 0;
@@ -610,39 +739,11 @@ async function fetchRealizadoItens(
       total,
       media: fechados > 0 && totalFechado > 0 ? totalFechado / fechados : null,
       lancamentos: Number(r.lancamentos) || 0,
+      // null = lançamento sem departamento OU fornecedor espalhado por
+      // vários; nos dois casos vai para "Não atribuído".
+      departamento: r.departamento == null ? null : String(r.departamento),
     };
   });
-}
-
-// ─── Categorias IRMÃS (a divisão "(*)" é interna à contabilidade) ────────────────
-// Ex.: "Manutenção de Imobilizado" e "Manutenção de Imobilizado (*)" são duas
-// categorias Omie (dois códigos) com o MESMO nome a menos do sufixo " (*)". Para
-// o gestor, o realizado do ano anterior é o TOTAL das duas. Só o realizado que a
-// IA mostra agrega os irmãos — o mapeamento/DRE/Prévia continuam por código.
-
-/** Nome sem o sufixo " (*)" (e sem acento/caixa), para casar irmãos. */
-function normNomeCategoria(s: string): string {
-  return s
-    .replace(/\s*\(\*\)\s*$/i, "")
-    .trim()
-    .toLocaleLowerCase("pt-BR");
-}
-
-/** A categoria é a "gêmea (*)" (subdivisão contábil interna), não a canônica? */
-function ehCategoriaEstrela(name: string): boolean {
-  return /\(\*\)\s*$/.test((name ?? "").trim());
-}
-
-/** Códigos de todas as categorias irmãs (mesmo nome-base), incluindo a própria. */
-function codigosIrmaos(
-  items: { categoryCode: string; categoryName: string }[],
-  categoryCode: string,
-  categoryName: string,
-): string[] {
-  const alvo = normNomeCategoria(categoryName);
-  const set = new Set<string>([categoryCode]);
-  for (const it of items) if (normNomeCategoria(it.categoryName) === alvo) set.add(it.categoryCode);
-  return Array.from(set);
 }
 
 /**
@@ -701,6 +802,9 @@ async function fetchRealizadoItensIrmaos(
         cur.total += it.total;
         cur.lancamentos += it.lancamentos;
         if (it.media != null) cur.media = (cur.media ?? 0) + it.media;
+        // Departamentos divergentes entre as irmãs: o fornecedor deixa de
+        // pertencer a um setor com segurança.
+        if (cur.departamento !== it.departamento) cur.departamento = null;
       }
     }
   }
@@ -712,6 +816,8 @@ async function fetchRealizadoItensIrmaos(
 export async function getPlanejamentoSocios(
   companyId: string,
   year: number,
+  /** Setor da tela: cada categoria é planejada por setor. */
+  setorId: string | null = null,
 ): Promise<{ items?: PlanejamentoListItem[]; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -727,12 +833,22 @@ export async function getPlanejamentoSocios(
   // também foi marcada com o método E a canônica está presente, NÃO gera um card
   // duplicado para a "(*)" — evitaria dupla contagem no total/progresso. Se só a
   // "(*)" tiver o método (sem a canônica), o card dela é mantido.
-  const basesCanonicas = new Set(
-    doMetodoTodos.filter((c) => !ehCategoriaEstrela(c.categoryName)).map((c) => normNomeCategoria(c.categoryName)),
-  );
-  const doMetodo = doMetodoTodos.filter(
-    (c) => !(ehCategoriaEstrela(c.categoryName) && basesCanonicas.has(normNomeCategoria(c.categoryName))),
-  );
+  const canonicas = apenasCanonicas(doMetodoTodos);
+
+  // Só as categorias atribuídas a ESTE setor (tela Método por categoria).
+  let doMetodo = canonicas;
+  if (setorId) {
+    const { data: atrib, error: atribErr } = await (createAdminClientIfAvailable() ??
+      (await createClient()))
+      .from("orcamento_categoria_setores")
+      .select("category_code")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("setor_id", setorEspecifico(setorId));
+    if (atribErr && !isSchemaMissing(atribErr.message)) return { error: atribErr.message };
+    const permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
+    doMetodo = canonicas.filter((c) => permitidas.has(c.categoryCode));
+  }
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -740,7 +856,8 @@ export async function getPlanejamentoSocios(
     .from("orcamento_planejamento_socios")
     .select("category_code, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
-    .eq("year", year);
+    .eq("year", year)
+    .eq("setor_id", setorEspecifico(setorId));
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
@@ -798,6 +915,8 @@ export async function getPlanejamentoCategoria(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ detalhe?: PlanejamentoCategoriaDetalhe; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -820,6 +939,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId))
     .maybeSingle<CategoriaRow>();
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
@@ -832,6 +952,7 @@ export async function getPlanejamentoCategoria(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId))
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (itemErr) {
@@ -842,10 +963,14 @@ export async function getPlanejamentoCategoria(
   // Realizado do ano anterior somando a categoria + suas irmãs "(*)" (divisão
   // interna da contabilidade) — total e fornecedores completos.
   const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
-  const [realizados, realizadoItens] = await Promise.all([
+  const [realizados, realizadoItensTodos, ctxSetor] = await Promise.all([
     fetchRealizados(supabase, companyId, year - 1, irmaos),
     fetchRealizadoItensIrmaos(supabase, companyId, year - 1, irmaos),
+    resolverDepartamentoDoSetor(supabase, companyId, setorId),
   ]);
+  // A base semeada é só dos fornecedores DESTE setor: o gestor do Comercial
+  // não valida o que só o Produto usou.
+  const realizadoItens = filtrarPorSetor(realizadoItensTodos, ctxSetor);
   const r = combinarRealizados(realizados, irmaos, year - 1);
   const totalAno = totalGastoAno(realizados, irmaos); // ano inteiro, não só meses fechados
 
@@ -885,12 +1010,14 @@ async function montarSistemaEntrevista(params: {
   itensContexto: PlanejamentoContextoItem[];
   promptCtx?: PlanejamentoPromptContexto;
   streaming: boolean;
+  /** Setor da linha de planejamento. */
+  setorId: string | null;
 }): Promise<
   | { system: string; historico: PlanejamentoMensagem[]; semBase: boolean }
   | { needsMigration: true }
   | { error: string }
 > {
-  const { companyId, year, categoryCode, categoryName, promptCtx, streaming } = params;
+  const { companyId, year, categoryCode, categoryName, promptCtx, streaming, setorId } = params;
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const contexto = (params.itensContexto ?? []).filter((i) => i.descricao.trim() !== "");
@@ -903,6 +1030,7 @@ async function montarSistemaEntrevista(params: {
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId))
     .maybeSingle<{ contexto_admin: string | null }>();
   const companyQuery = supabase
     .from("companies")
@@ -970,6 +1098,8 @@ export async function enviarMensagemPlanejamento(
   itensContexto: PlanejamentoContextoItem[] = [],
   finalizar = false,
   promptCtx?: PlanejamentoPromptContexto,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{
   reply?: string;
   proposta?: PlanejamentoProposta | null;
@@ -988,6 +1118,7 @@ export async function enviarMensagemPlanejamento(
 
   // Este caminho é o de ENCERRAR (finalizar=true), que produz a proposta em JSON.
   const prep = await montarSistemaEntrevista({
+    setorId,
     companyId,
     year,
     categoryCode,
@@ -1071,6 +1202,7 @@ export async function enviarMensagemPlanejamento(
     company_id: companyId,
     year,
     category_code: categoryCode,
+    setor_id: setorEspecifico(setorId),
     category_name: categoryName,
     conversa: novaConversa,
     updated_by: admin.userId,
@@ -1083,7 +1215,7 @@ export async function enviarMensagemPlanejamento(
 
   // Grava a conversa e registra o uso da IA em PARALELO.
   const [upsertRes] = await Promise.all([
-    supabase.from("orcamento_planejamento_socios").upsert(payload, { onConflict: "company_id,year,category_code" }),
+    supabase.from("orcamento_planejamento_socios").upsert(payload, { onConflict: "company_id,year,category_code,setor_id" }),
     logResolvedUsage(resolved, "orcamento", usageOk, { companyId, userId: admin.userId }),
   ]);
   const upErr = upsertRes.error;
@@ -1112,6 +1244,8 @@ export async function montarPromptEntrevista(
   textoUsuario: string,
   itensContexto: PlanejamentoContextoItem[] = [],
   promptCtx?: PlanejamentoPromptContexto,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{
   system?: string;
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -1124,6 +1258,7 @@ export async function montarPromptEntrevista(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const prep = await montarSistemaEntrevista({
+    setorId,
     companyId,
     year,
     categoryCode,
@@ -1160,9 +1295,15 @@ export async function persistirConversaEntrevista(
   categoryCode: string,
   categoryName: string,
   conversa: PlanejamentoMensagem[],
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1172,11 +1313,12 @@ export async function persistirConversaEntrevista(
       company_id: companyId,
       year,
       category_code: categoryCode,
+      setor_id: setorEspecifico(setorId),
       category_name: categoryName,
       conversa: sanitizeConversa(conversa),
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
@@ -1201,9 +1343,15 @@ export async function salvarBasePlanejamento(
   categoryName: string,
   itens: PlanejamentoItemProposto[],
   contextoAdmin = "",
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1220,12 +1368,13 @@ export async function salvarBasePlanejamento(
       company_id: companyId,
       year,
       category_code: categoryCode,
+      setor_id: setorEspecifico(setorId),
       category_name: categoryName,
       base_salva: true,
       contexto_admin: ctx || null,
       updated_by: admin.userId,
     },
-    { onConflict: "company_id,year,category_code" },
+    { onConflict: "company_id,year,category_code,setor_id" },
   );
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
@@ -1237,13 +1386,15 @@ export async function salvarBasePlanejamento(
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (delErr) return { error: delErr.message };
 
   const rows = limpos.map((i) => ({
     company_id: companyId,
     year,
     category_code: categoryCode,
+    setor_id: setorEspecifico(setorId),
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
@@ -1269,9 +1420,15 @@ export async function confirmarPropostaPlanejamento(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1286,7 +1443,8 @@ export async function confirmarPropostaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1305,9 +1463,15 @@ export async function editarPropostaPlanejamento(
   categoryCode: string,
   itens: PlanejamentoItemProposto[],
   justificativa: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1323,7 +1487,8 @@ export async function editarPropostaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1340,9 +1505,15 @@ export async function reiniciarConversaPlanejamento(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1358,7 +1529,8 @@ export async function reiniciarConversaPlanejamento(
     })
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1371,9 +1543,15 @@ export async function removerPlanejamentoSocios(
   companyId: string,
   year: number,
   categoryCode: string,
+  /** Setor da tela — a linha de planejamento pertence a ele. */
+  setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
+  // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1383,14 +1561,16 @@ export async function removerPlanejamentoSocios(
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (itemErr) return { error: itemErr.message };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode);
+    .eq("category_code", categoryCode)
+    .eq("setor_id", setorEspecifico(setorId));
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { ok: true };

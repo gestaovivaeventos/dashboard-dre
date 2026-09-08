@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
 const PATH = "/orcamento";
@@ -73,10 +74,15 @@ function isIndiceKey(value: unknown): value is IndiceKey {
 }
 
 /** Códigos + nomes das categorias marcadas com 'valor_fixo' na empresa/ano. */
+/**
+ * Categorias por valor fixo, restritas ao SETOR quando ele é informado — só
+ * aparece a categoria atribuída àquele setor em Método por categoria.
+ */
 async function fetchCategoriasValorFixo(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
   year: number,
+  setorId: string | null,
 ): Promise<{ codes: Map<string, string>; needsMigration?: boolean; error?: string }> {
   const { data, error } = await supabase
     .from("orcamento_categoria_metodo")
@@ -88,9 +94,29 @@ async function fetchCategoriasValorFixo(
     if (isSchemaMissing(error.message)) return { codes: new Map(), needsMigration: true };
     return { codes: new Map(), error: error.message };
   }
+
+  let permitidas: Set<string> | null = null;
+  if (setorId) {
+    const especifico = setorEspecifico(setorId);
+    let q = supabase
+      .from("orcamento_categoria_setores")
+      .select("category_code")
+      .eq("company_id", companyId)
+      .eq("year", year);
+    if (especifico) q = q.eq("setor_id", especifico);
+    const { data: atrib, error: atribErr } = await q;
+    if (atribErr) {
+      if (isSchemaMissing(atribErr.message)) return { codes: new Map(), needsMigration: true };
+      return { codes: new Map(), error: atribErr.message };
+    }
+    permitidas = new Set((atrib ?? []).map((r) => r.category_code as string));
+  }
+
   const codes = new Map<string, string>();
   for (const r of data ?? []) {
-    codes.set(r.category_code as string, (r.category_name as string) ?? (r.category_code as string));
+    const code = r.category_code as string;
+    if (permitidas && !permitidas.has(code)) continue;
+    codes.set(code, (r.category_name as string) ?? code);
   }
   return { codes };
 }
@@ -109,6 +135,8 @@ interface ContratoRow {
 export async function getValorFixoCategorias(
   companyId: string,
   year: number,
+  /** Setor da tela: os contratos listados são os deste setor. */
+  setorId: string | null = null,
 ): Promise<{ setup?: ValorFixoSetup; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
@@ -133,7 +161,7 @@ export async function getValorFixoCategorias(
   }));
 
   // Categorias marcadas como 'valor_fixo'.
-  const cats = await fetchCategoriasValorFixo(supabase, companyId, year);
+  const cats = await fetchCategoriasValorFixo(supabase, companyId, year, setorId);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const codes = Array.from(cats.codes.keys());
@@ -141,11 +169,15 @@ export async function getValorFixoCategorias(
 
   // Contratos salvos (N por categoria). Ordena por created_at/id para a lista
   // ficar estável entre recargas.
-  const { data: saved, error: savedError } = await supabase
+  let savedQuery = supabase
     .from("orcamento_valor_fixo_categorias")
     .select("id, category_code, descricao, valor_base, indice_key, mes_reajuste")
     .eq("company_id", companyId)
-    .eq("year", year)
+    .eq("year", year);
+  // "Todos os setores" não filtra — o literal iria para uma coluna uuid.
+  const especificoLeitura = setorEspecifico(setorId);
+  if (especificoLeitura) savedQuery = savedQuery.eq("setor_id", especificoLeitura);
+  const { data: saved, error: savedError } = await savedQuery
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (savedError) {
@@ -218,11 +250,19 @@ export async function saveValorFixoContrato(
   categoryName: string,
   contrato: ValorFixoContratoInput,
   requireDescricao: boolean,
+  /** Setor a que o contrato pertence. */
+  setorId: string | null = null,
 ): Promise<{ id?: string; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  // Em "Todos os setores" não há setor de destino: a linha não pode nascer sem
+  // dono, então a tela precisa escolher um setor antes de editar.
+  if (isTodosSetores(setorId)) {
+    return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
+  }
 
   const validationError = validarContrato(contrato, requireDescricao);
   if (validationError) return { error: validationError };
@@ -260,6 +300,7 @@ export async function saveValorFixoContrato(
       year,
       category_code: categoryCode,
       category_name: categoryName,
+      setor_id: setorId,
       ...patch,
     })
     .select("id")

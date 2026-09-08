@@ -13,8 +13,15 @@ import { listContasStatus } from "@/lib/omie/contas-status";
 // pelo módulo Case em produção): um título só enviado ao banco ou meramente
 // programado permanece EMABERTO e não conta como pago aqui.
 //
-// Ao detectar o pagamento, gravamos `omie_paid_at` (a data da baixa quando
-// disponível, senão o instante da detecção). A partir daí a UI exibe "Pago".
+// A reconciliação é MÃO DUPLA:
+//  • título baixado no Omie e ainda sem `omie_paid_at` → grava `omie_paid_at`
+//    (a data da baixa quando disponível, senão o instante da detecção). A UI
+//    passa a exibir "Pago".
+//  • título que ESTÁVAMOS tratando como pago mas o Omie mostra de volta EM
+//    ABERTO (baixa estornada/excluída manualmente) → LIMPA `omie_paid_at`. A
+//    requisição volta a "Enviado Pgto" e reabre a opção de Devolver. Só limpa
+//    quando o título é ENCONTRADO na listagem e está em aberto — título ausente
+//    (fora da listagem) é preservado para não desmarcar pagamento à toa.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -24,6 +31,8 @@ export interface ReconcilePaymentsResult {
   checked: number;
   /** Requisições que passaram a "Pago" nesta execução. */
   paid: number;
+  /** Requisições que voltaram de "Pago" para "Enviado Pgto" (baixa estornada). */
+  reverted: number;
   /** Empresas pagadoras consultadas. */
   companies: number;
   /** Requisições que não puderam ser verificadas (empresa sem credencial, falha Omie). */
@@ -35,27 +44,28 @@ interface CandidateRow {
   amount: number;
   paying_company_id: string | null;
   omie_contapagar_codigo: number | string | null;
+  omie_paid_at: string | null;
 }
 
 export async function reconcilePaidRequests(
   db: DB,
   opts: { companyId?: string } = {},
 ): Promise<ReconcilePaymentsResult> {
-  // Candidatas: já enviadas ao pagamento (agendado), com título no Omie e ainda
-  // não marcadas como pagas. Ignora excluídas logicamente.
+  // Candidatas: já enviadas ao pagamento (agendado), com título no Omie e não
+  // excluídas logicamente. Traz tanto as ainda não pagas (para marcar) quanto as
+  // já marcadas (para eventualmente desmarcar se a baixa foi estornada).
   let query = db
     .from("ctrl_requests")
-    .select("id, amount, paying_company_id, omie_contapagar_codigo")
+    .select("id, amount, paying_company_id, omie_contapagar_codigo, omie_paid_at")
     .eq("status", "agendado")
     .not("omie_contapagar_codigo", "is", null)
-    .is("omie_paid_at", null)
     .is("deleted_at", null);
   if (opts.companyId) query = query.eq("paying_company_id", opts.companyId);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as CandidateRow[];
-  if (rows.length === 0) return { checked: 0, paid: 0, companies: 0, errors: 0 };
+  if (rows.length === 0) return { checked: 0, paid: 0, reverted: 0, companies: 0, errors: 0 };
 
   // Agrupa por empresa pagadora: uma listagem de contas a pagar por empresa
   // cobre todas as suas requisições (bem mais barato que consultar título a
@@ -70,6 +80,7 @@ export async function reconcilePaidRequests(
 
   let checked = 0;
   let paid = 0;
+  let reverted = 0;
   let errors = 0;
   const now = new Date().toISOString();
 
@@ -102,25 +113,43 @@ export async function reconcilePaidRequests(
     for (const r of companyRows) {
       checked += 1;
       const st = statusByCode.get(Number(r.omie_contapagar_codigo));
-      // Só marca quando o Omie confirma o pagamento (baixa). Título não
-      // encontrado na listagem ou ainda em aberto → permanece "Enviado Pgto".
-      if (!st?.pago) continue;
+      const jaMarcadoPago = r.omie_paid_at != null;
 
-      const { error: updErr } = await db
-        .from("ctrl_requests")
-        .update({
-          omie_paid_at: st.pagoEm ? `${st.pagoEm}T00:00:00Z` : now,
-          updated_at: now,
-        })
-        .eq("id", r.id)
-        .is("omie_paid_at", null); // guarda contra corrida (dupla marcação)
-      if (updErr) {
-        errors += 1;
-        continue;
+      if (!jaMarcadoPago) {
+        // Ainda "Enviado Pgto": marca como pago SÓ quando o Omie confirma a baixa.
+        // Título não encontrado ou em aberto permanece como está.
+        if (!st?.pago) continue;
+        const { error: updErr } = await db
+          .from("ctrl_requests")
+          .update({
+            omie_paid_at: st.pagoEm ? `${st.pagoEm}T00:00:00Z` : now,
+            updated_at: now,
+          })
+          .eq("id", r.id)
+          .is("omie_paid_at", null); // guarda contra corrida (dupla marcação)
+        if (updErr) {
+          errors += 1;
+          continue;
+        }
+        paid += 1;
+      } else {
+        // Já marcado "Pago": desmarca APENAS se o título foi encontrado na
+        // listagem e está de volta em aberto (baixa estornada/excluída). Título
+        // ausente da listagem é preservado — não desmarca por omissão.
+        if (!st || st.pago) continue;
+        const { error: updErr } = await db
+          .from("ctrl_requests")
+          .update({ omie_paid_at: null, updated_at: now })
+          .eq("id", r.id)
+          .not("omie_paid_at", "is", null); // guarda contra corrida
+        if (updErr) {
+          errors += 1;
+          continue;
+        }
+        reverted += 1;
       }
-      paid += 1;
     }
   }
 
-  return { checked, paid, companies: byCompany.size, errors };
+  return { checked, paid, reverted, companies: byCompany.size, errors };
 }

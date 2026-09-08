@@ -33,7 +33,11 @@ import {
   type PlanejamentoCategoriaDetalhe,
 } from "@/lib/orcamento/actions/planejamento-socios";
 import {
+  PERIODICIDADES,
   categoriaTotal,
+  periodicidadeLabel,
+  serieItem,
+  toPeriodicidade,
   totalItem,
   limparMarcadorFechar,
   type Periodicidade,
@@ -42,6 +46,10 @@ import {
   type PlanejamentoProposta,
 } from "@/lib/orcamento/planejamento-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
+import { analisarBase } from "@/lib/orcamento/planejamento-analise";
+import { PlanejamentoAlertasBase } from "@/components/orcamento/planejamento-alertas-base";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -149,13 +157,20 @@ function ItemRow({
   const anual = item.periodicidade === "anual";
   const total = totalItem(item.valorMensal, item.mesInicio, item.periodicidade, item.mesFim);
   const fim = item.mesFim != null && item.mesFim >= 1 && item.mesFim <= 12 ? item.mesFim : null;
-  const rangeLabel = anual
-    ? `1×/ano em ${MESES[item.mesInicio - 1]}`
-    : fim != null && fim < 12
+  // Quantos pagamentos a periodicidade gera na faixa escolhida — é o que
+  // distingue "trimestral a partir de março" de "mensal a partir de março".
+  const vezes = serieItem(1, item.mesInicio, item.periodicidade, item.mesFim).filter((v) => v > 0).length;
+  const faixa =
+    fim != null && fim < 12
       ? `${MESES[item.mesInicio - 1]}–${MESES[fim - 1]} (cancela)`
       : item.mesInicio > 1
         ? `${MESES[item.mesInicio - 1]}–dez`
         : "ano todo";
+  const rangeLabel = anual
+    ? `1×/ano em ${MESES[item.mesInicio - 1]}`
+    : item.periodicidade === "mensal"
+      ? faixa
+      : `${vezes}× · ${faixa}`;
   return (
     <tr className={cn("align-top", !item.incluir && "opacity-50")}>
       <td className="px-2 py-2 text-center">
@@ -198,11 +213,14 @@ function ItemRow({
       <td className="px-2 py-2">
         <select
           value={item.periodicidade}
-          onChange={(e) => onChange({ periodicidade: e.target.value === "anual" ? "anual" : "mensal" })}
-          className={cn(INPUT_CLS, "w-24 py-1.5")}
+          onChange={(e) => onChange({ periodicidade: toPeriodicidade(e.target.value) })}
+          className={cn(INPUT_CLS, "w-28 py-1.5")}
         >
-          <option value="mensal">mensal</option>
-          <option value="anual">anual</option>
+          {PERIODICIDADES.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
         </select>
       </td>
       <td className="px-2 py-2">
@@ -278,6 +296,7 @@ function ItensTable({
   onChange,
   onRemove,
   onAdd,
+  onToggleAll,
 }: {
   itens: LocalItem[];
   refMap: Map<string, RefInfo>;
@@ -285,7 +304,12 @@ function ItensTable({
   onChange: (key: string, partial: Partial<LocalItem>) => void;
   onRemove: (key: string) => void;
   onAdd: () => void;
+  onToggleAll: (incluir: boolean) => void;
 }) {
+  // Marcar/desmarcar tudo. Fica marcado só quando TODOS estão incluídos;
+  // com parte marcada, mostra o estado indeterminado e o clique inclui todos.
+  const todos = itens.length > 0 && itens.every((i) => i.incluir);
+  const algum = itens.some((i) => i.incluir);
   return (
     <div className="space-y-2">
       {itens.length === 0 ? (
@@ -297,7 +321,21 @@ function ItensTable({
           <table className="w-full text-sm">
             <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr className="border-b">
-                <th className="px-2 py-1.5 text-center font-medium">Incluir</th>
+                <th className="px-2 py-1.5 text-center font-medium">
+                  <label className="flex cursor-pointer flex-col items-center gap-0.5">
+                    <input
+                      type="checkbox"
+                      checked={todos}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !todos && algum;
+                      }}
+                      onChange={() => onToggleAll(!todos)}
+                      className="h-4 w-4 accent-emerald-600"
+                      title={todos ? "Desmarcar todos" : "Marcar todos"}
+                    />
+                    <span>Incluir</span>
+                  </label>
+                </th>
                 <th className="px-2 py-1.5 font-medium">Item</th>
                 <th className="px-2 py-1.5 font-medium">Valor</th>
                 <th className="px-2 py-1.5 font-medium">Período</th>
@@ -361,7 +399,9 @@ function PropostaCard({ proposta, year }: { proposta: PlanejamentoProposta; year
           const quando =
             it.periodicidade === "anual"
               ? `${formatBRL(it.valorMensal)}/ano · pago em ${mes}`
-              : `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}${cancela}`;
+              : it.periodicidade === "mensal"
+                ? `${formatBRL(it.valorMensal)}/mês · a partir de ${mes}${cancela}`
+                : `${formatBRL(it.valorMensal)} ${periodicidadeLabel(it.periodicidade)} · a partir de ${mes}${cancela}`;
           return (
             <li key={idx} className="flex items-baseline justify-between gap-3 py-1.5">
               <div className="min-w-0">
@@ -419,7 +459,7 @@ function ConclusaoPanel({
               Todas as categorias concluídas!
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              O planejamento dos sócios de {year} está completo — todas as categorias já têm proposta
+              O planejamento dos gestores de {year} está completo — todas as categorias já têm proposta
               confirmada e foram enviadas à Prévia.
             </p>
           </div>
@@ -524,6 +564,7 @@ function CategoriaInterview({
   companyId,
   year,
   categoryCode,
+  setorId,
   isAdmin,
   allItems,
   onBack,
@@ -534,6 +575,8 @@ function CategoriaInterview({
   companyId: string;
   year: number;
   categoryCode: string;
+  /** Setor da tela: o planejamento desta categoria é o DESTE setor. */
+  setorId: string | null;
   isAdmin: boolean;
   /** Lista COMPLETA de categorias (ordem estável) — para posição "X de N" e a próxima pendente. */
   allItems: PlanejamentoListItem[];
@@ -608,11 +651,11 @@ function CategoriaInterview({
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    void getPlanejamentoCategoria(companyId, year, categoryCode).then((res) => {
+    void getPlanejamentoCategoria(companyId, year, categoryCode, setorId).then((res) => {
       if (!alive) return;
       setLoading(false);
       if (res.needsMigration) {
-        onError("Migration do Planejamento dos sócios ainda não aplicada.");
+        onError("Migration do Planejamento dos gestores ainda não aplicada.");
         return;
       }
       if (res.error || !res.detalhe) {
@@ -643,6 +686,19 @@ function CategoriaInterview({
   const baseIncluidos = useMemo(() => baseItens.filter((i) => i.incluir), [baseItens]);
   const baseTotal = categoriaTotal(baseIncluidos);
   const baseDescFaltando = baseIncluidos.some((i) => i.descricao.trim() === "");
+  // Leitura do conjunto: as mesmas observações que a IA faz na abertura, só que
+  // AQUI — para o admin limpar a base antes de levá-la para a entrevista.
+  const alertasBase = useMemo(
+    () =>
+      analisarBase(
+        baseIncluidos.map((i) => ({
+          key: i.key,
+          descricao: i.descricao,
+          totalAno: totalItem(i.valorMensal, i.mesInicio, i.periodicidade, i.mesFim ?? null),
+        })),
+      ),
+    [baseIncluidos],
+  );
 
   // Posição desta categoria no plano + próxima PENDENTE (para o painel de
   // conclusão e o "X de N" do cabeçalho). A categoria atual conta como concluída
@@ -717,10 +773,11 @@ function CategoriaInterview({
         incluir: i.incluir,
       })),
       contextoAdmin,
+      setorId,
     );
     setSavingBase(false);
     if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
     }
     if (res.error) {
@@ -783,6 +840,7 @@ function CategoriaInterview({
           texto,
           itensContexto: baseContexto(),
           promptCtx: promptContexto(),
+          setorId,
         }),
       });
 
@@ -790,7 +848,7 @@ function CategoriaInterview({
         const j = await resp.json().catch(() => ({}) as { error?: string; needsMigration?: boolean });
         setConversa(comUsuario); // desfaz o balão vazio
         if (j.needsMigration) {
-          onError("Migration do Planejamento dos sócios ainda não aplicada.");
+          onError("Migration do Planejamento dos gestores ainda não aplicada.");
         } else {
           setLocalErr(j.error ?? "Falha ao consultar a IA.");
         }
@@ -832,10 +890,11 @@ function CategoriaInterview({
       baseContexto(),
       true,
       promptContexto(),
+      setorId,
     );
     setSending(false);
     if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
     }
     if (res.conversa) setConversa(res.conversa);
@@ -858,9 +917,9 @@ function CategoriaInterview({
 
   async function recomecar() {
     setConfirmReset(false);
-    const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode);
+    const res = await reiniciarConversaPlanejamento(companyId, year, categoryCode, setorId);
     if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
     }
     if (res.error) {
@@ -880,10 +939,10 @@ function CategoriaInterview({
   async function confirmar() {
     setConfirming(true);
     setLocalErr(null);
-    const res = await confirmarPropostaPlanejamento(companyId, year, categoryCode);
+    const res = await confirmarPropostaPlanejamento(companyId, year, categoryCode, setorId);
     setConfirming(false);
     if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
     }
     if (res.error) {
@@ -931,10 +990,17 @@ function CategoriaInterview({
       origem: i.origem,
       fornecedor: i.fornecedor,
     }));
-    const res = await editarPropostaPlanejamento(companyId, year, categoryCode, payload, propostaEditJust);
+    const res = await editarPropostaPlanejamento(
+      companyId,
+      year,
+      categoryCode,
+      payload,
+      propostaEditJust,
+      setorId,
+    );
     setSavingProposta(false);
     if (res.needsMigration) {
-      onError("Migration do Planejamento dos sócios ainda não aplicada.");
+      onError("Migration do Planejamento dos gestores ainda não aplicada.");
       return;
     }
     if (res.error) {
@@ -1064,6 +1130,7 @@ function CategoriaInterview({
                   <Pencil className="h-3.5 w-3.5" /> Editar base
                 </button>
               </div>
+              <PlanejamentoAlertasBase alertas={alertasBase} />
               {contextoAdmin.trim() !== "" && (
                 <div className="flex items-start gap-1.5 rounded-md border border-emerald-500/20 bg-background/60 p-2 text-xs text-muted-foreground">
                   <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -1075,6 +1142,7 @@ function CategoriaInterview({
             </div>
           ) : (
             <div className="space-y-3">
+              <PlanejamentoAlertasBase alertas={alertasBase} />
               <ItensTable
                 itens={baseItens}
                 refMap={refMap}
@@ -1082,6 +1150,9 @@ function CategoriaInterview({
                 onChange={updateBaseItem}
                 onRemove={removeBaseItem}
                 onAdd={addBaseItem}
+                onToggleAll={(incluir) =>
+                  setBaseItens((prev) => prev.map((it) => ({ ...it, incluir })))
+                }
               />
               <div className="space-y-1">
                 <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -1327,6 +1398,9 @@ function CategoriaInterview({
                   setPropostaEdit((prev) => (prev ? prev.map((it) => (it.key === key ? { ...it, ...partial } : it)) : prev))
                 }
                 onRemove={(key) => setPropostaEdit((prev) => (prev ? prev.filter((it) => it.key !== key) : prev))}
+                onToggleAll={(incluir) =>
+                  setPropostaEdit((prev) => (prev ? prev.map((it) => ({ ...it, incluir })) : prev))
+                }
                 onAdd={() =>
                   setPropostaEdit((prev) =>
                     prev
@@ -1431,6 +1505,10 @@ export function PlanejamentoSociosManager({
   year: number;
   isAdmin?: boolean;
 }) {
+  // Cada categoria é planejada POR SETOR: a tela trabalha um setor por vez, e
+  // a lista mostra só as categorias atribuídas a ele.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [items, setItems] = useState<PlanejamentoListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1438,7 +1516,7 @@ export function PlanejamentoSociosManager({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
 
-  async function reload() {
+  async function reload(sid: string | null = setorId) {
     if (!companyId) {
       setItems([]);
       return;
@@ -1446,7 +1524,7 @@ export function PlanejamentoSociosManager({
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getPlanejamentoSocios(companyId, year);
+    const res = await getPlanejamentoSocios(companyId, year, sid);
     setLoading(false);
     if (res.needsMigration) {
       setNeedsMigration(true);
@@ -1462,11 +1540,29 @@ export function PlanejamentoSociosManager({
   }
 
   useEffect(() => {
-    void reload();
+    let cancelado = false;
     setSearch("");
     setSelected(null);
+    void (async () => {
+      const res = await getSetores(companyId, year);
+      if (cancelado) return;
+      const ativos = (res.items ?? []).filter((x) => x.active);
+      setSetores(ativos);
+      const primeiro = ativos[0]?.id ?? null;
+      setSetorId(primeiro);
+      await reload(primeiro);
+    })();
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  function handleSetor(sid: string) {
+    setSetorId(sid);
+    setSelected(null);
+    void reload(sid);
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1491,6 +1587,7 @@ export function PlanejamentoSociosManager({
         companyId={companyId}
         year={year}
         categoryCode={selected}
+        setorId={setorId}
         isAdmin={isAdmin}
         allItems={items}
         onBack={() => {
@@ -1526,7 +1623,7 @@ export function PlanejamentoSociosManager({
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
         <p className="font-medium">Migration pendente</p>
         <p className="mt-1 text-muted-foreground">
-          Aplique as migrations do Planejamento dos sócios (
+          Aplique as migrations do Planejamento dos gestores (
           <code className="rounded bg-muted px-1 py-0.5">20260825120000</code> …{" "}
           <code className="rounded bg-muted px-1 py-0.5">20260830120000</code>) para habilitar esta tela.
         </p>
@@ -1543,7 +1640,7 @@ export function PlanejamentoSociosManager({
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
           Nenhuma categoria desta empresa está marcada para o método{" "}
-          <span className="font-medium">Planejamento dos sócios</span> em {year}. Defina o método em
+          <span className="font-medium">Planejamento dos gestores</span> em {year}. Defina o método em
           Configuração → Método por categoria.
         </div>
       ) : (
@@ -1589,6 +1686,26 @@ export function PlanejamentoSociosManager({
             </div>
           </div>
 
+          {setores.length > 0 && (
+            <div className="w-64 space-y-1.5">
+              <label className="text-sm font-medium">Setor</label>
+              <select
+                value={setorId ?? ""}
+                onChange={(e) => handleSetor(e.target.value)}
+                disabled={loading}
+                title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+                className={INPUT_CLS}
+              >
+                {setores.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+                <option value={SETOR_TODOS}>Todos os setores</option>
+              </select>
+            </div>
+          )}
+
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -1600,7 +1717,7 @@ export function PlanejamentoSociosManager({
           </div>
 
           <p className="text-sm text-muted-foreground">
-            {items.length} categoria(s) por planejamento dos sócios. Escolha por qual começar — cada uma
+            {items.length} categoria(s) por planejamento dos gestores. Escolha por qual começar — cada uma
             guarda o progresso das etapas.
           </p>
 

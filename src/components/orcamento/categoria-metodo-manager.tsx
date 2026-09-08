@@ -9,6 +9,13 @@ import {
   setCategoriaMetodo,
   type CategoriaMetodoItem,
 } from "@/lib/orcamento/actions/categoria-metodo";
+import {
+  getCategoriaSetores,
+  setCategoriaSetores,
+  type SetoresPorCategoria,
+} from "@/lib/orcamento/actions/categoria-setores";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SetoresMultiSelect } from "@/components/orcamento/setores-multi-select";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { YearSelect } from "@/components/orcamento/year-select";
@@ -38,6 +45,11 @@ export function CategoriaMetodoManager({
   const [companyId, setCompanyId] = useState<string>(fixedCompanyId ?? companies[0]?.companyId ?? "");
   const [year, setYear] = useState<number>(fixedYear ?? defaultBudgetYear());
   const [items, setItems] = useState<CategoriaMetodoItem[]>([]);
+  // Setores da empresa/ano + quais orçam cada categoria. É o que decide quais
+  // combinações categoria×setor viram card nas telas de método.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setoresPorCat, setSetoresPorCat] = useState<SetoresPorCategoria>({});
+  const [salvandoSetores, setSalvandoSetores] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
@@ -46,6 +58,31 @@ export function CategoriaMetodoManager({
   const [, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [search, setSearch] = useState("");
+
+  /** Grava os setores de uma categoria. A action recusa tirar um setor que já
+   * tem orçamento lançado — nesse caso desfaz e mostra o motivo. */
+  async function handleSetores(categoryCode: string, ids: string[]) {
+    const anterior = setoresPorCat[categoryCode] ?? [];
+    setSalvandoSetores(categoryCode);
+    setSetoresPorCat((prev) => ({ ...prev, [categoryCode]: ids }));
+    const res = await setCategoriaSetores(companyId, year, categoryCode, ids);
+    setSalvandoSetores(null);
+    if (res?.error) {
+      setSetoresPorCat((prev) => ({ ...prev, [categoryCode]: anterior }));
+      setFeedback({ ok: false, msg: res.error });
+    }
+  }
+
+  // Resíduo: categoria por MÉDIA em mais de um setor. A regra nova não deixa
+  // criar, mas a migração da Fase 1 pode ter deixado — e cada setor calcula a
+  // média da categoria inteira, contando a despesa duas vezes no orçamento.
+  const mediasDuplicadas = useMemo(
+    () =>
+      items.filter(
+        (i) => i.metodo === "media" && (setoresPorCat[i.categoryCode]?.length ?? 0) > 1,
+      ),
+    [items, setoresPorCat],
+  );
 
   async function reload(id: string, y: number) {
     if (!id) {
@@ -68,6 +105,11 @@ export function CategoriaMetodoManager({
       return;
     }
     setItems(res.items ?? []);
+
+    // Setores ativos do ano + a atribuição atual, em paralelo.
+    const [setoresRes, atribRes] = await Promise.all([getSetores(id, y), getCategoriaSetores(id, y)]);
+    setSetores((setoresRes.items ?? []).filter((x) => x.active));
+    setSetoresPorCat(atribRes.mapa ?? {});
   }
 
   useEffect(() => {
@@ -229,13 +271,34 @@ export function CategoriaMetodoManager({
           <p className="text-sm text-muted-foreground">
             {definedCount} de {items.length} categorias com método definido.
           </p>
-          <div className="overflow-x-auto rounded-lg border">
+          {mediasDuplicadas.length > 0 && (
+        <div className="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <p className="font-medium text-amber-700 dark:text-amber-500">
+            {mediasDuplicadas.length} categoria(s) por média em mais de um setor
+          </p>
+          <p className="text-muted-foreground">
+            A média sai do realizado da categoria inteira, então cada setor está calculando o
+            <strong> mesmo valor</strong> — e o orçamento conta a despesa mais de uma vez. Deixe
+            um setor só aqui e use <strong>Tirar deste setor</strong> na tela de Média para apagar
+            a linha que sobrar:{" "}
+            {mediasDuplicadas.map((i) => i.categoryName).join(", ")}.
+          </p>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2.5 font-medium">Categoria</th>
                   <th className="px-4 py-2.5 font-medium">Linha DRE</th>
                   <th className="px-4 py-2.5 font-medium">Método de orçamento</th>
+                  <th
+                    className="px-4 py-2.5 font-medium"
+                    title="Quais setores orçam esta categoria. Só as combinações marcadas viram card nas telas de método."
+                  >
+                    Setores
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -288,11 +351,24 @@ export function CategoriaMetodoManager({
                         )}
                       </div>
                     </td>
+                    <td className="px-4 py-2">
+                      {item.metodo == null ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <SetoresMultiSelect
+                          setores={setores}
+                          selecionados={setoresPorCat[item.categoryCode] ?? []}
+                          unico={item.metodo === "media"}
+                          onCommit={(ids) => void handleSetores(item.categoryCode, ids)}
+                          salvando={salvandoSetores === item.categoryCode}
+                        />
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>

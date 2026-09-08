@@ -22,6 +22,9 @@ import {
 import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import type { IndiceKey } from "@/lib/orcamento/indices";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -82,14 +85,22 @@ function MediaRow({
   onPatch,
   onError,
   companyId,
+  setorId,
+  setores,
+  onMoved,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
   baseYear: number;
   budgetYear: number;
-  onPatch: (code: string, partial: Partial<MediaCategoriaItem>) => void;
+  onPatch: (code: string, setorId: string | null, partial: Partial<MediaCategoriaItem>) => void;
   onError: (msg: string) => void;
   companyId: string;
+  /** Setor da tela: a linha de orçamento desta categoria pertence a ele. */
+  setorId: string | null;
+  /** Setores ativos, para o destino do "Mover". */
+  setores: OrcamentoSetor[];
+  onMoved: () => void;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
   // ao vivo do realizado enquanto nada foi salvo.
@@ -117,7 +128,7 @@ function MediaRow({
       setDraft(numberToInput(item.mediaValor ?? item.realizado.media));
       return;
     }
-    onPatch(item.categoryCode, { mediaValor: parsed, manual: parsed != null });
+    onPatch(item.categoryCode, item.setorId, { mediaValor: parsed, manual: parsed != null });
     startTransition(async () => {
       const res = await setMediaValor(
         companyId,
@@ -125,13 +136,14 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         parsed,
+        item.setorId ?? setorEspecifico(setorId),
       );
       if (res?.error) onError(res.error);
     });
   }
 
   function handleIndice(next: IndiceKey | null) {
-    onPatch(item.categoryCode, { indiceKey: next });
+    onPatch(item.categoryCode, item.setorId, { indiceKey: next });
     startTransition(async () => {
       const res = await setMediaIndice(
         companyId,
@@ -139,6 +151,7 @@ function MediaRow({
         item.categoryCode,
         item.categoryName,
         next,
+        item.setorId ?? setorEspecifico(setorId),
       );
       if (res?.error) onError(res.error);
     });
@@ -152,6 +165,7 @@ function MediaRow({
         budgetYear,
         item.categoryCode,
         item.categoryName,
+        item.setorId ?? setorEspecifico(setorId),
       );
       setRecalcing(false);
       if (res?.error) {
@@ -160,7 +174,7 @@ function MediaRow({
       }
       if (res?.item) {
         // Preserva o índice (a action não o altera).
-        onPatch(item.categoryCode, {
+        onPatch(item.categoryCode, item.setorId, {
           mediaValor: res.item.mediaValor,
           manual: false,
           realizado: res.item.realizado,
@@ -194,9 +208,28 @@ function MediaRow({
             )}
             <span>
               <span className="font-medium">{item.categoryName}</span>
-              <span className="block text-xs text-muted-foreground">{item.categoryCode}</span>
+              <span className="block text-xs text-muted-foreground">
+                {item.categoryCode}
+                {/* Em "Todos os setores" a mesma categoria aparece uma vez por
+                    setor — sem o rótulo, as linhas ficariam indistinguíveis. */}
+                {isTodosSetores(setorId) && item.setorNome ? ` · ${item.setorNome}` : ""}
+              </span>
             </span>
           </button>
+          {setores.length > 0 && (
+            <div className="mt-1">
+              <MoverSetorButton
+                companyId={companyId}
+                year={budgetYear}
+                metodo="media"
+                categoryCode={item.categoryCode}
+                origemSetorId={item.setorId}
+                setores={setores}
+                onMoved={onMoved}
+                onError={onError}
+              />
+            </div>
+          )}
         </td>
 
         {/* Média */}
@@ -341,6 +374,10 @@ export function MediaCorrecaoManager({
   companyId: string;
   year: number;
 }) {
+  // Setor da tela. Cada categoria é orçada por setor, então tudo aqui — o que
+  // se lê, o que se grava e o recálculo em lote — é do setor selecionado.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [items, setItems] = useState<MediaCategoriaItem[]>([]);
   const [indices, setIndices] = useState<IndiceOption[]>([]);
   const [baseYear, setBaseYear] = useState<number>(year - 1);
@@ -352,7 +389,7 @@ export function MediaCorrecaoManager({
   const [search, setSearch] = useState("");
   const [, startTransition] = useTransition();
 
-  async function reload(id: string, y: number) {
+  async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
       setItems([]);
       return;
@@ -360,7 +397,7 @@ export function MediaCorrecaoManager({
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getMediaCategorias(id, y);
+    const res = await getMediaCategorias(id, y, sid);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -377,15 +414,38 @@ export function MediaCorrecaoManager({
     setBaseYear(res.setup.baseYear);
   }
 
+  // Empresa/ano mudou: recarrega a lista de setores e cai no primeiro deles.
   useEffect(() => {
-    void reload(companyId, year);
+    let cancelado = false;
     setSearch("");
     setFeedback(null);
+    void (async () => {
+      const res = await getSetores(companyId, year);
+      if (cancelado) return;
+      const ativos = (res.items ?? []).filter((x) => x.active);
+      setSetores(ativos);
+      const primeiro = ativos[0]?.id ?? null;
+      setSetorId(primeiro);
+      await reload(companyId, year, primeiro);
+    })();
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
 
-  function patchItem(code: string, partial: Partial<MediaCategoriaItem>) {
-    setItems((prev) => prev.map((it) => (it.categoryCode === code ? { ...it, ...partial } : it)));
+  function handleSetor(sid: string) {
+    setSetorId(sid);
+    setFeedback(null);
+    void reload(companyId, year, sid);
+  }
+
+  function patchItem(code: string, sid: string | null, partial: Partial<MediaCategoriaItem>) {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.categoryCode === code && it.setorId === sid ? { ...it, ...partial } : it,
+      ),
+    );
   }
 
   function handleRecalcAll() {
@@ -393,13 +453,13 @@ export function MediaCorrecaoManager({
     setRecalcAll(true);
     setFeedback(null);
     startTransition(async () => {
-      const res = await recalcularTodasMedias(companyId, year);
+      const res = await recalcularTodasMedias(companyId, year, setorId);
       setRecalcAll(false);
       if (res?.error) {
         setLoadError(res.error);
         return;
       }
-      await reload(companyId, year);
+      await reload(companyId, year, setorId);
       setFeedback(`${res?.atualizadas ?? 0} média(s) recalculada(s) pela Omie (base ${year - 1}).`);
     });
   }
@@ -417,6 +477,25 @@ export function MediaCorrecaoManager({
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3">
+        {setores.length > 0 && (
+          <div className="w-56 space-y-1.5">
+            <label className="text-sm font-medium">Setor</label>
+            <select
+              value={setorId ?? ""}
+              onChange={(e) => handleSetor(e.target.value)}
+              disabled={loading}
+              title="Cada categoria é orçada por setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+              className={INPUT_CLS}
+            >
+              {setores.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+              <option value={SETOR_TODOS}>Todos os setores</option>
+            </select>
+          </div>
+        )}
         <button
           type="button"
           onClick={handleRecalcAll}
@@ -496,12 +575,15 @@ export function MediaCorrecaoManager({
               <tbody className="divide-y">
                 {filtered.map((item) => (
                   <MediaRow
-                    key={item.categoryCode}
+                    key={`${item.categoryCode}|${item.setorId ?? "-"}`}
                     item={item}
                     indices={indices}
                     baseYear={baseYear}
                     budgetYear={year}
                     companyId={companyId}
+                    setorId={setorId}
+                    setores={setores}
+                    onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}
                     onError={setLoadError}
                   />

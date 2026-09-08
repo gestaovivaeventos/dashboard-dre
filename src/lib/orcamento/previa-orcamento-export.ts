@@ -10,11 +10,20 @@ import type { PreviaDreLinha } from "@/lib/orcamento/actions/previa-orcamento";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
+/** Caracteres que o Excel recusa em nome de aba. */
+const ABA_PROIBIDO = new Set(["\\", "/", "?", "*", "[", "]", ":"]);
+
 export interface PreviaOrcamentoExportMeta {
   /** Nome da empresa (vai no nome do arquivo). */
   empresaLabel: string;
   /** Ano do orçamento. */
   ano: number;
+  /**
+   * Setor recortado, quando a prévia não é a da empresa inteira. Vai para o
+   * nome do arquivo e para a aba: dois downloads da mesma empresa em setores
+   * diferentes não podem virar o mesmo arquivo na pasta de downloads.
+   */
+  setorLabel?: string | null;
 }
 
 function sanitizeFilenamePart(value: string): string {
@@ -72,9 +81,18 @@ export async function downloadPreviaOrcamentoXlsx(
   ws["!freeze"] = { xSplit: 2, ySplit: 1 };
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Prévia do orçamento");
+  // Nome da aba: o Excel corta em 31 caracteres e recusa alguns símbolos, então
+  // o setor entra sanitizado e o conjunto é truncado.
+  const aba = meta.setorLabel
+    ? Array.from(`Prévia ${meta.setorLabel}`)
+        .map((ch) => (ABA_PROIBIDO.has(ch) ? " " : ch))
+        .join("")
+        .slice(0, 31)
+    : "Prévia do orçamento";
+  XLSX.utils.book_append_sheet(wb, ws, aba);
 
-  const filename = `previa_orcamento_${sanitizeFilenamePart(meta.empresaLabel)}_${meta.ano}.xlsx`;
+  const sufixoSetor = meta.setorLabel ? `_${sanitizeFilenamePart(meta.setorLabel)}` : "";
+  const filename = `previa_orcamento_${sanitizeFilenamePart(meta.empresaLabel)}${sufixoSetor}_${meta.ano}.xlsx`;
 
   // Download client-side robusto (Blob + <a>) — mesmo padrão do drilldown.
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;

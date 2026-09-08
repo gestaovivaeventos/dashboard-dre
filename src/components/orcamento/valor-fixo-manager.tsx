@@ -14,6 +14,9 @@ import {
 import { projetarValorFixoSerie, corrigirValorFixo } from "@/lib/orcamento/valor-fixo-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { formatIndice, type IndiceKey } from "@/lib/orcamento/indices";
+import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
+import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -249,12 +252,20 @@ function ValorFixoCategoryGroup({
   indices,
   companyId,
   budgetYear,
+  setorId,
+  setores,
+  onMoved,
   onError,
 }: {
   item: ValorFixoItem;
   indices: IndiceOption[];
   companyId: string;
   budgetYear: number;
+  /** Setor a que os contratos desta categoria pertencem. */
+  setorId: string | null;
+  /** Setores ativos, para o destino do "Mover". */
+  setores: OrcamentoSetor[];
+  onMoved: () => void;
   onError: (msg: string) => void;
 }) {
   const [contratos, setContratos] = useState<LocalContrato[]>(() => seedContratos(item));
@@ -288,6 +299,7 @@ function ValorFixoCategoryGroup({
           mesReajuste: contrato.mesReajuste,
         },
         requireDescricao,
+        setorId,
       );
       if (res.needsMigration) {
         onError("Migration pendente do módulo Orçamento.");
@@ -365,13 +377,27 @@ function ValorFixoCategoryGroup({
   );
 
   const addBtn = (
-    <button
-      type="button"
-      onClick={addContrato}
-      className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-    >
-      <Plus className="h-3 w-3" /> contrato
-    </button>
+    <div className="mt-1 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={addContrato}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+      >
+        <Plus className="h-3 w-3" /> contrato
+      </button>
+      {setores.length > 0 && (
+        <MoverSetorButton
+          companyId={companyId}
+          year={budgetYear}
+          metodo="valor_fixo"
+          categoryCode={item.categoryCode}
+          origemSetorId={setorEspecifico(setorId)}
+          setores={setores}
+          onMoved={onMoved}
+          onError={onError}
+        />
+      )}
+    </div>
   );
 
   const detailRow = expanded && (
@@ -494,6 +520,9 @@ function ValorFixoCategoryGroup({
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export function ValorFixoManager({ companyId, year }: { companyId: string; year: number }) {
+  // Cada contrato pertence a um setor; a tela trabalha um setor por vez.
+  const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
+  const [setorId, setSetorId] = useState<string | null>(null);
   const [items, setItems] = useState<ValorFixoItem[]>([]);
   const [indices, setIndices] = useState<IndiceOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -501,7 +530,7 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
   const [needsMigration, setNeedsMigration] = useState(false);
   const [search, setSearch] = useState("");
 
-  async function reload(id: string, y: number) {
+  async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
       setItems([]);
       return;
@@ -509,7 +538,7 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
     setLoading(true);
     setLoadError(null);
     setNeedsMigration(false);
-    const res = await getValorFixoCategorias(id, y);
+    const res = await getValorFixoCategorias(id, y, sid);
     setLoading(false);
     if (res?.needsMigration) {
       setNeedsMigration(true);
@@ -526,10 +555,27 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
   }
 
   useEffect(() => {
-    void reload(companyId, year);
+    let cancelado = false;
     setSearch("");
+    void (async () => {
+      const res = await getSetores(companyId, year);
+      if (cancelado) return;
+      const ativos = (res.items ?? []).filter((x) => x.active);
+      setSetores(ativos);
+      const primeiro = ativos[0]?.id ?? null;
+      setSetorId(primeiro);
+      await reload(companyId, year, primeiro);
+    })();
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, year]);
+
+  function handleSetor(sid: string) {
+    setSetorId(sid);
+    void reload(companyId, year, sid);
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -543,6 +589,25 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
+        {setores.length > 0 && (
+          <div className="w-56 space-y-1.5">
+            <label className="text-sm font-medium">Setor</label>
+            <select
+              value={setorId ?? ""}
+              onChange={(e) => handleSetor(e.target.value)}
+              disabled={loading}
+              title="Cada contrato pertence a um setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+              className={INPUT_CLS}
+            >
+              {setores.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+              <option value={SETOR_TODOS}>Todos os setores</option>
+            </select>
+          </div>
+        )}
         <div className="min-w-[220px] flex-1 space-y-1.5">
           <label className="text-sm font-medium">Buscar categoria</label>
           <div className="relative">
@@ -612,6 +677,9 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
                     indices={indices}
                     companyId={companyId}
                     budgetYear={year}
+                    setorId={setorId}
+                    setores={setores}
+                    onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}
                   />
                 ))}

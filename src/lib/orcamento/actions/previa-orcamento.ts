@@ -5,7 +5,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import {
   buildDashboardRows,
   loadScopedDreAccounts,
@@ -14,9 +14,19 @@ import {
 import { projetarMedia } from "@/lib/orcamento/media-calc";
 import { fetchRealizados } from "@/lib/orcamento/media-realizado";
 import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
-import { categoriaSerie } from "@/lib/orcamento/planejamento-calc";
+import {
+  apenasCanonicas,
+  categoriaSerie,
+  periodicidadeLabel,
+  serieItem,
+  toPeriodicidade,
+  type Periodicidade,
+} from "@/lib/orcamento/planejamento-calc";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
+import { vinculoLabel } from "@/lib/orcamento/vinculos";
+import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
 /** Unidade de cada índice (percent × brl), para o valor fixo corrigir certo. */
@@ -45,6 +55,40 @@ const INDICE_UNIT = new Map<string, IndiceUnit>(INDICES.map((i) => [i.key, i.uni
 // aviso na tela deixa isso explícito.
 // =============================================================================
 
+/**
+ * De onde veio um pedaço do valor de uma linha — o drilldown da Prévia.
+ *
+ * A Prévia soma tudo num acumulador por conta; sem isto, o número final não
+ * conta de qual categoria/método ele veio. Guardamos a contribuição de cada
+ * origem em paralelo à soma, com o link para a tela que a produziu.
+ */
+/**
+ * 2º nível do drilldown: o que compõe UMA origem. Cada método tem a sua
+ * granularidade natural — o item que o gestor planejou, o contrato de valor
+ * fixo, o colaborador da folha.
+ */
+export interface PreviaFonteItem {
+  nome: string;
+  /** Complemento curto (periodicidade, vínculo, índice…). */
+  detalhe?: string;
+  meses: number[];
+  totalAno: number;
+}
+
+export interface PreviaFonte {
+  /** Chave do método (metodos.ts) — também é o slug da aba do workspace. */
+  metodo: string;
+  metodoLabel: string;
+  /** Nome da categoria, ou o rótulo da linha no caso do pessoal. */
+  chave: string;
+  meses: number[];
+  totalAno: number;
+  /** Rota da tela de origem, para abrir em nova aba. */
+  href: string;
+  /** Abertura da origem. Vazio quando o método não tem nível abaixo. */
+  itens: PreviaFonteItem[];
+}
+
 /** Uma linha da estrutura DRE com os 12 meses orçados + total do ano. */
 export interface PreviaDreLinha {
   id: string;
@@ -59,6 +103,8 @@ export interface PreviaDreLinha {
   hasChildren: boolean;
   meses: number[];
   totalAno: number;
+  /** Origens que compõem esta linha (vazio em linha calculada por fórmula). */
+  fontes: PreviaFonte[];
 }
 
 /** Valores que não conseguiram cair numa linha da DRE (ficam visíveis). */
@@ -74,6 +120,12 @@ export interface PreviaOrcamentoData {
   pessoalNaoClassificado: PreviaOrfao[];
   /** Categorias por média com valor, mas sem mapeamento categoria→DRE. */
   categoriasNaoMapeadas: PreviaOrfao[];
+  /**
+   * Propostas de categorias gêmeas "(*)" que NÃO entram no orçamento porque a
+   * canônica de mesmo nome também é planejada — o card é um só. Ficam visíveis
+   * para que um planejamento feito ali não desapareça em silêncio.
+   */
+  planejamentoGemeaIgnorada: PreviaOrfao[];
   /** Diagnóstico para a tela. */
   resumo: {
     temReceita: boolean;
@@ -83,6 +135,8 @@ export interface PreviaOrcamentoData {
     valorFixoSemValor: number;
     planejamentoCategorias: number;
     planejamentoSemValor: number;
+    /** Colaboradores dentro do escopo (empresa ou setor). */
+    pessoalColaboradores: number;
     totalDespesa: number;
     totalReceita: number;
   };
@@ -94,19 +148,34 @@ interface CategoriaMetodoRow {
 }
 interface MediaSnapshotRow {
   category_code: string;
+  setor_id: string | null;
   media_valor: number | string | null;
   indice_key: string | null;
 }
 interface ValorFixoSnapshotRow {
   category_code: string;
+  setor_id: string | null;
   valor_base: number | string | null;
   indice_key: string | null;
   mes_reajuste: number | string | null;
+  /** Rótulo do contrato — só preenchido quando a categoria tem 2+. */
+  descricao: string | null;
 }
 interface CategoryMappingRow {
   omie_category_code: string;
   dre_account_id: string | null;
   company_id: string | null;
+}
+
+const MESES_CURTO = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** Moeda curta para o texto de detalhe do item (sem centavos quando redondo). */
+function formatBRLSimples(v: number): string {
+  return v.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: v % 1 === 0 ? 0 : 2,
+  });
 }
 
 function db() {
@@ -126,11 +195,23 @@ function somar(meses: number[]): number {
 export async function getPreviaOrcamento(
   companyId: string,
   year: number,
+  /**
+   * Escopo da prévia. Ausente, null ou SETOR_TODOS = empresa inteira (o
+   * orçamento que vai para a DRE). Um uuid recorta a prévia num setor.
+   *
+   * O recorte é feito LINHA A LINHA (setor_id de cada despesa), nunca por
+   * categoria: uma categoria pode ser orçada por dois setores, mas cada
+   * despesa dentro dela pertence a um só. É isso que faz a soma dos setores
+   * fechar com "Todos os setores".
+   */
+  setorId?: string | null,
 ): Promise<{ data?: PreviaOrcamentoData; error?: string; needsMigration?: boolean }> {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const filtroSetor = setorEspecifico(setorId);
 
   const supabase = db() ?? (await createClient());
 
@@ -144,8 +225,17 @@ export async function getPreviaOrcamento(
 
   // Acumulador de valores por FOLHA (scoped dre_account_id) × 12 meses.
   const leafByScopedId = new Map<string, number[]>();
+  // Origens que compõem cada folha, na mesma ordem em que são somadas — é o
+  // que permite o drilldown sem recalcular nada.
+  const fontesByScopedId = new Map<string, PreviaFonte[]>();
+  const pushFonte = (scopedId: string, fonte: PreviaFonte) => {
+    const lista = fontesByScopedId.get(scopedId) ?? [];
+    lista.push(fonte);
+    fontesByScopedId.set(scopedId, lista);
+  };
   const pessoalNaoClassificado: PreviaOrfao[] = [];
   const categoriasNaoMapeadas: PreviaOrfao[] = [];
+  const planejamentoGemeaIgnorada: PreviaOrfao[] = [];
 
   // Ids das contas que a prévia REALMENTE renderiza (core = top-level 1..19).
   // `translateToScopedId` casa contra o plano COMPLETO (`scopedAccounts`), que
@@ -155,6 +245,25 @@ export async function getPreviaOrcamento(
   // só aceitamos o pouso quando o id está em `coreAccounts`; senão vira órfão
   // visível no aviso "Valores fora da DRE".
   const coreIds = new Set(scope.coreAccounts.map((a) => a.id));
+
+  // Nomes dos setores para etiquetar o drilldown na visão consolidada: em
+  // "Todos os setores" dois contratos de Água, um de cada setor, ficariam
+  // indistinguíveis. Filtrando por um setor a etiqueta seria ruído — e aí nem
+  // se carrega.
+  const nomeSetor = new Map<string, string>();
+  if (!filtroSetor) {
+    const { data: setorRows } = await supabase
+      .from("orcamento_setores")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .eq("year", year);
+    for (const r of setorRows ?? []) nomeSetor.set(r.id as string, r.name as string);
+  }
+  /** " · Administrativo" para o detalhe do item, ou "" quando não há o que dizer. */
+  const etiquetaSetor = (id: string | null | undefined): string => {
+    const n = id ? nomeSetor.get(id) : null;
+    return n ? ` · ${n}` : "";
+  };
 
   // ── MÉTODOS POR CATEGORIA (média + valor fixo) ──────────────────────────────
   // Ambos ligam na DRE pela mesma chave (category_code → category_mapping) e
@@ -180,13 +289,49 @@ export async function getPreviaOrcamento(
   const metodoCats = (metodoRows ?? []) as (CategoriaMetodoRow & { metodo: string })[];
   const mediaCats = metodoCats.filter((c) => c.metodo === "media");
   const vfCats = metodoCats.filter((c) => c.metodo === "valor_fixo");
-  const psCats = metodoCats.filter((c) => c.metodo === "planejamento_socios");
-  mediaCategorias = mediaCats.length;
-  valorFixoCategorias = vfCats.length;
-  planejamentoCategorias = psCats.length;
-
+  // A gêmea "(*)" não vira card próprio no Planejamento quando a canônica de
+  // mesmo nome também é planejada (o card é um só, e o realizado dele já soma
+  // as duas). A Prévia tem de orçar exatamente o que a tela mostra, senão soma
+  // uma proposta que ninguém consegue abrir nem editar.
+  const psCatsTodas = metodoCats.filter((c) => c.metodo === "planejamento_socios");
+  const psCats = apenasCanonicas(
+    psCatsTodas.map((c) => ({ ...c, categoryName: c.category_name ?? c.category_code })),
+  );
+  const psGemeasIgnoradas = psCatsTodas.filter(
+    (c) => !psCats.some((k) => k.category_code === c.category_code),
+  );
   if (metodoCats.length > 0) {
     const allCodes = Array.from(new Set(metodoCats.map((c) => c.category_code)));
+
+    // Categorias atribuídas ao setor filtrado. Serve de escopo para as
+    // categorias que ainda não têm linha gravada (a média viva, por exemplo):
+    // sem isso elas não teriam como saber a que setor pertencem.
+    const codesDoSetor = new Set<string>();
+    if (filtroSetor) {
+      const { data: atribRows, error: atribErr } = await supabase
+        .from("orcamento_categoria_setores")
+        .select("category_code")
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("setor_id", filtroSetor);
+      if (atribErr) {
+        if (isSchemaMissing(atribErr.message)) return { needsMigration: true };
+        return { error: atribErr.message };
+      }
+      for (const r of atribRows ?? []) codesDoSetor.add(r.category_code as string);
+    }
+
+    // Categorias que este escopo enxerga: as atribuídas ao setor MAIS as que
+    // têm alguma linha nele. A união cobre o caso de uma despesa movida cuja
+    // atribuição da categoria não acompanhou — ela apareceria só em "Todos",
+    // e some do setor onde está de fato.
+    const noEscopo = <T extends { category_code: string }>(
+      lista: T[],
+      comLinha: Set<string>,
+    ): T[] =>
+      filtroSetor
+        ? lista.filter((c) => codesDoSetor.has(c.category_code) || comLinha.has(c.category_code))
+        : lista;
 
     // Índices percentuais do ano (compartilhado pelos dois métodos).
     const { data: indiceRowRaw } = await supabase
@@ -216,7 +361,13 @@ export async function getPreviaOrcamento(
     }
 
     // Resolve o code para a folha escopada; empurra os 12 meses ou registra o órfão.
-    const aplicar = (code: string, chave: string, meses: number[]) => {
+    const aplicar = (
+      code: string,
+      chave: string,
+      meses: number[],
+      metodo: string,
+      itens: PreviaFonteItem[] = [],
+    ) => {
       const rawAccountId = mapByCode.get(code) ?? null;
       const scopedId = rawAccountId ? scope.translateToScopedId(rawAccountId) : null;
       // Sem conta mapeada, ou mapeada para fora da faixa renderizada (coreIds):
@@ -226,41 +377,108 @@ export async function getPreviaOrcamento(
         return;
       }
       pushMeses(leafByScopedId, scopedId, meses);
+      pushFonte(scopedId, {
+        metodo,
+        metodoLabel: metodoLabel(metodo as OrcamentoMetodo),
+        chave,
+        meses,
+        totalAno: somar(meses),
+        href: workspaceTabHref(companyId, year, metodo),
+        itens,
+      });
     };
 
     // MÉDIA — valor mensal médio, igual nos 12 meses.
     if (mediaCats.length > 0) {
       const { data: snapRows, error: snapErr } = await supabase
         .from("orcamento_media_categorias")
-        .select("category_code, media_valor, indice_key")
+        .select("category_code, setor_id, media_valor, indice_key")
         .eq("company_id", companyId)
         .eq("year", year);
       if (snapErr) {
         if (isSchemaMissing(snapErr.message)) return { needsMigration: true };
         return { error: snapErr.message };
       }
-      const snapByCode = new Map<string, MediaSnapshotRow>(
-        ((snapRows ?? []) as MediaSnapshotRow[]).map((r) => [r.category_code, r]),
-      );
+      // Uma linha POR SETOR: a categoria pode ser orçada pelo Comercial e pelo
+      // Produto. Agrupa em lista e soma — um Map por código perderia setores.
+      const todasSnaps = (snapRows ?? []) as MediaSnapshotRow[];
+      // Códigos com linha gravada em QUALQUER setor: é o que impede a média
+      // viva de reaparecer no setor filtrado quando o valor salvo é de outro.
+      const comLinhaNoAno = new Set(todasSnaps.map((r) => r.category_code));
+      const snapsDoEscopo = filtroSetor
+        ? todasSnaps.filter((r) => r.setor_id === filtroSetor)
+        : todasSnaps;
+      const snapsByCode = new Map<string, MediaSnapshotRow[]>();
+      for (const r of snapsDoEscopo) {
+        const lista = snapsByCode.get(r.category_code) ?? [];
+        lista.push(r);
+        snapsByCode.set(r.category_code, lista);
+      }
       // Realizado do ano-base AO VIVO — mesmo cálculo da tela de Média. A prévia
       // lia só o snapshot salvo, mas a tela mostra `mediaValor ?? realizado.media`
       // (sugestão viva antes de "Recalcular p/ salvar"): categoria com valor
       // vivo mas sem snapshot aparecia zerada aqui. Usamos o MESMO efetivo.
-      const mediaCodes = mediaCats.map((c) => c.category_code);
+      const catsEscopo = noEscopo(mediaCats, new Set(snapsByCode.keys()));
+      mediaCategorias = catsEscopo.length;
+      const mediaCodes = catsEscopo.map((c) => c.category_code);
       const realizados = await fetchRealizados(supabase, companyId, year - 1, mediaCodes);
-      for (const cat of mediaCats) {
-        const snap = snapByCode.get(cat.category_code);
-        // Efetiva = snapshot salvo; sem ele, a média viva do realizado.
-        const bruto =
-          snap?.media_valor != null
-            ? Number(snap.media_valor)
-            : realizados.get(cat.category_code)?.media ?? null;
-        const projetado = projetarMedia(bruto, indicePercent(snap?.indice_key ?? null));
-        if (projetado == null || projetado === 0) {
+      for (const cat of catsEscopo) {
+        const snaps = snapsByCode.get(cat.category_code) ?? [];
+        // Sem nenhuma linha gravada, vale a média VIVA do realizado (é o que a
+        // tela mostra antes de "Recalcular p/ salvar"). Com linhas, soma-se o
+        // projetado de cada setor.
+        // Filtrando por setor, a média viva só vale se a categoria não tiver
+        // linha gravada em setor NENHUM: se tem e ela é de outro setor, o valor
+        // pertence a ele, e ressuscitá-lo aqui contaria a despesa duas vezes.
+        if (filtroSetor && snaps.length === 0 && comLinhaNoAno.has(cat.category_code)) continue;
+        const parcelas = snaps.length > 0 ? snaps : [null];
+        let projetado = 0;
+        let bruto: number | null = null;
+        let snap: MediaSnapshotRow | null = null;
+        for (const s of parcelas) {
+          const brutoParcela =
+            s?.media_valor != null
+              ? Number(s.media_valor)
+              : realizados.get(cat.category_code)?.media ?? null;
+          const proj = projetarMedia(brutoParcela, indicePercent(s?.indice_key ?? null));
+          if (proj == null) continue;
+          projetado += proj;
+          // Guarda a maior parcela só para o texto do drilldown.
+          if (bruto == null || (brutoParcela ?? 0) > bruto) {
+            bruto = brutoParcela;
+            snap = s;
+          }
+        }
+        if (projetado === 0) {
           mediaSemValor += 1;
           continue;
         }
-        aplicar(cat.category_code, cat.category_name ?? cat.category_code, Array<number>(12).fill(projetado));
+        // A média não tem sublinhas: o item único explica de onde saiu o
+        // número (média do realizado do ano-base + índice aplicado).
+        const indiceNome = snap?.indice_key
+          ? INDICES.find((i) => i.key === snap.indice_key)?.label ?? snap.indice_key
+          : null;
+        const detalheMedia =
+          [
+            bruto != null ? `média ${formatBRLSimples(bruto)}/mês em ${year - 1}` : null,
+            indiceNome ? `corrigida por ${indiceNome}` : "sem correção",
+          ]
+            .filter(Boolean)
+            .join(" · ") + etiquetaSetor(snap?.setor_id);
+        aplicar(
+          cat.category_code,
+          cat.category_name ?? cat.category_code,
+          Array<number>(12).fill(projetado),
+          "media",
+          [
+            {
+              nome: cat.category_name ?? cat.category_code,
+              detalhe: detalheMedia,
+              meses: Array<number>(12).fill(projetado),
+              totalAno: projetado * 12,
+            },
+          ],
+        );
       }
     }
 
@@ -268,7 +486,7 @@ export async function getPreviaOrcamento(
     if (vfCats.length > 0) {
       const { data: vfRows, error: vfErr } = await supabase
         .from("orcamento_valor_fixo_categorias")
-        .select("category_code, valor_base, indice_key, mes_reajuste")
+        .select("category_code, setor_id, valor_base, indice_key, mes_reajuste, descricao")
         .eq("company_id", companyId)
         .eq("year", year);
       if (vfErr) {
@@ -277,14 +495,20 @@ export async function getPreviaOrcamento(
       }
       // Uma categoria pode ter N contratos (linhas) — agrupa por código e SOMA
       // as séries de cada contrato antes de aplicar na linha da DRE.
+      // Cada contrato tem o seu setor: filtrar aqui recorta a categoria sem
+      // perder os contratos dos outros setores na visão consolidada.
       const vfByCode = new Map<string, ValorFixoSnapshotRow[]>();
       for (const r of (vfRows ?? []) as ValorFixoSnapshotRow[]) {
+        if (filtroSetor && r.setor_id !== filtroSetor) continue;
         if (!vfByCode.has(r.category_code)) vfByCode.set(r.category_code, []);
         vfByCode.get(r.category_code)!.push(r);
       }
-      for (const cat of vfCats) {
+      const vfEscopo = noEscopo(vfCats, new Set(vfByCode.keys()));
+      valorFixoCategorias = vfEscopo.length;
+      for (const cat of vfEscopo) {
         const contratos = vfByCode.get(cat.category_code) ?? [];
         const meses = Array<number>(12).fill(0);
+        const itensVf: PreviaFonteItem[] = [];
         for (const snap of contratos) {
           const base = snap.valor_base == null ? null : Number(snap.valor_base);
           if (base == null) continue;
@@ -293,13 +517,27 @@ export async function getPreviaOrcamento(
           const unit = INDICE_UNIT.get(snap.indice_key ?? "") ?? "percent";
           const serie = projetarValorFixoSerie(base, indicePercent(snap.indice_key ?? null), mes, unit);
           for (let m = 0; m < 12; m += 1) meses[m] += serie[m] ?? 0;
+          const indiceNome = snap.indice_key
+            ? INDICES.find((i) => i.key === snap.indice_key)?.label ?? snap.indice_key
+            : null;
+          itensVf.push({
+            // Contrato único costuma vir sem descrição — cai no nome da categoria.
+            nome: snap.descricao?.trim() || (cat.category_name ?? cat.category_code),
+            detalhe:
+              [
+                `base ${formatBRLSimples(base)}`,
+                indiceNome ? `${indiceNome}${mes ? ` em ${MESES_CURTO[mes - 1]}` : ""}` : "sem correção",
+              ].join(" · ") + etiquetaSetor(snap.setor_id),
+            meses: serie.slice(0, 12),
+            totalAno: serie.reduce((a, b) => a + b, 0),
+          });
         }
         // "Sem valor" quando nenhum contrato tem base (a soma zera).
         if (somar(meses) === 0) {
           valorFixoSemValor += 1;
           continue;
         }
-        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses);
+        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses, "valor_fixo", itensVf);
       }
     }
 
@@ -311,7 +549,7 @@ export async function getPreviaOrcamento(
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
         .from("orcamento_planejamento_socios")
-        .select("category_code, proposta, proposta_confirmada")
+        .select("category_code, setor_id, proposta, proposta_confirmada")
         .eq("company_id", companyId)
         .eq("year", year);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
@@ -319,11 +557,26 @@ export async function getPreviaOrcamento(
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
       const psByCode = new Map<
         string,
-        { valorMensal: number; mesInicio: number; mesFim: number | null; periodicidade: "mensal" | "anual" }[]
+        {
+          descricao: string;
+          valorMensal: number;
+          mesInicio: number;
+          mesFim: number | null;
+          periodicidade: Periodicidade;
+          /** Setor da proposta que gerou o item — só para rotular o drilldown. */
+          setorId: string | null;
+        }[]
       >();
-      ((psRows ?? []) as { category_code: string; proposta: unknown; proposta_confirmada: boolean | null }[]).forEach(
+      ((psRows ?? []) as {
+        category_code: string;
+        setor_id: string | null;
+        proposta: unknown;
+        proposta_confirmada: boolean | null;
+      }[]).forEach(
         (r) => {
           if (r.proposta_confirmada !== true) return; // só a proposta CONFIRMADA
+          // A proposta é por (categoria × setor): filtrando, só entra a do setor.
+          if (filtroSetor && r.setor_id !== filtroSetor) return;
           const p = r.proposta as { itens?: unknown } | null;
           const itens = Array.isArray(p?.itens) ? (p!.itens as Record<string, unknown>[]) : [];
           const arr = itens.map((it) => {
@@ -331,32 +584,90 @@ export async function getPreviaOrcamento(
             const mes = Number(it.mesInicio ?? it.mes_inicio ?? 1);
             const fimRaw = it.mesFim ?? it.mes_fim;
             const fim = fimRaw == null ? null : Number(fimRaw);
-            const periodicidade = it.periodicidade === "anual" ? ("anual" as const) : ("mensal" as const);
+            // toPeriodicidade cobre as 5 opções (mensal..anual) e cai em mensal
+            // quando o valor gravado é desconhecido.
+            const periodicidade = toPeriodicidade(it.periodicidade);
             return {
+              setorId: r.setor_id ?? null,
+              descricao: typeof it.descricao === "string" && it.descricao.trim() !== ""
+                ? it.descricao.trim()
+                : "Item sem descrição",
               valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
               mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
               mesFim: fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
               periodicidade,
             };
           });
-          if (arr.length > 0) psByCode.set(r.category_code, arr);
+          // ACUMULA: a categoria pode ter uma proposta POR SETOR, e o orçado da
+          // categoria é a soma de todas. Sobrescrever perderia setores.
+          if (arr.length > 0) {
+            const acumulado = psByCode.get(r.category_code) ?? [];
+            acumulado.push(...arr);
+            psByCode.set(r.category_code, acumulado);
+          }
         },
       );
-      for (const cat of psCats) {
-        const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);
+      const psEscopo = noEscopo(psCats, new Set(psByCode.keys()));
+      planejamentoCategorias = psEscopo.length;
+      for (const cat of psEscopo) {
+        const itensProposta = psByCode.get(cat.category_code) ?? [];
+        const meses = categoriaSerie(itensProposta);
         if (somar(meses) === 0) {
           planejamentoSemValor += 1;
           continue;
         }
-        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses);
+        // Cada item que o gestor planejou vira uma linha do drilldown, com a
+        // própria série (a periodicidade muda em quais meses ele cai).
+        const itensPs: PreviaFonteItem[] = itensProposta
+          .map((it) => {
+            const serie = serieItem(it.valorMensal, it.mesInicio, it.periodicidade, it.mesFim);
+            const ate =
+              it.periodicidade !== "anual" && it.mesFim != null && it.mesFim < 12
+                ? ` até ${MESES_CURTO[it.mesFim - 1]}`
+                : "";
+            return {
+              nome: it.descricao,
+              detalhe: `${formatBRLSimples(it.valorMensal)} ${periodicidadeLabel(it.periodicidade)} · a partir de ${MESES_CURTO[it.mesInicio - 1]}${ate}${etiquetaSetor(it.setorId)}`,
+              meses: serie,
+              totalAno: serie.reduce((a, b) => a + b, 0),
+            };
+          })
+          .filter((i) => i.totalAno !== 0)
+          .sort((a, b) => b.totalAno - a.totalAno);
+        aplicar(
+          cat.category_code,
+          cat.category_name ?? cat.category_code,
+          meses,
+          "planejamento_socios",
+          itensPs,
+        );
+      }
+
+      // Proposta gravada numa gêmea "(*)" que o card canônico substituiu: não
+      // entra no orçamento, mas é reportada para o planejamento não sumir calado.
+      for (const cat of psGemeasIgnoradas) {
+        const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);
+        if (somar(meses) === 0) continue;
+        planejamentoGemeaIgnorada.push({
+          chave: cat.category_name ?? cat.category_code,
+          meses,
+          totalAno: somar(meses),
+        });
       }
     }
   }
 
   // ── PESSOAL ─────────────────────────────────────────────────────────────────
-  // A empresa inteira (SETOR_TODOS) — é o número que vai para a DRE.
-  const previaRes = await getPrevia(companyId, year, { setorId: SETOR_TODOS });
+  // Sem filtro, a empresa inteira (SETOR_TODOS) — é o número que vai para a
+  // DRE. Com um setor, só os colaboradores dele; quem está no quadro sem setor
+  // não aparece em setor nenhum, e por isso a soma dos setores pode ficar
+  // abaixo de "Todos" nas linhas de pessoal (a tela avisa).
+  const previaRes = await getPrevia(companyId, year, {
+    setorId: filtroSetor ?? SETOR_TODOS,
+    detalharColaboradores: true,
+  });
   if (previaRes.needsMigration) return { needsMigration: true };
+  const pessoalColaboradores = previaRes.payload?.totalColaboradores ?? 0;
   if (previaRes.payload && previaRes.payload.totalColaboradores > 0) {
     // Mapeamento rótulo → conta (as "Linhas do Orçamento").
     const { data: labelRows, error: labelErr } = await supabase
@@ -382,6 +693,30 @@ export async function getPreviaOrcamento(
         continue;
       }
       pushMeses(leafByScopedId, scopedId, linha.meses);
+      // Abertura: quanto cada colaborador contribui NESTA linha (o salário
+      // dele, o INSS dele…). Só quem tem valor na linha entra.
+      const itensPessoal: PreviaFonteItem[] = (previaRes.payload.porColaborador ?? [])
+        .map((colab): PreviaFonteItem | null => {
+          const dele = colab.linhas.find((l) => l.key === linha.key);
+          if (!dele || dele.totalAno === 0) return null;
+          return {
+            nome: colab.nome?.trim() || "Sem nome",
+            detalhe: vinculoLabel(colab.vinculo) + etiquetaSetor(colab.setorId),
+            meses: dele.meses,
+            totalAno: dele.totalAno,
+          };
+        })
+        .filter((x): x is PreviaFonteItem => x != null)
+        .sort((a, b) => b.totalAno - a.totalAno);
+      pushFonte(scopedId, {
+        metodo: "pessoal",
+        metodoLabel: metodoLabel("pessoal"),
+        chave: linha.label,
+        meses: linha.meses,
+        totalAno: somar(linha.meses),
+        href: workspaceTabHref(companyId, year, "pessoal"),
+        itens: itensPessoal,
+      });
     }
   }
 
@@ -396,6 +731,30 @@ export async function getPreviaOrcamento(
     });
     perMonthRows.push(buildDashboardRows(scope.coreAccounts, amounts).rows);
   }
+
+  // ── Fontes por linha ───────────────────────────────────────────────────────
+  // A folha tem as suas; a totalizadora herda as dos descendentes, para o
+  // drilldown funcionar também num nível agregado. Linha CALCULADA (fórmula)
+  // fica de fora: ela combina outras linhas com sinais, e listar origens ali
+  // sugeriria uma soma simples que não é o que a fórmula faz.
+  const filhosPorPai = new Map<string, string[]>();
+  for (const conta of scope.coreAccounts) {
+    if (!conta.parent_id) continue;
+    const lista = filhosPorPai.get(conta.parent_id) ?? [];
+    lista.push(conta.id);
+    filhosPorPai.set(conta.parent_id, lista);
+  }
+  const fontesMemo = new Map<string, PreviaFonte[]>();
+  const coletarFontes = (id: string): PreviaFonte[] => {
+    const pronto = fontesMemo.get(id);
+    if (pronto) return pronto;
+    const acc = [...(fontesByScopedId.get(id) ?? [])];
+    for (const filho of filhosPorPai.get(id) ?? []) acc.push(...coletarFontes(filho));
+    // Maior contribuição primeiro: é o que o leitor quer ver de cara.
+    acc.sort((a, b) => b.totalAno - a.totalAno);
+    fontesMemo.set(id, acc);
+    return acc;
+  };
 
   const base = perMonthRows[0] ?? [];
   const linhas: PreviaDreLinha[] = base.map((row, i) => {
@@ -412,6 +771,7 @@ export async function getPreviaOrcamento(
       hasChildren: row.hasChildren,
       meses,
       totalAno: somar(meses),
+      fontes: row.type === "calculado" ? [] : coletarFontes(row.id),
     };
   });
 
@@ -428,6 +788,7 @@ export async function getPreviaOrcamento(
       linhas,
       pessoalNaoClassificado,
       categoriasNaoMapeadas,
+      planejamentoGemeaIgnorada,
       resumo: {
         temReceita,
         mediaCategorias,
@@ -436,6 +797,7 @@ export async function getPreviaOrcamento(
         valorFixoSemValor,
         planejamentoCategorias,
         planejamentoSemValor,
+        pessoalColaboradores,
         totalDespesa,
         totalReceita,
       },
