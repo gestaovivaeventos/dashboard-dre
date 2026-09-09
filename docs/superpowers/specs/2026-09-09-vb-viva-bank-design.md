@@ -205,7 +205,10 @@ Linhas de lote nunca são apagadas (histórico de quem importou o quê).
 - Leituras nas páginas usam o client do usuário (RLS de verdade); escritas
   usam `createAdminClient()`.
 
-`supabase/types.ts` é regenerado após a migration.
+O `types.ts` do Supabase neste projeto é escrito à mão (não há `Database`
+gerado), então as linhas das tabelas ficam em `src/lib/vb/types.ts`, junto do
+módulo; em `src/lib/supabase/types.ts` entram só `VbRole` e os campos de
+sessão.
 
 ## 6. Parser da planilha
 
@@ -398,18 +401,20 @@ Validação com `zod` no server action `createVbEntry`.
 ## 11. Arquivos
 
 Novos: `supabase/migrations/20260909120000_vb_module.sql`,
-`src/lib/auth/vb.ts`, `src/lib/vb/auth.ts`, `src/lib/vb/import/parse-vb-workbook.ts`,
-`src/lib/vb/import/excel-date.ts`, `src/lib/vb/ledger.ts` (saldo corrente,
-agrupamento por ano, totais), `src/lib/vb/actions/{import,entries,creditors}.ts`,
-`src/lib/vb/format.ts` (explicação do rendimento), `src/app/(vb)/vb/{layout,
-error,loading}.tsx`, `src/app/(vb)/vb/page.tsx`,
+`src/lib/auth/vb.ts`, `src/lib/vb/{types,auth,money,ledger,format,queries}.ts`,
+`src/lib/vb/import/{excel-date,parse-vb-workbook,to-rows}.ts`,
+`src/lib/vb/actions/{import,entries,creditors}.ts`,
+`src/app/api/vb/import/route.ts`, `src/app/(vb)/error.tsx`,
+`src/app/(vb)/vb/{layout,loading,page}.tsx`,
 `src/app/(vb)/vb/credores/[id]/page.tsx`, `src/app/(vb)/vb/importar/page.tsx`,
 `src/app/(vb)/vb/importar/[batchId]/page.tsx`, `src/components/vb/*`,
-`scripts/vb-parse-check.ts`.
+`scripts/vb-parse-check.ts`, testes `*.test.ts` ao lado dos módulos puros
+(rodados por `npm test`, `node --test` + `tsx`).
 
 Alterados: `src/lib/auth/session.ts`, `src/lib/auth/access.ts`,
 `src/lib/supabase/middleware.ts`, `src/app/page.tsx`,
 `src/lib/context/{active-context,modules}.ts`,
 `src/components/app/{navigation,nav-links,app-shell}.tsx`, layouts de
 `(app)`, `(ctrl)`, `(case)`, `(viagens)`, `src/lib/supabase/types.ts`
-(regenerado + tipos de sessão), `CLAUDE.md` (seção do módulo VB).
+(`VbRole` + campos de sessão), `package.json` (script `test`), `CLAUDE.md`
+(seção do módulo VB).
