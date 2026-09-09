@@ -9,6 +9,7 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import {
   fetchRealizados,
@@ -776,8 +777,16 @@ export async function getPlanejamentoSocios(
   const canonicas = apenasCanonicas(doMetodoTodos);
 
   // Só as categorias atribuídas a ESTE setor (tela Método por categoria).
+  // Empresa sem "Orçar por setor": as linhas existem num setor-balde, mas a
+  // tela manda setor nulo — e `.eq("setor_id", null)` vira `eq.null` no
+  // PostgREST, que não casa com NADA. Filtrar aí esvaziaria a tela inteira.
+  const porSetorLista = await orcaPorSetor(
+    createAdminClientIfAvailable() ?? (await createClient()),
+    companyId,
+    year,
+  );
   let doMetodo = canonicas;
-  if (setorId) {
+  if (porSetorLista && setorId) {
     const { data: atrib, error: atribErr } = await (createAdminClientIfAvailable() ??
       (await createClient()))
       .from("orcamento_categoria_setores")
@@ -792,12 +801,13 @@ export async function getPlanejamentoSocios(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const { data: catRows, error: catErr } = await supabase
+  let catQuery = supabase
     .from("orcamento_planejamento_socios")
     .select("category_code, base_salva, proposta, proposta_confirmada")
     .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("year", year);
+  if (porSetorLista) catQuery = catQuery.eq("setor_id", setorEspecifico(setorId));
+  const { data: catRows, error: catErr } = await catQuery;
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
@@ -871,28 +881,33 @@ export async function getPlanejamentoCategoria(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const { data: catRow, error: catErr } = await supabase
+  // Ver getPlanejamentoSocios: sem orçar por setor a tela manda setor nulo, e
+  // filtrar por ele não traria linha nenhuma. A empresa tem uma linha só por
+  // categoria nesse caso, então o maybeSingle continua válido.
+  const porSetorDetalhe = await orcaPorSetor(supabase, companyId, year);
+  let catQ = supabase
     .from("orcamento_planejamento_socios")
     .select(
       "category_code, category_name, justificativa, conversa, status, base_salva, contexto_admin, proposta, proposta_confirmada",
     )
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId))
-    .maybeSingle<CategoriaRow>();
+    .eq("category_code", categoryCode);
+  if (porSetorDetalhe) catQ = catQ.eq("setor_id", setorEspecifico(setorId));
+  const { data: catRow, error: catErr } = await catQ.maybeSingle<CategoriaRow>();
   if (catErr) {
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
   }
 
-  const { data: itemRows, error: itemErr } = await supabase
+  let itensQ = supabase
     .from("orcamento_planejamento_socios_itens")
     .select("id, category_code, descricao, valor_mensal, mes_inicio, mes_fim, periodicidade, origem, fornecedor, incluir")
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId))
+    .eq("category_code", categoryCode);
+  if (porSetorDetalhe) itensQ = itensQ.eq("setor_id", setorEspecifico(setorId));
+  const { data: itemRows, error: itemErr } = await itensQ
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
   if (itemErr) {
@@ -964,14 +979,16 @@ async function montarSistemaEntrevista(params: {
   // BASE VAZIA = admin validou a categoria sem itens → entrevista ABERTA.
   const semBase = contexto.length === 0;
 
-  const ctxQuery = supabase
+  let ctxQ = supabase
     .from("orcamento_planejamento_socios")
     .select("contexto_admin")
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId))
-    .maybeSingle<{ contexto_admin: string | null }>();
+    .eq("category_code", categoryCode);
+  if (await orcaPorSetor(supabase, companyId, year)) {
+    ctxQ = ctxQ.eq("setor_id", setorEspecifico(setorId));
+  }
+  const ctxQuery = ctxQ.maybeSingle<{ contexto_admin: string | null }>();
   const companyQuery = supabase
     .from("companies")
     .select("name")
@@ -1138,11 +1155,16 @@ export async function enviarMensagemPlanejamento(
   // Persiste a conversa sempre; e, quando a proposta é fechada (Etapa 3), grava-a
   // na coluna jsonb e DESCONGELA (proposta_confirmada=false) — proposta nova pede
   // nova confirmação. A BASE (itens) NÃO é tocada aqui.
+  // A chave do upsert inclui o setor, e NULL nunca casa com a linha anterior —
+  // gravaria uma conversa nova a cada turno. Ver setor-gravacao.ts.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
+
   const payload: Record<string, unknown> = {
     company_id: companyId,
     year,
     category_code: categoryCode,
-    setor_id: setorEspecifico(setorId),
+    setor_id: alvo.id,
     category_name: categoryName,
     conversa: novaConversa,
     updated_by: admin.userId,
@@ -1248,12 +1270,14 @@ export async function persistirConversaEntrevista(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
       company_id: companyId,
       year,
       category_code: categoryCode,
-      setor_id: setorEspecifico(setorId),
+      setor_id: alvo.id,
       category_name: categoryName,
       conversa: sanitizeConversa(conversa),
       updated_by: admin.userId,
@@ -1303,12 +1327,15 @@ export async function salvarBasePlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
+
   const { error: catErr } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
       company_id: companyId,
       year,
       category_code: categoryCode,
-      setor_id: setorEspecifico(setorId),
+      setor_id: alvo.id,
       category_name: categoryName,
       base_salva: true,
       contexto_admin: ctx || null,
@@ -1327,14 +1354,14 @@ export async function salvarBasePlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (delErr) return { error: delErr.message };
 
   const rows = limpos.map((i) => ({
     company_id: companyId,
     year,
     category_code: categoryCode,
-    setor_id: setorEspecifico(setorId),
+    setor_id: alvo.id,
     descricao: i.descricao.trim(),
     valor_mensal: i.valorMensal,
     mes_inicio: i.mesInicio,
@@ -1373,6 +1400,8 @@ export async function confirmarPropostaPlanejamento(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .update({
@@ -1384,7 +1413,7 @@ export async function confirmarPropostaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1419,6 +1448,8 @@ export async function editarPropostaPlanejamento(
   if (limpos.length === 0) return { error: "A proposta precisa de ao menos um item." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .update({
@@ -1428,7 +1459,7 @@ export async function editarPropostaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1458,6 +1489,8 @@ export async function reiniciarConversaPlanejamento(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .update({
@@ -1470,7 +1503,7 @@ export async function reiniciarConversaPlanejamento(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -1496,13 +1529,15 @@ export async function removerPlanejamentoSocios(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")
     .delete()
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (itemErr) return { error: itemErr.message };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1510,7 +1545,7 @@ export async function removerPlanejamentoSocios(
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("category_code", categoryCode)
-    .eq("setor_id", setorEspecifico(setorId));
+    .eq("setor_id", alvo.id);
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { ok: true };

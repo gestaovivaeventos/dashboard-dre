@@ -108,7 +108,11 @@ export function CategoriaMetodoManager({
 
     // Setores ativos do ano + a atribuição atual, em paralelo.
     const [setoresRes, atribRes] = await Promise.all([getSetores(id, y), getCategoriaSetores(id, y)]);
-    setSetores((setoresRes.items ?? []).filter((x) => x.active));
+    // Sem "Orçar por setor", a coluna de setores não faz sentido: a categoria
+    // vale para a empresa inteira e não há a quem atribuí-la.
+    setSetores(
+      setoresRes.orcarPorSetor ? (setoresRes.items ?? []).filter((x) => x.active) : [],
+    );
     setSetoresPorCat(atribRes.mapa ?? {});
   }
 
@@ -271,7 +275,7 @@ export function CategoriaMetodoManager({
           <p className="text-sm text-muted-foreground">
             {definedCount} de {items.length} categorias com método definido.
           </p>
-          {mediasDuplicadas.length > 0 && (
+          {setores.length > 0 && mediasDuplicadas.length > 0 && (
         <div className="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
           <p className="font-medium text-amber-700 dark:text-amber-500">
             {mediasDuplicadas.length} categoria(s) por média em mais de um setor
@@ -293,12 +297,14 @@ export function CategoriaMetodoManager({
                   <th className="px-4 py-2.5 font-medium">Categoria</th>
                   <th className="px-4 py-2.5 font-medium">Linha DRE</th>
                   <th className="px-4 py-2.5 font-medium">Método de orçamento</th>
-                  <th
-                    className="px-4 py-2.5 font-medium"
-                    title="Quais setores orçam esta categoria. Só as combinações marcadas viram card nas telas de método."
-                  >
-                    Setores
-                  </th>
+                  {setores.length > 0 && (
+                    <th
+                      className="px-4 py-2.5 font-medium"
+                      title="Quais setores orçam esta categoria. Só as combinações marcadas viram card nas telas de método."
+                    >
+                      Setores
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -351,24 +357,29 @@ export function CategoriaMetodoManager({
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-2">
-                      {item.metodo == null ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : (
-                        <SetoresMultiSelect
-                          setores={setores}
-                          selecionados={setoresPorCat[item.categoryCode] ?? []}
-                          unico={item.metodo === "media"}
-                          onCommit={(ids) => void handleSetores(item.categoryCode, ids)}
-                          salvando={salvandoSetores === item.categoryCode}
-                        />
-                      )}
-                    </td>
+                    {setores.length > 0 && (
+                      <td className="px-4 py-2">
+                        {item.metodo == null ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <SetoresMultiSelect
+                            setores={setores}
+                            selecionados={setoresPorCat[item.categoryCode] ?? []}
+                            unico={item.metodo === "media"}
+                            onCommit={(ids) => void handleSetores(item.categoryCode, ids)}
+                            salvando={salvandoSetores === item.categoryCode}
+                          />
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td
+                      colSpan={setores.length > 0 ? 4 : 3}
+                      className="px-4 py-8 text-center text-sm text-muted-foreground"
+                    >
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>

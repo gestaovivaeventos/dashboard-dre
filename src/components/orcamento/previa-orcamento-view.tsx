@@ -117,7 +117,8 @@ export function PreviaOrcamentoView({
     setSetorId((atual) => (atual === SETOR_TODOS ? atual : SETOR_TODOS));
     void getSetores(companyId, year).then((res) => {
       if (cancelado) return;
-      setSetores((res.items ?? []).filter((x) => x.active));
+      // Chave "Orçar por setor" desligada: sem recorte por setor nesta empresa.
+      setSetores(res.orcarPorSetor ? (res.items ?? []).filter((x) => x.active) : []);
     });
     return () => {
       cancelado = true;

@@ -8,6 +8,7 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { INDICES, type IndiceKey } from "@/lib/orcamento/indices";
 import {
   fetchRealizados,
@@ -199,6 +200,19 @@ export async function getMediaCategorias(
     (saved ?? []).map((r) => [chave(r.category_code as string, (r.setor_id as string) ?? null), r]),
   );
 
+  // Empresa sem "Orçar por setor": a categoria tem UMA linha, e o setor dela é
+  // só o balde onde ficou gravada (a chave única do banco exige um). Casar por
+  // setor aqui faria o valor salvo sumir da tela, porque a tela manda setor
+  // nulo. Então, com a chave desligada, casa-se só pela categoria.
+  const porSetor = await orcaPorSetor(supabase, companyId, year);
+  const savedByCode = new Map<string, NonNullable<typeof saved>[number]>();
+  if (!porSetor) {
+    for (const r of saved ?? []) {
+      const code = r.category_code as string;
+      if (!savedByCode.has(code)) savedByCode.set(code, r);
+    }
+  }
+
   // Nomes dos setores, para rotular as linhas na visão "Todos os setores".
   const { data: setoresRows } = await supabase
     .from("orcamento_setores")
@@ -217,6 +231,12 @@ export async function getMediaCategorias(
   // setores aparece duas vezes, cada uma com o seu valor.
   const pares: { code: string; setorId: string | null }[] = [];
   for (const code of codes) {
+    // Sem orçar por setor: uma linha por categoria, no setor em que ela já está
+    // gravada (ou nenhum, se ainda não existir — a gravação resolve o balde).
+    if (!porSetor) {
+      pares.push({ code, setorId: (savedByCode.get(code)?.setor_id as string) ?? null });
+      continue;
+    }
     const doCode = cats.setoresPorCodigo?.get(code);
     if (doCode && doCode.length > 0) {
       for (const sid of doCode) pares.push({ code, setorId: sid });
@@ -226,7 +246,7 @@ export async function getMediaCategorias(
   }
 
   const items: MediaCategoriaItem[] = pares.map(({ code, setorId: sid }) => {
-    const row = savedByKey.get(chave(code, sid));
+    const row = porSetor ? savedByKey.get(chave(code, sid)) : savedByCode.get(code);
     const indiceKey = isIndiceKey(row?.indice_key) ? (row!.indice_key as IndiceKey) : null;
     return {
       categoryCode: code,
@@ -275,13 +295,18 @@ export async function calcularMedia(
   const realizado = realizados.get(categoryCode) ?? REALIZADO_VAZIO;
   const calculadoEm = new Date().toISOString();
 
+  // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
+  // encontra a linha anterior e duplicaria a categoria a cada gravação.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
+
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
       year,
       category_code: categoryCode,
       category_name: categoryName,
-      setor_id: setorId,
+      setor_id: alvo.id,
       media_valor: realizado.media,
       manual: false,
       base_year: baseYear,
@@ -336,6 +361,11 @@ export async function recalcularTodasMedias(
   const realizados = await fetchRealizados(supabase, companyId, baseYear, codes);
   const calculadoEm = new Date().toISOString();
 
+  // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
+  // encontra a linha anterior e duplicaria a categoria a cada gravação.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
+
   const rows = codes.map((code) => {
     const realizado = realizados.get(code) ?? REALIZADO_VAZIO;
     return {
@@ -343,7 +373,7 @@ export async function recalcularTodasMedias(
       year,
       category_code: code,
       category_name: cats.codes.get(code) ?? code,
-      setor_id: setorId,
+      setor_id: alvo.id,
       media_valor: realizado.media,
       manual: false,
       base_year: baseYear,
@@ -383,13 +413,17 @@ export async function setMediaValor(
   }
 
   const supabase = db() ?? (await createClient());
+  // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
+  // encontra a linha anterior e duplicaria a categoria a cada gravação.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
       year,
       category_code: categoryCode,
       category_name: categoryName,
-      setor_id: setorId,
+      setor_id: alvo.id,
       media_valor: valor,
       manual: valor != null,
       updated_by: admin.userId,
@@ -421,13 +455,17 @@ export async function setMediaIndice(
   if (indiceKey != null && !isIndiceKey(indiceKey)) return { error: "Índice inválido." };
 
   const supabase = db() ?? (await createClient());
+  // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
+  // encontra a linha anterior e duplicaria a categoria a cada gravação.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
       year,
       category_code: categoryCode,
       category_name: categoryName,
-      setor_id: setorId,
+      setor_id: alvo.id,
       indice_key: indiceKey,
       updated_by: admin.userId,
     },

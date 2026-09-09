@@ -1529,7 +1529,12 @@ export function PlanejamentoSociosManager({
     void (async () => {
       const res = await getSetores(companyId, year);
       if (cancelado) return;
-      const ativos = (res.items ?? []).filter((x) => x.active);
+      // "Orçar por setor" DESLIGADO: a empresa é orçada como um bloco só.
+      // Zerar a lista aqui apaga, de uma vez, o seletor de setor, a coluna de
+      // setor e o botão Mover — todos já condicionados a `setores.length > 0`.
+      const ativos = res.orcarPorSetor
+        ? (res.items ?? []).filter((x) => x.active)
+        : [];
       setSetores(ativos);
       const primeiro = ativos[0]?.id ?? null;
       setSetorId(primeiro);
@@ -1620,11 +1625,48 @@ export function PlanejamentoSociosManager({
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{loadError}</div>
       )}
 
+      {/* Seletor de setor SEMPRE visível — inclusive quando o setor escolhido não
+          tem categoria nenhuma. Ele ficava dentro do ramo de baixo, então cair
+          num setor vazio deixava a tela sem nenhuma forma de trocar de setor. */}
+      {setores.length > 0 && (
+        <div className="w-64 space-y-1.5">
+          <label className="text-sm font-medium">Setor</label>
+          <select
+            value={setorId ?? ""}
+            onChange={(e) => handleSetor(e.target.value)}
+            disabled={loading}
+            title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+            className={INPUT_CLS}
+          >
+            {setores.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+            <option value={SETOR_TODOS}>Todos os setores</option>
+          </select>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nenhuma categoria desta empresa está marcada para o método{" "}
-          <span className="font-medium">Planejamento dos gestores</span> em {year}. Defina o método em
-          Configuração → Método por categoria.
+          {setores.length > 0 && setorId && setorId !== SETOR_TODOS ? (
+            <>
+              Nenhuma categoria está vinculada a{" "}
+              <span className="font-medium">
+                {setores.find((x) => x.id === setorId)?.name ?? "este setor"}
+              </span>{" "}
+              pelo método <span className="font-medium">Planejamento dos gestores</span> em {year}.
+              Escolha outro setor acima, ou vincule a categoria em Configuração → Método por
+              categoria.
+            </>
+          ) : (
+            <>
+              Nenhuma categoria desta empresa está marcada para o método{" "}
+              <span className="font-medium">Planejamento dos gestores</span> em {year}. Defina o
+              método em Configuração → Método por categoria.
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -1669,25 +1711,6 @@ export function PlanejamentoSociosManager({
             </div>
           </div>
 
-          {setores.length > 0 && (
-            <div className="w-64 space-y-1.5">
-              <label className="text-sm font-medium">Setor</label>
-              <select
-                value={setorId ?? ""}
-                onChange={(e) => handleSetor(e.target.value)}
-                disabled={loading}
-                title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
-                className={INPUT_CLS}
-              >
-                {setores.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-                <option value={SETOR_TODOS}>Todos os setores</option>
-              </select>
-            </div>
-          )}
 
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
