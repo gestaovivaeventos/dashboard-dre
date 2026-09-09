@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { DocumentosAnexosClient } from "@/components/financeiro/documentos/DocumentosAnexosClient";
+import { filterRestrictedCompanies } from "@/lib/auth/restricted-companies";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
@@ -41,10 +42,16 @@ export default async function DocumentosAnexosPage() {
     allCompanies.map((c) => c.id),
   );
 
-  const visibleCompanies =
+  // Empresas RESTRITAS (ex.: Dataforte) saem do seletor de quem nao tem o
+  // vinculo no cadastro — inclusive admin, que passa por cima do filtro acima.
+  // Ver @/lib/auth/restricted-companies; /api/financeiro/documentos repete a
+  // checagem na listagem, no download, no upload e na exclusao.
+  const visibleCompanies = filterRestrictedCompanies(
     profile?.role === "admin"
       ? allCompanies
-      : allCompanies.filter((c) => allowedCompanyIds.includes(c.id));
+      : allCompanies.filter((c) => allowedCompanyIds.includes(c.id)),
+    profile?.company_ids,
+  );
 
   // Apenas admin envia/exclui documentos. A rota POST/DELETE tambem valida
   // isso no backend — o flag aqui apenas controla a UI.

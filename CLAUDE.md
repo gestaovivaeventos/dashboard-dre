@@ -137,6 +137,16 @@ Alguns acordos de negócio não têm campo de cadastro e vivem no código: alça
 
 **Ao criar uma regra nominal nova, registre a leitura dela em `user-exceptions.ts`** — senão ela volta a ser invisível para quem administra os usuários, que é exatamente o problema que essa tela resolve.
 
+### Empresas restritas (Business Intelligence e Documentos anexos)
+
+`src/lib/auth/restricted-companies.ts` lista empresas que só aparecem para quem tem o vínculo explícito em `user_company_access` — e aqui **admin não passa por cima**. Hoje: Dataforte.
+
+Existe porque essas duas telas são de escopo **global**: listam empresas de todos os segmentos numa lista só, sem o filtro por `segment_id` do Dashboard/Fluxo/Budget. Como `resolveAllowedCompanyIds` devolve tudo para `role = 'admin'`, a Dataforte aparecia no seletor das duas telas para os três admins, nenhum deles cadastrado na empresa. A regra de negócio é "só quem está no cadastro vê".
+
+A trava está na tela **e** em toda API que a tela chama (listagem/upload/exclusão/download de documentos, geração do One Page e o histórico dele) — esconder do `<select>` não é a única defesa. O escopo para de propósito nessas duas telas: as telas por segmento seguem com admin vendo tudo, senão Mapeamento, Configurações e o sync da Omie quebram para a empresa restrita.
+
+Para liberar alguém (admin inclusive), marque a empresa na tela de Usuários. É o único caminho, de propósito — a liberação fica num cadastro visível, não numa lista de e-mails no código.
+
 ### Módulo Validação de Contratos (`/contratos`)
 
 `src/lib/auth/contratos.ts` é a fonte de verdade. A tela deixou de ser exclusiva do perfil `validador_contrato` (que isolava o usuário) e virou um **módulo** marcável em "Módulos visíveis" na tela de Usuários — assim um Gerente Sócio do Compras, por exemplo, pode validar contratos sem trocar de perfil.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { canSeeRestrictedCompany } from "@/lib/auth/restricted-companies";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ============================================================================
@@ -23,6 +24,7 @@ const MAX_RESULTS = 50;
 
 interface AiReportRow {
   id: string;
+  company_ids: string[] | null;
   period_from: string;
   period_to: string;
   created_at: string;
@@ -51,7 +53,7 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("ai_reports")
-    .select("id, period_from, period_to, created_at, content_json")
+    .select("id, company_ids, period_from, period_to, created_at, content_json")
     .eq("type", "one-page")
     .eq("created_by", user.id)
     .gte("created_at", cutoff)
@@ -62,7 +64,16 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const reports = ((data ?? []) as AiReportRow[]).map((r) => ({
+  // Empresa restrita (ex.: Dataforte) sai do historico de quem perdeu (ou
+  // nunca teve) o vinculo no cadastro — inclusive do admin que gerou o
+  // relatorio antes da regra existir. Ver @/lib/auth/restricted-companies.
+  const reports = ((data ?? []) as AiReportRow[])
+    .filter((r) =>
+      (r.company_ids ?? []).every((id) =>
+        canSeeRestrictedCompany(id, profile.company_ids),
+      ),
+    )
+    .map((r) => ({
     id: r.id,
     empresa: r.content_json?.input?.empresa?.nome ?? "—",
     periodo: r.content_json?.input?.periodo?.label ?? "—",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { canSeeRestrictedCompany } from "@/lib/auth/restricted-companies";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -15,6 +16,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //   - Pre-requisito: acesso ao modulo Financeiro (can_financeiro).
 //   - Autorizacao por empresa via resolveAllowedCompanyIds: admin ve todas;
 //     demais perfis (ex.: franqueado) apenas as de user_company_access.
+//   - Empresas RESTRITAS (ex.: Dataforte) exigem o vinculo explicito em
+//     user_company_access — nem o admin passa sem cadastro. Vale para
+//     listagem, upload e exclusao. Ver @/lib/auth/restricted-companies.
 //   - Documentos de uma empresa nunca sao retornados na consulta de outra:
 //     toda query/insert e amarrada ao company_id.
 //   - Upload e exclusao exigem perfil admin.
@@ -98,7 +102,10 @@ export async function GET(request: Request) {
   }
 
   const allowed = await resolveAllowedCompanyIds(supabase, profile, [companyId]);
-  if (!allowed.includes(companyId)) {
+  if (
+    !allowed.includes(companyId) ||
+    !canSeeRestrictedCompany(companyId, profile.company_ids)
+  ) {
     return NextResponse.json({ error: "Sem acesso a esta empresa." }, { status: 403 });
   }
 
@@ -151,6 +158,11 @@ export async function POST(request: Request) {
       { error: "Empresa obrigatoria para o upload." },
       { status: 400 },
     );
+  }
+  // Empresa restrita: nem o admin anexa documento em empresa que ele nao tem
+  // no cadastro — seria um arquivo que ele mesmo nao consegue listar depois.
+  if (!canSeeRestrictedCompany(companyId, profile.company_ids)) {
+    return NextResponse.json({ error: "Sem acesso a esta empresa." }, { status: 403 });
   }
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Arquivo obrigatorio." }, { status: 400 });
@@ -271,12 +283,15 @@ export async function DELETE(request: Request) {
   const admin = createAdminClient();
   const { data: doc } = await admin
     .from("company_documents")
-    .select("id, storage_path")
+    .select("id, company_id, storage_path")
     .eq("id", id)
-    .maybeSingle<{ id: string; storage_path: string }>();
+    .maybeSingle<{ id: string; company_id: string; storage_path: string }>();
 
   if (!doc) {
     return NextResponse.json({ error: "Documento nao encontrado." }, { status: 404 });
+  }
+  if (!canSeeRestrictedCompany(doc.company_id, profile.company_ids)) {
+    return NextResponse.json({ error: "Sem acesso a este documento." }, { status: 403 });
   }
 
   await admin.storage.from(BUCKET).remove([doc.storage_path]);
