@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
-import { currentYearBR } from "@/lib/ctrl/datetime";
+import { currentMonthBR, currentYearBR } from "@/lib/ctrl/datetime";
 import { createClient } from "@/lib/supabase/server";
 import { BudgetUpload } from "@/components/ctrl/budget-upload";
 import { OrcamentoTable, type OrcamentoRow } from "@/components/ctrl/orcamento-table";
@@ -12,13 +13,22 @@ import { OrcamentoTable, type OrcamentoRow } from "@/components/ctrl/orcamento-t
  *   para ver tudo. Usado pelo perfil "Gerente" (gerente_setor), que enxerga
  *   apenas as despesas dos setores vinculados a ele.
  */
-async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
+async function getOrcamentoData(
+  year: number,
+  sectorFilter: string[] | null,
+  throughMonth: number,
+) {
   const supabase = await createClient();
 
+  // "Até o mês atual" fecha o orçado/realizado da planilha no mês corrente
+  // (a planilha-base é mensal, com period_month). "Ano completo" (throughMonth=12)
+  // não corta nada. O realizado/pendente dinâmico é fechado no mesmo mês pela
+  // janela do countsTowardBudget, mantendo os dois lados no mesmo corte.
   let budgetQuery = supabase
     .from("ctrl_budget")
     .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
-    .eq("period_year", year);
+    .eq("period_year", year)
+    .lte("period_month", throughMonth);
   // Requisições de 1 setor (is_rateio = false). As rateadas entram pelas suas
   // parcelas (rateioQuery), cada uma no orçamento do SEU setor.
   let requestsQuery = supabase
@@ -97,7 +107,7 @@ async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
   // corte, evitando desconto duplicado. Aprovadas/agendadas → realizado; demais
   // em aberto → pendente. Mesmo critério da agregação por tipo, agora por setor.
   for (const r of requestsRes.data ?? []) {
-    if (!countsTowardBudget(r, year)) continue;
+    if (!countsTowardBudget(r, year, throughMonth)) continue;
     const typeKey = r.expense_type_id ?? "__none__";
     const sectorKey = r.sector_id ?? "__none__";
     const isApproved = r.status === "aprovado" || r.status === "agendado";
@@ -112,7 +122,7 @@ async function getOrcamentoData(year: number, sectorFilter: string[] | null) {
       | { expense_type_id: string | null; status: string; due_date: string | null; created_at: string }
       | null;
     if (!req) continue;
-    if (!countsTowardBudget(req, year)) continue;
+    if (!countsTowardBudget(req, year, throughMonth)) continue;
     const typeKey = req.expense_type_id ?? "__none__";
     const sectorKey = (row.sector_id as string | null) ?? "__none__";
     const isApproved = req.status === "aprovado" || req.status === "agendado";
@@ -152,7 +162,11 @@ async function getSectorNames(sectorIds: string[]): Promise<string[]> {
   return (data ?? []).map((s) => s.name);
 }
 
-export default async function OrcamentoPage() {
+export default async function OrcamentoPage({
+  searchParams,
+}: {
+  searchParams: { periodo?: string };
+}) {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
@@ -162,6 +176,15 @@ export default async function OrcamentoPage() {
 
   const year = currentYearBR();
   const canEditBudget = hasCtrlRole(ctx, "csc", "admin");
+
+  // Filtro de período dos KPIs e da tabela: "Até o mês atual" (padrão) considera
+  // de janeiro até o mês corrente; "Ano completo" considera os 12 meses. Fecha
+  // tanto o orçado quanto o realizado/pendente (tipos e setores) no mesmo corte.
+  const anoCompleto = searchParams.periodo === "ano";
+  const throughMonth = anoCompleto ? 12 : currentMonthBR();
+  const mesAtualLabel = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(
+    new Date(year, currentMonthBR() - 1, 1),
+  );
 
   // Perfil "Gerente" (gerente_setor): vê apenas os setores vinculados a ele.
   // Sem setor vinculado não há nada a exibir — não caímos no fallback de ver
@@ -173,7 +196,7 @@ export default async function OrcamentoPage() {
   const { rows = [], error } =
     sectorScoped && ctx.sectorIds.length === 0
       ? { rows: [] as OrcamentoRow[], error: undefined }
-      : await getOrcamentoData(year, sectorFilter);
+      : await getOrcamentoData(year, sectorFilter, throughMonth);
 
   const grandOrcado = rows.reduce((s, r) => s + r.orcado, 0);
   const grandRealizado = rows.reduce((s, r) => s + r.realizado, 0);
@@ -199,6 +222,39 @@ export default async function OrcamentoPage() {
       )}
 
       {canEditBudget && <BudgetUpload defaultYear={year} />}
+
+      {/* Filtro de período — segmentado, sem sair da tela (query param) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {anoCompleto
+            ? `Considerando o ano completo de ${year}.`
+            : `Considerando de janeiro a ${mesAtualLabel} de ${year}.`}
+        </p>
+        <div className="inline-flex rounded-md border p-0.5 text-xs font-medium" data-tour="orc-periodo">
+          <Link
+            href="/ctrl/orcamento"
+            scroll={false}
+            className={`rounded px-3 py-1.5 transition-colors ${
+              !anoCompleto
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Até o mês atual
+          </Link>
+          <Link
+            href="/ctrl/orcamento?periodo=ano"
+            scroll={false}
+            className={`rounded px-3 py-1.5 transition-colors ${
+              anoCompleto
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Ano completo
+          </Link>
+        </div>
+      </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" data-tour="orc-kpis">
