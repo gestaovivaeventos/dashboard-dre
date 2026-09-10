@@ -1543,10 +1543,24 @@ function parseCreditorSheet(wb: XLSX.WorkBook, sheetName: string): ParsedCredito
 }
 
 /**
+ * Todo .xlsx é um contêiner ZIP e começa com "PK\x03\x04". Sem essa checagem o
+ * SheetJS aceita bytes arbitrários como texto/CSV e devolve uma aba fantasma
+ * ("Sheet1") em vez de lançar.
+ */
+function isZipSignature(data: Uint8Array): boolean {
+  return (
+    data.length >= 4 && data[0] === 0x50 && data[1] === 0x4b && data[2] === 0x03 && data[3] === 0x04
+  );
+}
+
+/**
  * Lê o .xlsx inteiro. Lança só quando o arquivo não é uma planilha legível;
  * problema de conteúdo vira flag no lançamento, nunca exceção.
  */
 export function parseVbWorkbook(data: Uint8Array): ParsedWorkbook {
+  if (!isZipSignature(data)) {
+    throw new Error("Arquivo inválido: não é uma planilha .xlsx legível.");
+  }
   let wb: XLSX.WorkBook;
   try {
     wb = XLSX.read(data, { type: "array", cellDates: false });
@@ -1635,7 +1649,7 @@ process.exit(failed ? 1 : 0);
 - [ ] **Step 12: Rodar o script**
 
 Run: `npx tsx scripts/vb-parse-check.ts`
-Expected: 9 credores (Fabio, Mirai, Renan marcados `(oculta)`), aba vazia `Mylliano`, 4 ignoradas (Resumo, dividendos 2024, Propostas socios 2026, Propostas socios 2025, Imoveis — são 5 nomes; conferir a lista impressa), `|diff| ≤ 0,05` em todos, nenhuma flag com `!`, saldo total ≈ 2.368.211,67 e código de saída 0. Se aparecer `data_invalida`, investigar a linha (a coluna B da planilha real é sempre válida nas linhas reais — foi conferido em 09/09/2026).
+Expected: 9 credores (Fabio, Mirai, Renan marcados `(oculta)`), aba vazia `Mylliano`, 4 ignoradas (Resumo, dividendos 2024, Propostas socios 2026, Propostas socios 2025, Imoveis — são 5 nomes; conferir a lista impressa), `|diff| ≤ 0,05` em todos, nenhuma flag com `!`, saldo total das abas visíveis ≈ 2.368.201,89 (o R$ 2.368.211,67 da aba Resumo inclui os três credores encerrados) e código de saída 0. Se aparecer `data_invalida`, investigar a linha (a coluna B da planilha real é sempre válida nas linhas reais — foi conferido em 09/09/2026).
 
 - [ ] **Step 13: Lint e commit**
 
@@ -4002,7 +4016,7 @@ Com `npm run dev` e o navegador logado como Marcelo:
 1. `/vb/importar` → enviar `docs/VB TERRAZZO V2.xlsx` → redireciona para a revisão. Resumo: 9 credores, Fabio/Mirai/Renan com "aba oculta", todos com badge "fecha", 0 bloqueios. Rodapé: "Abas vazias: Mylliano" e as abas fora do VB.
 2. Clicar em "Mylliano ( Sr Jorge)" → renomear para "Mylliano", salvar → nome atualiza na lista.
 3. Editar um lançamento (ex.: trocar a descrição) → tabela atualiza; excluir um lançamento de teste NÃO (para não alterar o histórico) — se testar exclusão, descartar o lote e reimportar antes de aprovar.
-4. "Aprovar importação" → confirmar → volta para `/vb` com saldo total R$ 2.368.211,67 (±0,10) e os 6 credores ativos + 3 encerrados.
+4. "Aprovar importação" → confirmar → volta para `/vb` com saldo total (ativos) R$ 2.368.201,89 (±0,10) e os 6 credores ativos + 3 encerrados.
 5. Subir a mesma planilha de novo → erro 409 "Todos os credores da planilha já foram importados e aprovados." e nenhum lote novo na lista.
 
 Se algo divergir, corrigir antes de commitar; se o Marcelo preferir revisar com calma antes de aprovar, parar no passo 1 e deixar o lote pendente.
@@ -4513,7 +4527,7 @@ npx tsx scripts/vb-parse-check.ts
 
 `mcp__claude_ai_Supabase__get_advisors` (security): sem alerta novo para `vb_*` além do predicado `vb_role`.
 
-Roteiro no navegador (Marcelo logado), se ainda não feito nas Tasks 8 e 9: menu VB → Importação → upload → revisão (renomear Mylliano) → aprovar → Visão geral (saldo total R$ 2.368.211,67 ±0,10; Mylliano negativo em vermelho; Fabio/Mirai/Renan como encerrados) → extrato do Vitor (saldo R$ 781.589,42 ±0,05) → novo lançamento e remoção da linha de teste. Depois, com outro admin (ou removendo e recolocando a linha de `user_module_roles` do Marcelo): VB some do menu e `/vb` volta para `/`.
+Roteiro no navegador (Marcelo logado), se ainda não feito nas Tasks 8 e 9: menu VB → Importação → upload → revisão (renomear Mylliano) → aprovar → Visão geral (saldo total dos ativos R$ 2.368.201,89 ±0,10; Mylliano negativo em vermelho; Fabio/Mirai/Renan como encerrados) → extrato do Vitor (saldo R$ 781.589,42 ±0,05) → novo lançamento e remoção da linha de teste. Depois, com outro admin (ou removendo e recolocando a linha de `user_module_roles` do Marcelo): VB some do menu e `/vb` volta para `/`.
 
 - [ ] **Step 3: Commit e entrega**
 
