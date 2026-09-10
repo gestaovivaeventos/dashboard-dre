@@ -2,6 +2,7 @@ import {
   BI_VALIDATION_PATH,
   canAccessBiValidationByProfile,
 } from "@/lib/auth/bi-validation";
+import { isVbPath } from "@/lib/auth/vb";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type { DreRole, CtrlRole, UserProfileType } from "@/lib/supabase/types";
@@ -18,6 +19,7 @@ export function defaultLandingFor(
   canCase: boolean = false,
   canViagens: boolean = false,
   canContratos: boolean = false,
+  canVb: boolean = false,
 ): string {
   // TODO perfil pousa na tela inicial. Ela é o cockpit comum do Control Hub:
   // saudação, indicadores e notícias econômicas para todos, e as seções
@@ -32,6 +34,7 @@ export function defaultLandingFor(
     canCase ||
     canViagens ||
     canContratos ||
+    canVb ||
     profile === "admin"
   ) {
     return "/home";
@@ -93,6 +96,11 @@ export function canAccessPathByProfile(
    * não-nominal (a regra por perfil continua valendo).
    */
   email: string | null = null,
+  /**
+   * Módulo VB (Viva Bank). Só a concessão em user_module_roles libera; admin
+   * NÃO passa por cima — ver @/lib/auth/vb.
+   */
+  canVb: boolean = false,
 ): boolean {
   // Tela inicial (cockpit): liberada para TODOS os perfis, sem depender de
   // módulo. O que cada um VÊ lá dentro é decidido por perfil na própria tela
@@ -137,6 +145,11 @@ export function canAccessPathByProfile(
   if (pathname === "/contratos" || pathname.startsWith("/contratos/")) {
     return canContratos || profile === "admin";
   }
+
+  // Módulo VB (Viva Bank): só a concessão explícita libera. Precisa vir antes
+  // do bloco franqueado/CSC (a whitelist negaria a rota) e antes de "Admin:
+  // tudo" — admin sem a linha não vê o módulo, de propósito.
+  if (isVbPath(pathname)) return canVb;
 
   // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
   // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl e

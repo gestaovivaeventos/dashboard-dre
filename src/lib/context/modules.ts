@@ -36,27 +36,36 @@ export const MODULES: Record<ActiveModule, ModuleDefinition> = {
     usesSegments: false,
     defaultPath: "/viagens/requisicoes",
   },
+  vb: {
+    id: "vb",
+    label: "VB",
+    usesSegments: false,
+    defaultPath: "/vb",
+  },
 };
 
-export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "viagens"] as const;
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "viagens", "vb"] as const;
 
 /**
  * Returns the modules the user has any access to.
  * - DRE access if dreRole is set (always true for an authenticated app user).
  * - Ctrl access if at least one ctrlRole is non-null/non-empty.
  * - Case access if canCase is set (visibilidade do módulo, boolean).
+ * - VB access if canVb is set (concessão em user_module_roles; admin não herda).
  */
 export function resolveAvailableModules(
   dreRole: DreRole | null | undefined,
   ctrlRoles: CtrlRole[] | null | undefined,
   canCase?: boolean | null,
   canViagens?: boolean | null,
+  canVb?: boolean | null,
 ): ModuleDefinition[] {
   const result: ModuleDefinition[] = [];
   if (dreRole) result.push(MODULES.dre);
   if (ctrlRoles && ctrlRoles.length > 0) result.push(MODULES.ctrl);
   if (canCase) result.push(MODULES.case);
   if (canViagens) result.push(MODULES.viagens);
+  if (canVb) result.push(MODULES.vb);
   return result;
 }
 
@@ -97,8 +106,9 @@ export async function resolveLayoutContext(
   fallbackModule: ActiveModule,
   canCase?: boolean | null,
   canViagens?: boolean | null,
+  canVb?: boolean | null,
 ): Promise<ResolvedLayoutContext> {
-  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase, canViagens);
+  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase, canViagens, canVb);
   const moduleCookie = await readActiveModule();
   const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
   const activeModule: ActiveModule = activeModuleDef?.id ?? fallbackModule;

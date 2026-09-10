@@ -17,6 +17,10 @@ export type CtrlRole =
   | "contas_a_pagar"
   | "aprovacao_fornecedor";
 
+// ─── VB roles (módulo Viva Bank) ──────────────────────────────────────────────
+/** Papel no módulo VB (Viva Bank). Concedido em user_module_roles — ver @/lib/auth/vb. */
+export type VbRole = "gestor" | "credor";
+
 // ─── Acesso por módulo ────────────────────────────────────────────────────────
 export interface ModuleAccess {
   dre: {
@@ -37,6 +41,11 @@ export interface ModuleAccess {
    * coluna can_* de users).
    */
   contratos: Record<string, never> | null;
+  /**
+   * Módulo VB (Viva Bank). Concessão em user_module_roles (module='vb') — ver
+   * `@/lib/auth/vb`. Admin não recebe automaticamente.
+   */
+  vb: { role: VbRole } | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -90,6 +99,11 @@ export interface UnifiedProfile {
    * 'validador_contrato' continua implicando o módulo.
    */
   can_contratos: boolean;
+  /**
+   * Papel no módulo VB (Viva Bank), ou null sem concessão. Como `can_contratos`,
+   * vem de `user_module_roles`, não de coluna de `users` — ver `@/lib/auth/vb`.
+   */
+  vb_role: VbRole | null;
   /**
    * Já viu o tour guiado de boas-vindas. Como `can_contratos`, NÃO é coluna de
    * `users`: é derivada da linha em `user_module_roles` (module='tour') — ver

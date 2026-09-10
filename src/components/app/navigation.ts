@@ -13,6 +13,7 @@ import {
   FileText,
   GitCompare,
   GitMerge,
+  Landmark,
   LayoutDashboard,
   Mail,
   MapPinned,
@@ -34,6 +35,7 @@ import {
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
+import { VB_NAV_KEY_OVERVIEW, VB_PATH } from "@/lib/auth/vb";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -220,6 +222,13 @@ export interface NavItem {
    * dreRoles/ctrlRoles.
    */
   biValidationAccess?: boolean;
+  /**
+   * Item do módulo VB (Viva Bank) — visível para quem tem a concessão (ver
+   * @/lib/auth/vb). Independe de dreRoles/ctrlRoles; admin não herda.
+   */
+  vbAccess?: boolean;
+  /** Item só do papel gestor do VB (importação). */
+  vbGestorOnly?: boolean;
 }
 
 export type NavGroupId =
@@ -229,6 +238,7 @@ export type NavGroupId =
   | "case"
   | "viagens"
   | "contratos"
+  | "vb"
   | "plataforma";
 
 export interface NavGroup {
@@ -317,6 +327,19 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "CONTRATOS",
     items: [
       { key: CONTRATOS_NAV_KEY, title: "Validacao de Contratos", icon: FileCheck, scope: "global", href: CONTRATOS_PATH, contratosAccess: true },
+    ],
+  },
+  {
+    // Módulo VB (Viva Bank): créditos de sócios/credores. Concedido por
+    // usuário em user_module_roles (module='vb'); admin não enxerga sem a
+    // linha — ver @/lib/auth/vb.
+    // Só "Visão geral": a importação da planilha é uma vez só, então não é
+    // rotina de menu — quem precisa chega por ela pela Visão geral, que
+    // oferece o link enquanto não existe histórico aprovado.
+    id: "vb",
+    label: "VB",
+    items: [
+      { key: VB_NAV_KEY_OVERVIEW, title: "Visão geral", icon: Landmark, scope: "global", href: VB_PATH, vbAccess: true },
     ],
   },
   {

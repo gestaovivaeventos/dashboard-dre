@@ -31,6 +31,7 @@ export default async function ProtectedLayout({
   const canViagens = Boolean(modules?.viagens);
   const canViagensAprovar = Boolean(modules?.viagens?.aprovador);
   const canContratos = Boolean(modules?.contratos);
+  const vbRole = modules?.vb?.role ?? null;
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
   const isCsc = profile?.profile === "csc";
@@ -56,6 +57,7 @@ export default async function ProtectedLayout({
     "dre",
     canCase,
     canViagens,
+    vbRole !== null,
   );
 
   const unreadNotifications = profile?.id
@@ -72,6 +74,7 @@ export default async function ProtectedLayout({
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
+      vbRole={vbRole}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

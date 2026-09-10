@@ -24,6 +24,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
   const canViagens = Boolean(modules.viagens);
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
   const canContratos = Boolean(modules.contratos);
+  const vbRole = modules.vb?.role ?? null;
 
   // Segmentos para o shell — fonte única compartilhada (resolveUserSegments):
   // admin vê todos; os demais recebem a UNIÃO de user_segment_access com os
@@ -41,6 +42,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
     "case",
     canCase,
     canViagens,
+    vbRole !== null,
   );
 
   const unreadNotifications = profile?.id
@@ -57,6 +59,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
+      vbRole={vbRole}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

@@ -160,12 +160,28 @@ O módulo é liberável em **qualquer perfil**, inclusive `franqueado` ("Visão 
 No menu, a tela tem grupo próprio (`CONTRATOS`); saiu de PLATAFORMA, onde convivia com as telas de administração sem ter relação com elas.
 
 "Viagens" saiu de "Módulos visíveis" (módulo sem uso). As colunas `can_viagens`/`can_viagens_aprovar`, o módulo e o kill-switch `VIAGENS_ENABLED` continuam existindo; o formulário só carrega e devolve os valores atuais, sem oferecê-los.
+
+### Módulo VB (`/vb`, Viva Bank)
+
+Controle dos créditos de sócios/credores que emprestaram ao grupo na construção do Terrazzo — substitui a planilha `docs/VB TERRAZZO V2.xlsx`. Desenho: `docs/superpowers/specs/2026-09-09-vb-viva-bank-design.md`.
+
+- **Acesso só por concessão**: linha em `user_module_roles` (`module='vb'`, `role` `gestor` | `credor`), lida por `src/lib/auth/vb.ts`. **Admin não passa por cima** (mesma filosofia das empresas restritas): sem a linha, o grupo VB não aparece no menu e `/vb` redireciona. O gate em `canAccessPathByProfile` vem antes de "Admin: tudo" de propósito. Hoje só o Marcelo tem `gestor`; a tela de Usuários ainda não oferece o botão (fase 2, junto com o papel `credor`, que verá só o próprio extrato via `vb_creditors.user_id`).
+  - O perfil `validador_contrato` é ilha (só `/contratos`) e não alcança o VB mesmo com a concessão; qualquer outro perfil, inclusive `franqueado`/`csc`, entra com a linha.
+- **Histórico congelado**: cada linha da planilha virou um lançamento com o valor que estava lá (`rate_basis` registra o método: `mensal` = taxa fixa capitalizada por dia, `periodo` = saldo × CDI do período, `ajuste` = valor digitado). O sistema não recalcula juros do passado — os saldos são fatos acordados com cada credor.
+- **Saldo nunca é gravado**: é a soma de `vb_entries.amount` (com sinal) em ordem `(entry_date, sort_order, created_at)` — `src/lib/vb/ledger.ts`. Só `status='aprovado'` entra em saldo e totais.
+- **Importação com revisão**: `POST /api/vb/import` parseia o `.xlsx` (`src/lib/vb/import/parse-vb-workbook.ts`, função pura) e grava os lançamentos como `pendente` na própria `vb_entries`, num `vb_import_batches` (um pendente por vez). A revisão compara o SALDO da planilha (`sheet_balance`) com o saldo somado; até R$ 1,00 é arredondamento. Aprovar (`vb_approve_import_batch`, transação) exige zero flags bloqueantes (`data_invalida`, `valor_invalido`). Credor com lançamento aprovado nunca é reimportado. `npx tsx scripts/vb-parse-check.ts` confere a planilha real sem tocar o banco.
+- **Importação é uma vez só**: não há item de menu; a Visão geral oferece "Importar histórico" enquanto não existe histórico aprovado (nem lote pendente), e a página `/vb/importar` recusa novo upload depois disso — a tela continua acessível por URL, como histórico das importações. Depois da aprovação, tudo é lançamento manual (`Novo lançamento`) na tela do credor.
+- **Uma tabela só, em formato de extrato bancário**: `src/components/vb/statement-table.tsx` (`VbStatementTable`) desenha tanto o extrato do credor (separador por ano com totais) quanto a revisão do lote (flags e ações por linha) — as opções são props. A cor carrega o tipo (entrada verde, saída vermelha, rendimento azul) e o saldo negativo é vermelho. A conferência saldo-planilha × sistema é feita pelo script `scripts/vb-parse-check.ts` e o banco guarda `sheet_balance`/`source_row` para auditoria, mas **a interface não mostra nenhuma referência à planilha** (pedido do dono do projeto: "a planilha foi só o meio de entrada"). Não crie uma segunda tabela para o VB; a faixa de indicadores das duas telas também é compartilhada (`stat-strip.tsx`). As telas listam do mais recente para o mais antigo (`VbStatementTable` inverte para exibir; o saldo é calculado em ordem cronológica antes da inversão e antes de qualquer filtro). A tela do credor continua server component e entrega os lançamentos ao `statement-view.tsx` (client), que monta faixa, gráfico da evolução do saldo, filtros (ano, tipo, busca) e a tabela.
+- Escrita nas tabelas `vb_*` só pelo admin client depois de `requireVbGestor()` (`src/lib/vb/auth.ts`); leitura das páginas pelo client do usuário sob RLS (`vb_role()`).
+- Fases seguintes previstas no modelo, não construídas: juros automáticos com CDI do Banco Central (`rate_basis='cdi'`), importação de lançamentos da Omie, edição de lançamentos aprovados.
+
 - `mapeamento` and `configuracoes` are **admin-only** even for other DRE users.
 
 ## Database
 
 - **DRE**: `users`, `companies`, `segments`, `dre_accounts`, `financial_entries`, `category_mappings`, `kpi_definitions`, `sync_logs`, `dre_monthly_aggregates`, `cash_flow_*` (accounts, category mappings, monthly aggregates), `*_manual_entries`, `company_documents`, contract tables.
 - **Access**: `user_module_roles`, `user_company_access`, `user_segment_access`, `user_sectors`.
+- **VB** (prefixed `vb_*`): creditors, entries, import_batches.
 - **CTRL** (prefixed `ctrl_*`): requests, suppliers, sectors, events, budgets, omie-mapping, notifications, contapagar launches, `ctrl_approval_email_log` (rastro + trava de duplicidade do lembrete diário de aprovações). Note: `contas_a_pagar` absorbs the legacy `csc` concept in-app — RLS policies that list `csc` must also include `contas_a_pagar`.
 
 SQL functions: `get_dre_consolidated()` (account aggregation), `get_dre_drilldown()` (transaction detail), plus aggregate-refresh functions.

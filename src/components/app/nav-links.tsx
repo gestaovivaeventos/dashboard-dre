@@ -14,7 +14,7 @@ import {
 } from "@/components/app/navigation";
 import { ModuleTourButton } from "@/components/app/tour/module-tour-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CtrlRole, DreRole, Segment } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, Segment, VbRole } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
@@ -25,6 +25,8 @@ interface NavLinksProps {
   canViagensAprovar?: boolean;
   /** Módulo Validação de Contratos (grupo CONTRATOS). */
   canContratos?: boolean;
+  /** Papel no módulo VB (grupo VB); null sem concessão. */
+  vbRole?: VbRole | null;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -75,6 +77,7 @@ export function NavLinks({
   canViagens,
   canViagensAprovar,
   canContratos,
+  vbRole,
   segments,
   activeSegmentSlug,
   collapsed,
@@ -92,7 +95,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, vbRole, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -192,6 +195,7 @@ interface BuildInput {
   canViagens?: boolean;
   canViagensAprovar?: boolean;
   canContratos?: boolean;
+  vbRole?: VbRole | null;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -226,6 +230,7 @@ function buildGroups({
   canViagens,
   canViagensAprovar,
   canContratos,
+  vbRole,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -245,7 +250,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -273,11 +278,16 @@ function isItemVisible(
   isCsc?: boolean,
   canBiValidation?: boolean,
   ctrlFullView?: boolean,
+  vbRole: VbRole | null = null,
 ): boolean {
   // Validação de Contratos: módulo próprio, concedido por usuário. Não passa
   // por dreRole/ctrlRole nem pelas whitelists de franqueado/CSC — qualquer
   // perfil com o módulo enxerga o item.
   if (item.contratosAccess) return canContratos;
+
+  // VB (Viva Bank): módulo próprio, concedido por usuário. Não passa por
+  // dreRole/ctrlRole nem pelas whitelists de franqueado/CSC; admin não herda.
+  if (item.vbAccess) return vbRole !== null && (!item.vbGestorOnly || vbRole === "gestor");
 
   // CSC: cópia do franqueado + a tela "Validação Relatório".
   if (isCsc) return CSC_NAV_KEYS.has(item.key);
@@ -311,7 +321,8 @@ function isItemVisible(
     !item.ctrlRoles &&
     !item.caseAccess &&
     !item.viagensAccess &&
-    !item.contratosAccess
+    !item.contratosAccess &&
+    !item.vbAccess
   )
     return false;
   return dreOk || ctrlOk || caseOk || viagensOk;

@@ -16,7 +16,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
 import type { ActiveModule } from "@/lib/context/active-context";
 import type { ModuleDefinition } from "@/lib/context/modules";
-import type { CtrlRole, DreRole, Segment, UserProfileType } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, Segment, UserProfileType, VbRole } from "@/lib/supabase/types";
 import { tourAudienceForProfile, type TourModuleId } from "@/lib/tour";
 
 interface AppShellProps {
@@ -31,6 +31,8 @@ interface AppShellProps {
   canViagensAprovar?: boolean;
   /** Módulo Validação de Contratos — grupo CONTRATOS no menu. */
   canContratos?: boolean;
+  /** Papel no módulo VB (Viva Bank) — grupo VB no menu; null sem concessão. */
+  vbRole?: VbRole | null;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -67,6 +69,7 @@ export function AppShell({
   canViagens,
   canViagensAprovar,
   canContratos,
+  vbRole,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -125,6 +128,7 @@ export function AppShell({
         canViagens,
         canViagensAprovar,
         canContratos,
+        vbRole,
         segments,
         activeSegmentSlug,
         contractsOnly,
@@ -140,6 +144,7 @@ export function AppShell({
       canViagens,
       canViagensAprovar,
       canContratos,
+      vbRole,
       segments,
       activeSegmentSlug,
       contractsOnly,
@@ -158,6 +163,7 @@ export function AppShell({
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
+      vbRole={vbRole}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}
