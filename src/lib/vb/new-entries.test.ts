@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildEntryRows, newEntriesSchema, VB_MAX_ENTRY_LINES, type NewEntriesInput } from "./new-entries";
+import { buildEntryRows, newEntriesSchema, sumTypedLines, VB_MAX_ENTRY_LINES, type NewEntriesInput } from "./new-entries";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -173,4 +173,15 @@ test("schema exige ao menos uma linha e limita o tamanho do lançamento", () => 
     tooMany.success ? "" : tooMany.error.issues[0]?.message,
     `No máximo ${VB_MAX_ENTRY_LINES} linhas por lançamento.`,
   );
+});
+
+test("sumTypedLines soma por tipo a partir das strings digitadas e ignora inválidas", () => {
+  const totals = sumTypedLines([
+    { kind: "entrada", amount: "1.000,50" },
+    { kind: "saida", amount: "-200" },
+    { kind: "rendimento", amount: "-10,5" },
+    { kind: "entrada", amount: "abc" },
+    { kind: "saida", amount: "" },
+  ]);
+  assert.deepEqual(totals, { entradas: 1000.5, saidas: 200, rendimentos: -10.5, liquido: 790, bruto: 1211 });
 });

@@ -5,9 +5,10 @@
 
 import { z } from "zod";
 
+import { parseBrNumber } from "@/lib/orcamento/format";
 import { diffDaysIso } from "@/lib/vb/import/excel-date";
 import { roundCents } from "@/lib/vb/money";
-import type { VbEntryInsert } from "@/lib/vb/types";
+import type { VbEntryInsert, VbEntryKind } from "@/lib/vb/types";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -101,4 +102,33 @@ export function buildEntryRows(
     });
   }
   return { rows };
+}
+
+/**
+ * Totais do formulário a partir do que foi digitado (strings BR). Linhas
+ * inválidas são ignoradas — o submit é quem reclama delas. `bruto` (soma dos
+ * módulos) é o número que se compara com o valor de um pagamento da Omie.
+ */
+export function sumTypedLines(
+  lines: ReadonlyArray<{ kind: VbEntryKind; amount: string }>,
+): { entradas: number; saidas: number; rendimentos: number; liquido: number; bruto: number } {
+  let entradas = 0;
+  let saidas = 0;
+  let rendimentos = 0;
+  let bruto = 0;
+  for (const line of lines) {
+    const raw = parseBrNumber(line.amount);
+    if (raw == null || Number.isNaN(raw)) continue;
+    bruto += Math.abs(raw);
+    if (line.kind === "entrada") entradas += Math.abs(raw);
+    else if (line.kind === "saida") saidas += Math.abs(raw);
+    else rendimentos += raw;
+  }
+  return {
+    entradas: roundCents(entradas),
+    saidas: roundCents(saidas),
+    rendimentos: roundCents(rendimentos),
+    liquido: roundCents(entradas - saidas + rendimentos),
+    bruto: roundCents(bruto),
+  };
 }
