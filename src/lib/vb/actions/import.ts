@@ -77,12 +77,17 @@ export async function discardImportBatch(batchId: string): Promise<VbActionResul
 
   const summary = (batch.summary ?? {}) as Partial<VbImportSummary>;
   for (const creditor of summary.creditors ?? []) {
-    const { count } = await admin
+    const { count, error: countError } = await admin
       .from("vb_entries")
       .select("id", { count: "exact", head: true })
       .eq("creditor_id", creditor.creditorId);
+    if (countError) return { error: countError.message };
     if ((count ?? 0) === 0) {
-      await admin.from("vb_creditors").delete().eq("id", creditor.creditorId);
+      const { error: deleteError } = await admin
+        .from("vb_creditors")
+        .delete()
+        .eq("id", creditor.creditorId);
+      if (deleteError) return { error: deleteError.message };
     }
   }
 

@@ -59,11 +59,14 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
 
-  const { data: pending } = await admin
+  const { data: pending, error: pendingError } = await admin
     .from("vb_import_batches")
     .select("id")
     .eq("status", "pendente")
     .maybeSingle();
+  if (pendingError) {
+    return NextResponse.json({ error: pendingError.message }, { status: 500 });
+  }
   if (pending) {
     return NextResponse.json(
       { error: "Já existe um lote pendente de revisão. Aprove ou descarte-o antes de importar outro." },
@@ -171,19 +174,41 @@ export async function POST(request: Request) {
     if (summaryError) throw new Error(summaryError.message);
   } catch (err) {
     // Desfaz o que este lote criou (o lote só existe de verdade depois daqui).
-    await admin.from("vb_entries").delete().eq("import_batch_id", batchId);
+    // Cada passo checa o erro: uma limpeza que falha em silêncio deixaria um
+    // lote 'pendente' vazio bloqueando toda importação futura.
+    const cleanupErrors: string[] = [];
+    const { error: entriesError } = await admin
+      .from("vb_entries")
+      .delete()
+      .eq("import_batch_id", batchId);
+    if (entriesError) cleanupErrors.push(`lançamentos: ${entriesError.message}`);
     if (createdCreditorIds.length > 0) {
-      await admin.from("vb_creditors").delete().in("id", createdCreditorIds);
+      const { error: creditorsError } = await admin
+        .from("vb_creditors")
+        .delete()
+        .in("id", createdCreditorIds);
+      if (creditorsError) cleanupErrors.push(`credores: ${creditorsError.message}`);
     }
-    await admin.from("vb_import_batches").delete().eq("id", batchId);
+    const { error: batchDeleteError } = await admin
+      .from("vb_import_batches")
+      .delete()
+      .eq("id", batchId);
+    if (batchDeleteError) cleanupErrors.push(`lote: ${batchDeleteError.message}`);
+    if (cleanupErrors.length > 0) {
+      console.error("[vb/import] limpeza incompleta do lote", batchId, cleanupErrors);
+    }
+    const suffix =
+      cleanupErrors.length > 0
+        ? ` Limpeza incompleta (${cleanupErrors.join("; ")}) — descarte o lote pendente na tela de importação antes de tentar de novo.`
+        : "";
     if (err instanceof AlreadyImportedError) {
       return NextResponse.json(
-        { error: "Todos os credores da planilha já foram importados e aprovados." },
+        { error: `Todos os credores da planilha já foram importados e aprovados.${suffix}` },
         { status: 409 },
       );
     }
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Falha ao importar." },
+      { error: `${err instanceof Error ? err.message : "Falha ao importar."}${suffix}` },
       { status: 500 },
     );
   }
