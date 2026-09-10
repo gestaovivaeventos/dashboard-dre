@@ -62,11 +62,11 @@ export function VbImportUpload({ pendingBatchId }: Props) {
       />
       <Button type="button" onClick={submit} disabled={!file || busy}>
         {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-        Importar planilha
+        Importar histórico
       </Button>
       <p className="basis-full text-xs text-ink-muted">
         Só abas com o cabeçalho DATA | DATA | DIAS | DESCRIÇÃO | ENTRADA | SAÍDA | RENDIMENTO | SALDO na linha 4
-        são lidas. Credores já aprovados são pulados. Nada vira oficial antes de você aprovar o lote.
+        são lidas. Nada vira oficial antes de você revisar e aprovar.
       </p>
     </div>
   );

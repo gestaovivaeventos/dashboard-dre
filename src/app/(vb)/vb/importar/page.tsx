@@ -40,21 +40,32 @@ export default async function VbImportPage() {
   const db = await createClient();
   const batches = await listBatches(db);
   const pending = batches.find((b) => b.status === "pendente") ?? null;
+  // A planilha entra uma vez só: com o histórico aprovado, esta tela vira
+  // arquivo — o que vier depois é lançamento manual na tela do credor.
+  const alreadyImported = batches.some((b) => b.status === "aprovado");
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-ink-primary">VB — Importação</h1>
+        <h1 className="text-xl font-semibold text-ink-primary">Importar histórico da planilha</h1>
         <p className="text-sm text-ink-muted">
-          Traga o histórico da planilha VB. Cada upload vira um lote que você revisa e aprova.
+          Feito uma única vez, para trazer o histórico do VB. Depois disso, os lançamentos são
+          feitos aqui no sistema.
         </p>
       </div>
 
-      <VbImportUpload pendingBatchId={pending?.id ?? null} />
+      {alreadyImported ? (
+        <div className="rounded-md border border-border bg-surface-1 px-4 py-3 text-sm text-ink-secondary">
+          O histórico já foi importado e aprovado. Novas importações não são necessárias — os
+          lançamentos são feitos na tela de cada credor.
+        </div>
+      ) : (
+        <VbImportUpload pendingBatchId={pending?.id ?? null} />
+      )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Lotes</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Histórico de importações</CardTitle>
         </CardHeader>
         <CardContent>
           {batches.length === 0 ? (

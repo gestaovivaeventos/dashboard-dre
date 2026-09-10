@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, Upload } from "lucide-react";
 
+import { VbStatStrip } from "@/components/vb/stat-strip";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -62,9 +63,12 @@ export default async function VbOverviewPage() {
   // Mesmo universo dos cards de rendimento e da tabela de juros por semestre: só credores ativos.
   const activeIds = new Set(active.map((r) => r.creditor.id));
   const activeEntries = entries.filter((e) => activeIds.has(e.creditor_id));
+  // A importação é uma vez só: o convite some assim que existe histórico (ou
+  // um lote esperando revisão).
+  const showImportCta = isGestor && entries.length === 0 && !pendingBatch;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink-primary">VB — Visão geral</h1>
@@ -72,12 +76,12 @@ export default async function VbOverviewPage() {
             Créditos dos sócios e credores. Saldo positivo = o VB deve ao credor.
           </p>
         </div>
-        {isGestor && (
+        {showImportCta && (
           <Link
             href="/vb/importar"
             className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-primary hover:bg-surface-2"
           >
-            <Upload className="h-4 w-4" /> Importação
+            <Upload className="h-4 w-4" /> Importar histórico da planilha
           </Link>
         )}
       </div>
@@ -95,41 +99,35 @@ export default async function VbOverviewPage() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-ink-muted">Saldo total (ativos)</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(totalBalance)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-ink-muted">Credores ativos</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{active.length}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-ink-muted">Rendimentos em {year}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(activeEntries, year))}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-ink-muted">Rendimentos em {year - 1}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(activeEntries, year - 1))}</CardContent>
-        </Card>
-      </div>
+      <VbStatStrip
+        stats={[
+          {
+            label: "Saldo total (ativos)",
+            value: formatBRL(totalBalance),
+            emphasis: true,
+            tone: totalBalance < 0 ? "negative" : "default",
+          },
+          { label: "Credores ativos", value: String(active.length) },
+          { label: `Rendimentos em ${year}`, value: formatBRL(yieldOf(activeEntries, year)), tone: "rendimento" },
+          {
+            label: `Rendimentos em ${year - 1}`,
+            value: formatBRL(yieldOf(activeEntries, year - 1)),
+            tone: "rendimento",
+          },
+        ]}
+      />
 
       {creditors.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-ink-muted">
-            Nenhum credor ainda.{" "}
+            Nenhum lançamento ainda.{" "}
             {isGestor ? (
-              <Link href="/vb/importar" className="underline">
-                Importe a planilha VB
-              </Link>
+              <>
+                <Link href="/vb/importar" className="underline">
+                  Importe o histórico da planilha
+                </Link>{" "}
+                uma única vez; depois, os lançamentos são feitos aqui.
+              </>
             ) : (
               "Aguarde a importação do histórico."
             )}
@@ -138,40 +136,44 @@ export default async function VbOverviewPage() {
       ) : (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base">Credores</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="text-[13px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Credor</TableHead>
-                      <TableHead className="text-right">Saldo atual</TableHead>
-                      <TableHead className="text-right">Rendimento em {year}</TableHead>
-                      <TableHead className="text-right">Lançamentos</TableHead>
-                      <TableHead>Último lançamento</TableHead>
+                      <TableHead className="h-8 py-1.5">Credor</TableHead>
+                      <TableHead className="h-8 py-1.5 text-right">Saldo atual</TableHead>
+                      <TableHead className="h-8 py-1.5 text-right">Rendimento em {year}</TableHead>
+                      <TableHead className="h-8 py-1.5 text-right">Lançamentos</TableHead>
+                      <TableHead className="h-8 py-1.5">Último lançamento</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {[...active, ...closed].map((row) => (
                       <TableRow key={row.creditor.id}>
-                        <TableCell>
+                        <TableCell className="px-4 py-1.5">
                           <Link href={`/vb/credores/${row.creditor.id}`} className="font-medium underline-offset-2 hover:underline">
                             {row.creditor.name}
                           </Link>
                           {!row.creditor.active && (
-                            <Badge variant="secondary" className="ml-2">
+                            <Badge variant="secondary" className="ml-2 text-[10px]">
                               encerrado
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className={`text-right tabular-nums ${row.balance < 0 ? "text-red-600" : ""}`}>
+                        <TableCell
+                          className={`px-4 py-1.5 text-right font-medium tabular-nums ${row.balance < 0 ? "text-red-600" : "text-ink-primary"}`}
+                        >
                           {formatBRL(row.balance)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{formatBRL(row.yieldYear)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.count}</TableCell>
-                        <TableCell>{formatDayBR(row.lastDate)}</TableCell>
+                        <TableCell className="px-4 py-1.5 text-right tabular-nums text-sky-700">
+                          {formatBRL(row.yieldYear)}
+                        </TableCell>
+                        <TableCell className="px-4 py-1.5 text-right tabular-nums">{row.count}</TableCell>
+                        <TableCell className="px-4 py-1.5 whitespace-nowrap">{formatDayBR(row.lastDate)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -181,36 +183,36 @@ export default async function VbOverviewPage() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base">Custo de juros por semestre</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="text-[13px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Credor</TableHead>
+                      <TableHead className="h-8 py-1.5">Credor</TableHead>
                       {years.flatMap((y) => [
-                        <TableHead key={`${y}-1`} className="text-right">1º sem {y}</TableHead>,
-                        <TableHead key={`${y}-2`} className="text-right">2º sem {y}</TableHead>,
+                        <TableHead key={`${y}-1`} className="h-8 py-1.5 text-right">1º sem {y}</TableHead>,
+                        <TableHead key={`${y}-2`} className="h-8 py-1.5 text-right">2º sem {y}</TableHead>,
                       ])}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {active.map((row) => (
                       <TableRow key={row.creditor.id}>
-                        <TableCell className="font-medium">{row.creditor.name}</TableCell>
+                        <TableCell className="px-4 py-1.5 font-medium">{row.creditor.name}</TableCell>
                         {row.semesters.map((s) => (
-                          <TableCell key={`${s.year}-${s.semester}`} className="text-right tabular-nums">
+                          <TableCell key={`${s.year}-${s.semester}`} className="px-4 py-1.5 text-right tabular-nums">
                             {formatBRL(s.total)}
                           </TableCell>
                         ))}
                       </TableRow>
                     ))}
                     <TableRow>
-                      <TableCell className="font-semibold">Total</TableCell>
+                      <TableCell className="px-4 py-1.5 font-semibold">Total</TableCell>
                       {yieldBySemester(activeEntries, years).map((s) => (
-                        <TableCell key={`t-${s.year}-${s.semester}`} className="text-right font-semibold tabular-nums">
+                        <TableCell key={`t-${s.year}-${s.semester}`} className="px-4 py-1.5 text-right font-semibold tabular-nums">
                           {formatBRL(s.total)}
                         </TableCell>
                       ))}

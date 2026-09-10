@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Check, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 
 import { VbEntryEditDialog } from "@/components/vb/entry-edit-dialog";
+import { VbStatementTable } from "@/components/vb/statement-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toaster";
-import { formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { formatBRL } from "@/lib/orcamento/format";
 import { updateCreditor } from "@/lib/vb/actions/creditors";
 import {
@@ -35,7 +36,6 @@ import {
   deletePendingEntry,
   discardImportBatch,
 } from "@/lib/vb/actions/import";
-import { describeRendimento } from "@/lib/vb/format";
 import type { LedgerTotals, WithBalance } from "@/lib/vb/ledger";
 import {
   VB_BALANCE_TOLERANCE,
@@ -65,26 +65,20 @@ interface Props {
 }
 
 function DiffBadge({ diff }: { diff: number | null }) {
-  if (diff === null) return <Badge variant="outline">sem saldo na planilha</Badge>;
+  if (diff === null) return <Badge variant="outline" className="text-[10px]">sem saldo na planilha</Badge>;
   const ok = Math.abs(diff) <= VB_BALANCE_TOLERANCE;
   return (
-    <Badge variant={ok ? "secondary" : "destructive"}>
+    <Badge variant={ok ? "secondary" : "destructive"} className="text-[10px]">
       {ok ? "fecha" : "divergência"} ({diff >= 0 ? "+" : ""}{formatBRL(diff)})
     </Badge>
   );
 }
 
-function FlagBadges({ flags }: { flags: VbEntryFlag[] }) {
-  if (flags.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {flags.map((f) => (
-        <Badge key={f} variant={isBlockingFlag(f) ? "destructive" : "outline"} className="whitespace-nowrap">
-          {VB_FLAG_LABELS[f]}
-        </Badge>
-      ))}
-    </div>
-  );
+/** Semáforo do credor: bloqueio manda, depois divergência, senão fecha. */
+function dotFor(group: ReviewGroup): string {
+  if (group.blockingCount > 0) return "bg-red-500";
+  if (group.diff !== null && Math.abs(group.diff) > VB_BALANCE_TOLERANCE) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
 function CreditorHeader({ group }: { group: ReviewGroup }) {
@@ -108,22 +102,26 @@ function CreditorHeader({ group }: { group: ReviewGroup }) {
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="min-w-[220px]">
-        <label className="mb-1 block text-xs font-medium text-ink-secondary" htmlFor={`name-${group.creditor.id}`}>
-          Nome do credor (aba &ldquo;{group.creditor.source_sheet ?? "—"}&rdquo;)
-        </label>
-        <Input id={`name-${group.creditor.id}`} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-      </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="text-[11px] uppercase tracking-wide text-ink-muted" htmlFor={`name-${group.creditor.id}`}>
+        Nome (aba &ldquo;{group.creditor.source_sheet ?? "—"}&rdquo;)
+      </label>
+      <Input
+        id={`name-${group.creditor.id}`}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        maxLength={120}
+        className="h-8 w-[220px] text-[13px]"
+      />
       <button
         type="button"
         onClick={() => setActive((v) => !v)}
-        className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm ${active ? "border-teal-600 text-teal-700" : "border-border text-ink-muted"}`}
+        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] ${active ? "border-teal-600 text-teal-700" : "border-border text-ink-muted"}`}
       >
-        {active ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+        {active ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
         {active ? "Ativo" : "Encerrado"}
       </button>
-      <Button type="button" size="sm" onClick={save} disabled={!dirty || pending}>
+      <Button type="button" size="sm" className="h-8" onClick={save} disabled={!dirty || pending}>
         {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         Salvar credor
       </Button>
@@ -198,10 +196,10 @@ export function VbBatchReview({ batch, groups }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-ink-primary">Revisão da importação</h1>
+          <h1 className="text-xl font-semibold text-ink-primary">Revisão do histórico importado</h1>
           <p className="text-sm text-ink-muted">
             {batch.file_name} · enviado em {formatDateTimeBR(batch.created_at)} ·{" "}
             <Badge variant={isPending ? "default" : batch.status === "aprovado" ? "secondary" : "outline"}>
@@ -233,21 +231,21 @@ export function VbBatchReview({ batch, groups }: Props) {
       )}
 
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-2">
           <CardTitle className="text-base">Resumo</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table className="text-[13px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Credor</TableHead>
-                <TableHead>Aba</TableHead>
-                <TableHead className="text-right">Lançamentos</TableHead>
-                <TableHead className="text-right">Saldo planilha</TableHead>
-                <TableHead className="text-right">Saldo sistema</TableHead>
-                <TableHead>Conferência</TableHead>
-                <TableHead className="text-right">Bloqueios</TableHead>
-                <TableHead className="text-right">Avisos</TableHead>
+                <TableHead className="h-8 py-1.5">Credor</TableHead>
+                <TableHead className="h-8 py-1.5">Aba</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Lançamentos</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Saldo planilha</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Saldo sistema</TableHead>
+                <TableHead className="h-8 py-1.5">Conferência</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Bloqueios</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Avisos</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -256,9 +254,11 @@ export function VbBatchReview({ batch, groups }: Props) {
                 const sheet = c.sheetFinalBalance;
                 const computed = live ? live.computedFinalBalance : c.computedFinalBalance;
                 const diff = live ? live.diff : c.diff;
+                const blocking = live ? live.blockingCount : c.blockingCount;
+                const warnings = live ? live.warningCount : c.warningCount;
                 return (
                   <TableRow key={c.creditorId} className={live && activeId === c.creditorId ? "bg-surface-2" : undefined}>
-                    <TableCell>
+                    <TableCell className="px-4 py-1.5">
                       {live ? (
                         <button type="button" className="font-medium underline-offset-2 hover:underline" onClick={() => setActiveId(c.creditorId)}>
                           {live.creditor.name}
@@ -266,22 +266,22 @@ export function VbBatchReview({ batch, groups }: Props) {
                       ) : (
                         c.name
                       )}
-                      {c.hidden && <Badge variant="outline" className="ml-2">aba oculta</Badge>}
+                      {c.hidden && <Badge variant="outline" className="ml-2 text-[10px]">aba oculta</Badge>}
                     </TableCell>
-                    <TableCell className="text-ink-muted">{c.sheetName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{live ? live.rows.length : c.entries}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatBRL(sheet)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatBRL(computed)}</TableCell>
-                    <TableCell><DiffBadge diff={diff} /></TableCell>
-                    <TableCell className="text-right tabular-nums">{live ? live.blockingCount : c.blockingCount}</TableCell>
-                    <TableCell className="text-right tabular-nums">{live ? live.warningCount : c.warningCount}</TableCell>
+                    <TableCell className="px-4 py-1.5 text-ink-muted">{c.sheetName}</TableCell>
+                    <TableCell className="px-4 py-1.5 text-right tabular-nums">{live ? live.rows.length : c.entries}</TableCell>
+                    <TableCell className="px-4 py-1.5 text-right tabular-nums">{formatBRL(sheet)}</TableCell>
+                    <TableCell className="px-4 py-1.5 text-right tabular-nums">{formatBRL(computed)}</TableCell>
+                    <TableCell className="px-4 py-1.5"><DiffBadge diff={diff} /></TableCell>
+                    <TableCell className={`px-4 py-1.5 text-right tabular-nums ${blocking > 0 ? "font-semibold text-red-600" : ""}`}>{blocking}</TableCell>
+                    <TableCell className={`px-4 py-1.5 text-right tabular-nums ${warnings > 0 ? "text-amber-700" : ""}`}>{warnings}</TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
           {(batch.summary.skippedSheets.length > 0 || batch.summary.emptySheets.length > 0 || batch.summary.ignoredSheets.length > 0) && (
-            <p className="mt-3 text-xs text-ink-muted">
+            <p className="mt-3 text-[11px] text-ink-muted">
               {batch.summary.skippedSheets.length > 0 && (
                 <>Já importados (pulados): {batch.summary.skippedSheets.map((s) => s.sheetName).join(", ")}. </>
               )}
@@ -290,7 +290,7 @@ export function VbBatchReview({ batch, groups }: Props) {
             </p>
           )}
           {isPending && totalEntries > 0 && (
-            <p className="mt-2 text-xs text-ink-muted">
+            <p className="mt-2 text-[11px] text-ink-muted">
               Diferença até {formatBRL(VB_BALANCE_TOLERANCE)} por credor é arredondamento para centavos. Divergência maior não impede aprovar, mas vale corrigir a linha antes.
             </p>
           )}
@@ -299,35 +299,45 @@ export function VbBatchReview({ batch, groups }: Props) {
 
       {isPending && active && (
         <Card>
-          <CardHeader className="space-y-3">
-            <div className="flex flex-wrap gap-2">
+          <CardHeader className="space-y-2 pb-3">
+            <div className="flex flex-wrap gap-1.5">
               {groups.map((g) => (
                 <button
                   key={g.creditor.id}
                   type="button"
                   onClick={() => setActiveId(g.creditor.id)}
-                  className={`rounded-full border px-3 py-1 text-sm ${g.creditor.id === active.creditor.id ? "border-teal-600 bg-teal-600/10 font-medium text-teal-700" : "border-border text-ink-secondary hover:bg-surface-2"}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] ${g.creditor.id === active.creditor.id ? "border-teal-600 bg-teal-600/10 font-medium text-teal-700" : "border-border text-ink-secondary hover:bg-surface-2"}`}
                 >
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${dotFor(g)}`} />
                   {g.creditor.name}
-                  {g.blockingCount > 0 && <span className="ml-1 text-red-600">•{g.blockingCount}</span>}
+                  {g.blockingCount > 0 && <span className="text-red-600">{g.blockingCount}</span>}
                 </button>
               ))}
             </div>
             <CreditorHeader key={active.creditor.id} group={active} />
-            <div className="flex flex-wrap gap-4 text-sm text-ink-secondary">
-              <span>Entradas: <strong className="text-ink-primary">{formatBRL(active.totals.entradas)}</strong></span>
-              <span>Saídas: <strong className="text-ink-primary">{formatBRL(active.totals.saidas)}</strong></span>
-              <span>Rendimentos: <strong className="text-ink-primary">{formatBRL(active.totals.rendimentos)}</strong></span>
-              <span>Saldo sistema: <strong className="text-ink-primary">{formatBRL(active.computedFinalBalance)}</strong></span>
-              <span>Saldo planilha: <strong className="text-ink-primary">{formatBRL(active.sheetFinalBalance)}</strong></span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+              <span className="text-ink-secondary">
+                Planilha <strong className="text-ink-primary tabular-nums">{formatBRL(active.sheetFinalBalance)}</strong>
+              </span>
+              <span className="text-ink-secondary">
+                Sistema <strong className="text-ink-primary tabular-nums">{formatBRL(active.computedFinalBalance)}</strong>
+              </span>
               <DiffBadge diff={active.diff} />
+              <span className="text-ink-muted">
+                Entradas {formatBRL(active.totals.entradas)} · Saídas {formatBRL(active.totals.saidas)} · Rendimentos{" "}
+                {formatBRL(active.totals.rendimentos)}
+              </span>
             </div>
             {flagCounts.size > 0 && (
               <div className="flex flex-wrap gap-1">
                 {Array.from(flagCounts.entries())
                   .sort(([a], [b]) => Number(isBlockingFlag(b)) - Number(isBlockingFlag(a)))
                   .map(([flag, count]) => (
-                    <Badge key={flag} variant={isBlockingFlag(flag) ? "destructive" : "outline"}>
+                    <Badge
+                      key={flag}
+                      variant={isBlockingFlag(flag) ? "destructive" : "outline"}
+                      className="whitespace-nowrap px-1.5 py-0 text-[10px]"
+                    >
                       {VB_FLAG_LABELS[flag]} ×{count}
                     </Badge>
                   ))}
@@ -335,58 +345,14 @@ export function VbBatchReview({ batch, groups }: Props) {
             )}
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-right">Linha</TableHead>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead className="text-right">Entrada</TableHead>
-                    <TableHead className="text-right">Saída</TableHead>
-                    <TableHead className="text-right">Rendimento</TableHead>
-                    <TableHead className="text-right">Saldo planilha</TableHead>
-                    <TableHead className="text-right">Saldo sistema</TableHead>
-                    <TableHead>Alertas</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {active.rows.map((row) => {
-                    const sheetDiff = row.sheet_balance == null ? null : row.balance - row.sheet_balance;
-                    const sheetOff = sheetDiff !== null && Math.abs(sheetDiff) > VB_BALANCE_TOLERANCE;
-                    return (
-                      <TableRow key={row.id} className={row.flags.some(isBlockingFlag) ? "bg-red-500/5" : undefined}>
-                        <TableCell className="text-right tabular-nums text-ink-muted">{row.source_row ?? "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap">{formatDayBR(row.entry_date)}</TableCell>
-                        <TableCell>
-                          <div>{row.description ?? "—"}</div>
-                          {row.kind === "rendimento" && (
-                            <div className="text-xs text-ink-muted">{describeRendimento(row)}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{row.kind === "entrada" ? formatBRL(row.amount) : ""}</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.kind === "saida" ? formatBRL(Math.abs(row.amount)) : ""}</TableCell>
-                        <TableCell className={`text-right tabular-nums ${row.kind === "rendimento" && row.amount < 0 ? "text-red-600" : ""}`}>
-                          {row.kind === "rendimento" ? formatBRL(row.amount) : ""}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-ink-muted">{formatBRL(row.sheet_balance)}</TableCell>
-                        <TableCell className={`text-right tabular-nums ${sheetOff ? "font-semibold text-red-600" : ""}`}>{formatBRL(row.balance)}</TableCell>
-                        <TableCell><FlagBadges flags={row.flags} /></TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <Button type="button" variant="ghost" size="icon" onClick={() => setEditing(row)} aria-label="Editar">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button type="button" variant="ghost" size="icon" onClick={() => setDeleting(row)} aria-label="Excluir">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            <VbStatementTable
+              rows={active.rows}
+              showSheetBalance
+              showFlags
+              onEdit={setEditing}
+              onDelete={setDeleting}
+              emptyText="Nenhum lançamento neste credor."
+            />
           </CardContent>
         </Card>
       )}
@@ -420,7 +386,7 @@ export function VbBatchReview({ batch, groups }: Props) {
             <DialogTitle>{confirm === "approve" ? "Aprovar a importação?" : "Descartar o lote?"}</DialogTitle>
             <DialogDescription>
               {confirm === "approve"
-                ? `${totalEntries} lançamentos de ${groups.length} credor(es) passam a ser o histórico oficial do VB. Depois de aprovado, o histórico não é editado.`
+                ? `${totalEntries} lançamentos de ${groups.length} credor(es) passam a ser o histórico oficial do VB. A partir daí os lançamentos são feitos aqui no sistema; a planilha não é mais importada.`
                 : "Todos os lançamentos pendentes deste lote são apagados. Você pode importar a planilha de novo depois."}
             </DialogDescription>
           </DialogHeader>

@@ -3,39 +3,17 @@ import { notFound, redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
+import { VbStatStrip } from "@/components/vb/stat-strip";
+import { VbStatementTable } from "@/components/vb/statement-table";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatDayBR } from "@/lib/ctrl/datetime";
 import { formatBRL } from "@/lib/orcamento/format";
 import { createClient } from "@/lib/supabase/server";
 import { getVbUser } from "@/lib/vb/auth";
-import { describeRendimento } from "@/lib/vb/format";
-import { currentBalance, groupByYear, ledgerTotals } from "@/lib/vb/ledger";
+import { currentBalance, ledgerTotals, withRunningBalance } from "@/lib/vb/ledger";
 import { countPendingEntries, getCreditor, getPendingBatch, listEntries } from "@/lib/vb/queries";
 import { isUuid } from "@/lib/vb/types";
 
 export const dynamic = "force-dynamic";
-
-function Stat({ label, value, negative }: { label: string; value: number; negative?: boolean }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-ink-muted">{label}</CardTitle>
-      </CardHeader>
-      <CardContent className={`text-2xl font-semibold ${negative ? "text-red-600" : "text-ink-primary"}`}>
-        {formatBRL(value)}
-      </CardContent>
-    </Card>
-  );
-}
 
 export default async function VbCreditorPage({ params }: { params: { id: string } }) {
   const user = await getVbUser();
@@ -55,22 +33,23 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
 
   const totals = ledgerTotals(entries);
   const balance = currentBalance(entries);
-  const years = groupByYear(entries);
+  // Cronológico, mais antigo em cima: a mesma ordem da planilha, que é como o
+  // saldo é conferido linha a linha.
+  const rows = withRunningBalance(entries);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <Link href="/vb" className="inline-flex items-center gap-1 text-xs text-ink-muted hover:underline">
             <ArrowLeft className="h-3 w-3" /> Visão geral
           </Link>
-          <h1 className="text-xl font-semibold text-ink-primary">
-            {creditor.name}
-            {!creditor.active && <Badge variant="secondary" className="ml-2 align-middle">encerrado</Badge>}
-          </h1>
-          <p className="text-sm text-ink-muted">
-            {entries.length} lançamentos · saldo positivo = o VB deve ao credor
-          </p>
+          <h1 className="text-xl font-semibold text-ink-primary">{creditor.name}</h1>
+          {!creditor.active && (
+            <Badge variant="secondary" className="text-[10px]">
+              encerrado
+            </Badge>
+          )}
         </div>
         {isGestor && <VbNewEntryDialog creditorId={creditor.id} creditorName={creditor.name} />}
       </div>
@@ -89,70 +68,34 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Saldo atual" value={balance} negative={balance < 0} />
-        <Stat label="Entradas" value={totals.entradas} />
-        <Stat label="Saídas" value={totals.saidas} />
-        <Stat label="Rendimentos" value={totals.rendimentos} />
+      <VbStatStrip
+        stats={[
+          {
+            label: "Saldo atual",
+            value: formatBRL(balance),
+            emphasis: true,
+            tone: balance < 0 ? "negative" : "default",
+          },
+          { label: "Entradas", value: formatBRL(totals.entradas), tone: "entrada" },
+          { label: "Saídas", value: formatBRL(totals.saidas), tone: "saida" },
+          { label: "Rendimentos", value: formatBRL(totals.rendimentos), tone: "rendimento" },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" /> entrada
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-red-500" /> saída
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-sky-500" /> rendimento
+        </span>
+        <span>{entries.length} lançamentos · saldo positivo = o VB deve ao credor</span>
       </div>
 
-      {years.length === 0 ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-ink-muted">Nenhum lançamento aprovado.</CardContent>
-        </Card>
-      ) : (
-        years.map((group) => (
-          <Card key={group.year}>
-            <CardHeader className="flex flex-row flex-wrap items-baseline justify-between gap-2">
-              <CardTitle className="text-base">{group.year}</CardTitle>
-              <p className="text-xs text-ink-muted">
-                Entradas {formatBRL(group.totals.entradas)} · Saídas {formatBRL(group.totals.saidas)} · Rendimentos{" "}
-                {formatBRL(group.totals.rendimentos)} · Saldo no fim do ano{" "}
-                <strong className={group.closingBalance < 0 ? "text-red-600" : "text-ink-primary"}>
-                  {formatBRL(group.closingBalance)}
-                </strong>
-              </p>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Descrição</TableHead>
-                      <TableHead className="text-right">Entrada</TableHead>
-                      <TableHead className="text-right">Saída</TableHead>
-                      <TableHead className="text-right">Rendimento</TableHead>
-                      <TableHead className="text-right">Saldo</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.entries.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell className="whitespace-nowrap">{formatDayBR(row.entry_date)}</TableCell>
-                        <TableCell>
-                          <div>{row.description ?? "—"}</div>
-                          {row.kind === "rendimento" && (
-                            <div className="text-xs text-ink-muted">{describeRendimento(row)}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{row.kind === "entrada" ? formatBRL(row.amount) : ""}</TableCell>
-                        <TableCell className="text-right tabular-nums">{row.kind === "saida" ? formatBRL(Math.abs(row.amount)) : ""}</TableCell>
-                        <TableCell className={`text-right tabular-nums ${row.kind === "rendimento" && row.amount < 0 ? "text-red-600" : ""}`}>
-                          {row.kind === "rendimento" ? formatBRL(row.amount) : ""}
-                        </TableCell>
-                        <TableCell className={`text-right font-medium tabular-nums ${row.balance < 0 ? "text-red-600" : ""}`}>
-                          {formatBRL(row.balance)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        ))
-      )}
+      <VbStatementTable rows={rows} yearSeparators emptyText="Nenhum lançamento aprovado." />
     </div>
   );
 }

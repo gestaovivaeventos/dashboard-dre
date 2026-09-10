@@ -25,7 +25,6 @@ import {
   Sparkles,
   Target,
   Truck,
-  Upload,
   Users,
   Wallet,
 } from "lucide-react";
@@ -36,7 +35,7 @@ import {
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
-import { VB_NAV_KEY_IMPORT, VB_NAV_KEY_OVERVIEW, VB_PATH } from "@/lib/auth/vb";
+import { VB_NAV_KEY_OVERVIEW, VB_PATH } from "@/lib/auth/vb";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -334,11 +333,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     // Módulo VB (Viva Bank): créditos de sócios/credores. Concedido por
     // usuário em user_module_roles (module='vb'); admin não enxerga sem a
     // linha — ver @/lib/auth/vb.
+    // Só "Visão geral": a importação da planilha é uma vez só, então não é
+    // rotina de menu — quem precisa chega por ela pela Visão geral, que
+    // oferece o link enquanto não existe histórico aprovado.
     id: "vb",
     label: "VB",
     items: [
       { key: VB_NAV_KEY_OVERVIEW, title: "Visão geral", icon: Landmark, scope: "global", href: VB_PATH, vbAccess: true },
-      { key: VB_NAV_KEY_IMPORT, title: "Importação", icon: Upload, scope: "global", href: `${VB_PATH}/importar`, vbAccess: true, vbGestorOnly: true },
     ],
   },
   {
