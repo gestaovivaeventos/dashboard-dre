@@ -54,6 +54,8 @@ interface NavLinksProps {
    * independentemente dos ctrlRoles do usuário.
    */
   ctrlFullView?: boolean;
+  /** Contadores por chave de item (ex.: pendentes da triagem da Omie). Só aparece quando > 0. */
+  navBadges?: Readonly<Record<string, number>>;
 }
 
 interface RenderItem {
@@ -87,6 +89,7 @@ export function NavLinks({
   isCsc,
   canBiValidation,
   ctrlFullView,
+  navBadges,
 }: NavLinksProps) {
   const pathname = usePathname();
 
@@ -95,7 +98,7 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, vbRole, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView });
+    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, vbRole, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView, navBadges });
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =
@@ -202,6 +205,7 @@ interface BuildInput {
   isCsc?: boolean;
   canBiValidation?: boolean;
   ctrlFullView?: boolean;
+  navBadges?: Readonly<Record<string, number>>;
 }
 
 function buildContractsOnlyGroups(): RenderGroup[] {
@@ -237,6 +241,7 @@ function buildGroups({
   isCsc,
   canBiValidation,
   ctrlFullView,
+  navBadges,
 }: BuildInput): RenderGroup[] {
   const ctrlSet = new Set(ctrlRoles ?? []);
   const slug =
@@ -255,7 +260,8 @@ function buildGroups({
       const href = resolveHref(item, slug);
       if (!href) continue;
 
-      items.push({ key: item.key, title: item.title, href, icon: item.icon });
+      const badge = navBadges?.[item.key];
+      items.push({ key: item.key, title: item.title, href, icon: item.icon, ...(badge != null && badge > 0 ? { badge } : {}) });
     }
 
     if (items.length > 0) {
