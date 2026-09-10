@@ -296,10 +296,24 @@ function parseCreditorSheet(wb: XLSX.WorkBook, sheetName: string): ParsedCredito
 }
 
 /**
+ * Todo .xlsx é um contêiner ZIP e começa com "PK\x03\x04". Sem essa checagem o
+ * SheetJS aceita bytes arbitrários como texto/CSV e devolve uma aba fantasma
+ * ("Sheet1") em vez de lançar.
+ */
+function isZipSignature(data: Uint8Array): boolean {
+  return (
+    data.length >= 4 && data[0] === 0x50 && data[1] === 0x4b && data[2] === 0x03 && data[3] === 0x04
+  );
+}
+
+/**
  * Lê o .xlsx inteiro. Lança só quando o arquivo não é uma planilha legível;
  * problema de conteúdo vira flag no lançamento, nunca exceção.
  */
 export function parseVbWorkbook(data: Uint8Array): ParsedWorkbook {
+  if (!isZipSignature(data)) {
+    throw new Error("Arquivo inválido: não é uma planilha .xlsx legível.");
+  }
   let wb: XLSX.WorkBook;
   try {
     wb = XLSX.read(data, { type: "array", cellDates: false });
