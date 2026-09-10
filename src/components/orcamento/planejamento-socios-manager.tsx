@@ -46,8 +46,6 @@ import {
   type PlanejamentoProposta,
 } from "@/lib/orcamento/planejamento-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
-import { analisarBase } from "@/lib/orcamento/planejamento-analise";
-import { PlanejamentoAlertasBase } from "@/components/orcamento/planejamento-alertas-base";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { cn } from "@/lib/utils";
@@ -686,19 +684,6 @@ function CategoriaInterview({
   const baseIncluidos = useMemo(() => baseItens.filter((i) => i.incluir), [baseItens]);
   const baseTotal = categoriaTotal(baseIncluidos);
   const baseDescFaltando = baseIncluidos.some((i) => i.descricao.trim() === "");
-  // Leitura do conjunto: as mesmas observações que a IA faz na abertura, só que
-  // AQUI — para o admin limpar a base antes de levá-la para a entrevista.
-  const alertasBase = useMemo(
-    () =>
-      analisarBase(
-        baseIncluidos.map((i) => ({
-          key: i.key,
-          descricao: i.descricao,
-          totalAno: totalItem(i.valorMensal, i.mesInicio, i.periodicidade, i.mesFim ?? null),
-        })),
-      ),
-    [baseIncluidos],
-  );
 
   // Posição desta categoria no plano + próxima PENDENTE (para o painel de
   // conclusão e o "X de N" do cabeçalho). A categoria atual conta como concluída
@@ -1130,7 +1115,6 @@ function CategoriaInterview({
                   <Pencil className="h-3.5 w-3.5" /> Editar base
                 </button>
               </div>
-              <PlanejamentoAlertasBase alertas={alertasBase} />
               {contextoAdmin.trim() !== "" && (
                 <div className="flex items-start gap-1.5 rounded-md border border-emerald-500/20 bg-background/60 p-2 text-xs text-muted-foreground">
                   <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -1142,7 +1126,6 @@ function CategoriaInterview({
             </div>
           ) : (
             <div className="space-y-3">
-              <PlanejamentoAlertasBase alertas={alertasBase} />
               <ItensTable
                 itens={baseItens}
                 refMap={refMap}
@@ -1546,7 +1529,12 @@ export function PlanejamentoSociosManager({
     void (async () => {
       const res = await getSetores(companyId, year);
       if (cancelado) return;
-      const ativos = (res.items ?? []).filter((x) => x.active);
+      // "Orçar por setor" DESLIGADO: a empresa é orçada como um bloco só.
+      // Zerar a lista aqui apaga, de uma vez, o seletor de setor, a coluna de
+      // setor e o botão Mover — todos já condicionados a `setores.length > 0`.
+      const ativos = res.orcarPorSetor
+        ? (res.items ?? []).filter((x) => x.active)
+        : [];
       setSetores(ativos);
       const primeiro = ativos[0]?.id ?? null;
       setSetorId(primeiro);
@@ -1637,11 +1625,48 @@ export function PlanejamentoSociosManager({
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{loadError}</div>
       )}
 
+      {/* Seletor de setor SEMPRE visível — inclusive quando o setor escolhido não
+          tem categoria nenhuma. Ele ficava dentro do ramo de baixo, então cair
+          num setor vazio deixava a tela sem nenhuma forma de trocar de setor. */}
+      {setores.length > 0 && (
+        <div className="w-64 space-y-1.5">
+          <label className="text-sm font-medium">Setor</label>
+          <select
+            value={setorId ?? ""}
+            onChange={(e) => handleSetor(e.target.value)}
+            disabled={loading}
+            title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
+            className={INPUT_CLS}
+          >
+            {setores.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+            <option value={SETOR_TODOS}>Todos os setores</option>
+          </select>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nenhuma categoria desta empresa está marcada para o método{" "}
-          <span className="font-medium">Planejamento dos gestores</span> em {year}. Defina o método em
-          Configuração → Método por categoria.
+          {setores.length > 0 && setorId && setorId !== SETOR_TODOS ? (
+            <>
+              Nenhuma categoria está vinculada a{" "}
+              <span className="font-medium">
+                {setores.find((x) => x.id === setorId)?.name ?? "este setor"}
+              </span>{" "}
+              pelo método <span className="font-medium">Planejamento dos gestores</span> em {year}.
+              Escolha outro setor acima, ou vincule a categoria em Configuração → Método por
+              categoria.
+            </>
+          ) : (
+            <>
+              Nenhuma categoria desta empresa está marcada para o método{" "}
+              <span className="font-medium">Planejamento dos gestores</span> em {year}. Defina o
+              método em Configuração → Método por categoria.
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -1686,25 +1711,6 @@ export function PlanejamentoSociosManager({
             </div>
           </div>
 
-          {setores.length > 0 && (
-            <div className="w-64 space-y-1.5">
-              <label className="text-sm font-medium">Setor</label>
-              <select
-                value={setorId ?? ""}
-                onChange={(e) => handleSetor(e.target.value)}
-                disabled={loading}
-                title="Cada gestor planeja o próprio setor. As categorias listadas são as atribuídas a este setor em Método por categoria."
-                className={INPUT_CLS}
-              >
-                {setores.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-                <option value={SETOR_TODOS}>Todos os setores</option>
-              </select>
-            </div>
-          )}
 
           <div className="relative max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

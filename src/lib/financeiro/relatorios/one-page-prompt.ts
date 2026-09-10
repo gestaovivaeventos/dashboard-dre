@@ -976,6 +976,13 @@ REGRAS (obrigatorias; prevalecem sobre a leitura puramente numerica):
    num texto unico e continuo. Nao existe secao separada de contexto no
    relatorio: o que nao estiver aqui (ou nos alertas e acoes) nao chega ao
    leitor.
+2.0. LIMITE RIGIDO: o "diagnosticoPrincipal" tem no maximo 1200 CARACTERES —
+   e limite do campo, nao sugestao; passar disso invalida a resposta inteira e
+   o relatorio nao e gerado. Cerca de 3 a 5 frases densas cabem nesse espaco.
+   Se o contexto pedir uma analise adicional (ex.: "diga quanto seria o
+   resultado sem tal receita"), ela cabe DENTRO desse limite: escreva a conta
+   em uma frase curta e objetiva. Precisando escolher, prefira condensar a
+   redacao a cortar um fato — e nunca estoure o limite para caber tudo.
    Alem dele, use tambem "destaques", "pontosAtencao", "acoesRecomendadas" e
    "leituraPorIndicador" onde couber — sem REPETIR as mesmas frases: cada campo
    acrescenta algo. Relatorio que ignora o contexto informado esta ERRADO.
@@ -1150,7 +1157,7 @@ pago e o que foi recebido, e pare por ai. Quem decide onde o valor entrou e o
 plano de contas, nao voce.
 
 VALE TAMBEM PARA O "diagnosticoPrincipal", SEM alonga-lo (ele continua com no
-maximo 900 caracteres). Monte-o em frases SEPARADAS, nesta ordem:
+maximo 1200 caracteres). Monte-o em frases SEPARADAS, nesta ordem:
   - frase 1: a linha da DRE e SO as causas que pertencem a ela. E PROIBIDO
     emendar nela a sequencia "..., alem do acerto / da venda / do recebimento";
   - frase 2, comecando por "Alem disso, no periodo": o fato societario, dizendo

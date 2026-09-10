@@ -8,6 +8,7 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import { setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
 const PATH = "/orcamento";
@@ -292,7 +293,10 @@ export async function saveValorFixoContrato(
     return { id: contrato.id };
   }
 
-  // Novo contrato.
+  // Novo contrato. O setor é resolvido para um de verdade (ver setor-gravacao):
+  // linha com setor nulo some de qualquer filtro por setor e não pode ser movida.
+  const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  if (alvo.error) return { error: alvo.error };
   const { data, error } = await supabase
     .from("orcamento_valor_fixo_categorias")
     .insert({
@@ -300,7 +304,7 @@ export async function saveValorFixoContrato(
       year,
       category_code: categoryCode,
       category_name: categoryName,
-      setor_id: setorId,
+      setor_id: alvo.id,
       ...patch,
     })
     .select("id")

@@ -49,6 +49,19 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
 - **DADOS BANCÁRIOS (Se houver):**
     - \`favorecido.banco\`, \`favorecido.agencia\`, \`favorecido.conta\`.
 
+- **TODAS AS CONTAS BANCÁRIAS DO DOCUMENTO (MUITO IMPORTANTE — NÃO PARE NA DO FAVORECIDO):**
+    - \`contas_encontradas\`: liste **TODAS** as contas bancárias que aparecem em
+      QUALQUER parte do documento — do prestador, do tomador, do contratante,
+      do contratado, em bloco "DADOS BANCÁRIOS", rodapé, carimbo ou anexo.
+      Varra o documento inteiro.
+    - **POR QUÊ:** em NFS-e o favorecido a extrair é o TOMADOR, mas a conta
+      impressa no documento costuma ser a do PRESTADOR. Se você só olhar a
+      conta do favorecido, a conta do documento se perde e a conferência
+      bancária deixa de acontecer. Não decida qual é a "certa"; liste todas.
+    - Cada item é a conta como aparece, incluindo o dígito quando houver
+      (ex.: "577870469-7"). Não invente nem complete dígitos. Não duplique a
+      mesma conta. Nenhuma conta no documento → \`[]\`.
+
 - **TODOS OS CPF/CNPJ DO DOCUMENTO (MUITO IMPORTANTE — NÃO PARE NO PRIMEIRO):**
     - \`cpf_cnpj_encontrados\`: liste **TODOS** os CPF e CNPJ que aparecem em
       QUALQUER parte do documento, sem exceção — contratante, contratado,
@@ -134,6 +147,7 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
     "conta": ""
   },
   "cpf_cnpj_encontrados": [],
+  "contas_encontradas": [],
   "numero_documento": "",
   "chave_acesso": "",
   "valor_contrato": "",

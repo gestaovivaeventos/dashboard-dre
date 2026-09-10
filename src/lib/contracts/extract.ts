@@ -18,6 +18,10 @@ export interface ContractExtractionResult {
 export async function extractContract(documentUrl: string): Promise<ContractExtractionResult> {
   const ocr = await parseDocumentWithLandingAI(documentUrl)
   const raw = await extractContractDataWithLlm(ocr.markdown)
+  if (ocr.pagesRead !== undefined && ocr.pagesRead < ocr.pageCount) {
+    raw.paginas_total = ocr.pageCount
+    raw.paginas_lidas = ocr.pagesRead
+  }
 
   return {
     raw,
@@ -37,6 +41,26 @@ export async function extractContract(documentUrl: string): Promise<ContractExtr
  * do `raw_extraction` salvo no banco (process-batch).
  */
 export function mergeCpfCnpj(
+  principal: string | null | undefined,
+  encontrados: string[] | null | undefined,
+): string[] {
+  return mergePorDigitos(principal, encontrados)
+}
+
+/**
+ * Mesma junção para contas bancárias: a conta do favorecido + todas as
+ * encontradas no documento. Necessária porque em NFS-e o favorecido extraído
+ * é o tomador e a conta impressa é a do prestador — sem a lista, a conta do
+ * documento se perde e a conferência bancária não roda.
+ */
+export function mergeContas(
+  principal: string | null | undefined,
+  encontradas: string[] | null | undefined,
+): string[] {
+  return mergePorDigitos(principal, encontradas)
+}
+
+function mergePorDigitos(
   principal: string | null | undefined,
   encontrados: string[] | null | undefined,
 ): string[] {
@@ -96,11 +120,14 @@ export function normalizeExtraction(raw: ContractExtraction): ExtractedContract 
     numero_documento: (raw.numero_documento ?? '').toString().trim() || null,
     chave_acesso: (raw.chave_acesso ?? '').toString().trim() || null,
     conta: (raw.favorecido?.conta ?? '').toString().trim() || null,
+    contas_todas: mergeContas(raw.favorecido?.conta, raw.contas_encontradas),
     valor_contrato: parseValor(raw.valor_contrato) || null,
     valores_pagamentos: valoresPagamentos,
     assinatura_contratante: (raw.assinatura_contratante ?? '').toString().trim() || null,
     assinatura_contratado: (raw.assinatura_contratado ?? '').toString().trim() || null,
     data_contrato: (raw.data_contrato ?? '').toString().trim() || null,
     datas_vencimento: datasVencimento,
+    paginas_total: raw.paginas_total,
+    paginas_lidas: raw.paginas_lidas,
   }
 }

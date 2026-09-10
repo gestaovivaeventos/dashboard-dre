@@ -16,8 +16,9 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
  *   - children_aggregate: agregados das contas filhas (para detectar is_summary)
  */
 export async function GET(request: Request) {
-  const { supabase, user } = await getCurrentSessionContext();
+  const { supabase, user, profile } = await getCurrentSessionContext();
   if (!user) return NextResponse.json({ error: "auth" }, { status: 401 });
+  if (profile?.role !== "admin") return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
 
   const url = new URL(request.url);
   let companyId = url.searchParams.get("companyId");

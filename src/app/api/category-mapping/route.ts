@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isUuid } from "@/lib/utils/uuid";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const companyId = url.searchParams.get("companyId");
-  if (!companyId) {
+  if (!isUuid(companyId)) {
     return NextResponse.json({ error: "Informe companyId." }, { status: 400 });
   }
 

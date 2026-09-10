@@ -1,4 +1,7 @@
-"use server";
+// Módulo interno de servidor — NÃO é "use server": com a diretiva, cada export
+// virava uma Server Action pública sem guarda (inserção de notificação com
+// service role para qualquer user_id). Só actions com requireCtrlRole usam isso.
+import "server-only";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";

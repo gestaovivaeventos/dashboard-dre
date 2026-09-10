@@ -8,12 +8,15 @@ import {
   CheckCircle2,
   Download,
   Eye,
+  FlaskConical,
   History,
   Loader2,
   MessageSquarePlus,
   RefreshCw,
   Send,
+  SendHorizontal,
   Sparkles,
+  UserPlus,
 } from "lucide-react";
 
 import { OnePageReportPreview } from "@/components/financeiro/relatorios/OnePageReportPreview";
@@ -145,7 +148,14 @@ function formatDateTime(iso: string | null): string {
   return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
 }
 
-type DialogMode = "preview" | "revisao" | "contexto" | "historico" | null;
+type DialogMode =
+  | "preview"
+  | "revisao"
+  | "contexto"
+  | "historico"
+  | "reenvio"
+  | "novos"
+  | null;
 
 /** Um contexto de negócio registrado — vem de bi_report_validation_contexts. */
 interface ContextHistoryEntry {
@@ -567,6 +577,19 @@ export function ValidacaoRelatorioClient({
                   const sent = Boolean(item.sentAt);
                   const accepted = Boolean(item.acceptedAt);
                   const hasReport = item.status !== "erro_geracao";
+                  // Quem está no cadastro atual mas não consta em `sentRecipients`
+                  // — normalmente alguém incluído em Plataforma > Relatório BI
+                  // depois do envio. É a mesma conta que o servidor refaz antes
+                  // de disparar; aqui ela só decide se o botão aparece.
+                  const novosDestinatarios = sent
+                    ? item.recipients.filter(
+                        (email) =>
+                          !item.sentRecipients.some(
+                            (already) =>
+                              already.trim().toLowerCase() === email.trim().toLowerCase(),
+                          ),
+                      )
+                    : [];
                   return (
                     <TableRow key={item.id}>
                       <TableCell>
@@ -761,6 +784,23 @@ export function ValidacaoRelatorioClient({
                                 <Send className="mr-1 h-3.5 w-3.5" />
                                 Enviar
                               </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  void runAction(
+                                    item,
+                                    { action: "teste" },
+                                    "E-mail de teste enviado para você",
+                                  )
+                                }
+                                disabled={busy || !hasReport || Boolean(envioIndisponivel)}
+                                title="Manda o e-mail exatamente como o gestor receberia, mas SÓ para o seu endereço. Não conta como envio."
+                              >
+                                <FlaskConical className="mr-1 h-3.5 w-3.5" />
+                                Testar
+                              </Button>
 
                               {/* Ação de EXCEÇÃO — separada do fluxo de rotina
                                   (aceitar / contexto / regerar / enviar) por um
@@ -796,7 +836,71 @@ export function ValidacaoRelatorioClient({
                                   : "Bloquear envio"}
                               </Button>
                             </>
-                          ) : null}
+                          ) : (
+                            /* JÁ ENVIADO — a linha ficava sem nenhuma ação. As
+                               duas aqui existem para o depois do envio: conferir
+                               como o e-mail chega (teste, só para quem clicou) e
+                               mandar de novo quando alguém ficou de fora. */
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  void runAction(
+                                    item,
+                                    { action: "teste" },
+                                    "E-mail de teste enviado para você",
+                                  )
+                                }
+                                disabled={busy || !hasReport || Boolean(envioIndisponivel)}
+                                title="Manda o e-mail exatamente como o gestor recebeu, mas SÓ para o seu endereço."
+                              >
+                                <FlaskConical className="mr-1 h-3.5 w-3.5" />
+                                Testar
+                              </Button>
+                              {novosDestinatarios.length > 0 ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => {
+                                    setActive(item);
+                                    setDialogMode("novos");
+                                  }}
+                                  disabled={busy || Boolean(envioIndisponivel)}
+                                  title={`${novosDestinatarios.length} destinatário(s) entraram na lista depois do envio e ainda não receberam este relatório.`}
+                                >
+                                  <UserPlus className="mr-1 h-3.5 w-3.5" />
+                                  Enviar aos novos ({novosDestinatarios.length})
+                                </Button>
+                              ) : null}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setActive(item);
+                                  setDialogMode("reenvio");
+                                }}
+                                disabled={
+                                  busy ||
+                                  !hasReport ||
+                                  item.recipients.length === 0 ||
+                                  Boolean(envioIndisponivel)
+                                }
+                                title={
+                                  envioIndisponivel
+                                    ? "Canal de envio (Resend) não configurado — veja o aviso no topo da tela."
+                                    : item.recipients.length === 0
+                                      ? "Nenhum destinatário cadastrado para esta empresa em Plataforma > Relatório BI."
+                                      : "Enviar este relatório novamente aos destinatários da empresa."
+                                }
+                              >
+                                <SendHorizontal className="mr-1 h-3.5 w-3.5" />
+                                Reenviar
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -862,6 +966,132 @@ export function ValidacaoRelatorioClient({
               <OnePageReportPreview data={previewData} />
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Enviar aos novos — o caso de "esqueci de cadastrar fulano". Manda só
+          para quem entrou na lista depois do envio; quem já recebeu não recebe
+          de novo. A lista é recalculada no servidor antes de disparar. */}
+      <Dialog
+        open={dialogMode === "novos"}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enviar aos destinatários novos</DialogTitle>
+            <DialogDescription>
+              {active?.companyName} — {active?.periodLabel}. Só quem entrou na lista
+              depois do envio vai receber. Quem já recebeu não é incomodado de novo.
+            </DialogDescription>
+          </DialogHeader>
+          {active ? (
+            <div className="space-y-3">
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900/50 dark:bg-emerald-950/30">
+                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
+                  Vai receber agora
+                </div>
+                <div className="mt-1 break-words text-sm text-emerald-900 dark:text-emerald-200">
+                  {active.recipients
+                    .filter(
+                      (email) =>
+                        !active.sentRecipients.some(
+                          (already) =>
+                            already.trim().toLowerCase() === email.trim().toLowerCase(),
+                        ),
+                    )
+                    .join(", ") || "—"}
+                </div>
+              </div>
+              <div className="rounded-md border bg-muted/40 px-3 py-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  Já recebeu — não será reenviado ({active.sentRecipients.length})
+                </div>
+                <div className="mt-1 break-words text-sm text-muted-foreground">
+                  {active.sentRecipients.join(", ") || "—"}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDialog}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() =>
+                active
+                  ? void runAction(
+                      active,
+                      { action: "enviar_novos" },
+                      "Enviado aos destinatários novos",
+                    )
+                  : undefined
+              }
+              disabled={busyId !== null}
+            >
+              {busyId ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <UserPlus className="mr-2 h-4 w-4" />
+              )}
+              Enviar aos novos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reenvio — confirmação obrigatória: diferente do "Testar", isto chega
+          de verdade na caixa do gestor, e o relatório já foi enviado uma vez.
+          Os destinatários são resolvidos no servidor pela empresa da linha; a
+          lista abaixo é só o que a tela já conhece. */}
+      <Dialog
+        open={dialogMode === "reenvio"}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reenviar este relatório?</DialogTitle>
+            <DialogDescription>
+              {active?.companyName} — {active?.periodLabel}. O relatório já foi enviado
+              {active?.sentAt ? ` em ${formatDateTime(active.sentAt)}` : ""}; quem já
+              recebeu vai receber de novo, igual. A data do primeiro envio é preservada
+              no histórico. Para só conferir como o e-mail está chegando, use{" "}
+              <strong>Testar</strong> — vai apenas para você.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <div className="text-xs font-medium text-muted-foreground">
+              Destinatários ({active?.recipients.length ?? 0})
+            </div>
+            <div className="mt-1 break-words text-sm">
+              {active?.recipients.join(", ") || "—"}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDialog}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() =>
+                active
+                  ? void runAction(active, { action: "reenviar" }, "Relatório reenviado")
+                  : undefined
+              }
+              disabled={busyId !== null}
+            >
+              {busyId ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <SendHorizontal className="mr-2 h-4 w-4" />
+              )}
+              Reenviar agora
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

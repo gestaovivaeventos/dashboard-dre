@@ -30,11 +30,31 @@ const DEFAULT_FROM_DOMAIN = "contato.quokka.net.br";
 /** Caixa usada como remetente dos e-mails automáticos. */
 const DEFAULT_FROM_MAILBOX = "bi";
 
+/**
+ * Anexo do e-mail. Com `contentId` preenchido vira imagem INLINE: o HTML
+ * referencia por `<img src="cid:SEU_CONTENT_ID">` e o arquivo não aparece
+ * como anexo baixável. É assim que os gráficos do relatório BI chegam.
+ */
+export interface ResendAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  contentId?: string;
+}
+
 export interface SendResendEmailOptions {
   to: string | string[];
   subject: string;
   html: string;
   replyTo?: string;
+  attachments?: ResendAttachment[];
+  /**
+   * Cabeçalhos extras. O caso de uso hoje é `X-Entity-Ref-ID`: com um valor
+   * único, o Gmail para de agrupar a mensagem na mesma conversa de outra com
+   * assunto parecido. É o que separa o e-mail de TESTE do envio oficial na
+   * caixa de quem dispara os dois.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface SendResendEmailResult {
@@ -132,6 +152,8 @@ export async function sendEmailViaResend({
   subject,
   html,
   replyTo,
+  attachments,
+  headers,
 }: SendResendEmailOptions): Promise<SendResendEmailResult> {
   const resend = getClient();
   if (!resend) {
@@ -160,12 +182,24 @@ export async function sendEmailViaResend({
   }
 
   try {
+    // `content` vai como base64: o SDK repassa o valor cru para o corpo JSON,
+    // então um Buffer viraria {"type":"Buffer","data":[...]} e o anexo chegaria
+    // corrompido. A API do Resend espera base64 nesse campo.
+    const parsedAttachments = (attachments ?? []).map((a) => ({
+      filename: a.filename,
+      content: a.content.toString("base64"),
+      ...(a.contentType ? { contentType: a.contentType } : {}),
+      ...(a.contentId ? { contentId: a.contentId } : {}),
+    }));
+
     const { data, error } = await resend.emails.send({
       from,
       to: recipients,
       subject,
       html,
       ...(replyTo ? { replyTo } : {}),
+      ...(parsedAttachments.length > 0 ? { attachments: parsedAttachments } : {}),
+      ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
     });
 
     if (error) {

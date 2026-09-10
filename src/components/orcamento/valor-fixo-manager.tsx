@@ -560,7 +560,12 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
     void (async () => {
       const res = await getSetores(companyId, year);
       if (cancelado) return;
-      const ativos = (res.items ?? []).filter((x) => x.active);
+      // "Orçar por setor" DESLIGADO: a empresa é orçada como um bloco só.
+      // Zerar a lista aqui apaga, de uma vez, o seletor de setor, a coluna de
+      // setor e o botão Mover — todos já condicionados a `setores.length > 0`.
+      const ativos = res.orcarPorSetor
+        ? (res.items ?? []).filter((x) => x.active)
+        : [];
       setSetores(ativos);
       const primeiro = ativos[0]?.id ?? null;
       setSetorId(primeiro);

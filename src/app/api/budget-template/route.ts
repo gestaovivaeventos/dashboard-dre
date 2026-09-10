@@ -10,7 +10,12 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const companyName = url.searchParams.get("companyName") ?? "Empresa";
+  // Vai para o header Content-Disposition e para células do CSV: sem aspas/CRLF,
+  // e sem começar com =+-@ (Excel executaria a célula como fórmula).
+  const companyName = (url.searchParams.get("companyName") ?? "Empresa")
+    .replace(/["\r\n;]/g, "")
+    .replace(/^[=+\-@]+/, "")
+    .trim() || "Empresa";
 
   // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
   const accounts = await fetchAllDreAccountRows<{ code: string; name: string; is_summary: boolean }>(

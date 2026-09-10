@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { canSeeRestrictedCompany } from "@/lib/auth/restricted-companies";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -43,8 +44,13 @@ export async function GET(
   }
 
   // Autorizacao por empresa: admin ve todas; demais apenas as liberadas.
+  // Empresa restrita (ex.: Dataforte) exige o vinculo no cadastro mesmo para
+  // admin — ver @/lib/auth/restricted-companies.
   const allowed = await resolveAllowedCompanyIds(supabase, profile, [doc.company_id]);
-  if (!allowed.includes(doc.company_id)) {
+  if (
+    !allowed.includes(doc.company_id) ||
+    !canSeeRestrictedCompany(doc.company_id, profile.company_ids)
+  ) {
     return NextResponse.json({ error: "Sem acesso a este documento." }, { status: 403 });
   }
 

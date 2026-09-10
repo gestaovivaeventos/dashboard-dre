@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCronAuthorized } from "@/lib/auth/cron";
 
 import { sendEmail } from "@/lib/email/gmail";
 import { generateReport } from "@/lib/intelligence/generate-report";
@@ -13,10 +14,7 @@ const MONTH_NAMES = [
 ];
 
 function isAuthorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  return isCronAuthorized(request);
 }
 
 function getPreviousMonthRange(now: Date): { dateFrom: string; dateTo: string; periodLabel: string } {

@@ -35,6 +35,11 @@ export interface ContractExtraction {
   // favorecido, etc.). A IA varre o documento inteiro — a validação aprova se o
   // CPF/CNPJ da requisição casar com QUALQUER um destes, não só o favorecido.
   cpf_cnpj_encontrados?: string[]
+  // Todas as contas bancárias presentes no documento. Em NFS-e o favorecido
+  // extraído é o TOMADOR, mas a conta impressa é a do PRESTADOR — sem esta
+  // varredura `favorecido.conta` volta vazio e a conferência bancária não
+  // acontece (caso real: RP 873260).
+  contas_encontradas?: string[]
   // Idoneidade do documento fiscal (NF/Fatura/Boleto). Usados na Faixa 2-B:
   // documento fiscal avulso precisa de número ou chave de acesso.
   numero_documento?: string
@@ -75,6 +80,11 @@ export interface ContractExtraction {
   assinatura_contratante: 'Sim' | 'Não' | string
   assinatura_contratado: 'Sim' | 'Não' | string
   assinatura_digital_detectada: 'Sim' | 'Não' | string
+  // Preenchidos pela extração (não pela IA) quando o PDF passou do limite de
+  // páginas do LandingAI e só o começo foi lido. Ficam no raw_extraction para
+  // a validação avisar que o documento foi lido parcialmente.
+  paginas_total?: number
+  paginas_lidas?: number
 }
 
 // Input for validation: the requisition row (from XLSX upload) plus the
@@ -114,6 +124,9 @@ export interface ExtractedContract {
   numero_documento: string | null
   chave_acesso: string | null
   conta: string | null
+  // TODAS as contas do documento, já incluindo a principal. A conferência
+  // bancária casa contra esta lista, não só contra `conta`.
+  contas_todas: string[]
   valor_contrato: number | null
   valores_pagamentos: number[]
   assinatura_contratante: string | null
@@ -123,6 +136,9 @@ export interface ExtractedContract {
   data_contrato?: string | null
   // Datas de vencimento das parcelas (DD/MM/AAAA). Usadas na regra de vencimento.
   datas_vencimento?: string[]
+  // Só quando o documento foi cortado antes da leitura (ver landingai.ts).
+  paginas_total?: number
+  paginas_lidas?: number
 }
 
 export type ValidationStatus =

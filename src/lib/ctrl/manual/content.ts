@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "14/08/2026";
+export const MANUAL_UPDATED_AT = "10/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -549,6 +549,11 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "p",
         text:
           "Na tela **Orçamento** você acompanha orçado, realizado, pendente e disponível por tipo de despesa; clique na linha para abrir o detalhamento por setor. É a mesma base usada na verificação orçamentária da requisição.",
+      },
+      {
+        kind: "p",
+        text:
+          "No topo há um seletor de período que vale para tudo (KPIs, tipos e setores): **Até o mês atual** (padrão) considera de janeiro até o mês corrente; **Ano completo** considera os 12 meses. Por isso, ao abrir a tela, os valores costumam ser menores que o orçamento anual inteiro — é o esperado; troque para **Ano completo** para ver o ano fechado.",
       },
     ],
   },

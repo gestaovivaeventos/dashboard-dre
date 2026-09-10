@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { defaultLandingFor } from "@/lib/auth/access";
 import { hasContratosGrant } from "@/lib/auth/contratos";
+import { hasVbGrant } from "@/lib/auth/vb";
 import { createClient } from "@/lib/supabase/server";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -55,6 +56,7 @@ export default async function RootRouter() {
     userProfile === "validador_contrato" ||
     Boolean(profileRow.contracts_only) ||
     userProfile === "admin";
+  const canVb = hasVbGrant(profileRow.user_module_roles);
 
   redirect(
     defaultLandingFor(
@@ -67,6 +69,7 @@ export default async function RootRouter() {
       // /viagens com ele desligado devolveria o usuário pra cá.
       false,
       canContratos,
+      canVb,
     ),
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { canSeeRestrictedCompany } from "@/lib/auth/restricted-companies";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ============================================================================
@@ -40,11 +41,12 @@ export async function GET(_request: Request, { params }: Params) {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("ai_reports")
-    .select("id, content_json, created_by, type")
+    .select("id, company_ids, content_json, created_by, type")
     .eq("id", params.id)
     .eq("type", "one-page")
     .maybeSingle<{
       id: string;
+      company_ids: string[] | null;
       content_json: Record<string, unknown> | null;
       created_by: string;
       type: string;
@@ -59,6 +61,15 @@ export async function GET(_request: Request, { params }: Params) {
   if (data.created_by !== user.id) {
     // Defesa extra: mesmo que o ID seja conhecido, so o autor pode acessar.
     return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
+  }
+  // Empresa restrita (ex.: Dataforte): ser o autor nao basta — precisa do
+  // vinculo no cadastro, admin incluido. Ver @/lib/auth/restricted-companies.
+  if (
+    !(data.company_ids ?? []).every((id) =>
+      canSeeRestrictedCompany(id, profile.company_ids),
+    )
+  ) {
+    return NextResponse.json({ error: "Sem acesso a esta empresa." }, { status: 403 });
   }
   if (!data.content_json) {
     return NextResponse.json(

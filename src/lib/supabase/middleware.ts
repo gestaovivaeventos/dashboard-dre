@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { canAccessPathByProfile, defaultLandingFor } from "@/lib/auth/access";
 import { hasContratosGrant } from "@/lib/auth/contratos";
+import { hasVbGrant } from "@/lib/auth/vb";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -125,6 +126,8 @@ export async function updateSession(request: NextRequest) {
       userProfile === "validador_contrato" ||
       Boolean(profileData?.contracts_only) ||
       userProfile === "admin";
+    // Módulo VB (Viva Bank): só a concessão. Sem override de admin.
+    const canVb = hasVbGrant(profileData?.user_module_roles);
     const isActive = profileData?.active ?? true;
 
     if (!isActive) {
@@ -143,6 +146,7 @@ export async function updateSession(request: NextRequest) {
         // Necessário para a tela "Validação Relatório", liberada nominalmente
         // para dois e-mails além de CSC/admin.
         user.email ?? null,
+        canVb,
       )
     ) {
       const url = request.nextUrl.clone();
@@ -153,6 +157,7 @@ export async function updateSession(request: NextRequest) {
         canCase,
         canViagens,
         canContratos,
+        canVb,
       );
       supabaseResponse = NextResponse.redirect(url);
     }

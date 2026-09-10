@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { canSeeRestrictedCompany } from "@/lib/auth/restricted-companies";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import {
   analyzeOnePageReport,
@@ -75,10 +76,17 @@ export async function POST(request: Request) {
   // Para admin, resolveAllowedCompanyIds devolve a lista recebida intacta;
   // para os demais, filtra por user_company_access. Passamos [companyId] e
   // checamos se sobreviveu ao filtro.
+  //
+  // Empresa RESTRITA (ex.: Dataforte) tem uma trava a mais: exige o vinculo
+  // explicito em user_company_access, e nesse caso o admin NAO passa por cima.
+  // Ver @/lib/auth/restricted-companies.
   const allowedCompanyIds = await resolveAllowedCompanyIds(supabase, profile, [
     companyId,
   ]);
-  if (!allowedCompanyIds.includes(companyId)) {
+  if (
+    !allowedCompanyIds.includes(companyId) ||
+    !canSeeRestrictedCompany(companyId, profile.company_ids)
+  ) {
     return NextResponse.json(
       { error: "Sem acesso a esta empresa." },
       { status: 403 },

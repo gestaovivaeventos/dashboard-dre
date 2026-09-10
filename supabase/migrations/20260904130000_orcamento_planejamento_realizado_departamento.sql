@@ -69,3 +69,9 @@ AS $$
 $$;
 
 NOTIFY pgrst, 'reload schema';
+
+-- DROP+CREATE devolve EXECUTE a anon/authenticated (default privileges do Supabase),
+-- reabrindo a leitura de financial_entries de qualquer empresa que a auditoria de
+-- 03/09/2026 fechou. O app só chama esta função pelo service role.
+REVOKE EXECUTE ON FUNCTION public.orcamento_planejamento_realizado_itens(uuid, integer, text, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.orcamento_planejamento_realizado_itens(uuid, integer, text, integer) TO service_role;

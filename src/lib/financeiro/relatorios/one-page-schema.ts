@@ -72,7 +72,14 @@ export const OnePageReportSchema = z.object({
   // frases. Quando o CSC adiciona contexto na tela Validação Relatório, a
   // explicação dos fatos entra AQUI — este é o texto que todo template exibe —,
   // e 500 chars nao cabiam a leitura do periodo mais as causas nomeadas.
-  diagnosticoPrincipal: z.string().min(1).max(900),
+  //
+  // 900 → 1200 (10/09/2026): contexto que pede uma analise a mais dentro do
+  // diagnostico (Salvaterra Mall, "quanto seria o resultado sem a receita de
+  // reembolso de IPTU") estourava os 900 e derrubava a geracao inteira. O
+  // limite tambem passou a ser dito ao modelo (CONTEXTO_CONTROLADORIA_RULE,
+  // regra 2.0) — se ainda assim estourar, o retry avisa o tamanho exato.
+  // Mantenha os dois numeros em sincronia ao mexer aqui.
+  diagnosticoPrincipal: z.string().min(1).max(1200),
   destaques: z.array(DestaqueSchema).min(0).max(5),
   pontosAtencao: z.array(PontoAtencaoSchema).min(0).max(5),
   acoesRecomendadas: z.array(AcaoRecomendadaSchema).min(0).max(5),

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isCronAuthorized } from "@/lib/auth/cron";
 
 import {
   sendSyncFailureEmail,
@@ -19,10 +20,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 function isAuthorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
+  return isCronAuthorized(request);
 }
 
 // Quantas empresas sincronizam em paralelo. Antes o cron processava todas

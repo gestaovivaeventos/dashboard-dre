@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
@@ -78,11 +79,18 @@ export async function GET(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!req) return NextResponse.json({ error: "Requisição não encontrada." }, { status: 404 });
 
-  // Visibilidade adicional: solicitante puro só pode baixar a propria.
-  const hasBroadVisibility = ctx.ctrlRoles.some((r) =>
-    ["gerente", "diretor", "csc", "admin", "contas_a_pagar"].includes(r),
-  );
-  if (!hasBroadVisibility && req.created_by !== ctx.id) {
+  // Visibilidade: espelha a tela de Requisições. Solicitante puro só baixa a
+  // própria; gerente baixa as próprias e as dos setores pelos quais responde
+  // (o PDF traz PIX/banco/conta do fornecedor — não pode vazar entre setores).
+  const isOwner = req.created_by === ctx.id;
+  const hasGlobalVisibility =
+    hasCtrlFullView(ctx.email) ||
+    ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin", "contas_a_pagar"].includes(r));
+  const isSectorManager =
+    ctx.ctrlRoles.includes("gerente") &&
+    typeof req.sector_id === "string" &&
+    ctx.sectorIds.includes(req.sector_id);
+  if (!hasGlobalVisibility && !isSectorManager && !isOwner) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 

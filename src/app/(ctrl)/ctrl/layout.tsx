@@ -31,6 +31,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const canViagens = Boolean(modules.viagens);
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
   const canContratos = Boolean(modules.contratos);
+  const vbRole = modules.vb?.role ?? null;
 
   // Segmentos para o shell DRE — fonte única compartilhada com o (app) layout
   // e as páginas DRE (resolveUserSegments): admin vê todos; os demais recebem a
@@ -52,6 +53,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     "ctrl",
     canCase,
     canViagens,
+    vbRole !== null,
   );
 
   const unreadNotifications = profile?.id
@@ -68,6 +70,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
+      vbRole={vbRole}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isUuid } from "@/lib/utils/uuid";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const companyId = url.searchParams.get("companyId");
-  if (!companyId) {
+  if (!isUuid(companyId)) {
     return NextResponse.json({ error: "Informe companyId." }, { status: 400 });
   }
 
@@ -197,7 +198,7 @@ export async function POST(request: Request) {
 
   const companyId = body.companyId?.trim();
   const mappings = body.mappings ?? [];
-  if (!companyId) {
+  if (!isUuid(companyId)) {
     return NextResponse.json({ error: "Informe companyId." }, { status: 400 });
   }
 

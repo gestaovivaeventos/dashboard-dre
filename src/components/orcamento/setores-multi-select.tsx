@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 
@@ -49,6 +49,25 @@ export function SetoresMultiSelect({
   const botaoRef = useRef<HTMLButtonElement>(null);
   const painelRef = useRef<HTMLDivElement>(null);
 
+  // Guarda o rascunho num ref para o commit não depender de re-registrar os
+  // listeners a cada tecla — e para o botão poder comitar sem duplicar a regra.
+  const rascunhoRef = useRef<string[]>(selecionados);
+  rascunhoRef.current = rascunho;
+  const selecionadosRef = useRef<string[]>(selecionados);
+  selecionadosRef.current = selecionados;
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
+  /** Fecha gravando o que mudou. TODO caminho de fechamento passa por aqui —
+   * fechar pelo próprio botão descartava a seleção sem avisar. */
+  const fecharEGravar = useCallback(() => {
+    setAberto(false);
+    const rasc = rascunhoRef.current;
+    const sel = selecionadosRef.current;
+    const mudou = rasc.length !== sel.length || rasc.some((id) => !sel.includes(id));
+    if (mudou) onCommitRef.current(rasc);
+  }, []);
+
   // O pai pode recarregar (troca de ano/empresa) — ressincroniza.
   useEffect(() => {
     if (!aberto) setRascunho(selecionados);
@@ -57,34 +76,41 @@ export function SetoresMultiSelect({
   // Fecha ao clicar fora ou com ESC, gravando o que mudou.
   useEffect(() => {
     if (!aberto) return;
-    const fechar = () => {
-      setAberto(false);
-      const mudou =
-        rascunho.length !== selecionados.length ||
-        rascunho.some((id) => !selecionados.includes(id));
-      if (mudou) onCommit(rascunho);
-    };
     const onClick = (e: MouseEvent) => {
       const alvo = e.target as Node;
       if (caixaRef.current?.contains(alvo) || painelRef.current?.contains(alvo))
         return;
-      fechar();
+      fecharEGravar();
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") fechar();
+      if (e.key === "Escape") fecharEGravar();
     };
-    // Painel fixo: rolar a página o deixaria para trás.
+    // O painel é FIXO, então precisa acompanhar a rolagem — mas rolar NÃO pode
+    // fechá-lo: a própria lista de setores rola por dentro (max-h + overflow),
+    // e fechar no scroll tornava impossível marcar um setor do fim da lista.
+    const reposicionar = (e: Event) => {
+      if (e.type === "scroll" && painelRef.current?.contains(e.target as Node)) return;
+      const r = botaoRef.current?.getBoundingClientRect();
+      if (!r) return;
+      // Botão rolou para fora da janela: aí sim fecha, senão o painel ficaria
+      // flutuando sozinho, sem âncora visível.
+      if (r.bottom < 0 || r.top > window.innerHeight) {
+        fecharEGravar();
+        return;
+      }
+      setPos({ top: r.bottom + 4, left: r.left });
+    };
     document.addEventListener("mousedown", onClick);
     document.addEventListener("keydown", onEsc);
-    window.addEventListener("scroll", fechar, true);
-    window.addEventListener("resize", fechar);
+    window.addEventListener("scroll", reposicionar, true);
+    window.addEventListener("resize", reposicionar);
     return () => {
       document.removeEventListener("mousedown", onClick);
       document.removeEventListener("keydown", onEsc);
-      window.removeEventListener("scroll", fechar, true);
-      window.removeEventListener("resize", fechar);
+      window.removeEventListener("scroll", reposicionar, true);
+      window.removeEventListener("resize", reposicionar);
     };
-  }, [aberto, rascunho, selecionados, onCommit]);
+  }, [aberto, fecharEGravar]);
 
   const nomes = setores
     .filter((s) => selecionados.includes(s.id))
@@ -104,7 +130,7 @@ export function SetoresMultiSelect({
         ref={botaoRef}
         onClick={() => {
           if (aberto) {
-            setAberto(false);
+            fecharEGravar();
             return;
           }
           const r = botaoRef.current?.getBoundingClientRect();

@@ -8,7 +8,7 @@
 // the next run picks up where it left off because extraction is keyed off
 // "tipo_documento IS NULL".
 
-import { extractContract, mergeCpfCnpj } from './extract'
+import { extractContract, mergeContas, mergeCpfCnpj } from './extract'
 import { decidirPorSaldoFee, loadFeeSaldo, type FeeSaldoMap } from './fee-saldo'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
@@ -406,13 +406,22 @@ export async function processBatch(
       numero_documento: (i.raw_extraction?.numero_documento ?? '').toString().trim() || null,
       chave_acesso: (i.raw_extraction?.chave_acesso ?? '').toString().trim() || null,
       conta: i.extracted_conta,
+      // Todas as contas do documento, reidratadas do raw_extraction salvo.
+      // Itens anteriores ao campo caem só na principal (retrocompat).
+      contas_todas: mergeContas(i.extracted_conta, i.raw_extraction?.contas_encontradas),
       valor_contrato: Number(i.extracted_valor_contrato) || null,
       valores_pagamentos: i.extracted_pagamentos ?? [],
       assinatura_contratante: i.assinatura_contratante,
       assinatura_contratado: i.assinatura_contratado,
       data_contrato: i.data_contrato,
       datas_vencimento: i.extracted_vencimentos ?? [],
-      extraction_failed: i.status === 'erro',
+      paginas_total: i.raw_extraction?.paginas_total,
+      paginas_lidas: i.raw_extraction?.paginas_lidas,
+      // O veredito 'erro' é espelhado em todos os itens da RP (abaixo), então
+      // status sozinho não diz qual documento falhou: numa reavaliação os três
+      // itens de uma RP apareciam como "3 documentos com falha" quando só um
+      // tinha falhado (RP 880704). Falha de extração = erro SEM tipo extraído.
+      extraction_failed: i.status === 'erro' && !i.tipo_documento,
     }))
 
     const validation = analisarRequisicao({

@@ -8,13 +8,24 @@ import { dayKeyBR } from "@/lib/ctrl/datetime";
 const BUDGET_IMPORT_BASELINE_YEAR = 2026;
 const BUDGET_IMPORT_BASELINE_DUE_START = "2026-07-12";
 
-/** Janela [startDate, endDate) do ano, como datas puras (YYYY-MM-DD). */
-export function getBudgetWindowDates(year: number) {
+/**
+ * Janela [startDate, endDate) do ano, como datas puras (YYYY-MM-DD).
+ *
+ * `throughMonth` (1–12) fecha a janela no fim daquele mês em vez de no fim do
+ * ano — é o que sustenta a visão "Até o mês atual" da tela de Orçamento (só
+ * conta o realizado/pendente com vencimento de janeiro até o mês corrente).
+ * Omitido ou 12 → ano inteiro (comportamento padrão).
+ */
+export function getBudgetWindowDates(year: number, throughMonth?: number) {
   const startDate =
     year === BUDGET_IMPORT_BASELINE_YEAR
       ? BUDGET_IMPORT_BASELINE_DUE_START
       : `${year}-01-01`;
-  return { startDate, endDate: `${year + 1}-01-01` };
+  const endDate =
+    throughMonth != null && throughMonth < 12
+      ? `${year}-${String(throughMonth + 1).padStart(2, "0")}-01`
+      : `${year + 1}-01-01`;
+  return { startDate, endDate };
 }
 
 /**
@@ -24,12 +35,16 @@ export function getBudgetWindowDates(year: number) {
  * Brasília (fatiar o ISO daria o dia em UTC e jogaria o que foi criado à noite
  * para o dia seguinte, virando o ano do orçamento em 31/12). Datas ISO
  * (YYYY-MM-DD) comparam lexicograficamente = cronologicamente.
+ *
+ * `throughMonth` fecha a janela no fim do mês informado (visão "Até o mês
+ * atual"); omitido = ano inteiro.
  */
 export function countsTowardBudget(
   row: { due_date: string | null; created_at: string },
   year: number,
+  throughMonth?: number,
 ): boolean {
-  const { startDate, endDate } = getBudgetWindowDates(year);
+  const { startDate, endDate } = getBudgetWindowDates(year, throughMonth);
   const eff = row.due_date ?? dayKeyBR(row.created_at);
   return eff >= startDate && eff < endDate;
 }

@@ -198,9 +198,14 @@ export async function extractAttachmentData(
   attachmentPath: string,
   kind: "nota" | "boleto",
 ): Promise<{ data: AttachmentReadResult } | { error: string }> {
-  await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin");
+  const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin");
 
   if (!attachmentPath) return { error: "Anexo não informado." };
+  // O download abaixo usa service role (ignora a policy do bucket), então a
+  // pasta `<uid>/` do próprio usuário — regra do upload — é conferida aqui.
+  if (!attachmentPath.startsWith(`${ctx.id}/`) || attachmentPath.includes("..")) {
+    return { error: "Anexo não pertence a este usuário." };
+  }
 
   // Baixa os bytes do anexo (bucket privado) para ler localmente e, se preciso,
   // mandar ao GPT visão.

@@ -2,7 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { sendEmailViaResend } from "@/lib/email/resend";
 import { analyzeOnePageReport } from "@/lib/financeiro/relatorios/one-page-analyzer";
-import { renderOnePageEmail } from "@/lib/financeiro/relatorios/one-page-email";
+import {
+  renderOnePageEmail,
+  type OnePageEmailResult,
+} from "@/lib/financeiro/relatorios/one-page-email";
 import { buildOnePagePayload } from "@/lib/financeiro/relatorios/one-page-payload";
 import {
   mapOnePageApiResponseToPreviewData,
@@ -116,16 +119,21 @@ export async function buildOnePageReport({
 }
 
 /**
- * Converte o relatorio gerado no HTML do e-mail. Passa pelo MESMO mapper da
- * tela — por isso o e-mail respeita template, blocos exclusivos e campos
- * ocultos de cada empresa sem nenhuma configuracao extra.
+ * Converte o relatorio gerado no e-mail. Passa pelo MESMO mapper da tela —
+ * por isso o e-mail respeita template, blocos exclusivos e campos ocultos de
+ * cada empresa sem nenhuma configuracao extra.
+ *
+ * Devolve `{ html, attachments }`: os graficos vao como imagem inline (cid),
+ * entao quem envia PRECISA repassar `attachments` ao Resend — sem isso o
+ * leitor recebe o relatorio com as imagens quebradas.
  */
-export function renderReportEmailHtml(
+export async function renderReportEmail(
   report: OnePageApiResponse,
   appUrl?: string,
-): string {
+  banner?: { title: string; text: string },
+): Promise<OnePageEmailResult> {
   const data = mapOnePageApiResponseToPreviewData(report);
-  return renderOnePageEmail({ data, appUrl });
+  return renderOnePageEmail({ data, appUrl, banner });
 }
 
 /** Assunto padronizado do e-mail do relatorio. */
@@ -172,12 +180,13 @@ export async function sendOnePageForCompany({
     const built = await buildOnePageReport({ admin, companyId, range });
     if (!built.ok) throw new Error(built.error);
 
-    const html = renderReportEmailHtml(built.report, appUrl);
+    const { html, attachments } = await renderReportEmail(built.report, appUrl);
 
     const sendResult = await sendEmailViaResend({
       to: emails,
       subject: reportEmailSubject(companyName, periodLabel),
       html,
+      attachments,
     });
     if (!sendResult.ok) throw new Error(sendResult.error ?? "Falha no envio do email.");
 

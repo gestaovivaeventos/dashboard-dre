@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { BusinessIntelligenceClient } from "@/components/financeiro/relatorios/BusinessIntelligenceClient";
+import { filterRestrictedCompanies } from "@/lib/auth/restricted-companies";
 import { resolveAllowedCompanyIds } from "@/lib/dashboard/dre";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 
@@ -51,11 +52,17 @@ export default async function BusinessIntelligencePage() {
     allCompanies.map((c) => c.id),
   );
 
-  const visibleCompanies = (
-    profile?.role === "admin"
+  // Empresas RESTRITAS (ex.: Dataforte) saem do seletor de quem nao tem o
+  // vinculo no cadastro — inclusive admin, que passa por cima do filtro acima.
+  // Ver @/lib/auth/restricted-companies; a rota /api/intelligence/one-page
+  // repete a checagem, entao esconder aqui nao e a unica trava.
+  const visibleCompanies = filterRestrictedCompanies(
+    (profile?.role === "admin"
       ? allCompanies
       : allCompanies.filter((c) => allowedCompanyIds.includes(c.id))
-  ).filter((c) => !BI_HIDDEN_COMPANY_IDS.has(c.id));
+    ).filter((c) => !BI_HIDDEN_COMPANY_IDS.has(c.id)),
+    profile?.company_ids,
+  );
 
   // Geracao liberada para quem tem acesso ao modulo Financeiro. A rota
   // /api/intelligence/one-page valida, por empresa, se o usuario pode gerar

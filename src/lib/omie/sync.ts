@@ -788,8 +788,17 @@ export async function canSyncCompany(
   companyId: string,
 ) {
   if (!profile) return false;
-  if (profile.role === "admin" || profile.role === "gestor_hero") return true;
-  return profile.company_id === companyId;
+  if (profile.role === "admin") return true;
+  // `gestor_hero` legado também cobre perfis só-Compras (diretor, contas a pagar):
+  // sincronizar exige o módulo Financeiro E acesso explícito à empresa.
+  if (profile.role !== "gestor_hero" || profile.can_financeiro === false) return false;
+  const { data } = await createAdminClient()
+    .from("user_company_access")
+    .select("company_id")
+    .eq("user_id", profile.id)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  return Boolean(data);
 }
 
 // ===========================================================================
