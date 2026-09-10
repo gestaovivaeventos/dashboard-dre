@@ -125,6 +125,7 @@ export async function linkOmieMovement(
     const { error: cleanupError } = await admin.from("vb_entries").delete().eq("group_id", group_id);
     if (cleanupError) {
       console.error("[vb-omie] link compensation failed", { group_id, error: cleanupError.message });
+      revalidateOmie(creditorIds);
       return {
         error: `Falha ao registrar o vínculo e a limpeza também falhou (grupo ${group_id}). Avise o suporte.`,
       };
@@ -170,6 +171,7 @@ export async function unlinkOmieMovement(omieId: string): Promise<VbActionResult
 
   const { error } = await admin.from("vb_omie_triage").delete().eq("id", triage.id as string);
   if (error) {
+    revalidateOmie(creditorIds);
     return { error: `${error.message} (${removed} lançamento(s) já apagados; repita o desvincular)` };
   }
 
