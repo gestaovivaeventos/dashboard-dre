@@ -3,6 +3,22 @@
 import { formatDayBR } from "@/lib/ctrl/datetime";
 import type { VbEntry } from "@/lib/vb/types";
 
+/**
+ * Moeda abreviada para eixo de gráfico: "R$ 1,2 mi", "R$ 300 mil", "R$ 850".
+ * O valor cheio continua no tooltip — aqui só cabe o suficiente para dar escala.
+ */
+export function compactBRL(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "−" : "";
+  if (abs >= 1000000) {
+    return `${sign}R$ ${(abs / 1000000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`;
+  }
+  if (abs >= 1000) {
+    return `${sign}R$ ${(abs / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} mil`;
+  }
+  return `${sign}R$ ${abs.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`;
+}
+
 export function formatPercent(rate: number, digits = 2): string {
   const value = (rate * 100).toLocaleString("pt-BR", {
     minimumFractionDigits: digits,

@@ -3,13 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
-import { VbStatStrip } from "@/components/vb/stat-strip";
-import { VbStatementTable } from "@/components/vb/statement-table";
+import { VbStatementView } from "@/components/vb/statement-view";
 import { Badge } from "@/components/ui/badge";
-import { formatBRL } from "@/lib/orcamento/format";
 import { createClient } from "@/lib/supabase/server";
 import { getVbUser } from "@/lib/vb/auth";
-import { currentBalance, ledgerTotals, withRunningBalance } from "@/lib/vb/ledger";
 import { countPendingEntries, getCreditor, getPendingBatch, listEntries } from "@/lib/vb/queries";
 import { isUuid } from "@/lib/vb/types";
 
@@ -31,12 +28,6 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
     isGestor ? getPendingBatch(db) : Promise.resolve(null),
   ]);
 
-  const totals = ledgerTotals(entries);
-  const balance = currentBalance(entries);
-  // Cronológico, mais antigo em cima: a mesma ordem da planilha, que é como o
-  // saldo é conferido linha a linha.
-  const rows = withRunningBalance(entries);
-
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -50,6 +41,7 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
               encerrado
             </Badge>
           )}
+          <span className="text-[11px] text-ink-muted">saldo positivo = o VB deve ao credor</span>
         </div>
         {isGestor && <VbNewEntryDialog creditorId={creditor.id} creditorName={creditor.name} />}
       </div>
@@ -68,34 +60,7 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
         </div>
       )}
 
-      <VbStatStrip
-        stats={[
-          {
-            label: "Saldo atual",
-            value: formatBRL(balance),
-            emphasis: true,
-            tone: balance < 0 ? "negative" : "default",
-          },
-          { label: "Entradas", value: formatBRL(totals.entradas), tone: "entrada" },
-          { label: "Saídas", value: formatBRL(totals.saidas), tone: "saida" },
-          { label: "Rendimentos", value: formatBRL(totals.rendimentos), tone: "rendimento" },
-        ]}
-      />
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted">
-        <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" /> entrada
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-red-500" /> saída
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-sky-500" /> rendimento
-        </span>
-        <span>{entries.length} lançamentos · saldo positivo = o VB deve ao credor</span>
-      </div>
-
-      <VbStatementTable rows={rows} yearSeparators emptyText="Nenhum lançamento aprovado." />
+      <VbStatementView entries={entries} creditorName={creditor.name} />
     </div>
   );
 }

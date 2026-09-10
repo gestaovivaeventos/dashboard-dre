@@ -64,6 +64,18 @@ interface Props {
   groups: ReviewGroup[];
 }
 
+type RowFilter = "todos" | "alerta" | "divergente";
+
+const ROW_FILTERS: Array<{ value: RowFilter; label: string }> = [
+  { value: "todos", label: "Todos" },
+  { value: "alerta", label: "Só com alerta" },
+  { value: "divergente", label: "Só divergentes" },
+];
+
+function isOffSheet(row: WithBalance<VbEntry>): boolean {
+  return row.sheet_balance != null && Math.abs(row.balance - row.sheet_balance) > VB_BALANCE_TOLERANCE;
+}
+
 function DiffBadge({ diff }: { diff: number | null }) {
   if (diff === null) return <Badge variant="outline" className="text-[10px]">sem saldo na planilha</Badge>;
   const ok = Math.abs(diff) <= VB_BALANCE_TOLERANCE;
@@ -137,6 +149,7 @@ export function VbBatchReview({ batch, groups }: Props) {
   const [editing, setEditing] = useState<VbEntry | null>(null);
   const [confirm, setConfirm] = useState<"approve" | "discard" | null>(null);
   const [deleting, setDeleting] = useState<VbEntry | null>(null);
+  const [rowFilter, setRowFilter] = useState<RowFilter>("todos");
 
   const isPending = batch.status === "pendente";
   const totalBlocking = useMemo(() => groups.reduce((acc, g) => acc + g.blockingCount, 0), [groups]);
@@ -154,6 +167,14 @@ export function VbBatchReview({ batch, groups }: Props) {
     }
     return map;
   }, [active]);
+
+  // Recorte da conferência. A ordem de exibição é da tabela (mais recente em cima).
+  const visibleRows = useMemo(() => {
+    if (!active) return [];
+    if (rowFilter === "alerta") return active.rows.filter((row) => row.flags.length > 0);
+    if (rowFilter === "divergente") return active.rows.filter(isOffSheet);
+    return active.rows;
+  }, [active, rowFilter]);
 
   function runApprove() {
     startTransition(async () => {
@@ -291,7 +312,7 @@ export function VbBatchReview({ batch, groups }: Props) {
           )}
           {isPending && totalEntries > 0 && (
             <p className="mt-2 text-[11px] text-ink-muted">
-              Diferença até {formatBRL(VB_BALANCE_TOLERANCE)} por credor é arredondamento para centavos. Divergência maior não impede aprovar, mas vale corrigir a linha antes.
+              Diferença até {formatBRL(VB_BALANCE_TOLERANCE)} por credor é arredondamento para centavos. O ✓ na coluna Conf. indica que o saldo do sistema fecha com a planilha naquela linha.
             </p>
           )}
         </CardContent>
@@ -327,6 +348,23 @@ export function VbBatchReview({ batch, groups }: Props) {
                 Entradas {formatBRL(active.totals.entradas)} · Saídas {formatBRL(active.totals.saidas)} · Rendimentos{" "}
                 {formatBRL(active.totals.rendimentos)}
               </span>
+              <div className="ml-auto flex flex-wrap items-center gap-1">
+                {ROW_FILTERS.map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    aria-pressed={rowFilter === filter.value}
+                    onClick={() => setRowFilter(filter.value)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[12px] ${
+                      rowFilter === filter.value
+                        ? "border-teal-600 bg-teal-600/10 font-medium text-teal-700"
+                        : "border-border text-ink-muted hover:bg-surface-2"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
             </div>
             {flagCounts.size > 0 && (
               <div className="flex flex-wrap gap-1">
@@ -346,12 +384,14 @@ export function VbBatchReview({ batch, groups }: Props) {
           </CardHeader>
           <CardContent>
             <VbStatementTable
-              rows={active.rows}
+              rows={visibleRows}
               showSheetBalance
               showFlags
               onEdit={setEditing}
               onDelete={setDeleting}
-              emptyText="Nenhum lançamento neste credor."
+              emptyText={
+                rowFilter === "todos" ? "Nenhum lançamento neste credor." : "Nenhum lançamento neste recorte."
+              }
             />
           </CardContent>
         </Card>
