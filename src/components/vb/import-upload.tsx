@@ -32,7 +32,7 @@ export function VbImportUpload({ pendingBatchId }: Props) {
         showToast({ title: "Importação não iniciada", description: json.error ?? "Falha ao enviar o arquivo.", variant: "destructive" });
         return;
       }
-      showToast({ title: "Planilha lida", description: "Revise os lançamentos antes de aprovar.", variant: "success" });
+      showToast({ title: "Arquivo lido", description: "Revise os lançamentos antes de aprovar.", variant: "success" });
       router.push(`/vb/importar/${json.batchId}`);
     } finally {
       setBusy(false);
@@ -42,7 +42,7 @@ export function VbImportUpload({ pendingBatchId }: Props) {
   if (pendingBatchId) {
     return (
       <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-ink-primary">
-        Há um lote pendente de revisão. Aprove ou descarte-o antes de importar outra planilha.{" "}
+        Há um lote pendente de revisão. Aprove ou descarte-o antes de importar outro arquivo.{" "}
         <Link href={`/vb/importar/${pendingBatchId}`} className="font-medium underline">
           Abrir revisão
         </Link>
@@ -65,8 +65,8 @@ export function VbImportUpload({ pendingBatchId }: Props) {
         Importar histórico
       </Button>
       <p className="basis-full text-xs text-ink-muted">
-        Só abas com o cabeçalho DATA | DATA | DIAS | DESCRIÇÃO | ENTRADA | SAÍDA | RENDIMENTO | SALDO na linha 4
-        são lidas. Nada vira oficial antes de você revisar e aprovar.
+        O arquivo .xlsx precisa ter, em cada aba de credor, o cabeçalho DATA | DATA | DIAS | DESCRIÇÃO | ENTRADA |
+        SAÍDA | RENDIMENTO | SALDO na linha 4. Nada vira oficial antes de você revisar e aprovar.
       </p>
     </div>
   );

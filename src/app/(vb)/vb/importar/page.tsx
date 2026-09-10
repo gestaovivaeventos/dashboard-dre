@@ -47,10 +47,9 @@ export default async function VbImportPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-ink-primary">Importar histórico da planilha</h1>
+        <h1 className="text-xl font-semibold text-ink-primary">Importar histórico</h1>
         <p className="text-sm text-ink-muted">
-          Feito uma única vez, para trazer o histórico do VB. Depois disso, os lançamentos são
-          feitos aqui no sistema.
+          Feito uma única vez, a partir do arquivo .xlsx. Depois disso, os lançamentos são feitos aqui no sistema.
         </p>
       </div>
 

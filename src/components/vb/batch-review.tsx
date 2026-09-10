@@ -38,7 +38,6 @@ import {
 } from "@/lib/vb/actions/import";
 import type { LedgerTotals, WithBalance } from "@/lib/vb/ledger";
 import {
-  VB_BALANCE_TOLERANCE,
   VB_FLAG_LABELS,
   isBlockingFlag,
   type VbCreditor,
@@ -64,32 +63,17 @@ interface Props {
   groups: ReviewGroup[];
 }
 
-type RowFilter = "todos" | "alerta" | "divergente";
+type RowFilter = "todos" | "alerta";
 
 const ROW_FILTERS: Array<{ value: RowFilter; label: string }> = [
   { value: "todos", label: "Todos" },
   { value: "alerta", label: "Só com alerta" },
-  { value: "divergente", label: "Só divergentes" },
 ];
 
-function isOffSheet(row: WithBalance<VbEntry>): boolean {
-  return row.sheet_balance != null && Math.abs(row.balance - row.sheet_balance) > VB_BALANCE_TOLERANCE;
-}
-
-function DiffBadge({ diff }: { diff: number | null }) {
-  if (diff === null) return <Badge variant="outline" className="text-[10px]">sem saldo na planilha</Badge>;
-  const ok = Math.abs(diff) <= VB_BALANCE_TOLERANCE;
-  return (
-    <Badge variant={ok ? "secondary" : "destructive"} className="text-[10px]">
-      {ok ? "fecha" : "divergência"} ({diff >= 0 ? "+" : ""}{formatBRL(diff)})
-    </Badge>
-  );
-}
-
-/** Semáforo do credor: bloqueio manda, depois divergência, senão fecha. */
+/** Semáforo do credor: bloqueio manda, depois aviso, senão tudo certo. */
 function dotFor(group: ReviewGroup): string {
   if (group.blockingCount > 0) return "bg-red-500";
-  if (group.diff !== null && Math.abs(group.diff) > VB_BALANCE_TOLERANCE) return "bg-amber-500";
+  if (group.warningCount > 0) return "bg-amber-500";
   return "bg-emerald-500";
 }
 
@@ -116,7 +100,7 @@ function CreditorHeader({ group }: { group: ReviewGroup }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <label className="text-[11px] uppercase tracking-wide text-ink-muted" htmlFor={`name-${group.creditor.id}`}>
-        Nome (aba &ldquo;{group.creditor.source_sheet ?? "—"}&rdquo;)
+        Nome do credor
       </label>
       <Input
         id={`name-${group.creditor.id}`}
@@ -172,7 +156,6 @@ export function VbBatchReview({ batch, groups }: Props) {
   const visibleRows = useMemo(() => {
     if (!active) return [];
     if (rowFilter === "alerta") return active.rows.filter((row) => row.flags.length > 0);
-    if (rowFilter === "divergente") return active.rows.filter(isOffSheet);
     return active.rows;
   }, [active, rowFilter]);
 
@@ -220,9 +203,9 @@ export function VbBatchReview({ batch, groups }: Props) {
     <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-ink-primary">Revisão do histórico importado</h1>
+          <h1 className="text-xl font-semibold text-ink-primary">Revisão do histórico</h1>
           <p className="text-sm text-ink-muted">
-            {batch.file_name} · enviado em {formatDateTimeBR(batch.created_at)} ·{" "}
+            Enviado em {formatDateTimeBR(batch.created_at)} ·{" "}
             <Badge variant={isPending ? "default" : batch.status === "aprovado" ? "secondary" : "outline"}>
               {isPending ? "pendente" : batch.status}
             </Badge>
@@ -253,18 +236,15 @@ export function VbBatchReview({ batch, groups }: Props) {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Resumo</CardTitle>
+          <CardTitle className="text-base">Credores</CardTitle>
         </CardHeader>
         <CardContent>
           <Table className="text-[13px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="h-8 py-1.5">Credor</TableHead>
-                <TableHead className="h-8 py-1.5">Aba</TableHead>
                 <TableHead className="h-8 py-1.5 text-right">Lançamentos</TableHead>
-                <TableHead className="h-8 py-1.5 text-right">Saldo planilha</TableHead>
-                <TableHead className="h-8 py-1.5 text-right">Saldo sistema</TableHead>
-                <TableHead className="h-8 py-1.5">Conferência</TableHead>
+                <TableHead className="h-8 py-1.5 text-right">Saldo</TableHead>
                 <TableHead className="h-8 py-1.5 text-right">Bloqueios</TableHead>
                 <TableHead className="h-8 py-1.5 text-right">Avisos</TableHead>
               </TableRow>
@@ -272,9 +252,7 @@ export function VbBatchReview({ batch, groups }: Props) {
             <TableBody>
               {batch.summary.creditors.map((c) => {
                 const live = groups.find((g) => g.creditor.id === c.creditorId);
-                const sheet = c.sheetFinalBalance;
                 const computed = live ? live.computedFinalBalance : c.computedFinalBalance;
-                const diff = live ? live.diff : c.diff;
                 const blocking = live ? live.blockingCount : c.blockingCount;
                 const warnings = live ? live.warningCount : c.warningCount;
                 return (
@@ -287,13 +265,14 @@ export function VbBatchReview({ batch, groups }: Props) {
                       ) : (
                         c.name
                       )}
-                      {c.hidden && <Badge variant="outline" className="ml-2 text-[10px]">aba oculta</Badge>}
+                      {live?.creditor.active === false && (
+                        <Badge variant="outline" className="ml-2 text-[10px]">encerrado</Badge>
+                      )}
                     </TableCell>
-                    <TableCell className="px-4 py-1.5 text-ink-muted">{c.sheetName}</TableCell>
                     <TableCell className="px-4 py-1.5 text-right tabular-nums">{live ? live.rows.length : c.entries}</TableCell>
-                    <TableCell className="px-4 py-1.5 text-right tabular-nums">{formatBRL(sheet)}</TableCell>
-                    <TableCell className="px-4 py-1.5 text-right tabular-nums">{formatBRL(computed)}</TableCell>
-                    <TableCell className="px-4 py-1.5"><DiffBadge diff={diff} /></TableCell>
+                    <TableCell className={`px-4 py-1.5 text-right tabular-nums ${computed < 0 ? "text-red-600" : ""}`}>
+                      {formatBRL(computed)}
+                    </TableCell>
                     <TableCell className={`px-4 py-1.5 text-right tabular-nums ${blocking > 0 ? "font-semibold text-red-600" : ""}`}>{blocking}</TableCell>
                     <TableCell className={`px-4 py-1.5 text-right tabular-nums ${warnings > 0 ? "text-amber-700" : ""}`}>{warnings}</TableCell>
                   </TableRow>
@@ -301,20 +280,6 @@ export function VbBatchReview({ batch, groups }: Props) {
               })}
             </TableBody>
           </Table>
-          {(batch.summary.skippedSheets.length > 0 || batch.summary.emptySheets.length > 0 || batch.summary.ignoredSheets.length > 0) && (
-            <p className="mt-3 text-[11px] text-ink-muted">
-              {batch.summary.skippedSheets.length > 0 && (
-                <>Já importados (pulados): {batch.summary.skippedSheets.map((s) => s.sheetName).join(", ")}. </>
-              )}
-              {batch.summary.emptySheets.length > 0 && <>Abas vazias: {batch.summary.emptySheets.join(", ")}. </>}
-              {batch.summary.ignoredSheets.length > 0 && <>Abas fora do VB: {batch.summary.ignoredSheets.join(", ")}.</>}
-            </p>
-          )}
-          {isPending && totalEntries > 0 && (
-            <p className="mt-2 text-[11px] text-ink-muted">
-              Diferença até {formatBRL(VB_BALANCE_TOLERANCE)} por credor é arredondamento para centavos. O ✓ na coluna Conf. indica que o saldo do sistema fecha com a planilha naquela linha.
-            </p>
-          )}
         </CardContent>
       </Card>
 
@@ -338,12 +303,11 @@ export function VbBatchReview({ batch, groups }: Props) {
             <CreditorHeader key={active.creditor.id} group={active} />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
               <span className="text-ink-secondary">
-                Planilha <strong className="text-ink-primary tabular-nums">{formatBRL(active.sheetFinalBalance)}</strong>
+                Saldo{" "}
+                <strong className={`tabular-nums ${active.computedFinalBalance < 0 ? "text-red-600" : "text-ink-primary"}`}>
+                  {formatBRL(active.computedFinalBalance)}
+                </strong>
               </span>
-              <span className="text-ink-secondary">
-                Sistema <strong className="text-ink-primary tabular-nums">{formatBRL(active.computedFinalBalance)}</strong>
-              </span>
-              <DiffBadge diff={active.diff} />
               <span className="text-ink-muted">
                 Entradas {formatBRL(active.totals.entradas)} · Saídas {formatBRL(active.totals.saidas)} · Rendimentos{" "}
                 {formatBRL(active.totals.rendimentos)}
@@ -385,7 +349,6 @@ export function VbBatchReview({ batch, groups }: Props) {
           <CardContent>
             <VbStatementTable
               rows={visibleRows}
-              showSheetBalance
               showFlags
               onEdit={setEditing}
               onDelete={setDeleting}
@@ -410,7 +373,7 @@ export function VbBatchReview({ batch, groups }: Props) {
           <DialogHeader>
             <DialogTitle>Excluir lançamento?</DialogTitle>
             <DialogDescription>
-              Linha {deleting?.source_row ?? "—"}: {deleting?.description ?? "—"} ({formatBRL(deleting?.amount ?? null)}). A linha some deste lote; a planilha não muda.
+              {deleting?.description ?? "—"} ({formatBRL(deleting?.amount ?? null)}) sai do histórico pendente.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -426,8 +389,8 @@ export function VbBatchReview({ batch, groups }: Props) {
             <DialogTitle>{confirm === "approve" ? "Aprovar a importação?" : "Descartar o lote?"}</DialogTitle>
             <DialogDescription>
               {confirm === "approve"
-                ? `${totalEntries} lançamentos de ${groups.length} credor(es) passam a ser o histórico oficial do VB. A partir daí os lançamentos são feitos aqui no sistema; a planilha não é mais importada.`
-                : "Todos os lançamentos pendentes deste lote são apagados. Você pode importar a planilha de novo depois."}
+                ? `${totalEntries} lançamentos de ${groups.length} credor(es) passam a ser o histórico oficial do VB. A partir daí, os lançamentos são feitos aqui no sistema.`
+                : "Todos os lançamentos pendentes deste lote são apagados. Você pode importar o histórico de novo depois."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

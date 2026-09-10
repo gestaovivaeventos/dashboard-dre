@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.49",

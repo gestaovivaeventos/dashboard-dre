@@ -93,7 +93,7 @@ export function VbEntryEditDialog({ entry, onClose }: Props) {
           <DialogHeader>
             <DialogTitle>Editar lançamento</DialogTitle>
             <DialogDescription>
-              Linha {entry?.source_row ?? "—"} da planilha. Corrigir aqui remove os alertas bloqueantes desta linha.
+              Corrigir aqui remove os alertas bloqueantes deste lançamento.
             </DialogDescription>
           </DialogHeader>
 

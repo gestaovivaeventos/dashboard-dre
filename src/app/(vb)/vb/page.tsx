@@ -81,7 +81,7 @@ export default async function VbOverviewPage() {
             href="/vb/importar"
             className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-primary hover:bg-surface-2"
           >
-            <Upload className="h-4 w-4" /> Importar histórico da planilha
+            <Upload className="h-4 w-4" /> Importar histórico
           </Link>
         )}
       </div>
@@ -124,7 +124,7 @@ export default async function VbOverviewPage() {
             {isGestor ? (
               <>
                 <Link href="/vb/importar" className="underline">
-                  Importe o histórico da planilha
+                  Importe o histórico
                 </Link>{" "}
                 uma única vez; depois, os lançamentos são feitos aqui.
               </>

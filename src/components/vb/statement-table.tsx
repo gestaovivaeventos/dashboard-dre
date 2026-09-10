@@ -1,12 +1,13 @@
 // Extrato do VB em formato de extrato bancário: uma tabela só, densa, com a
 // cor carregando o tipo do lançamento. Serve as duas telas — o extrato do
-// credor (separador de ano, totais) e a revisão do lote (coluna "Conf.", flags
-// e ações por linha).
+// credor (separador de ano, totais) e a revisão do lote (flags e ações por
+// linha).
 //
 // Sem hooks de propósito: a página do credor é server component. Quando o pai
 // passa onEdit/onDelete ele é que é client ("use client" em batch-review).
 
-import { AlertTriangle, Check, Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
+import React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,28 +15,20 @@ import { formatDayBR } from "@/lib/ctrl/datetime";
 import { formatBRL } from "@/lib/orcamento/format";
 import { describeRendimento } from "@/lib/vb/format";
 import { ledgerTotals, type WithBalance } from "@/lib/vb/ledger";
-import {
-  VB_BALANCE_TOLERANCE,
-  VB_FLAG_LABELS,
-  isBlockingFlag,
-  type VbEntry,
-  type VbEntryKind,
-} from "@/lib/vb/types";
+import { VB_FLAG_LABELS, isBlockingFlag, type VbEntry, type VbEntryKind } from "@/lib/vb/types";
 
 export type StatementRow = WithBalance<VbEntry>;
 
 interface StatementTableProps {
   /**
-   * Já com `balance`, em ordem CRONOLÓGICA (planilha na revisão) — o saldo de
-   * cada linha é o saldo acumulado até ela. A tabela inverte internamente para
-   * exibir do mais recente para o mais antigo; os pais continuam entregando a
-   * ordem em que o saldo foi calculado.
+   * Já com `balance`, em ordem CRONOLÓGICA (ordem de importação na revisão) —
+   * o saldo de cada linha é o saldo acumulado até ela. A tabela inverte
+   * internamente para exibir do mais recente para o mais antigo; os pais
+   * continuam entregando a ordem em que o saldo foi calculado.
    */
   rows: StatementRow[];
   /** Separadores por ano com totais (extrato). */
   yearSeparators?: boolean;
-  /** Revisão: coluna "Conf." (✓/⚠ contra `sheet_balance`) e destaque da divergência. */
-  showSheetBalance?: boolean;
   /** Revisão: flags sob a descrição. */
   showFlags?: boolean;
   onEdit?: (row: StatementRow) => void;
@@ -78,14 +71,13 @@ function groupsInOrder(rows: StatementRow[]): Array<{ year: number; rows: Statem
 export function VbStatementTable({
   rows,
   yearSeparators = false,
-  showSheetBalance = false,
   showFlags = false,
   onEdit,
   onDelete,
   emptyText,
 }: StatementTableProps) {
   const hasActions = Boolean(onEdit || onDelete);
-  const columns = 4 + (showSheetBalance ? 1 : 0) + (hasActions ? 1 : 0);
+  const columns = 4 + (hasActions ? 1 : 0);
 
   if (rows.length === 0) {
     return (
@@ -108,7 +100,6 @@ export function VbStatementTable({
             <th className="px-3 py-1.5 text-left">Data</th>
             <th className="px-3 py-1.5 text-left">Descrição</th>
             <th className="px-3 py-1.5 text-right">Valor</th>
-            {showSheetBalance && <th className="w-10 px-1 py-1.5 text-center">Conf.</th>}
             <th className="px-3 py-1.5 text-right">Saldo</th>
             {hasActions && <th className="px-3 py-1.5" />}
           </tr>
@@ -120,7 +111,6 @@ export function VbStatementTable({
               group={group}
               columns={columns}
               yearSeparators={yearSeparators}
-              showSheetBalance={showSheetBalance}
               showFlags={showFlags}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -136,21 +126,12 @@ interface YearBlockProps {
   group: { year: number; rows: StatementRow[] };
   columns: number;
   yearSeparators: boolean;
-  showSheetBalance: boolean;
   showFlags: boolean;
   onEdit?: (row: StatementRow) => void;
   onDelete?: (row: StatementRow) => void;
 }
 
-function YearBlock({
-  group,
-  columns,
-  yearSeparators,
-  showSheetBalance,
-  showFlags,
-  onEdit,
-  onDelete,
-}: YearBlockProps) {
+function YearBlock({ group, columns, yearSeparators, showFlags, onEdit, onDelete }: YearBlockProps) {
   const totals = yearSeparators ? ledgerTotals(group.rows) : null;
   // Grupo já invertido: a primeira linha é a mais recente do ano.
   const closing = group.rows[0].balance;
@@ -172,14 +153,7 @@ function YearBlock({
         </tr>
       )}
       {group.rows.map((row) => (
-        <StatementLine
-          key={row.id}
-          row={row}
-          showSheetBalance={showSheetBalance}
-          showFlags={showFlags}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
+        <StatementLine key={row.id} row={row} showFlags={showFlags} onEdit={onEdit} onDelete={onDelete} />
       ))}
     </>
   );
@@ -187,19 +161,16 @@ function YearBlock({
 
 interface StatementLineProps {
   row: StatementRow;
-  showSheetBalance: boolean;
   showFlags: boolean;
   onEdit?: (row: StatementRow) => void;
   onDelete?: (row: StatementRow) => void;
 }
 
-function StatementLine({ row, showSheetBalance, showFlags, onEdit, onDelete }: StatementLineProps) {
+function StatementLine({ row, showFlags, onEdit, onDelete }: StatementLineProps) {
   const amount = amountOf(row);
   const blocking = row.flags.some(isBlockingFlag);
-  const sheetDiff = row.sheet_balance == null ? null : row.balance - row.sheet_balance;
-  const sheetOff = showSheetBalance && sheetDiff !== null && Math.abs(sheetDiff) > VB_BALANCE_TOLERANCE;
-  // Bloqueio tem precedência sobre divergência: a linha vermelha impede aprovar.
-  const rowTone = blocking ? "bg-red-500/5" : sheetOff ? "bg-amber-500/10" : "";
+  // Fundo vermelho claro sinaliza bloqueio: a linha impede aprovar o lote.
+  const rowTone = blocking ? "bg-red-500/5" : "";
   const rendimento = row.kind === "rendimento" ? describeRendimento(row) : null;
 
   return (
@@ -230,40 +201,10 @@ function StatementLine({ row, showSheetBalance, showFlags, onEdit, onDelete }: S
       <td className={`whitespace-nowrap px-3 py-1.5 text-right align-top font-medium tabular-nums ${amount.className}`}>
         {amount.text}
       </td>
-      {showSheetBalance && (
-        <td className="w-10 px-1 py-1.5 text-center align-top">
-          {sheetDiff === null ? (
-            <span className="text-ink-muted">—</span>
-          ) : (
-            // O title vai no span: navegador não mostra tooltip de atributo em <svg>.
-            <span
-              className="inline-flex"
-              title={
-                sheetOff
-                  ? `Diverge da planilha em ${formatBRL(Math.abs(sheetDiff))}`
-                  : "Fecha com a planilha"
-              }
-            >
-              {sheetOff ? (
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-label="Diverge da planilha" />
-              ) : (
-                <Check className="h-3.5 w-3.5 text-emerald-600" aria-label="Fecha com a planilha" />
-              )}
-            </span>
-          )}
-        </td>
-      )}
       <td
-        className={`px-3 py-1.5 text-right align-top tabular-nums ${
-          sheetOff
-            ? "font-bold text-amber-700"
-            : `font-semibold ${row.balance < 0 ? "text-red-600" : ""}`
-        }`}
+        className={`px-3 py-1.5 text-right align-top font-semibold tabular-nums ${row.balance < 0 ? "text-red-600" : ""}`}
       >
         {formatBRL(row.balance)}
-        {sheetOff && (
-          <div className="text-[10px] font-normal text-amber-700">planilha {formatBRL(row.sheet_balance)}</div>
-        )}
       </td>
       {(onEdit || onDelete) && (
         <td className="whitespace-nowrap px-3 py-1.5 align-top">

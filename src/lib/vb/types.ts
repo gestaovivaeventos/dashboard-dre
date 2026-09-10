@@ -28,11 +28,11 @@ export const VB_FLAG_LABELS: Record<VbEntryFlag, string> = {
   data_invalida: "Data inválida",
   valor_invalido: "Valor inválido",
   fora_de_ordem: "Data fora de ordem",
-  conferir: "Marcado 'CONFERIR' na planilha",
+  conferir: "Marcado para conferir",
   sem_descricao: "Sem descrição",
   periodo_inferido: "Período do rendimento inferido",
-  dias_divergentes: "Dias diferentes da planilha",
-  entrada_e_saida: "Entrada e saída na mesma linha",
+  dias_divergentes: "Dias do período diferentes do informado",
+  entrada_e_saida: "Entrada e saída no mesmo lançamento",
 };
 
 export function isBlockingFlag(flag: string): boolean {
