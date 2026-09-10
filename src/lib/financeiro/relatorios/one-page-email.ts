@@ -157,6 +157,114 @@ class ChartAssets {
   }
 }
 
+/**
+ * "Acumulado no ano" — Previsto × Realizado em barras, espelhando o
+ * `AcumPrevRealFooter` da tela (rótulo + valor em cima, barra cheia embaixo).
+ *
+ * Aqui NÃO usamos imagem: a forma da tela é exatamente uma barra de progresso,
+ * que HTML de tabela reproduz igual — e assim este bloco continua visível mesmo
+ * com imagem bloqueada. Antes isto era uma linha de texto ("Acumulado no ano ·
+ * orçado X · realizado Y"), que é o que sumia em relação à tela.
+ */
+function acumPrevRealFooter(
+  acum: { previsto: number | null; realizado: number | null },
+  fmt: (value: number | null) => string,
+): string {
+  const { previsto, realizado } = acum;
+  const max = Math.max(1, Math.abs(previsto ?? 0), Math.abs(realizado ?? 0));
+  const variation =
+    previsto !== null && previsto !== 0 && realizado !== null
+      ? ((realizado - previsto) / Math.abs(previsto)) * 100
+      : null;
+  const variationHtml =
+    variation === null
+      ? ""
+      : `<span style="font-family:${FF};font-size:10px;font-weight:600;color:${
+          variation >= 0 ? SEV.positive.text : SEV.critical.text
+        };margin-left:6px;">${esc(
+          `${variation >= 0 ? "+" : ""}${fmtNum(variation, 1)}% vs previsto`,
+        )}</span>`;
+
+  const row = (
+    label: string,
+    value: number | null,
+    color: string,
+    valueColor: string,
+    suffix: string,
+  ) => `
+    <div style="margin-bottom:9px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-family:${FF};font-size:12px;color:${C.body};">${esc(label)}</td>
+        <td style="text-align:right;white-space:nowrap;"><span style="font-family:${FM};font-size:12px;font-weight:600;color:${valueColor};">${esc(
+          fmt(value),
+        )}</span>${suffix}</td>
+      </tr></table>
+      <div style="height:4px;line-height:4px;font-size:0;">&nbsp;</div>
+      ${hbar((Math.abs(value ?? 0) / max) * 100, color)}
+    </div>`;
+
+  return `
+    <div style="margin-top:10px;border-top:1px solid ${C.grid};padding-top:10px;">
+      <div style="font-family:${FF};font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;color:${C.sub};margin-bottom:8px;">Acumulado no ano</div>
+      ${row("Realizado", realizado, C.accent, C.ink, variationHtml)}
+      ${row("Previsto", previsto, C.previsto, C.sub, "")}
+    </div>`;
+}
+
+/**
+ * "Acumulado no ano" de N séries — uma barra por série, com a variação % em
+ * relação à série base (a orçada). Espelha o rodapé do `GraficoLinhasMulti`
+ * da tela; antes o e-mail resumia isso numa linha de texto.
+ */
+function acumSeriesFooter(
+  values: Array<number | null | undefined>,
+  labels: string[],
+  colors: string[],
+  baseIndex: number | undefined,
+  fmt: (value: number | null) => string,
+): string {
+  const max = Math.max(1, ...values.map((v) => Math.abs(v ?? 0)));
+  const base = baseIndex !== undefined ? values[baseIndex] : null;
+  const rows = values
+    .map((v, i) => {
+      let suffix = "";
+      if (
+        baseIndex !== undefined &&
+        i !== baseIndex &&
+        v !== null &&
+        v !== undefined &&
+        base !== null &&
+        base !== undefined &&
+        base !== 0
+      ) {
+        const pct = ((v - base) / Math.abs(base)) * 100;
+        suffix = `<span style="font-family:${FF};font-size:10px;font-weight:600;color:${
+          pct >= 0 ? SEV.positive.text : SEV.critical.text
+        };margin-left:6px;">${esc(`${pct >= 0 ? "+" : ""}${fmtNum(pct, 1)}% vs orçado`)}</span>`;
+      }
+      return `
+      <div style="margin-bottom:9px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td style="font-family:${FF};font-size:12px;color:${C.body};">${esc(
+            labels[i] ?? `Série ${i + 1}`,
+          )}</td>
+          <td style="text-align:right;white-space:nowrap;"><span style="font-family:${FM};font-size:12px;font-weight:600;color:${C.ink};">${esc(
+            fmt(v ?? null),
+          )}</span>${suffix}</td>
+        </tr></table>
+        <div style="height:4px;line-height:4px;font-size:0;">&nbsp;</div>
+        ${hbar((Math.abs(v ?? 0) / max) * 100, colors[i % colors.length])}
+      </div>`;
+    })
+    .join("");
+
+  return `
+    <div style="margin-top:10px;border-top:1px solid ${C.grid};padding-top:10px;">
+      <div style="font-family:${FF};font-size:9px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;color:${C.sub};margin-bottom:8px;">Acumulado no ano</div>
+      ${rows}
+    </div>`;
+}
+
 /** Texto do `alt` — mantém os números legíveis se a imagem for bloqueada. */
 function altFromSeries(
   title: string,
@@ -1149,6 +1257,7 @@ async function renderBreakdown(
 async function renderAcumulado(
   items: PrevistoRealizadoItem[],
   charts: ChartAssets,
+  width: number,
 ): Promise<string> {
   const currency = items.filter((i) => i.unidade === "mil");
   const margem = items.find((i) => i.unidade === "%");
@@ -1192,7 +1301,7 @@ async function renderAcumulado(
       ? rows
       : await charts.image({
           svg: horizontalBarsSvg({
-            width: CHART_W_HALF,
+            width,
             palette: CHART_PALETTE,
             legend: true,
             categories: currency.map((i) => ({
@@ -1215,7 +1324,7 @@ async function renderAcumulado(
               ],
             })),
           }),
-          width: CHART_W_HALF,
+          width,
           alt: altFromSeries(
             "Acumulado do ano",
             currency.map((i) => i.indicador),
@@ -1238,6 +1347,7 @@ async function renderAcumulado(
 async function renderHistorico(
   data: OnePageReportPreviewData,
   charts: ChartAssets,
+  width: number,
 ): Promise<string> {
   const kLabels = data.historicoKLabels === true;
   const fmtV = (v: number | null) =>
@@ -1259,11 +1369,7 @@ async function renderHistorico(
     .join("");
 
   const acum = data.historicoAcum
-    ? `<div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:8px;border-top:1px solid ${C.grid};padding-top:8px;">Acumulado no ano · orçado <span style="font-family:${FM};">${esc(
-        fmtV(data.historicoAcum.previsto),
-      )}</span> · realizado <span style="font-family:${FM};color:${C.accent};font-weight:600;">${esc(
-        fmtV(data.historicoAcum.realizado),
-      )}</span></div>`
+    ? acumPrevRealFooter(data.historicoAcum, fmtV)
     : "";
 
   const title = data.historicoTitle ?? "Resultado do Exercício";
@@ -1293,14 +1399,17 @@ async function renderHistorico(
       ? fallback
       : await charts.image({
           svg: lineChartSvg({
-            width: CHART_W_HALF,
-            height: 186,
+            // Altura acompanha a largura: um gráfico de 752px com 186 de altura
+            // fica achatado, e é esse o formato quando o "Acumulado do Ano" não
+            // está na allowlist da empresa e o histórico ocupa a linha inteira.
+            width,
+            height: width >= CHART_W_FULL ? 260 : 186,
             categories,
             series,
             palette: CHART_PALETTE,
             format: (v) => fmtNum(v, 1),
           }),
-          width: CHART_W_HALF,
+          width,
           alt: altFromSeries(title, categories, series, (v) => fmtV(v)),
           fallback,
         });
@@ -1492,24 +1601,25 @@ async function renderLines(
     )
     .join("");
 
-  const acum = data.linesAcum
-    ? `<div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:8px;border-top:1px solid ${C.grid};padding-top:8px;">Acumulado no ano · ${data.linesAcum
-        .map(
-          (v, i) =>
-            `${esc(labels[i] ?? `Série ${i + 1}`)}: <span style="font-family:${FM};color:${C.body};font-weight:600;">${esc(
-              v === null || v === undefined ? "—" : `${fmtNum(v, 1)} mil`,
-            )}</span>`,
+  // Mesma sequência de cores do GraficoLinhasMulti da tela — vale para as
+  // linhas do gráfico e para as barras do acumulado, que têm de casar.
+  const SERIES_COLORS = [C.accent, C.metaAmber, C.previsto];
+  const acum =
+    data.linesAcum && data.linesAcum.length > 0
+      ? acumSeriesFooter(
+          data.linesAcum,
+          labels,
+          SERIES_COLORS,
+          data.linesAcumBaseIndex,
+          (v) => (v === null ? "—" : `${fmtNum(v, 1)} mil`),
         )
-        .join(" · ")}</div>`
-    : "";
+      : "";
 
   const title = data.linesTitle ?? "Resultado";
   const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
        <thead>${head}</thead><tbody>${rows}</tbody>
      </table>`;
 
-  // Mesma sequência de cores do GraficoLinhasMulti da tela.
-  const SERIES_COLORS = [C.accent, C.metaAmber, C.previsto];
   const categories = points.map((p) => p.mes);
   const seriesCount = Math.max(labels.length, ...points.map((p) => p.values.length));
   const series: ChartSeries[] = Array.from({ length: seriesCount }, (_, i) => ({
@@ -1562,20 +1672,8 @@ async function renderPrevRealChart(
     )
     .join("");
 
-  let variacao = "";
-  if (
-    chart.previstoAcum !== null &&
-    chart.previstoAcum !== 0 &&
-    chart.realizadoAcum !== null
-  ) {
-    const pct = ((chart.realizadoAcum - chart.previstoAcum) / Math.abs(chart.previstoAcum)) * 100;
-    variacao = ` · ${sevBadge(
-      `${pct >= 0 ? "+" : ""}${fmtNum(pct, 1)}%`,
-      pct >= 0 ? "positive" : pct < -10 ? "critical" : "attention",
-      true,
-    )}`;
-  }
-
+  // A variação % vs previsto agora sai dentro do próprio `acumPrevRealFooter`
+  // (ao lado do valor realizado), igual à tela — não é mais um badge solto.
   const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
        <thead><tr>${thCell("Mês")}${thCell("Previsto", "right")}${thCell(
          "Realizado",
@@ -1619,11 +1717,10 @@ async function renderPrevRealChart(
       chart.title,
     )}</div>
      ${chartImg}
-     <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:8px;border-top:1px solid ${C.grid};padding-top:8px;">Acumulado no ano · orçado <span style="font-family:${FM};">${esc(
-       fmtMil(chart.previstoAcum),
-     )}</span> · realizado <span style="font-family:${FM};color:${C.accent};font-weight:600;">${esc(
-       fmtMil(chart.realizadoAcum),
-     )}</span>${variacao}</div>`,
+     ${acumPrevRealFooter(
+       { previsto: chart.previstoAcum, realizado: chart.realizadoAcum },
+       fmtMil,
+     )}`,
   );
 }
 
@@ -1662,13 +1759,7 @@ function renderConsolidated(block: Consolidated): string {
     })
     .join("");
 
-  const acum = block.acum
-    ? `<div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:10px;border-top:1px solid ${C.grid};padding-top:8px;">Acumulado no ano · orçado <span style="font-family:${FM};">${esc(
-        fmtMil(block.acum.previsto),
-      )}</span> · realizado <span style="font-family:${FM};color:${C.accent};font-weight:600;">${esc(
-        fmtMil(block.acum.realizado),
-      )}</span></div>`
-    : "";
+  const acum = block.acum ? acumPrevRealFooter(block.acum, fmtMil) : "";
 
   return `${sectionTitle(block.title)}${panel(
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -1868,9 +1959,17 @@ export async function renderOnePageEmail({
 
   // Tendência & Acumulado — acumulado + histórico lado a lado; VVR abaixo.
   if (showAcumulado || showTendencia) {
+    // Os dois painéis dividem a linha SÓ quando ambos aparecem. Com um só (é o
+    // caso de quem não tem "acumuladoAno" na allowlist, ex.: Salvaterra Mall),
+    // ele ocupa a linha inteira — e a imagem precisa nascer nessa largura,
+    // senão fica um gráfico pequeno perdido num painel largo.
+    const sideBySide = showAcumulado && showHistorico;
+    const chartWidth = sideBySide ? CHART_W_HALF : CHART_W_FULL;
     const cols: string[] = [];
-    if (showAcumulado) cols.push(await renderAcumulado(data.acumuladoAno, charts));
-    if (showHistorico) cols.push(await renderHistorico(data, charts));
+    if (showAcumulado) {
+      cols.push(await renderAcumulado(data.acumuladoAno, charts, chartWidth));
+    }
+    if (showHistorico) cols.push(await renderHistorico(data, charts, chartWidth));
     const topo = cols.length > 0 ? grid(cols, cols.length) : "";
     const vvr = showVvr ? await renderVvr(data, charts) : "";
     parts.push(`${sectionTitle("Tendência & Acumulado")}${topo}${vvr}`);
