@@ -38,6 +38,7 @@ test("toEntryRows: uma linha de vb_entries por lançamento, pendente e ligada ao
     import_batch_id: "b1",
     source_row: 5,
     sheet_balance: 40000,
+    group_id: null,
     sort_order: 51,
     flags: [],
     created_by: "u1",

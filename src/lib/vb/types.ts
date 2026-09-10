@@ -84,6 +84,8 @@ export interface VbEntry {
   status: VbEntryStatus;
   import_batch_id: string | null;
   source_row: number | null;
+  /** Lançamentos gravados na mesma operação (Novo lançamento) compartilham o id; importados: null. */
+  group_id: string | null;
   /** SALDO que a planilha mostrava nesta linha (só importados). */
   sheet_balance: number | null;
   sort_order: number;
@@ -92,6 +94,9 @@ export interface VbEntry {
   created_at: string;
   updated_at: string;
 }
+
+/** Linha de vb_entries pronta para o insert (id e carimbos vêm do banco). */
+export type VbEntryInsert = Omit<VbEntry, "id" | "created_at" | "updated_at">;
 
 export interface VbImportCreditorSummary {
   creditorId: string;

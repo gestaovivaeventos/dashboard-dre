@@ -10,7 +10,7 @@ function row(id: string, entry_date: string, kind: StatementRow["kind"], amount:
   return {
     id, creditor_id: "c1", entry_date, kind, amount, description: `Lançamento ${id}`,
     period_start: null, period_end: null, days: null, rate: null, rate_basis: null,
-    status: "aprovado", import_batch_id: null, source_row: 42, sheet_balance: 999999,
+    status: "aprovado", import_batch_id: null, source_row: 42, sheet_balance: 999999, group_id: null,
     sort_order: 0, flags, created_by: null, created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z",
     balance,
   };

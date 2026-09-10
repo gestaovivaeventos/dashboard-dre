@@ -7,7 +7,7 @@ import { VbStatementView } from "@/components/vb/statement-view";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
 import { getVbUser } from "@/lib/vb/auth";
-import { countPendingEntries, getCreditor, getPendingBatch, listEntries } from "@/lib/vb/queries";
+import { countPendingEntries, getCreditor, getPendingBatch, listCreditors, listEntries } from "@/lib/vb/queries";
 import { isUuid } from "@/lib/vb/types";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +22,11 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
   const creditor = await getCreditor(db, params.id);
   if (!creditor) notFound();
 
-  const [entries, pendingCount, pendingBatch] = await Promise.all([
+  const [entries, pendingCount, pendingBatch, creditors] = await Promise.all([
     listEntries(db, { status: "aprovado", creditorId: creditor.id }),
     isGestor ? countPendingEntries(db, creditor.id) : Promise.resolve(0),
     isGestor ? getPendingBatch(db) : Promise.resolve(null),
+    isGestor ? listCreditors(db) : Promise.resolve([]),
   ]);
 
   return (
@@ -43,7 +44,12 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
           )}
           <span className="text-[11px] text-ink-muted">saldo positivo = o VB deve ao credor</span>
         </div>
-        {isGestor && <VbNewEntryDialog creditorId={creditor.id} creditorName={creditor.name} />}
+        {isGestor && (
+          <VbNewEntryDialog
+            creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))}
+            defaultCreditorId={creditor.id}
+          />
+        )}
       </div>
 
       {isGestor && pendingCount > 0 && (

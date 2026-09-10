@@ -2,9 +2,7 @@
 // handler para ser testável sem banco.
 
 import type { ParsedCreditor } from "@/lib/vb/import/parse-vb-workbook";
-import type { VbEntry } from "@/lib/vb/types";
-
-export type VbEntryInsert = Omit<VbEntry, "id" | "created_at" | "updated_at">;
+import type { VbEntryInsert } from "@/lib/vb/types";
 
 export function toEntryRows(
   creditor: ParsedCreditor,
@@ -25,6 +23,7 @@ export function toEntryRows(
     import_batch_id: ctx.batchId,
     source_row: e.sourceRow,
     sheet_balance: e.sheetBalance,
+    group_id: null,
     sort_order: e.sortOrder,
     flags: e.flags,
     created_by: ctx.userId,

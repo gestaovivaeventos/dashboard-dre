@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, Upload } from "lucide-react";
 
+import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
 import { VbStatStrip } from "@/components/vb/stat-strip";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,14 +77,19 @@ export default async function VbOverviewPage() {
             Créditos dos sócios e credores. Saldo positivo = o VB deve ao credor.
           </p>
         </div>
-        {showImportCta && (
-          <Link
-            href="/vb/importar"
-            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-primary hover:bg-surface-2"
-          >
-            <Upload className="h-4 w-4" /> Importar histórico
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          {showImportCta && (
+            <Link
+              href="/vb/importar"
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-primary hover:bg-surface-2"
+            >
+              <Upload className="h-4 w-4" /> Importar histórico
+            </Link>
+          )}
+          {isGestor && creditors.length > 0 && (
+            <VbNewEntryDialog creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))} />
+          )}
+        </div>
       </div>
 
       {pendingBatch && (
