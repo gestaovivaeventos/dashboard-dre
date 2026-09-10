@@ -83,3 +83,27 @@ test("yieldOf e yieldBySemester", () => {
     { year: 2026, semester: 2, total: 0 },
   ]);
 });
+
+test("compareLedger: mesma data e mesmo sort_order → desempata por created_at", () => {
+  const later = e("b", "2026-01-15", "entrada", 10, 0, "2026-09-10T12:00:00Z");
+  const earlier = e("a", "2026-01-15", "entrada", 5, 0, "2026-09-10T08:00:00Z");
+  assert.deepEqual(sortLedger([later, earlier]).map((x) => x.id), ["a", "b"]);
+  assert.deepEqual(withRunningBalance([later, earlier]).map((x) => [x.id, x.balance]), [["a", 5], ["b", 15]]);
+});
+
+test("rendimento negativo (ajuste) reduz o saldo e entra com sinal nos totais", () => {
+  const entries = [
+    e("a1", "2024-01-10", "entrada", 1000, 51),
+    e("r1", "2024-06-30", "rendimento", 50, 60),
+    e("r2", "2024-07-26", "rendimento", -6484, 70),
+    e("r3", "2025-03-31", "rendimento", 25.5, 80),
+  ];
+  assert.deepEqual(ledgerTotals(entries), { entradas: 1000, saidas: 0, rendimentos: -6408.5, saldo: -5408.5 });
+  assert.equal(currentBalance(entries), -5408.5);
+  const groups = groupByYear(entries);
+  assert.deepEqual(groups.map((g) => [g.year, g.totals.rendimentos, g.closingBalance]), [
+    [2025, 25.5, -5408.5],
+    [2024, -6434, -5434],
+  ]);
+  assert.equal(yieldOf(entries, 2024), -6434);
+});
