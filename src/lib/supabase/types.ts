@@ -17,6 +17,10 @@ export type CtrlRole =
   | "contas_a_pagar"
   | "aprovacao_fornecedor";
 
+// ─── VB roles (módulo Viva Bank) ──────────────────────────────────────────────
+/** Papel no módulo VB (Viva Bank). Concedido em user_module_roles — ver @/lib/auth/vb. */
+export type VbRole = "gestor" | "credor";
+
 // ─── Acesso por módulo ────────────────────────────────────────────────────────
 export interface ModuleAccess {
   dre: {
