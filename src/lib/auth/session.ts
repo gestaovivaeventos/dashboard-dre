@@ -3,6 +3,7 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasContratosGrant } from "@/lib/auth/contratos";
+import { resolveVbRole } from "@/lib/auth/vb";
 import { hasSeenTour } from "@/lib/tour/seen";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
 import type {
@@ -51,6 +52,14 @@ export function hasViagensAprovar(ctx: SessionContext): boolean {
 
 export function hasContratosAccess(ctx: SessionContext): boolean {
   return Boolean(ctx.modules?.contratos);
+}
+
+export function hasVbAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.vb);
+}
+
+export function isVbGestor(ctx: SessionContext): boolean {
+  return ctx.modules?.vb?.role === "gestor";
 }
 
 // ─── Função principal ─────────────────────────────────────────────────────────
@@ -153,6 +162,10 @@ async function loadSessionContext(): Promise<SessionContext> {
     Boolean(profileRow.contracts_only) ||
     isAdminUser;
 
+  // Módulo VB (Viva Bank): só a concessão em user_module_roles. Sem override
+  // de admin, de propósito — ver @/lib/auth/vb.
+  const vbRole = resolveVbRole(moduleRoleRows);
+
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
   ).map((s) => s.sector_id);
@@ -179,6 +192,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     can_viagens: canViagens,
     can_viagens_aprovar: canViagensAprovar,
     can_contratos: canContratos,
+    vb_role: vbRole,
     // Tour guiado de boas-vindas: linha em user_module_roles (module='tour'),
     // pelo mesmo motivo do módulo Contratos — sem coluna nova, sem migration.
     tour_seen: hasSeenTour(moduleRoleRows),
@@ -199,6 +213,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     case: canCase ? {} : null,
     viagens: canViagens ? { aprovador: canViagensAprovar } : null,
     contratos: canContratos ? {} : null,
+    vb: vbRole ? { role: vbRole } : null,
   };
 
   return { supabase, user, profile, modules };
