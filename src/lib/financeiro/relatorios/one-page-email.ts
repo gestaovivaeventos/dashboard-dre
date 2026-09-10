@@ -17,6 +17,15 @@ import type {
   PrevRealChart,
   PrevistoRealizadoItem,
 } from "@/components/financeiro/relatorios/OnePageReportPreview";
+import { svgToPng } from "@/lib/financeiro/relatorios/one-page-chart-png";
+import {
+  columnsChartSvg,
+  comboChartSvg,
+  horizontalBarsSvg,
+  lineChartSvg,
+  type ChartPalette,
+  type ChartSeries,
+} from "@/lib/financeiro/relatorios/one-page-chart-svg";
 
 // ============================================================================
 // Renderiza o One Page Report como HTML de e-mail A PARTIR DO MESMO OBJETO
@@ -38,10 +47,22 @@ import type {
 //   • campos ocultos na tela continuam ocultos no e-mail, porque simplesmente
 //     não existem no objeto.
 //
-// A única diferença é o MEIO: e-mail não roda recharts nem CSS moderno, então
-// os gráficos viram tabelas/barras em HTML de tabela com estilo inline
-// (compatível com Gmail/Outlook/Apple Mail). Os números, textos, rótulos,
-// arredondamentos e regras de cor são os mesmos do componente.
+// A única diferença é o MEIO: e-mail não roda recharts nem CSS moderno. Os
+// textos, números, rótulos, arredondamentos e regras de cor são os mesmos do
+// componente; o que muda é como o GRÁFICO chega ao leitor.
+//
+// Gráficos: cada bloco é desenhado em SVG (`one-page-chart-svg.ts`) e
+// rasterizado em PNG (`one-page-chart-png.ts`), embutido como anexo inline
+// (`cid:`) — imagem é o único formato que abre em Gmail, Outlook e Apple Mail
+// (o Gmail remove `<svg>`). Por isso `renderOnePageEmail` é async e devolve
+// `{ html, attachments }`: quem envia PRECISA repassar os anexos, senão as
+// imagens chegam quebradas.
+//
+// Se a rasterização falhar (wasm ausente, fonte ausente, SVG inválido), cada
+// bloco cai no HTML de tabela/barra que existia antes — este código roda no
+// cron de envio automático e um gráfico não pode derrubar o relatório. Pelo
+// mesmo motivo todo `<img>` leva `alt` com os números: leitor que bloqueia
+// imagem (padrão em parte do Outlook) continua recebendo a informação.
 // ============================================================================
 
 export interface OnePageEmailArgs {
@@ -81,6 +102,81 @@ const SEV: Record<SevKey, { text: string; bg: string; border: string }> = {
   positive: { text: "#27824f", bg: "#e7f3ec", border: "#cfe7d8" },
   neutral: { text: "#717784", bg: "#f1f1ee", border: "#e3e2db" },
 };
+
+// ─── Gráficos como imagem inline ────────────────────────────────────────────
+
+/** Anexo inline (`cid:`) que o remetente precisa repassar ao Resend. */
+export interface OnePageEmailAttachment {
+  filename: string;
+  contentId: string;
+  contentType: string;
+  content: Buffer;
+}
+
+/** Larguras de exibição, derivadas do card de 880px com 38px de padding. */
+const CHART_W_FULL = 752;
+const CHART_W_HALF = 352;
+
+const CHART_PALETTE: ChartPalette = {
+  axis: "#c8c5be",
+  grid: C.grid,
+  label: C.sub,
+  valueLabel: C.body,
+  background: C.cardBg,
+};
+
+/**
+ * Coleta os PNGs gerados e devolve o `<img>` correspondente. Falhou a
+ * rasterização? Devolve o `fallback` (a tabela/barra de antes) — nunca lança.
+ */
+class ChartAssets {
+  private readonly items: OnePageEmailAttachment[] = [];
+  private seq = 0;
+
+  async image(args: {
+    svg: string;
+    width: number;
+    alt: string;
+    fallback: string;
+  }): Promise<string> {
+    const png = await svgToPng(args.svg, args.width);
+    if (!png) return args.fallback;
+    this.seq += 1;
+    const contentId = `onepage-chart-${this.seq}`;
+    this.items.push({
+      filename: `grafico-${this.seq}.png`,
+      contentId,
+      contentType: "image/png",
+      content: png,
+    });
+    return `<img src="cid:${contentId}" alt="${esc(args.alt)}" width="${args.width}" style="display:block;width:100%;max-width:${args.width}px;height:auto;border:0;outline:none;text-decoration:none;">`;
+  }
+
+  list(): OnePageEmailAttachment[] {
+    return this.items;
+  }
+}
+
+/** Texto do `alt` — mantém os números legíveis se a imagem for bloqueada. */
+function altFromSeries(
+  title: string,
+  categories: string[],
+  series: Array<{ label: string; values: (number | null)[] }>,
+  format: (v: number) => string,
+): string {
+  const body = series
+    .map(
+      (s) =>
+        `${s.label}: ${categories
+          .map((c, i) => {
+            const v = s.values[i];
+            return `${c} ${v === null || v === undefined ? "—" : format(v)}`;
+          })
+          .join("; ")}`,
+    )
+    .join(" | ");
+  return `${title}. ${body}`;
+}
 
 type ImpactSign = "Positivo" | "Atenção" | "Neutro" | "Crítico";
 
@@ -1005,31 +1101,55 @@ function renderPartnerPerformance(block: PartnerPerformance): string {
   )}`;
 }
 
-function renderBreakdown(block: BreakdownBlock): string {
+async function renderBreakdown(
+  block: BreakdownBlock,
+  charts: ChartAssets,
+): Promise<string> {
   const max = Math.max(1, ...block.rows.map((r) => Math.abs(r.value)));
+  const colorOf = (row: BreakdownBlock["rows"][number]) =>
+    row.emphasis ? C.accent : row.value >= 0 ? SEV.positive.text : SEV.critical.text;
+  const labelOf = (row: BreakdownBlock["rows"][number]) =>
+    `${fmtNum(row.value, 1)} mil${row.pct !== null ? `   ${fmtNum(row.pct, 1)}%` : ""}`;
+
   const bars = block.rows
-    .map((r) => {
-      const color = r.emphasis
-        ? C.accent
-        : r.value >= 0
-          ? SEV.positive.text
-          : SEV.critical.text;
-      const valueLabel = `${fmtNum(r.value, 1)} mil${
-        r.pct !== null ? `   ${fmtNum(r.pct, 1)}%` : ""
-      }`;
-      return barRow(
+    .map((r) =>
+      barRow(
         r.label,
-        valueLabel,
+        labelOf(r),
         (Math.abs(r.value) / max) * 100,
-        color,
+        colorOf(r),
         r.emphasis ? C.ink : C.body,
-      );
-    })
+      ),
+    )
     .join("");
-  return `${sectionTitle(block.title)}${panel(bars, "14px 16px 6px")}`;
+
+  const chart =
+    block.rows.length === 0
+      ? bars
+      : await charts.image({
+          svg: horizontalBarsSvg({
+            width: CHART_W_FULL,
+            palette: CHART_PALETTE,
+            legend: false,
+            categories: block.rows.map((r) => ({
+              label: r.label,
+              bars: [{ value: r.value, color: colorOf(r), label: labelOf(r) }],
+            })),
+          }),
+          width: CHART_W_FULL,
+          alt: `${block.title}. ${block.rows
+            .map((r) => `${r.label}: ${labelOf(r)}`)
+            .join("; ")}`,
+          fallback: bars,
+        });
+
+  return `${sectionTitle(block.title)}${panel(chart, "14px 16px 6px")}`;
 }
 
-function renderAcumulado(items: PrevistoRealizadoItem[]): string {
+async function renderAcumulado(
+  items: PrevistoRealizadoItem[],
+  charts: ChartAssets,
+): Promise<string> {
   const currency = items.filter((i) => i.unidade === "mil");
   const margem = items.find((i) => i.unidade === "%");
   const max = Math.max(
@@ -1064,16 +1184,61 @@ function renderAcumulado(items: PrevistoRealizadoItem[]): string {
       )}</span></div>`
     : "";
 
+  // Barra na cor neutra da tela (cinza/azul) e o NÚMERO em verde/vermelho —
+  // assim o gráfico bate com o do Business Intelligence sem perder o sinal de
+  // acima/abaixo do orçado que a versão em tabela dava.
+  const chart =
+    currency.length === 0
+      ? rows
+      : await charts.image({
+          svg: horizontalBarsSvg({
+            width: CHART_W_HALF,
+            palette: CHART_PALETTE,
+            legend: true,
+            categories: currency.map((i) => ({
+              label: i.indicador,
+              bars: [
+                {
+                  value: i.previsto,
+                  color: C.previsto,
+                  label: fmtValueWithUnit(i.previsto, "mil"),
+                  seriesLabel: "Orçado",
+                },
+                {
+                  value: i.realizado,
+                  color: C.accent,
+                  label: fmtValueWithUnit(i.realizado, "mil"),
+                  seriesLabel: "Realizado",
+                  labelColor:
+                    i.realizado >= i.previsto ? SEV.positive.text : SEV.critical.text,
+                },
+              ],
+            })),
+          }),
+          width: CHART_W_HALF,
+          alt: altFromSeries(
+            "Acumulado do ano",
+            currency.map((i) => i.indicador),
+            [
+              { label: "Orçado", values: currency.map((i) => i.previsto) },
+              { label: "Realizado", values: currency.map((i) => i.realizado) },
+            ],
+            (v) => fmtValueWithUnit(v, "mil"),
+          ),
+          fallback: rows,
+        });
+
   return panel(
     `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">Acumulado do ano</div>
      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:10px;">Orçado × Realizado — janeiro até o período de análise.</div>
-     ${rows}${margemLine}`,
+     ${chart}${margemLine}`,
   );
 }
 
-function renderHistorico(
+async function renderHistorico(
   data: OnePageReportPreviewData,
-): string {
+  charts: ChartAssets,
+): Promise<string> {
   const kLabels = data.historicoKLabels === true;
   const fmtV = (v: number | null) =>
     v === null ? "—" : kLabels ? `${fmtNum(v, 1)}k` : `${fmtNum(v, 1)} mil`;
@@ -1101,22 +1266,60 @@ function renderHistorico(
       )}</span></div>`
     : "";
 
-  return panel(
-    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">${esc(
-      data.historicoTitle ?? "Resultado do Exercício",
-    )}</div>
-     <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Previsto × Realizado — últimos meses.</div>
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+  const title = data.historicoTitle ?? "Resultado do Exercício";
+  const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
        <thead><tr>${thCell("Mês")}${thCell("Previsto", "right")}${thCell(
          "Realizado",
          "right",
        )}</tr></thead>
        <tbody>${rows}</tbody>
-     </table>${acum}`,
+     </table>`;
+
+  const categories = data.historico.map((p) => p.mes);
+  const series: ChartSeries[] = [
+    {
+      label: "Previsto",
+      color: C.previsto,
+      values: data.historico.map((p) => p.previsto),
+    },
+    {
+      label: "Realizado",
+      color: C.accent,
+      values: data.historico.map((p) => p.realizado),
+    },
+  ];
+  const chart =
+    data.historico.length === 0
+      ? fallback
+      : await charts.image({
+          svg: lineChartSvg({
+            width: CHART_W_HALF,
+            height: 186,
+            categories,
+            series,
+            palette: CHART_PALETTE,
+            format: (v) => fmtNum(v, 1),
+          }),
+          width: CHART_W_HALF,
+          alt: altFromSeries(title, categories, series, (v) => fmtV(v)),
+          fallback,
+        });
+
+  return panel(
+    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">${esc(
+      title,
+    )}</div>
+     <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Previsto × Realizado — últimos meses${
+       kLabels ? " (k)" : " (mil)"
+     }.</div>
+     ${chart}${acum}`,
   );
 }
 
-function renderVvr(data: OnePageReportPreviewData): string {
+async function renderVvr(
+  data: OnePageReportPreviewData,
+  charts: ChartAssets,
+): Promise<string> {
   const points = data.vvrSerieAnual;
   if (points.length === 0) return "";
   const rows = points
@@ -1143,16 +1346,50 @@ function renderVvr(data: OnePageReportPreviewData): string {
   const acumMax = Math.max(1, acumMeta, acumReal);
   const acima = acumReal >= acumMeta;
 
-  return panel(
-    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">VVR — meta × realizado</div>
-     <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Série do ano de análise.</div>
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+  const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
        <thead><tr>${thCell("Mês")}${thCell("Meta", "right")}${thCell(
          "Realizado",
          "right",
        )}</tr></thead>
        <tbody>${rows}</tbody>
-     </table>
+     </table>`;
+
+  const categories = points.map((p) => p.mes);
+  const series: ChartSeries[] = [
+    {
+      label: "Realizado",
+      color: C.accent,
+      kind: "column",
+      values: points.map((p) => p.realizado),
+    },
+    {
+      label: "Meta",
+      color: C.metaAmber,
+      kind: "line",
+      dashed: true,
+      values: points.map((p) => p.meta),
+    },
+  ];
+  const chart = await charts.image({
+    svg: comboChartSvg({
+      width: CHART_W_FULL,
+      height: 220,
+      categories,
+      series,
+      palette: CHART_PALETTE,
+      format: (v) => fmtNum(v, 1),
+    }),
+    width: CHART_W_FULL,
+    alt: altFromSeries("VVR — meta × realizado", categories, series, (v) =>
+      fmtNum(v, 1),
+    ),
+    fallback,
+  });
+
+  return panel(
+    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};">VVR — meta × realizado</div>
+     <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-bottom:8px;">Série do ano de análise (mil).</div>
+     ${chart}
      <div style="height:12px;font-size:0;">&nbsp;</div>
      <div style="font-family:${FF};font-size:11px;font-weight:600;color:${C.body};margin-bottom:6px;">Acumulado do ano</div>
      ${barRow("Meta", `${fmtNum(acumMeta, 1)} mil`, (acumMeta / acumMax) * 100, C.metaAmber, C.body)}
@@ -1166,7 +1403,10 @@ function renderVvr(data: OnePageReportPreviewData): string {
   );
 }
 
-function renderBars(data: OnePageReportPreviewData): string {
+async function renderBars(
+  data: OnePageReportPreviewData,
+  charts: ChartAssets,
+): Promise<string> {
   const points = data.barsSerie ?? [];
   if (points.length === 0) return "";
   const max = Math.max(1, ...points.map((p) => Math.abs(p.valor ?? 0)));
@@ -1187,14 +1427,47 @@ function renderBars(data: OnePageReportPreviewData): string {
           `${fmtNum(data.barsAcum, 1)} mil`,
         )}</span></div>`
       : "";
+  const title = data.barsTitle ?? "Histórico";
+  const categories = points.map((p) => p.mes);
+  const values = points.map((p) => p.valor);
+  const chart = await charts.image({
+    svg: columnsChartSvg({
+      width: CHART_W_FULL,
+      height: 220,
+      categories,
+      palette: CHART_PALETTE,
+      format: (v) => fmtNum(v, 1),
+      legend: false,
+      series: [
+        {
+          label: "Realizado",
+          color: SEV.positive.text,
+          values,
+          // Coluna negativa em vermelho — mesma leitura da versão em barras.
+          pointColors: values.map((v) =>
+            (v ?? 0) >= 0 ? SEV.positive.text : SEV.critical.text,
+          ),
+        },
+      ],
+    }),
+    width: CHART_W_FULL,
+    alt: altFromSeries(title, categories, [{ label: "Realizado", values }], (v) =>
+      fmtNum(v, 1),
+    ),
+    fallback: rows,
+  });
+
   return panel(
     `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};margin-bottom:10px;">${esc(
-      data.barsTitle ?? "Histórico",
-    )}</div>${rows}${acum}`,
+      title,
+    )}</div>${chart}${acum}`,
   );
 }
 
-function renderLines(data: OnePageReportPreviewData): string {
+async function renderLines(
+  data: OnePageReportPreviewData,
+  charts: ChartAssets,
+): Promise<string> {
   const points = data.linesSerie ?? [];
   if (points.length === 0) return "";
   const labels = data.linesSeriesLabels ?? [];
@@ -1230,17 +1503,49 @@ function renderLines(data: OnePageReportPreviewData): string {
         .join(" · ")}</div>`
     : "";
 
+  const title = data.linesTitle ?? "Resultado";
+  const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+       <thead>${head}</thead><tbody>${rows}</tbody>
+     </table>`;
+
+  // Mesma sequência de cores do GraficoLinhasMulti da tela.
+  const SERIES_COLORS = [C.accent, C.metaAmber, C.previsto];
+  const categories = points.map((p) => p.mes);
+  const seriesCount = Math.max(labels.length, ...points.map((p) => p.values.length));
+  const series: ChartSeries[] = Array.from({ length: seriesCount }, (_, i) => ({
+    label: labels[i] ?? `Série ${i + 1}`,
+    color: SERIES_COLORS[i % SERIES_COLORS.length],
+    values: points.map((p) => p.values[i] ?? null),
+  }));
+
+  const chart = await charts.image({
+    svg: lineChartSvg({
+      width: CHART_W_FULL,
+      height: 220,
+      categories,
+      series,
+      palette: CHART_PALETTE,
+      format: (v) => fmtNum(v, 1),
+      // Com 3 séries os rótulos por ponto colidem; a legenda + eixo bastam.
+      valueLabels: seriesCount === 1,
+    }),
+    width: CHART_W_FULL,
+    alt: altFromSeries(title, categories, series, (v) => fmtNum(v, 1)),
+    fallback,
+  });
+
   return panel(
     `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};margin-bottom:8px;">${esc(
-      data.linesTitle ?? "Resultado",
+      title,
     )}</div>
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-       <thead>${head}</thead><tbody>${rows}</tbody>
-     </table>${acum}`,
+     ${chart}${acum}`,
   );
 }
 
-function renderPrevRealChart(chart: PrevRealChart): string {
+async function renderPrevRealChart(
+  chart: PrevRealChart,
+  charts: ChartAssets,
+): Promise<string> {
   const rows = chart.serie
     .map(
       (p) => `<tr>
@@ -1271,17 +1576,49 @@ function renderPrevRealChart(chart: PrevRealChart): string {
     )}`;
   }
 
-  return panel(
-    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};margin-bottom:8px;">${esc(
-      chart.title,
-    )}</div>
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+  const fallback = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
        <thead><tr>${thCell("Mês")}${thCell("Previsto", "right")}${thCell(
          "Realizado",
          "right",
        )}</tr></thead>
        <tbody>${rows}</tbody>
-     </table>
+     </table>`;
+
+  const categories = chart.serie.map((p) => p.mes);
+  const series: ChartSeries[] = [
+    {
+      label: "Previsto",
+      color: C.previsto,
+      values: chart.serie.map((p) => p.previsto),
+    },
+    {
+      label: "Realizado",
+      color: C.accent,
+      values: chart.serie.map((p) => p.realizado),
+    },
+  ];
+  const chartImg =
+    chart.serie.length === 0
+      ? fallback
+      : await charts.image({
+          svg: columnsChartSvg({
+            width: CHART_W_HALF,
+            height: 186,
+            categories,
+            series,
+            palette: CHART_PALETTE,
+            format: (v) => fmtNum(v, 1),
+          }),
+          width: CHART_W_HALF,
+          alt: altFromSeries(chart.title, categories, series, (v) => fmtNum(v, 1)),
+          fallback,
+        });
+
+  return panel(
+    `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};margin-bottom:8px;">${esc(
+      chart.title,
+    )}</div>
+     ${chartImg}
      <div style="font-family:${FF};font-size:10px;color:${C.sub};margin-top:8px;border-top:1px solid ${C.grid};padding-top:8px;">Acumulado no ano · orçado <span style="font-family:${FM};">${esc(
        fmtMil(chart.previstoAcum),
      )}</span> · realizado <span style="font-family:${FM};color:${C.accent};font-weight:600;">${esc(
@@ -1456,7 +1793,21 @@ function renderAcoes(items: OnePageReportPreviewData["acoes"]): string {
 
 // ─── Render principal ───────────────────────────────────────────────────────
 
-export function renderOnePageEmail({ data, appUrl }: OnePageEmailArgs): string {
+export interface OnePageEmailResult {
+  html: string;
+  /**
+   * Imagens dos gráficos, referenciadas no HTML por `cid:`. Quem envia TEM de
+   * repassar ao Resend — sem isso o leitor recebe imagem quebrada.
+   */
+  attachments: OnePageEmailAttachment[];
+}
+
+export async function renderOnePageEmail({
+  data,
+  appUrl,
+}: OnePageEmailArgs): Promise<OnePageEmailResult> {
+  const charts = new ChartAssets();
+
   // Mesmíssima função de visibilidade do componente: sem `blocks`, mostra
   // tudo; com `blocks`, só os listados.
   const show = (block: string) => !data.blocks || data.blocks.includes(block);
@@ -1512,31 +1863,32 @@ export function renderOnePageEmail({ data, appUrl }: OnePageEmailArgs): string {
     parts.push(renderPartnerPerformance(data.partnerPerformance));
   }
   for (const block of data.breakdownBlocks ?? []) {
-    if (show(block.key)) parts.push(renderBreakdown(block));
+    if (show(block.key)) parts.push(await renderBreakdown(block, charts));
   }
 
   // Tendência & Acumulado — acumulado + histórico lado a lado; VVR abaixo.
   if (showAcumulado || showTendencia) {
     const cols: string[] = [];
-    if (showAcumulado) cols.push(renderAcumulado(data.acumuladoAno));
-    if (showHistorico) cols.push(renderHistorico(data));
+    if (showAcumulado) cols.push(await renderAcumulado(data.acumuladoAno, charts));
+    if (showHistorico) cols.push(await renderHistorico(data, charts));
     const topo = cols.length > 0 ? grid(cols, cols.length) : "";
-    const vvr = showVvr ? renderVvr(data) : "";
+    const vvr = showVvr ? await renderVvr(data, charts) : "";
     parts.push(`${sectionTitle("Tendência & Acumulado")}${topo}${vvr}`);
   }
 
   if (data.barsSerie || data.linesSerie) {
-    const cards = [renderBars(data), renderLines(data)].filter(Boolean);
+    const cards = [
+      await renderBars(data, charts),
+      await renderLines(data, charts),
+    ].filter(Boolean);
     parts.push(`${sectionTitle("Evolução")}${cards.join('<div style="height:12px;font-size:0;">&nbsp;</div>')}`);
   }
 
   if (data.prevRealCharts && data.prevRealCharts.length > 0) {
-    parts.push(
-      `${sectionTitle("Previsto × Realizado por frente")}${grid(
-        data.prevRealCharts.map(renderPrevRealChart),
-        2,
-      )}`,
+    const cards = await Promise.all(
+      data.prevRealCharts.map((c) => renderPrevRealChart(c, charts)),
     );
+    parts.push(`${sectionTitle("Previsto × Realizado por frente")}${grid(cards, 2)}`);
   }
 
   if (data.consolidated) parts.push(renderConsolidated(data.consolidated));
@@ -1568,7 +1920,7 @@ export function renderOnePageEmail({ data, appUrl }: OnePageEmailArgs): string {
       Relatório gerado pelo Control Hub com apoio de IA e validado antes do envio. Os números vêm do DRE realizado e orçado da unidade.
     </div>`;
 
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
@@ -1591,4 +1943,6 @@ export function renderOnePageEmail({ data, appUrl }: OnePageEmailArgs): string {
   </table>
 </body>
 </html>`;
+
+  return { html, attachments: charts.list() };
 }

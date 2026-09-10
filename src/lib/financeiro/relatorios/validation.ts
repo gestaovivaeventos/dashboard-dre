@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BI_VALIDATION_EXTRA_EMAILS } from "@/lib/auth/bi-validation";
 import {
   buildOnePageReport,
-  renderReportEmailHtml,
+  renderReportEmail,
   reportEmailSubject,
   type MonthRange,
 } from "@/lib/financeiro/relatorios/monthly-bi-sender";
@@ -761,13 +761,14 @@ export async function sendValidationReport({
     return { ok: false, error: message };
   }
 
-  const html = renderReportEmailHtml(row.report_json, appUrl);
+  const { html, attachments } = await renderReportEmail(row.report_json, appUrl);
   const subject = reportEmailSubject(recipients.companyName, row.period_label);
 
   const result = await sendEmailViaResend({
     to: recipients.emails,
     subject,
     html,
+    attachments,
   });
 
   const nowIso = new Date().toISOString();
