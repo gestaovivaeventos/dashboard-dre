@@ -690,6 +690,16 @@ export interface SendValidationArgs {
    * `false` no cron do envio automatico, que manda a versao mais recente.
    */
   requireAccepted: boolean;
+  /**
+   * Libera o REENVIO de um relatorio ja enviado (botao "Reenviar" da tela).
+   * Fora dele a trava de duplicidade continua valendo — e ela existe porque o
+   * envio manual e o cron do dia do autosend podem cair no mesmo relatorio.
+   *
+   * No reenvio, `sent_at`/`sent_by`/`status` NAO sao sobrescritos: a data do
+   * primeiro envio e informacao de auditoria. Cada reenvio vira um evento
+   * proprio em bi_report_validation_events.
+   */
+  allowResend?: boolean;
 }
 
 export interface SendValidationResult {
@@ -713,6 +723,7 @@ export async function sendValidationReport({
   actor,
   appUrl,
   requireAccepted,
+  allowResend,
 }: SendValidationArgs): Promise<SendValidationResult> {
   const { data: row, error } = await admin
     .from("bi_report_validations")
@@ -723,7 +734,8 @@ export async function sendValidationReport({
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: "Relatório não encontrado." };
 
-  if (row.sent_at) {
+  const isResend = Boolean(row.sent_at) && allowResend === true;
+  if (row.sent_at && !allowResend) {
     return { ok: false, error: "Relatório já enviado — envio duplicado bloqueado." };
   }
   if (!row.report_json) {
@@ -803,23 +815,35 @@ export async function sendValidationReport({
 
   await admin
     .from("bi_report_validations")
-    .update({
-      status: mode === "manual" ? "enviado_manual" : "enviado_automatico",
-      sent_at: nowIso,
-      sent_by: actor.id,
-      sent_mode: mode,
-      sent_recipients: recipients.emails,
-      send_error: null,
-    })
+    .update(
+      isResend
+        ? // Reenvio preserva a data/autor do PRIMEIRO envio — o rastro de cada
+          // reenvio fica no log de eventos, que é onde se pergunta "quem mandou
+          // de novo e quando". Sobrescrever `sent_at` apagaria a data original.
+          { sent_recipients: recipients.emails, send_error: null }
+        : {
+            status: mode === "manual" ? "enviado_manual" : "enviado_automatico",
+            sent_at: nowIso,
+            sent_by: actor.id,
+            sent_mode: mode,
+            sent_recipients: recipients.emails,
+            send_error: null,
+          },
+    )
     .eq("id", validationId);
 
   await logValidationEvent(admin, {
     validationId,
     companyId: row.company_id,
-    action: mode === "manual" ? "enviado_manual" : "enviado_automatico",
+    action: isResend
+      ? "reenviado_manual"
+      : mode === "manual"
+        ? "enviado_manual"
+        : "enviado_automatico",
     actor,
     detail: {
       modo: mode,
+      reenvio: isResend,
       destinatarios: recipients.emails,
       periodo: row.period_label,
       versao: row.version,
@@ -839,6 +863,94 @@ export async function sendValidationReport({
   });
 
   return { ok: true, recipients: recipients.emails };
+}
+
+// ─── Envio de TESTE (so para quem clicou) ───────────────────────────────────
+
+export interface SendValidationTestArgs {
+  admin: SupabaseClient;
+  validationId: string;
+  /**
+   * Destinatario unico. O caller resolve isso da SESSAO — nunca do corpo da
+   * requisicao: aceitar um e-mail arbitrario transformaria a rota num relay
+   * para mandar dado financeiro de qualquer empresa para fora.
+   */
+  to: string;
+  actor: ValidationActor;
+  appUrl?: string;
+}
+
+/**
+ * Manda o e-mail EXATAMENTE como o gestor receberia, mas so para o proprio
+ * usuario. Serve para conferir renderizacao (os graficos viram imagem inline,
+ * e cada cliente de e-mail trata imagem de um jeito) antes de disparar para o
+ * gestor.
+ *
+ * NAO mexe em status, `sent_at` nem em `ai_reports`: teste nao e envio. O
+ * unico rastro e um evento `envio_teste` no historico da linha.
+ *
+ * Funciona com o relatorio ja enviado ou nao — a trava de duplicidade nao se
+ * aplica, porque nada sai para os destinatarios reais.
+ */
+export async function sendValidationTestEmail({
+  admin,
+  validationId,
+  to,
+  actor,
+  appUrl,
+}: SendValidationTestArgs): Promise<SendValidationResult> {
+  const { data: row, error } = await admin
+    .from("bi_report_validations")
+    .select("*")
+    .eq("id", validationId)
+    .maybeSingle<ValidationRow>();
+
+  if (error) return { ok: false, error: error.message };
+  if (!row) return { ok: false, error: "Relatório não encontrado." };
+  if (!row.report_json) {
+    return { ok: false, error: "Relatório sem conteúdo gerado. Gere antes de testar." };
+  }
+
+  const target = to.trim();
+  if (!target || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target)) {
+    return { ok: false, error: "Seu usuário não tem um e-mail válido cadastrado." };
+  }
+
+  const { data: company } = await admin
+    .from("companies")
+    .select("name")
+    .eq("id", row.company_id)
+    .maybeSingle<{ name: string }>();
+
+  const { html, attachments } = await renderReportEmail(row.report_json, appUrl);
+
+  const result = await sendEmailViaResend({
+    to: [target],
+    // Prefixo no assunto: se este e-mail for encaminhado por engano, fica
+    // evidente que nao e a versao oficial enviada ao gestor.
+    subject: `[TESTE] ${reportEmailSubject(company?.name ?? "Empresa", row.period_label)}`,
+    html,
+    attachments,
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? "Falha desconhecida no envio de teste." };
+  }
+
+  await logValidationEvent(admin, {
+    validationId,
+    companyId: row.company_id,
+    action: "envio_teste",
+    actor,
+    detail: {
+      destinatarios: [target],
+      periodo: row.period_label,
+      versao: row.version,
+      graficos: attachments.length,
+    },
+  });
+
+  return { ok: true, recipients: [target] };
 }
 
 // ─── Pendencia / notificacao para o CSC ─────────────────────────────────────

@@ -8,11 +8,13 @@ import {
   CheckCircle2,
   Download,
   Eye,
+  FlaskConical,
   History,
   Loader2,
   MessageSquarePlus,
   RefreshCw,
   Send,
+  SendHorizontal,
   Sparkles,
 } from "lucide-react";
 
@@ -145,7 +147,13 @@ function formatDateTime(iso: string | null): string {
   return `${dd}/${mm}/${d.getFullYear()} ${hh}:${mi}`;
 }
 
-type DialogMode = "preview" | "revisao" | "contexto" | "historico" | null;
+type DialogMode =
+  | "preview"
+  | "revisao"
+  | "contexto"
+  | "historico"
+  | "reenvio"
+  | null;
 
 /** Um contexto de negócio registrado — vem de bi_report_validation_contexts. */
 interface ContextHistoryEntry {
@@ -761,6 +769,23 @@ export function ValidacaoRelatorioClient({
                                 <Send className="mr-1 h-3.5 w-3.5" />
                                 Enviar
                               </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  void runAction(
+                                    item,
+                                    { action: "teste" },
+                                    "E-mail de teste enviado para você",
+                                  )
+                                }
+                                disabled={busy || !hasReport || Boolean(envioIndisponivel)}
+                                title="Manda o e-mail exatamente como o gestor receberia, mas SÓ para o seu endereço. Não conta como envio."
+                              >
+                                <FlaskConical className="mr-1 h-3.5 w-3.5" />
+                                Testar
+                              </Button>
 
                               {/* Ação de EXCEÇÃO — separada do fluxo de rotina
                                   (aceitar / contexto / regerar / enviar) por um
@@ -796,7 +821,56 @@ export function ValidacaoRelatorioClient({
                                   : "Bloquear envio"}
                               </Button>
                             </>
-                          ) : null}
+                          ) : (
+                            /* JÁ ENVIADO — a linha ficava sem nenhuma ação. As
+                               duas aqui existem para o depois do envio: conferir
+                               como o e-mail chega (teste, só para quem clicou) e
+                               mandar de novo quando alguém ficou de fora. */
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  void runAction(
+                                    item,
+                                    { action: "teste" },
+                                    "E-mail de teste enviado para você",
+                                  )
+                                }
+                                disabled={busy || !hasReport || Boolean(envioIndisponivel)}
+                                title="Manda o e-mail exatamente como o gestor recebeu, mas SÓ para o seu endereço."
+                              >
+                                <FlaskConical className="mr-1 h-3.5 w-3.5" />
+                                Testar
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setActive(item);
+                                  setDialogMode("reenvio");
+                                }}
+                                disabled={
+                                  busy ||
+                                  !hasReport ||
+                                  item.recipients.length === 0 ||
+                                  Boolean(envioIndisponivel)
+                                }
+                                title={
+                                  envioIndisponivel
+                                    ? "Canal de envio (Resend) não configurado — veja o aviso no topo da tela."
+                                    : item.recipients.length === 0
+                                      ? "Nenhum destinatário cadastrado para esta empresa em Plataforma > Relatório BI."
+                                      : "Enviar este relatório novamente aos destinatários da empresa."
+                                }
+                              >
+                                <SendHorizontal className="mr-1 h-3.5 w-3.5" />
+                                Reenviar
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -862,6 +936,59 @@ export function ValidacaoRelatorioClient({
               <OnePageReportPreview data={previewData} />
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Reenvio — confirmação obrigatória: diferente do "Testar", isto chega
+          de verdade na caixa do gestor, e o relatório já foi enviado uma vez.
+          Os destinatários são resolvidos no servidor pela empresa da linha; a
+          lista abaixo é só o que a tela já conhece. */}
+      <Dialog
+        open={dialogMode === "reenvio"}
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reenviar este relatório?</DialogTitle>
+            <DialogDescription>
+              {active?.companyName} — {active?.periodLabel}. O relatório já foi enviado
+              {active?.sentAt ? ` em ${formatDateTime(active.sentAt)}` : ""}; quem já
+              recebeu vai receber de novo, igual. A data do primeiro envio é preservada
+              no histórico. Para só conferir como o e-mail está chegando, use{" "}
+              <strong>Testar</strong> — vai apenas para você.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <div className="text-xs font-medium text-muted-foreground">
+              Destinatários ({active?.recipients.length ?? 0})
+            </div>
+            <div className="mt-1 break-words text-sm">
+              {active?.recipients.join(", ") || "—"}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDialog}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() =>
+                active
+                  ? void runAction(active, { action: "reenviar" }, "Relatório reenviado")
+                  : undefined
+              }
+              disabled={busyId !== null}
+            >
+              {busyId ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <SendHorizontal className="mr-2 h-4 w-4" />
+              )}
+              Reenviar agora
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

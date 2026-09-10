@@ -8,6 +8,7 @@ import {
   generateValidationReport,
   markValidationForReview,
   sendValidationReport,
+  sendValidationTestEmail,
   type ValidationActor,
   type ValidationRow,
 } from "@/lib/financeiro/relatorios/validation";
@@ -22,6 +23,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //   { action: "contexto", context: string }
 //   { action: "regerar" }
 //   { action: "enviar" }
+//   { action: "reenviar" }  — relatorio JA enviado, vai de novo ao gestor
+//   { action: "teste" }     — mesmo e-mail, so para quem clicou (nao e envio)
 //
 // Acesso: CSC, admin e os e-mails nominais (canAccessBiValidation) — mesma
 // regra da tela e do RLS (public.can_validate_bi_reports()).
@@ -35,7 +38,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 interface Body {
-  action?: "aceitar" | "revisao" | "contexto" | "regerar" | "enviar";
+  action?:
+    | "aceitar"
+    | "revisao"
+    | "contexto"
+    | "regerar"
+    | "enviar"
+    | "reenviar"
+    | "teste";
   note?: string;
   context?: string;
 }
@@ -186,6 +196,37 @@ export async function POST(request: Request, { params }: { params: { id: string 
         appUrl,
         // Envio manual só acontece após o aceite (regra 7/10).
         requireAccepted: true,
+      });
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+      return NextResponse.json({ ok: true, recipients: result.recipients });
+    }
+
+    case "reenviar": {
+      // Mesmo destino do envio oficial (resolvido no servidor pela empresa da
+      // linha). A diferença é só a trava de duplicidade, liberada de propósito
+      // — a tela confirma antes, porque isto chega ao gestor de verdade.
+      const result = await sendValidationReport({
+        admin,
+        validationId: params.id,
+        mode: "manual",
+        actor,
+        appUrl,
+        requireAccepted: true,
+        allowResend: true,
+      });
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+      return NextResponse.json({ ok: true, recipients: result.recipients });
+    }
+
+    case "teste": {
+      // Destinatário vem da SESSÃO, nunca do corpo — senão a rota viraria um
+      // meio de mandar o resultado de qualquer empresa para fora.
+      const result = await sendValidationTestEmail({
+        admin,
+        validationId: params.id,
+        to: profile.email,
+        actor,
+        appUrl,
       });
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
       return NextResponse.json({ ok: true, recipients: result.recipients });
