@@ -1,0 +1,98 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+
+import { VbImportUpload } from "@/components/vb/import-upload";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
+import { createClient } from "@/lib/supabase/server";
+import { getVbUser } from "@/lib/vb/auth";
+import { listBatches } from "@/lib/vb/queries";
+import type { VbBatchStatus } from "@/lib/vb/types";
+
+export const dynamic = "force-dynamic";
+
+const STATUS_LABEL: Record<VbBatchStatus, string> = {
+  pendente: "Pendente de revisão",
+  aprovado: "Aprovado",
+  descartado: "Descartado",
+};
+
+const STATUS_VARIANT: Record<VbBatchStatus, "default" | "secondary" | "destructive" | "outline"> = {
+  pendente: "default",
+  aprovado: "secondary",
+  descartado: "outline",
+};
+
+export default async function VbImportPage() {
+  const user = await getVbUser();
+  if (!user) redirect("/");
+  if (user.role !== "gestor") redirect("/vb");
+
+  const db = await createClient();
+  const batches = await listBatches(db);
+  const pending = batches.find((b) => b.status === "pendente") ?? null;
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold text-ink-primary">VB — Importação</h1>
+        <p className="text-sm text-ink-muted">
+          Traga o histórico da planilha VB. Cada upload vira um lote que você revisa e aprova.
+        </p>
+      </div>
+
+      <VbImportUpload pendingBatchId={pending?.id ?? null} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Lotes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {batches.length === 0 ? (
+            <p className="text-sm text-ink-muted">Nenhuma importação ainda.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Arquivo</TableHead>
+                  <TableHead>Enviado em</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Credores</TableHead>
+                  <TableHead className="text-right">Lançamentos</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {batches.map((b) => (
+                  <TableRow key={b.id}>
+                    <TableCell>
+                      <Link href={`/vb/importar/${b.id}`} className="font-medium underline-offset-2 hover:underline">
+                        {b.file_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{formatDateTimeBR(b.created_at)}</TableCell>
+                    <TableCell>
+                      <Badge variant={STATUS_VARIANT[b.status]}>{STATUS_LABEL[b.status]}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{b.summary.creditors.length}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {b.summary.creditors.reduce((acc, c) => acc + c.entries, 0)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
