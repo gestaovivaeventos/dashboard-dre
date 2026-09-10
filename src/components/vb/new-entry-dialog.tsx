@@ -75,7 +75,7 @@ export function VbNewEntryDialog({ creditorId, creditorName }: { creditorId: str
         period_start: kind === "rendimento" && periodStart ? periodStart : null,
         period_end: kind === "rendimento" ? periodEnd || date : null,
         rate: kind === "rendimento" && rate != null ? rate / 100 : null,
-        rate_basis: kind === "rendimento" ? basis : null,
+        rate_basis: kind === "rendimento" ? (rate != null ? basis : "ajuste") : null,
       });
       if ("error" in result) {
         showToast({ title: "Não gravado", description: result.error, variant: "destructive" });
@@ -140,7 +140,13 @@ export function VbNewEntryDialog({ creditorId, creditorName }: { creditorId: str
                   </div>
                   <div>
                     <Label htmlFor="vb-new-basis">Método</Label>
-                    <select id="vb-new-basis" className={SELECT_CLS} value={basis} onChange={(e) => setBasis(e.target.value as "periodo" | "ajuste")}>
+                    <select
+                      id="vb-new-basis"
+                      className={SELECT_CLS}
+                      value={ratePct.trim() ? basis : "ajuste"}
+                      onChange={(e) => setBasis(e.target.value as "periodo" | "ajuste")}
+                      disabled={!ratePct.trim()}
+                    >
                       <option value="periodo">Saldo × taxa do período</option>
                       <option value="ajuste">Ajuste manual</option>
                     </select>

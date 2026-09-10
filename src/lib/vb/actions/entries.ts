@@ -53,7 +53,8 @@ export async function createVbEntry(input: NewEntryInput): Promise<VbActionResul
     if (period_start > period_end) return { error: "Início do período depois do fim." };
     days = diffDaysIso(period_start, period_end);
     rate = v.rate;
-    rate_basis = v.rate_basis ?? (rate == null ? "ajuste" : "periodo");
+    // Sem taxa não existe "saldo × taxa": é ajuste, decida o formulário o que decidir.
+    rate_basis = rate == null ? "ajuste" : (v.rate_basis ?? "periodo");
   }
 
   const admin = createAdminClient();

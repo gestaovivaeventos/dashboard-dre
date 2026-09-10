@@ -106,7 +106,9 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
               <p className="text-xs text-ink-muted">
                 Entradas {formatBRL(group.totals.entradas)} · Saídas {formatBRL(group.totals.saidas)} · Rendimentos{" "}
                 {formatBRL(group.totals.rendimentos)} · Saldo no fim do ano{" "}
-                <strong className="text-ink-primary">{formatBRL(group.closingBalance)}</strong>
+                <strong className={group.closingBalance < 0 ? "text-red-600" : "text-ink-primary"}>
+                  {formatBRL(group.closingBalance)}
+                </strong>
               </p>
             </CardHeader>
             <CardContent>
