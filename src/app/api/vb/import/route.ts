@@ -105,6 +105,7 @@ export async function POST(request: Request) {
     skippedSheets: [],
     emptySheets: parsed.emptySheets,
     ignoredSheets: parsed.ignoredSheets,
+    createdCreditorIds: [],
   };
   const createdCreditorIds: string[] = [];
 
@@ -167,6 +168,7 @@ export async function POST(request: Request) {
       throw new AlreadyImportedError();
     }
 
+    summary.createdCreditorIds = createdCreditorIds;
     const { error: summaryError } = await admin
       .from("vb_import_batches")
       .update({ summary })

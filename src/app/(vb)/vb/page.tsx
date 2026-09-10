@@ -59,6 +59,9 @@ export default async function VbOverviewPage() {
   const active = rows.filter((r) => r.creditor.active);
   const closed = rows.filter((r) => !r.creditor.active);
   const totalBalance = fromCents(sumCents(active.map((r) => r.balance)));
+  // Mesmo universo dos cards de rendimento e da tabela de juros por semestre: só credores ativos.
+  const activeIds = new Set(active.map((r) => r.creditor.id));
+  const activeEntries = entries.filter((e) => activeIds.has(e.creditor_id));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -109,13 +112,13 @@ export default async function VbOverviewPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-ink-muted">Rendimentos em {year}</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(entries, year))}</CardContent>
+          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(activeEntries, year))}</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-ink-muted">Rendimentos em {year - 1}</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(entries, year - 1))}</CardContent>
+          <CardContent className="text-2xl font-semibold text-ink-primary">{formatBRL(yieldOf(activeEntries, year - 1))}</CardContent>
         </Card>
       </div>
 
@@ -206,7 +209,7 @@ export default async function VbOverviewPage() {
                     ))}
                     <TableRow>
                       <TableCell className="font-semibold">Total</TableCell>
-                      {yieldBySemester(entries.filter((e) => active.some((r) => r.creditor.id === e.creditor_id)), years).map((s) => (
+                      {yieldBySemester(activeEntries, years).map((s) => (
                         <TableCell key={`t-${s.year}-${s.semester}`} className="text-right font-semibold tabular-nums">
                           {formatBRL(s.total)}
                         </TableCell>

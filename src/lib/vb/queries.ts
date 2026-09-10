@@ -68,6 +68,7 @@ export async function listEntries(
       .order("entry_date")
       .order("sort_order")
       .order("created_at")
+      .order("id")
       .range(from, from + PAGE - 1);
     if (filter.creditorId) query = query.eq("creditor_id", filter.creditorId);
     if (filter.batchId) query = query.eq("import_batch_id", filter.batchId);

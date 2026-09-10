@@ -42,3 +42,14 @@ test("defaultLandingFor: quem só tem o VB cai na home, não em /pendente", () =
   assert.equal(defaultLandingFor("solicitante", false, false, false, false, false, true), "/home");
   assert.equal(defaultLandingFor("solicitante", false, false, false, false, false, false), "/pendente");
 });
+
+test("/vb: validador_contrato é ilha — não alcança o VB nem com concessão", () => {
+  assert.equal(
+    canAccessPathByProfile("/vb", "validador_contrato", false, false, false, false, true, null, true),
+    false,
+  );
+});
+
+test("/vb: csc com concessão entra (gate vem antes da whitelist)", () => {
+  assert.equal(canAccessPathByProfile("/vb", "csc", true, false, false, false, false, null, true), true);
+});

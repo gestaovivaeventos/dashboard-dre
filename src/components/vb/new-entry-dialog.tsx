@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toaster";
+import { todayBR } from "@/lib/ctrl/datetime";
 import { parseBrNumber } from "@/lib/orcamento/format";
 import { createVbEntry } from "@/lib/vb/actions/entries";
 import { VB_KIND_LABELS, type VbEntryKind } from "@/lib/vb/types";
@@ -23,16 +24,12 @@ import { VB_KIND_LABELS, type VbEntryKind } from "@/lib/vb/types";
 const SELECT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-teal-500/40";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function VbNewEntryDialog({ creditorId, creditorName }: { creditorId: string; creditorName: string }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [date, setDate] = useState(todayIso());
+  const [date, setDate] = useState(() => todayBR());
   const [kind, setKind] = useState<VbEntryKind>("entrada");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
@@ -42,7 +39,7 @@ export function VbNewEntryDialog({ creditorId, creditorName }: { creditorId: str
   const [basis, setBasis] = useState<"periodo" | "ajuste">("periodo");
 
   function reset() {
-    setDate(todayIso());
+    setDate(todayBR());
     setKind("entrada");
     setAmount("");
     setDescription("");

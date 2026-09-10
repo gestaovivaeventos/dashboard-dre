@@ -20,6 +20,7 @@ import { getVbUser } from "@/lib/vb/auth";
 import { describeRendimento } from "@/lib/vb/format";
 import { currentBalance, groupByYear, ledgerTotals } from "@/lib/vb/ledger";
 import { countPendingEntries, getCreditor, getPendingBatch, listEntries } from "@/lib/vb/queries";
+import { isUuid } from "@/lib/vb/types";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ function Stat({ label, value, negative }: { label: string; value: number; negati
 export default async function VbCreditorPage({ params }: { params: { id: string } }) {
   const user = await getVbUser();
   if (!user) redirect("/");
+  if (!isUuid(params.id)) notFound();
   const isGestor = user.role === "gestor";
   const db = await createClient();
 

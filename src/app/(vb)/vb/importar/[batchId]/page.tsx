@@ -6,7 +6,7 @@ import { getVbUser } from "@/lib/vb/auth";
 import { currentBalance, ledgerTotals, withSheetOrderBalance } from "@/lib/vb/ledger";
 import { roundCents } from "@/lib/vb/money";
 import { getBatch, listCreditors, listEntries } from "@/lib/vb/queries";
-import { isBlockingFlag } from "@/lib/vb/types";
+import { isBlockingFlag, isUuid } from "@/lib/vb/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,7 @@ export default async function VbBatchPage({ params }: { params: { batchId: strin
   const user = await getVbUser();
   if (!user) redirect("/");
   if (user.role !== "gestor") redirect("/vb");
+  if (!isUuid(params.batchId)) notFound();
 
   const db = await createClient();
   const batch = await getBatch(db, params.batchId);

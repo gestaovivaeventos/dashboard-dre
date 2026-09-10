@@ -145,6 +145,18 @@ export function VbBatchReview({ batch, groups }: Props) {
   const totalEntries = useMemo(() => groups.reduce((acc, g) => acc + g.rows.length, 0), [groups]);
   const active = groups.find((g) => g.creditor.id === activeId) ?? groups[0] ?? null;
 
+  // Contagem de flags do credor ativo, bloqueantes primeiro (spec §8.3).
+  const flagCounts = useMemo(() => {
+    const map = new Map<VbEntryFlag, number>();
+    if (!active) return map;
+    for (const row of active.rows) {
+      for (const flag of row.flags) {
+        map.set(flag, (map.get(flag) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [active]);
+
   function runApprove() {
     startTransition(async () => {
       const result = await approveImportBatch(batch.id);
@@ -310,6 +322,17 @@ export function VbBatchReview({ batch, groups }: Props) {
               <span>Saldo planilha: <strong className="text-ink-primary">{formatBRL(active.sheetFinalBalance)}</strong></span>
               <DiffBadge diff={active.diff} />
             </div>
+            {flagCounts.size > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {Array.from(flagCounts.entries())
+                  .sort(([a], [b]) => Number(isBlockingFlag(b)) - Number(isBlockingFlag(a)))
+                  .map(([flag, count]) => (
+                    <Badge key={flag} variant={isBlockingFlag(flag) ? "destructive" : "outline"}>
+                      {VB_FLAG_LABELS[flag]} ×{count}
+                    </Badge>
+                  ))}
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">

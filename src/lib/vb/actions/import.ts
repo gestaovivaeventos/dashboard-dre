@@ -9,6 +9,7 @@ import { diffDaysIso } from "@/lib/vb/import/excel-date";
 import { roundCents } from "@/lib/vb/money";
 import {
   VB_BLOCKING_FLAGS,
+  isUuid,
   type VbActionResult,
   type VbEntryFlag,
   type VbImportSummary,
@@ -32,7 +33,8 @@ export type PendingEntryInput = z.infer<typeof pendingEntrySchema>;
 function revalidateVb(batchId?: string | null) {
   revalidatePath("/vb");
   revalidatePath("/vb/importar");
-  revalidatePath("/vb/credores/[id]", "page");
+  // No Next 14 a tag da página inclui o grupo de rotas — sem "(vb)" isso era um no-op silencioso.
+  revalidatePath("/(vb)/vb/credores/[id]", "page");
   if (batchId) revalidatePath(`/vb/importar/${batchId}`);
 }
 
@@ -41,6 +43,7 @@ export async function approveImportBatch(
   batchId: string,
 ): Promise<VbActionResult<{ approved: number }>> {
   const user = await requireVbGestor();
+  if (!isUuid(batchId)) return { error: "Identificador inválido." };
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("vb_approve_import_batch", {
     p_batch_id: batchId,
@@ -52,11 +55,13 @@ export async function approveImportBatch(
 }
 
 /**
- * Apaga os lançamentos pendentes do lote e os credores que ficaram sem nenhum
- * lançamento. A linha do lote fica, como 'descartado'.
+ * Apaga os lançamentos pendentes do lote e os credores que ESTE lote criou
+ * (nunca um credor que já existia) e ficaram sem nenhum lançamento. A linha
+ * do lote fica, como 'descartado'.
  */
 export async function discardImportBatch(batchId: string): Promise<VbActionResult> {
   await requireVbGestor();
+  if (!isUuid(batchId)) return { error: "Identificador inválido." };
   const admin = createAdminClient();
 
   const { data: batch, error: batchError } = await admin
@@ -76,17 +81,17 @@ export async function discardImportBatch(batchId: string): Promise<VbActionResul
   if (deleteError) return { error: deleteError.message };
 
   const summary = (batch.summary ?? {}) as Partial<VbImportSummary>;
-  for (const creditor of summary.creditors ?? []) {
+  for (const creditorId of summary.createdCreditorIds ?? []) {
     const { count, error: countError } = await admin
       .from("vb_entries")
       .select("id", { count: "exact", head: true })
-      .eq("creditor_id", creditor.creditorId);
+      .eq("creditor_id", creditorId);
     if (countError) return { error: countError.message };
     if ((count ?? 0) === 0) {
       const { error: deleteError } = await admin
         .from("vb_creditors")
         .delete()
-        .eq("id", creditor.creditorId);
+        .eq("id", creditorId);
       if (deleteError) return { error: deleteError.message };
     }
   }
@@ -110,6 +115,7 @@ export async function updatePendingEntry(
   input: PendingEntryInput,
 ): Promise<VbActionResult> {
   await requireVbGestor();
+  if (!isUuid(entryId)) return { error: "Identificador inválido." };
   const parsed = pendingEntrySchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   const v = parsed.data;
@@ -156,7 +162,15 @@ export async function updatePendingEntry(
       period_end,
       days,
       rate,
-      rate_basis: v.kind === "rendimento" ? (current.rate_basis ?? "ajuste") : null,
+      // Sem taxa é ajuste; com taxa, mantém mensal/periodo/cdi importado ou vira periodo.
+      rate_basis:
+        v.kind === "rendimento"
+          ? rate == null
+            ? "ajuste"
+            : current.rate_basis && current.rate_basis !== "ajuste"
+              ? current.rate_basis
+              : "periodo"
+          : null,
       flags,
     })
     .eq("id", entryId)
@@ -169,6 +183,7 @@ export async function updatePendingEntry(
 
 export async function deletePendingEntry(entryId: string): Promise<VbActionResult> {
   await requireVbGestor();
+  if (!isUuid(entryId)) return { error: "Identificador inválido." };
   const admin = createAdminClient();
   const { data: current, error: readError } = await admin
     .from("vb_entries")

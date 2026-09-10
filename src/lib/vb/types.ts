@@ -39,6 +39,12 @@ export function isBlockingFlag(flag: string): boolean {
   return VB_BLOCKING_FLAGS.has(flag as VbEntryFlag);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Id vindo da URL ou do cliente: evita 22P02 do Postgres virar erro genérico. */
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 /** Diferença planilha × sistema tolerada como arredondamento (R$ por credor). */
 export const VB_BALANCE_TOLERANCE = 1;
 
@@ -106,6 +112,8 @@ export interface VbImportSummary {
   skippedSheets: Array<{ sheetName: string; reason: "ja_importado" }>;
   emptySheets: string[];
   ignoredSheets: string[];
+  /** Ids dos credores que ESTE lote criou — descartar só apaga esses, nunca um credor que já existia. */
+  createdCreditorIds: string[];
 }
 
 export interface VbImportBatch {
@@ -130,4 +138,5 @@ export const EMPTY_IMPORT_SUMMARY: VbImportSummary = {
   skippedSheets: [],
   emptySheets: [],
   ignoredSheets: [],
+  createdCreditorIds: [],
 };
