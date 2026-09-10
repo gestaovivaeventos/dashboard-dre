@@ -130,9 +130,10 @@ export async function buildOnePageReport({
 export async function renderReportEmail(
   report: OnePageApiResponse,
   appUrl?: string,
+  banner?: { title: string; text: string },
 ): Promise<OnePageEmailResult> {
   const data = mapOnePageApiResponseToPreviewData(report);
-  return renderOnePageEmail({ data, appUrl });
+  return renderOnePageEmail({ data, appUrl, banner });
 }
 
 /** Assunto padronizado do e-mail do relatorio. */

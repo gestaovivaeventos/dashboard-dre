@@ -700,6 +700,19 @@ export interface SendValidationArgs {
    * proprio em bi_report_validation_events.
    */
   allowResend?: boolean;
+  /**
+   * Manda SO para quem ainda nao recebeu: a diferenca entre o cadastro atual
+   * de Plataforma > Relatório BI e o `sent_recipients` ja gravado na linha.
+   *
+   * Caso de uso: o relatorio foi enviado e depois alguem novo entrou na lista.
+   * Sem isto a unica saida seria "Reenviar", que manda de novo para todo mundo
+   * — quem ja tinha recebido leva o mesmo relatorio duas vezes.
+   *
+   * Implica `allowResend` (a linha ja tem `sent_at`). Os destinatarios
+   * continuam resolvidos no servidor pelo cadastro da empresa: nao existe
+   * caminho para digitar um e-mail avulso e disparar o relatorio para ele.
+   */
+  onlyNewRecipients?: boolean;
 }
 
 export interface SendValidationResult {
@@ -724,6 +737,7 @@ export async function sendValidationReport({
   appUrl,
   requireAccepted,
   allowResend,
+  onlyNewRecipients,
 }: SendValidationArgs): Promise<SendValidationResult> {
   const { data: row, error } = await admin
     .from("bi_report_validations")
@@ -734,9 +748,16 @@ export async function sendValidationReport({
   if (error) return { ok: false, error: error.message };
   if (!row) return { ok: false, error: "Relatório não encontrado." };
 
-  const isResend = Boolean(row.sent_at) && allowResend === true;
-  if (row.sent_at && !allowResend) {
+  const resendAllowed = allowResend === true || onlyNewRecipients === true;
+  const isResend = Boolean(row.sent_at) && resendAllowed;
+  if (row.sent_at && !resendAllowed) {
     return { ok: false, error: "Relatório já enviado — envio duplicado bloqueado." };
+  }
+  if (onlyNewRecipients && !row.sent_at) {
+    return {
+      ok: false,
+      error: "Este relatório ainda não foi enviado — use Enviar, que atende a lista toda.",
+    };
   }
   if (!row.report_json) {
     return { ok: false, error: "Relatório sem conteúdo gerado. Gere novamente antes de enviar." };
@@ -771,6 +792,27 @@ export async function sendValidationReport({
       detail: { modo: mode, error: message },
     });
     return { ok: false, error: message };
+  }
+
+  // "Enviar aos novos": recorta a lista para quem ainda não recebeu. Comparação
+  // normalizada (trim + minúsculas) porque o cadastro aceita o e-mail digitado
+  // como veio, e `sent_recipients` guarda o que o Resend recebeu.
+  const alreadySent = new Set(
+    (row.sent_recipients ?? []).map((email) => email.trim().toLowerCase()),
+  );
+  if (onlyNewRecipients) {
+    const novos = recipients.emails.filter(
+      (email) => !alreadySent.has(email.trim().toLowerCase()),
+    );
+    if (novos.length === 0) {
+      return {
+        ok: false,
+        error:
+          "Nenhum destinatário novo: todos os cadastrados para esta empresa já receberam " +
+          "este relatório. Para mandar de novo à lista inteira, use Reenviar.",
+      };
+    }
+    recipients = { ...recipients, emails: novos };
   }
 
   const { html, attachments } = await renderReportEmail(row.report_json, appUrl);
@@ -820,7 +862,16 @@ export async function sendValidationReport({
         ? // Reenvio preserva a data/autor do PRIMEIRO envio — o rastro de cada
           // reenvio fica no log de eventos, que é onde se pergunta "quem mandou
           // de novo e quando". Sobrescrever `sent_at` apagaria a data original.
-          { sent_recipients: recipients.emails, send_error: null }
+          {
+            // No envio aos novos, ACUMULA: `sent_recipients` é a lista de quem
+            // já recebeu, e é ela que define quem é "novo" da próxima vez.
+            // Substituir pela lista parcial faria os antigos voltarem a contar
+            // como novos no clique seguinte.
+            sent_recipients: onlyNewRecipients
+              ? Array.from(new Set([...(row.sent_recipients ?? []), ...recipients.emails]))
+              : recipients.emails,
+            send_error: null,
+          }
         : {
             status: mode === "manual" ? "enviado_manual" : "enviado_automatico",
             sent_at: nowIso,
@@ -835,15 +886,18 @@ export async function sendValidationReport({
   await logValidationEvent(admin, {
     validationId,
     companyId: row.company_id,
-    action: isResend
-      ? "reenviado_manual"
-      : mode === "manual"
-        ? "enviado_manual"
-        : "enviado_automatico",
+    action: onlyNewRecipients
+      ? "enviado_novos"
+      : isResend
+        ? "reenviado_manual"
+        : mode === "manual"
+          ? "enviado_manual"
+          : "enviado_automatico",
     actor,
     detail: {
       modo: mode,
       reenvio: isResend,
+      somenteNovos: onlyNewRecipients === true,
       destinatarios: recipients.emails,
       periodo: row.period_label,
       versao: row.version,
@@ -922,15 +976,40 @@ export async function sendValidationTestEmail({
     .eq("id", row.company_id)
     .maybeSingle<{ name: string }>();
 
-  const { html, attachments } = await renderReportEmail(row.report_json, appUrl);
+  // Hora do teste no assunto + tarja no corpo + X-Entity-Ref-ID unico.
+  //
+  // Os tres existem pelo mesmo motivo: na caixa de quem dispara teste E envio
+  // oficial, o cliente de e-mail agrupa mensagens de assunto parecido numa
+  // conversa so e mostra o titulo da PRIMEIRA — um prefixo entre colchetes e
+  // tratado como etiqueta de lista e ignorado nesse agrupamento. Resultado: o
+  // envio oficial aparecia dentro da thread do teste, rotulado "[TESTE]".
+  // O X-Entity-Ref-ID unico e o que de fato separa as threads no Gmail; a hora
+  // no assunto e a tarja resolvem no cliente que agrupa mesmo assim.
+  const stamp = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const { html, attachments } = await renderReportEmail(row.report_json, appUrl, {
+    title: "Este é um e-mail de TESTE",
+    text:
+      `Enviado só para você em ${stamp} para conferir como o relatório chega. ` +
+      "Nenhum gestor recebeu esta mensagem, e ela não conta como envio — o relatório " +
+      "continua no fluxo normal de validação.",
+  });
 
   const result = await sendEmailViaResend({
     to: [target],
-    // Prefixo no assunto: se este e-mail for encaminhado por engano, fica
-    // evidente que nao e a versao oficial enviada ao gestor.
-    subject: `[TESTE] ${reportEmailSubject(company?.name ?? "Empresa", row.period_label)}`,
+    subject: `[TESTE ${stamp}] ${reportEmailSubject(
+      company?.name ?? "Empresa",
+      row.period_label,
+    )}`,
     html,
     attachments,
+    headers: { "X-Entity-Ref-ID": `teste-${validationId}-${Date.now()}` },
   });
 
   if (!result.ok) {

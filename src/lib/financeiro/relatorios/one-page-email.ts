@@ -70,6 +70,13 @@ export interface OnePageEmailArgs {
   data: OnePageReportPreviewData;
   /** Base URL do Control Hub, para o botão "ver no sistema". */
   appUrl?: string;
+  /**
+   * Tarja no topo do relatório. Usada pelo envio de TESTE: dentro da caixa de
+   * quem dispara teste e envio oficial, o assunto sozinho não basta para
+   * distinguir os dois — o cliente de e-mail agrupa as mensagens e mostra o
+   * título de uma só. Aberto o e-mail, a tarja resolve a dúvida.
+   */
+  banner?: { title: string; text: string };
 }
 
 // ─── Sistema visual (espelha o componente web) ──────────────────────────────
@@ -1896,6 +1903,7 @@ export interface OnePageEmailResult {
 export async function renderOnePageEmail({
   data,
   appUrl,
+  banner,
 }: OnePageEmailArgs): Promise<OnePageEmailResult> {
   const charts = new ChartAssets();
 
@@ -2033,6 +2041,20 @@ export async function renderOnePageEmail({
     <tr><td align="center">
       <table role="presentation" width="880" cellpadding="0" cellspacing="0" style="background:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:7px;padding:34px 38px 32px;max-width:880px;width:100%;">
         <tr><td>
+          ${
+            banner
+              ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${SEV.attention.bg};border:1px solid ${SEV.attention.border};border-radius:6px;margin-bottom:20px;">
+                  <tr><td style="padding:12px 14px;">
+                    <div style="font-family:${FF};font-size:12px;font-weight:700;color:${SEV.attention.text};">${esc(
+                      banner.title,
+                    )}</div>
+                    <div style="font-family:${FF};font-size:11px;color:${SEV.attention.text};margin-top:3px;line-height:1.5;">${esc(
+                      banner.text,
+                    )}</div>
+                  </td></tr>
+                </table>`
+              : ""
+          }
           ${parts.filter(Boolean).join("")}
           ${cta}
           ${footer}

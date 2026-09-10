@@ -48,6 +48,13 @@ export interface SendResendEmailOptions {
   html: string;
   replyTo?: string;
   attachments?: ResendAttachment[];
+  /**
+   * Cabeçalhos extras. O caso de uso hoje é `X-Entity-Ref-ID`: com um valor
+   * único, o Gmail para de agrupar a mensagem na mesma conversa de outra com
+   * assunto parecido. É o que separa o e-mail de TESTE do envio oficial na
+   * caixa de quem dispara os dois.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface SendResendEmailResult {
@@ -146,6 +153,7 @@ export async function sendEmailViaResend({
   html,
   replyTo,
   attachments,
+  headers,
 }: SendResendEmailOptions): Promise<SendResendEmailResult> {
   const resend = getClient();
   if (!resend) {
@@ -191,6 +199,7 @@ export async function sendEmailViaResend({
       html,
       ...(replyTo ? { replyTo } : {}),
       ...(parsedAttachments.length > 0 ? { attachments: parsedAttachments } : {}),
+      ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
     });
 
     if (error) {

@@ -23,8 +23,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //   { action: "contexto", context: string }
 //   { action: "regerar" }
 //   { action: "enviar" }
-//   { action: "reenviar" }  — relatorio JA enviado, vai de novo ao gestor
-//   { action: "teste" }     — mesmo e-mail, so para quem clicou (nao e envio)
+//   { action: "reenviar" }      — relatorio JA enviado, vai de novo a lista toda
+//   { action: "enviar_novos" }  — so para quem entrou na lista depois do envio
+//   { action: "teste" }         — mesmo e-mail, so para quem clicou (nao e envio)
 //
 // Acesso: CSC, admin e os e-mails nominais (canAccessBiValidation) — mesma
 // regra da tela e do RLS (public.can_validate_bi_reports()).
@@ -45,6 +46,7 @@ interface Body {
     | "regerar"
     | "enviar"
     | "reenviar"
+    | "enviar_novos"
     | "teste";
   note?: string;
   context?: string;
@@ -213,6 +215,23 @@ export async function POST(request: Request, { params }: { params: { id: string 
         appUrl,
         requireAccepted: true,
         allowResend: true,
+      });
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+      return NextResponse.json({ ok: true, recipients: result.recipients });
+    }
+
+    case "enviar_novos": {
+      // Só quem entrou na lista depois do envio. A diferença é calculada no
+      // servidor (cadastro atual − `sent_recipients`), então o cliente não
+      // escolhe destinatário aqui — nem por engano, nem de propósito.
+      const result = await sendValidationReport({
+        admin,
+        validationId: params.id,
+        mode: "manual",
+        actor,
+        appUrl,
+        requireAccepted: true,
+        onlyNewRecipients: true,
       });
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
       return NextResponse.json({ ok: true, recipients: result.recipients });
