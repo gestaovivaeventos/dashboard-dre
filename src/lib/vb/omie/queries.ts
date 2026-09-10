@@ -267,6 +267,7 @@ export async function getOmieSyncStatus(): Promise<VbOmieSyncStatus> {
       .from("sync_log")
       .select("status, started_at")
       .eq("company_id", VB_OMIE_COMPANY_ID)
+      .eq("status", "running")
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
