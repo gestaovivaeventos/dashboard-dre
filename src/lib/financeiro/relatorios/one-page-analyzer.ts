@@ -52,6 +52,70 @@ export class OnePageReportError extends Error {
   }
 }
 
+/**
+ * Resposta que veio bem-formada mas violou o schema (campo longo demais, enum
+ * fora da lista, item a mais numa lista). Carrega `correction`: a instrucao
+ * que diz ao modelo EXATAMENTE o que corrigir no retry.
+ *
+ * Sem isso o retry era um "refaca seguindo o schema" generico — inutil contra
+ * estouro de tamanho, porque o modelo nao tem como saber que escreveu 1.043
+ * caracteres num campo de 900. Era o que derrubava a regeracao com contexto do
+ * CSC: o contexto pede mais texto justamente no `diagnosticoPrincipal`.
+ */
+class SchemaMismatchError extends OnePageReportError {
+  constructor(
+    message: string,
+    readonly correction: string,
+    cause?: unknown,
+  ) {
+    super(message, cause);
+    this.name = "SchemaMismatchError";
+  }
+}
+
+/** Valor de `object` no caminho do issue (para saber o tamanho real escrito). */
+function valueAtPath(object: unknown, path: readonly PropertyKey[]): unknown {
+  let cur: unknown = object;
+  for (const key of path) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<PropertyKey, unknown>)[key];
+  }
+  return cur;
+}
+
+/**
+ * Descreve as violacoes do schema em portugues, campo a campo. Usado nas duas
+ * pontas: como instrucao de correcao para o modelo no retry e como mensagem
+ * para o usuario quando nem o retry salva.
+ */
+function describeSchemaIssues(issues: readonly z.core.$ZodIssue[], object: unknown): string[] {
+  return issues.slice(0, 10).map((issue) => {
+    const field = issue.path.length > 0 ? issue.path.join(".") : "(raiz)";
+    const value = valueAtPath(object, issue.path);
+
+    if (issue.code === "too_big") {
+      const limit = Number(issue.maximum);
+      if (typeof value === "string") {
+        return `"${field}": o texto tem ${value.length} caracteres e o limite e ${limit}. Reescreva mais curto — nao corte nenhum fato, condense a redacao.`;
+      }
+      if (Array.isArray(value)) {
+        return `"${field}": tem ${value.length} itens e o maximo e ${limit}. Mantenha so os mais relevantes.`;
+      }
+      return `"${field}": valor acima do maximo permitido (${limit}).`;
+    }
+    if (issue.code === "too_small") {
+      return `"${field}": abaixo do minimo permitido (${issue.minimum}). Preencha o campo.`;
+    }
+    if (issue.code === "invalid_value") {
+      return `"${field}": valor fora da lista permitida. Use exatamente um dos valores do enum.`;
+    }
+    if (issue.code === "invalid_type") {
+      return `"${field}": tipo errado (${issue.message}).`;
+    }
+    return `"${field}": ${issue.message}`;
+  });
+}
+
 interface AnalyzerOptions {
   // Modelo OpenAI a usar. Default: gpt-4o-mini.
   model?: string;
@@ -209,8 +273,13 @@ DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
     const { object, usage } = await runOnce(target, prompt);
     const verified = OnePageReportSchema.safeParse(object);
     if (!verified.success) {
-      throw new OnePageReportError(
-        `Resposta da IA nao casou com o schema: ${verified.error.message}`,
+      const problems = describeSchemaIssues(verified.error.issues, object);
+      throw new SchemaMismatchError(
+        `A IA devolveu o relatório fora do formato exigido — ${problems.join(" ")}`,
+        "\n\nSua resposta anterior NAO casou com o schema obrigatorio. Corrija " +
+          "EXATAMENTE os pontos abaixo e devolva o relatorio inteiro de novo, " +
+          "mantendo todos os fatos e numeros:\n" +
+          problems.map((p) => `- ${p}`).join("\n"),
         verified.error,
       );
     }
@@ -218,16 +287,22 @@ DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
     return verified.data;
   };
 
+  // Instrucao de correcao generica — so entra quando a falha NAO foi de
+  // schema (ex.: provedor devolveu vazio). Violacao de schema usa a instrucao
+  // especifica que o SchemaMismatchError carrega.
   const schemaNudge =
     "\n\nSua resposta anterior nao casou com o schema obrigatorio. " +
     "Refaca seguindo o schema EXATAMENTE — todos os campos com os tipos e enums corretos.";
 
+  const correctionFor = (err: unknown): string =>
+    err instanceof SchemaMismatchError ? err.correction : schemaNudge;
+
   try {
     return await attempt(resolved, userPrompt);
-  } catch {
+  } catch (firstErr) {
     // Retry unico com instrucao de correcao, no MESMO provedor.
     try {
-      return await attempt(resolved, userPrompt + schemaNudge);
+      return await attempt(resolved, userPrompt + correctionFor(firstErr));
     } catch (retryErr) {
       // Ultimo recurso: o provedor ativo nao e a OpenAI e falhou duas vezes.
       // Refaz na OpenAI, que usa structured output NATIVO (json_schema) e nao
@@ -248,7 +323,9 @@ DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
               `(${retryErr instanceof Error ? retryErr.message : "erro desconhecido"}) — ` +
               `refazendo em openai/${fallback.modelName}.`,
           );
-          return await attempt(fallback, userPrompt);
+          // Leva junto a correcao: se as duas tentativas cairam por estouro de
+          // tamanho, repetir o prompt cru faria a OpenAI estourar igual.
+          return await attempt(fallback, userPrompt + correctionFor(retryErr));
         } catch (fallbackErr) {
           console.error(
             "[one-page] Fallback para OpenAI tambem falhou:",
