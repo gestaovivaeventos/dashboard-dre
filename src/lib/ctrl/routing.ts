@@ -68,10 +68,18 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
   {
     // Regis Adriano Da Costa — solicita em todos os setores, mas como gerente só
     // aprova estes quatro. "Despesas Gerais" entrou em 03/08/2026.
+    //
+    // O setor chama-se "Bem Laranja" na base; a regra nasceu com
+    // "Associação Bem Laranja", que não casava com nada — o casamento é por nome
+    // exato (normalizado só para acento/caixa), então a alçada desse setor ficava
+    // órfã em silêncio: ele não via nem aprovava as requisições dele. Os dois nomes
+    // ficam listados para a regra sobreviver a uma renomeação em qualquer direção —
+    // nome que não existe não resolve setor nenhum e é inofensivo.
     email: "regis@vivaeventos.com.br",
     allowedSectorNames: [
       "Gestão de Pessoas",
       "Associação Bem Laranja",
+      "Bem Laranja",
       "Eventos Oficiais",
       "Despesas Gerais",
     ],
