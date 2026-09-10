@@ -25,25 +25,31 @@ export default async function VbBatchPage({ params }: { params: { batchId: strin
     batch.status === "pendente" ? listEntries(db, { status: "pendente", batchId: batch.id }) : Promise.resolve([]),
   ]);
 
-  const groups: ReviewGroup[] = creditors
-    .filter((c) => creditorIds.has(c.id))
-    .map((creditor) => {
-      const list = entries.filter((e) => e.creditor_id === creditor.id);
-      const rows = withSheetOrderBalance(list);
-      const sheetFinalBalance =
-        batch.summary.creditors.find((c) => c.creditorId === creditor.id)?.sheetFinalBalance ?? null;
-      const computedFinalBalance = currentBalance(list);
-      return {
-        creditor,
-        rows,
-        totals: ledgerTotals(list),
-        sheetFinalBalance,
-        computedFinalBalance,
-        diff: sheetFinalBalance === null ? null : roundCents(computedFinalBalance - sheetFinalBalance),
-        blockingCount: rows.filter((r) => r.flags.some(isBlockingFlag)).length,
-        warningCount: rows.filter((r) => r.flags.length > 0 && !r.flags.some(isBlockingFlag)).length,
-      };
-    });
+  // Grupos "ao vivo" só fazem sentido com lançamentos pendentes. Para lote
+  // aprovado/descartado a lista fica vazia e o Resumo cai no retrato gravado
+  // em batch.summary (senão mostraria saldo 0 e uma falsa divergência).
+  const groups: ReviewGroup[] =
+    batch.status !== "pendente"
+      ? []
+      : creditors
+          .filter((c) => creditorIds.has(c.id))
+          .map((creditor) => {
+            const list = entries.filter((e) => e.creditor_id === creditor.id);
+            const rows = withSheetOrderBalance(list);
+            const sheetFinalBalance =
+              batch.summary.creditors.find((c) => c.creditorId === creditor.id)?.sheetFinalBalance ?? null;
+            const computedFinalBalance = currentBalance(list);
+            return {
+              creditor,
+              rows,
+              totals: ledgerTotals(list),
+              sheetFinalBalance,
+              computedFinalBalance,
+              diff: sheetFinalBalance === null ? null : roundCents(computedFinalBalance - sheetFinalBalance),
+              blockingCount: rows.filter((r) => r.flags.some(isBlockingFlag)).length,
+              warningCount: rows.filter((r) => r.flags.length > 0 && !r.flags.some(isBlockingFlag)).length,
+            };
+          });
 
   return <VbBatchReview batch={batch} groups={groups} />;
 }
