@@ -27,7 +27,16 @@ import { todayBR } from "@/lib/ctrl/datetime";
 import { formatBRL, parseBrNumber } from "@/lib/orcamento/format";
 import { createVbEntries } from "@/lib/vb/actions/entries";
 import { linkOmieMovement } from "@/lib/vb/actions/omie";
-import { sumTypedLines, VB_MAX_ENTRY_LINES, type NewEntriesInput, type NewEntryLine } from "@/lib/vb/new-entries";
+import {
+  addAllActiveLines,
+  replicatedFrom,
+  sumTypedLines,
+  toggleCreditorLines,
+  VB_MAX_ENTRY_LINES,
+  type EntryLineDraft,
+  type NewEntriesInput,
+  type NewEntryLine,
+} from "@/lib/vb/new-entries";
 import { VB_KIND_LABELS, type VbCreditorOption, type VbEntryKind, type VbEntryPrefill } from "@/lib/vb/types";
 
 export type { VbCreditorOption } from "@/lib/vb/types";
@@ -137,7 +146,9 @@ function EntryForm({
     () => [...creditors].sort((a, b) => Number(b.active) - Number(a.active)),
     [creditors],
   );
-  const fallbackCreditorId = options[0]?.id ?? "";
+  // Sem credor explícito (aberto pela Visão geral) a primeira linha nasce
+  // vazia e obriga a escolha: preencher com o primeiro da lista já mandou
+  // lançamento para o credor errado sem ninguém perceber.
 
   const [date, setDate] = useState(() => initial?.date ?? todayBR());
   const [description, setDescription] = useState(() => initial?.description ?? "");
@@ -150,12 +161,14 @@ function EntryForm({
     const seed =
       initial && initial.lines.length > 0
         ? initial.lines
-        : [{ creditorId: fallbackCreditorId, kind: "entrada" as VbEntryKind, amount: "" }];
+        : [{ creditorId: "", kind: "entrada" as VbEntryKind, amount: "" }];
     return seed.map((line) => ({ key: nextKey.current++, ...line }));
   });
 
   const hasYield = lines.some((line) => line.kind === "rendimento");
   const totals = useMemo(() => sumTypedLines(lines), [lines]);
+  const chosen = useMemo(() => new Set(lines.map((line) => line.creditorId)), [lines]);
+  const activeIds = useMemo(() => options.filter((c) => c.active).map((c) => c.id), [options]);
   const omieDiffers = omie ? Math.abs(totals.bruto - omie.value) >= 0.01 : false;
 
   function updateLine(key: number, patch: Partial<Line>) {
@@ -166,34 +179,28 @@ function EntryForm({
     setLines((current) => (current.length > 1 ? current.filter((line) => line.key !== key) : current));
   }
 
-  /** Linha nova: mesmo tipo da última e o próximo credor ativo ainda não usado. */
-  function addLine() {
-    setLines((current) => {
-      if (current.length >= VB_MAX_ENTRY_LINES) return current;
-      const used = new Set(current.map((line) => line.creditorId));
-      const next = options.find((c) => c.active && !used.has(c.id)) ?? options[0];
-      const last = current[current.length - 1];
-      return [...current, { key: nextKey.current++, creditorId: next?.id ?? "", kind: last?.kind ?? "entrada", amount: "" }];
-    });
+  /** Linha nova, com a chave que o React usa para não remontar as outras. */
+  function make(draft: EntryLineDraft): Line {
+    return { key: nextKey.current++, ...draft };
   }
 
-  /** "Juros do mês para todos": uma linha para cada credor ativo que ainda não está na lista. */
+  /** Linha extra sem credor — para repetir o mesmo credor ou completar à mão. */
+  function addLine() {
+    setLines((current) =>
+      current.length >= VB_MAX_ENTRY_LINES
+        ? current
+        : [...current, make({ creditorId: "", ...replicatedFrom(current) })],
+    );
+  }
+
+  /** Clique no nome: entra com o mesmo valor da linha preenchida, ou sai. */
+  function toggleCreditor(creditorId: string) {
+    setLines((current) => toggleCreditorLines(current, creditorId, make));
+  }
+
+  /** Um lançamento igual para cada credor ativo (ex.: PLR, juros do mês). */
   function addAllActive() {
-    setLines((current) => {
-      const used = new Set(current.map((line) => line.creditorId));
-      const last = current[current.length - 1];
-      const missing = options.filter((c) => c.active && !used.has(c.id));
-      const room = Math.max(VB_MAX_ENTRY_LINES - current.length, 0);
-      return [
-        ...current,
-        ...missing.slice(0, room).map((c) => ({
-          key: nextKey.current++,
-          creditorId: c.id,
-          kind: last?.kind ?? ("entrada" as VbEntryKind),
-          amount: "",
-        })),
-      ];
-    });
+    setLines((current) => addAllActiveLines(current, activeIds, make));
   }
 
   function submit(e: React.FormEvent) {
@@ -369,22 +376,49 @@ function EntryForm({
               </button>
             </div>
           ))}
-          <div className="flex items-center gap-4 pt-1">
-            <button
-              type="button"
-              onClick={addLine}
-              disabled={pending || lines.length >= VB_MAX_ENTRY_LINES}
-              className="inline-flex items-center gap-1 text-[12px] font-medium text-teal-700 hover:underline disabled:opacity-50"
-            >
-              <Plus className="h-3.5 w-3.5" /> Adicionar linha
-            </button>
+          {/*
+            Clicar no nome lança o MESMO valor para outro credor — é o caso
+            recorrente (PLR, juros do mês). O valor replicado é o da última
+            linha preenchida, então digita-se uma vez só.
+          */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2">
+            <span className="text-[11px] uppercase tracking-wide text-ink-muted">Lançar também para</span>
+            {options
+              .filter((c) => c.active)
+              .map((c) => {
+                const on = chosen.has(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleCreditor(c.id)}
+                    disabled={pending || (!on && lines.length >= VB_MAX_ENTRY_LINES)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[12px] disabled:opacity-40 ${
+                      on
+                        ? "border-teal-600 bg-teal-500/10 font-medium text-teal-700"
+                        : "border-border text-ink-muted hover:text-ink-primary"
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
             <button
               type="button"
               onClick={addAllActive}
               disabled={pending || lines.length >= VB_MAX_ENTRY_LINES}
-              className="text-[12px] text-ink-muted hover:underline disabled:opacity-50"
+              className="rounded-full border border-dashed border-border px-2.5 py-0.5 text-[12px] text-ink-muted hover:text-ink-primary disabled:opacity-40"
             >
-              Todos os credores ativos
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={addLine}
+              disabled={pending || lines.length >= VB_MAX_ENTRY_LINES}
+              className="ml-auto inline-flex items-center gap-1 text-[12px] font-medium text-teal-700 hover:underline disabled:opacity-50"
+            >
+              <Plus className="h-3.5 w-3.5" /> Linha em branco
             </button>
           </div>
         </div>

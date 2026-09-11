@@ -132,3 +132,62 @@ export function sumTypedLines(
     bruto: roundCents(bruto),
   };
 }
+
+// ─── Composição das linhas no formulário ─────────────────────────────────────
+// Puro de propósito: escolher o credor errado é o erro mais caro deste
+// formulário (um lançamento de centenas de milhares no extrato de quem não
+// devia), então a regra de quem entra e o que se replica fica testada.
+
+export interface EntryLineDraft {
+  creditorId: string;
+  kind: VbEntryKind;
+  amount: string;
+}
+
+/** Tipo e valor que uma linha nova herda: os da última linha JÁ preenchida. */
+export function replicatedFrom(lines: readonly EntryLineDraft[]): { kind: VbEntryKind; amount: string } {
+  const filled = [...lines].reverse().find((line) => line.amount.trim() !== "");
+  const last = filled ?? lines[lines.length - 1];
+  return { kind: last?.kind ?? "entrada", amount: last?.amount ?? "" };
+}
+
+/**
+ * Liga ou desliga um credor na lista. Ligando, ocupa a primeira linha sem
+ * credor (para não deixar linha órfã) ou acrescenta uma com o tipo e o valor
+ * replicados. Desligando, tira as linhas dele — e nunca deixa a lista vazia.
+ */
+export function toggleCreditorLines<T extends EntryLineDraft>(
+  lines: readonly T[],
+  creditorId: string,
+  make: (draft: EntryLineDraft) => T,
+  max: number = VB_MAX_ENTRY_LINES,
+): T[] {
+  const mine = lines.filter((line) => line.creditorId === creditorId);
+  if (mine.length > 0) {
+    const rest = lines.filter((line) => line.creditorId !== creditorId);
+    return rest.length > 0 ? rest : [make({ creditorId: "", kind: mine[0].kind, amount: mine[0].amount })];
+  }
+  if (lines.length >= max) return [...lines];
+  const blank = lines.findIndex((line) => line.creditorId === "");
+  if (blank >= 0) return lines.map((line, i) => (i === blank ? { ...line, creditorId } : line));
+  return [...lines, make({ creditorId, ...replicatedFrom(lines) })];
+}
+
+/** Uma linha para cada credor ativo que ainda não está na lista, mesmo valor. */
+export function addAllActiveLines<T extends EntryLineDraft>(
+  lines: readonly T[],
+  activeCreditorIds: readonly string[],
+  make: (draft: EntryLineDraft) => T,
+  max: number = VB_MAX_ENTRY_LINES,
+): T[] {
+  const seed = replicatedFrom(lines);
+  const used = new Set(lines.map((line) => line.creditorId));
+  const room = Math.max(max - lines.length, 0);
+  const added = activeCreditorIds
+    .filter((id) => !used.has(id))
+    .slice(0, room)
+    .map((creditorId) => make({ creditorId, ...seed }));
+  // A linha em branco inicial some quando os nomes entram no lugar dela.
+  const base = lines.length === 1 && lines[0].creditorId === "" && added.length > 0 ? [] : [...lines];
+  return [...base, ...added];
+}
