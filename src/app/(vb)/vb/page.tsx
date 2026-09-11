@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, Upload } from "lucide-react";
 
+import { VbCdiAccrualDialog } from "@/components/vb/cdi-accrual-dialog";
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
 import { VbStatStrip } from "@/components/vb/stat-strip";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,7 @@ import { getVbUser } from "@/lib/vb/auth";
 import { currentBalance, sortLedger, yieldBySemester, yieldOf } from "@/lib/vb/ledger";
 import { fromCents, sumCents } from "@/lib/vb/money";
 import { countPendingMovements } from "@/lib/vb/omie/queries";
+import { lastCdiDate } from "@/lib/vb/cdi/queries";
 import { getPendingBatch, listCreditors, listEntries } from "@/lib/vb/queries";
 import type { VbEntry } from "@/lib/vb/types";
 
@@ -33,11 +35,13 @@ export default async function VbOverviewPage() {
   const isGestor = user.role === "gestor";
   const db = await createClient();
 
-  const [creditors, entries, pendingBatch, omiePending] = await Promise.all([
+  const [creditors, entries, pendingBatch, omiePending, cdiUntil] = await Promise.all([
     listCreditors(db),
     listEntries(db, { status: "aprovado" }),
     isGestor ? getPendingBatch(db) : Promise.resolve(null),
     isGestor ? countPendingMovements() : Promise.resolve(0),
+    // Legenda do botão de rendimento; falha vira "sem data", nunca derruba a página.
+    isGestor ? lastCdiDate().catch(() => null) : Promise.resolve(null),
   ]);
 
   const year = currentYearBR();
@@ -89,6 +93,7 @@ export default async function VbOverviewPage() {
               <Upload className="h-4 w-4" /> Importar histórico
             </Link>
           )}
+          {isGestor && creditors.length > 0 && <VbCdiAccrualDialog cdiUntil={cdiUntil} />}
           {isGestor && creditors.length > 0 && (
             <VbNewEntryDialog creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))} />
           )}
