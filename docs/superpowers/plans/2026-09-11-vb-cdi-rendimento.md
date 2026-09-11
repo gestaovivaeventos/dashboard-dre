@@ -635,7 +635,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   - `interface CdiAccrualItem { creditor_id: string; creditor_name: string; period_start: string; period_end: string; days: number; balance: number; rate: number; amount: number }`
   - `previewCdiAccrual(): Promise<VbActionResult<{ items: CdiAccrualItem[]; total: number; lastRateDate: string | null }>>`
   - `postCdiAccrual(): Promise<VbActionResult<{ created: number; total: number }>>`
-  - `accrueForCreditors(creditorIds: readonly string[], upTo: string, userId: string): Promise<{ created: number; retroativo: boolean }>`
+  - `accrueForCreditors(creditorIds: readonly string[], upTo: string): Promise<{ created: number; retroativo: boolean }>`
 
 - [ ] **Step 1: Escrever as actions**
 
@@ -755,7 +755,12 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
     console.error("[vb-cdi] sync failed, using stored rates", error);
   }
   // Recalcula no servidor: a prévia do cliente nunca é entrada de dados.
-  const plan = await buildPlan();
+  let plan: Plan;
+  try {
+    plan = await buildPlan();
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
+  }
   if (plan.items.length === 0) return { ok: true, created: 0, total: 0 };
 
   const groupId = randomUUID();
@@ -779,9 +784,11 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
 export async function accrueForCreditors(
   creditorIds: readonly string[],
   upTo: string,
-  /** Quem está gravando; quem chama já passou por requireVbGestor(). */
-  userId: string,
 ): Promise<{ created: number; retroativo: boolean }> {
+  // Toda função exportada de um arquivo "use server" é chamável pela rede por
+  // id, mesmo sem nenhum import apontando para ela. A checagem é aqui, e o
+  // created_by sai da sessão verificada — nunca de parâmetro.
+  const user = await requireVbGestor();
   try {
     const until = await lastCdiDate();
     if (!until) return { created: 0, retroativo: false };
@@ -816,7 +823,7 @@ export async function accrueForCreditors(
               amount: segment.amount,
             },
             groupId,
-            userId,
+            user.id,
             index++,
           ),
         );
@@ -1088,7 +1095,7 @@ Em `src/lib/vb/actions/entries.ts`, dentro de `createVbEntries`, **depois** da c
   // requisito: o motor reconstrói os segmentos a partir da linha do tempo, de
   // modo que gravar sem fechar antes não corrompe o cálculo seguinte. Por isso
   // a falha aqui nunca derruba o lançamento.
-  const accrual = await accrueForCreditors(creditorIds, parsed.data.entry_date, user.id);
+  const accrual = await accrueForCreditors(creditorIds, parsed.data.entry_date);
 ```
 
 E, no retorno de sucesso, devolva o que aconteceu para a tela avisar:
