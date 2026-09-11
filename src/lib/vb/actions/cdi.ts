@@ -124,7 +124,15 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
   const rows = plan.items.map((item, index) => toEntryRow(item, groupId, user.id, index));
   const admin = createAdminClient();
   const { data, error } = await admin.from("vb_entries").insert(rows).select("id");
-  if (error || !data) return { error: error?.message ?? "Falha ao gravar os rendimentos." };
+  if (error || !data) {
+    // Índice único por (credor, fim do período): outra execução — duplo clique,
+    // segunda aba ou um lançamento manual — chegou antes. Nada foi duplicado.
+    if (error?.code === "23505") {
+      revalidatePath("/vb");
+      return { error: "Esse rendimento acabou de ser lançado por outra execução. Atualize a página." };
+    }
+    return { error: error?.message ?? "Falha ao gravar os rendimentos." };
+  }
 
   revalidatePath("/vb");
   for (const id of Array.from(new Set(plan.items.map((i) => i.creditor_id)))) {

@@ -26,7 +26,8 @@ function formatRate(rate: number): string {
   return `${(rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%`;
 }
 
-export function VbCdiAccrualDialog() {
+/** `cdiUntil`: última data com taxa gravada, para a legenda ao lado do botão. */
+export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | null }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -86,9 +87,12 @@ export function VbCdiAccrualDialog() {
 
   return (
     <>
-      <Button type="button" variant="outline" onClick={openDialog}>
-        <TrendingUp className="mr-2 h-4 w-4" /> Calcular rendimento
-      </Button>
+      <span className="inline-flex items-center gap-2">
+        <Button type="button" variant="outline" onClick={openDialog}>
+          <TrendingUp className="mr-2 h-4 w-4" /> Calcular rendimento
+        </Button>
+        {cdiUntil && <span className="text-[11px] text-ink-muted">CDI até {formatDayBR(cdiUntil)}</span>}
+      </span>
       <Dialog open={open} onOpenChange={(v) => !saving && setOpen(v)}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
