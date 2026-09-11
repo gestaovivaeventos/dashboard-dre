@@ -328,19 +328,9 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         getValue: (r) => resolveNamed(r.ctrl_expense_types) ?? "",
       },
       {
-        key: "categoria",
-        type: "text",
-        getValue: (r) => r.categoria ?? "",
-      },
-      {
         key: "setor",
         type: "text",
         getValue: (r) => sectorLabel(r),
-      },
-      {
-        key: "descricao",
-        type: "text",
-        getValue: (r) => r.description ?? "",
       },
       {
         key: "valor",
@@ -592,26 +582,24 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             <thead>
               <tr className="border-b bg-muted/40">
                 {canSelectRows && (
-                  <th className="w-10 px-4 py-3">
+                  <th className="w-10 px-3 py-3">
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-gray-300" />
                   </th>
                 )}
-                <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Tipo de despesa" {...headerProps("tipo_despesa")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Categoria" {...headerProps("categoria")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Descrição" {...headerProps("descricao")} /></th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Tipo / Categoria" {...headerProps("tipo_despesa")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-3 py-3">
                   {activeTab === "agendado" ? (
                     <ExcelHeaderCell label="Empresa / Enviado em" menuSide="right" {...headerProps("empresa")} />
                   ) : (
                     <ExcelHeaderCell label="Vencimento" menuSide="right" {...headerProps("vencimento")} />
                   )}
                 </th>
-                <th className="w-20 px-4 py-3 text-right font-medium text-muted-foreground"></th>
+                <th className="w-20 px-3 py-3 text-right font-medium text-muted-foreground"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -629,7 +617,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     className={`transition-colors ${clickable ? "cursor-pointer" : ""} ${isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-muted/20"}`}
                   >
                     {canSelectRows && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -639,28 +627,37 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3">
-                      <p className="font-medium line-clamp-1">{req.title}</p>
+                    <td className="px-3 py-3">
+                      <p className="line-clamp-1 max-w-[15rem] font-medium" title={req.title}>{req.title}</p>
                       <p className="text-xs text-muted-foreground">#{req.request_number}</p>
+                      {/* Descrição só quando acrescenta algo além do título (evita duplicar). */}
+                      {req.description && req.description.trim() !== req.title.trim() && (
+                        <p className="line-clamp-1 max-w-[15rem] text-xs text-muted-foreground" title={req.description}>
+                          {req.description}
+                        </p>
+                      )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       {sup ? (
-                        <div>
+                        <div className="max-w-[13rem]">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <p className="font-medium">{sup.name}</p>
+                            <p className="truncate font-medium" title={sup.name}>{sup.name}</p>
                             <SupplierNotApprovedBadge status={sup.status} />
                           </div>
                           {sup.cnpj_cpf && <p className="text-xs text-muted-foreground">{sup.cnpj_cpf}</p>}
                         </div>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {resolveNamed(req.ctrl_expense_types) ?? <span className="text-muted-foreground">—</span>}
+                    <td className="px-3 py-3 text-sm">
+                      <p className="line-clamp-1 max-w-[11rem]" title={resolveNamed(req.ctrl_expense_types) ?? undefined}>
+                        {resolveNamed(req.ctrl_expense_types) ?? <span className="text-muted-foreground">—</span>}
+                      </p>
+                      {/* Categoria Omie (prévia/override) recolhida como sublinha do tipo. */}
+                      {req.categoria && (
+                        <p className="text-xs text-muted-foreground" title="Categoria Omie">{req.categoria}</p>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {req.categoria ?? <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
+                    <td className="px-3 py-3 text-sm">
                       {req.is_rateio ? (
                         <span
                           className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300"
@@ -677,16 +674,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {req.description ? (
-                        <p className="line-clamp-2 max-w-[16rem]" title={req.description}>{req.description}</p>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                    <td className="px-3 py-3">
+                      <div className="max-w-[14rem]"><PaymentInfo supplier={sup} /></div>
                     </td>
-                    <td className="px-4 py-3"><PaymentInfo supplier={sup} /></td>
-                    <td className="px-4 py-3 text-right font-medium">{fmt.format(Number(req.amount))}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-3 py-3 text-right font-medium whitespace-nowrap">{fmt.format(Number(req.amount))}</td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
                       {activeTab === "aprovado" && (
                         <div className="space-y-1">
                           <p>{formatDayBR(req.due_date)}</p>
@@ -728,7 +720,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       )}
                     </td>
                     <td
-                      className="px-4 py-3 text-right"
+                      className="px-3 py-3 text-right"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex flex-col items-end gap-1">
