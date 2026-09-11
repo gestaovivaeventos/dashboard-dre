@@ -114,3 +114,13 @@ BEGIN
 
   RAISE NOTICE 'RLS fast path: % policy(ies) criada(s)', created;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- POST-SCRIPTUM (11/09/2026, depois de aplicada): a premissa da ordem por nome
+-- NAO se confirmou. O planner antepoe as chamadas de funcao simples e joga os
+-- bracos com SubPlan (esta policy inclusive) para o fim do OR, entao o custo
+-- por linha continuou. A correcao efetiva esta em
+-- 20260911130000_rls_initplan_wrap_policy_functions.sql (funcoes embrulhadas
+-- em (SELECT ...) => InitPlan). Esta policy segue valida e barata (hash), so
+-- nao resolve sozinha.
+-- ---------------------------------------------------------------------------
