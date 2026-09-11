@@ -252,6 +252,17 @@ function EntryForm({
         title = n === 1 ? "Lançamento gravado" : `${n} lançamentos gravados`;
       }
       showToast({ title, variant: "success" });
+      // Só createVbEntries devolve accrued/retroativo; linkOmieMovement não.
+      if (!omie && "accrued" in result && typeof result.accrued === "number" && result.accrued > 0) {
+        showToast({ title: `Rendimento fechado antes: ${result.accrued} lançamento(s)`, variant: "default" });
+      }
+      if (!omie && "retroativo" in result && result.retroativo === true) {
+        showToast({
+          title: "Data retroativa",
+          description: "O rendimento já lançado não foi recalculado.",
+          variant: "default",
+        });
+      }
       onSaved?.(result);
       onClose();
       router.refresh();

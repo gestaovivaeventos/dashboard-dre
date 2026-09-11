@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, Upload } from "lucide-react";
 
+import { VbCdiAccrualDialog } from "@/components/vb/cdi-accrual-dialog";
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
 import { VbStatStrip } from "@/components/vb/stat-strip";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +90,7 @@ export default async function VbOverviewPage() {
               <Upload className="h-4 w-4" /> Importar histórico
             </Link>
           )}
+          {isGestor && creditors.length > 0 && <VbCdiAccrualDialog />}
           {isGestor && creditors.length > 0 && (
             <VbNewEntryDialog creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))} />
           )}
