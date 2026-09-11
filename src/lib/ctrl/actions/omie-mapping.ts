@@ -114,6 +114,10 @@ export interface OmieMappingData {
   expenseMap: Record<string, string>; // expenseTypeId → codigoCategoria (com NF)
   expenseMapSemNota: Record<string, string>; // expenseTypeId → codigoCategoria (sem NF)
   sectorMap: Record<string, string>; // sectorId → codigoDepartamento
+  // expenseTypeId → true quando o tipo tem "categoria definida no envio"
+  // (grupo Omie, ex.: Investimentos): dispensa o mapeamento tipo → categoria e o
+  // operador escolhe a categoria no Contas a Pagar.
+  categoriaNoEnvio: Record<string, boolean>;
   contaCorrente: string | null;
   contaCorrenteCaixa: string | null;
   contaCorrenteCartao: string | null;
@@ -121,6 +125,8 @@ export interface OmieMappingData {
   // Empresa cuja conta no Omie não emite remessa de pagamento: o lançamento
   // cria o título sem o bloco CNAB (pagamento manual no Omie).
   skipCnabRemessa: boolean;
+  /** Dia do mês (1-31) em que vence a fatura do cartão da empresa. */
+  cartaoDiaVencimento: number | null;
   lastSyncedAt: string | null;
 }
 
@@ -155,13 +161,24 @@ export async function getOmieMappingData(
     }
   }
 
-  // Expense types
-  const { data: expenseTypesRaw, error: etErr } = await db
-    .from("ctrl_expense_types")
-    .select("id, name")
-    .order("name");
-
-  if (etErr) return { error: etErr.message };
+  // Expense types (+ flag categoria_no_envio). Resiliente à migração ausente:
+  // se a coluna ainda não existe (42703), recarrega sem ela e trata como false.
+  let expenseTypesRaw: Array<{ id: string; name: string; categoria_no_envio?: boolean }> = [];
+  {
+    const withFlag = await db
+      .from("ctrl_expense_types")
+      .select("id, name, categoria_no_envio")
+      .order("name");
+    if ((withFlag.error as { code?: string } | null)?.code === "42703") {
+      const fallback = await db.from("ctrl_expense_types").select("id, name").order("name");
+      if (fallback.error) return { error: fallback.error.message };
+      expenseTypesRaw = (fallback.data ?? []) as typeof expenseTypesRaw;
+    } else if (withFlag.error) {
+      return { error: withFlag.error.message };
+    } else {
+      expenseTypesRaw = (withFlag.data ?? []) as typeof expenseTypesRaw;
+    }
+  }
 
   // Sectors (active only)
   const { data: sectorsRaw, error: secErr } = await db
@@ -192,7 +209,7 @@ export async function getOmieMappingData(
   const { data: ccConfig, error: ccErr } = await db
     .from("ctrl_company_omie_config")
     .select(
-      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa",
+      "codigo_conta_corrente, codigo_conta_corrente_caixa, codigo_conta_corrente_cartao, codigo_conta_corrente_cartao_prepago, skip_cnab_remessa, cartao_dia_vencimento",
     )
     .eq("company_id", companyId)
     .maybeSingle();
@@ -212,20 +229,25 @@ export async function getOmieMappingData(
     sectorMap[row.sector_id] = row.codigo_departamento;
   }
 
+  const categoriaNoEnvio: Record<string, boolean> = {};
+  for (const et of expenseTypesRaw) categoriaNoEnvio[et.id] = Boolean(et.categoria_no_envio);
+
   return {
     categorias,
     departamentos,
     contasCorrentes,
-    expenseTypes: (expenseTypesRaw ?? []).map((r) => ({ id: r.id, name: r.name })),
+    expenseTypes: expenseTypesRaw.map((r) => ({ id: r.id, name: r.name })),
     sectors: (sectorsRaw ?? []).map((r) => ({ id: r.id, name: r.name })),
     expenseMap,
     expenseMapSemNota,
     sectorMap,
+    categoriaNoEnvio,
     contaCorrente: ccConfig?.codigo_conta_corrente ?? null,
     contaCorrenteCaixa: ccConfig?.codigo_conta_corrente_caixa ?? null,
     contaCorrenteCartao: ccConfig?.codigo_conta_corrente_cartao ?? null,
     contaCorrenteCartaoPrepago: ccConfig?.codigo_conta_corrente_cartao_prepago ?? null,
     skipCnabRemessa: ccConfig?.skip_cnab_remessa ?? false,
+    cartaoDiaVencimento: ccConfig?.cartao_dia_vencimento ?? null,
     lastSyncedAt,
   };
 }
@@ -262,6 +284,58 @@ export async function saveExpenseTypeCategoria(
 
   revalidatePath("/ctrl/admin/omie-mapeamento");
   return { ok: true };
+}
+
+// ─── saveExpenseTypeCategoriaNoEnvio ──────────────────────────────────────────
+
+// Liga/desliga "categoria definida no envio" de um tipo de despesa. É uma
+// propriedade do TIPO (vale para todas as empresas): tipos de grupo no Omie
+// (ex.: Investimentos) não têm categoria única, então a escolha vai para o
+// operador do Contas a Pagar no momento do envio.
+export async function saveExpenseTypeCategoriaNoEnvio(
+  expenseTypeId: string,
+  value: boolean,
+): Promise<{ ok: true } | { error: string }> {
+  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+  const db = createAdminClient();
+
+  const { error } = await db
+    .from("ctrl_expense_types")
+    .update({ categoria_no_envio: value })
+    .eq("id", expenseTypeId);
+
+  if (error) {
+    if ((error as { code?: string }).code === "42703") {
+      return { error: "Migração pendente: aplique 20260911120000_ctrl_categoria_no_envio.sql." };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/ctrl/admin/omie-mapeamento");
+  return { ok: true };
+}
+
+// ─── getOmieCategoriasForCompany ──────────────────────────────────────────────
+
+// Categorias (despesa) já sincronizadas do Omie de UMA empresa. Usada pelo modal
+// de envio do Contas a Pagar para o operador escolher a categoria dos tipos com
+// "categoria no envio". O cache (ctrl_omie_options) já é só de despesa.
+export async function getOmieCategoriasForCompany(
+  companyId: string,
+): Promise<{ categorias: OmieOption[] } | { error: string }> {
+  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+  if (!companyId) return { categorias: [] };
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("ctrl_omie_options")
+    .select("codigo, descricao")
+    .eq("company_id", companyId)
+    .eq("kind", "categoria")
+    .order("descricao");
+
+  if (error) return { error: error.message };
+  return { categorias: (data ?? []).map((r) => ({ codigo: r.codigo, descricao: r.descricao })) };
 }
 
 // ─── saveSkipCnabRemessa ──────────────────────────────────────────────────────
@@ -355,6 +429,36 @@ export async function saveContaCorrente(
       {
         company_id: companyId,
         [coluna]: codigo ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "company_id" },
+    );
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/ctrl/admin/omie-mapeamento");
+  return { ok: true };
+}
+
+// ─── saveCartaoDiaVencimento ──────────────────────────────────────────────────
+
+export async function saveCartaoDiaVencimento(
+  companyId: string,
+  dia: number | null,
+): Promise<{ ok: true } | { error: string }> {
+  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+
+  if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 31)) {
+    return { error: "Dia de vencimento deve ser um número entre 1 e 31." };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("ctrl_company_omie_config")
+    .upsert(
+      {
+        company_id: companyId,
+        cartao_dia_vencimento: dia,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "company_id" },

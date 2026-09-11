@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildEntryRows, newEntriesSchema, VB_MAX_ENTRY_LINES, type NewEntriesInput } from "./new-entries";
+import {
+  addAllActiveLines,
+  buildEntryRows,
+  newEntriesSchema,
+  replicatedFrom,
+  sumTypedLines,
+  toggleCreditorLines,
+  VB_MAX_ENTRY_LINES,
+  type NewEntriesInput,
+} from "./new-entries";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -172,5 +181,118 @@ test("schema exige ao menos uma linha e limita o tamanho do lançamento", () => 
   assert.equal(
     tooMany.success ? "" : tooMany.error.issues[0]?.message,
     `No máximo ${VB_MAX_ENTRY_LINES} linhas por lançamento.`,
+  );
+});
+
+test("sumTypedLines soma por tipo a partir das strings digitadas e ignora inválidas", () => {
+  const totals = sumTypedLines([
+    { kind: "entrada", amount: "1.000,50" },
+    { kind: "saida", amount: "-200" },
+    { kind: "rendimento", amount: "-10,5" },
+    { kind: "entrada", amount: "abc" },
+    { kind: "saida", amount: "" },
+  ]);
+  assert.deepEqual(totals, { entradas: 1000.5, saidas: 200, rendimentos: -10.5, liquido: 790, bruto: 1211 });
+});
+
+// ─── Composição das linhas no formulário ─────────────────────────────────────
+
+type Draft = { key: number; creditorId: string; kind: "entrada" | "saida" | "rendimento"; amount: string };
+
+function keyed() {
+  let next = 100;
+  return (draft: { creditorId: string; kind: Draft["kind"]; amount: string }): Draft => ({ key: next++, ...draft });
+}
+
+const PEDRO = "c-pedro";
+const MYLL = "c-mylliano";
+const VITOR = "c-vitor";
+
+test("replicatedFrom pega tipo e valor da última linha preenchida, ignorando as vazias", () => {
+  assert.deepEqual(
+    replicatedFrom([
+      { creditorId: PEDRO, kind: "entrada", amount: "330.000" },
+      { creditorId: MYLL, kind: "saida", amount: "  " },
+    ]),
+    { kind: "entrada", amount: "330.000" },
+  );
+  // Nada preenchido: herda o tipo da última linha e valor vazio.
+  assert.deepEqual(replicatedFrom([{ creditorId: "", kind: "rendimento", amount: "" }]), {
+    kind: "rendimento",
+    amount: "",
+  });
+  assert.deepEqual(replicatedFrom([]), { kind: "entrada", amount: "" });
+});
+
+test("toggleCreditorLines: o primeiro nome ocupa a linha em branco, sem criar outra", () => {
+  const rows = toggleCreditorLines([{ key: 1, creditorId: "", kind: "entrada", amount: "330.000" }], MYLL, keyed());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].creditorId, MYLL);
+  assert.equal(rows[0].key, 1, "mantém a chave para não remontar o campo que está sendo digitado");
+  assert.equal(rows[0].amount, "330.000");
+});
+
+test("toggleCreditorLines: o segundo nome entra replicando tipo e valor", () => {
+  const rows = toggleCreditorLines([{ key: 1, creditorId: MYLL, kind: "entrada", amount: "330.000" }], VITOR, keyed());
+  assert.deepEqual(
+    rows.map((r) => [r.creditorId, r.kind, r.amount]),
+    [
+      [MYLL, "entrada", "330.000"],
+      [VITOR, "entrada", "330.000"],
+    ],
+  );
+});
+
+test("toggleCreditorLines: clicar de novo tira o credor, e nunca deixa a lista vazia", () => {
+  const two: Draft[] = [
+    { key: 1, creditorId: MYLL, kind: "entrada", amount: "330.000" },
+    { key: 2, creditorId: VITOR, kind: "entrada", amount: "330.000" },
+  ];
+  assert.deepEqual(toggleCreditorLines(two, VITOR, keyed()).map((r) => r.creditorId), [MYLL]);
+
+  const single = toggleCreditorLines([two[0]], MYLL, keyed());
+  assert.equal(single.length, 1);
+  assert.equal(single[0].creditorId, "", "sobra uma linha em branco, com o valor preservado");
+  assert.equal(single[0].amount, "330.000");
+});
+
+test("toggleCreditorLines respeita o teto de linhas", () => {
+  const full: Draft[] = Array.from({ length: 3 }, (_, i) => ({
+    key: i,
+    creditorId: `c-${i}`,
+    kind: "entrada" as const,
+    amount: "1",
+  }));
+  assert.deepEqual(toggleCreditorLines(full, "c-novo", keyed(), 3).map((r) => r.creditorId), ["c-0", "c-1", "c-2"]);
+});
+
+test("addAllActiveLines replica o valor para todos e consome a linha em branco", () => {
+  const rows = addAllActiveLines(
+    [{ key: 1, creditorId: "", kind: "entrada", amount: "330.000" }],
+    [PEDRO, MYLL, VITOR],
+    keyed(),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.creditorId, r.amount]),
+    [
+      [PEDRO, "330.000"],
+      [MYLL, "330.000"],
+      [VITOR, "330.000"],
+    ],
+  );
+});
+
+test("addAllActiveLines não duplica quem já está na lista", () => {
+  const rows = addAllActiveLines(
+    [{ key: 1, creditorId: MYLL, kind: "saida", amount: "500" }],
+    [PEDRO, MYLL],
+    keyed(),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.creditorId, r.kind, r.amount]),
+    [
+      [MYLL, "saida", "500"],
+      [PEDRO, "saida", "500"],
+    ],
   );
 });

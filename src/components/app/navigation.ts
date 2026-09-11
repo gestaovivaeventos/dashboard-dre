@@ -13,6 +13,7 @@ import {
   FileText,
   GitCompare,
   GitMerge,
+  Inbox,
   Landmark,
   LayoutDashboard,
   Mail,
@@ -35,7 +36,7 @@ import {
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
-import { VB_NAV_KEY_OVERVIEW, VB_PATH } from "@/lib/auth/vb";
+import { VB_NAV_KEY_OMIE, VB_NAV_KEY_OVERVIEW, VB_OMIE_PATH, VB_PATH } from "@/lib/auth/vb";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -257,6 +258,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: "fin-dashboard", title: "DRE Gerencial", icon: PieChart, scope: "segment", suffix: "/dashboard", dreRoles: ALL_DRE_ROLES },
       { key: "fin-fluxo", title: "Fluxo de Caixa", icon: Wallet, scope: "segment", suffix: "/fluxo-de-caixa", dreRoles: ALL_DRE_ROLES },
       { key: "fin-budget", title: "Budget e Forecast", icon: Target, scope: "segment", suffix: "/budget-forecast", dreRoles: ALL_DRE_ROLES },
+      { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ALL_DRE_ROLES },
       // [KPIs OCULTO] Item escondido do menu a pedido (a pagina e a rota continuam existindo).
       // Para reexibir: descomente a linha abaixo e a entrada "fin-kpis" em FRANQUEADO_NAV_KEYS.
       // { key: "fin-kpis", title: "KPIs", icon: BarChart3, scope: "segment", suffix: "/kpis", dreRoles: ALL_DRE_ROLES },
@@ -266,7 +268,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // canAccessBiValidation em @/lib/auth/bi-validation).
       { key: BI_VALIDATION_NAV_KEY, title: "Validação Relatório", icon: ClipboardCheck, scope: "global", href: BI_VALIDATION_PATH, biValidationAccess: true },
       { key: "fin-docs", title: "Documentos anexos", icon: Files, scope: "global", href: "/financeiro/documentos", dreRoles: ALL_DRE_ROLES },
-      { key: "fin-comparativos", title: "Comparativos Anuais", icon: GitCompare, scope: "segment", suffix: "/comparativos-anuais", dreRoles: ALL_DRE_ROLES },
       { key: "fin-map", title: "Mapeamento", icon: MapPinned, scope: "segment", suffix: "/mapeamento", dreRoles: ["admin"] },
       { key: "fin-manual", title: "Lancamentos manuais", icon: FileText, scope: "segment", suffix: "/lancamentos-manuais", dreRoles: ["admin"] },
       { key: "fin-config", title: "Configuracoes", icon: Cog, scope: "segment", suffix: "/configuracoes", dreRoles: ["admin"] },
@@ -333,13 +334,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     // Módulo VB (Viva Bank): créditos de sócios/credores. Concedido por
     // usuário em user_module_roles (module='vb'); admin não enxerga sem a
     // linha — ver @/lib/auth/vb.
-    // Só "Visão geral": a importação da planilha é uma vez só, então não é
-    // rotina de menu — quem precisa chega por ela pela Visão geral, que
-    // oferece o link enquanto não existe histórico aprovado.
+    // "Visão geral" para todo papel; "Omie" (triagem dos pagamentos da ABD
+    // Holding) só para gestor. A importação da planilha é uma vez só e não
+    // tem item — quem precisa chega por ela pela Visão geral.
     id: "vb",
     label: "VB",
     items: [
       { key: VB_NAV_KEY_OVERVIEW, title: "Visão geral", icon: Landmark, scope: "global", href: VB_PATH, vbAccess: true },
+      { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
     ],
   },
   {

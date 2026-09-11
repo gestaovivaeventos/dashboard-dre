@@ -69,6 +69,10 @@ export type RequestDetail = {
   // Categoria Omie (prévia do mapeamento do tipo de despesa) — resolvida no
   // servidor para exibição no Contas a Pagar. Não é coluna da tabela.
   categoria?: string | null;
+  // Categoria Omie escolhida no envio (tipos "grupo", ex.: Investimentos).
+  omie_categoria_override?: string | null;
+  // true quando o tipo de despesa tem "categoria definida no envio".
+  isCategoriaNoEnvio?: boolean;
   payment_method?: string | null;
   installment_number?: number | null;
   installment_total?: number | null;

@@ -5,9 +5,10 @@
 
 import { z } from "zod";
 
+import { parseBrNumber } from "@/lib/orcamento/format";
 import { diffDaysIso } from "@/lib/vb/import/excel-date";
 import { roundCents } from "@/lib/vb/money";
-import type { VbEntryInsert } from "@/lib/vb/types";
+import type { VbEntryInsert, VbEntryKind } from "@/lib/vb/types";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -101,4 +102,92 @@ export function buildEntryRows(
     });
   }
   return { rows };
+}
+
+/**
+ * Totais do formulário a partir do que foi digitado (strings BR). Linhas
+ * inválidas são ignoradas — o submit é quem reclama delas. `bruto` (soma dos
+ * módulos) é o número que se compara com o valor de um pagamento da Omie.
+ */
+export function sumTypedLines(
+  lines: ReadonlyArray<{ kind: VbEntryKind; amount: string }>,
+): { entradas: number; saidas: number; rendimentos: number; liquido: number; bruto: number } {
+  let entradas = 0;
+  let saidas = 0;
+  let rendimentos = 0;
+  let bruto = 0;
+  for (const line of lines) {
+    const raw = parseBrNumber(line.amount);
+    if (raw == null || Number.isNaN(raw)) continue;
+    bruto += Math.abs(raw);
+    if (line.kind === "entrada") entradas += Math.abs(raw);
+    else if (line.kind === "saida") saidas += Math.abs(raw);
+    else rendimentos += raw;
+  }
+  return {
+    entradas: roundCents(entradas),
+    saidas: roundCents(saidas),
+    rendimentos: roundCents(rendimentos),
+    liquido: roundCents(entradas - saidas + rendimentos),
+    bruto: roundCents(bruto),
+  };
+}
+
+// ─── Composição das linhas no formulário ─────────────────────────────────────
+// Puro de propósito: escolher o credor errado é o erro mais caro deste
+// formulário (um lançamento de centenas de milhares no extrato de quem não
+// devia), então a regra de quem entra e o que se replica fica testada.
+
+export interface EntryLineDraft {
+  creditorId: string;
+  kind: VbEntryKind;
+  amount: string;
+}
+
+/** Tipo e valor que uma linha nova herda: os da última linha JÁ preenchida. */
+export function replicatedFrom(lines: readonly EntryLineDraft[]): { kind: VbEntryKind; amount: string } {
+  const filled = [...lines].reverse().find((line) => line.amount.trim() !== "");
+  const last = filled ?? lines[lines.length - 1];
+  return { kind: last?.kind ?? "entrada", amount: last?.amount ?? "" };
+}
+
+/**
+ * Liga ou desliga um credor na lista. Ligando, ocupa a primeira linha sem
+ * credor (para não deixar linha órfã) ou acrescenta uma com o tipo e o valor
+ * replicados. Desligando, tira as linhas dele — e nunca deixa a lista vazia.
+ */
+export function toggleCreditorLines<T extends EntryLineDraft>(
+  lines: readonly T[],
+  creditorId: string,
+  make: (draft: EntryLineDraft) => T,
+  max: number = VB_MAX_ENTRY_LINES,
+): T[] {
+  const mine = lines.filter((line) => line.creditorId === creditorId);
+  if (mine.length > 0) {
+    const rest = lines.filter((line) => line.creditorId !== creditorId);
+    return rest.length > 0 ? rest : [make({ creditorId: "", kind: mine[0].kind, amount: mine[0].amount })];
+  }
+  if (lines.length >= max) return [...lines];
+  const blank = lines.findIndex((line) => line.creditorId === "");
+  if (blank >= 0) return lines.map((line, i) => (i === blank ? { ...line, creditorId } : line));
+  return [...lines, make({ creditorId, ...replicatedFrom(lines) })];
+}
+
+/** Uma linha para cada credor ativo que ainda não está na lista, mesmo valor. */
+export function addAllActiveLines<T extends EntryLineDraft>(
+  lines: readonly T[],
+  activeCreditorIds: readonly string[],
+  make: (draft: EntryLineDraft) => T,
+  max: number = VB_MAX_ENTRY_LINES,
+): T[] {
+  const seed = replicatedFrom(lines);
+  const used = new Set(lines.map((line) => line.creditorId));
+  const room = Math.max(max - lines.length, 0);
+  const added = activeCreditorIds
+    .filter((id) => !used.has(id))
+    .slice(0, room)
+    .map((creditorId) => make({ creditorId, ...seed }));
+  // A linha em branco inicial some quando os nomes entram no lugar dela.
+  const base = lines.length === 1 && lines[0].creditorId === "" && added.length > 0 ? [] : [...lines];
+  return [...base, ...added];
 }

@@ -74,6 +74,7 @@ async function getContasAPagar() {
       favorecido,
       supplier_issues_invoice,
       invoice_number,
+      omie_categoria_override,
       attachment_path,
       created_at,
       approved_at,
@@ -168,11 +169,33 @@ async function getContasAPagar() {
     }
   }
 
-  const requests = (data ?? []).map((r) => ({
-    ...r,
-    categoria: resolveCategoria(r as Parameters<typeof resolveCategoria>[0]),
-    ...(r.is_rateio ? { ctrl_request_sectors: portionsByReq.get(r.id as string) ?? [] } : {}),
-  })) as ContasRequest[];
+  // Flag "categoria no envio" por tipo de despesa (grupo Omie, ex.: Investimentos).
+  // Resiliente à migração ausente (42703) — sem a coluna, nada é marcado.
+  const catNoEnvioByType = new Map<string, boolean>();
+  {
+    const flagRes = await supabase.from("ctrl_expense_types").select("id, categoria_no_envio");
+    if (!flagRes.error) {
+      for (const et of flagRes.data ?? []) {
+        catNoEnvioByType.set(et.id as string, Boolean((et as { categoria_no_envio?: boolean }).categoria_no_envio));
+      }
+    }
+  }
+
+  const requests = (data ?? []).map((r) => {
+    // A "Categoria" exibida: quando o operador já escolheu (override), mostra a
+    // descrição dela; senão cai na prévia pelo mapeamento tipo → categoria.
+    const override = (r as { omie_categoria_override?: string | null }).omie_categoria_override ?? null;
+    const company = (r.paying_company_id as string | null) ?? previewCompanyId;
+    const categoria = override
+      ? (company ? optByKey.get(`${company}:${override}`) ?? override : override)
+      : resolveCategoria(r as Parameters<typeof resolveCategoria>[0]);
+    return {
+      ...r,
+      categoria,
+      isCategoriaNoEnvio: catNoEnvioByType.get(r.expense_type_id as string) ?? false,
+      ...(r.is_rateio ? { ctrl_request_sectors: portionsByReq.get(r.id as string) ?? [] } : {}),
+    };
+  }) as ContasRequest[];
 
   return { requests };
 }

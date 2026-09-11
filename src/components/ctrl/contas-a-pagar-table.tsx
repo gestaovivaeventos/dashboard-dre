@@ -12,6 +12,8 @@ import {
   type PrevisaoMatch,
 } from "@/lib/ctrl/actions/requests";
 import { resyncContaPagar } from "@/lib/ctrl/actions/contapagar-launch";
+import { getOmieCategoriasForCompany } from "@/lib/ctrl/actions/omie-mapping";
+import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
 import { PaymentInfoThreadModal } from "@/components/ctrl/payment-info-thread-modal";
 import { EditExpenseRoutingModal } from "@/components/ctrl/edit-expense-routing-modal";
 import {
@@ -145,6 +147,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const [previsaoPreview, setPrevisaoPreview] = useState<PrevisaoMatch[] | null>(null);
   // requestId -> decisão escolhida no diálogo
   const [previsaoDecisoes, setPrevisaoDecisoes] = useState<Record<string, number | "novo">>({});
+  // Categoria no envio (tipos "grupo", ex.: Investimentos): categorias do Omie da
+  // empresa pagadora escolhida + a escolha do operador por requisição.
+  const [omieCategorias, setOmieCategorias] = useState<{ codigo: string; descricao: string }[]>([]);
+  const [catLoading, setCatLoading] = useState(false);
+  const [categoriaEscolhas, setCategoriaEscolhas] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -271,6 +278,40 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       .sort((a, b) => b.request_number - a.request_number);
   }, [requests, activeTab, search]);
 
+  // Requisições selecionadas cujo tipo exige categoria no envio (grupo Omie,
+  // ex.: Investimentos). O operador escolhe a categoria no modal de envio.
+  const flaggedSelected = useMemo(
+    () =>
+      CATEGORIA_NO_ENVIO_ENABLED
+        ? requests.filter((r) => selected.has(r.id) && r.isCategoriaNoEnvio)
+        : [],
+    [requests, selected],
+  );
+
+  // Carrega as categorias do Omie da empresa pagadora escolhida quando o modal de
+  // envio está aberto e há requisição de grupo na seleção. Troca de empresa zera
+  // as escolhas (os códigos de categoria são por empresa).
+  useEffect(() => {
+    if (!showEnviarModal || !payingCompanyId || flaggedSelected.length === 0) {
+      setOmieCategorias([]);
+      return;
+    }
+    let cancelado = false;
+    setCatLoading(true);
+    setCategoriaEscolhas({});
+    getOmieCategoriasForCompany(payingCompanyId)
+      .then((res) => {
+        if (cancelado) return;
+        setOmieCategorias("categorias" in res ? res.categorias : []);
+      })
+      .finally(() => {
+        if (!cancelado) setCatLoading(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [showEnviarModal, payingCompanyId, flaggedSelected.length]);
+
   // Colunas do cabeçalho estilo Excel (ordenar + filtrar por valores). A última
   // coluna muda conforme a aba (vencimento / empresa pagadora / inativação).
   const columns = useMemo<ExcelColumn<ContasRequest>[]>(() => {
@@ -287,19 +328,9 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         getValue: (r) => resolveNamed(r.ctrl_expense_types) ?? "",
       },
       {
-        key: "categoria",
-        type: "text",
-        getValue: (r) => r.categoria ?? "",
-      },
-      {
         key: "setor",
         type: "text",
         getValue: (r) => sectorLabel(r),
-      },
-      {
-        key: "descricao",
-        type: "text",
-        getValue: (r) => r.description ?? "",
       },
       {
         key: "valor",
@@ -360,7 +391,12 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
     if (ids.length === 0 || !companyId) return;
 
     startTransition(async () => {
-      const result = await enqueueSendToPayment(ids, companyId, decisoes);
+      const result = await enqueueSendToPayment(
+        ids,
+        companyId,
+        decisoes,
+        CATEGORIA_NO_ENVIO_ENABLED ? categoriaEscolhas : undefined,
+      );
       if ("error" in result) {
         notify(String(result.error), false, 10000);
         return;
@@ -371,6 +407,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
       setShowEnviarModal(false);
       setPrevisaoPreview(null);
       setPrevisaoDecisoes({});
+      setCategoriaEscolhas({});
+      setOmieCategorias([]);
       router.refresh();
       notify(
         `${result.enfileiradas} requisição(ões) na fila de envio ao Omie. ` +
@@ -409,6 +447,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
 
   function handleEnviar() {
     if (selected.size === 0 || !payingCompanyId) return;
+    // Categoria no envio: barra enquanto alguma requisição de grupo não teve a
+    // categoria escolhida (nem tem override anterior).
+    if (CATEGORIA_NO_ENVIO_ENABLED && flaggedSelected.length > 0) {
+      const semCat = flaggedSelected.filter(
+        (r) => !(categoriaEscolhas[r.id] ?? r.omie_categoria_override),
+      );
+      if (semCat.length > 0) {
+        notify(
+          `Escolha a categoria Omie de: ${semCat.map((r) => `#${r.request_number}`).join(", ")}.`,
+          false,
+          8000,
+        );
+        return;
+      }
+    }
     startTransition(async () => {
       const preview = await previewPrevisaoMatches(Array.from(selected), payingCompanyId);
       if ("error" in preview) {
@@ -529,26 +582,24 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
             <thead>
               <tr className="border-b bg-muted/40">
                 {canSelectRows && (
-                  <th className="w-10 px-4 py-3">
+                  <th className="w-10 px-3 py-3">
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-gray-300" />
                   </th>
                 )}
-                <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Tipo de despesa" {...headerProps("tipo_despesa")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Categoria" {...headerProps("categoria")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Descrição" {...headerProps("descricao")} /></th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("requisicao")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Tipo / Categoria" {...headerProps("tipo_despesa")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados de Pagamento</th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-3 py-3">
                   {activeTab === "agendado" ? (
                     <ExcelHeaderCell label="Empresa / Enviado em" menuSide="right" {...headerProps("empresa")} />
                   ) : (
                     <ExcelHeaderCell label="Vencimento" menuSide="right" {...headerProps("vencimento")} />
                   )}
                 </th>
-                <th className="w-20 px-4 py-3 text-right font-medium text-muted-foreground"></th>
+                <th className="w-20 px-3 py-3 text-right font-medium text-muted-foreground"></th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -566,7 +617,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                     className={`transition-colors ${clickable ? "cursor-pointer" : ""} ${isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-muted/20"}`}
                   >
                     {canSelectRows && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -576,28 +627,37 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3">
-                      <p className="font-medium line-clamp-1">{req.title}</p>
+                    <td className="px-3 py-3">
+                      <p className="line-clamp-1 max-w-[15rem] font-medium" title={req.title}>{req.title}</p>
                       <p className="text-xs text-muted-foreground">#{req.request_number}</p>
+                      {/* Descrição só quando acrescenta algo além do título (evita duplicar). */}
+                      {req.description && req.description.trim() !== req.title.trim() && (
+                        <p className="line-clamp-1 max-w-[15rem] text-xs text-muted-foreground" title={req.description}>
+                          {req.description}
+                        </p>
+                      )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       {sup ? (
-                        <div>
+                        <div className="max-w-[13rem]">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <p className="font-medium">{sup.name}</p>
+                            <p className="truncate font-medium" title={sup.name}>{sup.name}</p>
                             <SupplierNotApprovedBadge status={sup.status} />
                           </div>
                           {sup.cnpj_cpf && <p className="text-xs text-muted-foreground">{sup.cnpj_cpf}</p>}
                         </div>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {resolveNamed(req.ctrl_expense_types) ?? <span className="text-muted-foreground">—</span>}
+                    <td className="px-3 py-3 text-sm">
+                      <p className="line-clamp-1 max-w-[11rem]" title={resolveNamed(req.ctrl_expense_types) ?? undefined}>
+                        {resolveNamed(req.ctrl_expense_types) ?? <span className="text-muted-foreground">—</span>}
+                      </p>
+                      {/* Categoria Omie (prévia/override) recolhida como sublinha do tipo. */}
+                      {req.categoria && (
+                        <p className="text-xs text-muted-foreground" title="Categoria Omie">{req.categoria}</p>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {req.categoria ?? <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
+                    <td className="px-3 py-3 text-sm">
                       {req.is_rateio ? (
                         <span
                           className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300"
@@ -614,16 +674,11 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                         resolveNamed(req.ctrl_sectors ?? null) ?? <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {req.description ? (
-                        <p className="line-clamp-2 max-w-[16rem]" title={req.description}>{req.description}</p>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                    <td className="px-3 py-3">
+                      <div className="max-w-[14rem]"><PaymentInfo supplier={sup} /></div>
                     </td>
-                    <td className="px-4 py-3"><PaymentInfo supplier={sup} /></td>
-                    <td className="px-4 py-3 text-right font-medium">{fmt.format(Number(req.amount))}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                    <td className="px-3 py-3 text-right font-medium whitespace-nowrap">{fmt.format(Number(req.amount))}</td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
                       {activeTab === "aprovado" && (
                         <div className="space-y-1">
                           <p>{formatDayBR(req.due_date)}</p>
@@ -665,7 +720,7 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                       )}
                     </td>
                     <td
-                      className="px-4 py-3 text-right"
+                      className="px-3 py-3 text-right"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex flex-col items-end gap-1">
@@ -862,10 +917,60 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                   <p className="text-xs text-destructive">Nenhuma empresa com conexão Omie configurada.</p>
                 )}
               </div>
+
+              {/* Categoria no envio: tipos de grupo (ex.: Investimentos) não têm
+                  categoria única — o operador escolhe aqui, já com a empresa
+                  pagadora definida (os códigos de categoria são por empresa). */}
+              {CATEGORIA_NO_ENVIO_ENABLED && flaggedSelected.length > 0 && (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    Categoria Omie — obrigatória para tipos de grupo (ex.: Investimentos)
+                  </p>
+                  {!payingCompanyId ? (
+                    <p className="text-xs text-muted-foreground">
+                      Selecione a empresa pagadora para carregar as categorias.
+                    </p>
+                  ) : catLoading ? (
+                    <p className="text-xs text-muted-foreground">Carregando categorias…</p>
+                  ) : omieCategorias.length === 0 ? (
+                    <p className="text-xs text-destructive">
+                      Nenhuma categoria sincronizada para esta empresa. Sincronize em
+                      Configurações → Mapeamento Omie.
+                    </p>
+                  ) : (
+                    flaggedSelected.map((r) => (
+                      <div key={r.id} className="space-y-1">
+                        <label className="block text-xs font-medium">
+                          #{r.request_number} — {r.title}
+                        </label>
+                        <select
+                          value={categoriaEscolhas[r.id] ?? r.omie_categoria_override ?? ""}
+                          onChange={(e) =>
+                            setCategoriaEscolhas((prev) => ({ ...prev, [r.id]: e.target.value }))
+                          }
+                          className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value="">Selecione a categoria</option>
+                          {omieCategorias.map((c) => (
+                            <option key={c.codigo} value={c.codigo}>
+                              {c.descricao}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
             <div className="border-t px-6 py-4 flex justify-end gap-3">
               <button
-                onClick={() => { setShowEnviarModal(false); setPayingCompanyId(""); }}
+                onClick={() => {
+                  setShowEnviarModal(false);
+                  setPayingCompanyId("");
+                  setCategoriaEscolhas({});
+                  setOmieCategorias([]);
+                }}
                 disabled={isPending}
                 className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
               >

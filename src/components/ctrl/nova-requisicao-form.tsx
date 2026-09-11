@@ -11,6 +11,7 @@ import { maskPixTelefone, pixTelefoneIsComplete } from "@/lib/ctrl/bancos";
 import { isValidBoletoLinhaDigitavel, parseBoletoLinhaDigitavel } from "@/lib/ctrl/boleto";
 import { currentMonthBR, currentYearBR } from "@/lib/ctrl/datetime";
 import { nextFaturaDueDate } from "@/lib/ctrl/fatura-cartao";
+import { earliestDueDateBRT, formatBR } from "@/lib/ctrl/business-days";
 import type { BudgetVerification } from "@/lib/ctrl/actions/requests";
 import type { CtrlEvent, CtrlExpenseType, CtrlSector, CtrlSupplier } from "@/lib/supabase/types";
 
@@ -29,39 +30,6 @@ const INPUT_CLS =
 const LABEL_CLS = "text-sm font-medium";
 
 const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-// Data/hora "agora" no fuso de Brasília (America/Sao_Paulo), independente do
-// fuso do navegador do usuário — a regra de vencimento é definida pelo horário
-// de Brasília, não pelo relógio local de quem preenche.
-function brasiliaNowParts(): { ymd: string; hour: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return { ymd: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) % 24 };
-}
-
-function addOneDayISO(ymd: string): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-}
-
-// Já passou das 12:00 no horário de Brasília? (cutoff para vencimento no mesmo dia)
-function isAfterNoonBRT(): boolean {
-  return brasiliaNowParts().hour >= 12;
-}
-
-// Vencimento mínimo permitido: o MESMO dia quando a requisição é cadastrada até
-// 12:00 (horário de Brasília); após as 12:00, só a partir do dia seguinte.
-function earliestDueDateBRT(): string {
-  const { ymd } = brasiliaNowParts();
-  return isAfterNoonBRT() ? addOneDayISO(ymd) : ymd;
-}
 
 // Vencimento da próxima fatura do cartão vive em @/lib/ctrl/fatura-cartao
 // (compartilhado com a edição em Contas a Pagar) — ver nextFaturaDueDate.
@@ -424,9 +392,9 @@ export function NovaRequisicaoForm({
     setRateioRows((rows) => (rows.length <= 2 ? rows : rows.filter((_, idx) => idx !== i)));
   }
 
-  // Vencimento mínimo (horário de Brasília): mesmo dia até 12:00; após 12:00,
-  // só a partir do dia seguinte. Calculado no fuso America/Sao_Paulo, então não
-  // depende do relógio/fuso do navegador de quem preenche.
+  // Vencimento mínimo permitido (horário de Brasília): até o meio-dia pode ser
+  // o mesmo dia; após o meio-dia, só a partir do próximo dia útil. Dia útil
+  // ignora fim de semana e feriados bancários nacionais.
   const minDueDate = useMemo(() => earliestDueDateBRT(), []);
 
   const selectedSupplier = useMemo(
@@ -701,12 +669,12 @@ export function NovaRequisicaoForm({
     }
 
     // Defensive due-date check: HTML `min` is enforced by most browsers but
-    // some mobile webviews ignore it. Belt + suspenders.
+    // some mobile webviews ignore it. Belt + suspenders. A data mínima já
+    // embute a regra do cutoff de meio-dia (Brasília) + próximo dia útil.
     if (dueDate && dueDate < minDueDate) {
       setError(
-        isAfterNoonBRT()
-          ? "Como já passou das 12:00 (horário de Brasília), a data de vencimento deve ser a partir de amanhã."
-          : "A data de vencimento não pode ser anterior a hoje.",
+        `A data de vencimento deve ser a partir de ${formatBR(minDueDate)}. ` +
+          "Solicitações feitas após o meio-dia (horário de Brasília) só podem vencer a partir do próximo dia útil.",
       );
       return;
     }
@@ -1383,7 +1351,7 @@ export function NovaRequisicaoForm({
             </div>
             {installments > 1 && (
               <p className="text-xs text-muted-foreground mt-1">
-                Serão criadas {installments} requisições, vencimentos no dia 5 de cada mês.
+                Serão criadas {installments} requisições. Os vencimentos seguem o dia de vencimento do cartão da empresa pagadora (definido no envio para pagamento); o dia 5 é usado quando o cartão não tem dia configurado.
               </p>
             )}
           </div>
