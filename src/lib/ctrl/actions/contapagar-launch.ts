@@ -19,6 +19,7 @@ import {
 import { incluirAnexoContaPagar } from "@/lib/omie/anexo";
 import { parseBanco } from "@/lib/ctrl/bancos";
 import { normalizeDoc, semDocumentoError } from "@/lib/ctrl/cnpj";
+import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
 
 type LaunchResult =
   | { ok: true; status: "recebido" | "lancado" | "previsao_editada" }
@@ -226,7 +227,7 @@ export async function launchRequestToOmie(
   const { data: request, error: reqErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, extra_attachment_paths, event_id, is_rateio",
+      "id, request_number, supplier_id, expense_type_id, sector_id, amount, due_date, reference_month, reference_year, description, payment_method, supplier_issues_invoice, invoice_number, barcode, pix_key, attachment_path, invoice_attachment_path, extra_attachment_paths, event_id, is_rateio, omie_categoria_override",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -282,10 +283,16 @@ export async function launchRequestToOmie(
   // fallback para a com nota); "sim"/"sim_apos_pagamento"/vazio usam a com nota.
   const catComNota = (catRow?.codigo_categoria as string | null) ?? null;
   const catSemNota = (catRow?.codigo_categoria_sem_nota as string | null) ?? null;
+  // Override do operador (tipo "grupo", ex.: Investimentos): a categoria escolhida
+  // no envio TEM PRECEDÊNCIA sobre o mapeamento. Ignorado com a flag desligada.
+  const categoriaOverride = CATEGORIA_NO_ENVIO_ENABLED
+    ? ((request.omie_categoria_override as string | null) ?? null)
+    : null;
   const codigoCategoriaResolved =
-    request.supplier_issues_invoice === "nao"
+    categoriaOverride ??
+    (request.supplier_issues_invoice === "nao"
       ? (catSemNota ?? catComNota)
-      : catComNota;
+      : catComNota);
 
   const { data: depRow } = await supabase
     .from("ctrl_sector_omie_departamento")

@@ -7,11 +7,13 @@ import {
   syncOmieOptions,
   getOmieMappingData,
   saveExpenseTypeCategoria,
+  saveExpenseTypeCategoriaNoEnvio,
   saveSectorDepartamento,
   saveContaCorrente,
   saveSkipCnabRemessa,
   type OmieMappingData,
 } from "@/lib/ctrl/actions/omie-mapping";
+import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
 import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 
 const INPUT_CLS =
@@ -145,6 +147,25 @@ export function OmieMapeamentoClient({ companies }: Props) {
         if (prev) revert[expenseTypeId] = prev;
         else delete revert[expenseTypeId];
         setData({ ...data, [campo]: revert });
+        setSaveFeedback({ id: feedbackId, ok: false, msg: res.error });
+      } else {
+        setSaveFeedback({ id: feedbackId, ok: true, msg: "Salvo" });
+        setTimeout(() => setSaveFeedback((f) => (f?.id === feedbackId ? null : f)), 2000);
+      }
+    });
+  }
+
+  // "Categoria no envio" é uma propriedade do TIPO (vale para todas as empresas):
+  // liga/desliga a escolha da categoria Omie no Contas a Pagar (tipos de grupo).
+  function handleCategoriaNoEnvio(expenseTypeId: string, value: boolean) {
+    if (!data) return;
+    const feedbackId = `${expenseTypeId}:no_envio`;
+    const prev = { ...data.categoriaNoEnvio };
+    setData({ ...data, categoriaNoEnvio: { ...prev, [expenseTypeId]: value } });
+    startTransition(async () => {
+      const res = await saveExpenseTypeCategoriaNoEnvio(expenseTypeId, value);
+      if ("error" in res) {
+        setData({ ...data, categoriaNoEnvio: prev });
         setSaveFeedback({ id: feedbackId, ok: false, msg: res.error });
       } else {
         setSaveFeedback({ id: feedbackId, ok: true, msg: "Salvo" });
@@ -414,54 +435,89 @@ export function OmieMapeamentoClient({ companies }: Props) {
                       <span className="flex-1">Categoria — com nota fiscal</span>
                       <span className="flex-1">Categoria — sem nota fiscal</span>
                     </div>
-                    {data.expenseTypes.map((et) => (
+                    {data.expenseTypes.map((et) => {
+                      const noEnvio =
+                        CATEGORIA_NO_ENVIO_ENABLED && (data.categoriaNoEnvio[et.id] ?? false);
+                      return (
                       <div
                         key={et.id}
                         className="flex flex-wrap items-center gap-3 px-4 py-2.5"
                       >
                         <span className="w-48 shrink-0 text-sm font-medium">{et.name}</span>
-                        <div className="flex-1 flex items-center gap-2">
-                          <select
-                            value={data.expenseMap[et.id] ?? ""}
-                            onChange={(e) => handleExpenseMap(et.id, e.target.value, "com_nota")}
-                            disabled={isPending}
-                            className={INPUT_CLS + " flex-1"}
-                          >
-                            <option value="">— não mapeado —</option>
-                            {data.categorias.map((c) => (
-                              <option key={c.codigo} value={c.codigo}>
-                                {c.descricao}
-                              </option>
-                            ))}
-                          </select>
-                          {saveFeedback?.id === `${et.id}:com_nota` && (
-                            <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
-                              {saveFeedback.msg}
+                        {noEnvio ? (
+                          <div className="flex flex-1 items-center gap-2 text-xs text-muted-foreground">
+                            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                              Categoria escolhida no envio
                             </span>
-                          )}
-                        </div>
-                        <div className="flex-1 flex items-center gap-2">
-                          <select
-                            value={data.expenseMapSemNota[et.id] ?? ""}
-                            onChange={(e) => handleExpenseMap(et.id, e.target.value, "sem_nota")}
-                            disabled={isPending}
-                            className={INPUT_CLS + " flex-1"}
+                            <span>O operador seleciona a categoria Omie no Contas a Pagar.</span>
+                            {saveFeedback?.id === `${et.id}:no_envio` && (
+                              <span className={`shrink-0 font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                                {saveFeedback.msg}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex-1 flex items-center gap-2">
+                              <select
+                                value={data.expenseMap[et.id] ?? ""}
+                                onChange={(e) => handleExpenseMap(et.id, e.target.value, "com_nota")}
+                                disabled={isPending}
+                                className={INPUT_CLS + " flex-1"}
+                              >
+                                <option value="">— não mapeado —</option>
+                                {data.categorias.map((c) => (
+                                  <option key={c.codigo} value={c.codigo}>
+                                    {c.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                              {saveFeedback?.id === `${et.id}:com_nota` && (
+                                <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                                  {saveFeedback.msg}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex-1 flex items-center gap-2">
+                              <select
+                                value={data.expenseMapSemNota[et.id] ?? ""}
+                                onChange={(e) => handleExpenseMap(et.id, e.target.value, "sem_nota")}
+                                disabled={isPending}
+                                className={INPUT_CLS + " flex-1"}
+                              >
+                                <option value="">— não mapeado —</option>
+                                {data.categorias.map((c) => (
+                                  <option key={c.codigo} value={c.codigo}>
+                                    {c.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                              {saveFeedback?.id === `${et.id}:sem_nota` && (
+                                <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                                  {saveFeedback.msg}
+                                </span>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {CATEGORIA_NO_ENVIO_ENABLED && (
+                          <label
+                            className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+                            title="Tipos de grupo no Omie (ex.: Investimentos) não têm categoria única — a escolha vai para o operador no envio."
                           >
-                            <option value="">— não mapeado —</option>
-                            {data.categorias.map((c) => (
-                              <option key={c.codigo} value={c.codigo}>
-                                {c.descricao}
-                              </option>
-                            ))}
-                          </select>
-                          {saveFeedback?.id === `${et.id}:sem_nota` && (
-                            <span className={`shrink-0 text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
-                              {saveFeedback.msg}
-                            </span>
-                          )}
-                        </div>
+                            <input
+                              type="checkbox"
+                              checked={noEnvio}
+                              onChange={(e) => handleCategoriaNoEnvio(et.id, e.target.checked)}
+                              disabled={isPending}
+                              className="h-3.5 w-3.5"
+                            />
+                            Categoria no envio
+                          </label>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>

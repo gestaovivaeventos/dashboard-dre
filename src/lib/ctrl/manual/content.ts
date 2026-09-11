@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "10/09/2026";
+export const MANUAL_UPDATED_AT = "11/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -670,6 +670,11 @@ export const MANUAL_SECTIONS: ManualSection[] = [
             title: "Selecione e escolha a empresa pagadora",
             text:
               "Marque as requisições e clique em **Enviar para Pagamento**. A empresa pagadora define em qual Omie o título será criado.",
+          },
+          {
+            title: "Escolha a categoria dos tipos de grupo (ex.: Investimentos)",
+            text:
+              "Alguns tipos de despesa são um **grupo** no Omie (têm várias categorias) e não têm categoria única mapeada. Para esses, o modal de envio pede a **categoria Omie** de cada requisição, já com a empresa pagadora escolhida. Sem a categoria selecionada o envio fica bloqueado. Os demais tipos usam a categoria do mapeamento normalmente.",
           },
           {
             title: "Decida sobre as previsões encontradas",

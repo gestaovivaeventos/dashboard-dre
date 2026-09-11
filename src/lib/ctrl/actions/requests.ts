@@ -13,6 +13,7 @@ import {
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { semDocumentoError } from "@/lib/ctrl/cnpj";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
+import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -2707,6 +2708,9 @@ export async function enqueueSendToPayment(
   requestIds: string[],
   payingCompanyId: string,
   decisoes?: Record<string, number | "novo">,
+  // Categoria Omie escolhida no envio (requestId → codigo) para tipos "grupo"
+  // (ex.: Investimentos). Gravada como override antes de enfileirar.
+  categorias?: Record<string, string>,
 ) {
   // Mesma alçada da tela Contas a Pagar (ver previewPrevisaoMatches).
   const ctx = await requireCtrlRoleOrFullView("contas_a_pagar", "csc", "admin");
@@ -2778,6 +2782,49 @@ export async function enqueueSendToPayment(
 
   const now = new Date().toISOString();
   const companyName = company.name as string;
+
+  // ── Categoria no envio (tipos "grupo", ex.: Investimentos) ─────────────────
+  // Tipos marcados com `categoria_no_envio` não têm mapeamento tipo → categoria;
+  // a categoria Omie é escolhida agora, pelo operador. Barra o lote quando falta
+  // (mesma filosofia da trava de fornecedor) e grava o override ANTES de
+  // enfileirar — o worker lança minutos depois e precisa do valor guardado.
+  if (CATEGORIA_NO_ENVIO_ENABLED) {
+    const { data: comTipo, error: tipoErr } = await supabase
+      .from("ctrl_requests")
+      .select("id, request_number, omie_categoria_override, ctrl_expense_types(categoria_no_envio)")
+      .in("id", requestIds);
+    if (tipoErr && (tipoErr as { code?: string }).code !== "42703") {
+      return { error: tipoErr.message };
+    }
+    if (!tipoErr) {
+      const semCategoria: number[] = [];
+      for (const r of comTipo ?? []) {
+        const et = (Array.isArray(r.ctrl_expense_types) ? r.ctrl_expense_types[0] : r.ctrl_expense_types) as
+          | { categoria_no_envio: boolean | null }
+          | null;
+        if (!et?.categoria_no_envio) continue;
+        const escolhida = categorias?.[r.id as string] ?? (r.omie_categoria_override as string | null) ?? null;
+        if (!escolhida) semCategoria.push(r.request_number as number);
+      }
+      if (semCategoria.length > 0) {
+        return {
+          error:
+            `Selecione a categoria Omie para ${semCategoria.map((n) => `#${n}`).join(", ")}. ` +
+            "Tipos de despesa de grupo (ex.: Investimentos) exigem a categoria escolhida no envio.",
+        };
+      }
+      for (const [id, codigo] of Object.entries(categorias ?? {})) {
+        if (!requestIds.includes(id)) continue;
+        const { error: catErr } = await supabase
+          .from("ctrl_requests")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .update({ omie_categoria_override: codigo || null } as any)
+          .eq("id", id)
+          .eq("status", "aprovado");
+        if (catErr) return { error: `Falha ao guardar a categoria escolhida: ${catErr.message}` };
+      }
+    }
+  }
 
   // Previsão escolhida no diálogo: o lançamento acontece minutos depois, então o
   // código precisa ficar guardado até o worker consumir. Gravado ANTES de
