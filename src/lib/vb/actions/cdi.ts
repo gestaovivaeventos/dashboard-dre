@@ -112,7 +112,12 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
     console.error("[vb-cdi] sync failed, using stored rates", error);
   }
   // Recalcula no servidor: a prévia do cliente nunca é entrada de dados.
-  const plan = await buildPlan();
+  let plan: Plan;
+  try {
+    plan = await buildPlan();
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
+  }
   if (plan.items.length === 0) return { ok: true, created: 0, total: 0 };
 
   const groupId = randomUUID();
@@ -131,14 +136,21 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
 /**
  * Fecha o rendimento de alguns credores até `upTo`, para o lançamento manual.
  * Conveniência, não requisito: o motor reconstrói os segmentos, então lançar
- * sem fechar antes não corrompe o cálculo seguinte. Por isso nunca lança erro.
+ * sem fechar antes não corrompe o cálculo seguinte — por isso erros de rede
+ * ou banco nunca sobem, só resultam em `created: 0`.
+ *
+ * A checagem de permissão mora aqui dentro, antes do `try`, e não só no
+ * chamador: toda função exportada de um arquivo "use server" ganha um id de
+ * action chamável pela rede, mesmo sem nenhum import apontando pra ela — por
+ * isso `created_by` vem da sessão verificada por `requireVbGestor()`, nunca
+ * de um parâmetro, e uma chamada sem permissão lança em vez de virar
+ * `created: 0` silencioso.
  */
 export async function accrueForCreditors(
   creditorIds: readonly string[],
   upTo: string,
-  /** Quem está gravando; quem chama já passou por requireVbGestor(). */
-  userId: string,
 ): Promise<{ created: number; retroativo: boolean }> {
+  const user = await requireVbGestor();
   try {
     const until = await lastCdiDate();
     if (!until) return { created: 0, retroativo: false };
@@ -173,7 +185,7 @@ export async function accrueForCreditors(
               amount: segment.amount,
             },
             groupId,
-            userId,
+            user.id,
             index++,
           ),
         );
