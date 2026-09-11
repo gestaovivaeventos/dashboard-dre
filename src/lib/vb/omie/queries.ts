@@ -23,8 +23,8 @@ import type {
   VbOmieTriageStatus,
 } from "@/lib/vb/types";
 
-/** Teto folgado: a ABD Holding tem uns 25 pagamentos por mês. */
-const MAX_MOVEMENTS = 2000;
+/** PostgREST devolve no máximo 1000 linhas por requisição; as consultas de listagem paginam até a última página vir incompleta. */
+const PAGE = 1000;
 const MOVEMENT_COLUMNS =
   "id, omie_id, payment_date, supplier_customer, description, category_code, value, document_number";
 
@@ -60,6 +60,29 @@ function unique(values: Array<string | null | undefined>): string[] {
   return Array.from(new Set(values.filter((v): v is string => Boolean(v))));
 }
 
+/** Percorre em páginas de PAGE linhas (padrão de listEntries em src/lib/vb/queries.ts) até a última vir incompleta. */
+async function paginate<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
+}
+
+/** omie_id de toda decisão (vinculado ou descartado) já tomada para a empresa. */
+async function decidedOmieIds(admin: Admin): Promise<Set<string>> {
+  const rows = await paginate<{ omie_id: string }>((from, to) =>
+    admin.from("vb_omie_triage").select("omie_id").eq("company_id", VB_OMIE_COMPANY_ID).range(from, to),
+  );
+  return new Set(rows.map((r) => r.omie_id));
+}
+
 /** Código → nome do plano de contas da ABD (omie_categories). */
 async function categoryNames(admin: Admin): Promise<Map<string, string>> {
   const { data, error } = await admin
@@ -92,28 +115,41 @@ function toMovement(row: MovementRow, categories: Map<string, string>): VbOmieMo
 export async function listPendingMovements(): Promise<VbOmieMovement[]> {
   const admin = createAdminClient();
   const [decided, rows, categories] = await Promise.all([
-    admin.from("vb_omie_triage").select("omie_id").eq("company_id", VB_OMIE_COMPANY_ID),
-    admin
-      .from("financial_entries")
-      .select(MOVEMENT_COLUMNS)
-      .eq("company_id", VB_OMIE_COMPANY_ID)
-      .in("type", [...VB_OMIE_TYPES])
-      .gte("payment_date", VB_OMIE_START_DATE)
-      .order("payment_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(MAX_MOVEMENTS),
+    decidedOmieIds(admin),
+    paginate<MovementRow>((from, to) =>
+      admin
+        .from("financial_entries")
+        .select(MOVEMENT_COLUMNS)
+        .eq("company_id", VB_OMIE_COMPANY_ID)
+        .in("type", [...VB_OMIE_TYPES])
+        .gte("payment_date", VB_OMIE_START_DATE)
+        .order("payment_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    ),
     categoryNames(admin),
   ]);
-  if (decided.error) throw new Error(decided.error.message);
-  if (rows.error) throw new Error(rows.error.message);
-  const decidedIds = new Set(((decided.data ?? []) as Array<{ omie_id: string }>).map((r) => r.omie_id));
-  return ((rows.data ?? []) as unknown as MovementRow[])
-    .filter((row) => !decidedIds.has(row.omie_id))
-    .map((row) => toMovement(row, categories));
+  return rows.filter((row) => !decided.has(row.omie_id)).map((row) => toMovement(row, categories));
 }
 
+/** Só a contagem (badge do menu e Visão geral): mesmos filtros dos candidatos, sem carregar o plano de contas. */
 export async function countPendingMovements(): Promise<number> {
-  return (await listPendingMovements()).length;
+  const admin = createAdminClient();
+  const [decided, candidates] = await Promise.all([
+    decidedOmieIds(admin),
+    paginate<{ omie_id: string }>((from, to) =>
+      admin
+        .from("financial_entries")
+        .select("omie_id")
+        .eq("company_id", VB_OMIE_COMPANY_ID)
+        .in("type", [...VB_OMIE_TYPES])
+        .gte("payment_date", VB_OMIE_START_DATE)
+        .range(from, to),
+    ),
+  ]);
+  let count = 0;
+  for (const row of candidates) if (!decided.has(row.omie_id)) count++;
+  return count;
 }
 
 /** O movimento, se existir hoje e for candidato; senão null. Usado pelas actions antes de decidir. */
@@ -135,14 +171,15 @@ export async function getCandidateMovement(omieId: string): Promise<VbOmieMoveme
 /** Decisões de um status, com o que existe hoje na Omie e os lançamentos do grupo. */
 export async function listTriage(status: VbOmieTriageStatus): Promise<VbOmieTriageRow[]> {
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("vb_omie_triage")
-    .select("*")
-    .eq("company_id", VB_OMIE_COMPANY_ID)
-    .eq("status", status)
-    .order("decided_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as unknown as TriageDbRow[];
+  const rows = await paginate<TriageDbRow>((from, to) =>
+    admin
+      .from("vb_omie_triage")
+      .select("*")
+      .eq("company_id", VB_OMIE_COMPANY_ID)
+      .eq("status", status)
+      .order("decided_at", { ascending: false })
+      .range(from, to),
+  );
   if (rows.length === 0) return [];
 
   const userIds = unique(rows.map((r) => r.decided_by));

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toaster";
+import { VB_OMIE_PATH } from "@/lib/auth/vb";
 import { formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { formatBRL } from "@/lib/orcamento/format";
 import {
@@ -31,7 +32,7 @@ import {
   syncOmieNow,
   unlinkOmieMovement,
 } from "@/lib/vb/actions/omie";
-import { prefillFromMovement, suggestCreditor, suggestKind } from "@/lib/vb/omie/suggest";
+import { normalizeText, prefillFromMovement, suggestCreditor, suggestKind } from "@/lib/vb/omie/suggest";
 import {
   VB_KIND_LABELS,
   type VbActionResult,
@@ -61,13 +62,6 @@ const KIND_TONE: Record<VbEntryKind, string> = {
 };
 
 const ACTION_CLS = "rounded px-2 py-0.5 text-[12px] font-medium hover:bg-surface-2 disabled:opacity-50";
-
-function normalize(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
 
 function categoryOf(row: { category_name: string | null; category_code: string | null }): string {
   return row.category_name ?? row.category_code ?? NO_CATEGORY;
@@ -116,35 +110,51 @@ export function VbOmieTriage({ tab, pending, linked, discarded, creditors, memor
   }, [pending]);
 
   const filtered = useMemo(() => {
-    const term = normalize(query.trim());
+    const term = normalizeText(query.trim());
     return pending.filter((row) => {
       if (category !== ALL && categoryOf(row) !== category) return false;
-      if (term && !normalize(`${row.supplier_customer ?? ""} ${row.description ?? ""}`).includes(term)) return false;
+      if (term && !normalizeText(`${row.supplier_customer ?? ""} ${row.description ?? ""}`).includes(term)) return false;
       return true;
     });
   }, [pending, category, query]);
 
   function run(action: () => Promise<VbActionResult<object>>, success: string) {
     startTransition(async () => {
-      const result = await action();
-      if ("error" in result) {
-        showToast({ title: "Não foi possível", description: result.error, variant: "destructive" });
-        return;
+      try {
+        const result = await action();
+        if ("error" in result) {
+          showToast({ title: "Não foi possível", description: result.error, variant: "destructive" });
+          return;
+        }
+        showToast({ title: success, variant: "success" });
+        router.refresh();
+      } catch (error) {
+        showToast({
+          title: "Não foi possível",
+          description: error instanceof Error ? error.message : "Erro inesperado.",
+          variant: "destructive",
+        });
       }
-      showToast({ title: success, variant: "success" });
-      router.refresh();
     });
   }
 
   function runSync() {
     startSync(async () => {
-      const result = await syncOmieNow();
-      if ("error" in result) {
-        showToast({ title: "Omie não respondeu", description: result.error, variant: "destructive" });
-        return;
+      try {
+        const result = await syncOmieNow();
+        if ("error" in result) {
+          showToast({ title: "Omie não respondeu", description: result.error, variant: "destructive" });
+          return;
+        }
+        showToast({ title: `Omie consultada: ${result.recordsImported} movimento(s) na janela`, variant: "success" });
+        router.refresh();
+      } catch (error) {
+        showToast({
+          title: "Omie não respondeu",
+          description: error instanceof Error ? error.message : "Erro inesperado.",
+          variant: "destructive",
+        });
       }
-      showToast({ title: `Omie consultada: ${result.recordsImported} movimento(s) na janela`, variant: "success" });
-      router.refresh();
     });
   }
 
@@ -167,7 +177,7 @@ export function VbOmieTriage({ tab, pending, linked, discarded, creditors, memor
           {TABS.map((t) => (
             <Link
               key={t.id}
-              href={`/vb/omie?aba=${t.id}`}
+              href={`${VB_OMIE_PATH}?aba=${t.id}`}
               aria-current={tab === t.id ? "page" : undefined}
               className={`rounded px-3 py-1 text-[13px] ${
                 tab === t.id ? "bg-surface-2 font-medium text-ink-primary" : "text-ink-muted hover:text-ink-primary"
@@ -251,6 +261,7 @@ export function VbOmieTriage({ tab, pending, linked, discarded, creditors, memor
       )}
 
       <VbEntryDialog
+        key={linking?.movement.omie_id ?? "none"}
         open={linking !== null}
         onOpenChange={(open) => !open && setLinking(null)}
         creditors={creditors}

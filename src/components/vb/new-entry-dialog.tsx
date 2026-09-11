@@ -128,7 +128,10 @@ function EntryForm({
   const router = useRouter();
   const { showToast } = useToast();
   const [pending, startTransition] = useTransition();
-  useEffect(() => onPendingChange(pending), [pending, onPendingChange]);
+  useEffect(() => {
+    onPendingChange(pending);
+    return () => onPendingChange(false);
+  }, [pending, onPendingChange]);
 
   const options = useMemo(
     () => [...creditors].sort((a, b) => Number(b.active) - Number(a.active)),
@@ -232,12 +235,16 @@ function EntryForm({
         return;
       }
       const n = result.ids.length;
-      showToast({
-        title: omie
-          ? n === 1 ? "Vinculado ao VB" : `Vinculado: ${n} lançamentos`
-          : n === 1 ? "Lançamento gravado" : `${n} lançamentos gravados`,
-        variant: "success",
-      });
+      let title: string;
+      if (omie) {
+        const names = Array.from(new Set(parsedLines.map((line) => line.creditor_id))).map(
+          (id) => options.find((o) => o.id === id)?.name ?? "—",
+        );
+        title = names.length === 1 ? `Vinculado a ${names[0]}` : `Vinculado a ${names.length} credores`;
+      } else {
+        title = n === 1 ? "Lançamento gravado" : `${n} lançamentos gravados`;
+      }
+      showToast({ title, variant: "success" });
       onSaved?.(result);
       onClose();
       router.refresh();
@@ -249,8 +256,9 @@ function EntryForm({
       <DialogHeader>
         <DialogTitle>{omie ? "Vincular pagamento ao VB" : "Novo lançamento"}</DialogTitle>
         <DialogDescription>
-          Uma linha por credor. Tudo entra junto no extrato, na mesma data; transferência entre credores
-          fecha o líquido em zero.
+          {omie
+            ? "Uma linha por credor. Divida o pagamento entre credores se for o caso; o total pode ficar diferente do valor da Omie."
+            : "Uma linha por credor. Tudo entra junto no extrato, na mesma data; transferência entre credores fecha o líquido em zero."}
         </DialogDescription>
       </DialogHeader>
 

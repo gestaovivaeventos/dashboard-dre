@@ -14,13 +14,18 @@ import type { VbCreditorOption, VbEntryKind, VbEntryPrefill, VbOmieMovement } fr
 /** Mesmo limite da coluna/descrição do lançamento manual. */
 export const VB_OMIE_DESCRIPTION_MAX = 300;
 
-/** "MARIA APARECIDA - CONTA BRADESCO" → ["maria","aparecida","conta","bradesco"]. */
-export function normalizeTokens(value: string | null | undefined): string[] {
-  if (!value) return [];
+/** NFD + remove marcas diacríticas (faixa U+0300–U+036F) + minúsculas. Não tokeniza. */
+export function normalizeText(value: string | null | undefined): string {
+  if (!value) return "";
   return value
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** "MARIA APARECIDA - CONTA BRADESCO" → ["maria","aparecida","conta","bradesco"]. */
+export function normalizeTokens(value: string | null | undefined): string[] {
+  return normalizeText(value)
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length > 0);
 }

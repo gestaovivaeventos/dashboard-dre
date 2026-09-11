@@ -5,6 +5,7 @@ import { VB_OMIE_COMPANY_ID, VB_OMIE_START_DATE } from "@/lib/vb/omie/config";
 import {
   isCandidateMovement,
   matchesSupplier,
+  normalizeText,
   normalizeTokens,
   prefillFromMovement,
   suggestCreditor,
@@ -39,6 +40,10 @@ test("normalizeTokens tira acento, caixa e pontuação", () => {
   assert.deepEqual(normalizeTokens("MARIA APARECIDA - CONTA BRADESCO"), ["maria", "aparecida", "conta", "bradesco"]);
   assert.deepEqual(normalizeTokens("Sotrate"), ["sotrate"]);
   assert.deepEqual(normalizeTokens(null), []);
+});
+
+test("normalizeText tira acento e caixa, mas mantém pontuação e espaços", () => {
+  assert.equal(normalizeText("Maria Aparecida - Ap."), "maria aparecida - ap.");
 });
 
 test("matchesSupplier: cada token do credor é prefixo de um token distinto do fornecedor, na ordem", () => {

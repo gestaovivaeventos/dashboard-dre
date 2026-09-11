@@ -45,7 +45,9 @@ function snapshot(movement: VbOmieMovement) {
 /** Descarta: grava a decisão com retrato. Reversível por restoreOmieMovement. */
 export async function discardOmieMovement(omieId: string): Promise<VbActionResult> {
   const user = await requireVbGestor();
-  const movement = await getCandidateMovement(omieId);
+  const parsed = z.string().trim().min(1, "Movimento inválido.").safeParse(omieId);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Movimento inválido." };
+  const movement = await getCandidateMovement(parsed.data);
   if (!movement) return { error: NOT_FOUND };
 
   const admin = createAdminClient();
@@ -61,12 +63,14 @@ export async function discardOmieMovement(omieId: string): Promise<VbActionResul
 /** Restaura um descarte: apaga a decisão; o movimento volta a pendente. */
 export async function restoreOmieMovement(omieId: string): Promise<VbActionResult> {
   await requireVbGestor();
+  const parsed = z.string().trim().min(1, "Movimento inválido.").safeParse(omieId);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Movimento inválido." };
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("vb_omie_triage")
     .delete()
     .eq("company_id", VB_OMIE_COMPANY_ID)
-    .eq("omie_id", omieId)
+    .eq("omie_id", parsed.data)
     .eq("status", "descartado")
     .select("id");
   if (error) return { error: error.message };
@@ -143,12 +147,14 @@ export async function linkOmieMovement(
  */
 export async function unlinkOmieMovement(omieId: string): Promise<VbActionResult<{ removed: number }>> {
   await requireVbGestor();
+  const parsed = z.string().trim().min(1, "Movimento inválido.").safeParse(omieId);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Movimento inválido." };
   const admin = createAdminClient();
   const { data: triage, error: triageError } = await admin
     .from("vb_omie_triage")
     .select("id, group_id")
     .eq("company_id", VB_OMIE_COMPANY_ID)
-    .eq("omie_id", omieId)
+    .eq("omie_id", parsed.data)
     .eq("status", "vinculado")
     .maybeSingle();
   if (triageError) return { error: triageError.message };
