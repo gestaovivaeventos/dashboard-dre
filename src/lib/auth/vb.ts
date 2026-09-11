@@ -26,6 +26,8 @@ export const VB_PATH = "/vb";
 /** Chaves dos itens do grupo VB no menu lateral. */
 export const VB_NAV_KEY_OVERVIEW = "vb-overview";
 export const VB_NAV_KEY_IMPORT = "vb-import";
+export const VB_NAV_KEY_OMIE = "vb-omie";
+export const VB_OMIE_PATH = "/vb/omie";
 
 /**
  * Há alguma concessão do módulo? Aceita o select enxuto do middleware e da

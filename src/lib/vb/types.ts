@@ -145,3 +145,67 @@ export const EMPTY_IMPORT_SUMMARY: VbImportSummary = {
   ignoredSheets: [],
   createdCreditorIds: [],
 };
+
+/** O que o formulário de lançamento precisa saber de um credor. */
+export type VbCreditorOption = Pick<VbCreditor, "id" | "name" | "active">;
+
+/** Pagamento da ABD Holding como está hoje em financial_entries. */
+export interface VbOmieMovement {
+  /** financial_entries.id (muda se o sync recriar a linha; a chave é omie_id). */
+  id: string;
+  omie_id: string;
+  /** 'YYYY-MM-DD' */
+  payment_date: string;
+  supplier_customer: string | null;
+  description: string | null;
+  category_code: string | null;
+  category_name: string | null;
+  /** Sempre positivo; o tipo (despesa) dá a direção. */
+  value: number;
+  document_number: string | null;
+}
+
+export type VbOmieTriageStatus = "vinculado" | "descartado";
+
+export interface VbOmieLinkedEntry {
+  id: string;
+  creditor_id: string;
+  creditor_name: string;
+  kind: VbEntryKind;
+  amount: number;
+  sort_order: number;
+}
+
+/** Decisão gravada + retrato + o que existe hoje (para os avisos). */
+export interface VbOmieTriageRow {
+  id: string;
+  omie_id: string;
+  status: VbOmieTriageStatus;
+  group_id: string | null;
+  payment_date: string;
+  supplier_customer: string | null;
+  description: string | null;
+  category_code: string | null;
+  category_name: string | null;
+  value: number;
+  decided_by_name: string | null;
+  decided_at: string;
+  /** Movimento como está hoje na Omie; null = não consta mais. */
+  live: { value: number } | null;
+  /** Só vinculado: lançamentos do grupo, em sort_order. */
+  entries: VbOmieLinkedEntry[];
+}
+
+export interface VbOmieSyncStatus {
+  /** Fim do último sync com sucesso (ISO) ou null. */
+  finishedAt: string | null;
+  /** Há um sync em andamento (iniciado há menos de VB_OMIE_SYNC_RUNNING_WINDOW_MS). */
+  running: boolean;
+}
+
+/** Valores iniciais do diálogo de lançamento (valor como string BR, ex.: "330000" ou "1234,5"). */
+export interface VbEntryPrefill {
+  date: string;
+  description: string;
+  lines: Array<{ creditorId: string; kind: VbEntryKind; amount: string }>;
+}

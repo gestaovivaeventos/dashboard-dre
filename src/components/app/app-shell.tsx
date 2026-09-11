@@ -46,6 +46,8 @@ interface AppShellProps {
   /** Visão completa (leitura) do módulo Compras — override nominal por e-mail. */
   ctrlFullView?: boolean;
   unreadNotifications?: number;
+  /** Contadores por chave de item de menu (ex.: pendentes da triagem da Omie no VB). */
+  navBadges?: Readonly<Record<string, number>>;
   /**
    * Perfil unificado do usuário. Serve ao tour guiado: é o que separa os cinco
    * perfis do Compras nos passos que mudam de significado conforme quem lê
@@ -82,6 +84,7 @@ export function AppShell({
   canBiValidation,
   ctrlFullView,
   unreadNotifications = 0,
+  navBadges,
   userProfile,
   tourSeen,
 }: AppShellProps) {
@@ -173,6 +176,7 @@ export function AppShell({
       isCsc={isCsc}
       canBiValidation={canBiValidation}
       ctrlFullView={ctrlFullView}
+      navBadges={navBadges}
     />
   );
 

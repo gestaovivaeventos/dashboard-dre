@@ -14,12 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { VB_OMIE_PATH } from "@/lib/auth/vb";
 import { currentYearBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { formatBRL } from "@/lib/orcamento/format";
 import { createClient } from "@/lib/supabase/server";
 import { getVbUser } from "@/lib/vb/auth";
 import { currentBalance, sortLedger, yieldBySemester, yieldOf } from "@/lib/vb/ledger";
 import { fromCents, sumCents } from "@/lib/vb/money";
+import { countPendingMovements } from "@/lib/vb/omie/queries";
 import { getPendingBatch, listCreditors, listEntries } from "@/lib/vb/queries";
 import type { VbEntry } from "@/lib/vb/types";
 
@@ -31,10 +33,11 @@ export default async function VbOverviewPage() {
   const isGestor = user.role === "gestor";
   const db = await createClient();
 
-  const [creditors, entries, pendingBatch] = await Promise.all([
+  const [creditors, entries, pendingBatch, omiePending] = await Promise.all([
     listCreditors(db),
     listEntries(db, { status: "aprovado" }),
     isGestor ? getPendingBatch(db) : Promise.resolve(null),
+    isGestor ? countPendingMovements() : Promise.resolve(0),
   ]);
 
   const year = currentYearBR();
@@ -101,6 +104,18 @@ export default async function VbOverviewPage() {
           </span>
           <Link href={`/vb/importar/${pendingBatch.id}`} className="ml-auto font-medium underline">
             Revisar
+          </Link>
+        </div>
+      )}
+
+      {isGestor && omiePending > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <span className="text-ink-primary">
+            {omiePending} pagamento{omiePending === 1 ? "" : "s"} da Omie aguarda{omiePending === 1 ? "" : "m"} triagem.
+          </span>
+          <Link href={VB_OMIE_PATH} className="ml-auto font-medium underline">
+            Triar
           </Link>
         </div>
       )}
