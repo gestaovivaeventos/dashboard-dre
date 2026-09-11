@@ -11,6 +11,7 @@ import {
   saveSectorDepartamento,
   saveContaCorrente,
   saveSkipCnabRemessa,
+  saveCartaoDiaVencimento,
   type OmieMappingData,
 } from "@/lib/ctrl/actions/omie-mapping";
 import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
@@ -122,6 +123,27 @@ export function OmieMapeamentoClient({ companies }: Props) {
       } else {
         setSaveFeedback({ id: "skip_cnab", ok: true, msg: "Salvo" });
         setTimeout(() => setSaveFeedback((f) => (f?.id === "skip_cnab" ? null : f)), 2000);
+      }
+    });
+  }
+
+  function handleCartaoDia(value: string) {
+    if (!companyId || !data) return;
+    const dia = value.trim() === "" ? null : Number(value);
+    if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 31)) {
+      setSaveFeedback({ id: "cc_cartao_dia", ok: false, msg: "Use um dia entre 1 e 31" });
+      return;
+    }
+    const prev = data.cartaoDiaVencimento;
+    setData({ ...data, cartaoDiaVencimento: dia });
+    startTransition(async () => {
+      const res = await saveCartaoDiaVencimento(companyId, dia);
+      if ("error" in res) {
+        setData({ ...data, cartaoDiaVencimento: prev });
+        setSaveFeedback({ id: "cc_cartao_dia", ok: false, msg: res.error });
+      } else {
+        setSaveFeedback({ id: "cc_cartao_dia", ok: true, msg: "Salvo" });
+        setTimeout(() => setSaveFeedback((f) => (f?.id === "cc_cartao_dia" ? null : f)), 2000);
       }
     });
   }
@@ -359,6 +381,29 @@ export function OmieMapeamentoClient({ companies }: Props) {
                         {saveFeedback.msg}
                       </span>
                     )}
+                  </div>
+                  <div className="space-y-1.5 pl-4 border-l-2">
+                    <label className="text-sm font-medium">Dia de vencimento da fatura</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        placeholder="ex.: 10"
+                        defaultValue={data.cartaoDiaVencimento ?? ""}
+                        onBlur={(e) => handleCartaoDia(e.target.value)}
+                        disabled={isPending}
+                        className={INPUT_CLS + " max-w-[8rem]"}
+                      />
+                      {saveFeedback?.id === "cc_cartao_dia" && (
+                        <span className={`text-xs font-medium ${saveFeedback.ok ? "text-green-700" : "text-destructive"}`}>
+                          {saveFeedback.msg}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Pagamentos no cartão vencem neste dia, respeitando a regra de fechamento (compra a partir do dia 23 → +2 meses).
+                    </p>
                   </div>
                 </div>
 

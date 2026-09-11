@@ -389,7 +389,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
           ],
           [
             "Cartão de Crédito",
-            "Número de parcelas (até 12x) e se você precisa receber o cartão físico. O vencimento é o da fatura (dia 05) e não é editável.",
+            "Número de parcelas (até 12x) e se você precisa receber o cartão físico. O vencimento é o da fatura da empresa pagadora e não é editável: o dia vem do cadastro dela em Compras > Administração > Mapeamento Omie; sem dia cadastrado, vale o dia 05.",
           ],
           ["Cartão Pré-Pago", "Vencimento normal, sem parcelamento."],
           ["Dinheiro", "Valor e vencimento."],
@@ -400,7 +400,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         tone: "atencao",
         title: "Prazo do vencimento",
         text:
-          "Requisição cadastrada **até as 12h** pode ter vencimento no mesmo dia. Depois das 12h, o vencimento mínimo é o dia seguinte. Datas anteriores a esse limite não são aceitas pelo formulário.",
+          "Requisição cadastrada **até as 12h** (horário de Brasília) pode ter vencimento no mesmo dia. Depois das 12h, o vencimento mínimo é o **próximo dia útil** — fim de semana e feriado bancário nacional não contam. Datas anteriores a esse limite são recusadas pelo formulário e pelo sistema.",
       },
       {
         kind: "p",
@@ -409,7 +409,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "list",
         items: [
-          "**Parcelamento** — só no cartão de crédito, até 12x. O sistema cria uma requisição por parcela (“Parcela 2/6”), todas com vencimento no dia 05, e verifica o orçamento de cada mês separadamente.",
+          "**Parcelamento** — só no cartão de crédito, até 12x. O sistema cria uma requisição por parcela (“Parcela 2/6”), todas vencendo no dia da fatura da empresa pagadora (dia 05 quando ela não tem dia cadastrado), e verifica o orçamento de cada mês separadamente.",
           "**Recorrência mensal** — marque os outros meses em que a mesma despesa se repete. É criada uma requisição por mês, com o mesmo dia de vencimento. Não é combinável com parcelamento.",
           "**Rateio entre setores** — uma única requisição dividida entre dois ou mais setores, cada um com seu valor. Cada setor tem a sua própria aprovação, e a requisição só fica aprovada quando **todos** os setores aprovarem. Não combina com parcelamento, recorrência nem compra em dólar.",
           "**Compra em dólar** — marque *Compra em dólar (US$)*, informe o valor em dólar e o sistema converte para reais aplicando o câmbio e o IOF vigentes. O valor em reais é o que vale para orçamento e pagamento. Indisponível nos métodos PIX e PIX Copia e Cola e no rateio.",
@@ -891,7 +891,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
           },
           {
             q: "Comprei parcelado. Preciso criar uma requisição por parcela?",
-            a: "Não. Escolha cartão de crédito, informe o número de parcelas e o sistema cria uma requisição por parcela, com vencimento no dia 05 e verificação de orçamento mês a mês.",
+            a: "Não. Escolha cartão de crédito, informe o número de parcelas e o sistema cria uma requisição por parcela, com vencimento no dia da fatura da empresa pagadora e verificação de orçamento mês a mês.",
           },
           {
             q: "Não encontro a tela que preciso no menu.",

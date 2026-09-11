@@ -15,6 +15,7 @@ import { semDocumentoError } from "@/lib/ctrl/cnpj";
 import { countsTowardBudget } from "@/lib/ctrl/budget-cutoff";
 import { CATEGORIA_NO_ENVIO_ENABLED } from "@/lib/ctrl/feature-flags";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
+import { earliestDueDateBRT, formatBR } from "@/lib/ctrl/business-days";
 import { notifyPendingApproval, notifyRequester, notifyAdmins } from "@/lib/ctrl/notifications";
 import { decryptSecret } from "@/lib/security/encryption";
 import { listarAnexosContaPagar, obterAnexoLinkContaPagar } from "@/lib/omie/anexo";
@@ -536,6 +537,17 @@ export async function createRequest(data: CreateRequestInput) {
   }
   if (data.reference_month < 1 || data.reference_month > 12) {
     return { error: "Mês de referência inválido." };
+  }
+
+  // Cutoff de meio-dia (Brasília): até o meio-dia pode vencer no mesmo dia;
+  // após o meio-dia, só a partir do próximo dia útil. Regra dura no servidor.
+  if (data.due_date) {
+    const earliest = earliestDueDateBRT();
+    if (data.due_date < earliest) {
+      return {
+        error: `A data de vencimento não pode ser anterior a ${formatBR(earliest)}. Solicitações feitas após o meio-dia (horário de Brasília) só podem vencer a partir do próximo dia útil.`,
+      };
+    }
   }
 
   // Fornecedor ainda não homologado NÃO interrompe mais a criação: a requisição

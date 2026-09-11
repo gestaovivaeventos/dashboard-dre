@@ -104,6 +104,13 @@ Purchase requests move through a status machine driven by a **budget check** aga
 - Side states: `aguardando_complementacao` (info requested), `aguardando_aprovacao_fornecedor`, `rejeitado`
 Approval tier is computed from remaining annual balance at request time. Once `aprovado`, a request can be launched into Omie *contas a pagar* via `contapagar-launch.ts`. Guard every action with `requireCtrlRole(...)`.
 
+### Vencimento das requisições (Compras)
+
+Duas regras, ambas com fonte única:
+
+- **Cutoff de meio-dia** (`src/lib/ctrl/business-days.ts`): requisição cadastrada até 12:00:00 de Brasília pode vencer no mesmo dia; depois disso, só a partir do **próximo dia útil** (fim de semana e feriado bancário nacional, incluindo os móveis derivados da Páscoa). O formulário usa `earliestDueDateBRT()` no `min` do campo e o servidor repete a trava em `createRequest` — o `min` do HTML é ignorado por alguns webviews. Não recrie um cálculo de cutoff local na tela: existia um em `nova-requisicao-form.tsx` (só "amanhã", sem dia útil) e foi removido em favor do módulo compartilhado.
+- **Cartão de crédito vence no dia da fatura da empresa pagadora** (`ctrl_company_omie_config.cartao_dia_vencimento`, cadastrado em Mapeamento Omie). Aplicado no envio ao Omie (`contapagar-launch.ts`, `cardDueDateIso`): à vista aplica a regra de fechamento (compra a partir do dia 23 → fatura +2 meses, senão +1) e o dia é limitado ao último dia do mês; parcelas já vêm com o mês certo da criação e só recebem o dia. Sem dia cadastrado, nada muda (parcelas no dia 05).
+
 ### Manual do módulo Compras — `src/lib/ctrl/manual/content.ts`
 
 O manual do usuário final (fluxo, alçadas, status, o que cada perfil faz) tem **fonte única** nesse arquivo de dados puro. Dele saem as duas versões: a tela `/ctrl/manual` (`manual-client.tsx`, último item do menu COMPRAS, liberada a qualquer papel do módulo) e o arquivo Word em `docs/`, gerado por `npx tsx scripts/gen-manual-doc.ts` (`manual/word.ts` renderiza HTML/MSO — não há lib de .docx no projeto). O Word é distribuído **fora do app**: a tela não oferece download, e a rota que servia esse botão foi removida a pedido.
