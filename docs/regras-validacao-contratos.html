@@ -376,10 +376,26 @@
       </p>
     </div>
 
+    <h2>Atalho Comissão</h2>
+    <div class="card">
+      <p style="margin:0">
+        Requisições cuja <strong>descrição</strong> contém a palavra
+        <code>"comissão"</code> / <code>"comissões"</code> (qualquer variação:
+        comercial, relacionamento, produção, atendimento, pós-venda; sem
+        distinção de acento ou caixa) também <strong>não são lidas</strong>:
+        vão direto para <span class="status especialista">analise_especialista</span>
+        com o aviso "conferir na OP os valores orçados e já aprovados". Motivo:
+        o recibo anexo sempre bate com a RP (é emitido pelo valor pedido), então a
+        leitura aprovava sem conferir nada — o valor certo está na OP. Se a
+        descrição casar FEE e comissão ao mesmo tempo, vale o atalho FEE.
+      </p>
+    </div>
+
     <h2>Pipeline de avaliação</h2>
     <div class="card">
       <ol>
-        <li><strong>FEE/Cerimonial:</strong> se a descrição da requisição casa o atalho → <span class="status especialista">analise_especialista</span>, sem leitura, e sai.</li>
+        <li><strong>FEE/Cerimonial:</strong> se a descrição da requisição casa o atalho → decisão pelo saldo FEE do fundo (aprovada / reprovada / <span class="status especialista">analise_especialista</span>), sem leitura, e sai.</li>
+        <li><strong>Comissão:</strong> se a descrição casa o atalho → <span class="status especialista">analise_especialista</span> (conferir na OP), sem leitura, e sai.</li>
         <li>Se algum documento tem <code>extraction_failed = true</code> → retorna <span class="status erro">erro</span> e sai.</li>
         <li>Remove documentos do tipo "Suporte / Evidências" da análise.</li>
         <li>Se sobrou nenhum documento classificável → <span class="status especialista">analise_especialista</span>.</li>
