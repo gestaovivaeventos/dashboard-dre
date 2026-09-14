@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "11/09/2026";
+export const MANUAL_UPDATED_AT = "14/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -723,6 +723,13 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "p",
         text:
           "O orçamento se ajusta sozinho: rejeitar, devolver ou excluir uma requisição libera o valor na próxima leitura da tela Orçamento — não existe lançamento manual de consumo.",
+      },
+      {
+        kind: "callout",
+        tone: "atencao",
+        title: "Alterar tipo de despesa depois de paga (só admin)",
+        text:
+          "Exceção rara, restrita a administradores: nas requisições já enviadas/pagas há o botão **Alterar tipo (admin)**, que corrige o **tipo de despesa** e move o consumo do orçamento (tira do tipo antigo, soma no novo) — mesmo paga, sem voltar para aprovação. Exige motivo e fica no histórico. **Não altera o Omie**: um pop-up lembra de ajustar a categoria no Omie manualmente, para os dois lados ficarem coerentes.",
       },
     ],
   },

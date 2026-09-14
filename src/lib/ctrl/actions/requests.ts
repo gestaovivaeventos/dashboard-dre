@@ -3390,6 +3390,85 @@ export async function editExpenseRoutingFromContasAPagar(
   return { ok: true as const, returnedTo: newStatus, tier: approvalTier };
 }
 
+// ─── Correção de tipo de despesa PÓS-PAGAMENTO (admin) ────────────────────────
+//
+// Exceção rara, só admin (controladoria): corrige o TIPO DE DESPESA de uma
+// requisição que JÁ FOI enviada ao pagamento (status 'agendado', inclusive já
+// paga). Como o consumo do Orçamento é soma dinâmica por (tipo, setor) e nunca é
+// gravado, trocar `expense_type_id` já move o realizado do tipo antigo para o
+// novo — sem acerto manual. NÃO reenvia nem altera o Omie (o admin ajusta a
+// categoria no Omie manualmente) e NÃO volta para aprovação. Fica no histórico.
+export async function changePaidRequestExpenseType(
+  requestId: string,
+  newExpenseTypeId: string,
+  reason: string,
+) {
+  const ctx = await requireCtrlRole("admin");
+
+  if (!newExpenseTypeId) return { error: "Selecione o novo tipo de despesa." };
+  if (!reason?.trim()) return { error: "Informe o motivo da correção." };
+
+  const adminClient = createAdminClientIfAvailable();
+  const supabase = adminClient ?? (await createClient());
+
+  const { data: req, error: fetchErr } = await supabase
+    .from("ctrl_requests")
+    .select("id, request_number, status, expense_type_id, deleted_at, ctrl_expense_types(name)")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  if (fetchErr) return { error: fetchErr.message };
+  if (!req || req.deleted_at) return { error: "Requisição não encontrada." };
+  // Só pós-envio. Antes disso (Aguardando Envio) usa-se o botão Editar normal,
+  // que reroteia e devolve à aprovação.
+  if (req.status !== "agendado") {
+    return {
+      error:
+        "Esta correção é apenas para requisições já enviadas ao pagamento. " +
+        "Nas que estão em Aguardando Envio, use o botão Editar.",
+    };
+  }
+  const oldTypeId = (req.expense_type_id as string | null) ?? null;
+  if (oldTypeId === newExpenseTypeId) {
+    return { error: "O tipo de despesa selecionado é o mesmo atual." };
+  }
+
+  const { data: newType } = await supabase
+    .from("ctrl_expense_types")
+    .select("id, name")
+    .eq("id", newExpenseTypeId)
+    .maybeSingle();
+  if (!newType) return { error: "Tipo de despesa não encontrado." };
+
+  const oldTypeName =
+    (Array.isArray(req.ctrl_expense_types) ? req.ctrl_expense_types[0] : req.ctrl_expense_types)?.name ??
+    "—";
+
+  const { error: updErr } = await supabase
+    .from("ctrl_requests")
+    .update({ expense_type_id: newExpenseTypeId, updated_at: new Date().toISOString() })
+    .eq("id", requestId)
+    .eq("status", "agendado"); // guarda contra corrida (não mexe se saiu de 'agendado')
+  if (updErr) return { error: updErr.message };
+
+  await supabase.from("ctrl_history").insert({
+    request_id: requestId,
+    user_id: ctx.id,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    action: "editado" as any,
+    comment: reason.trim(),
+    metadata: {
+      source: "correcao_pos_pagamento",
+      changes: { tipo_despesa: [oldTypeName, newType.name] },
+    },
+  });
+
+  revalidatePath("/ctrl/contas-a-pagar");
+  revalidatePath("/ctrl/requisicoes");
+  revalidatePath("/ctrl/orcamento");
+  return { ok: true as const, oldType: oldTypeName, newType: newType.name as string };
+}
+
 // ─── Backward-compat alias ────────────────────────────────────────────────────
 
 export async function updateRequestStatus(
