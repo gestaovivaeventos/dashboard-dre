@@ -47,12 +47,14 @@ export function VbCdiAccrualDialog({
   const [items, setItems] = useState<CdiAccrualItem[]>([]);
   const [total, setTotal] = useState(0);
   const [lastRateDate, setLastRateDate] = useState<string | null>(null);
+  // "Calcular até": vazio = última taxa. Fechar no último dia do mês faz o
+  // extrato mensal sair com o rendimento do mês dentro do próprio mês.
+  const [upTo, setUpTo] = useState("");
 
-  function openDialog() {
-    setOpen(true);
+  function load(until: string) {
     startLoading(async () => {
       try {
-        const result = await previewCdiAccrual(creditorId);
+        const result = await previewCdiAccrual(creditorId, until || undefined);
         if ("error" in result) {
           showToast({ title: "Não foi possível calcular", description: result.error, variant: "destructive" });
           setOpen(false);
@@ -61,6 +63,7 @@ export function VbCdiAccrualDialog({
         setItems(result.items);
         setTotal(result.total);
         setLastRateDate(result.lastRateDate);
+        if (result.until && result.until !== until) setUpTo(result.until);
       } catch (error) {
         showToast({
           title: "Não foi possível calcular",
@@ -72,10 +75,16 @@ export function VbCdiAccrualDialog({
     });
   }
 
+  function openDialog() {
+    setOpen(true);
+    setUpTo("");
+    load("");
+  }
+
   function post() {
     startSaving(async () => {
       try {
-        const result = await postCdiAccrual(creditorId);
+        const result = await postCdiAccrual(creditorId, upTo || undefined);
         if ("error" in result) {
           showToast({ title: "Não gravado", description: result.error, variant: "destructive" });
           return;
@@ -114,6 +123,25 @@ export function VbCdiAccrualDialog({
                 : "Calculado com o CDI do Banco Central, do fim do último rendimento de cada credor em diante."}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-secondary">
+            <label htmlFor="vb-cdi-up-to">Calcular até</label>
+            <input
+              id="vb-cdi-up-to"
+              type="date"
+              className="h-8 rounded-md border border-border bg-surface-1 px-2 text-sm text-ink-primary"
+              value={upTo}
+              max={lastRateDate ?? undefined}
+              disabled={loading || saving}
+              onChange={(e) => {
+                setUpTo(e.target.value);
+                if (e.target.value) load(e.target.value);
+              }}
+            />
+            <span className="text-[11px] text-ink-muted">
+              Para o extrato mensal, feche no último dia do mês antes de enviar.
+            </span>
+          </div>
 
           {loading ? (
             <p className="py-8 text-center text-sm text-ink-muted">

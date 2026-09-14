@@ -29,18 +29,27 @@ export interface CdiAccrualItem {
 interface Plan {
   items: CdiAccrualItem[];
   total: number;
+  /** Última taxa gravada (teto do cálculo). */
   lastRateDate: string | null;
+  /** Data efetiva de fechamento usada no plano. */
+  until?: string;
 }
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Calcula, sem gravar, o rendimento que falta — de todos os credores ativos
- * ou só do `creditorId` (botão na tela do credor). Cada um parte do PRÓPRIO
- * último lançamento, por isso os períodos da prévia têm inícios diferentes.
- * É a mesma função que a gravação usa — a prévia nunca vira entrada de dados.
+ * ou só do `creditorId` (botão na tela do credor). Cada um parte do fim do
+ * PRÓPRIO último rendimento, por isso os períodos da prévia têm inícios
+ * diferentes. `upTo` fecha numa data escolhida (ex.: último dia do mês, para
+ * o extrato mensal sair com o rendimento do mês dentro do mês) em vez de ir
+ * até a última taxa; nunca passa da última taxa gravada. É a mesma função
+ * que a gravação usa — a prévia nunca vira entrada de dados.
  */
-async function buildPlan(creditorId?: string): Promise<Plan> {
-  const until = await lastCdiDate();
-  if (!until) return { items: [], total: 0, lastRateDate: null };
+async function buildPlan(creditorId?: string, upTo?: string): Promise<Plan> {
+  const lastRate = await lastCdiDate();
+  if (!lastRate) return { items: [], total: 0, lastRateDate: null };
+  const until = upTo && ISO_DAY.test(upTo) && upTo < lastRate ? upTo : lastRate;
 
   const admin = createAdminClient();
   const creditors = (await listCreditors(admin)).filter(
@@ -66,7 +75,7 @@ async function buildPlan(creditorId?: string): Promise<Plan> {
       });
     }
   }
-  return { items, total: fromCents(sumCents(items.map((i) => i.amount))), lastRateDate: until };
+  return { items, total: fromCents(sumCents(items.map((i) => i.amount))), lastRateDate: lastRate, until };
 }
 
 /** Linha de vb_entries para um segmento calculado. */
@@ -93,8 +102,11 @@ function toEntryRow(item: CdiAccrualItem, groupId: string, userId: string, index
   };
 }
 
-/** `creditorId` restringe ao credor da tela; sem ele, todos os ativos. */
-export async function previewCdiAccrual(creditorId?: string): Promise<VbActionResult<Plan>> {
+/**
+ * `creditorId` restringe ao credor da tela; sem ele, todos os ativos.
+ * `upTo` fecha numa data (limitada à última taxa gravada).
+ */
+export async function previewCdiAccrual(creditorId?: string, upTo?: string): Promise<VbActionResult<Plan>> {
   await requireVbGestor();
   try {
     await syncCdiRates();
@@ -103,7 +115,7 @@ export async function previewCdiAccrual(creditorId?: string): Promise<VbActionRe
     console.error("[vb-cdi] sync failed, using stored rates", error);
   }
   try {
-    return { ok: true, ...(await buildPlan(creditorId)) };
+    return { ok: true, ...(await buildPlan(creditorId, upTo)) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
   }
@@ -111,6 +123,7 @@ export async function previewCdiAccrual(creditorId?: string): Promise<VbActionRe
 
 export async function postCdiAccrual(
   creditorId?: string,
+  upTo?: string,
 ): Promise<VbActionResult<{ created: number; total: number }>> {
   const user = await requireVbGestor();
   try {
@@ -121,7 +134,7 @@ export async function postCdiAccrual(
   // Recalcula no servidor: a prévia do cliente nunca é entrada de dados.
   let plan: Plan;
   try {
-    plan = await buildPlan(creditorId);
+    plan = await buildPlan(creditorId, upTo);
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
   }
