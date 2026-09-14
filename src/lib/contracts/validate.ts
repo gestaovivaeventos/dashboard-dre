@@ -40,6 +40,21 @@ export function isFeeCerimonial(descricao: string | null | undefined): boolean {
   return /\bfee\b/.test(norm) || norm.includes('cerimonial')
 }
 
+// Requisições de comissão (comercial, relacionamento, produção, atendimento,
+// pós-venda…) também não passam por leitura de documento: o valor certo está
+// na OP (orçado e já aprovado), não no anexo — o recibo sempre "bate" e o
+// validador aprovava sem ter como conferir (RPs 881419-881421, 881432-881433).
+// Vão direto para análise especialista. Casa "comissao"/"comissoes" como
+// palavra, sem acento e sem caixa, então qualquer variação de sufixo entra.
+export function isComissao(descricao: string | null | undefined): boolean {
+  if (!descricao) return false
+  const norm = descricao
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+  return /\bcomiss(ao|oes)\b/.test(norm)
+}
+
 // Parser tolerante de data: aceita "DD/MM/AAAA" (e variações com . ou -),
 // ISO "AAAA-MM-DD" e número serial do Excel. Retorna null se não der pra ler.
 export function parseDataBR(value: string | null | undefined): Date | null {
