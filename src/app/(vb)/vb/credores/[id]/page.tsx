@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
 import { VbCdiAccrualDialog } from "@/components/vb/cdi-accrual-dialog";
+import { VbCreditorEmailDialog } from "@/components/vb/creditor-email-dialog";
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
 import { VbStatementView } from "@/components/vb/statement-view";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +50,8 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
           <span className="text-[11px] text-ink-muted">saldo positivo = o VB deve ao credor</span>
         </div>
         {isGestor && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <VbCreditorEmailDialog creditorId={creditor.id} email={creditor.email ?? null} />
             {creditor.active && <VbCdiAccrualDialog creditorId={creditor.id} cdiUntil={cdiUntil} />}
             <VbNewEntryDialog
               creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))}
