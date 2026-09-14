@@ -33,21 +33,25 @@ interface Plan {
 }
 
 /**
- * Calcula, sem gravar, o rendimento que falta para cada credor ativo. É a
- * mesma função que a gravação usa — a prévia nunca vira entrada de dados.
+ * Calcula, sem gravar, o rendimento que falta — de todos os credores ativos
+ * ou só do `creditorId` (botão na tela do credor). Cada um parte do PRÓPRIO
+ * último lançamento, por isso os períodos da prévia têm inícios diferentes.
+ * É a mesma função que a gravação usa — a prévia nunca vira entrada de dados.
  */
-async function buildPlan(): Promise<Plan> {
+async function buildPlan(creditorId?: string): Promise<Plan> {
   const until = await lastCdiDate();
   if (!until) return { items: [], total: 0, lastRateDate: null };
 
   const admin = createAdminClient();
-  const creditors = (await listCreditors(admin)).filter((c) => c.active);
+  const creditors = (await listCreditors(admin)).filter(
+    (c) => c.active && (!creditorId || c.id === creditorId),
+  );
   const rates = await loadCdiRates("1900-01-01");
   const items: CdiAccrualItem[] = [];
 
   for (const creditor of creditors) {
     const from = await accrualStartFor(creditor.id);
-    if (until <= from) continue;
+    if (!from || until <= from) continue;
     const entries = await listEntries(admin, { status: "aprovado", creditorId: creditor.id });
     for (const segment of planAccrual({ entries, rates, from, until })) {
       items.push({
@@ -89,7 +93,8 @@ function toEntryRow(item: CdiAccrualItem, groupId: string, userId: string, index
   };
 }
 
-export async function previewCdiAccrual(): Promise<VbActionResult<Plan>> {
+/** `creditorId` restringe ao credor da tela; sem ele, todos os ativos. */
+export async function previewCdiAccrual(creditorId?: string): Promise<VbActionResult<Plan>> {
   await requireVbGestor();
   try {
     await syncCdiRates();
@@ -98,13 +103,15 @@ export async function previewCdiAccrual(): Promise<VbActionResult<Plan>> {
     console.error("[vb-cdi] sync failed, using stored rates", error);
   }
   try {
-    return { ok: true, ...(await buildPlan()) };
+    return { ok: true, ...(await buildPlan(creditorId)) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
   }
 }
 
-export async function postCdiAccrual(): Promise<VbActionResult<{ created: number; total: number }>> {
+export async function postCdiAccrual(
+  creditorId?: string,
+): Promise<VbActionResult<{ created: number; total: number }>> {
   const user = await requireVbGestor();
   try {
     await syncCdiRates();
@@ -114,7 +121,7 @@ export async function postCdiAccrual(): Promise<VbActionResult<{ created: number
   // Recalcula no servidor: a prévia do cliente nunca é entrada de dados.
   let plan: Plan;
   try {
-    plan = await buildPlan();
+    plan = await buildPlan(creditorId);
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Falha ao calcular o rendimento." };
   }
@@ -173,6 +180,7 @@ export async function accrueForCreditors(
 
     for (const creditorId of Array.from(new Set(creditorIds))) {
       const from = await accrualStartFor(creditorId);
+      if (!from) continue;
       if (upTo < from) {
         retroativo = true;
         continue;

@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 
+import { VbCdiAccrualDialog } from "@/components/vb/cdi-accrual-dialog";
 import { VbNewEntryDialog } from "@/components/vb/new-entry-dialog";
 import { VbStatementView } from "@/components/vb/statement-view";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
 import { getVbUser } from "@/lib/vb/auth";
+import { lastCdiDate } from "@/lib/vb/cdi/queries";
 import { countPendingEntries, getCreditor, getPendingBatch, listCreditors, listEntries } from "@/lib/vb/queries";
 import { isUuid } from "@/lib/vb/types";
 
@@ -22,11 +24,13 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
   const creditor = await getCreditor(db, params.id);
   if (!creditor) notFound();
 
-  const [entries, pendingCount, pendingBatch, creditors] = await Promise.all([
+  const [entries, pendingCount, pendingBatch, creditors, cdiUntil] = await Promise.all([
     listEntries(db, { status: "aprovado", creditorId: creditor.id }),
     isGestor ? countPendingEntries(db, creditor.id) : Promise.resolve(0),
     isGestor ? getPendingBatch(db) : Promise.resolve(null),
     isGestor ? listCreditors(db) : Promise.resolve([]),
+    // Legenda do botão de rendimento; falha vira "sem data", nunca derruba a página.
+    isGestor ? lastCdiDate().catch(() => null) : Promise.resolve(null),
   ]);
 
   return (
@@ -45,10 +49,13 @@ export default async function VbCreditorPage({ params }: { params: { id: string 
           <span className="text-[11px] text-ink-muted">saldo positivo = o VB deve ao credor</span>
         </div>
         {isGestor && (
-          <VbNewEntryDialog
-            creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))}
-            defaultCreditorId={creditor.id}
-          />
+          <div className="flex items-center gap-2">
+            {creditor.active && <VbCdiAccrualDialog creditorId={creditor.id} cdiUntil={cdiUntil} />}
+            <VbNewEntryDialog
+              creditors={creditors.map(({ id, name, active }) => ({ id, name, active }))}
+              defaultCreditorId={creditor.id}
+            />
+          </div>
         )}
       </div>
 
