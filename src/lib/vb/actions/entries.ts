@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { accrueForCreditors } from "@/lib/vb/actions/cdi";
 import { requireVbGestor } from "@/lib/vb/auth";
+import { reconcileCdiAfterChange, type CdiReconcileResult } from "@/lib/vb/cdi/service";
 import { buildEntryRows, newEntriesSchema, type NewEntriesInput } from "@/lib/vb/new-entries";
 import type { VbActionResult } from "@/lib/vb/types";
 
@@ -18,7 +18,7 @@ import type { VbActionResult } from "@/lib/vb/types";
  */
 export async function createVbEntries(
   input: NewEntriesInput,
-): Promise<VbActionResult<{ ids: string[]; group_id: string; accrued: number; retroativo: boolean }>> {
+): Promise<VbActionResult<{ ids: string[]; group_id: string; cdi: CdiReconcileResult }>> {
   const user = await requireVbGestor();
   const parsed = newEntriesSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -36,16 +36,17 @@ export async function createVbEntries(
   if (creditorError) return { error: creditorError.message };
   if ((creditors ?? []).length !== creditorIds.length) return { error: "Credor não encontrado." };
 
-  // Fecha o rendimento até a véspera do lançamento. É conveniência, não
-  // requisito: o motor reconstrói os segmentos a partir da linha do tempo, de
-  // modo que gravar sem fechar antes não corrompe o cálculo seguinte. Por isso
-  // a falha aqui nunca derruba o lançamento.
-  const accrual = await accrueForCreditors(creditorIds, parsed.data.entry_date);
-
   const { data, error } = await admin.from("vb_entries").insert(built.rows).select("id");
   if (error || !data) return { error: error?.message ?? "Falha ao gravar." };
 
+  // Depois de gravar: fecha o rendimento até a data do lançamento e, se a
+  // data for retroativa, apaga e recalcula os rendimentos por CDI dali em
+  // diante sobre o saldo novo. Falha aqui nunca derruba o lançamento — o
+  // motor reconstrói a partir do que existe na próxima execução.
+  const cdi = await reconcileCdiAfterChange(admin, creditorIds, parsed.data.entry_date, user.id);
+
   revalidatePath("/vb");
+  revalidatePath("/vb/relatorios");
   for (const id of creditorIds) revalidatePath(`/vb/credores/${id}`);
-  return { ok: true, ids: data.map((row) => row.id as string), group_id, accrued: accrual.created, retroativo: accrual.retroativo };
+  return { ok: true, ids: data.map((row) => row.id as string), group_id, cdi };
 }

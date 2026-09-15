@@ -45,6 +45,8 @@ export interface MonthlyReportRowView {
   closingDate: string;
   lastOfficial: { sentAt: string; sentTo: string } | null;
   lastTest: { sentAt: string } | null;
+  /** O extrato mudou depois do envio (retroativo/recálculo): sugerir reenvio. */
+  changedAfterSend: boolean;
 }
 
 interface Props {
@@ -196,6 +198,11 @@ export function VbMonthlyReports({ month, months, rows }: Props) {
                     {row.status === "rendimento_pendente" && (
                       <div className="mt-0.5 text-[11px] text-ink-muted">
                         rendimento até {row.lastYieldEnd ? formatDayBR(row.lastYieldEnd) : "—"} · falta até {formatDayBR(row.closingDate)}
+                      </div>
+                    )}
+                    {row.changedAfterSend && (
+                      <div className="mt-0.5 text-[11px] font-medium text-amber-700">
+                        extrato mudou depois do envio — reenviar
                       </div>
                     )}
                   </TableCell>

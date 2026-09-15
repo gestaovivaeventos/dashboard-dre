@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { accumulatedFactor, planAccrual } from "@/lib/vb/cdi/accrual";
+import { accumulatedFactor, monthEndsBetween, planAccrual } from "@/lib/vb/cdi/accrual";
 import type { LedgerEntryLike } from "@/lib/vb/ledger";
 
 /** 0,05% ao dia em todos os dias úteis de 11 a 18/09/2026 (13 e 14 são fim de semana). */
@@ -112,6 +112,38 @@ test("planAccrual é idempotente: partir do fim do período gerado não produz n
     until: "2026-09-18",
   });
   assert.deepEqual(again, []);
+});
+
+test("monthEndsBetween lista os fins de mês estritamente dentro do intervalo", () => {
+  assert.deepEqual(monthEndsBetween("2026-06-30", "2026-09-11"), ["2026-07-31", "2026-08-31"]);
+  assert.deepEqual(monthEndsBetween("2026-08-01", "2026-08-31"), [], "a borda final não repete");
+  assert.deepEqual(monthEndsBetween("2025-11-15", "2026-02-10"), ["2025-11-30", "2025-12-31", "2026-01-31"]);
+  assert.deepEqual(monthEndsBetween("2026-09-10", "2026-09-18"), []);
+});
+
+test("planAccrual: o rendimento nunca atravessa a virada do mês", () => {
+  const rates = new Map<string, number>([
+    ["2026-08-28", 0.05],
+    ["2026-08-31", 0.05],
+    ["2026-09-01", 0.05],
+    ["2026-09-02", 0.05],
+  ]);
+  const rows = planAccrual({
+    entries: [entry("a", "2026-08-01", 100000)],
+    rates,
+    from: "2026-08-27",
+    until: "2026-09-02",
+  });
+  assert.deepEqual(
+    rows.map((r) => [r.period_start, r.period_end]),
+    [
+      ["2026-08-27", "2026-08-31"],
+      ["2026-08-31", "2026-09-02"],
+    ],
+  );
+  // Agosto: 28 e 31. Setembro: 1 e 2 — sobre o saldo já acrescido de agosto.
+  assert.equal(rows[0].amount, 100.03);
+  assert.equal(rows[1].balance, 100100.03);
 });
 
 test("planAccrual ignora lançamento anterior ao início, mas soma no saldo", () => {

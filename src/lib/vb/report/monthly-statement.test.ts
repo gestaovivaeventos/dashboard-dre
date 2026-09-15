@@ -58,6 +58,19 @@ test("buildMonthlyStatement: abertura = tudo antes do mês, linhas com saldo cor
   assert.equal(s.last_yield_end, "2026-05-22");
 });
 
+test("buildMonthlyStatement: rendimento datado no mês seguinte ainda conta como cobertura do mês", () => {
+  const s = buildMonthlyStatement(
+    [
+      e("a", "2026-07-01", "entrada", 100000),
+      e("b", "2026-09-14", "rendimento", 900, { period_start: "2026-08-01", period_end: "2026-09-14" }),
+    ],
+    "2026-08",
+  );
+  assert.equal(s.lines.length, 0);
+  assert.equal(s.rendimento, 0, "o valor só aparece no mês em que a linha está datada");
+  assert.equal(s.last_yield_end, "2026-09-14", "mas o mês está coberto: não é rendimento pendente");
+});
+
 test("buildMonthlyStatement: mês sem movimentação mantém o saldo e não tem linhas", () => {
   const s = buildMonthlyStatement([e("a", "2026-01-10", "entrada", 250.5)], "2026-05");
   assert.equal(s.opening_balance, 250.5);
