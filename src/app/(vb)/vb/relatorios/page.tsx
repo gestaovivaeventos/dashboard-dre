@@ -44,6 +44,7 @@ export default async function VbReportsPage({ searchParams }: { searchParams: { 
     closingDate: r.statement.closing_date,
     lastOfficial: r.lastOfficial ? { sentAt: r.lastOfficial.sent_at, sentTo: r.lastOfficial.sent_to } : null,
     lastTest: r.lastTest ? { sentAt: r.lastTest.sent_at } : null,
+    changedAfterSend: r.changedAfterSend,
   }));
 
   return (

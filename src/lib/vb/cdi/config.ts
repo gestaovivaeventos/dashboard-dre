@@ -12,5 +12,7 @@ export const VB_CDI_SGS_SERIES = 12;
  */
 export const VB_CDI_START_DATE = "2026-09-10";
 
-/** Descrição dos lançamentos gerados. */
+/** Descrição dos lançamentos gerados pelo botão / fechamento antes de lançamento. */
 export const VB_CDI_DESCRIPTION = "Rendimento CDI";
+/** Descrição do fechamento automático do mês (cron do dia 5). */
+export const VB_CDI_MONTH_CLOSE_DESCRIPTION = "Rendimento CDI (fechamento do mês)";

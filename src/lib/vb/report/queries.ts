@@ -17,16 +17,35 @@ export interface VbMonthlyReportRow {
   /** Último envio oficial/reenvio do mês, se houver. */
   lastOfficial: VbReportSend | null;
   lastTest: VbReportSend | null;
+  /**
+   * O extrato de hoje difere do que foi enviado (lançamento retroativo ou
+   * recálculo de rendimento depois do envio). Sinal para reenviar.
+   */
+  changedAfterSend: boolean;
 }
 
-export async function listReportSends(db: VbDb, month: string): Promise<VbReportSend[]> {
+type SendWithStatement = VbReportSend & {
+  statement: Pick<MonthlyStatement, "closing_balance" | "rendimento"> | null;
+};
+
+export async function listReportSends(db: VbDb, month: string): Promise<SendWithStatement[]> {
   const { data, error } = await db
     .from("vb_report_sends")
-    .select("id, creditor_id, month, kind, sent_to, sent_by, sent_at, subject, resend_id")
+    .select("id, creditor_id, month, kind, sent_to, sent_by, sent_at, subject, resend_id, statement")
     .eq("month", month)
     .order("sent_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return (data ?? []) as VbReportSend[];
+  return (data ?? []) as SendWithStatement[];
+}
+
+const CENT = 0.005;
+
+function differs(sent: SendWithStatement["statement"], now: MonthlyStatement): boolean {
+  if (!sent) return false;
+  return (
+    Math.abs(Number(sent.closing_balance) - now.closing_balance) > CENT ||
+    Math.abs(Number(sent.rendimento) - now.rendimento) > CENT
+  );
 }
 
 export async function loadMonthlyReportRows(db: VbDb, month: string): Promise<VbMonthlyReportRow[]> {
@@ -62,6 +81,7 @@ export async function loadMonthlyReportRows(db: VbDb, month: string): Promise<Vb
         }),
         lastOfficial,
         lastTest,
+        changedAfterSend: lastOfficial ? differs(lastOfficial.statement, statement) : false,
       };
     });
 }

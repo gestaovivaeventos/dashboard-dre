@@ -32,6 +32,25 @@ function diffDays(a: string, b: string): number {
   return Math.round((Date.UTC(yb, mb - 1, db) - Date.UTC(ya, ma - 1, da)) / MS_PER_DAY);
 }
 
+/** Último dia de cada mês com after < dia < until (exclusivo nas duas pontas: as bordas já são cortes). */
+export function monthEndsBetween(after: string, until: string): string[] {
+  const out: string[] = [];
+  const [y, m] = after.split("-").map(Number);
+  let year = y;
+  let month = m;
+  for (;;) {
+    const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    if (end >= until) break;
+    if (end > after) out.push(end);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return out;
+}
+
 /**
  * Produto de (1 + taxa/100) das datas d com after < d <= until. O dia em que um
  * período fecha é o mesmo em que o próximo abre, e a taxa dele conta uma vez só.
@@ -67,14 +86,16 @@ export function planAccrual(input: {
     if (entry.entry_date <= from) balance += entry.amount;
   }
 
-  // Datas de lançamento DENTRO do intervalo abrem um segmento novo.
-  const cuts: string[] = [];
+  // Datas de lançamento DENTRO do intervalo abrem um segmento novo. Todo
+  // último dia de mês também: o rendimento nunca atravessa a virada do mês,
+  // para o extrato mensal sair com o rendimento do mês dentro do mês
+  // (decisão 15/09/2026).
+  const cuts = new Set<string>();
   for (const entry of sorted) {
-    if (entry.entry_date > from && entry.entry_date <= until && !cuts.includes(entry.entry_date)) {
-      cuts.push(entry.entry_date);
-    }
+    if (entry.entry_date > from && entry.entry_date <= until) cuts.add(entry.entry_date);
   }
-  const bounds = [from, ...cuts];
+  for (const monthEnd of monthEndsBetween(from, until)) cuts.add(monthEnd);
+  const bounds = [from, ...Array.from(cuts).sort()];
   if (bounds[bounds.length - 1] !== until) bounds.push(until);
 
   const segments: AccrualSegment[] = [];
