@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Eye, Loader2, Paperclip, Plus, X } from "lucide-react";
+import { Eye, Info, Loader2, Paperclip, Plus, X } from "lucide-react";
 
 import {
   addTicketMessage,
@@ -45,6 +45,15 @@ const PRIORITY_LABEL: Record<TicketPriority, string> = { baixa: "Baixa", media: 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+
+// Legenda dos status (tooltip nativo no cabeçalho e no controle do admin).
+const STATUS_LEGEND = [
+  "Aberto — chamado novo, ainda não analisado",
+  "Em análise — a equipe está trabalhando nele",
+  "Aguardando resposta — parado esperando o solicitante responder",
+  "Resolvido — entregue; ainda aceita resposta para confirmar ou reabrir",
+  "Fechado — encerrado; a conversa fica bloqueada",
+].join("\n");
 
 function CategoryBadge({ value }: { value: TicketCategory }) {
   const cls =
@@ -299,13 +308,15 @@ export function ChamadosClient({
               <option value="melhoria">Melhoria</option>
               <option value="bug">Bug</option>
             </select>
-            <select value={prioF} onChange={(e) => setPrioF(e.target.value as "" | TicketPriority | "sem")} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
-              <option value="">Prioridade: todas</option>
-              <option value="alta">Alta</option>
-              <option value="media">Média</option>
-              <option value="baixa">Baixa</option>
-              <option value="sem">Sem prioridade</option>
-            </select>
+            {isAdmin && (
+              <select value={prioF} onChange={(e) => setPrioF(e.target.value as "" | TicketPriority | "sem")} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+                <option value="">Prioridade: todas</option>
+                <option value="alta">Alta</option>
+                <option value="media">Média</option>
+                <option value="baixa">Baixa</option>
+                <option value="sem">Sem prioridade</option>
+              </select>
+            )}
             {isAdmin && (
               <select value={respF} onChange={(e) => setRespF(e.target.value)} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
                 <option value="">Responsável: todos</option>
@@ -338,8 +349,13 @@ export function ChamadosClient({
                     <th className="px-3 py-3">Código</th>
                     <th className="px-3 py-3">Título</th>
                     <th className="px-3 py-3">Categoria</th>
-                    <th className="px-3 py-3">Status</th>
-                    <th className="px-3 py-3">Prioridade</th>
+                    <th className="px-3 py-3">
+                      <span className="inline-flex cursor-help items-center gap-1" title={STATUS_LEGEND}>
+                        Status
+                        <Info className="h-3 w-3 opacity-60" />
+                      </span>
+                    </th>
+                    {isAdmin && <th className="px-3 py-3">Prioridade</th>}
                     {isAdmin && <th className="px-3 py-3">Autor</th>}
                     {isAdmin && <th className="px-3 py-3">Responsável</th>}
                     <th className="px-3 py-3">Aberto em</th>
@@ -355,7 +371,7 @@ export function ChamadosClient({
                       </td>
                       <td className="px-3 py-3"><CategoryBadge value={t.category} /></td>
                       <td className="px-3 py-3"><StatusBadge value={t.status} /></td>
-                      <td className="px-3 py-3"><PriorityBadge value={t.priority} /></td>
+                      {isAdmin && <td className="px-3 py-3"><PriorityBadge value={t.priority} /></td>}
                       {isAdmin && (
                         <td className="px-3 py-3 text-muted-foreground">
                           <p className="line-clamp-1 max-w-[12rem]" title={t.author?.name ?? t.author?.email ?? ""}>
@@ -499,13 +515,16 @@ export function ChamadosClient({
                   <div className="flex flex-wrap gap-2">
                     <CategoryBadge value={detail.ticket.category} />
                     <StatusBadge value={detail.ticket.status} />
-                    <PriorityBadge value={detail.ticket.priority} />
+                    {isAdmin && <PriorityBadge value={detail.ticket.priority} />}
                   </div>
 
                   {isAdmin && (
                     <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
                       <div className="space-y-1">
-                        <label className="block text-xs font-medium text-muted-foreground">Status</label>
+                        <label className="flex cursor-help items-center gap-1 text-xs font-medium text-muted-foreground" title={STATUS_LEGEND}>
+                          Status
+                          <Info className="h-3 w-3 opacity-60" />
+                        </label>
                         <select
                           value={detail.ticket.status}
                           onChange={(e) => changeStatus(e.target.value as TicketStatus)}
