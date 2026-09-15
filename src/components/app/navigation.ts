@@ -16,6 +16,7 @@ import {
   Inbox,
   Landmark,
   LayoutDashboard,
+  LifeBuoy,
   Mail,
   MapPinned,
   Music2,
@@ -230,6 +231,11 @@ export interface NavItem {
   vbAccess?: boolean;
   /** Item só do papel gestor do VB (importação). */
   vbGestorOnly?: boolean;
+  /**
+   * Item visível a QUALQUER usuário logado (ex.: Chamados/Suporte). Ignora
+   * dreRoles/ctrlRoles e as whitelists de franqueado/CSC.
+   */
+  alwaysVisible?: boolean;
 }
 
 export type NavGroupId =
@@ -240,7 +246,8 @@ export type NavGroupId =
   | "viagens"
   | "contratos"
   | "vb"
-  | "plataforma";
+  | "plataforma"
+  | "suporte";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -356,6 +363,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // Substitui a antiga aba "Configuracoes > Empresas", a tela "Conexoes" e o
       // antigo Painel Administrador global (/admin), todos removidos.
       { key: "pf-painel-admin", title: "Painel Administrador", icon: LayoutDashboard, scope: "segment", suffix: "/painel-administrador", dreRoles: ["admin"] },
+    ],
+  },
+  // Último grupo: aberto a qualquer usuário logado (abre chamados de melhoria/bug).
+  {
+    id: "suporte",
+    label: "SUPORTE",
+    items: [
+      { key: "sup-chamados", title: "Chamados", icon: LifeBuoy, scope: "global", href: "/chamados", alwaysVisible: true },
     ],
   },
 ] as const;

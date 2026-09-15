@@ -113,6 +113,10 @@ export function canAccessPathByProfile(
   // volta para /home, em loop.
   if (pathname === "/home" || pathname.startsWith("/home/")) return true;
 
+  // Chamados (suporte): aberto a QUALQUER usuário logado — inclusive o validador
+  // de contrato (ilha). Vem antes de tudo, de propósito.
+  if (pathname === "/chamados" || pathname.startsWith("/chamados/")) return true;
+
   // Validador de contrato: ilha. Só /contratos (+ a tela inicial, acima).
   if (profile === "validador_contrato") {
     return pathname === "/contratos" || pathname.startsWith("/contratos/");

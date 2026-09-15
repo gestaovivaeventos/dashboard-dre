@@ -211,20 +211,28 @@ interface BuildInput {
 function buildContractsOnlyGroups(): RenderGroup[] {
   // Pull the canonical Validacao de Contratos item out of NAV_GROUPS so the
   // title/icon/href stay in sync with the rest of the nav config.
+  const groups: RenderGroup[] = [];
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
       if (item.scope === "global" && item.href === "/contratos") {
-        return [
-          {
-            id: group.id,
-            label: group.label,
-            items: [{ key: item.key, title: item.title, href: item.href!, icon: item.icon }],
-          },
-        ];
+        groups.push({
+          id: group.id,
+          label: group.label,
+          items: [{ key: item.key, title: item.title, href: item.href!, icon: item.icon }],
+        });
+      }
+      // Chamados é aberto a qualquer usuário — inclusive o perfil "ilha" de
+      // validador de contrato.
+      if (item.alwaysVisible && item.scope === "global" && item.href) {
+        groups.push({
+          id: group.id,
+          label: group.label,
+          items: [{ key: item.key, title: item.title, href: item.href, icon: item.icon }],
+        });
       }
     }
   }
-  return [];
+  return groups;
 }
 
 function buildGroups({
@@ -286,6 +294,10 @@ function isItemVisible(
   ctrlFullView?: boolean,
   vbRole: VbRole | null = null,
 ): boolean {
+  // Item aberto a qualquer usuário logado (ex.: Chamados/Suporte). Vem antes de
+  // tudo — ignora dreRole/ctrlRole e as whitelists de franqueado/CSC.
+  if (item.alwaysVisible) return true;
+
   // Validação de Contratos: módulo próprio, concedido por usuário. Não passa
   // por dreRole/ctrlRole nem pelas whitelists de franqueado/CSC — qualquer
   // perfil com o módulo enxerga o item.
