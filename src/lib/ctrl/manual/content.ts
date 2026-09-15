@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "14/09/2026";
+export const MANUAL_UPDATED_AT = "15/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -448,7 +448,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         tone: "info",
         title: "Preciso corrigir uma requisição já enviada",
         text:
-          "O solicitante não edita a requisição depois do envio. Peça ao aprovador para rejeitar (e crie uma nova corrigida) ou, se ela já estiver em Contas a Pagar, peça ao time para **Devolver**. Setor, tipo de despesa e método de pagamento também podem ser corrigidos pelo próprio Contas a Pagar.",
+          "O solicitante não edita a requisição depois do envio. Peça ao aprovador para rejeitar (e crie uma nova corrigida) ou, se ela já estiver em Contas a Pagar, peça ao time para **Devolver**. Setor, tipo de despesa e método de pagamento também podem ser corrigidos pelo próprio Contas a Pagar. Enquanto a requisição está **em aprovação**, o Contas a Pagar e o admin podem **editá-la** pela tela de Requisições (botão Editar) — se mudar setor, tipo ou valor, a alçada é recalculada e a aprovação reinicia.",
       },
     ],
   },

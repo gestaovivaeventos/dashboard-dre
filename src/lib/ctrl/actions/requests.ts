@@ -3469,6 +3469,113 @@ export async function changePaidRequestExpenseType(
   return { ok: true as const, oldType: oldTypeName, newType: newType.name as string };
 }
 
+// ─── Reroteamento após edição de requisição PENDENTE (admin / contas a pagar) ─
+//
+// Chamada pelo `updateRequestByAdmin` quando a edição mexeu em campos de
+// orçamento (setor/tipo/valor/competência) e a requisição ainda está em
+// aprovação. Recalcula a alçada com os campos JÁ salvos e ajusta a etapa
+// (pendente/pendente_diretor), reiniciando a aprovação e reavaliando o "NÃO
+// ORÇADO -", como na criação. Reusa performBudgetVerification/APPROVAL_ROUTING.
+export async function rerouteAfterAdminEdit(
+  requestId: string,
+): Promise<
+  { ok: true; rerouted: boolean; status?: CtrlRequestStatus; tier?: ApprovalTier } | { error: string }
+> {
+  await requireCtrlRole("admin", "contas_a_pagar");
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  const { data: req } = await supabase
+    .from("ctrl_requests")
+    .select(
+      "id, request_number, created_by, status, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year, ctrl_sectors(name), creator:users!ctrl_requests_created_by_fkey(name, email)",
+    )
+    .eq("id", requestId)
+    .maybeSingle();
+  if (!req) return { error: "Requisição não encontrada." };
+
+  const PENDING: string[] = ["pendente", "pendente_diretor", "aguardando_complementacao"];
+  if (!PENDING.includes(req.status as string)) return { ok: true, rerouted: false };
+
+  const month = req.due_date
+    ? new Date((req.due_date as string) + "T00:00:00").getMonth() + 1
+    : (req.reference_month as number);
+  const year = req.due_date
+    ? new Date((req.due_date as string) + "T00:00:00").getFullYear()
+    : (req.reference_year as number);
+
+  let verification: BudgetVerification | null = null;
+  if (req.expense_type_id) {
+    verification = await performBudgetVerification(
+      supabase,
+      req.sector_id as string,
+      req.expense_type_id as string,
+      Number(req.amount),
+      month,
+      year,
+    );
+  }
+  const approvalTier: ApprovalTier = verification?.approvalTier ?? "nivel_2";
+  const directorOnly = req.created_by === APPROVAL_ROUTING.directorOnly.requesterId;
+  const directorSectorOnly = req.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+  const forceDirector = directorOnly || directorSectorOnly;
+  const newStatus: CtrlRequestStatus = forceDirector ? "pendente_diretor" : "pendente";
+  const now = new Date().toISOString();
+
+  const { error: updErr } = await supabase
+    .from("ctrl_requests")
+    .update({
+      approval_tier: approvalTier,
+      approval_level: approvalTier === "nivel_3" ? 2 : 1,
+      is_budgeted: verification?.isBudgeted ?? false,
+      status: newStatus,
+      approved_by: null,
+      approved_at: null,
+      complement_return_status: null,
+      title: syncNaoOrcadoPrefix(req.title as string | null, approvalTier === "nivel_3"),
+      description: syncNaoOrcadoPrefix(req.description as string | null, approvalTier === "nivel_3"),
+      updated_at: now,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    .eq("id", requestId)
+    .in("status", PENDING);
+  if (updErr) return { error: updErr.message };
+
+  const sectorName =
+    (Array.isArray(req.ctrl_sectors) ? req.ctrl_sectors[0] : req.ctrl_sectors)?.name ?? "Setor";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const creatorRaw = (req as any).creator;
+  const creator = (Array.isArray(creatorRaw) ? creatorRaw[0] : creatorRaw) as
+    | { name: string | null; email: string | null }
+    | null;
+
+  const stage: "gerente" | "diretor" = forceDirector ? "diretor" : "gerente";
+  let explicitApproverIds: string[] | undefined;
+  if (directorOnly) {
+    explicitApproverIds = [APPROVAL_ROUTING.directorOnly.directorId];
+  } else if (
+    !forceDirector &&
+    req.expense_type_id === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
+  ) {
+    explicitApproverIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
+  }
+
+  await notifyPendingApproval({
+    requestId,
+    requestNumber: req.request_number as number,
+    requesterName: creator?.name ?? creator?.email ?? "Solicitante",
+    sectorId: req.sector_id as string,
+    sectorName,
+    amount: Number(req.amount),
+    stage,
+    explicitApproverIds,
+  });
+
+  revalidatePath("/ctrl/aprovacoes");
+  revalidatePath("/ctrl/requisicoes");
+  revalidatePath("/ctrl/orcamento");
+  return { ok: true, rerouted: true, status: newStatus, tier: approvalTier };
+}
+
 // ─── Backward-compat alias ────────────────────────────────────────────────────
 
 export async function updateRequestStatus(

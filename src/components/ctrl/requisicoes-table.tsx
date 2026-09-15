@@ -38,6 +38,8 @@ interface Props {
    */
   showRequester?: boolean;
   isAdmin?: boolean;
+  /** Pode editar requisição (admin + Contas a Pagar). Excluir segue só admin. */
+  canEdit?: boolean;
   canReconcile?: boolean;
   sectors?: CadastroOption[];
   expenseTypes?: CadastroOption[];
@@ -82,6 +84,7 @@ export function RequisicoesTable({
   requests,
   showRequester = false,
   isAdmin = false,
+  canEdit = false,
   canReconcile = false,
   sectors = [],
   expenseTypes = [],
@@ -421,37 +424,37 @@ export function RequisicoesTable({
                             Responder
                           </button>
                         )}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setEditReq(req)}
+                            disabled={isOmieLaunched(req)}
+                            title={
+                              isOmieLaunched(req)
+                                ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                : "Editar requisição"
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Editar
+                          </button>
+                        )}
                         {isAdmin && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setEditReq(req)}
-                              disabled={isOmieLaunched(req)}
-                              title={
-                                isOmieLaunched(req)
-                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
-                                  : "Editar requisição"
-                              }
-                              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteReq(req)}
-                              disabled={isOmieLaunched(req)}
-                              title={
-                                isOmieLaunched(req)
-                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
-                                  : "Excluir requisição"
-                              }
-                              className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Excluir
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteReq(req)}
+                            disabled={isOmieLaunched(req)}
+                            title={
+                              isOmieLaunched(req)
+                                ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                : "Excluir requisição"
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Excluir
+                          </button>
                         )}
                       </div>
                     </td>
