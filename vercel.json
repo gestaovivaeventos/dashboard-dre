@@ -34,6 +34,10 @@
     {
       "path": "/api/cron/vb-cdi",
       "schedule": "0 11 * * 1-5"
+    },
+    {
+      "path": "/api/cron/vb-monthly-reports",
+      "schedule": "0 12 5 * *"
     }
   ]
 }

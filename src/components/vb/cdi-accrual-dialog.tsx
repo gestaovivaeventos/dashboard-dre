@@ -26,8 +26,19 @@ function formatRate(rate: number): string {
   return `${(rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}%`;
 }
 
-/** `cdiUntil`: última data com taxa gravada, para a legenda ao lado do botão. */
-export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | null }) {
+/**
+ * `cdiUntil`: última data com taxa gravada, para a legenda ao lado do botão.
+ * `creditorId`: na tela do credor, calcula e lança só para ele; na Visão
+ * geral (sem o prop), para todos os ativos. Em ambos os casos cada credor
+ * parte do fim do próprio último rendimento — por isso a coluna Período varia.
+ */
+export function VbCdiAccrualDialog({
+  cdiUntil = null,
+  creditorId,
+}: {
+  cdiUntil?: string | null;
+  creditorId?: string;
+}) {
   const router = useRouter();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -36,12 +47,14 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
   const [items, setItems] = useState<CdiAccrualItem[]>([]);
   const [total, setTotal] = useState(0);
   const [lastRateDate, setLastRateDate] = useState<string | null>(null);
+  // "Calcular até": vazio = última taxa. Fechar no último dia do mês faz o
+  // extrato mensal sair com o rendimento do mês dentro do próprio mês.
+  const [upTo, setUpTo] = useState("");
 
-  function openDialog() {
-    setOpen(true);
+  function load(until: string) {
     startLoading(async () => {
       try {
-        const result = await previewCdiAccrual();
+        const result = await previewCdiAccrual(creditorId, until || undefined);
         if ("error" in result) {
           showToast({ title: "Não foi possível calcular", description: result.error, variant: "destructive" });
           setOpen(false);
@@ -50,6 +63,7 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
         setItems(result.items);
         setTotal(result.total);
         setLastRateDate(result.lastRateDate);
+        if (result.until && result.until !== until) setUpTo(result.until);
       } catch (error) {
         showToast({
           title: "Não foi possível calcular",
@@ -61,10 +75,16 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
     });
   }
 
+  function openDialog() {
+    setOpen(true);
+    setUpTo("");
+    load("");
+  }
+
   function post() {
     startSaving(async () => {
       try {
-        const result = await postCdiAccrual();
+        const result = await postCdiAccrual(creditorId, upTo || undefined);
         if ("error" in result) {
           showToast({ title: "Não gravado", description: result.error, variant: "destructive" });
           return;
@@ -99,10 +119,29 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
             <DialogTitle>Rendimento por CDI</DialogTitle>
             <DialogDescription>
               {lastRateDate
-                ? `Calculado com o CDI do Banco Central até ${formatDayBR(lastRateDate)}. Confira antes de lançar.`
-                : "Calculado com o CDI do Banco Central."}
+                ? `${creditorId ? "Do fim do último rendimento do credor" : "Do fim do último rendimento de cada credor"} até o CDI do Banco Central de ${formatDayBR(lastRateDate)}; cada movimentação no meio fecha um período. Confira antes de lançar.`
+                : "Calculado com o CDI do Banco Central, do fim do último rendimento de cada credor em diante."}
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-secondary">
+            <label htmlFor="vb-cdi-up-to">Calcular até</label>
+            <input
+              id="vb-cdi-up-to"
+              type="date"
+              className="h-8 rounded-md border border-border bg-surface-1 px-2 text-sm text-ink-primary"
+              value={upTo}
+              max={lastRateDate ?? undefined}
+              disabled={loading || saving}
+              onChange={(e) => {
+                setUpTo(e.target.value);
+                if (e.target.value) load(e.target.value);
+              }}
+            />
+            <span className="text-[11px] text-ink-muted">
+              Para o extrato mensal, feche no último dia do mês antes de enviar.
+            </span>
+          </div>
 
           {loading ? (
             <p className="py-8 text-center text-sm text-ink-muted">
@@ -117,7 +156,7 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-ink-muted">
-                    <th className="py-1.5 pr-3 font-medium">Credor</th>
+                    {!creditorId && <th className="py-1.5 pr-3 font-medium">Credor</th>}
                     <th className="py-1.5 pr-3 font-medium">Período</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Dias</th>
                     <th className="py-1.5 pr-3 text-right font-medium">Saldo base</th>
@@ -128,7 +167,9 @@ export function VbCdiAccrualDialog({ cdiUntil = null }: { cdiUntil?: string | nu
                 <tbody>
                   {items.map((item) => (
                     <tr key={`${item.creditor_id}-${item.period_start}-${item.period_end}`} className="border-b border-border/60">
-                      <td className="py-1.5 pr-3 font-medium text-ink-primary">{item.creditor_name}</td>
+                      {!creditorId && (
+                        <td className="py-1.5 pr-3 font-medium text-ink-primary">{item.creditor_name}</td>
+                      )}
                       <td className="whitespace-nowrap py-1.5 pr-3 text-ink-secondary">
                         {formatDayBR(item.period_start)} a {formatDayBR(item.period_end)}
                       </td>

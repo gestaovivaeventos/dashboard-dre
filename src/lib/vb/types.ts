@@ -58,6 +58,8 @@ export interface VbCreditor {
   id: string;
   name: string;
   active: boolean;
+  /** Destinatário do extrato mensal; null = não recebe. */
+  email: string | null;
   user_id: string | null;
   source_sheet: string | null;
   sort_order: number;
@@ -134,6 +136,22 @@ export interface VbImportBatch {
 }
 
 /** Retorno padrão dos server actions do módulo. */
+export type VbReportSendKind = "oficial" | "teste" | "reenvio";
+
+/** Linha de vb_report_sends: um disparo do extrato mensal. */
+export interface VbReportSend {
+  id: string;
+  creditor_id: string;
+  /** 'YYYY-MM' */
+  month: string;
+  kind: VbReportSendKind;
+  sent_to: string;
+  sent_by: string | null;
+  sent_at: string;
+  subject: string;
+  resend_id: string | null;
+}
+
 export type VbActionResult<T extends object = Record<never, never>> =
   | ({ ok: true } & T)
   | { error: string };

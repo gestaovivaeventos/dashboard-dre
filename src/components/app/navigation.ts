@@ -37,7 +37,14 @@ import {
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
-import { VB_NAV_KEY_OMIE, VB_NAV_KEY_OVERVIEW, VB_OMIE_PATH, VB_PATH } from "@/lib/auth/vb";
+import {
+  VB_NAV_KEY_OMIE,
+  VB_NAV_KEY_OVERVIEW,
+  VB_NAV_KEY_REPORTS,
+  VB_OMIE_PATH,
+  VB_PATH,
+  VB_REPORTS_PATH,
+} from "@/lib/auth/vb";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -349,6 +356,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: VB_NAV_KEY_OVERVIEW, title: "Visão geral", icon: Landmark, scope: "global", href: VB_PATH, vbAccess: true },
       { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
+      // Extrato mensal por e-mail aos credores: acompanhamento e envio manual.
+      { key: VB_NAV_KEY_REPORTS, title: "Relatórios mensais", icon: Mail, scope: "global", href: VB_REPORTS_PATH, vbAccess: true, vbGestorOnly: true },
     ],
   },
   {
