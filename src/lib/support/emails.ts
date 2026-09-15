@@ -5,10 +5,19 @@ import { sendEmailViaResend } from "@/lib/email/resend";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = any;
 
-const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+// URL de produção do Control Hub (mesma do lembrete de aprovações). Serve de
+// fallback quando NEXT_PUBLIC_APP_URL não está definida — o e-mail vai para uma
+// caixa real, então o link precisa ser SEMPRE absoluto e apontar para o app
+// publicado (um link relativo virava "http:///chamados" no cliente de e-mail).
+const FALLBACK_APP_URL = "https://controlhub.vivaeventos.com.br";
+
+function baseUrl(): string {
+  const env = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
+  return env || FALLBACK_APP_URL;
+}
 
 function ticketLink(): string {
-  return APP_URL ? `${APP_URL}/chamados` : "/chamados";
+  return `${baseUrl()}/chamados`;
 }
 
 function shell(title: string, bodyHtml: string): string {
