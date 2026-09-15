@@ -35,7 +35,7 @@ export interface MonthlyStatement {
   /** Rendimento acumulado no ano até o fim deste mês. */
   rendimento_ano: number;
   lines: MonthlyStatementLine[];
-  /** Fim do último rendimento lançado até o fechamento — para avisar quando o mês não está fechado. */
+  /** Até onde o rendimento do credor já foi calculado (qualquer data de linha) — decide "rendimento pendente". */
   last_yield_end: string | null;
   /** Houve saldo positivo em algum momento do mês (abertura ou depois de alguma linha). */
   had_positive_balance: boolean;
@@ -88,9 +88,11 @@ export function buildMonthlyStatement(entries: readonly StatementEntry[], month:
       .filter((e) => e.kind === "rendimento" && e.entry_date >= `${year}-01-01` && e.entry_date <= last)
       .map((e) => e.amount),
   );
-  const yieldEnds = sorted
-    .filter((e) => e.kind === "rendimento" && e.entry_date <= last)
-    .map((e) => e.period_end ?? e.entry_date);
+  // Até onde o rendimento já foi calculado, olhando TODOS os rendimentos do
+  // credor — a linha pode estar datada no mês seguinte (período que fechou em
+  // 14/09 cobre agosto inteiro). Filtrar pela data da linha marcava o mês
+  // como "rendimento pendente" com o CDI já lançado (caso real, 15/09/2026).
+  const yieldEnds = sorted.filter((e) => e.kind === "rendimento").map((e) => e.period_end ?? e.entry_date);
 
   return {
     month,
