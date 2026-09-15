@@ -4,16 +4,23 @@ import { useRef, useState } from "react";
 import { Eye, Loader2, Paperclip, Plus, X } from "lucide-react";
 
 import {
+  addTicketMessage,
   createTicket,
   getTicket,
   getTickets,
+  setTicketPriority,
+  updateTicketStatus,
+} from "@/lib/support/actions";
+import {
+  TICKET_STATUS_LABEL,
   type TicketAttachment,
   type TicketCategory,
   type TicketDetail,
   type TicketListItem,
+  type TicketMessage,
   type TicketPriority,
   type TicketStatus,
-} from "@/lib/support/actions";
+} from "@/lib/support/types";
 import {
   MAX_SUPPORT_ATTACHMENT_SIZE,
   uploadSupportAttachment,
@@ -88,8 +95,14 @@ export function ChamadosClient({
 
   // Detalhe
   const [detailLoading, setDetailLoading] = useState(false);
-  const [detail, setDetail] = useState<{ ticket: TicketDetail; attachments: TicketAttachment[] } | null>(null);
+  const [detail, setDetail] = useState<{
+    ticket: TicketDetail;
+    attachments: TicketAttachment[];
+    messages: TicketMessage[];
+  } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [busy, setBusy] = useState(false); // resposta/status/prioridade em andamento
 
   async function refresh() {
     const res = await getTickets();
@@ -146,13 +159,61 @@ export function ChamadosClient({
     setDetailLoading(true);
     setDetailError(null);
     setDetail(null);
+    setReplyText("");
     const res = await getTicket(id);
     setDetailLoading(false);
     if ("error" in res) {
       setDetailError(res.error);
       return;
     }
-    setDetail({ ticket: res.ticket, attachments: res.attachments });
+    setDetail({ ticket: res.ticket, attachments: res.attachments, messages: res.messages });
+  }
+
+  async function reloadDetail(id: string) {
+    const res = await getTicket(id);
+    if ("ok" in res) {
+      setDetail({ ticket: res.ticket, attachments: res.attachments, messages: res.messages });
+    }
+  }
+
+  async function sendReply() {
+    if (!detail || !replyText.trim()) return;
+    setBusy(true);
+    const res = await addTicketMessage(detail.ticket.id, replyText);
+    setBusy(false);
+    if ("error" in res) {
+      setDetailError(res.error);
+      return;
+    }
+    setReplyText("");
+    await reloadDetail(detail.ticket.id);
+    await refresh();
+  }
+
+  async function changeStatus(status: TicketStatus) {
+    if (!detail) return;
+    setBusy(true);
+    const res = await updateTicketStatus(detail.ticket.id, status);
+    setBusy(false);
+    if ("error" in res) {
+      setDetailError(res.error);
+      return;
+    }
+    await reloadDetail(detail.ticket.id);
+    await refresh();
+  }
+
+  async function changePriority(priority: TicketPriority | null) {
+    if (!detail) return;
+    setBusy(true);
+    const res = await setTicketPriority(detail.ticket.id, priority);
+    setBusy(false);
+    if ("error" in res) {
+      setDetailError(res.error);
+      return;
+    }
+    await reloadDetail(detail.ticket.id);
+    await refresh();
   }
 
   return (
@@ -328,6 +389,38 @@ export function ChamadosClient({
                     <StatusBadge value={detail.ticket.status} />
                     <PriorityBadge value={detail.ticket.priority} />
                   </div>
+
+                  {isAdmin && (
+                    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+                      <div className="space-y-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Status</label>
+                        <select
+                          value={detail.ticket.status}
+                          onChange={(e) => changeStatus(e.target.value as TicketStatus)}
+                          disabled={busy}
+                          className={INPUT_CLS}
+                        >
+                          {(Object.keys(TICKET_STATUS_LABEL) as TicketStatus[]).map((s) => (
+                            <option key={s} value={s}>{TICKET_STATUS_LABEL[s]}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Prioridade</label>
+                        <select
+                          value={detail.ticket.priority ?? ""}
+                          onChange={(e) => changePriority((e.target.value || null) as TicketPriority | null)}
+                          disabled={busy}
+                          className={INPUT_CLS}
+                        >
+                          <option value="">— definir —</option>
+                          <option value="baixa">Baixa</option>
+                          <option value="media">Média</option>
+                          <option value="alta">Alta</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Descrição</p>
                     <p className="whitespace-pre-wrap text-sm">{detail.ticket.description}</p>
@@ -352,9 +445,64 @@ export function ChamadosClient({
                       </div>
                     </div>
                   )}
-                  <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                    A conversa do chamado e a mudança de status/prioridade chegam na próxima etapa.
-                  </p>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Conversa</p>
+                    {detail.messages.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda.</p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {detail.messages.map((m) => (
+                          <li
+                            key={m.id}
+                            className={`rounded-lg border px-3 py-2 ${
+                              m.fromRequester
+                                ? "bg-background"
+                                : "border-violet-200 bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/20"
+                            }`}
+                          >
+                            <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <span className="font-medium text-foreground">
+                                {m.author?.name ?? m.author?.email ?? "—"}
+                                {!m.fromRequester && (
+                                  <span className="ml-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800 dark:bg-violet-950/40 dark:text-violet-300">
+                                    Equipe
+                                  </span>
+                                )}
+                              </span>
+                              <span>{new Date(m.created_at).toLocaleString("pt-BR")}</span>
+                            </div>
+                            <p className="whitespace-pre-wrap text-sm">{m.body}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {detail.ticket.status === "fechado" ? (
+                    <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                      Chamado fechado.{isAdmin ? " Reabra pelo status acima se precisar." : ""}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        rows={3}
+                        placeholder="Escreva uma resposta…"
+                        className={`${INPUT_CLS} resize-none`}
+                      />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={sendReply}
+                          disabled={busy || !replyText.trim()}
+                          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy ? "Enviando…" : "Responder"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : null}
