@@ -17,8 +17,15 @@ export interface TicketAuthor {
   email: string | null;
 }
 
+export interface SupportAdmin {
+  id: string;
+  name: string | null;
+  email: string | null;
+}
+
 export interface TicketListItem {
   id: string;
+  ticket_number: number;
   title: string;
   category: TicketCategory;
   status: TicketStatus;
@@ -26,6 +33,8 @@ export interface TicketListItem {
   created_at: string;
   updated_at: string;
   author: TicketAuthor | null;
+  assignee_id: string | null;
+  assignee: TicketAuthor | null;
 }
 
 export interface TicketAttachment {

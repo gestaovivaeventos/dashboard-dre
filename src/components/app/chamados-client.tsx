@@ -8,11 +8,13 @@ import {
   createTicket,
   getTicket,
   getTickets,
+  setTicketAssignee,
   setTicketPriority,
   updateTicketStatus,
 } from "@/lib/support/actions";
 import {
   TICKET_STATUS_LABEL,
+  type SupportAdmin,
   type TicketAttachment,
   type TicketCategory,
   type TicketDetail,
@@ -76,11 +78,41 @@ function PriorityBadge({ value }: { value: TicketPriority | null }) {
 export function ChamadosClient({
   initialTickets,
   isAdmin,
+  admins,
 }: {
   initialTickets: TicketListItem[];
   isAdmin: boolean;
+  admins: SupportAdmin[];
 }) {
   const [tickets, setTickets] = useState<TicketListItem[]>(initialTickets);
+
+  // Filtros da lista (aplicados no cliente sobre os chamados já carregados).
+  const [q, setQ] = useState("");
+  const [statusF, setStatusF] = useState<"" | TicketStatus>("");
+  const [catF, setCatF] = useState<"" | TicketCategory>("");
+  const [prioF, setPrioF] = useState<"" | TicketPriority | "sem">("");
+  const [respF, setRespF] = useState<string>(""); // "", "none", ou id do admin
+
+  const filtered = tickets.filter((t) => {
+    if (statusF && t.status !== statusF) return false;
+    if (catF && t.category !== catF) return false;
+    if (prioF === "sem" ? t.priority !== null : prioF && t.priority !== prioF) return false;
+    if (respF === "none" ? t.assignee_id !== null : respF && t.assignee_id !== respF) return false;
+    if (q.trim()) {
+      const term = q.trim().toLowerCase();
+      const hay = [
+        `#${t.ticket_number}`,
+        String(t.ticket_number),
+        t.title,
+        t.author?.name ?? "",
+        t.author?.email ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(term)) return false;
+    }
+    return true;
+  });
 
   // Novo chamado
   const [showNew, setShowNew] = useState(false);
@@ -216,6 +248,19 @@ export function ChamadosClient({
     await refresh();
   }
 
+  async function changeAssignee(assigneeId: string | null) {
+    if (!detail) return;
+    setBusy(true);
+    const res = await setTicketAssignee(detail.ticket.id, assigneeId);
+    setBusy(false);
+    if ("error" in res) {
+      setDetailError(res.error);
+      return;
+    }
+    await reloadDetail(detail.ticket.id);
+    await refresh();
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -234,51 +279,115 @@ export function ChamadosClient({
           {isAdmin ? "Nenhum chamado aberto ainda." : "Você ainda não abriu nenhum chamado."}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left text-xs font-semibold text-muted-foreground">
-                <th className="px-3 py-3">Título</th>
-                <th className="px-3 py-3">Categoria</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Prioridade</th>
-                {isAdmin && <th className="px-3 py-3">Autor</th>}
-                <th className="px-3 py-3">Aberto em</th>
-                <th className="px-3 py-3 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {tickets.map((t) => (
-                <tr key={t.id} className="hover:bg-muted/20 transition-colors">
-                  <td className="px-3 py-3">
-                    <p className="line-clamp-1 max-w-[22rem] font-medium" title={t.title}>{t.title}</p>
-                  </td>
-                  <td className="px-3 py-3"><CategoryBadge value={t.category} /></td>
-                  <td className="px-3 py-3"><StatusBadge value={t.status} /></td>
-                  <td className="px-3 py-3"><PriorityBadge value={t.priority} /></td>
-                  {isAdmin && (
-                    <td className="px-3 py-3 text-muted-foreground">
-                      <p className="line-clamp-1 max-w-[12rem]" title={t.author?.name ?? t.author?.email ?? ""}>
-                        {t.author?.name ?? t.author?.email ?? "—"}
-                      </p>
-                    </td>
-                  )}
-                  <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(t.created_at)}</td>
-                  <td className="px-3 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => openDetail(t.id)}
-                      className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      Ver
-                    </button>
-                  </td>
-                </tr>
+        <>
+          {/* Filtros — aplicados no cliente sobre os chamados carregados */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar por código, título ou autor…"
+              className="min-w-[220px] flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+            <select value={statusF} onChange={(e) => setStatusF(e.target.value as "" | TicketStatus)} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <option value="">Status: todos</option>
+              {(Object.keys(TICKET_STATUS_LABEL) as TicketStatus[]).map((s) => (
+                <option key={s} value={s}>{TICKET_STATUS_LABEL[s]}</option>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </select>
+            <select value={catF} onChange={(e) => setCatF(e.target.value as "" | TicketCategory)} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <option value="">Categoria: todas</option>
+              <option value="melhoria">Melhoria</option>
+              <option value="bug">Bug</option>
+            </select>
+            <select value={prioF} onChange={(e) => setPrioF(e.target.value as "" | TicketPriority | "sem")} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <option value="">Prioridade: todas</option>
+              <option value="alta">Alta</option>
+              <option value="media">Média</option>
+              <option value="baixa">Baixa</option>
+              <option value="sem">Sem prioridade</option>
+            </select>
+            {isAdmin && (
+              <select value={respF} onChange={(e) => setRespF(e.target.value)} className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+                <option value="">Responsável: todos</option>
+                <option value="none">Não atribuído</option>
+                {admins.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name ?? a.email ?? "—"}</option>
+                ))}
+              </select>
+            )}
+            {(q || statusF || catF || prioF || respF) && (
+              <button
+                type="button"
+                onClick={() => { setQ(""); setStatusF(""); setCatF(""); setPrioF(""); setRespF(""); }}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" /> Limpar
+              </button>
+            )}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+              Nenhum chamado para esse filtro.
+            </div>
+          ) : (
+            <div className="rounded-lg border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-left text-xs font-semibold text-muted-foreground">
+                    <th className="px-3 py-3">Código</th>
+                    <th className="px-3 py-3">Título</th>
+                    <th className="px-3 py-3">Categoria</th>
+                    <th className="px-3 py-3">Status</th>
+                    <th className="px-3 py-3">Prioridade</th>
+                    {isAdmin && <th className="px-3 py-3">Autor</th>}
+                    {isAdmin && <th className="px-3 py-3">Responsável</th>}
+                    <th className="px-3 py-3">Aberto em</th>
+                    <th className="px-3 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filtered.map((t) => (
+                    <tr key={t.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-3 py-3 font-mono text-muted-foreground whitespace-nowrap">#{t.ticket_number}</td>
+                      <td className="px-3 py-3">
+                        <p className="line-clamp-1 max-w-[22rem] font-medium" title={t.title}>{t.title}</p>
+                      </td>
+                      <td className="px-3 py-3"><CategoryBadge value={t.category} /></td>
+                      <td className="px-3 py-3"><StatusBadge value={t.status} /></td>
+                      <td className="px-3 py-3"><PriorityBadge value={t.priority} /></td>
+                      {isAdmin && (
+                        <td className="px-3 py-3 text-muted-foreground">
+                          <p className="line-clamp-1 max-w-[12rem]" title={t.author?.name ?? t.author?.email ?? ""}>
+                            {t.author?.name ?? t.author?.email ?? "—"}
+                          </p>
+                        </td>
+                      )}
+                      {isAdmin && (
+                        <td className="px-3 py-3 text-muted-foreground">
+                          <p className="line-clamp-1 max-w-[12rem]" title={t.assignee?.name ?? t.assignee?.email ?? ""}>
+                            {t.assignee?.name ?? t.assignee?.email ?? "—"}
+                          </p>
+                        </td>
+                      )}
+                      <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(t.created_at)}</td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openDetail(t.id)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Ver
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {/* Novo chamado */}
@@ -373,7 +482,10 @@ export function ChamadosClient({
               <>
                 <div className="flex items-start justify-between gap-4 border-b px-6 py-4">
                   <div className="min-w-0">
-                    <h2 className="text-lg font-semibold">{detail.ticket.title}</h2>
+                    <h2 className="text-lg font-semibold">
+                      <span className="font-mono text-muted-foreground">#{detail.ticket.ticket_number}</span>{" "}
+                      {detail.ticket.title}
+                    </h2>
                     <p className="text-xs text-muted-foreground">
                       Aberto em {fmtDate(detail.ticket.created_at)}
                       {isAdmin && detail.ticket.author ? ` · ${detail.ticket.author.name ?? detail.ticket.author.email}` : ""}
@@ -418,6 +530,21 @@ export function ChamadosClient({
                           <option value="media">Média</option>
                           <option value="alta">Alta</option>
                         </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-medium text-muted-foreground">Responsável</label>
+                        <select
+                          value={detail.ticket.assignee_id ?? ""}
+                          onChange={(e) => changeAssignee(e.target.value || null)}
+                          disabled={busy}
+                          className={INPUT_CLS}
+                        >
+                          <option value="">— não atribuído —</option>
+                          {admins.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name ?? a.email ?? "—"}</option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-muted-foreground">Só o responsável recebe os e-mails deste chamado.</p>
                       </div>
                     </div>
                   )}

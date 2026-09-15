@@ -1,8 +1,15 @@
-import { getTickets } from "@/lib/support/actions";
+import { getSupportAdmins, getTickets } from "@/lib/support/actions";
 import { ChamadosClient } from "@/components/app/chamados-client";
+import type { SupportAdmin } from "@/lib/support/types";
 
 export default async function ChamadosPage() {
   const res = await getTickets();
+  // Admins precisam da lista de responsáveis (dropdown + filtro).
+  let admins: SupportAdmin[] = [];
+  if ("ok" in res && res.isAdmin) {
+    const a = await getSupportAdmins();
+    if ("ok" in a) admins = a.admins;
+  }
 
   return (
     <div className="space-y-6">
@@ -19,7 +26,7 @@ export default async function ChamadosPage() {
           {res.error}
         </p>
       ) : (
-        <ChamadosClient initialTickets={res.tickets} isAdmin={res.isAdmin} />
+        <ChamadosClient initialTickets={res.tickets} isAdmin={res.isAdmin} admins={admins} />
       )}
     </div>
   );

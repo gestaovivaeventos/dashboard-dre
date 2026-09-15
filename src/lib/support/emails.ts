@@ -91,11 +91,13 @@ export async function emailAuthorReply(
   });
 }
 
-export async function emailAdminsReply(
+// Comentário do solicitante: vai só para o RESPONSÁVEL quando há um; sem
+// responsável definido, cai para todos os admins.
+export async function emailReplyToStaff(
   db: DB,
-  t: { title: string; byName: string },
+  t: { title: string; byName: string; assigneeEmail: string | null },
 ): Promise<void> {
-  const to = await adminEmails(db);
+  const to = t.assigneeEmail ? [t.assigneeEmail] : await adminEmails(db);
   if (to.length === 0) return;
   await safeSend({
     to,
@@ -104,6 +106,23 @@ export async function emailAdminsReply(
       "Novo comentário do solicitante",
       `<p><strong>${esc(t.byName)}</strong> comentou no chamado:</p>
        <p style="padding:8px 12px;background:#f3f4f6;border-radius:6px">${esc(t.title)}</p>`,
+    ),
+  });
+}
+
+export async function emailAssigneeAssigned(
+  db: DB,
+  t: { assigneeEmail: string | null; title: string; byName: string },
+): Promise<void> {
+  if (!t.assigneeEmail) return;
+  await safeSend({
+    to: t.assigneeEmail,
+    subject: `Você é o responsável pelo chamado: ${t.title}`,
+    html: shell(
+      "Chamado atribuído a você",
+      `<p><strong>${esc(t.byName)}</strong> definiu você como responsável por:</p>
+       <p style="padding:8px 12px;background:#f3f4f6;border-radius:6px">${esc(t.title)}</p>
+       <p>A partir de agora, os e-mails deste chamado vêm só para você.</p>`,
     ),
   });
 }

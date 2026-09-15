@@ -7,12 +7,14 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   emailAdminsNewTicket,
-  emailAdminsReply,
+  emailAssigneeAssigned,
   emailAuthorReply,
   emailAuthorStatus,
+  emailReplyToStaff,
 } from "@/lib/support/emails";
 import {
   TICKET_STATUS_LABEL,
+  type SupportAdmin,
   type TicketAttachment,
   type TicketAuthor,
   type TicketCategory,
@@ -22,6 +24,11 @@ import {
   type TicketPriority,
   type TicketStatus,
 } from "@/lib/support/types";
+
+const TICKET_SELECT =
+  "id, ticket_number, title, category, status, priority, created_at, updated_at, created_by, assignee_id, " +
+  "author:users!support_tickets_created_by_fkey(name, email), " +
+  "assignee:users!support_tickets_assignee_id_fkey(name, email)";
 
 // Admin da plataforma: enxerga e gerencia todos os chamados.
 function isSupportAdmin(profile: { profile?: string | null; role?: string | null } | null): boolean {
@@ -103,28 +110,34 @@ export async function getTickets(): Promise<
 
   let query = db
     .from("support_tickets")
-    .select(
-      "id, title, category, status, priority, created_at, updated_at, created_by, author:users!support_tickets_created_by_fkey(name, email)",
-    )
-    .order("created_at", { ascending: false });
+    .select(TICKET_SELECT)
+    .order("ticket_number", { ascending: false });
   // Usuário comum vê só os próprios; admin vê todos.
   if (!admin) query = query.eq("created_by", profile?.id ?? user.id);
 
   const { data, error } = await query;
   if (error) return { error: error.message };
 
-  const tickets: TicketListItem[] = (data ?? []).map((t) => ({
+  const tickets: TicketListItem[] = (data ?? []).map(toListItem);
+
+  return { ok: true, isAdmin: admin, tickets };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toListItem(t: any): TicketListItem {
+  return {
     id: t.id as string,
+    ticket_number: Number(t.ticket_number),
     title: t.title as string,
     category: t.category as TicketCategory,
     status: t.status as TicketStatus,
     priority: (t.priority as TicketPriority | null) ?? null,
     created_at: t.created_at as string,
     updated_at: t.updated_at as string,
-    author: normAuthor((t as { author: unknown }).author),
-  }));
-
-  return { ok: true, isAdmin: admin, tickets };
+    author: normAuthor(t.author),
+    assignee_id: (t.assignee_id as string | null) ?? null,
+    assignee: normAuthor(t.assignee),
+  };
 }
 
 // ─── getTicket ────────────────────────────────────────────────────────────────
@@ -144,9 +157,7 @@ export async function getTicket(
 
   const { data: t, error } = await db
     .from("support_tickets")
-    .select(
-      "id, title, description, category, status, priority, created_at, updated_at, created_by, author:users!support_tickets_created_by_fkey(name, email)",
-    )
+    .select(`${TICKET_SELECT}, description`)
     .eq("id", id)
     .maybeSingle();
 
@@ -191,15 +202,8 @@ export async function getTicket(
   }));
 
   const ticket: TicketDetail = {
-    id: t.id as string,
-    title: t.title as string,
+    ...toListItem(t),
     description: t.description as string,
-    category: t.category as TicketCategory,
-    status: t.status as TicketStatus,
-    priority: (t.priority as TicketPriority | null) ?? null,
-    created_at: t.created_at as string,
-    updated_at: t.updated_at as string,
-    author: normAuthor((t as { author: unknown }).author),
   };
 
   return { ok: true, isAdmin: admin, ticket, attachments, messages };
@@ -222,7 +226,9 @@ export async function addTicketMessage(
 
   const { data: t } = await db
     .from("support_tickets")
-    .select("id, title, status, created_by, author:users!support_tickets_created_by_fkey(name, email)")
+    .select(
+      "id, title, status, created_by, author:users!support_tickets_created_by_fkey(name, email), assignee:users!support_tickets_assignee_id_fkey(name, email)",
+    )
     .eq("id", ticketId)
     .maybeSingle();
   if (!t) return { error: "Chamado não encontrado." };
@@ -243,7 +249,12 @@ export async function addTicketMessage(
 
   const byName = profile?.name ?? user.email ?? "Usuário";
   if (isRequester) {
-    await emailAdminsReply(db, { title: t.title as string, byName });
+    // Só o responsável recebe; sem responsável, todos os admins.
+    await emailReplyToStaff(db, {
+      title: t.title as string,
+      byName,
+      assigneeEmail: normAuthor((t as { assignee: unknown }).assignee)?.email ?? null,
+    });
   } else {
     await emailAuthorReply(db, {
       authorEmail: normAuthor((t as { author: unknown }).author)?.email ?? null,
@@ -312,6 +323,80 @@ export async function setTicketPriority(
     .update({ priority: p, updated_at: new Date().toISOString() })
     .eq("id", ticketId);
   if (error) return { error: error.message };
+
+  revalidatePath("/chamados");
+  return { ok: true };
+}
+
+// ─── getSupportAdmins ─────────────────────────────────────────────────────────
+
+// Admins ativos — opções de "Responsável" no chamado (só admin consulta).
+export async function getSupportAdmins(): Promise<{ ok: true; admins: SupportAdmin[] } | { error: string }> {
+  const { user, profile } = await getCurrentSessionContext();
+  if (!user) return { error: "Sessão expirada — refaça o login." };
+  if (!isSupportAdmin(profile)) return { error: "Apenas administradores." };
+
+  const db = createAdminClientIfAvailable() ?? (await createClient());
+  const { data, error } = await db
+    .from("users")
+    .select("id, name, email")
+    .eq("role", "admin")
+    .eq("active", true)
+    .order("name");
+  if (error) return { error: error.message };
+
+  return {
+    ok: true,
+    admins: (data ?? []).map((u) => ({
+      id: u.id as string,
+      name: (u.name as string | null) ?? null,
+      email: (u.email as string | null) ?? null,
+    })),
+  };
+}
+
+// ─── setTicketAssignee (admin) ────────────────────────────────────────────────
+
+export async function setTicketAssignee(
+  ticketId: string,
+  assigneeId: string | null,
+): Promise<{ ok: true } | { error: string }> {
+  const { user, profile } = await getCurrentSessionContext();
+  if (!user) return { error: "Sessão expirada — refaça o login." };
+  if (!isSupportAdmin(profile)) return { error: "Apenas administradores definem o responsável." };
+
+  const db = createAdminClientIfAvailable() ?? (await createClient());
+  const now = new Date().toISOString();
+
+  let assigneeEmail: string | null = null;
+  if (assigneeId) {
+    const { data: a } = await db
+      .from("users")
+      .select("id, name, email, role, active")
+      .eq("id", assigneeId)
+      .maybeSingle();
+    if (!a || a.role !== "admin" || !a.active) {
+      return { error: "Responsável inválido — escolha um administrador ativo." };
+    }
+    assigneeEmail = (a.email as string | null) ?? null;
+  }
+
+  const { data: t } = await db.from("support_tickets").select("id, title").eq("id", ticketId).maybeSingle();
+  if (!t) return { error: "Chamado não encontrado." };
+
+  const { error } = await db
+    .from("support_tickets")
+    .update({ assignee_id: assigneeId, updated_at: now })
+    .eq("id", ticketId);
+  if (error) return { error: error.message };
+
+  if (assigneeId) {
+    await emailAssigneeAssigned(db, {
+      assigneeEmail,
+      title: t.title as string,
+      byName: profile?.name ?? user.email ?? "Administrador",
+    });
+  }
 
   revalidatePath("/chamados");
   return { ok: true };
