@@ -463,6 +463,276 @@ export function ProjectMappingTab({ companyId, search, dreAccounts }: ProjectMap
           </div>
         </CardContent>
       </Card>
+
+      <ExcludedProjectsSection companyId={companyId} search={search} />
     </div>
+  );
+}
+
+// ─── Projetos desconsiderados ────────────────────────────────────────────────
+//
+// Lista, por empresa, os projetos da Omie cujos lancamentos NAO entram em
+// nenhum numero do Financeiro (DRE, Fluxo, Previsto x Realizado, drilldowns).
+// A regra e aplicada pelas funcoes SQL de agregacao (migration 20260916120000);
+// aqui so se cadastra/remove, e a API ja recalcula os agregados da empresa —
+// o efeito aparece na hora e e desfeito na hora (os lancamentos nunca saem de
+// financial_entries, so deixam de ser somados).
+//
+// Diferente do mapeamento acima, isto vale para QUALQUER empresa, com ou sem
+// plano custom: nao depende de conta DRE, so do codigo do projeto.
+
+interface ExcludedProjectRow {
+  id: string;
+  omieProjectCode: string;
+  omieProjectName: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+function ExcludedProjectsSection({ companyId, search }: { companyId: string; search: string }) {
+  const { showToast } = useToast();
+  const [rows, setRows] = useState<ExcludedProjectRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    if (!companyId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/excluded-projects?companyId=${encodeURIComponent(companyId)}`,
+        { cache: "no-store" },
+      );
+      const payload = await safeJson<{ rows?: ExcludedProjectRow[]; error?: string }>(response);
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      setRows(payload?.rows ?? []);
+    } catch (error) {
+      showToast({
+        title: "Falha ao carregar projetos desconsiderados",
+        description: error instanceof Error ? error.message : "Erro inesperado.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId, showToast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((r) =>
+      [r.omieProjectCode, r.omieProjectName ?? "", r.note ?? ""].join(" ").toLowerCase().includes(term),
+    );
+  }, [rows, search]);
+
+  const warnRefresh = (refreshError: string | null | undefined) => {
+    if (!refreshError) return;
+    showToast({
+      title: "Lista salva, mas os agregados nao foram recalculados",
+      description: `${refreshError}. Os numeros atualizam no proximo sync da empresa.`,
+      variant: "destructive",
+    });
+  };
+
+  const add = async () => {
+    const trimmed = code.trim();
+    if (!trimmed) {
+      showToast({
+        title: "Codigo obrigatorio",
+        description: "Informe o codigo do projeto no Omie (cCodProjeto).",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/excluded-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId,
+          omieProjectCode: trimmed,
+          omieProjectName: name.trim() || null,
+          note: note.trim() || null,
+        }),
+      });
+      const payload = await safeJson<{ row?: ExcludedProjectRow; error?: string; refreshError?: string | null }>(response);
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      setCode("");
+      setName("");
+      setNote("");
+      await load();
+      showToast({
+        title: "Projeto desconsiderado",
+        description: `${payload?.row?.omieProjectName ?? trimmed} deixou de entrar nos numeros desta empresa.`,
+        variant: "success",
+      });
+      warnRefresh(payload?.refreshError);
+    } catch (error) {
+      showToast({
+        title: "Nao foi possivel salvar",
+        description: error instanceof Error ? error.message : "Erro inesperado.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (row: ExcludedProjectRow) => {
+    const label = row.omieProjectName ?? row.omieProjectCode;
+    if (!window.confirm(`Voltar a considerar "${label}"? Os lancamentos dele passam a entrar na DRE e no Fluxo desta empresa imediatamente.`)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/excluded-projects/${row.id}`, { method: "DELETE" });
+      const payload = await safeJson<{ error?: string; refreshError?: string | null }>(response);
+      if (!response.ok) throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      await load();
+      showToast({
+        title: "Projeto volta a ser considerado",
+        description: `${label} voltou a entrar nos numeros desta empresa.`,
+        variant: "success",
+      });
+      warnRefresh(payload?.refreshError);
+    } catch (error) {
+      showToast({
+        title: "Nao foi possivel remover",
+        description: error instanceof Error ? error.message : "Erro inesperado.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold">Projetos desconsiderados</h3>
+          <p className="text-xs text-muted-foreground">
+            Lancamentos destes projetos NAO entram em nenhum numero desta empresa: DRE,
+            Fluxo de Caixa, Previsto x Realizado, Comparativos, BI e detalhes. Projeto fora
+            da lista e considerado normalmente. O efeito e imediato e reversivel — remover da
+            lista traz os lancamentos de volta, sem sincronizar de novo.
+          </p>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+          <div className="md:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">Codigo do projeto</label>
+            <Input
+              placeholder="ex.: 11508080761"
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="md:col-span-4">
+            <label className="text-xs font-medium text-muted-foreground">Nome (opcional)</label>
+            <Input
+              placeholder="ex.: APT 402 MACHADO SOBRINHO"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="md:col-span-4">
+            <label className="text-xs font-medium text-muted-foreground">Motivo (opcional)</label>
+            <Input
+              placeholder="ex.: imovel de socio, fora do resultado da empresa"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="flex items-end md:col-span-2">
+            <Button type="button" className="w-full" onClick={() => void add()} disabled={saving}>
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="mr-2 h-4 w-4" />
+              )}
+              Desconsiderar
+            </Button>
+          </div>
+        </div>
+
+        <div className="overflow-auto rounded-md border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50 text-xs font-semibold uppercase text-muted-foreground">
+                <th className="whitespace-nowrap px-4 py-3 text-left">Codigo</th>
+                <th className="px-4 py-3 text-left">Projeto</th>
+                <th className="px-4 py-3 text-left">Motivo</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left">Desde</th>
+                <th className="px-4 py-3 text-right">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void load()}
+                    disabled={loading}
+                    title="Recarregar"
+                  >
+                    <RefreshCcw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                  </Button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && rows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                    Carregando...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                    {rows.length === 0
+                      ? "Nenhum projeto desconsiderado — todos os projetos desta empresa entram nos numeros."
+                      : "Nenhum projeto casa com a busca."}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={row.id} className="border-b last:border-b-0">
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">{row.omieProjectCode}</td>
+                    <td className="px-4 py-3">{row.omieProjectName ?? <span className="text-muted-foreground">—</span>}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.note ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      {new Date(row.createdAt).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void remove(row)}
+                        disabled={saving}
+                        title="Voltar a considerar este projeto"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
