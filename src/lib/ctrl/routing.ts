@@ -33,6 +33,79 @@ export const APPROVAL_ROUTING = {
   },
 } as const;
 
+// ─── Setores em que o GERENTE conclui mesmo fora do orçamento ─────────────────
+//
+// O oposto do `directorSector`: aqui a etapa do diretor é DISPENSADA. Caso de
+// uso: setor recém-criado, ainda sem orçamento carregado — toda requisição sai
+// "fora do orçamento" (nivel_3) e iria ao diretor, gerando uma fila de
+// aprovações de diretoria só por falta de cadastro de orçamento.
+//
+// O que NÃO muda para esses setores: `approval_tier` continua nivel_3 (é fato
+// que está fora do orçamento), o prefixo "NÃO ORÇADO" e a justificativa
+// obrigatória continuam, o badge "Fora do orçamento" continua. Só a etapa do
+// diretor é pulada: a aprovação do gerente já finaliza.
+//
+// A aprovação do gerente continua OBRIGATÓRIA (clique manual): a auto-aprovação
+// gerencial de `createRequest` exige despesa prevista em orçamento (nivel_2 +
+// isBudgeted), e setor sem orçamento nunca cai nela — toda requisição nasce
+// Pendente. Decisão do Lucas em 16/09/2026: "auto aprovação não precisa existir
+// no caso da Boreal; pode deixar sendo necessária a aprovação". Não crie
+// auto-aprovação para estes setores.
+//
+// Governança: sem a etapa do diretor, um gerente que também solicita nesse
+// setor aprova a própria requisição sem segundo par de olhos (o clique manual
+// em Aprovar não tem trava de "própria requisição"). Aceito para o Boreal por
+// ser um projeto em avaliação.
+//
+// PRAZO: a regra existe porque o setor não tem orçamento. Quando houver
+// orçamento (previsto para 2027), a etapa do diretor volta — para isso basta
+// REMOVER a entrada abaixo. `reviewBy` é lembrete, não expiração: a regra não
+// desliga sozinha, porque desligar sem ninguém saber é pior do que esquecer.
+//
+// Identificado por ID (estável a renomeação), com o nome em comentário.
+export const MANAGER_FINAL_SECTORS: ReadonlyArray<{
+  sectorId: string;
+  /** Só para leitura humana — a comparação é pelo ID. */
+  sectorName: string;
+  since: string;
+  /** Data em que a regra deve ser reavaliada (aparece no catálogo de exceções). */
+  reviewBy: string;
+  /** Motivo, em uma linha, para o catálogo. */
+  reason: string;
+}> = [
+  {
+    sectorId: "e5ce6368-94fe-40ad-8bd5-a1a4e7deab7d",
+    sectorName: "Boreal",
+    since: "2026-09-16",
+    reviewBy: "2027-01-01",
+    reason:
+      "Projeto em avaliação, ainda sem orçamento. A aprovação do diretor volta quando o " +
+      "orçamento do setor for carregado (previsto para 2027).",
+  },
+  {
+    // Setor "Bem Laranja" (antes "Associação Bem Laranja" — o ID não muda com o
+    // nome). Gerente aprovador: Regis, por APPROVER_SECTOR_RESTRICTIONS; quem
+    // solicita são outras pessoas, então aqui não há o caso de aprovar a própria.
+    sectorId: "444e3b49-b040-4ff8-87c5-53c73a551237",
+    sectorName: "Bem Laranja",
+    since: "2026-09-16",
+    reviewBy: "2027-01-01",
+    reason:
+      "Setor sem orçamento cadastrado — toda requisição saía \"fora do orçamento\" e ia ao " +
+      "diretor. A aprovação do diretor volta quando o orçamento do setor for carregado.",
+  },
+];
+
+/**
+ * True quando as requisições do setor são concluídas pelo GERENTE mesmo fora do
+ * orçamento — a etapa do diretor não existe para ele. Vale tanto para requisição
+ * de um setor quanto para a linha daquele setor num rateio.
+ */
+export function isManagerFinalSector(sectorId: string | null | undefined): boolean {
+  if (!sectorId) return false;
+  return MANAGER_FINAL_SECTORS.some((rule) => rule.sectorId === sectorId);
+}
+
 /**
  * Uma requisição é roteada direto ao diretor (pulando o gerente) por REGRA —
  * setor Diretoria ou solicitante especial —, independente do orçamento. Isso é

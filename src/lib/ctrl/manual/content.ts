@@ -480,6 +480,11 @@ export const MANUAL_SECTIONS: ManualSection[] = [
             "Passa para Aguardando Diretor e notifica a diretoria.",
           ],
           [
+            "Fora do orçamento em setor que dispensa a diretoria (regra do setor — a lista atual está em Usuários › Regras especiais)",
+            "Somente o gerente",
+            "Vai direto para Aprovado, mesmo com o rótulo NÃO ORÇADO. O histórico registra que o diretor foi dispensado por regra.",
+          ],
+          [
             "Setor ou solicitante direcionado à diretoria por regra",
             "Somente o Diretor",
             "Não aparece para você — nasce direto na etapa do diretor.",
@@ -541,7 +546,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         items: [
           "Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub. Na tela **Requisições** essa mesma falta de vínculo faz o contrário: sem setor, você vê apenas as suas.",
           "Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Ela vale nos dois lugares — são esses setores, e não os vínculos da tela de Usuários, que definem o que você aprova e o que vê na tela de Requisições. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.",
-          "Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, e um setor pode ir sempre direto à diretoria.",
+          "Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, um setor pode ir sempre direto à diretoria, e um setor pode dispensar a diretoria mesmo fora do orçamento (caso de setor recém-criado, ainda sem orçamento carregado — nele a sua aprovação encerra o fluxo). Todas essas regras aparecem em Usuários › Regras especiais.",
           "**Autoaprovação gerencial:** quando o próprio gerente é o solicitante e a despesa está prevista em orçamento, a etapa gerencial é dispensada e a requisição nasce aprovada, com registro no histórico. Fora do orçamento isso não vale — o diretor continua obrigatório.",
         ],
       },
@@ -583,7 +588,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "list",
         ordered: true,
         items: [
-          "**Fora do orçamento** — o saldo anual do setor + tipo de despesa não cobre o valor. A requisição chega com justificativa obrigatória e com o prefixo NÃO ORÇADO no título.",
+          "**Fora do orçamento** — o saldo anual do setor + tipo de despesa não cobre o valor. A requisição chega com justificativa obrigatória e com o prefixo NÃO ORÇADO no título. Exceção: setor configurado para dispensar a diretoria (em geral por ainda não ter orçamento carregado; a lista atual está em Usuários › Regras especiais) é concluído pelo gerente e não chega até você, mesmo NÃO ORÇADO.",
           "**Setor direcionado à diretoria** — requisições desse setor nascem direto na sua etapa, mesmo dentro do orçamento.",
           "**Solicitante direcionado** — regra nominal em que as requisições de uma pessoa específica vão direto ao diretor determinado.",
         ],

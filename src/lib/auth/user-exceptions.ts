@@ -21,6 +21,7 @@ import {
   APPROVAL_ROUTING,
   APPROVER_SECTOR_RESTRICTIONS,
   DIRECTOR_HIGHLIGHT_SECTORS,
+  MANAGER_FINAL_SECTORS,
 } from "@/lib/ctrl/routing";
 
 export interface UserException {
@@ -252,4 +253,17 @@ export const NON_USER_RULES: ReadonlyArray<{ title: string; detail: string; sour
       '"fora do orçamento" — é roteamento por regra.',
     source: "src/lib/ctrl/routing.ts",
   },
+  ...MANAGER_FINAL_SECTORS.map((rule) => {
+    const br = (iso: string) => iso.split("-").reverse().join("/");
+    return {
+      title: `Setor ${rule.sectorName} dispensa o diretor mesmo fora do orçamento`,
+      detail:
+        `Requisições do setor ${rule.sectorName} são concluídas na aprovação do gerente, inclusive ` +
+        'quando estão "fora do orçamento". A aprovação do gerente continua obrigatória (não há ' +
+        "auto-aprovação); o rótulo NÃO ORÇADO e a justificativa continuam; só a etapa da diretoria " +
+        "não existe — e por isso o gerente que também solicita no setor aprova a própria requisição. " +
+        `Motivo: ${rule.reason} Vigente desde ${br(rule.since)}; REVISAR EM ${br(rule.reviewBy)}.`,
+      source: "src/lib/ctrl/routing.ts (MANAGER_FINAL_SECTORS)",
+    };
+  }),
 ];

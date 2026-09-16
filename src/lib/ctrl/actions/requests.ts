@@ -8,6 +8,7 @@ import { requireCtrlRole, requireCtrlRoleOrFullView } from "@/lib/ctrl/auth";
 import {
   APPROVAL_ROUTING,
   approverSectorRestrictionFor,
+  isManagerFinalSector,
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
@@ -231,7 +232,10 @@ async function performBudgetVerification(
   }
 
   // Fora do orçamento anual (saldo anual < valor) → gerente e depois diretor,
-  // com justificativa obrigatória.
+  // com justificativa obrigatória. Exceção: setor em MANAGER_FINAL_SECTORS
+  // dispensa o diretor — o tier continua nivel_3 (é fato), só o texto muda,
+  // senão o formulário prometeria uma etapa que não vai existir.
+  const managerFinal = isManagerFinalSector(sectorId);
   return {
     approvalTier: "nivel_3",
     autoApproved: false,
@@ -242,7 +246,9 @@ async function performBudgetVerification(
     budgetedUpToMonth,
     budgetedAnnual,
     totalApproved,
-    statusLabel: `Fora do orçamento — requer gerente e diretor (saldo anual ${fmt.format(futureBalance)} insuficiente)`,
+    statusLabel: managerFinal
+      ? `Fora do orçamento — requer aprovação do gerente; este setor dispensa o diretor (saldo anual ${fmt.format(futureBalance)} insuficiente)`
+      : `Fora do orçamento — requer gerente e diretor (saldo anual ${fmt.format(futureBalance)} insuficiente)`,
   };
 }
 
@@ -1523,6 +1529,8 @@ async function notifyDirectorStage(
 // Aplica uma etapa de aprovação. Fluxo:
 //   pendente (gerente) → nivel_2: aprovado · nivel_3: pendente_diretor
 //   pendente_diretor (diretor) → aprovado
+// Exceção: setor em MANAGER_FINAL_SECTORS (routing.ts) conclui na etapa do
+// gerente mesmo em nivel_3 — a etapa do diretor não existe para ele.
 // Não restringe a pessoa específica (qualquer gerente/diretor pode aprovar a
 // etapa correspondente); o direcionamento é só via notificação.
 async function applyApprovalStep(
@@ -1562,7 +1570,8 @@ async function applyApprovalStep(
   }
 
   // status === "pendente" → etapa do gerente.
-  if ((req.approval_tier as string) === "nivel_3") {
+  const managerIsFinal = isManagerFinalSector(req.sector_id);
+  if ((req.approval_tier as string) === "nivel_3" && !managerIsFinal) {
     // Fora do orçamento: gerente aprovou, encaminha ao diretor.
     const { error } = await supabase
       .from("ctrl_requests")
@@ -1591,19 +1600,31 @@ async function applyApprovalStep(
     return { ok: true, finalized: false };
   }
 
-  // Dentro do orçamento: aprovação final pelo gerente.
+  // Dentro do orçamento — ou setor que dispensa o diretor: aprovação final pelo
+  // gerente. No segundo caso o histórico diz explicitamente que o diretor foi
+  // dispensado por regra, senão uma requisição NÃO ORÇADA aprovada sem diretor
+  // parece furo de alçada para quem auditar depois.
   const { error } = await supabase
     .from("ctrl_requests")
     .update({ status: "aprovado", approved_by: ctx.id, approved_at: now, updated_at: now })
     .eq("id", req.id);
   if (error) return { error: error.message };
 
+  const finalByRule = managerIsFinal && (req.approval_tier as string) === "nivel_3";
   await supabase.from("ctrl_history").insert({
     request_id: req.id,
     user_id: ctx.id,
     action: "aprovado",
-    comment: comment?.trim() || `Aprovada por ${ctx.name ?? ctx.email} (${ctx.ctrlRoles.join(", ")})`,
-    metadata: { approver_roles: ctx.ctrlRoles, stage: "gerente" },
+    comment:
+      comment?.trim() ||
+      (finalByRule
+        ? `Aprovada pelo Gerente ${ctx.name ?? ctx.email} — fora do orçamento, mas o setor dispensa a etapa do diretor (regra do setor)`
+        : `Aprovada por ${ctx.name ?? ctx.email} (${ctx.ctrlRoles.join(", ")})`),
+    metadata: {
+      approver_roles: ctx.ctrlRoles,
+      stage: "gerente",
+      ...(finalByRule ? { director_waived_by_sector_rule: true } : {}),
+    },
   });
   await notifyRequester({
     userId: req.created_by,
@@ -1674,6 +1695,11 @@ async function approveRateio(
       const canManagerStep =
         isDirector || (isManager && (managesAll || managerSectors.includes(row.sector_id as string)));
       if (!canManagerStep) continue;
+      // Linha de setor que dispensa o diretor (MANAGER_FINAL_SECTORS): nivel_3
+      // não gera etapa de diretor — nem para o super-aprovador, que não deve
+      // registrar uma aprovação de diretor numa etapa que não existe.
+      const needsDirector =
+        row.approval_tier === "nivel_3" && !isManagerFinalSector(row.sector_id as string);
       if (isDirector) {
         // Super-aprovador conclui gerente + diretor de uma vez (como no 1 setor).
         await supabase
@@ -1682,13 +1708,13 @@ async function approveRateio(
             status: "aprovado",
             manager_approved_by: ctx.id,
             manager_approved_at: now,
-            director_approved_by: row.approval_tier === "nivel_3" ? ctx.id : null,
-            director_approved_at: row.approval_tier === "nivel_3" ? now : null,
+            director_approved_by: needsDirector ? ctx.id : null,
+            director_approved_at: needsDirector ? now : null,
             updated_at: now,
           })
           .eq("id", row.id);
         advanced++;
-      } else if (row.approval_tier === "nivel_3") {
+      } else if (needsDirector) {
         await supabase
           .from("ctrl_request_sectors")
           .update({ status: "pendente_diretor", manager_approved_by: ctx.id, manager_approved_at: now, updated_at: now })
@@ -3070,12 +3096,16 @@ export async function returnRequestToRequisicoes(requestId: string, reason: stri
 
   // ── Estágio 2 ────────────────────────────────────────────────────────────────
   // Volta ao fluxo de aprovação. Nível preservado: nivel_3 (ou setor/solicitante
-  // forçado ao diretor) → pendente_diretor; senão pendente.
+  // forçado ao diretor) → pendente_diretor; senão pendente. Setor que dispensa
+  // o diretor (MANAGER_FINAL_SECTORS) volta para o gerente mesmo em nivel_3 —
+  // a etapa do diretor não existe para ele em nenhum sentido do fluxo.
   const forceDirector =
     req.created_by === APPROVAL_ROUTING.directorOnly.requesterId ||
     req.sector_id === APPROVAL_ROUTING.directorSector.sectorId;
+  const overBudgetNeedsDirector =
+    req.approval_tier === "nivel_3" && !isManagerFinalSector(req.sector_id);
   const newStatus: CtrlRequestStatus =
-    forceDirector || req.approval_tier === "nivel_3" ? "pendente_diretor" : "pendente";
+    forceDirector || overBudgetNeedsDirector ? "pendente_diretor" : "pendente";
 
   const { error: updErr } = await supabase
     .from("ctrl_requests")
