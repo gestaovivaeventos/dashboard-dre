@@ -7,6 +7,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Rate-limit conservador por processo. Cada unidade é uma conta Omie distinta,
 // então poderia ser por-conta; um global simples é suficiente aqui.
+//
+// Quem precisa de PARALELISMO entre empresas passa o próprio ref em
+// `opts.lastRequestRef` (ver o módulo Caixa, que varre todas as empresas): como
+// o limite da Omie é por app_key, um ref por empresa deixa N empresas correndo
+// juntas sem nenhuma delas estourar o intervalo. É o mesmo desenho que o
+// `omieRequest` do sync.ts já usa. Sem o parâmetro, nada muda.
 const lastRequest = { value: 0 };
 
 export const OMIE_CLIENTES_URL = "https://app.omie.com.br/api/v1/geral/clientes/";
@@ -83,8 +89,16 @@ export async function omieCall(
   appKey: string,
   appSecret: string,
   param: Record<string, unknown>,
+  opts: {
+    /**
+     * Relógio do rate-limit. Omitido, usa o global do processo (serializa TODAS
+     * as chamadas). Passe um ref por app_key para paralelizar entre empresas.
+     */
+    lastRequestRef?: { value: number };
+  } = {},
 ): Promise<OmieResult> {
   const MAX_ATTEMPTS = 4;
+  const clock = opts.lastRequestRef ?? lastRequest;
   let lastError: Error | null = null;
 
   // Leitura idêntica recente → devolve do cache, evitando o bloqueio anti-
@@ -107,8 +121,8 @@ export async function omieCall(
   };
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const elapsed = Date.now() - lastRequest.value;
-    if (lastRequest.value > 0 && elapsed < REQUEST_INTERVAL_MS) {
+    const elapsed = Date.now() - clock.value;
+    if (clock.value > 0 && elapsed < REQUEST_INTERVAL_MS) {
       await sleep(REQUEST_INTERVAL_MS - elapsed);
     }
 
@@ -121,13 +135,13 @@ export async function omieCall(
         cache: "no-store",
       });
     } catch (err) {
-      lastRequest.value = Date.now();
+      clock.value = Date.now();
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt === MAX_ATTEMPTS) throw lastError;
       await sleep(600 * 2 ** (attempt - 1));
       continue;
     }
-    lastRequest.value = Date.now();
+    clock.value = Date.now();
 
     if (!response.ok) {
       // A Omie devolve HTTP 500 com um corpo JSON de faultstring para MUITOS

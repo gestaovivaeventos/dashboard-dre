@@ -1,17 +1,22 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app/app-shell";
+import { canAccessBiValidation } from "@/lib/auth/bi-validation";
 import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 
-export default async function ViagensLayout({ children }: { children: React.ReactNode }) {
+/**
+ * Layout do módulo Caixa. Espelha o do (vb): monta o AppShell e barra quem não
+ * tem o módulo. Aqui, diferente do VB, admin passa — ver @/lib/auth/caixa.
+ */
+export default async function CaixaLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getSessionContext();
 
   if (!ctx.user) redirect("/login");
-  if (!ctx.modules?.viagens) redirect("/");
+  if (!ctx.modules?.caixa) redirect("/");
 
   const { profile, supabase, modules } = ctx;
   const userName = profile?.name || ctx.user.email || "Usuario";
@@ -26,9 +31,6 @@ export default async function ViagensLayout({ children }: { children: React.Reac
   const vbRole = modules.vb?.role ?? null;
   const canCaixa = Boolean(modules.caixa);
 
-  // Segmentos para o shell — fonte única compartilhada (resolveUserSegments):
-  // admin vê todos; os demais recebem a UNIÃO de user_segment_access com os
-  // segmentos derivados das empresas em user_company_access.
   const segments = await resolveUserSegments(supabase, {
     isAdmin: dreRole === "admin",
     userId: profile?.id ?? null,
@@ -39,7 +41,7 @@ export default async function ViagensLayout({ children }: { children: React.Reac
     dreRole,
     ctrlRoles,
     segments,
-    "viagens",
+    "caixa",
     canCase,
     canViagens,
     vbRole !== null,
@@ -66,15 +68,10 @@ export default async function ViagensLayout({ children }: { children: React.Reac
       activeModule={activeModule}
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
-      // Visão completa do módulo Compras (override nominal): só faz sentido
-      // para quem já tem o módulo — não concede o módulo a ninguém.
+      canBiValidation={canAccessBiValidation(profile)}
       ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
-      // Perfil unificado: o tour guiado usa para escolher a variante de texto
-      // dos passos que mudam conforme quem lê (os cinco perfis do Compras).
       userProfile={profile?.profile ?? null}
-      // Tour guiado: aparece sozinho uma única vez por usuário. A marca vive em
-      // user_module_roles (module='tour') — ver @/lib/tour/seen.
       tourSeen={profile?.tour_seen ?? false}
     >
       {children}

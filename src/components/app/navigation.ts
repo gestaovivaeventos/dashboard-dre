@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Banknote,
   Bell,
   BookOpen,
   Brain,
@@ -36,6 +37,7 @@ import {
   BI_VALIDATION_NAV_KEY,
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
+import { CAIXA_NAV_KEY_REAL, CAIXA_REAL_PATH } from "@/lib/auth/caixa";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
 import {
   VB_NAV_KEY_OMIE,
@@ -239,6 +241,11 @@ export interface NavItem {
   /** Item só do papel gestor do VB (importação). */
   vbGestorOnly?: boolean;
   /**
+   * Item do módulo Caixa — visível para quem tem a concessão ou é admin (ver
+   * @/lib/auth/caixa). Independe de dreRoles/ctrlRoles.
+   */
+  caixaAccess?: boolean;
+  /**
    * Item visível a QUALQUER usuário logado (ex.: Chamados/Suporte). Ignora
    * dreRoles/ctrlRoles e as whitelists de franqueado/CSC.
    */
@@ -253,6 +260,7 @@ export type NavGroupId =
   | "viagens"
   | "contratos"
   | "vb"
+  | "caixa"
   | "plataforma"
   | "suporte";
 
@@ -358,6 +366,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
       // Extrato mensal por e-mail aos credores: acompanhamento e envio manual.
       { key: VB_NAV_KEY_REPORTS, title: "Relatórios mensais", icon: Mail, scope: "global", href: VB_REPORTS_PATH, vbAccess: true, vbGestorOnly: true },
+    ],
+  },
+  {
+    // Módulo Caixa: saldo das contas correntes de todas as empresas, lido da
+    // Omie. Concedido por usuário em "Módulos visíveis" (ver @/lib/auth/caixa);
+    // admin enxerga sem a concessão. Grupo próprio porque não é um recorte do
+    // Financeiro — é a posição de caixa do grupo inteiro, sem filtro de
+    // segmento e sem a regra de empresas restritas.
+    id: "caixa",
+    label: "CAIXA",
+    items: [
+      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Real", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
     ],
   },
   {

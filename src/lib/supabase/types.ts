@@ -46,6 +46,12 @@ export interface ModuleAccess {
    * `@/lib/auth/vb`. Admin não recebe automaticamente.
    */
   vb: { role: VbRole } | null;
+  /**
+   * Módulo Caixa. Concessão em user_module_roles (module='caixa') OU admin —
+   * ver `@/lib/auth/caixa`. Sem recorte por empresa: quem tem o módulo vê
+   * todas, inclusive as restritas de @/lib/auth/restricted-companies.
+   */
+  caixa: Record<string, never> | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -104,6 +110,12 @@ export interface UnifiedProfile {
    * vem de `user_module_roles`, não de coluna de `users` — ver `@/lib/auth/vb`.
    */
   vb_role: VbRole | null;
+  /**
+   * Visibilidade do módulo Caixa (saldo das contas correntes de todas as
+   * empresas). Como `can_contratos`, vem de `user_module_roles`, não de coluna
+   * de `users` — ver `@/lib/auth/caixa`. Admin enxerga sem a linha.
+   */
+  can_caixa: boolean;
   /**
    * Já viu o tour guiado de boas-vindas. Como `can_contratos`, NÃO é coluna de
    * `users`: é derivada da linha em `user_module_roles` (module='tour') — ver

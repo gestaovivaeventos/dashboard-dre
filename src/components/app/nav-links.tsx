@@ -27,6 +27,8 @@ interface NavLinksProps {
   canContratos?: boolean;
   /** Papel no módulo VB (grupo VB); null sem concessão. */
   vbRole?: VbRole | null;
+  /** Módulo Caixa (grupo CAIXA). Concessão OU admin. */
+  canCaixa?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -199,6 +201,7 @@ interface BuildInput {
   canViagensAprovar?: boolean;
   canContratos?: boolean;
   vbRole?: VbRole | null;
+  canCaixa?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -243,6 +246,7 @@ function buildGroups({
   canViagensAprovar,
   canContratos,
   vbRole,
+  canCaixa,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -263,7 +267,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null, Boolean(canCaixa))) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -293,6 +297,7 @@ function isItemVisible(
   canBiValidation?: boolean,
   ctrlFullView?: boolean,
   vbRole: VbRole | null = null,
+  canCaixa: boolean = false,
 ): boolean {
   // Item aberto a qualquer usuário logado (ex.: Chamados/Suporte). Vem antes de
   // tudo — ignora dreRole/ctrlRole e as whitelists de franqueado/CSC.
@@ -306,6 +311,11 @@ function isItemVisible(
   // VB (Viva Bank): módulo próprio, concedido por usuário. Não passa por
   // dreRole/ctrlRole nem pelas whitelists de franqueado/CSC; admin não herda.
   if (item.vbAccess) return vbRole !== null && (!item.vbGestorOnly || vbRole === "gestor");
+
+  // Caixa: módulo próprio, concedido por usuário (ou admin). Como o Contratos,
+  // é decidido ANTES de FRANQUEADO_NAV_KEYS/CSC_NAV_KEYS — o módulo é liberável
+  // em qualquer perfil, e a whitelist deles esconderia o item.
+  if (item.caixaAccess) return canCaixa;
 
   // CSC: cópia do franqueado + a tela "Validação Relatório".
   if (isCsc) return CSC_NAV_KEYS.has(item.key);
@@ -340,7 +350,8 @@ function isItemVisible(
     !item.caseAccess &&
     !item.viagensAccess &&
     !item.contratosAccess &&
-    !item.vbAccess
+    !item.vbAccess &&
+    !item.caixaAccess
   )
     return false;
   return dreOk || ctrlOk || caseOk || viagensOk;

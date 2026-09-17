@@ -2,6 +2,7 @@ import {
   BI_VALIDATION_PATH,
   canAccessBiValidationByProfile,
 } from "@/lib/auth/bi-validation";
+import { isCaixaPath } from "@/lib/auth/caixa";
 import { isVbPath } from "@/lib/auth/vb";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
@@ -20,6 +21,7 @@ export function defaultLandingFor(
   canViagens: boolean = false,
   canContratos: boolean = false,
   canVb: boolean = false,
+  canCaixa: boolean = false,
 ): string {
   // TODO perfil pousa na tela inicial. Ela é o cockpit comum do Control Hub:
   // saudação, indicadores e notícias econômicas para todos, e as seções
@@ -35,6 +37,7 @@ export function defaultLandingFor(
     canViagens ||
     canContratos ||
     canVb ||
+    canCaixa ||
     profile === "admin"
   ) {
     return "/home";
@@ -101,6 +104,12 @@ export function canAccessPathByProfile(
    * NÃO passa por cima — ver @/lib/auth/vb.
    */
   canVb: boolean = false,
+  /**
+   * Módulo Caixa (saldo das contas correntes de todas as empresas). Concedido
+   * por usuário em "Módulos visíveis"; admin enxerga sem a concessão — ver
+   * @/lib/auth/caixa.
+   */
+  canCaixa: boolean = false,
 ): boolean {
   // Tela inicial (cockpit): liberada para TODOS os perfis, sem depender de
   // módulo. O que cada um VÊ lá dentro é decidido por perfil na própria tela
@@ -154,6 +163,11 @@ export function canAccessPathByProfile(
   // do bloco franqueado/CSC (a whitelist negaria a rota) e antes de "Admin:
   // tudo" — admin sem a linha não vê o módulo, de propósito.
   if (isVbPath(pathname)) return canVb;
+
+  // Módulo Caixa: concessão explícita OU admin. Como o Contratos, precisa vir
+  // ANTES do bloco franqueado/CSC — a whitelist deles negaria a rota mesmo com
+  // o módulo marcado, e o Caixa é liberável em qualquer perfil.
+  if (isCaixaPath(pathname)) return canCaixa || profile === "admin";
 
   // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
   // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl e

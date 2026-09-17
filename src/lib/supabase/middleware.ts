@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { canAccessPathByProfile, defaultLandingFor } from "@/lib/auth/access";
+import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { hasVbGrant } from "@/lib/auth/vb";
 import { getSupabaseEnv } from "@/lib/supabase/env";
@@ -128,6 +129,9 @@ export async function updateSession(request: NextRequest) {
       userProfile === "admin";
     // Módulo VB (Viva Bank): só a concessão. Sem override de admin.
     const canVb = hasVbGrant(profileData?.user_module_roles);
+    // Modulo Caixa: concessao OU admin (modelo do Case/Contratos).
+    const canCaixa =
+      hasCaixaGrant(profileData?.user_module_roles) || userProfile === "admin";
     const isActive = profileData?.active ?? true;
 
     if (!isActive) {
@@ -147,6 +151,7 @@ export async function updateSession(request: NextRequest) {
         // para dois e-mails além de CSC/admin.
         user.email ?? null,
         canVb,
+        canCaixa,
       )
     ) {
       const url = request.nextUrl.clone();
@@ -158,6 +163,7 @@ export async function updateSession(request: NextRequest) {
         canViagens,
         canContratos,
         canVb,
+        canCaixa,
       );
       supabaseResponse = NextResponse.redirect(url);
     }
