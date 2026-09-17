@@ -79,3 +79,12 @@ export interface CaixaCompanyResult {
   accountsError: number;
   error: string | null;
 }
+
+/** Um ponto da série "Evolução do caixa" (caixa_history / POST /api/caixa/history). */
+export interface CaixaHistoryPoint {
+  /** 'YYYY-MM-DD' em Brasília. */
+  day: string;
+  total: number;
+  /** Quantas das contas pedidas tinham saldo conhecido nesse dia. */
+  contas: number;
+}

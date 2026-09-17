@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { CaixaRealClient } from "@/components/caixa/caixa-real-client";
 import { getCaixaUser } from "@/lib/caixa/auth";
-import { listCaixaAccounts, lastCaixaUpdate } from "@/lib/caixa/queries";
+import { getCaixaSyncAlert, listCaixaAccounts, lastCaixaUpdate } from "@/lib/caixa/queries";
 import { listCaixaCompanyRefs } from "@/lib/caixa/sync";
 import { todayBR } from "@/lib/ctrl/datetime";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -25,7 +25,7 @@ export default async function CaixaRealPage() {
   // valendo para qualquer leitura feita com o client do usuário — são a
   // segunda linha de defesa, não a única.
   const db = createAdminClient();
-  const [rows, lastUpdate, companies] = await Promise.all([
+  const [rows, lastUpdate, companies, syncAlert] = await Promise.all([
     // Traz também as encerradas na Omie: a coluna Status as identifica e o
     // filtro da tela já abre em "Ativa". O histórico de saldo delas é fato e
     // some da vista se a consulta as descartar aqui.
@@ -35,6 +35,7 @@ export default async function CaixaRealPage() {
     // que uma empresa com credencial e ainda sem nenhuma conta sincronizada
     // apareça — é justamente ela que precisa do "Sincronizar contas".
     listCaixaCompanyRefs(db),
+    getCaixaSyncAlert(db),
   ]);
 
   return (
@@ -43,6 +44,7 @@ export default async function CaixaRealPage() {
       companies={companies}
       today={todayBR()}
       lastUpdate={lastUpdate}
+      syncAlert={syncAlert}
     />
   );
 }

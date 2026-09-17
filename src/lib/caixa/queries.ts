@@ -6,6 +6,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { todayBR } from "@/lib/ctrl/datetime";
+import { evaluateSyncHealth, type CaixaRunSummary, type CaixaSyncAlert } from "@/lib/caixa/health";
 import type { CaixaAccountRow } from "@/lib/caixa/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -144,4 +145,53 @@ function resolveCompanyName(v: unknown): string {
   if (!v) return "";
   const row = Array.isArray(v) ? v[0] : v;
   return (row as { name?: string } | undefined)?.name ?? "";
+}
+
+// ── Saúde da atualização ───────────────────────────────────────────────────
+
+function toRunSummary(row: Record<string, unknown> | null): CaixaRunSummary | null {
+  if (!row) return null;
+  return {
+    trigger: row.trigger === "manual" ? "manual" : "cron",
+    startedAt: row.started_at as string,
+    finishedAt: (row.finished_at as string | null) ?? null,
+    companiesTotal: Number(row.companies_total ?? 0),
+    companiesOk: Number(row.companies_ok ?? 0),
+    accountsError: Number(row.accounts_error ?? 0),
+    errors: Array.isArray(row.errors)
+      ? (row.errors as Array<{ company_name?: string; error?: string }>)
+      : [],
+  };
+}
+
+/**
+ * Alerta para a tela: a última atualização de saldos falhou, morreu no meio,
+ * ou o cron não rodou no horário. Regra em @/lib/caixa/health (pura, testada).
+ * Falha na leitura vira "sem alerta" — o aviso não pode derrubar a tela.
+ */
+export async function getCaixaSyncAlert(db: CaixaDb): Promise<CaixaSyncAlert | null> {
+  const cols = "trigger,started_at,finished_at,companies_total,companies_ok,accounts_error,errors";
+  const [last, lastCron] = await Promise.all([
+    db
+      .from("caixa_sync_runs")
+      .select(cols)
+      .eq("kind", "saldos")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db
+      .from("caixa_sync_runs")
+      .select(cols)
+      .eq("kind", "saldos")
+      .eq("trigger", "cron")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (last.error || lastCron.error) return null;
+  return evaluateSyncHealth(
+    toRunSummary(last.data as Record<string, unknown> | null),
+    toRunSummary(lastCron.data as Record<string, unknown> | null),
+    new Date(),
+  );
 }

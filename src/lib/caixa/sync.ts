@@ -26,6 +26,13 @@ export interface CaixaCompany {
  * entra no ciclo do DRE/BI, e uma unidade fora do pacote de relatórios continua
  * tendo dinheiro em conta. O Caixa responde "quanto o grupo tem agora", então
  * ficar de fora teria que ser uma decisão sobre caixa, não sobre relatório.
+ *
+ * As que ficam de fora por NÃO TEREM credencial (hoje: Salvaterra
+ * Estacionamento, Sirena, Viva Holding, Viva Uberaba e a empresa de teste) não
+ * são erro nem aviso na tela — decisão do dono do projeto em 17/09/2026: na
+ * Omie elas não são empresas separadas ou já foram inativadas; existem aqui só
+ * para o histórico do DRE. Não acrescente um "5 empresas fora" na interface
+ * achando que falta transparência.
  */
 export async function listCaixaCompanies(admin: AdminClient): Promise<CaixaCompany[]> {
   const { data, error } = await admin

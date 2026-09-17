@@ -14,9 +14,13 @@ import {
   Wallet,
 } from "lucide-react";
 
+import { CaixaHistoryChart } from "@/components/caixa/caixa-history-chart";
 import { CompanyPicker, type PickerCompany } from "@/components/caixa/company-picker";
+import { SyncAlertBanner } from "@/components/caixa/sync-alert-banner";
 import { FilterTable, type FilterColumn } from "@/components/data-table/filter-table";
 import { BANCOS_BR } from "@/lib/ctrl/bancos";
+import type { CaixaSyncAlert } from "@/lib/caixa/health";
+import { CAIXA_CRON_SLOTS_LABEL } from "@/lib/caixa/schedule";
 import {
   CAIXA_TIPOS_LIQUIDOS,
   OMIE_BANCO_SEM_BANCO,
@@ -118,11 +122,13 @@ interface Props {
   /** Hoje em Brasília ('YYYY-MM-DD'), resolvido no servidor. */
   today: string;
   lastUpdate: string | null;
+  /** Falha/atraso da atualização, se houver (ver @/lib/caixa/health). */
+  syncAlert: CaixaSyncAlert | null;
 }
 
 type Progress = { label: string; done: number; total: number } | null;
 
-export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
+export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Começa no MESMO recorte que a tabela vai aplicar. A FilterTable só reporta
@@ -351,6 +357,9 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
     return ids;
   }, [rows, today, ontem]);
 
+  // Ids visíveis, memoizados: o gráfico usa como chave de busca.
+  const visibleIds = useMemo(() => visible.map((r) => r.id), [visible]);
+
   const alvo = useMemo(
     () => (scope === null ? companies : companies.filter((c) => scope.has(c.id))),
     [companies, scope],
@@ -505,7 +514,7 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
                 <strong className="font-medium text-ink-secondary">
                   {formatDay(dayKey(lastUpdate))} às {formatTime(lastUpdate)}
                 </strong>{" "}
-                · automático às 04:00 e 12:30
+                · automático às {CAIXA_CRON_SLOTS_LABEL}
               </>
             ) : (
               "Nenhum saldo capturado ainda — use “Atualizar saldos”."
@@ -543,6 +552,8 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
           </button>
         </div>
       </div>
+
+      {syncAlert && <SyncAlertBanner alert={syncAlert} today={today} />}
 
       {alvo.length !== companies.length && (
         <p className="-mt-2 text-xs text-ink-muted">
@@ -643,6 +654,9 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
           da tabela para incluir.
         </p>
       )}
+
+      {/* Evolução: obedece ao mesmo recorte da tabela (recebe os ids visíveis). */}
+      <CaixaHistoryChart accountIds={visibleIds} totalAccounts={rows.length} />
 
       {/* Tabela */}
       <FilterTable
