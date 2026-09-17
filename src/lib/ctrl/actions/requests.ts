@@ -3517,11 +3517,16 @@ export async function rerouteAfterAdminEdit(
   const { data: req } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, request_number, created_by, status, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year, ctrl_sectors(name), creator:users!ctrl_requests_created_by_fkey(name, email)",
+      "id, request_number, created_by, status, is_rateio, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year, ctrl_sectors(name), creator:users!ctrl_requests_created_by_fkey(name, email)",
     )
     .eq("id", requestId)
     .maybeSingle();
   if (!req) return { error: "Requisição não encontrada." };
+
+  // Rateio tem alçada POR PARCELA — o recálculo com um setor único (abaixo) não
+  // se aplica. A edição de campos de orçamento no rateio é bloqueada na origem
+  // (updateRequestByAdmin), então aqui apenas ignoramos, por segurança.
+  if (req.is_rateio) return { ok: true, rerouted: false };
 
   const PENDING: string[] = ["pendente", "pendente_diretor", "aguardando_complementacao"];
   if (!PENDING.includes(req.status as string)) return { ok: true, rerouted: false };

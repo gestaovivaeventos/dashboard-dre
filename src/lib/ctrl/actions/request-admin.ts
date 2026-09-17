@@ -54,7 +54,7 @@ export async function updateRequestByAdmin(
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, status, deleted_at, omie_contapagar_codigo, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year",
+      "id, status, deleted_at, omie_contapagar_codigo, is_rateio, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -105,6 +105,17 @@ export async function updateRequestByAdmin(
   if (data.reference_year !== undefined) set("reference_year", data.reference_year);
 
   if (Object.keys(changes).length === 0) return { ok: true as const, unchanged: true };
+
+  // Rateio: o orçamento é POR PARCELA (ctrl_request_sectors). Mudar setor/valor/
+  // tipo/vencimento/competência mexeria na alçada de cada parcela — não tratado
+  // aqui. Por segurança, só título/descrição. Defesa server-side (a UI já esconde).
+  if ((req as { is_rateio?: boolean }).is_rateio && BUDGET_FIELDS.some((f) => f in changes)) {
+    return {
+      error:
+        "Requisição rateada: por aqui edite só título e descrição. Para mudar setor, " +
+        "valor, tipo, vencimento ou competência da divisão, rejeite e recrie a requisição.",
+    };
+  }
 
   const { error: updErr } = await supabase
     .from("ctrl_requests")
