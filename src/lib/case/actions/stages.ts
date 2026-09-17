@@ -208,8 +208,8 @@ export async function salvarCliente(
 // ────────────────────────────────────────────────────────────────────────────
 // ABA CLIENTE — aprovação interna e envio para assinatura
 //
-// rascunho → aguardando_aprovacao (só o aprovador, CASE_CONTRACT_APPROVER_EMAIL)
-// → aguardando_assinatura (cliente + testemunha; o aprovador assina por último).
+// rascunho → aguardando_aprovacao (só um aprovador, CASE_CONTRACT_APPROVER_EMAILS)
+// → aguardando_assinatura (cliente + testemunha; o CONTRATADO_SIGNER assina por último).
 // Nenhum caminho chega à ClickSign sem passar por aprovarContrato.
 // ────────────────────────────────────────────────────────────────────────────
 type SignatureResult = { ok: true; status: string; signUrl?: string; warning?: string } | { error: string };
@@ -451,7 +451,7 @@ export async function enviarParaAprovacao(contractId: string): Promise<Signature
 
 export async function aprovarContrato(contractId: string): Promise<SignatureResult> {
   const ctx = await requireCaseUser();
-  if (!isCaseContractApprover(ctx.email)) return { error: "Só o aprovador dos contratos Case pode aprovar." };
+  if (!isCaseContractApprover(ctx.email)) return { error: "Só um aprovador dos contratos Case pode aprovar." };
   const db = await getDb();
 
   const { data: cur } = await db.from("case_contracts").select("status").eq("id", contractId).single();
@@ -465,7 +465,7 @@ export async function aprovarContrato(contractId: string): Promise<SignatureResu
 
 export async function devolverContrato(contractId: string, motivo: string): Promise<{ ok: true } | { error: string }> {
   const ctx = await requireCaseUser();
-  if (!isCaseContractApprover(ctx.email)) return { error: "Só o aprovador dos contratos Case pode devolver." };
+  if (!isCaseContractApprover(ctx.email)) return { error: "Só um aprovador dos contratos Case pode devolver." };
   const reason = motivo.trim();
   if (!reason) return { error: "Informe o que precisa ser ajustado." };
   const db = await getDb();

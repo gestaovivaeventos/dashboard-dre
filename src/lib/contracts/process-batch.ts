@@ -12,7 +12,13 @@ import { extractContract, mergeContas, mergeCpfCnpj } from './extract'
 import { decidirPorSaldoFee, loadFeeSaldo, type FeeSaldoMap } from './fee-saldo'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
-import { analisarRequisicao, isComissao, isFeeCerimonial, type RequisitionDocument } from './validate'
+import {
+  agruparRpsIrmas,
+  analisarRequisicao,
+  isComissao,
+  isFeeCerimonial,
+  type RequisitionDocument,
+} from './validate'
 import type { ContractExtraction, ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -36,6 +42,7 @@ interface BatchRow {
 interface ItemRow {
   id: string
   requisicao_codigo: string
+  descricao: string | null
   fornecedor: string | null
   favorecido: string | null
   cpf_cnpj: string | null
@@ -395,7 +402,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, tipo_pagamento, raw_extraction',
+      'id, requisicao_codigo, descricao, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, tipo_pagamento, raw_extraction',
     )
     .eq('batch_id', batchId)
 
@@ -410,6 +417,19 @@ export async function processBatch(
   }
 
   console.log(`[contracts] phase2 evaluating ${groups.size} requisitions (${items.length} items)`)
+
+  // RPs irmãs: mesma descrição (normalizada) e mesmo fundo dentro do lote. Uma
+  // parcela paga em duas RPs — o caso recorrente é o BV Viva, uma RP ao
+  // fornecedor e outra à Viva — só fecha quando somadas, e sem isso cada uma
+  // parecia pagamento parcial (ou reprovava por favorecido/conta da Viva).
+  const irmasPorRp = agruparRpsIrmas(
+    items.map((i) => ({
+      requisicao_codigo: i.requisicao_codigo,
+      descricao: i.descricao,
+      fundo: i.fundo,
+      valor: Number(i.valor) || 0,
+    })),
+  )
 
   // BV (saldo do contrato): carrega a base de RPs pagas uma vez e soma o já-pago
   // por (fundo + CNPJ + número do contrato), normalizado. O valor entra na RP
@@ -486,6 +506,8 @@ export async function processBatch(
 
     const validation = analisarRequisicao({
       requisicao_codigo: reqCodigo,
+      descricao: first.descricao,
+      irmas: irmasPorRp.get(reqCodigo) ?? [],
       req: {
         fornecedor: first.fornecedor,
         favorecido: first.favorecido,

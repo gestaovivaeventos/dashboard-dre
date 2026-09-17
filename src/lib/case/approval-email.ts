@@ -3,7 +3,7 @@
 import "server-only";
 
 import { resolveAppUrl } from "@/lib/app-url";
-import { CASE_CONTRACT_APPROVER_EMAIL } from "@/lib/case/contract-config";
+import { CASE_CONTRACT_APPROVER_EMAILS, CONTRATADO_SIGNER } from "@/lib/case/contract-config";
 import { sendEmailViaResend } from "@/lib/email/resend";
 
 export interface ApprovalEmailContract {
@@ -40,17 +40,17 @@ ${extra}
 export async function sendApprovalRequestedEmail(c: ApprovalEmailContract, requesterName: string): Promise<void> {
   const html = layout(
     "Contrato aguardando sua aprovação",
-    `<strong>${esc(requesterName)}</strong> enviou um contrato para a sua aprovação. Depois de aprovado, ele segue para o cliente e a testemunha assinarem na ClickSign — e você assina por último.`,
+    `<strong>${esc(requesterName)}</strong> enviou um contrato para a sua aprovação. Depois de aprovado, ele segue para o cliente e a testemunha assinarem na ClickSign — e ${esc(CONTRATADO_SIGNER.name)} assina por último.`,
     c,
     "",
     "Revisar e aprovar",
   );
   const res = await sendEmailViaResend({
-    to: CASE_CONTRACT_APPROVER_EMAIL,
+    to: [...CASE_CONTRACT_APPROVER_EMAILS],
     subject: `Contrato Case #${c.contractNumber} aguardando sua aprovação — ${c.clientName}`,
     html,
   });
-  if (!res.ok) console.error("[case/aprovacao] falha ao avisar o aprovador:", res.error);
+  if (!res.ok) console.error("[case/aprovacao] falha ao avisar os aprovadores:", res.error);
 }
 
 export async function sendContractReturnedEmail(c: ApprovalEmailContract, to: string, reason: string): Promise<void> {

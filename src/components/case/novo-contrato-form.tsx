@@ -346,7 +346,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
           return;
         }
         if (g.status === "aguardando_aprovacao") {
-          showToast({ title: "Enviado para aprovação", description: "O Pedro recebeu o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
+          showToast({ title: "Enviado para aprovação", description: "Os aprovadores receberam o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
         } else {
           showToast({ title: "Contrato aprovado e enviado para assinatura", description: "Cliente e testemunha recebem o link agora; o contratado assina por último.", variant: "success" });
         }

@@ -185,7 +185,7 @@ function ClienteTab({ detail, signed, isApprover, onChange }: { detail: Contract
     setBusy(false);
     if ("error" in res) return setSignatureError(res.error);
     if (res.status === "aguardando_aprovacao") {
-      showToast({ title: "Enviado para aprovação", description: "O Pedro recebeu o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
+      showToast({ title: "Enviado para aprovação", description: "Os aprovadores receberam o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
     } else {
       showToast({
         title: sent ? "Contrato aprovado e reenviado para assinatura" : "Contrato aprovado e enviado para assinatura",
@@ -228,7 +228,7 @@ function ClienteTab({ detail, signed, isApprover, onChange }: { detail: Contract
         <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
           {isApprover
             ? <>Enviado para a sua aprovação{detail.approval_requested_by_name ? <> por <strong>{detail.approval_requested_by_name}</strong></> : null}{detail.approval_requested_at ? ` em ${dateTimeBR(detail.approval_requested_at)}` : ""}. Confira o PDF; ao aprovar, cliente e testemunha recebem o link e você assina por último.</>
-            : <>Aguardando a aprovação do Pedro{detail.approval_requested_at ? ` desde ${dateTimeBR(detail.approval_requested_at)}` : ""}. Se editar os dados agora, o contrato volta para rascunho e precisa ser enviado de novo.</>}
+            : <>Aguardando aprovação{detail.approval_requested_at ? ` desde ${dateTimeBR(detail.approval_requested_at)}` : ""}. Se editar os dados agora, o contrato volta para rascunho e precisa ser enviado de novo.</>}
         </div>
       )}
 

@@ -32,13 +32,19 @@ export const CONTRATADO_SIGNER = {
 } as const;
 
 /**
- * Único aprovador dos contratos Case (regra nominal, registrada em
- * user-exceptions.ts). Nenhum contrato vai à ClickSign sem o aval dele; na
- * assinatura ele entra por último, depois do cliente e da testemunha.
+ * Quem aprova (ou devolve) contrato Case antes da ClickSign — regra nominal,
+ * registrada em user-exceptions.ts. Nenhum contrato vai à ClickSign sem o aval
+ * de um deles, e todos recebem o aviso por e-mail e o contador no menu.
+ * Aprovar não é assinar: quem assina pela CS Agência continua sendo só o
+ * CONTRATADO_SIGNER, por último, depois do cliente e da testemunha.
  * Constante fixa (sem env) porque também é lida no client.
  */
-export const CASE_CONTRACT_APPROVER_EMAIL = "pedro@caseshows.com.br";
+export const CASE_CONTRACT_APPROVER_EMAILS = [
+  "pedro@caseshows.com.br",
+  "marcelo@quokka.net.br",
+] as const;
 
 export function isCaseContractApprover(email: string | null | undefined): boolean {
-  return (email ?? "").trim().toLowerCase() === CASE_CONTRACT_APPROVER_EMAIL;
+  const e = (email ?? "").trim().toLowerCase();
+  return CASE_CONTRACT_APPROVER_EMAILS.some((a) => a === e);
 }

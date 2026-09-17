@@ -159,14 +159,21 @@ function digitsOnly(value: string | null | undefined): string {
 // elas. O piso abaixo só descarta ruído de OCR ("0", "-").
 const CONTA_MIN_DIGITOS = 2
 
+// Zero à esquerda é formatação do extrato/documento, não parte do número: o
+// banco imprime "00005081-3" e a RP guarda "5081". Sem descartar os zeros, o
+// deslocamento faz qualquer comparação falhar (RP 881764).
+function contaDigitos(value: string | null | undefined): string {
+  return digitsOnly(value).replace(/^0+/, '')
+}
+
 type ConferenciaConta = 'confere' | 'diverge' | 'indeterminado'
 
 function conferirConta(
   reqConta: string | null | undefined,
   contasDoc: string[],
 ): ConferenciaConta {
-  const alvo = digitsOnly(reqConta)
-  const candidatas = contasDoc.map(digitsOnly).filter((c) => c.length >= CONTA_MIN_DIGITOS)
+  const alvo = contaDigitos(reqConta)
+  const candidatas = contasDoc.map(contaDigitos).filter((c) => c.length >= CONTA_MIN_DIGITOS)
   if (alvo.length < CONTA_MIN_DIGITOS || candidatas.length === 0) return 'indeterminado'
   const bate = candidatas.some(
     (c) => alvo === c || alvo === c.slice(0, -1) || c === alvo.slice(0, -1),
@@ -182,7 +189,7 @@ function contasDosDocumentos(docs: ExtractedContract[]): string[] {
     const lista = d.contas_todas?.length ? d.contas_todas : d.conta ? [d.conta] : []
     for (const conta of lista) {
       const texto = (conta ?? '').toString().trim()
-      const chave = digitsOnly(texto)
+      const chave = contaDigitos(texto)
       if (!texto || !chave || vistas.has(chave)) continue
       vistas.add(chave)
       resultado.push(texto)
@@ -451,10 +458,23 @@ export interface RequisitionDocument extends ExtractedContract {
   extraction_failed: boolean
 }
 
+// Uma RP irmã: outra requisição do MESMO lote que paga o mesmo contrato (mesmo
+// fundo + mesma descrição, normalizada). Ver `agruparRpsIrmas`.
+export interface RpIrma {
+  requisicao_codigo: string
+  valor: number
+}
+
 export interface RequisitionGroup {
   requisicao_codigo: string
   req: RequisitionInput
   documentos: RequisitionDocument[]
+  // Descrição da RP (a mesma usada nos atalhos FEE/Comissão). Identifica a
+  // perna BV e entra na chave de agrupamento das irmãs.
+  descricao?: string | null
+  // RPs irmãs (sem esta). Quando a soma delas com esta RP fecha uma parcela ou
+  // o total do contrato, o pagamento é dividido — e não parcial.
+  irmas?: RpIrma[]
 }
 
 const TIPO_CONTRATO = 'Contrato / Aditivo Contratual'
@@ -471,6 +491,79 @@ export function isTipoPagamentoReembolso(tipo: string | null | undefined): boole
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .includes('reembolso')
+}
+
+function semAcento(texto: string | null | undefined): string {
+  return String(texto ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+}
+
+// Chave de casamento entre RPs que pagam o mesmo contrato. A descrição do par
+// só difere pelos marcadores do BV ("Pagamento BV Viva - …" x "… - retirando
+// BV Viva"), então eles saem da chave junto com a pontuação. Os números ficam:
+// "parcela 1/2" e "parcela 2/2" são contratos-momento diferentes e NÃO podem
+// cair na mesma chave.
+export function normalizarDescricaoRp(descricao: string | null | undefined): string {
+  if (!descricao) return ''
+  return semAcento(descricao)
+    .replace(/\bbv\s+viva\b/g, ' ')
+    .replace(/\bbv\b/g, ' ')
+    .replace(/\bretirando\b/g, ' ')
+    .replace(/\bpagamento\b/g, ' ')
+    .replace(/[^a-z0-9/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// A "perna BV" do pagamento: a RP que paga a bonificação à própria Viva
+// ("Pagamento BV Viva - parcela 1/2 - …"). O favorecido, o CNPJ e a conta dela
+// são os da Viva, não os do contrato — por isso divergem por definição. A RP
+// gêmea, que paga o fornecedor, traz "retirando BV Viva" e não é perna BV.
+export function isPagamentoBvViva(descricao: string | null | undefined): boolean {
+  if (!descricao) return false
+  const norm = semAcento(descricao).trim()
+  if (/\bretirando\b/.test(norm)) return false
+  return /^bv\b/.test(norm) || /\bpagamento\s+bv\b/.test(norm)
+}
+
+// Indexa as RPs do lote por (fundo + descrição normalizada) e devolve, para
+// cada RP, as irmãs daquele grupo. É o que permite ver que duas RPs somam a
+// parcela do contrato em vez de cada uma parecer um pagamento parcial.
+export function agruparRpsIrmas(
+  rps: Array<{
+    requisicao_codigo: string
+    descricao: string | null
+    fundo: string | null
+    valor: number | null
+  }>,
+): Map<string, RpIrma[]> {
+  const vistas = new Set<string>()
+  const porChave = new Map<string, RpIrma[]>()
+
+  for (const rp of rps) {
+    if (vistas.has(rp.requisicao_codigo)) continue
+    vistas.add(rp.requisicao_codigo)
+    const desc = normalizarDescricaoRp(rp.descricao)
+    if (!desc) continue
+    const chave = `${semAcento(rp.fundo).replace(/\s+/g, ' ').trim()}|${desc}`
+    const lista = porChave.get(chave) ?? []
+    lista.push({ requisicao_codigo: rp.requisicao_codigo, valor: Number(rp.valor) || 0 })
+    porChave.set(chave, lista)
+  }
+
+  const resultado = new Map<string, RpIrma[]>()
+  porChave.forEach((lista) => {
+    if (lista.length < 2) return
+    for (const rp of lista) {
+      resultado.set(
+        rp.requisicao_codigo,
+        lista.filter((o) => o.requisicao_codigo !== rp.requisicao_codigo),
+      )
+    }
+  })
+  return resultado
 }
 
 export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
@@ -568,7 +661,23 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // o boleto como base, e RP só com comprovante(s) ou só com boleto(s) segue
   // usando o que tem.
   let partialPayment: null | { somaContratos: number; parcelaIdentificada: number } = null
-  let pagamentoAbaixo: null | { somaContratos: number; parcelaReferencia: number | null } = null
+  let pagamentoAbaixo: null | {
+    somaContratos: number
+    parcelaReferencia: number | null
+    // RP igual ao que resta do contrato depois das parcelas declaradas (ex.:
+    // sinal de R$ 500 num contrato de R$ 3.520 e a RP paga os R$ 3.020 que
+    // faltam — RP 881517, "Saldo do valor do buffet").
+    saldoAposParcelas: boolean
+  } = null
+  // Pagamento dividido entre RPs irmãs (mesmo fundo, mesma descrição): a soma
+  // delas fecha uma parcela ou o contrato inteiro. O caso recorrente é o BV
+  // Viva, em que a parcela sai em duas RPs — uma ao fornecedor, outra à Viva.
+  let pagamentoConjunto: null | {
+    somaRps: number
+    alvo: number
+    ehParcela: boolean
+    irmas: RpIrma[]
+  } = null
   const docsBase = (() => {
     const semComprovantes = docs.filter((d) => d.tipo_documento !== TIPO_REEMBOLSO)
     const base1 = semComprovantes.length > 0 ? semComprovantes : docs
@@ -586,19 +695,48 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
       const todasParcelas = docsBase.flatMap((d) => d.valores_pagamentos.map((v) => Number(v) || 0))
       const parcela = todasParcelas.find((v) => Math.abs(v - reqValor) <= VALUE_TOLERANCE)
       const parcelasAcima = todasParcelas.filter((v) => v > reqValor + VALUE_TOLERANCE)
+      const irmas = (group.irmas ?? []).filter((i) => (Number(i.valor) || 0) > 0)
+      const somaComIrmas = irmas.reduce((acc, i) => acc + (Number(i.valor) || 0), reqValor)
+      // Alvos do pagamento dividido: o contrato inteiro ou qualquer parcela.
+      const alvoConjunto =
+        irmas.length > 0
+          ? [soma, ...todasParcelas].find((v) => v > 0 && Math.abs(v - somaComIrmas) <= VALUE_TOLERANCE)
+          : undefined
+      // Saldo do contrato: o que resta depois das parcelas já declaradas.
+      const saldoDeclarado = soma - todasParcelas.reduce((a, v) => a + v, 0)
+      const ehSaldo =
+        todasParcelas.length > 0 && Math.abs(saldoDeclarado - reqValor) <= VALUE_TOLERANCE
+
       if (parcela !== undefined) {
         partialPayment = { somaContratos: soma, parcelaIdentificada: parcela }
+      } else if (alvoConjunto !== undefined) {
+        // Duas ou mais RPs do mesmo fundo/descrição fecham a parcela (ou o
+        // contrato): pagamento completo, dividido — não é pagamento parcial.
+        pagamentoConjunto = {
+          somaRps: somaComIrmas,
+          alvo: alvoConjunto,
+          ehParcela: Math.abs(alvoConjunto - soma) > VALUE_TOLERANCE,
+          irmas,
+        }
       } else if (parcelasAcima.length > 0) {
         // RP paga menos que uma parcela prevista — cita a menor parcela acima
         // do valor (a que provavelmente está sendo paga em partes).
-        pagamentoAbaixo = { somaContratos: soma, parcelaReferencia: Math.min(...parcelasAcima) }
-      } else if (todasParcelas.length === 0) {
-        // Documento sem parcelas declaradas: só dá para comparar com o total.
-        pagamentoAbaixo = { somaContratos: soma, parcelaReferencia: null }
+        pagamentoAbaixo = {
+          somaContratos: soma,
+          parcelaReferencia: Math.min(...parcelasAcima),
+          saldoAposParcelas: ehSaldo,
+        }
       } else {
-        motivos.push(
-          `Valor da requisição (${reqValor.toFixed(2)}) não corresponde à soma dos documentos (${soma.toFixed(2)}) nem a nenhuma parcela declarada`,
-        )
+        // RP abaixo do contrato sem nenhuma parcela de referência acima dela
+        // (documento sem parcelas, ou só com parcelas menores que a RP). Não
+        // reprova: pagar menos que o contrato é pagamento parcial por falta de
+        // saldo do fundo, ou o saldo de um contrato já com sinal pago — quem
+        // decide é quem vê o saldo, não o validador (RP 881517).
+        pagamentoAbaixo = {
+          somaContratos: soma,
+          parcelaReferencia: null,
+          saldoAposParcelas: ehSaldo,
+        }
       }
     } else {
       motivos.push(
@@ -637,12 +775,32 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   // checagem vivia dentro da Faixa 2 + "tem contrato", então uma RP de rotina
   // (R$ 800, uma NF) podia apontar para outra conta sem ninguém ver — que é
   // justamente a divergência que indica pagamento para a pessoa errada.
+  // Perna BV com o par identificado: a RP é paga à Viva, então favorecido,
+  // CPF/CNPJ e conta divergem do contrato por definição. O que a valida é o
+  // par — a soma com a(s) irmã(s) fecha a parcela. Vira ressalva, não reprova.
+  const bvComPar = pagamentoConjunto !== null && isPagamentoBvViva(group.descricao)
+  if (pagamentoConjunto) {
+    const { somaRps, alvo, ehParcela, irmas } = pagamentoConjunto
+    const lista = irmas
+      .map((i) => `RP ${i.requisicao_codigo} (R$ ${i.valor.toFixed(2)})`)
+      .join(' + ')
+    ressalvas.push(
+      `Pagamento dividido: esta RP (R$ ${reqValor.toFixed(2)}) + ${lista} = R$ ${somaRps.toFixed(2)}, ${ehParcela ? 'a parcela prevista no contrato' : 'o valor total do contrato'} de R$ ${alvo.toFixed(2)}`,
+    )
+  }
+  const ressalvaBv = 'BV Viva: RP paga à Viva, não ao fornecedor do contrato — favorecido/CNPJ/conta divergentes são esperados; o que confere o pagamento é o par de RPs que fecha a parcela'
+  const marcarBv = () => {
+    if (!ressalvas.includes(ressalvaBv)) ressalvas.push(ressalvaBv)
+  }
+
   const contasDoc = contasDosDocumentos(docs)
   const conferencia = conferirConta(req.conta, contasDoc)
   if (conferencia === 'diverge') {
-    motivos.push(
-      `Conta bancária dos documentos (${contasDoc.join(' / ')}) não confere com a requisição (${req.conta ?? ''})`,
-    )
+    if (bvComPar) marcarBv()
+    else
+      motivos.push(
+        `Conta bancária dos documentos (${contasDoc.join(' / ')}) não confere com a requisição (${req.conta ?? ''})`,
+      )
   } else if (contasDoc.length > 0 && !digitsOnly(req.conta)) {
     revisar.push('Documento com conta bancária, mas a requisição está sem conta para conferência')
   }
@@ -677,6 +835,8 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
           revisar.push(
             `Favorecido da RP (Req: '${req.favorecido ?? req.fornecedor ?? ''}') não consta nos documentos, mas há comprovante de pagamento anexo — confirme se a RP é um reembolso (tipo de pagamento não está marcado como reembolso)`,
           )
+        } else if (bvComPar) {
+          marcarBv()
         } else {
           motivos.push(
             `Favorecido da requisição não confere com nenhum documento (Req: '${req.favorecido ?? req.fornecedor ?? ''}' / '${req.cpf_cnpj ?? ''}')`,
@@ -690,7 +850,9 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
     if (!reqCnpj) {
       motivos.push('CPF/CNPJ da requisição ausente — obrigatório acima de R$ 10.000')
     } else if (!matchCnpj) {
-      motivos.push(`CPF/CNPJ da requisição não confere com nenhum documento (Req: ${req.cpf_cnpj ?? ''})`)
+      if (bvComPar) marcarBv()
+      else
+        motivos.push(`CPF/CNPJ da requisição não confere com nenhum documento (Req: ${req.cpf_cnpj ?? ''})`)
     }
 
     const temContrato = docs.some((d) => d.tipo_documento === TIPO_CONTRATO)
@@ -774,7 +936,9 @@ export function analisarRequisicao(group: RequisitionGroup): ValidationResult {
   const referenciaAbaixo = pagamentoAbaixo
     ? pagamentoAbaixo.parcelaReferencia !== null
       ? `abaixo da parcela prevista em contrato de R$ ${pagamentoAbaixo.parcelaReferencia.toFixed(2)}`
-      : `abaixo do valor do contrato de R$ ${pagamentoAbaixo.somaContratos.toFixed(2)} (sem parcelas declaradas no documento)`
+      : pagamentoAbaixo.saldoAposParcelas
+        ? `abaixo do valor do contrato de R$ ${pagamentoAbaixo.somaContratos.toFixed(2)} e corresponde ao saldo depois das parcelas declaradas no documento`
+        : `abaixo do valor do contrato de R$ ${pagamentoAbaixo.somaContratos.toFixed(2)}`
     : null
   const motivoSaldo = partialPayment
     ? `Pagamento parcial: parcela R$ ${partialPayment.parcelaIdentificada.toFixed(2)} de contrato R$ ${partialPayment.somaContratos.toFixed(2)}. Confirme manualmente que o saldo do contrato comporta esta requisição.`
