@@ -943,7 +943,7 @@ function AtracaoForm({
     const sel = bands.find((b) => b.id === bandId);
     return bandMode === "existing" && sel
       ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+          id: sel.id, name: sel.name, nome_artistico: sel.nome_artistico, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
           banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
         }
       : bandCadastroToInput(band);
@@ -990,7 +990,7 @@ function AtracaoForm({
       </div>
       {bandMode === "existing" ? (
         <SearchSelect
-          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+          items={bands.map((b) => ({ id: b.id, label: b.nome_artistico || b.name, sub: b.nome_artistico ? b.name : b.cnpj_cpf }))}
           value={bandId}
           onChange={setBandId}
           placeholder="Buscar e selecionar a atração/artista…"
@@ -1200,7 +1200,7 @@ function FornecedorForm({
     const sel = bands.find((b) => b.id === bandId);
     return bandMode === "existing" && sel
       ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+          id: sel.id, name: sel.name, nome_artistico: sel.nome_artistico, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
           banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
         }
       : bandCadastroToInput(band);

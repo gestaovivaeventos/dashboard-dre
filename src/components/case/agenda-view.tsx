@@ -146,10 +146,11 @@ function CompactCard({ c, onOpen }: { c: AgendaContract; onOpen: () => void }) {
       className={`flex w-full flex-col gap-1.5 rounded-lg border border-border border-l-4 ${color.border} bg-surface-1 p-3 text-left transition-colors hover:bg-surface-2/50`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-medium text-ink-muted">NP {c.contract_number}</span>
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${color.pill}`}>{STATUS_LABEL[c.status]}</span>
+        <span className="text-[11px] text-ink-muted">NP {c.contract_number}</span>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${color.pill}`}>{STATUS_LABEL[c.status]}</span>
       </div>
-      <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-ink-primary" title={c.event_name ?? undefined}>
+      {/* Único destaque do card: o nome do evento. */}
+      <h3 className="line-clamp-2 text-sm font-bold leading-snug text-ink-primary" title={c.event_name ?? undefined}>
         {c.event_name || c.client_name}
       </h3>
       <div className="flex items-center gap-1.5 text-xs text-ink-secondary">
@@ -161,7 +162,7 @@ function CompactCard({ c, onOpen }: { c: AgendaContract; onOpen: () => void }) {
         {atracoes}
       </div>
       <div className="mt-1 flex items-center justify-between border-t border-border pt-1.5">
-        <span className="text-xs font-semibold tabular-nums text-ink-primary">{brl(c.valor_total)}</span>
+        <span className="text-xs tabular-nums text-ink-secondary">{brl(c.valor_total)}</span>
         <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
           <span className={`inline-block h-2 w-2 rounded-full ${pag.dot}`} /> {pag.label}
         </span>

@@ -31,6 +31,8 @@ export interface CaseClientInput {
 export interface CaseBandInput {
   id?: string | null;
   name: string;
+  /** Nome artístico da atração — o que aparece na agenda; a razão social vai ao Omie. */
+  nome_artistico: string | null;
   cnpj_cpf: string | null;
   pessoa_fisica: boolean;
   email: string | null;
@@ -208,6 +210,7 @@ export interface CaseClientRow {
 export interface CaseBandRow {
   id: string;
   name: string;
+  nome_artistico: string | null;
   cnpj_cpf: string | null;
   pessoa_fisica: boolean;
   email: string | null;
