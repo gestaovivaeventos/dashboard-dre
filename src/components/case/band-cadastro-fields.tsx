@@ -67,6 +67,15 @@ export function bandCadastroToInput(b: BandCadastro, id?: string | null): CaseBa
   };
 }
 
+/** Do que foi lido, só o que o cadastro ainda não tem — nunca sobrescreve dado salvo. */
+export function missingFromCadastro(atual: BandCadastro, lido: Partial<BandCadastro>): Partial<BandCadastro> {
+  const out: Partial<BandCadastro> = {};
+  for (const [k, v] of Object.entries(lido) as Array<[keyof BandCadastro, string | undefined]>) {
+    if (v && !String(atual[k] ?? "").trim()) Object.assign(out, { [k]: v });
+  }
+  return out;
+}
+
 /** Campos do cadastro lidos do contrato da atração — só os que vieram preenchidos. */
 export function artistOcrToBandPatch(d: ArtistOcrResult): Partial<BandCadastro> {
   const patch: Partial<BandCadastro> = {};

@@ -51,6 +51,9 @@ export interface CaseParcelaInput {
   valor: number;
 }
 
+/** Modalidade do registro: contrato de show vendido ou comissão (BV) do artista. */
+export type CaseContractKind = "show" | "bv_artistico";
+
 export type CaseTipoEvento = "aberto" | "fechado" | null;
 
 /** Campos do modelo CASE Shows que não vinham do cadastro (checkboxes/testemunhas). */

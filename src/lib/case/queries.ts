@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
+import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractKind, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -13,6 +13,8 @@ async function getDb(): Promise<DB> {
 export interface ContractListRow {
   id: string;
   contract_number: number;
+  /** 'show' = contrato de venda; 'bv_artistico' = comissão recebida do artista. */
+  kind: CaseContractKind;
   event_name: string | null;
   event_date: string | null;
   client_name: string;
@@ -34,7 +36,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
   const { data } = await db
     .from("case_contracts")
     .select(
-      `id, contract_number, event_name, event_date, valor_atracao_cliente, valor_rider,
+      `id, contract_number, kind, event_name, event_date, valor_atracao_cliente, valor_rider,
        valor_camarim, valor_extras, valor_custodia, valor_servicos, status, created_at, attachment_path,
        sale_contract_path, sign_url,
        case_clients(name), case_bands(name), case_titles(leg, status)`,
@@ -45,6 +47,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
   return ((data ?? []) as any[]).map((c) => ({
     id: c.id,
     contract_number: c.contract_number,
+    kind: (c.kind ?? "show") as CaseContractKind,
     event_name: c.event_name,
     event_date: c.event_date,
     client_name: c.case_clients?.name ?? "—",
@@ -708,5 +711,85 @@ export async function getDashboardData(): Promise<DashboardData> {
     recebido,
     statusCount,
     projetos,
+  };
+}
+
+
+export interface BvArtisticoDetail {
+  id: string;
+  contract_number: number;
+  status: CaseContractStatus;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  event_name: string | null;
+  event_date: string | null;
+  valor_comissao: number;
+  receber_schedule: Array<{ vencimento: string; valor: number }>;
+  attachment_path: string | null;
+  observacao: string | null;
+  created_at: string;
+  titles: ContractTitleRow[];
+}
+
+/**
+ * Detalhe do BV artístico. Query própria (e não `getContractDetail`) porque BV
+ * não tem cliente, atrações nem fornecedores — o detalhe do show exige tudo isso.
+ */
+export async function getBvDetail(id: string): Promise<BvArtisticoDetail | null> {
+  const db = await getDb();
+  const { data: c } = await db
+    .from("case_contracts")
+    .select(
+      `id, contract_number, kind, status, event_name, event_date, valor_servicos, receber_schedule,
+       attachment_path, observacao, created_at, band_id, case_bands(name, cnpj_cpf)`,
+    )
+    .eq("id", id)
+    .maybeSingle();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cc = c as any;
+  if (!cc || cc.kind !== "bv_artistico") return null;
+
+  const { data: titles } = await db
+    .from("case_titles")
+    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em, atracao_id, fornecedor_id, launch_error")
+    .eq("contract_id", id)
+    .order("parcela_numero");
+
+  return {
+    id: cc.id,
+    contract_number: cc.contract_number,
+    status: cc.status,
+    band_id: cc.band_id,
+    band_name: cc.case_bands?.name ?? "—",
+    band_cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null,
+    event_name: cc.event_name,
+    event_date: cc.event_date,
+    valor_comissao: Number(cc.valor_servicos),
+    receber_schedule: (Array.isArray(cc.receber_schedule) ? cc.receber_schedule : []) as Array<{ vencimento: string; valor: number }>,
+    attachment_path: cc.attachment_path,
+    observacao: cc.observacao,
+    created_at: cc.created_at,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    titles: ((titles ?? []) as any[]).map((t) => ({
+      id: t.id,
+      leg: t.leg,
+      title_item: t.title_item,
+      parcela_numero: t.parcela_numero,
+      parcela_total: t.parcela_total,
+      vencimento: t.vencimento,
+      valor: Number(t.valor),
+      status: t.status,
+      omie_codigo: t.omie_codigo,
+      pago: Boolean(t.pago),
+      omie_status: t.omie_status ?? null,
+      pago_em: t.pago_em ?? null,
+      atracao_id: t.atracao_id ?? null,
+      atracao_nome: null,
+      fornecedor_id: t.fornecedor_id ?? null,
+      fornecedor_nome: null,
+      fornecedor_tipo: null,
+      launch_error: t.launch_error ?? null,
+    })) as ContractTitleRow[],
   };
 }
