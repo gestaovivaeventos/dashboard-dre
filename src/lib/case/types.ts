@@ -3,6 +3,7 @@
 export type CaseLegKind = "pagar_custodia" | "receber_custodia" | "receber_servicos";
 export type CaseContractStatus =
   | "rascunho"
+  | "aguardando_aprovacao"
   | "aguardando_assinatura"
   | "assinado"
   | "lancado"

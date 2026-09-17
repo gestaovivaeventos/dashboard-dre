@@ -7,13 +7,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCaseUser } from "@/lib/case/auth";
 import { CASE_COMPANY_ID } from "@/lib/case/constants";
-import { CONTRATADO_SIGNER } from "@/lib/case/contract-config";
+import { CONTRATADO_SIGNER, isCaseContractApprover } from "@/lib/case/contract-config";
+import { sendApprovalRequestedEmail, sendContractReturnedEmail, type ApprovalEmailContract } from "@/lib/case/approval-email";
 import { buildContractPdf, type ContractPdfData } from "@/lib/case/contract-pdf";
 import { clicksignEnabled, createSignatureRequest, type ClickSignSigner } from "@/lib/case/clicksign";
 import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew, pushBandToOmie } from "@/lib/case/resolve-cadastros";
 import { loadContractForAtracao, recomputeContractTitles, type ContractForAtracao } from "@/lib/case/titles";
 import { validarSchedule } from "@/lib/case/parcelas";
+import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandInput, CaseClientInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
@@ -116,7 +118,7 @@ export async function salvarCliente(
     // Edição — preserva o valor do artista e a verba já informados na aba Atração.
     const { data: cur } = await db
       .from("case_contracts")
-      .select("valor_artista, valor_rider_camarim, signed_at")
+      .select("valor_artista, valor_rider_camarim, signed_at, status")
       .eq("id", input.contract_id)
       .single();
     if (!cur) return { error: "Contrato não encontrado." };
@@ -134,7 +136,13 @@ export async function salvarCliente(
     const verba = Number(cur.valor_rider_camarim) || 0;
     const { error } = await db
       .from("case_contracts")
-      .update({ client_id: clientId, ...(bandId ? { band_id: bandId } : {}), ...clienteFields(input, valorArtista, verba) })
+      .update({
+        client_id: clientId,
+        ...(bandId ? { band_id: bandId } : {}),
+        ...clienteFields(input, valorArtista, verba),
+        // O aprovador aprovaria dados que já não são os do contrato: volta a rascunho.
+        ...(cur.status === "aguardando_aprovacao" ? { status: "rascunho", approval_requested_at: null } : {}),
+      })
       .eq("id", input.contract_id);
     if (error) return { error: `Falha ao salvar: ${error.message}` };
 
@@ -197,20 +205,56 @@ export async function salvarCliente(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// ABA CLIENTE — gerar PDF e enviar para assinatura (cliente + contratado + testemunha)
+// ABA CLIENTE — aprovação interna e envio para assinatura
+//
+// rascunho → aguardando_aprovacao (só o aprovador, CASE_CONTRACT_APPROVER_EMAIL)
+// → aguardando_assinatura (cliente + testemunha; o aprovador assina por último).
+// Nenhum caminho chega à ClickSign sem passar por aprovarContrato.
 // ────────────────────────────────────────────────────────────────────────────
-export async function gerarEnviarContrato(
-  contractId: string,
-): Promise<{ ok: true; status: string; signUrl?: string; warning?: string } | { error: string }> {
-  const ctx = await requireCaseUser();
-  const db = await getDb();
+type SignatureResult = { ok: true; status: string; signUrl?: string; warning?: string } | { error: string };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PreparedContract = { c: any; salePdf: Buffer; artistaNomes: string };
+
+function approvalEmailData(c: PreparedContract["c"]): ApprovalEmailContract {
+  return {
+    id: c.id,
+    contractNumber: Number(c.contract_number),
+    clientName: c.case_clients?.name ?? "—",
+    eventName: c.event_name ?? null,
+    eventDate: c.event_date ?? null,
+    totalValue: Number(c.valor_atracao_cliente) + Number(c.valor_rider) + Number(c.valor_camarim) + Number(c.valor_extras),
+  };
+}
+
+/**
+ * Valida o que a assinatura exige, regenera os títulos e o PDF (gravado em
+ * sale_contract_path para a revisão do aprovador). Roda na solicitação e de
+ * novo na aprovação, então o que vai à ClickSign reflete os dados atuais.
+ */
+async function prepareForSignature(db: DB, userId: string, contractId: string): Promise<PreparedContract | { error: string }> {
   const { data: c } = await db
     .from("case_contracts")
     .select("*, case_clients(name, cnpj_cpf, email, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep), case_bands(name)")
     .eq("id", contractId)
     .single();
   if (!c) return { error: "Contrato não encontrado." };
+  if (c.signed_at) return { error: "O contrato já foi assinado." };
+
+  // Cadastro incompleto é recusado pela ClickSign com erro técnico — barra antes
+  // de gerar títulos e PDF, dizendo o que cadastrar.
+  const signatureIssues = clientSignatureIssues({
+    email: c.case_clients?.email,
+    resp_legal: c.case_clients?.resp_legal,
+    cpf_resp_legal: c.case_clients?.cpf_resp_legal,
+  });
+  if (signatureIssues.length > 0) return { error: clientSignatureMessage(signatureIssues) };
+  if (c.testemunha_1_email?.trim() && !isPersonName(c.testemunha_1_nome)) {
+    return { error: `A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas). Corrija "${c.testemunha_1_nome ?? ""}" em "Editar dados".` };
+  }
+  if (c.testemunha_1_email?.trim() && c.testemunha_1_cpf?.trim() && !isValidCpf(c.testemunha_1_cpf)) {
+    return { error: `O CPF da testemunha ${c.testemunha_1_nome ?? ""} é inválido. Corrija em "Editar dados".` };
+  }
 
   // A assinatura dispara o lançamento automático no Omie — garante os títulos
   // ANTES de enviar. Sem parcela do cliente não há o que lançar: bloqueia aqui,
@@ -301,43 +345,31 @@ export async function gerarEnviarContrato(
     return { error: e instanceof Error ? e.message : "Falha ao gerar o PDF do contrato." };
   }
 
-  const salePath = `${ctx.id}/sale-${contractId}.pdf`;
+  const salePath = `${userId}/sale-${contractId}.pdf`;
   await db.storage.from(ATTACHMENT_BUCKET).upload(salePath, salePdf, { contentType: "application/pdf", upsert: true });
   await db.from("case_contracts").update({ sale_contract_path: salePath }).eq("id", contractId);
 
+  return { c, salePdf, artistaNomes };
+}
+
+/** Aprovação concedida: manda à ClickSign e registra quem aprovou. */
+async function approveAndSend(db: DB, userId: string, prepared: PreparedContract): Promise<SignatureResult> {
+  const { c, salePdf, artistaNomes } = prepared;
+  const client = c.case_clients;
+
   if (!clicksignEnabled()) {
-    return { ok: true, status: c.status as string, warning: "PDF gerado, mas a assinatura ClickSign não está configurada." };
-  }
-  if (!client?.email) {
-    return { ok: true, status: c.status as string, warning: "PDF gerado, mas o cliente não tem e-mail para envio da assinatura." };
+    return { error: "A assinatura ClickSign não está configurada — o contrato não foi enviado." };
   }
 
-  // Signatários: cliente + contratado (CS Agência) + testemunha 1 (se e-mail).
-  // Quem assina pelo cliente é o responsável legal (pessoa física) — o nome do
-  // cliente costuma ser o fundo/razão social e a ClickSign rejeita ("nome e sobrenome").
-  // Assinatura em ordem: o contratado (CS Agência) assina PRIMEIRO (grupo 1);
-  // só depois o ClickSign libera cliente + testemunha juntos (grupo 2).
-  const clienteSigner = client.resp_legal?.trim() || client.name;
+  // Ordem: cliente + testemunha assinam juntos (grupo 1); o contratado (CS
+  // Agência, que é o próprio aprovador) só é chamado depois (grupo 2).
   const signers: ClickSignSigner[] = [
-    { name: clienteSigner, email: client.email, cpf: client.cpf_resp_legal ?? client.cnpj_cpf, signAs: "contractor", group: 2 },
-    { name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor", group: 1 },
+    { name: client.resp_legal.trim(), email: client.email, cpf: client.cpf_resp_legal, signAs: "contractor", group: 1 },
   ];
   if (c.testemunha_1_email?.trim()) {
-    signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness", group: 2 });
+    signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness", group: 1 });
   }
-
-  // ClickSign exige nome E sobrenome de pessoa (sem números/símbolos) — valida
-  // antes de enviar para dar erro claro em português.
-  const nomeInvalido = (n: string | null | undefined) => {
-    const nome = (n ?? "").trim();
-    return nome.split(/\s+/).length < 2 || /[\d()\[\]\/\\@#$%&*]/.test(nome);
-  };
-  const invalidos = signers.filter((s) => nomeInvalido(s.name)).map((s) => s.name);
-  if (invalidos.length > 0) {
-    return {
-      error: `A assinatura exige nome e sobrenome de pessoa física (sem números ou siglas). Corrija: ${invalidos.join(", ")} — em "Editar dados", preencha o campo Responsável legal do cliente com o nome completo de quem assina.`,
-    };
-  }
+  signers.push({ name: CONTRATADO_SIGNER.name, email: CONTRATADO_SIGNER.email, cpf: CONTRATADO_SIGNER.cpf, signAs: "contractor", group: 2 });
 
   try {
     const sig = await createSignatureRequest(
@@ -346,6 +378,7 @@ export async function gerarEnviarContrato(
       signers,
       `Contrato de prestação de serviços artísticos — ${artistaNomes || c.case_bands?.name || c.event_name || `nº ${c.contract_number}`}. Por favor, assine.`,
     );
+    const now = new Date().toISOString();
     await db
       .from("case_contracts")
       .update({
@@ -354,22 +387,115 @@ export async function gerarEnviarContrato(
         clicksign_request_key: sig.requestKey,
         clicksign_status: "aguardando",
         sign_url: sig.signUrl,
-        sent_for_signature_at: new Date().toISOString(),
+        sent_for_signature_at: now,
+        approved_at: now,
+        approved_by: userId,
         status: "aguardando_assinatura",
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       })
-      .eq("id", contractId);
-    await db.from("case_history").insert({
-      contract_id: contractId,
-      user_id: ctx.id,
-      action: "enviado_assinatura",
-      comment: `Enviado para assinatura de ${signers.length} signatário(s).`,
-    });
-    revalidatePath(`/case/contratos/${contractId}`);
+      .eq("id", c.id);
+    await db.from("case_history").insert([
+      { contract_id: c.id, user_id: userId, action: "aprovado", comment: "Contrato aprovado." },
+      { contract_id: c.id, user_id: userId, action: "enviado_assinatura", comment: `Enviado para assinatura de ${signers.length} signatário(s) — o contratado assina por último.` },
+    ]);
+    revalidatePath(`/case/contratos/${c.id}`);
+    revalidatePath("/case/contratos");
     return { ok: true, status: "aguardando_assinatura", signUrl: sig.signUrl };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao enviar para assinatura." };
   }
+}
+
+/**
+ * Botão "Enviar para aprovação". Se quem clica já é o aprovador, aprova e envia
+ * direto (ele não precisa pedir aprovação a si mesmo).
+ */
+export async function enviarParaAprovacao(contractId: string): Promise<SignatureResult> {
+  const ctx = await requireCaseUser();
+  const db = await getDb();
+
+  const prepared = await prepareForSignature(db, ctx.id, contractId);
+  if ("error" in prepared) return prepared;
+
+  if (isCaseContractApprover(ctx.email)) return approveAndSend(db, ctx.id, prepared);
+
+  const now = new Date().toISOString();
+  const { error } = await db
+    .from("case_contracts")
+    .update({
+      status: "aguardando_aprovacao",
+      approval_requested_at: now,
+      approval_requested_by: ctx.id,
+      approved_at: null,
+      approved_by: null,
+      updated_at: now,
+    })
+    .eq("id", contractId);
+  if (error) return { error: `Falha ao enviar para aprovação: ${error.message}` };
+
+  await db.from("case_history").insert({
+    contract_id: contractId,
+    user_id: ctx.id,
+    action: "aprovacao_solicitada",
+    comment: "Enviado para aprovação antes da assinatura.",
+  });
+  await sendApprovalRequestedEmail(approvalEmailData(prepared.c), ctx.name || ctx.email);
+
+  revalidatePath(`/case/contratos/${contractId}`);
+  revalidatePath("/case/contratos");
+  return { ok: true, status: "aguardando_aprovacao" };
+}
+
+export async function aprovarContrato(contractId: string): Promise<SignatureResult> {
+  const ctx = await requireCaseUser();
+  if (!isCaseContractApprover(ctx.email)) return { error: "Só o aprovador dos contratos Case pode aprovar." };
+  const db = await getDb();
+
+  const { data: cur } = await db.from("case_contracts").select("status").eq("id", contractId).single();
+  if (!cur) return { error: "Contrato não encontrado." };
+  if (cur.status !== "aguardando_aprovacao") return { error: "Este contrato não está aguardando aprovação." };
+
+  const prepared = await prepareForSignature(db, ctx.id, contractId);
+  if ("error" in prepared) return prepared;
+  return approveAndSend(db, ctx.id, prepared);
+}
+
+export async function devolverContrato(contractId: string, motivo: string): Promise<{ ok: true } | { error: string }> {
+  const ctx = await requireCaseUser();
+  if (!isCaseContractApprover(ctx.email)) return { error: "Só o aprovador dos contratos Case pode devolver." };
+  const reason = motivo.trim();
+  if (!reason) return { error: "Informe o que precisa ser ajustado." };
+  const db = await getDb();
+
+  const { data: c } = await db
+    .from("case_contracts")
+    .select("id, contract_number, status, event_name, event_date, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, approval_requested_by, case_clients(name)")
+    .eq("id", contractId)
+    .single();
+  if (!c) return { error: "Contrato não encontrado." };
+  if (c.status !== "aguardando_aprovacao") return { error: "Este contrato não está aguardando aprovação." };
+
+  const { error } = await db
+    .from("case_contracts")
+    .update({ status: "rascunho", approval_requested_at: null, updated_at: new Date().toISOString() })
+    .eq("id", contractId);
+  if (error) return { error: `Falha ao devolver: ${error.message}` };
+
+  await db.from("case_history").insert({
+    contract_id: contractId,
+    user_id: ctx.id,
+    action: "devolvido",
+    comment: `Devolvido para ajuste: ${reason}`,
+  });
+
+  if (c.approval_requested_by) {
+    const { data: requester } = await db.from("users").select("email").eq("id", c.approval_requested_by).maybeSingle();
+    if (requester?.email) await sendContractReturnedEmail(approvalEmailData(c), requester.email, reason);
+  }
+
+  revalidatePath(`/case/contratos/${contractId}`);
+  revalidatePath("/case/contratos");
+  return { ok: true };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

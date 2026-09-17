@@ -6,10 +6,11 @@ import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, 
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
-import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
+import { salvarCliente, enviarParaAprovacao, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
 import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
+import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 import type { ContractEditData } from "@/lib/case/queries";
 
@@ -78,7 +79,7 @@ function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
   );
 }
 
-export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData }) {
+export function NovoContratoForm({ clients, bands, edit, isApprover = false }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData; isApprover?: boolean }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
@@ -98,18 +99,19 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   const [cCidadeEstado, setCCidadeEstado] = useState(initialClient?.cidade_estado ?? "");
   const [cCep, setCCep] = useState(initialClient?.cep ?? "");
 
-  // Na edição, trocar o cliente selecionado recarrega os campos do cadastro.
+  // Trocar o cliente selecionado recarrega os campos do cadastro (na criação,
+  // alimenta os campos de assinatura que aparecem se o cadastro estiver incompleto).
   function selectClient(id: string) {
     setClientId(id);
-    if (!edit) return;
     const c = clients.find((x) => x.id === id);
     if (!c) return;
-    setCName(c.name);
-    setCDoc(c.cnpj_cpf ?? "");
     setCEmail(c.email ?? "");
-    setCPhone(c.phone ?? "");
     setCRespLegal(c.resp_legal ?? "");
     setCCpfResp(c.cpf_resp_legal ?? "");
+    if (!edit) return;
+    setCName(c.name);
+    setCDoc(c.cnpj_cpf ?? "");
+    setCPhone(c.phone ?? "");
     setCEndereco(c.endereco ?? "");
     setCCidadeEstado(c.cidade_estado ?? "");
     setCCep(c.cep ?? "");
@@ -240,9 +242,10 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                 endereco: cEndereco.trim() || null, cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
               }
             : {
+                // Responsável, CPF e e-mail podem ter sido completados aqui (exigidos na assinatura).
                 id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
-                pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
-                resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
+                pessoa_fisica: selectedClient.pessoa_fisica, email: cEmail.trim() || null, phone: selectedClient.phone,
+                resp_legal: cRespLegal.trim() || null, cpf_resp_legal: cCpfResp.trim() || null,
                 endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
               }
           : {
@@ -281,6 +284,11 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     };
   }
 
+  // Avaliado sobre o cadastro original (não sobre o que está sendo digitado),
+  // senão o bloco sumiria no meio do preenchimento.
+  const selectedClientRow = clients.find((c) => c.id === clientId);
+  const selectedClientIncomplete = !!selectedClientRow && clientSignatureIssues(selectedClientRow).length > 0;
+
   function buildBandInput() {
     const selectedBand = bandsList.find((b) => b.id === bandId);
     return bandMode === "existing" && selectedBand
@@ -303,6 +311,12 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
     }
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
+    if (enviar) {
+      const issues = clientSignatureIssues({ email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp });
+      if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues)); }
+      if (test1Email.trim() && !isPersonName(test1Nome)) return setError("A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas).");
+      if (test1Email.trim() && test1Cpf.trim() && !isValidCpf(test1Cpf)) return setError("O CPF da testemunha é inválido.");
+    }
     if (!edit && bandMode === "new" && band.name.trim()) {
       const pixErr = validatePix(band.pixTipo || null, band.pix);
       if (pixErr) return setError(pixErr);
@@ -322,16 +336,16 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       }
 
       if (enviar) {
-        const g = await gerarEnviarContrato(contractId);
+        const g = await enviarParaAprovacao(contractId);
         if ("error" in g) {
           showToast({ title: "Contrato salvo, mas o envio falhou", description: g.error, variant: "destructive" });
           router.push(`/case/contratos/${contractId}`);
           return;
         }
-        if (g.warning) {
-          showToast({ title: "Contrato gerado", description: g.warning });
+        if (g.status === "aguardando_aprovacao") {
+          showToast({ title: "Enviado para aprovação", description: "O Pedro recebeu o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
         } else {
-          showToast({ title: "Contrato enviado para assinatura", description: "Os signatários receberão o link por e-mail.", variant: "success" });
+          showToast({ title: "Contrato aprovado e enviado para assinatura", description: "Cliente e testemunha recebem o link agora; o contratado assina por último.", variant: "success" });
         }
       }
       router.push(`/case/contratos/${contractId}`);
@@ -368,6 +382,18 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                   onChange={selectClient}
                   placeholder="Buscar e selecionar o cliente…"
                 />
+                {!edit && selectedClientIncomplete && (
+                  <div className="space-y-3 rounded-md border border-amber-500/50 bg-amber-500/5 p-3">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      O cadastro deste cliente está incompleto para a assinatura. Quem assina é o <strong>responsável legal</strong> (pessoa física) — preencha abaixo; o cadastro do cliente é atualizado ao salvar.
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Responsável legal — nome completo *" value={cRespLegal} onChange={setCRespLegal} />
+                      <Field label="CPF do responsável *" value={cCpfResp} onChange={setCCpfResp} />
+                      <Field label="E-mail (para assinatura) *" value={cEmail} onChange={setCEmail} />
+                    </div>
+                  </div>
+                )}
                 {edit && clientId && (
                   <div className="space-y-3 rounded-md border border-border/70 p-3">
                     <p className="text-xs text-ink-muted">Dados do cadastro do cliente — editar aqui atualiza o cadastro (ex.: completar o CNPJ/CPF exigido pelo Omie).</p>
@@ -549,7 +575,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar alterações" : "Salvar rascunho"}
         </button>
         <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar e enviar para assinatura" : "Gerar e enviar para assinatura"}
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {isApprover ? (edit ? "Salvar, aprovar e enviar para assinatura" : "Aprovar e enviar para assinatura") : edit ? "Salvar e enviar para aprovação" : "Enviar para aprovação"}
         </button>
       </div>
     </form>

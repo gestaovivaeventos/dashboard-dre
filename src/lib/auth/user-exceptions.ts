@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { BI_VALIDATION_EXTRA_EMAILS } from "@/lib/auth/bi-validation";
+import { CASE_CONTRACT_APPROVER_EMAIL } from "@/lib/case/contract-config";
 import { CTRL_FULL_VIEW_EMAILS } from "@/lib/ctrl/full-view";
 import {
   APPROVAL_ROUTING,
@@ -28,7 +29,7 @@ export interface UserException {
   /** Identificador estável da regra (chave de render). */
   key: string;
   /** Módulo onde a exceção age — vira o rótulo colorido no diálogo. */
-  scope: "Compras" | "Financeiro";
+  scope: "Compras" | "Financeiro" | "Case";
   title: string;
   detail: string;
   /** Arquivo que precisa ser editado para mudar a regra. */
@@ -52,6 +53,19 @@ function normalizeEmail(email: string | null | undefined): string {
 export function describeUserExceptions(user: UserRef): UserException[] {
   const email = normalizeEmail(user.email);
   const out: UserException[] = [];
+
+  // ── Case: aprovador único dos contratos (contract-config.ts) ──────────────
+  if (email === normalizeEmail(CASE_CONTRACT_APPROVER_EMAIL)) {
+    out.push({
+      key: "case-contract-approver",
+      scope: "Case",
+      title: "Aprovador dos contratos Case",
+      detail:
+        "É o único que aprova (ou devolve) contrato antes da ClickSign — recebe o aviso por e-mail e " +
+        "o contador no menu Contratos. Na assinatura entra por último, depois do cliente e da testemunha.",
+      source: "src/lib/case/contract-config.ts",
+    });
+  }
 
   // ── Compras: alçada de aprovação restrita (routing.ts) ────────────────────
   const restriction = APPROVER_SECTOR_RESTRICTIONS.find(
@@ -192,6 +206,11 @@ export function findOrphanExceptionRules(users: UserRef[]): OrphanExceptionRule[
       email,
       label: "Visão completa do módulo Compras",
     })),
+    {
+      key: "case-approver",
+      email: CASE_CONTRACT_APPROVER_EMAIL,
+      label: "Aprovador dos contratos Case",
+    },
     ...Array.from(BI_VALIDATION_EXTRA_EMAILS).map((email) => ({
       key: `bi:${email}`,
       email,

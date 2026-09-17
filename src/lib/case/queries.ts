@@ -63,6 +63,20 @@ export async function getContracts(): Promise<ContractListRow[]> {
   }));
 }
 
+/** Contratos parados na aprovação — pendência do aprovador (badge do menu). */
+export async function countContractsAwaitingApproval(): Promise<number> {
+  const db = await getDb();
+  const { count, error } = await db
+    .from("case_contracts")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "aguardando_aprovacao");
+  if (error) {
+    console.error("[case] falha ao contar contratos aguardando aprovação:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 export interface ContractTitleRow {
   id: string;
   leg: CaseLegKind;
@@ -112,6 +126,10 @@ export interface ContractDetail {
   bv_lancado_at: string | null;
   sent_for_signature_at: string | null;
   clicksign_status: string | null;
+  approval_requested_at: string | null;
+  /** Nome de quem enviou para aprovação (para o aprovador saber quem pediu). */
+  approval_requested_by_name: string | null;
+  approved_at: string | null;
   client: {
     id: string;
     name: string;
@@ -144,6 +162,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
        attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id,
+       approval_requested_at, approved_at, requester:users!case_contracts_approval_requested_by_fkey(name, email),
        case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
        case_bands(name, cnpj_cpf)`,
     )
@@ -227,6 +246,9 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     bv_lancado_at: cc.bv_lancado_at,
     sent_for_signature_at: cc.sent_for_signature_at,
     clicksign_status: cc.clicksign_status,
+    approval_requested_at: cc.approval_requested_at ?? null,
+    approval_requested_by_name: cc.requester?.name || cc.requester?.email || null,
+    approved_at: cc.approved_at ?? null,
     client: {
       id: cc.case_clients?.id ?? "",
       name: cc.case_clients?.name ?? "—",

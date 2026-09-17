@@ -14,6 +14,7 @@ const brl = (v: number) => `R$ ${fmt.format(v)}`;
 
 const STATUS_LABEL: Record<CaseContractStatus, string> = {
   rascunho: "Rascunho",
+  aguardando_aprovacao: "Aguardando aprovação",
   aguardando_assinatura: "Aguardando assinatura",
   assinado: "Assinado",
   lancado: "Lançado",
@@ -25,6 +26,7 @@ const STATUS_LABEL: Record<CaseContractStatus, string> = {
 // Cada status tem cor própria (borda esquerda do card + pill).
 const STATUS_COLOR: Record<CaseContractStatus, { border: string; pill: string; dot: string }> = {
   rascunho: { border: "border-l-slate-400", pill: "bg-slate-500/15 text-slate-600 dark:text-slate-300", dot: "bg-slate-400" },
+  aguardando_aprovacao: { border: "border-l-amber-500", pill: "bg-amber-500/15 text-amber-700 dark:text-amber-300", dot: "bg-amber-500" },
   aguardando_assinatura: { border: "border-l-blue-500", pill: "bg-blue-500/15 text-blue-700 dark:text-blue-300", dot: "bg-blue-500" },
   assinado: { border: "border-l-violet-500", pill: "bg-violet-500/15 text-violet-700 dark:text-violet-300", dot: "bg-violet-500" },
   lancado: { border: "border-l-emerald-500", pill: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-500" },

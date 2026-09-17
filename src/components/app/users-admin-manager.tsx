@@ -981,7 +981,9 @@ function ExceptionsDialog({
                         className={
                           ex.scope === "Compras"
                             ? "border-violet-200 bg-violet-50 text-violet-700"
-                            : "border-blue-200 bg-blue-50 text-blue-700"
+                            : ex.scope === "Case"
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-blue-200 bg-blue-50 text-blue-700"
                         }
                       >
                         {ex.scope}

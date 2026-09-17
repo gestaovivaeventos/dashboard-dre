@@ -30,3 +30,15 @@ export const CONTRATADO_SIGNER = {
   email: process.env.CASE_CONTRATADO_SIGNER_EMAIL ?? "pedro@caseshows.com.br",
   cpf: process.env.CASE_CONTRATADO_SIGNER_CPF ?? "084.243.096-26",
 } as const;
+
+/**
+ * Único aprovador dos contratos Case (regra nominal, registrada em
+ * user-exceptions.ts). Nenhum contrato vai à ClickSign sem o aval dele; na
+ * assinatura ele entra por último, depois do cliente e da testemunha.
+ * Constante fixa (sem env) porque também é lida no client.
+ */
+export const CASE_CONTRACT_APPROVER_EMAIL = "pedro@caseshows.com.br";
+
+export function isCaseContractApprover(email: string | null | undefined): boolean {
+  return (email ?? "").trim().toLowerCase() === CASE_CONTRACT_APPROVER_EMAIL;
+}

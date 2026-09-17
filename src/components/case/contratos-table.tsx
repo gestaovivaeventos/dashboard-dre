@@ -13,6 +13,7 @@ const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFr
 const STATUS_STYLE: Record<string, string> = {
   lancado: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   assinado: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  aguardando_aprovacao: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   aguardando_assinatura: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
   parcial: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   erro: "bg-red-500/15 text-red-700 dark:text-red-300",
@@ -23,6 +24,7 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   lancado: "Lançado",
   assinado: "Assinado",
+  aguardando_aprovacao: "Aguardando aprovação",
   aguardando_assinatura: "Aguardando assinatura",
   parcial: "Parcial",
   erro: "Erro",
