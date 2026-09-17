@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown, ClipboardPaste, Wand2 } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, enviarParaAprovacao, salvarAtracao } from "@/lib/case/actions/stages";
-import { extractArtistContract } from "@/lib/case/actions/ocr";
+import { extractArtistContract, extractContractFromText } from "@/lib/case/actions/ocr";
 import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
 import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
@@ -174,6 +174,12 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
   const [vArtista, setVArtista] = useState("");
   const [pagarArtista, setPagarArtista] = useState<ParcelaRow[]>([emptyParcela()]);
 
+  // Pedido colado (WhatsApp) — preenche o formulário como sugestão.
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefingText, setBriefingText] = useState("");
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingMsg, setBriefingMsg] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
@@ -224,6 +230,86 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
       return;
     }
     setOcrMsg("Contrato lido — revise os dados da atração.");
+  }
+
+  /**
+   * Lê o texto do pedido e preenche o que ainda está vazio — nunca por cima do
+   * que já foi digitado, porque a leitura é sugestão e o usuário é quem decide.
+   */
+  async function aplicarBriefing() {
+    setError(null);
+    setBriefingMsg(null);
+    setBriefingLoading(true);
+    const res = await extractContractFromText(briefingText);
+    setBriefingLoading(false);
+    if ("error" in res) return setError(res.error);
+    const d = res.data;
+    const preenchidos: string[] = [];
+    const fill = (label: string, atual: string, set: (v: string) => void, valor: string | null | undefined) => {
+      if (!valor || atual.trim()) return;
+      set(valor);
+      preenchidos.push(label);
+    };
+
+    // Cliente: cadastro existente ganha do texto (evita duplicar cadastro).
+    const doc = (d.clienteDoc ?? "").replace(/\D/g, "");
+    const nome = (d.clienteNome ?? "").trim().toLowerCase();
+    const jaCadastrado =
+      (doc && clients.find((c) => (c.cnpj_cpf ?? "").replace(/\D/g, "") === doc)) ||
+      (nome && clients.find((c) => c.name.trim().toLowerCase() === nome)) ||
+      null;
+    if (jaCadastrado && !clientId) {
+      setClientMode("existing");
+      selectClient(jaCadastrado.id);
+      preenchidos.push(`cliente (${jaCadastrado.name}, já cadastrado)`);
+    } else if (!jaCadastrado && !clientId && d.clienteNome) {
+      setClientMode("new");
+      fill("cliente", cName, setCName, d.clienteNome);
+      fill("CNPJ/CPF", cDoc, setCDoc, d.clienteDoc);
+    }
+    fill("responsável", cRespLegal, setCRespLegal, d.clienteResponsavel);
+    fill("CPF do responsável", cCpfResp, setCCpfResp, d.clienteCpfResponsavel);
+    fill("e-mail", cEmail, setCEmail, d.clienteEmail);
+    fill("telefone", cPhone, setCPhone, d.clienteTelefone);
+    fill("cidade do cliente", cCidadeEstado, setCCidadeEstado, d.clienteCidadeEstado);
+
+    fill("evento", eventName, setEventName, d.eventoNome);
+    fill("atração", atracaoNome, setAtracaoNome, d.atracaoNome);
+    fill("data", eventDate, setEventDate, d.dataEvento);
+    fill("horário", showTime, setShowTime, d.horario);
+    fill("duração", showDuration, setShowDuration, d.duracao);
+    fill("passagem de som", passagemSom, setPassagemSom, d.passagemSom);
+    fill("local", localName, setLocalName, d.localNome);
+    fill("endereço", localAddress, setLocalAddress, d.localEndereco);
+    fill("cidade", localCity, setLocalCity, d.localCidade);
+    fill("CEP", localCep, setLocalCep, d.localCep);
+    fill("cortesias", cortesias, setCortesias, d.cortesias);
+    fill("observação", observacao, setObservacao, d.observacao);
+    if (d.tipoEvento && !tipoEvento) {
+      setTipoEvento(d.tipoEvento);
+      preenchidos.push("tipo de evento");
+    }
+    if (d.valorCobradoCliente != null && d.valorCobradoCliente > 0 && !vAtracao.trim()) {
+      setVAtracao(brlFromNumber(d.valorCobradoCliente));
+      preenchidos.push("valor");
+    }
+    const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
+    const parcelasVazias = receberCliente.every((r) => !r.vencimento && !parseBRL(r.valorStr));
+    if (ps.length && parcelasVazias) {
+      setReceberCliente(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+      preenchidos.push(`${ps.length} parcela${ps.length > 1 ? "s" : ""}`);
+    }
+
+    if (preenchidos.length === 0) {
+      setBriefingMsg("Não achei nada novo nesse texto — os campos que ele traz já estavam preenchidos.");
+      return;
+    }
+    const soma = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    const alerta =
+      d.valorCobradoCliente != null && ps.length > 0 && Math.abs(soma - d.valorCobradoCliente) >= 0.01
+        ? " Atenção: as parcelas não somam o valor do contrato."
+        : "";
+    setBriefingMsg(`Preenchi: ${preenchidos.join(", ")}. Confira tudo antes de salvar.${alerta}`);
   }
 
   function buildClientInput(): Etapa1Input {
@@ -368,6 +454,45 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
           <TabBtn active={tab === "cliente"} done={valAtracao > 0} label="Contrato Cliente" onClick={() => setTab("cliente")} />
           <TabBtn active={tab === "atracao"} done={bandFilled} label="Contrato Atração" onClick={() => setTab("atracao")} />
         </div>
+      )}
+
+      {!edit && (
+        <section className="rounded-lg border border-dashed border-amber-500/50 bg-surface-1 p-4">
+          {!briefingOpen ? (
+            <button type="button" onClick={() => setBriefingOpen(true)} className="inline-flex items-center gap-2 text-sm font-medium text-amber-700 hover:underline dark:text-amber-400">
+              <ClipboardPaste className="h-4 w-4" /> Colar o pedido (WhatsApp) e preencher automaticamente
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-ink-primary">Pedido recebido</h2>
+                <button type="button" onClick={() => { setBriefingOpen(false); setBriefingMsg(null); }} className="text-xs text-ink-muted hover:underline">Fechar</button>
+              </div>
+              <p className="text-xs text-ink-muted">Cole a mensagem como ela chegou. O sistema preenche os campos vazios como sugestão — nada é salvo e o que você já digitou não é sobrescrito.</p>
+              <textarea
+                value={briefingText}
+                onChange={(e) => setBriefingText(e.target.value)}
+                rows={5}
+                placeholder="Ex.: Boa tarde! Queremos fechar a Ousa Samba pra formatura de Medicina da FAGOC, dia 14/11, no Espaço Parthenon em Ubá, das 23h às 2h. Valor 12 mil, metade na assinatura e o resto até uma semana antes."
+                className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={aplicarBriefing}
+                  disabled={briefingLoading || briefingText.trim().length < 15}
+                  className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {briefingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} Preencher campos
+                </button>
+                {briefingText.trim() && (
+                  <button type="button" onClick={() => { setBriefingText(""); setBriefingMsg(null); }} className="text-xs text-ink-muted hover:underline">Limpar texto</button>
+                )}
+              </div>
+              {briefingMsg && <p className="text-xs text-emerald-600 dark:text-emerald-400">{briefingMsg}</p>}
+            </div>
+          )}
+        </section>
       )}
 
       {edit || tab === "cliente" ? (

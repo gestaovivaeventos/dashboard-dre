@@ -469,3 +469,209 @@ export async function extractArtistContract(
     },
   };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Texto colado (pedido que chega por WhatsApp)
+// ────────────────────────────────────────────────────────────────────────────
+
+const BriefingSchema = z.object({
+  cliente_nome: z.string().nullable().describe("Quem contrata: comissão de formatura, fundo, empresa, prefeitura ou pessoa. Null se não encontrar."),
+  cliente_cnpj_cpf: z.string().nullable().describe("CNPJ ou CPF do contratante. Só números. Null se não encontrar."),
+  cliente_responsavel: z.string().nullable().describe("Nome da pessoa responsável pelo contratante. Null se não encontrar."),
+  cliente_cpf_responsavel: z.string().nullable().describe("CPF do responsável. Só números. Null se não encontrar."),
+  cliente_email: z.string().nullable().describe("E-mail de contato do contratante. Null se não encontrar."),
+  cliente_telefone: z.string().nullable().describe("Telefone/WhatsApp do contratante. Null se não encontrar."),
+  cliente_cidade_estado: z.string().nullable().describe("Cidade/UF do contratante, se diferente do local do evento. Null se não encontrar."),
+  evento_nome: z.string().nullable().describe("Nome do evento (ex.: 'Formatura Medicina 13 FAGOC', 'Baile de Máscaras'). Sem o nome da atração. Null se não encontrar."),
+  atracao_nome: z.string().nullable().describe("Nome da atração/artista contratada. Null se não encontrar."),
+  data_evento: z.string().nullable().describe("Data do evento em YYYY-MM-DD. Null se não encontrar."),
+  horario: z.string().nullable().describe("Horário da apresentação (ex.: '23:00' ou '01h às 03h'). Null se não encontrar."),
+  duracao: z.string().nullable().describe("Duração do show (ex.: '90 minutos'). Null se não encontrar."),
+  passagem_som: z.string().nullable().describe("Horário da passagem de som. Null se não encontrar."),
+  local_nome: z.string().nullable().describe("Nome da casa/espaço do evento. Null se não encontrar."),
+  local_endereco: z.string().nullable().describe("Endereço do local. Null se não encontrar."),
+  local_cidade: z.string().nullable().describe("Cidade/UF do evento. Null se não encontrar."),
+  local_cep: z.string().nullable().describe("CEP do local. Null se não encontrar."),
+  tipo_evento: z.enum(["aberto", "fechado"]).nullable().describe("'aberto' quando há venda de ingresso ao público; 'fechado' quando é evento privado/convidados. Null se o texto não disser."),
+  cortesias: z.string().nullable().describe("Cortesias combinadas (ex.: '10 cortesias'). Null se não encontrar."),
+  valor_cobrado_cliente: z.number().nullable().describe("Valor total cobrado DO CLIENTE pela atração, em reais. Null se não encontrar."),
+  parcelas_recebimento: z
+    .array(
+      z.object({
+        data: z.string().nullable().describe("Vencimento YYYY-MM-DD."),
+        valor: z.number().nullable().describe("Valor da parcela em reais."),
+      }),
+    )
+    .describe("Parcelas que o cliente vai pagar. Vazio se o texto não detalhar."),
+  observacao: z.string().nullable().describe("Combinados que não couberam nos outros campos (camarim, transporte, hospedagem, estrutura). Uma ou duas frases. Null se não houver."),
+});
+
+const BRIEFING_SCHEMA_HINT = JSON.stringify({
+  type: "object",
+  properties: {
+    cliente_nome: { type: ["string", "null"] },
+    cliente_cnpj_cpf: { type: ["string", "null"], description: "Só números" },
+    cliente_responsavel: { type: ["string", "null"] },
+    cliente_cpf_responsavel: { type: ["string", "null"], description: "Só números" },
+    cliente_email: { type: ["string", "null"] },
+    cliente_telefone: { type: ["string", "null"] },
+    cliente_cidade_estado: { type: ["string", "null"] },
+    evento_nome: { type: ["string", "null"], description: "Sem o nome da atração" },
+    atracao_nome: { type: ["string", "null"] },
+    data_evento: { type: ["string", "null"], description: "YYYY-MM-DD" },
+    horario: { type: ["string", "null"] },
+    duracao: { type: ["string", "null"] },
+    passagem_som: { type: ["string", "null"] },
+    local_nome: { type: ["string", "null"] },
+    local_endereco: { type: ["string", "null"] },
+    local_cidade: { type: ["string", "null"] },
+    local_cep: { type: ["string", "null"] },
+    tipo_evento: { type: ["string", "null"], enum: ["aberto", "fechado", null] },
+    cortesias: { type: ["string", "null"] },
+    valor_cobrado_cliente: { type: ["number", "null"], description: "Reais, decimal" },
+    parcelas_recebimento: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          data: { type: ["string", "null"], description: "YYYY-MM-DD" },
+          valor: { type: ["number", "null"] },
+        },
+      },
+    },
+    observacao: { type: ["string", "null"] },
+  },
+});
+
+export interface BriefingResult {
+  clienteNome: string | null;
+  clienteDoc: string | null;
+  clienteResponsavel: string | null;
+  clienteCpfResponsavel: string | null;
+  clienteEmail: string | null;
+  clienteTelefone: string | null;
+  clienteCidadeEstado: string | null;
+  eventoNome: string | null;
+  atracaoNome: string | null;
+  dataEvento: string | null;
+  horario: string | null;
+  duracao: string | null;
+  passagemSom: string | null;
+  localNome: string | null;
+  localEndereco: string | null;
+  localCidade: string | null;
+  localCep: string | null;
+  tipoEvento: "aberto" | "fechado" | null;
+  cortesias: string | null;
+  valorCobradoCliente: number | null;
+  parcelas: Array<{ data: string | null; valor: number | null }>;
+  observacao: string | null;
+}
+
+/** Regras de leitura de um pedido informal (mensagem de WhatsApp, e-mail, áudio transcrito). */
+function regrasBriefing(): string {
+  const hoje = new Date().toISOString().slice(0, 10);
+  return [
+    `Hoje é ${hoje}.`,
+    "COMO LER:",
+    "- O texto é informal, pode ter abreviação, gíria, emoji e informação fora de ordem. Extraia só o que estiver escrito; " +
+      "o que não estiver, devolva null. Não deduza valor, data ou nome que o texto não traz.",
+    "- Datas: devolva sempre YYYY-MM-DD. Sem o ano (\"dia 14/11\", \"sábado 23/03\"), use a PRÓXIMA ocorrência a partir de hoje. " +
+      "Dia da semana sozinho, sem data, é null.",
+    "- Valores: \"8k\", \"8 mil\", \"R$ 8.000,00\" e \"8000\" são 8000. \"1,5k\" é 1500. Ponto é milhar e vírgula é decimal.",
+    `- Parcela paga "na assinatura", "no ato", "à vista" ou "na reserva" (sem data no texto) usa a data ${amanhaISO()}. ` +
+      "Parcela descrita só em percentual, sem valor nem data que dê para calcular, fica fora da lista.",
+    "- O valor que interessa é o COBRADO DO CLIENTE pela atração. Se o texto também trouxer o cachê que a agência paga ao " +
+      "artista, ignore: não é esse campo.",
+    "- evento_nome é o evento (formatura, aniversário, festa da cidade); atracao_nome é quem se apresenta. Se vierem " +
+      "grudados (\"Formatura Med 13 - Ousa Samba\"), separe nos dois campos.",
+    "- Telefone e CPF/CNPJ: devolva só os números.",
+  ].join("\n");
+}
+
+/**
+ * Interpreta o pedido que chegou em texto (WhatsApp) e devolve sugestões para o
+ * formulário. Não grava nada — quem preenche é a tela, e o usuário revisa.
+ */
+export async function extractContractFromText(
+  texto: string,
+): Promise<{ data: BriefingResult } | { error: string }> {
+  await requireCaseUser();
+  const raw = (texto ?? "").trim();
+  if (raw.length < 15) return { error: "Cole o texto do pedido (pelo menos algumas palavras)." };
+  // Teto defensivo: mensagem colada é curta; texto gigante só queima token.
+  const conteudo = raw.slice(0, 8000);
+
+  const resolved = await resolveAiProvider({ role: "ocr" }).catch(() => null);
+  if (!resolved) {
+    return { error: "Leitura automática indisponível: configure o provedor de IA em Plataforma > IA." };
+  }
+
+  const instrucao =
+    "Leia o pedido abaixo, recebido de um cliente (normalmente por WhatsApp), e extraia os dados para abrir o " +
+    "contrato de uma atração.\n\n" +
+    regrasBriefing() +
+    "\n\nPEDIDO:\n" +
+    conteudo;
+  const system =
+    "Você organiza pedidos informais de contratação de shows para a CS Agência (Case Shows) e devolve os campos " +
+    "pedidos em JSON. Campo que o texto não traz é null — nunca invente nome, data ou valor.";
+
+  try {
+    let object: unknown;
+    if (resolved.providerName === "openai") {
+      const res = await generateObject({
+        model: resolved.provider(OCR_MODEL),
+        schema: BriefingSchema,
+        system,
+        prompt: instrucao,
+      });
+      await logResolvedUsage(resolved, "ocr", res.usage, { modelName: OCR_MODEL });
+      object = res.object;
+    } else {
+      const chat = await generateJsonViaChat(resolved, {
+        system,
+        prompt: instrucao,
+        schemaHint: BRIEFING_SCHEMA_HINT,
+        maxTokens: 8000,
+        temperature: 0,
+      });
+      await logResolvedUsage(resolved, "ocr", chat.usage);
+      object = chat.object;
+    }
+    const parsed = BriefingSchema.safeParse(object);
+    if (!parsed.success) {
+      return { error: "A IA devolveu um formato inesperado ao ler o texto. Tente novamente." };
+    }
+    const o = parsed.data;
+    return {
+      data: {
+        clienteNome: o.cliente_nome,
+        clienteDoc: o.cliente_cnpj_cpf,
+        clienteResponsavel: o.cliente_responsavel,
+        clienteCpfResponsavel: o.cliente_cpf_responsavel,
+        clienteEmail: o.cliente_email,
+        clienteTelefone: o.cliente_telefone,
+        clienteCidadeEstado: o.cliente_cidade_estado,
+        eventoNome: o.evento_nome,
+        atracaoNome: o.atracao_nome,
+        dataEvento: o.data_evento,
+        horario: o.horario,
+        duracao: o.duracao,
+        passagemSom: o.passagem_som,
+        localNome: o.local_nome,
+        localEndereco: o.local_endereco,
+        localCidade: o.local_cidade,
+        localCep: o.local_cep,
+        tipoEvento: o.tipo_evento,
+        cortesias: o.cortesias,
+        valorCobradoCliente: o.valor_cobrado_cliente,
+        parcelas: o.parcelas_recebimento ?? [],
+        observacao: o.observacao,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Não consegui interpretar o texto: ${msg}` };
+  }
+}
