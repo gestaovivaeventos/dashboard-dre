@@ -12,7 +12,6 @@ const LABEL_CLS = "block text-xs font-medium text-ink-secondary mb-1";
 export interface BandCadastro {
   // Dados do fornecedor
   name: string;
-  nomeArtistico: string;
   doc: string;
   email: string;
   phone: string;
@@ -28,14 +27,13 @@ export interface BandCadastro {
 }
 
 export function emptyBandCadastro(): BandCadastro {
-  return { name: "", nomeArtistico: "", doc: "", email: "", phone: "", titular: "", docTitular: "", banco: "", agencia: "", conta: "", pixTipo: "", pix: "" };
+  return { name: "", doc: "", email: "", phone: "", titular: "", docTitular: "", banco: "", agencia: "", conta: "", pixTipo: "", pix: "" };
 }
 
 /** Preenche o cadastro a partir de um cadastro existente (case_bands). */
 export function bandRowToCadastro(b: CaseBandRow): BandCadastro {
   return {
     name: b.name ?? "",
-    nomeArtistico: b.nome_artistico ?? "",
     doc: b.cnpj_cpf ?? "",
     email: b.email ?? "",
     phone: b.phone ?? "",
@@ -55,7 +53,6 @@ export function bandCadastroToInput(b: BandCadastro, id?: string | null): CaseBa
   return {
     ...(id ? { id } : {}),
     name: b.name.trim(),
-    nome_artistico: b.nomeArtistico.trim() || null,
     cnpj_cpf: b.doc.trim() || null,
     pessoa_fisica: onlyDigits(b.doc).length === 11,
     email: b.email.trim() || null,
@@ -74,7 +71,6 @@ export function bandCadastroToInput(b: BandCadastro, id?: string | null): CaseBa
 export function artistOcrToBandPatch(d: ArtistOcrResult): Partial<BandCadastro> {
   const patch: Partial<BandCadastro> = {};
   if (d.bandName) patch.name = d.bandName;
-  if (d.artistName) patch.nomeArtistico = d.artistName;
   if (d.bandDoc) patch.doc = d.bandDoc;
   if (d.email) patch.email = d.email;
   if (d.telefone) patch.phone = d.telefone;
@@ -110,7 +106,6 @@ export function BandCadastroFields({ value, onChange }: { value: BandCadastro; o
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Dados do fornecedor</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Nome / Razão social" value={value.name} onChange={(v) => onChange({ name: v })} />
-          <Field label="Nome da atração" value={value.nomeArtistico} onChange={(v) => onChange({ nomeArtistico: v })} placeholder="Nome artístico — aparece na agenda" />
           <Field label="CNPJ / CPF" value={value.doc} onChange={(v) => onChange({ doc: v })} />
           <Field label="E-mail" value={value.email} onChange={(v) => onChange({ email: v })} />
           <Field label="Telefone" value={value.phone} onChange={(v) => onChange({ phone: v })} />

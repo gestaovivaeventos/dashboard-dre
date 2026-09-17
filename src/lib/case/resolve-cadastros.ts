@@ -220,7 +220,6 @@ export async function resolveBand(
       .from("case_bands")
       .update({
         name: input.name,
-        nome_artistico: input.nome_artistico,
         cnpj_cpf: input.cnpj_cpf,
         pessoa_fisica: input.pessoa_fisica,
         email: input.email,
@@ -248,7 +247,6 @@ export async function resolveBand(
     .from("case_bands")
     .insert({
       name: input.name,
-      nome_artistico: input.nome_artistico,
       cnpj_cpf: input.cnpj_cpf,
       pessoa_fisica: input.pessoa_fisica,
       email: input.email,

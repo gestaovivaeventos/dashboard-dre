@@ -37,7 +37,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
       `id, contract_number, event_name, event_date, valor_atracao_cliente, valor_rider,
        valor_camarim, valor_extras, valor_custodia, valor_servicos, status, created_at, attachment_path,
        sale_contract_path, sign_url,
-       case_clients(name), case_bands(name, nome_artistico), case_titles(leg, status)`,
+       case_clients(name), case_bands(name), case_titles(leg, status)`,
     )
     .order("created_at", { ascending: false });
 
@@ -48,7 +48,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
     event_name: c.event_name,
     event_date: c.event_date,
     client_name: c.case_clients?.name ?? "—",
-    band_name: bandLabel(c.case_bands) ?? "—",
+    band_name: c.case_bands?.name ?? "—",
     valor_atracao_cliente: Number(c.valor_atracao_cliente),
     valor_custodia: Number(c.valor_custodia),
     valor_servicos: Number(c.valor_servicos),
@@ -164,7 +164,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
        attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id,
        approval_requested_at, approved_at, requester:users!case_contracts_approval_requested_by_fkey(name, email),
        case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
-       case_bands(name, nome_artistico, cnpj_cpf)`,
+       case_bands(name, cnpj_cpf)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -179,7 +179,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       .order("parcela_numero"),
     db
       .from("case_contract_atracoes")
-      .select("id, band_id, attachment_path, valor_artista, pagar_schedule, case_bands(name, nome_artistico, cnpj_cpf)")
+      .select("id, band_id, attachment_path, valor_artista, pagar_schedule, case_bands(name, cnpj_cpf)")
       .eq("contract_id", id)
       .order("created_at"),
     db
@@ -193,7 +193,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
   const atracoes: CaseAtracaoRow[] = ((atracoesData ?? []) as any[]).map((a) => ({
     id: a.id,
     band_id: a.band_id,
-    band_name: bandLabel(a.case_bands) ?? "—",
+    band_name: a.case_bands?.name ?? "—",
     band_cnpj_cpf: a.case_bands?.cnpj_cpf ?? null,
     attachment_path: a.attachment_path,
     valor_artista: Number(a.valor_artista),
@@ -297,6 +297,7 @@ export interface ContractEditData {
   client_id: string;
   signed_at: string | null;
   event_name: string | null;
+  atracao_nome: string | null;
   event_date: string | null;
   show_time: string | null;
   show_duration: string | null;
@@ -346,6 +347,7 @@ export async function getContractForEdit(id: string): Promise<ContractEditData |
     client_id: cc.client_id,
     signed_at: cc.signed_at,
     event_name: cc.event_name,
+    atracao_nome: cc.atracao_nome,
     event_date: cc.event_date,
     show_time: cc.show_time,
     show_duration: cc.show_duration,
@@ -395,23 +397,11 @@ export async function getClients(): Promise<CaseClientRow[]> {
 
 // Pool único de cadastros (espelho do Omie via syncCaseCadastrosFromOmie):
 // o mesmo cadastro serve como atração OU fornecedor — sem filtro por kind.
-/**
- * Na tela a atração aparece pelo nome artístico; a razão social fica para o
- * contrato e o Omie. Cadastro sem nome artístico (fornecedor, cadastro antigo)
- * cai na razão social.
- */
-type BandLabelSource = { name?: string | null; nome_artistico?: string | null } | null | undefined;
-
-function bandLabel(b: BandLabelSource): string | null {
-  const artistico = (b?.nome_artistico ?? "").trim();
-  return artistico || (b?.name ?? "").trim() || null;
-}
-
 export async function getBands(): Promise<CaseBandRow[]> {
   const db = await getDb();
   const { data } = await db
     .from("case_bands")
-    .select("id, name, nome_artistico, cnpj_cpf, pessoa_fisica, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, chave_pix_tipo")
+    .select("id, name, cnpj_cpf, pessoa_fisica, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, chave_pix_tipo")
     .order("name");
   return (data ?? []) as CaseBandRow[];
 }
@@ -486,13 +476,13 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
   const { data } = await db
     .from("case_contracts")
     .select(
-      `id, contract_number, status, event_name, event_date, show_time,
+      `id, contract_number, status, event_name, atracao_nome, event_date, show_time,
        local_name, local_city, local_address,
        valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_custodia, valor_servicos,
        attachment_path, sale_contract_path, sign_url,
        case_clients(name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, endereco, cidade_estado),
-       case_bands(name, nome_artistico),
-       case_contract_atracoes(case_bands(name, nome_artistico)),
+       case_bands(name),
+       case_contract_atracoes(case_bands(name)),
        case_titles(id, leg, title_item, valor, status, omie_codigo, pago, omie_status, vencimento)`,
     )
     .order("event_date", { ascending: true, nullsFirst: false });
@@ -532,8 +522,8 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
       }
     }
 
-    const atracoes = ((c.case_contract_atracoes ?? []) as Array<{ case_bands?: BandLabelSource }>)
-      .map((a) => bandLabel(a.case_bands))
+    const atracoes = ((c.case_contract_atracoes ?? []) as Array<{ case_bands?: { name?: string } }>)
+      .map((a) => a.case_bands?.name)
       .filter((n): n is string => Boolean(n));
 
     return {
@@ -554,8 +544,9 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
       client_resp_legal: c.case_clients?.resp_legal ?? null,
       client_endereco: c.case_clients?.endereco ?? null,
       client_cidade_estado: c.case_clients?.cidade_estado ?? null,
-      band_name: bandLabel(c.case_bands) ?? (atracoes[0] ?? "—"),
-      atracoes,
+      band_name: c.case_bands?.name ?? (atracoes[0] ?? "—"),
+      // Antes de cadastrar a atração, o nome digitado no contrato é o que existe.
+      atracoes: atracoes.length > 0 ? atracoes : c.atracao_nome ? [c.atracao_nome as string] : [],
       valor_total:
         Number(c.valor_atracao_cliente) + Number(c.valor_rider) + Number(c.valor_camarim) + Number(c.valor_extras),
       valor_custodia: Number(c.valor_custodia),

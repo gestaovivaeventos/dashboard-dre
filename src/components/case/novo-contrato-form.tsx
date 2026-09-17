@@ -119,6 +119,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
 
   // Evento / objeto
   const [eventName, setEventName] = useState(edit?.event_name ?? "");
+  const [atracaoNome, setAtracaoNome] = useState(edit?.atracao_nome ?? "");
   const [eventDate, setEventDate] = useState(edit?.event_date ?? "");
   const [showTime, setShowTime] = useState(edit?.show_time ?? "");
   const [showDuration, setShowDuration] = useState(edit?.show_duration ?? "");
@@ -211,6 +212,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
     if ("error" in res) return setError(res.error);
     const d = res.data;
     if (d.bandName && bandMode === "new") patchBand(artistOcrToBandPatch(d));
+    if (d.artistName && !atracaoNome.trim()) setAtracaoNome(d.artistName);
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
@@ -255,6 +257,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
               cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
             },
       event_name: eventName.trim() || null,
+      atracao_nome: atracaoNome.trim() || null,
       event_date: eventDate || null,
       show_time: showTime.trim() || null,
       show_duration: showDuration.trim() || null,
@@ -293,7 +296,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
     const selectedBand = bandsList.find((b) => b.id === bandId);
     return bandMode === "existing" && selectedBand
       ? {
-          id: selectedBand.id, name: selectedBand.name, nome_artistico: selectedBand.nome_artistico, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
+          id: selectedBand.id, name: selectedBand.name, cnpj_cpf: selectedBand.cnpj_cpf, pessoa_fisica: selectedBand.pessoa_fisica,
           email: selectedBand.email, phone: selectedBand.phone, banco: selectedBand.banco, agencia: selectedBand.agencia,
           conta_corrente: selectedBand.conta_corrente, titular_banco: selectedBand.titular_banco, doc_titular: selectedBand.doc_titular, chave_pix: selectedBand.chave_pix, chave_pix_tipo: selectedBand.chave_pix_tipo,
         }
@@ -435,6 +438,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
             <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Nome do evento" value={eventName} onChange={setEventName} />
+              <Field label="Nome da atração (vai no contrato)" value={atracaoNome} onChange={setAtracaoNome} />
               <div><label className={LABEL_CLS}>Data do evento</label><input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} /></div>
               <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
               <Field label="Duração" value={showDuration} onChange={setShowDuration} />
@@ -526,7 +530,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
             </div>
             {bandMode === "existing" ? (
               <SearchSelect
-                items={bandsList.map((b) => ({ id: b.id, label: b.nome_artistico || b.name, sub: b.nome_artistico ? b.name : b.cnpj_cpf }))}
+                items={bandsList.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
                 value={bandId}
                 onChange={setBandId}
                 placeholder="Buscar e selecionar a atração/artista…"

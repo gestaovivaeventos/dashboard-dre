@@ -31,8 +31,6 @@ export interface CaseClientInput {
 export interface CaseBandInput {
   id?: string | null;
   name: string;
-  /** Nome artístico da atração — o que aparece na agenda; a razão social vai ao Omie. */
-  nome_artistico: string | null;
   cnpj_cpf: string | null;
   pessoa_fisica: boolean;
   email: string | null;
@@ -117,6 +115,12 @@ export interface Etapa1Input extends CaseContractExtras {
   /** A atração/artista fica na aba Contrato Atração — opcional no salvamento do cliente. */
   band?: CaseBandInput | null;
   event_name: string | null;
+  /**
+   * Nome da atração como vai no contrato do cliente. Fica no contrato (e não no
+   * cadastro da banda) porque o contrato é enviado para assinatura antes de a
+   * atração ser cadastrada.
+   */
+  atracao_nome: string | null;
   event_date: string | null;
   show_time: string | null;
   show_duration: string | null;
@@ -210,7 +214,6 @@ export interface CaseClientRow {
 export interface CaseBandRow {
   id: string;
   name: string;
-  nome_artistico: string | null;
   cnpj_cpf: string | null;
   pessoa_fisica: boolean;
   email: string | null;

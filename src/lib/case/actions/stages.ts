@@ -36,6 +36,7 @@ function clienteFields(input: Etapa1Input, valorArtista: number, verbaRiderCamar
   const margem = valorAtracao - valorArtista - verbaRiderCamarim;
   return {
     event_name: input.event_name,
+    atracao_nome: input.atracao_nome,
     event_date: input.event_date,
     show_time: input.show_time,
     show_duration: input.show_duration,
@@ -302,7 +303,9 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
       cep: client?.cep ?? null,
     },
     objeto: {
-      artista: artistaNomes || c.case_bands?.name || c.event_name || "",
+      // O nome digitado no contrato manda: é o que o cliente assinou, e ele é
+      // preenchido antes de a atração virar cadastro.
+      artista: (c.atracao_nome ?? "").trim() || artistaNomes || c.case_bands?.name || c.event_name || "",
       dataEvento: c.event_date,
       horario: c.show_time,
       passagemSom: c.passagem_som,
@@ -376,7 +379,7 @@ async function approveAndSend(db: DB, userId: string, prepared: PreparedContract
       salePdf,
       `Contrato-Case-${c.contract_number}.pdf`,
       signers,
-      `Contrato de prestação de serviços artísticos — ${artistaNomes || c.case_bands?.name || c.event_name || `nº ${c.contract_number}`}. Por favor, assine.`,
+      `Contrato de prestação de serviços artísticos — ${(c.atracao_nome ?? "").trim() || artistaNomes || c.case_bands?.name || c.event_name || `nº ${c.contract_number}`}. Por favor, assine.`,
     );
     const now = new Date().toISOString();
     await db
