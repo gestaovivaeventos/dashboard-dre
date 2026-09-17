@@ -67,6 +67,11 @@ export function EditRequestModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Rateio: a divisão por setor (setor/valor) e o enquadramento (tipo, datas)
+  // definem o orçamento POR PARCELA — editar isso aqui exigiria refazer a alçada
+  // de cada parcela. Por segurança, no rateio o editar libera só título/descrição.
+  const isRateio = Boolean(req.is_rateio);
+
   const sectorOptions = withCurrent(sectors, req.sector_id, resolveNamed(req.ctrl_sectors ?? null));
   const typeOptions = withCurrent(
     expenseTypes,
@@ -77,6 +82,22 @@ export function EditRequestModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    // Rateio: só título e descrição (não mexe em orçamento/alçada por parcela).
+    if (isRateio) {
+      setSaving(true);
+      const res = await updateRequestByAdmin(req.id, {
+        title: title.trim(),
+        description: description.trim() || null,
+      });
+      setSaving(false);
+      if (res && "error" in res && res.error) {
+        setError(res.error);
+        return;
+      }
+      onSaved();
+      return;
+    }
 
     const amountNum = parseFloat(amount.replace(",", "."));
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
@@ -151,88 +172,99 @@ export function EditRequestModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Valor (R$)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
+          {isRateio ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30">
+              Requisição <strong>rateada</strong> — aqui dá para ajustar só o <strong>título</strong> e a{" "}
+              <strong>descrição</strong>. Setor, valor, tipo de despesa, vencimento e competência
+              definem o orçamento de cada setor da divisão; para mudá-los, rejeite e recrie a
+              requisição.
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Vencimento</label>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Valor (R$)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    required
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Vencimento</label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Setor</label>
-            <select
-              value={sectorId}
-              onChange={(e) => setSectorId(e.target.value)}
-              required
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Selecione…</option>
-              {sectorOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Setor</label>
+                <select
+                  value={sectorId}
+                  onChange={(e) => setSectorId(e.target.value)}
+                  required
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Selecione…</option>
+                  {sectorOptions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Tipo de despesa</label>
-            <select
-              value={expenseTypeId}
-              onChange={(e) => setExpenseTypeId(e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Sem categoria</option>
-              {typeOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Tipo de despesa</label>
+                <select
+                  value={expenseTypeId}
+                  onChange={(e) => setExpenseTypeId(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Sem categoria</option>
+                  {typeOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Mês de competência</label>
-              <select
-                value={refMonth}
-                onChange={(e) => setRefMonth(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">—</option>
-                {MONTHS.map((m, i) => (
-                  <option key={m} value={i + 1}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Ano de competência</label>
-              <input
-                type="number"
-                value={refYear}
-                onChange={(e) => setRefYear(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Mês de competência</label>
+                  <select
+                    value={refMonth}
+                    onChange={(e) => setRefMonth(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">—</option>
+                    {MONTHS.map((m, i) => (
+                      <option key={m} value={i + 1}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Ano de competência</label>
+                  <input
+                    type="number"
+                    value={refYear}
+                    onChange={(e) => setRefYear(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">

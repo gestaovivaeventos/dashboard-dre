@@ -40,10 +40,12 @@ export default async function RequisicoesPage() {
   // e marca como "Pago" os títulos já baixados).
   const canReconcile = hasCtrlRole(ctx, "contas_a_pagar", "csc", "diretor", "admin");
 
-  // Edição/exclusão administrativa (a princípio) só para admin. Carrega os
-  // cadastros de setor/tipo só nesse caso, para alimentar o form de edição.
+  // Exclusão continua só admin. A EDIÇÃO é liberada também ao Contas a Pagar
+  // (correção antes/durante a aprovação; muda de orçamento reroteia a alçada).
+  // Carrega setor/tipo para o form quando qualquer um dos dois pode editar.
   const isAdmin = hasCtrlRole(ctx, "admin");
-  const [sectorsRes, typesRes] = isAdmin
+  const canEdit = hasCtrlRole(ctx, "admin", "contas_a_pagar");
+  const [sectorsRes, typesRes] = canEdit
     ? await Promise.all([getSectors(), getExpenseTypes()])
     : [null, null];
   const sectors = (
@@ -144,6 +146,7 @@ export default async function RequisicoesPage() {
           requests={rows}
           showRequester={seesOthers}
           isAdmin={isAdmin}
+          canEdit={canEdit}
           canReconcile={canReconcile}
           sectors={sectors}
           expenseTypes={expenseTypes}

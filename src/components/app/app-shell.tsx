@@ -33,6 +33,8 @@ interface AppShellProps {
   canContratos?: boolean;
   /** Papel no módulo VB (Viva Bank) — grupo VB no menu; null sem concessão. */
   vbRole?: VbRole | null;
+  /** Módulo Caixa — grupo CAIXA no menu. Concessão OU admin. */
+  canCaixa?: boolean;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -72,6 +74,7 @@ export function AppShell({
   canViagensAprovar,
   canContratos,
   vbRole,
+  canCaixa,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -122,6 +125,12 @@ export function AppShell({
   }, [userRole, hasCtrl]);
 
   // Telas que entram no roteiro: as mesmas chaves que o menu montou para ele.
+  //
+  // Este objeto é montado campo a campo porque os nomes divergem (dreRole ←
+  // userRole), então não dá para repassar as props inteiras como o NavLinks
+  // faz. Ao adicionar a flag de um MÓDULO NOVO, inclua-a aqui e no array de
+  // dependências: as flags são opcionais em BuildInput, e esquecer uma compila
+  // sem erro e some com o item do menu em silêncio (aconteceu com o Caixa).
   const tourNavKeys = useMemo(
     () =>
       visibleNavKeys({
@@ -132,6 +141,7 @@ export function AppShell({
         canViagensAprovar,
         canContratos,
         vbRole,
+        canCaixa,
         segments,
         activeSegmentSlug,
         contractsOnly,
@@ -148,6 +158,7 @@ export function AppShell({
       canViagensAprovar,
       canContratos,
       vbRole,
+      canCaixa,
       segments,
       activeSegmentSlug,
       contractsOnly,
@@ -167,6 +178,7 @@ export function AppShell({
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
       vbRole={vbRole}
+      canCaixa={canCaixa}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
+import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractKind, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -13,6 +13,8 @@ async function getDb(): Promise<DB> {
 export interface ContractListRow {
   id: string;
   contract_number: number;
+  /** 'show' = contrato de venda; 'bv_artistico' = comissão recebida do artista. */
+  kind: CaseContractKind;
   event_name: string | null;
   event_date: string | null;
   client_name: string;
@@ -34,7 +36,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
   const { data } = await db
     .from("case_contracts")
     .select(
-      `id, contract_number, event_name, event_date, valor_atracao_cliente, valor_rider,
+      `id, contract_number, kind, event_name, event_date, valor_atracao_cliente, valor_rider,
        valor_camarim, valor_extras, valor_custodia, valor_servicos, status, created_at, attachment_path,
        sale_contract_path, sign_url,
        case_clients(name), case_bands(name), case_titles(leg, status)`,
@@ -45,6 +47,7 @@ export async function getContracts(): Promise<ContractListRow[]> {
   return ((data ?? []) as any[]).map((c) => ({
     id: c.id,
     contract_number: c.contract_number,
+    kind: (c.kind ?? "show") as CaseContractKind,
     event_name: c.event_name,
     event_date: c.event_date,
     client_name: c.case_clients?.name ?? "—",
@@ -61,6 +64,20 @@ export async function getContracts(): Promise<ContractListRow[]> {
     sign_url: c.sign_url,
     titles: (c.case_titles ?? []).map((t: { leg: CaseLegKind; status: string }) => ({ leg: t.leg, status: t.status })),
   }));
+}
+
+/** Contratos parados na aprovação — pendência do aprovador (badge do menu). */
+export async function countContractsAwaitingApproval(): Promise<number> {
+  const db = await getDb();
+  const { count, error } = await db
+    .from("case_contracts")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "aguardando_aprovacao");
+  if (error) {
+    console.error("[case] falha ao contar contratos aguardando aprovação:", error.message);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 export interface ContractTitleRow {
@@ -112,6 +129,10 @@ export interface ContractDetail {
   bv_lancado_at: string | null;
   sent_for_signature_at: string | null;
   clicksign_status: string | null;
+  approval_requested_at: string | null;
+  /** Nome de quem enviou para aprovação (para o aprovador saber quem pediu). */
+  approval_requested_by_name: string | null;
+  approved_at: string | null;
   client: {
     id: string;
     name: string;
@@ -144,6 +165,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
        attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id,
+       approval_requested_at, approved_at, requester:users!case_contracts_approval_requested_by_fkey(name, email),
        case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
        case_bands(name, cnpj_cpf)`,
     )
@@ -227,6 +249,9 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     bv_lancado_at: cc.bv_lancado_at,
     sent_for_signature_at: cc.sent_for_signature_at,
     clicksign_status: cc.clicksign_status,
+    approval_requested_at: cc.approval_requested_at ?? null,
+    approval_requested_by_name: cc.requester?.name || cc.requester?.email || null,
+    approved_at: cc.approved_at ?? null,
     client: {
       id: cc.case_clients?.id ?? "",
       name: cc.case_clients?.name ?? "—",
@@ -275,6 +300,7 @@ export interface ContractEditData {
   client_id: string;
   signed_at: string | null;
   event_name: string | null;
+  atracao_nome: string | null;
   event_date: string | null;
   show_time: string | null;
   show_duration: string | null;
@@ -324,6 +350,7 @@ export async function getContractForEdit(id: string): Promise<ContractEditData |
     client_id: cc.client_id,
     signed_at: cc.signed_at,
     event_name: cc.event_name,
+    atracao_nome: cc.atracao_nome,
     event_date: cc.event_date,
     show_time: cc.show_time,
     show_duration: cc.show_duration,
@@ -452,7 +479,7 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
   const { data } = await db
     .from("case_contracts")
     .select(
-      `id, contract_number, status, event_name, event_date, show_time,
+      `id, contract_number, status, event_name, atracao_nome, event_date, show_time,
        local_name, local_city, local_address,
        valor_atracao_cliente, valor_rider, valor_camarim, valor_extras, valor_custodia, valor_servicos,
        attachment_path, sale_contract_path, sign_url,
@@ -521,7 +548,8 @@ export async function getAgendaContracts(): Promise<AgendaContract[]> {
       client_endereco: c.case_clients?.endereco ?? null,
       client_cidade_estado: c.case_clients?.cidade_estado ?? null,
       band_name: c.case_bands?.name ?? (atracoes[0] ?? "—"),
-      atracoes,
+      // Antes de cadastrar a atração, o nome digitado no contrato é o que existe.
+      atracoes: atracoes.length > 0 ? atracoes : c.atracao_nome ? [c.atracao_nome as string] : [],
       valor_total:
         Number(c.valor_atracao_cliente) + Number(c.valor_rider) + Number(c.valor_camarim) + Number(c.valor_extras),
       valor_custodia: Number(c.valor_custodia),
@@ -683,5 +711,85 @@ export async function getDashboardData(): Promise<DashboardData> {
     recebido,
     statusCount,
     projetos,
+  };
+}
+
+
+export interface BvArtisticoDetail {
+  id: string;
+  contract_number: number;
+  status: CaseContractStatus;
+  band_id: string;
+  band_name: string;
+  band_cnpj_cpf: string | null;
+  event_name: string | null;
+  event_date: string | null;
+  valor_comissao: number;
+  receber_schedule: Array<{ vencimento: string; valor: number }>;
+  attachment_path: string | null;
+  observacao: string | null;
+  created_at: string;
+  titles: ContractTitleRow[];
+}
+
+/**
+ * Detalhe do BV artístico. Query própria (e não `getContractDetail`) porque BV
+ * não tem cliente, atrações nem fornecedores — o detalhe do show exige tudo isso.
+ */
+export async function getBvDetail(id: string): Promise<BvArtisticoDetail | null> {
+  const db = await getDb();
+  const { data: c } = await db
+    .from("case_contracts")
+    .select(
+      `id, contract_number, kind, status, event_name, event_date, valor_servicos, receber_schedule,
+       attachment_path, observacao, created_at, band_id, case_bands(name, cnpj_cpf)`,
+    )
+    .eq("id", id)
+    .maybeSingle();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cc = c as any;
+  if (!cc || cc.kind !== "bv_artistico") return null;
+
+  const { data: titles } = await db
+    .from("case_titles")
+    .select("id, leg, title_item, parcela_numero, parcela_total, vencimento, valor, status, omie_codigo, pago, omie_status, pago_em, atracao_id, fornecedor_id, launch_error")
+    .eq("contract_id", id)
+    .order("parcela_numero");
+
+  return {
+    id: cc.id,
+    contract_number: cc.contract_number,
+    status: cc.status,
+    band_id: cc.band_id,
+    band_name: cc.case_bands?.name ?? "—",
+    band_cnpj_cpf: cc.case_bands?.cnpj_cpf ?? null,
+    event_name: cc.event_name,
+    event_date: cc.event_date,
+    valor_comissao: Number(cc.valor_servicos),
+    receber_schedule: (Array.isArray(cc.receber_schedule) ? cc.receber_schedule : []) as Array<{ vencimento: string; valor: number }>,
+    attachment_path: cc.attachment_path,
+    observacao: cc.observacao,
+    created_at: cc.created_at,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    titles: ((titles ?? []) as any[]).map((t) => ({
+      id: t.id,
+      leg: t.leg,
+      title_item: t.title_item,
+      parcela_numero: t.parcela_numero,
+      parcela_total: t.parcela_total,
+      vencimento: t.vencimento,
+      valor: Number(t.valor),
+      status: t.status,
+      omie_codigo: t.omie_codigo,
+      pago: Boolean(t.pago),
+      omie_status: t.omie_status ?? null,
+      pago_em: t.pago_em ?? null,
+      atracao_id: t.atracao_id ?? null,
+      atracao_nome: null,
+      fornecedor_id: t.fornecedor_id ?? null,
+      fornecedor_nome: null,
+      fornecedor_tipo: null,
+      launch_error: t.launch_error ?? null,
+    })) as ContractTitleRow[],
   };
 }

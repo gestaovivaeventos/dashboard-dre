@@ -5,6 +5,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole } from "@/lib/ctrl/auth";
+import { rerouteAfterAdminEdit } from "@/lib/ctrl/actions/requests";
+
+// Campos que, alterados numa requisição em aprovação, mudam o orçamento e exigem
+// recálculo da alçada (reroteamento).
+const BUDGET_FIELDS = ["sector_id", "expense_type_id", "amount", "due_date", "reference_month", "reference_year"];
+const PENDING_STATUSES = ["pendente", "pendente_diretor", "aguardando_complementacao"];
 
 // Ações administrativas (admin-only, a princípio) para editar e excluir uma
 // requisição direto da tela de Requisições.
@@ -40,13 +46,15 @@ export async function updateRequestByAdmin(
   requestId: string,
   data: AdminEditRequestInput,
 ) {
-  const ctx = await requireCtrlRole("admin");
+  // Edição liberada para admin e Contas a Pagar (correção antes/durante a
+  // aprovação). A exclusão continua só para admin (ação à parte).
+  const ctx = await requireCtrlRole("admin", "contas_a_pagar");
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const { data: req, error: fetchErr } = await supabase
     .from("ctrl_requests")
     .select(
-      "id, status, deleted_at, omie_contapagar_codigo, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year",
+      "id, status, deleted_at, omie_contapagar_codigo, is_rateio, title, description, amount, sector_id, expense_type_id, due_date, reference_month, reference_year",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -98,6 +106,17 @@ export async function updateRequestByAdmin(
 
   if (Object.keys(changes).length === 0) return { ok: true as const, unchanged: true };
 
+  // Rateio: o orçamento é POR PARCELA (ctrl_request_sectors). Mudar setor/valor/
+  // tipo/vencimento/competência mexeria na alçada de cada parcela — não tratado
+  // aqui. Por segurança, só título/descrição. Defesa server-side (a UI já esconde).
+  if ((req as { is_rateio?: boolean }).is_rateio && BUDGET_FIELDS.some((f) => f in changes)) {
+    return {
+      error:
+        "Requisição rateada: por aqui edite só título e descrição. Para mudar setor, " +
+        "valor, tipo, vencimento ou competência da divisão, rejeite e recrie a requisição.",
+    };
+  }
+
   const { error: updErr } = await supabase
     .from("ctrl_requests")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,13 +124,28 @@ export async function updateRequestByAdmin(
     .eq("id", requestId);
   if (updErr) return { error: updErr.message };
 
+  // Recálculo de alçada: se a edição mexeu no orçamento e a requisição ainda
+  // está em aprovação, recalcula o tier e reroteia (reinicia a etapa). Campos
+  // que não afetam o orçamento (título, descrição) só salvam.
+  let reroute: { status?: string; tier?: string } | null = null;
+  const budgetChanged = BUDGET_FIELDS.some((f) => f in changes);
+  if (budgetChanged && PENDING_STATUSES.includes(req.status as string)) {
+    const r = await rerouteAfterAdminEdit(requestId);
+    if ("error" in r) return { error: r.error };
+    if (r.rerouted) reroute = { status: r.status, tier: r.tier };
+  }
+
   await supabase.from("ctrl_history").insert({
     request_id: requestId,
     user_id: ctx.id,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     action: "editado" as any,
-    comment: `Editada pelo admin ${ctx.name ?? ctx.email}`,
-    metadata: { changes, edited_by_roles: ctx.ctrlRoles },
+    comment: `Editada por ${ctx.name ?? ctx.email}`,
+    metadata: {
+      changes,
+      edited_by_roles: ctx.ctrlRoles,
+      ...(reroute ? { rerouted_to: reroute.status, approval_tier: reroute.tier } : {}),
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
@@ -120,7 +154,7 @@ export async function updateRequestByAdmin(
   revalidatePath("/ctrl/contas-a-pagar");
   revalidatePath("/ctrl/orcamento");
   revalidatePath("/home");
-  return { ok: true as const };
+  return { ok: true as const, rerouted: reroute?.status ?? null };
 }
 
 export async function deleteRequestByAdmin(requestId: string, reason?: string) {

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Plus, AlertTriangle } from "lucide-react";
+import { Plus, AlertTriangle, FileSignature } from "lucide-react";
 
 import { getCaseUser } from "@/lib/case/auth";
 import { getContracts, isOmieConfigured } from "@/lib/case/queries";
 import { ContratosTable } from "@/components/case/contratos-table";
+import { isCaseContractApprover } from "@/lib/case/contract-config";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export default async function CaseContratosPage() {
   if (!ctx) redirect("/login");
 
   const [contracts, omieOk] = await Promise.all([getContracts(), isOmieConfigured()]);
+  const awaitingApproval = isCaseContractApprover(ctx.email)
+    ? contracts.filter((c) => c.status === "aguardando_aprovacao")
+    : [];
 
   return (
     <div className="space-y-6">
@@ -23,13 +27,22 @@ export default async function CaseContratosPage() {
             Contratos de shows vendidos — lançados no Omie da Case Shows.
           </p>
         </div>
-        <Link
-          href="/case/contratos/novo"
-          className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
-        >
-          <Plus className="h-4 w-4" />
-          Novo contrato
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/case/contratos/novo?tipo=bv"
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-2"
+          >
+            <Plus className="h-4 w-4" />
+            BV artístico
+          </Link>
+          <Link
+            href="/case/contratos/novo"
+            className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
+          >
+            <Plus className="h-4 w-4" />
+            Novo contrato
+          </Link>
+        </div>
       </div>
 
       {!omieOk && (
@@ -43,6 +56,25 @@ export default async function CaseContratosPage() {
             </Link>
             .
           </span>
+        </div>
+      )}
+
+      {awaitingApproval.length > 0 && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <div className="flex items-center gap-2 font-medium">
+            <FileSignature className="h-4 w-4" />
+            {awaitingApproval.length === 1 ? "1 contrato aguardando sua aprovação" : `${awaitingApproval.length} contratos aguardando sua aprovação`}
+          </div>
+          <ul className="mt-2 space-y-1">
+            {awaitingApproval.map((c) => (
+              <li key={c.id}>
+                <Link href={`/case/contratos/${c.id}`} className="underline-offset-2 hover:underline">
+                  #{c.contract_number} — {c.client_name}
+                  {c.event_name ? ` · ${c.event_name}` : ""}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

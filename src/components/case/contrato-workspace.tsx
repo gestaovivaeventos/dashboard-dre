@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckCircle2, Circle, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Upload, Loader2, ScanLine, FileSignature, PenLine, CheckCircle2, Circle, RefreshCw, Undo2 } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
@@ -12,7 +12,9 @@ import {
   salvarVerbaRiderCamarim,
   salvarFornecedor,
   removerFornecedor,
-  gerarEnviarContrato,
+  enviarParaAprovacao,
+  aprovarContrato,
+  devolverContrato,
   lancarNoOmie,
   salvarCadastroCliente,
   salvarCadastroBanda,
@@ -22,8 +24,9 @@ import { extractArtistContract, extractFornecedorContract } from "@/lib/case/act
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract, lancarBvContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
-import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, missingFromCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
+import { clientSignatureIssues, clientSignatureMessage } from "@/lib/case/signature-check";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
 import type { CaseBandRow, CaseFornecedorTipo } from "@/lib/case/types";
 
@@ -31,6 +34,7 @@ const ATTACHMENT_BUCKET = "case-attachments";
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const fmt = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const brl = (n: number) => `R$ ${fmt.format(n)}`;
+const dateTimeBR = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const dateBR = (iso: string | null) => (iso ? new Date(iso.slice(0, 10) + "T00:00:00").toLocaleDateString("pt-BR") : "—");
 
 const INPUT_CLS = "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -68,8 +72,9 @@ interface ParcelaRow {
   valorStr: string;
 }
 
-function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ok" | "wait" | "err" | "muted" }) {
+function StatusPill({ children, tone }: { children: React.ReactNode; tone: "ok" | "wait" | "pending" | "err" | "muted" }) {
   const cls = {
+    pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
     ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
     wait: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
     err: "bg-red-500/15 text-red-700 dark:text-red-300",
@@ -102,7 +107,7 @@ function TabButton({ active, done, label, onClick }: { active: boolean; done: bo
   );
 }
 
-export function ContratoWorkspace({ detail, bands, fornecedorBands }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[] }) {
+export function ContratoWorkspace({ detail, bands, fornecedorBands, isApprover }: { detail: ContractDetail; bands: CaseBandRow[]; fornecedorBands: CaseBandRow[]; isApprover: boolean }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
@@ -134,7 +139,7 @@ export function ContratoWorkspace({ detail, bands, fornecedorBands }: { detail: 
           <TabButton active={tab === "atracao"} done={etapa2Done} label="Contrato Atração" onClick={() => setTab("atracao")} />
         </div>
         <div className="pt-4">
-          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} onChange={refresh} /> : <AtracaoTab detail={detail} bands={bands} fornecedorBands={fornecedorBands} onChange={refresh} />}
+          {tab === "cliente" ? <ClienteTab detail={detail} signed={signed} isApprover={isApprover} onChange={refresh} /> : <AtracaoTab detail={detail} bands={bands} fornecedorBands={fornecedorBands} onChange={refresh} />}
         </div>
       </div>
 
@@ -145,11 +150,15 @@ export function ContratoWorkspace({ detail, bands, fornecedorBands }: { detail: 
 }
 
 // ── ABA: Contrato Cliente ────────────────────────────────────────────────────
-function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; signed: boolean; onChange: () => void }) {
+function ClienteTab({ detail, signed, isApprover, onChange }: { detail: ContractDetail; signed: boolean; isApprover: boolean; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [returning, setReturning] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
   const [editingCadastro, setEditingCadastro] = useState(false);
+  const [signatureError, setSignatureError] = useState<string | null>(null);
   const { showToast } = useToast();
   const sent = Boolean(detail.sent_for_signature_at);
+  const awaitingApproval = detail.status === "aguardando_aprovacao";
 
   async function openSale() {
     const res = await getSaleContractUrl(detail.id);
@@ -164,19 +173,36 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
     showToast({ title: "Assinatura reenviada", description: "O cliente receberá um novo e-mail para assinar.", variant: "success" });
   }
   async function gerarEnviar() {
+    setSignatureError(null);
+    const issues = clientSignatureIssues(detail.client);
+    if (issues.length > 0) {
+      setSignatureError(clientSignatureMessage(issues));
+      setEditingCadastro(true);
+      return;
+    }
     setBusy(true);
-    const res = await gerarEnviarContrato(detail.id);
+    const res = awaitingApproval ? await aprovarContrato(detail.id) : await enviarParaAprovacao(detail.id);
     setBusy(false);
-    if ("error" in res) return alert(res.error);
-    if (res.warning) {
-      showToast({ title: "Contrato gerado", description: res.warning });
+    if ("error" in res) return setSignatureError(res.error);
+    if (res.status === "aguardando_aprovacao") {
+      showToast({ title: "Enviado para aprovação", description: "Os aprovadores receberam o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
     } else {
       showToast({
-        title: sent ? "Contrato reenviado para assinatura" : "Contrato enviado para assinatura",
-        description: "Os signatários receberão o link por e-mail.",
+        title: sent ? "Contrato aprovado e reenviado para assinatura" : "Contrato aprovado e enviado para assinatura",
+        description: "Cliente e testemunha recebem o link agora; o contratado assina por último.",
         variant: "success",
       });
     }
+    onChange();
+  }
+  async function devolver() {
+    setBusy(true);
+    const res = await devolverContrato(detail.id, returnReason);
+    setBusy(false);
+    if ("error" in res) return setSignatureError(res.error);
+    setReturning(false);
+    setReturnReason("");
+    showToast({ title: "Contrato devolvido", description: "Quem enviou foi avisado por e-mail com o motivo." });
     onChange();
   }
 
@@ -184,7 +210,7 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
     <section className="space-y-3 rounded-lg border border-border bg-surface-1 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-ink-primary">Contrato com o cliente</h2>
-        {signed ? <StatusPill tone="ok">Assinado · {dateBR(detail.signed_at)}</StatusPill> : sent ? <StatusPill tone="wait">Aguardando assinatura</StatusPill> : <StatusPill tone="muted">Rascunho</StatusPill>}
+        {signed ? <StatusPill tone="ok">Assinado · {dateBR(detail.signed_at)}</StatusPill> : awaitingApproval ? <StatusPill tone="pending">Aguardando aprovação</StatusPill> : sent ? <StatusPill tone="wait">Aguardando assinatura</StatusPill> : <StatusPill tone="muted">Rascunho</StatusPill>}
       </div>
 
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
@@ -198,10 +224,26 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
         <Info label="Passagem de som" value={detail.passagem_som ?? "—"} />
       </div>
 
+      {awaitingApproval && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+          {isApprover
+            ? <>Enviado para a sua aprovação{detail.approval_requested_by_name ? <> por <strong>{detail.approval_requested_by_name}</strong></> : null}{detail.approval_requested_at ? ` em ${dateTimeBR(detail.approval_requested_at)}` : ""}. Confira o PDF; ao aprovar, cliente e testemunha recebem o link e você assina por último.</>
+            : <>Aguardando aprovação{detail.approval_requested_at ? ` desde ${dateTimeBR(detail.approval_requested_at)}` : ""}. Se editar os dados agora, o contrato volta para rascunho e precisa ser enviado de novo.</>}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 pt-1">
-        {!signed && (
+        {!signed && (!awaitingApproval || isApprover) && (
           <button onClick={gerarEnviar} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSignature className="h-4 w-4" />} {sent ? "Gerar e reenviar" : "Gerar e enviar para assinatura"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSignature className="h-4 w-4" />}{" "}
+            {isApprover
+              ? sent ? "Aprovar e reenviar para assinatura" : "Aprovar e enviar para assinatura"
+              : sent ? "Reenviar para aprovação" : "Enviar para aprovação"}
+          </button>
+        )}
+        {awaitingApproval && isApprover && (
+          <button onClick={() => setReturning((v) => !v)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">
+            <Undo2 className="h-4 w-4" /> Devolver para ajuste
           </button>
         )}
         {!signed && (
@@ -231,10 +273,27 @@ function ClienteTab({ detail, signed, onChange }: { detail: ContractDetail; sign
         )}
       </div>
 
+      {returning && (
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <label className={LABEL_CLS}>O que precisa ser ajustado? (vai por e-mail para quem enviou)</label>
+          <textarea value={returnReason} onChange={(e) => setReturnReason(e.target.value)} rows={3} className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40" />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setReturning(false)} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm text-ink-secondary hover:bg-surface-2 disabled:opacity-50">Cancelar</button>
+            <button type="button" onClick={devolver} disabled={busy || !returnReason.trim()} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />} Devolver
+            </button>
+          </div>
+        </div>
+      )}
+
+      {signatureError && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">{signatureError}</div>
+      )}
+
       {editingCadastro && (
         <ClienteCadastroForm
           detail={detail}
-          onDone={() => { setEditingCadastro(false); onChange(); }}
+          onDone={() => { setEditingCadastro(false); setSignatureError(null); onChange(); }}
           onCancel={() => setEditingCadastro(false)}
         />
       )}
@@ -802,6 +861,15 @@ function AtracaoForm({
   const [bandId, setBandId] = useState<string>(atracao?.band_id ?? "");
   const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
   const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
+  // Cadastro já existente pode ser corrigido aqui (o caso comum é faltar dado
+  // bancário em cadastro antigo, que trava o lançamento no Omie).
+  const [editCadastro, setEditCadastro] = useState(false);
+  function abrirCadastro(id: string, extra?: Partial<BandCadastro>) {
+    const row = bands.find((b) => b.id === id);
+    if (!row) return;
+    setBand({ ...bandRowToCadastro(row), ...(extra ?? {}) });
+    setEditCadastro(true);
+  }
   const [attachmentPath, setAttachmentPath] = useState<string | null>(atracao?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(atracao?.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
@@ -854,12 +922,20 @@ function AtracaoForm({
     // Se o CNPJ/CPF do contrato bate com uma atração já cadastrada, seleciona-a.
     const doc = (d.bandDoc ?? "").replace(/\D/g, "");
     const match = !atracao && doc ? bands.find((b) => (b.cnpj_cpf ?? "").replace(/\D/g, "") === doc) : undefined;
+    let completou = false;
     if (match) {
       setBandMode("existing");
       setBandId(match.id);
+      // Cadastro antigo costuma estar sem dado bancário — o que o contrato trouxer
+      // e faltar no cadastro abre a edição já preenchido, para conferir e salvar.
+      const faltando = missingFromCadastro(bandRowToCadastro(match), artistOcrToBandPatch(d));
+      if (Object.keys(faltando).length > 0) {
+        abrirCadastro(match.id, faltando);
+        completou = true;
+      }
     } else if (!atracao && d.bandName) {
       setBandMode("new");
-      patchBand({ name: d.bandName, doc: d.bandDoc ?? "" });
+      patchBand(artistOcrToBandPatch(d));
     }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
@@ -871,23 +947,39 @@ function AtracaoForm({
       setErr(`As parcelas lidas somam ${brl(somaPs)}, mas o valor do contrato é ${brl(d.valorCache)}. Ajuste as parcelas para bater com o total antes de salvar.`);
       return;
     }
-    setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
+    setMsg(
+      match
+        ? completou
+          ? `Contrato lido — ${match.name} já cadastrado. Abri o cadastro com o que faltava (dados bancários/contato): confira e salve.`
+          : `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.`
+        : d.banco || d.chavePix
+          ? "Contrato lido. Revise a atração, o favorecido, o valor e as parcelas antes de salvar."
+          : "Contrato lido, mas sem dados bancários do favorecido — preencha antes de salvar.",
+    );
   }
 
   function buildBandInput() {
     const sel = bands.find((b) => b.id === bandId);
-    return bandMode === "existing" && sel
-      ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
-        }
-      : bandCadastroToInput(band);
+    if (bandMode === "existing" && sel) {
+      // Com o cadastro aberto, o que está na tela é o que vale (resolveBand grava por id).
+      return editCadastro
+        ? bandCadastroToInput(band, sel.id)
+        : {
+            id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+            banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
+          };
+    }
+    return bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
+    if (bandMode === "existing" && editCadastro) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
+    }
     if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome da atração/artista.");
     if (bandMode === "new") {
       const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "atração");
@@ -924,12 +1016,29 @@ function AtracaoForm({
         </div>
       </div>
       {bandMode === "existing" ? (
-        <SearchSelect
-          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
-          value={bandId}
-          onChange={setBandId}
-          placeholder="Buscar e selecionar a atração/artista…"
-        />
+        <div className="space-y-2">
+          <SearchSelect
+            items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+            value={bandId}
+            onChange={(id) => { setBandId(id); setEditCadastro(false); }}
+            placeholder="Buscar e selecionar a atração/artista…"
+          />
+          {bandId && !editCadastro && (
+            <button type="button" onClick={() => abrirCadastro(bandId)} className="text-xs text-amber-700 hover:underline dark:text-amber-400">
+              Editar cadastro (dados bancários, documento, contato)
+            </button>
+          )}
+          {bandId && editCadastro && (
+            <div className="space-y-2 rounded-md border border-border bg-surface-2/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Cadastro d a atração</span>
+                <button type="button" onClick={() => setEditCadastro(false)} className="text-xs text-ink-muted hover:underline">Fechar sem alterar</button>
+              </div>
+              <p className="text-xs text-ink-muted">O que você mudar aqui vale para o cadastro, em todos os contratos — é gravado ao salvar.</p>
+              <BandCadastroFields value={band} onChange={patchBand} />
+            </div>
+          )}
+        </div>
       ) : (
         <BandCadastroFields value={band} onChange={patchBand} />
       )}
@@ -1029,6 +1138,15 @@ function FornecedorForm({
   const [bandId, setBandId] = useState<string>(fornecedor?.band_id ?? "");
   const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
   const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
+  // Cadastro já existente pode ser corrigido aqui (o caso comum é faltar dado
+  // bancário em cadastro antigo, que trava o lançamento no Omie).
+  const [editCadastro, setEditCadastro] = useState(false);
+  function abrirCadastro(id: string, extra?: Partial<BandCadastro>) {
+    const row = bands.find((b) => b.id === id);
+    if (!row) return;
+    setBand({ ...bandRowToCadastro(row), ...(extra ?? {}) });
+    setEditCadastro(true);
+  }
   const [descricao, setDescricao] = useState(fornecedor?.descricao ?? "");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(fornecedor?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(fornecedor?.attachment_path ? "Contrato anexado" : "");
@@ -1133,18 +1251,26 @@ function FornecedorForm({
 
   function buildBandInput() {
     const sel = bands.find((b) => b.id === bandId);
-    return bandMode === "existing" && sel
-      ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
-        }
-      : bandCadastroToInput(band);
+    if (bandMode === "existing" && sel) {
+      // Com o cadastro aberto, o que está na tela é o que vale (resolveBand grava por id).
+      return editCadastro
+        ? bandCadastroToInput(band, sel.id)
+        : {
+            id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+            banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
+          };
+    }
+    return bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione o fornecedor.");
+    if (bandMode === "existing" && editCadastro) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
+    }
     if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome do fornecedor.");
     if (bandMode === "new") {
       const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "fornecedor");
@@ -1203,12 +1329,29 @@ function FornecedorForm({
         </div>
       </div>
       {bandMode === "existing" ? (
-        <SearchSelect
-          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
-          value={bandId}
-          onChange={setBandId}
-          placeholder="Buscar e selecionar o fornecedor…"
-        />
+        <div className="space-y-2">
+          <SearchSelect
+            items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+            value={bandId}
+            onChange={(id) => { setBandId(id); setEditCadastro(false); }}
+            placeholder="Buscar e selecionar o fornecedor…"
+          />
+          {bandId && !editCadastro && (
+            <button type="button" onClick={() => abrirCadastro(bandId)} className="text-xs text-amber-700 hover:underline dark:text-amber-400">
+              Editar cadastro (dados bancários, documento, contato)
+            </button>
+          )}
+          {bandId && editCadastro && (
+            <div className="space-y-2 rounded-md border border-border bg-surface-2/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Cadastro do fornecedor</span>
+                <button type="button" onClick={() => setEditCadastro(false)} className="text-xs text-ink-muted hover:underline">Fechar sem alterar</button>
+              </div>
+              <p className="text-xs text-ink-muted">O que você mudar aqui vale para o cadastro, em todos os contratos — é gravado ao salvar.</p>
+              <BandCadastroFields value={band} onChange={patchBand} />
+            </div>
+          )}
+        </div>
       ) : (
         <BandCadastroFields value={band} onChange={patchBand} />
       )}

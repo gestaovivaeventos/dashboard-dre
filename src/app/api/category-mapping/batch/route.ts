@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { refreshDreAggregatesForSource } from "@/lib/dashboard/aggregate-refresh";
+import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 
 interface BatchMappingItem {
   omieCategoryCode: string;
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
 
   // Mudou o mapeamento -> recalcula a pre-agregacao do DRE desta empresa (e dos
   // destinos de roteamento). Best-effort (nao lanca).
-  await refreshDreAggregatesForSource(supabase, companyId);
+  await refreshDreAggregatesForSource(createAdminClientIfAvailable() ?? supabase, companyId);
 
   revalidatePath("/(app)", "layout");
   return NextResponse.json({

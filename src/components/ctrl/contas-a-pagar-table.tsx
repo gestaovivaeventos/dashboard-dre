@@ -8,6 +8,7 @@ import {
   requeueRequestToOmie,
   previewPrevisaoMatches,
   returnRequestToRequisicoes,
+  changePaidRequestExpenseType,
   getRequestAttachmentUrl,
   type PrevisaoMatch,
 } from "@/lib/ctrl/actions/requests";
@@ -175,6 +176,8 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   // Modal de correção de setor/tipo (perfil Contas a Pagar / admin).
   const [editRouting, setEditRouting] = useState<ContasRequest | null>(null);
   const canEditRouting = canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "admin"].includes(r));
+  // Correção de tipo de despesa PÓS-pagamento: exceção rara, só admin.
+  const isAdmin = ctrlRoles.includes("admin");
 
   // Modal de thread de info — aberto pelo botao "Pedir info" / "Continuar conversa".
   const [infoModal, setInfoModal] = useState<{
@@ -188,6 +191,13 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
   const canReturn = canOperate || ctrlRoles.some((r) => ["contas_a_pagar", "csc", "admin"].includes(r));
   const [returnModal, setReturnModal] = useState<ContasRequest | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  // Correção de tipo pós-pagamento (admin) + lembrete de ajustar o Omie.
+  const [adminTipoModal, setAdminTipoModal] = useState<ContasRequest | null>(null);
+  const [novoTipoId, setNovoTipoId] = useState("");
+  const [adminMotivo, setAdminMotivo] = useState("");
+  const [omieReminder, setOmieReminder] = useState<
+    { requestNumber: number; oldType: string; newType: string } | null
+  >(null);
   // Alerta pós-devolução: pop-up grande orientando a conferir no Omie se o título
   // foi mesmo excluído (evita pagamento errado). Aparece após TODA devolução.
   const [returnedAlert, setReturnedAlert] = useState<
@@ -217,6 +227,26 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
         }
         router.refresh();
       }
+    });
+  }
+
+  // Correção de tipo de despesa pós-pagamento (admin): move o orçamento e, ao
+  // concluir, abre o lembrete de ajustar a categoria no Omie manualmente.
+  function handleAlterarTipo() {
+    if (!adminTipoModal || !novoTipoId || !adminMotivo.trim()) return;
+    const num = adminTipoModal.request_number;
+    startTransition(async () => {
+      const result = await changePaidRequestExpenseType(adminTipoModal.id, novoTipoId, adminMotivo);
+      if ("error" in result) {
+        notify(String(result.error), false, 8000);
+        return;
+      }
+      setAdminTipoModal(null);
+      setNovoTipoId("");
+      setAdminMotivo("");
+      router.refresh();
+      // Pop-up de lembrete: o Omie NÃO foi alterado por aqui.
+      setOmieReminder({ requestNumber: num, oldType: result.oldType, newType: result.newType });
     });
   }
 
@@ -743,6 +773,21 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
                             Editar
                           </button>
                         )}
+                        {isAdmin && req.status === "agendado" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdminTipoModal(req);
+                              setNovoTipoId("");
+                              setAdminMotivo("");
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300"
+                            title="Corrigir o tipo de despesa (admin) — move o consumo do orçamento. Não altera o Omie."
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Alterar tipo (admin)
+                          </button>
+                        )}
                         {canAskInfo && (req.status === "aprovado" || req.status === "info_pagamento_pendente") && (
                           <button
                             type="button"
@@ -1135,6 +1180,111 @@ export function ContasAPagarTable({ requests, ctrlRoles, companies, sectors, exp
           wasOnOmie={returnedAlert.wasOnOmie}
           onClose={() => setReturnedAlert(null)}
         />
+      )}
+
+      {/* Alterar tipo de despesa pós-pagamento (admin) */}
+      {adminTipoModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !isPending && setAdminTipoModal(null)}
+        >
+          <div className="w-full max-w-md rounded-xl border bg-background shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b px-6 py-4">
+              <h3 className="font-semibold">Alterar tipo de despesa (admin)</h3>
+              <p className="text-xs text-muted-foreground">
+                Requisição #{adminTipoModal.request_number} — {adminTipoModal.title}
+              </p>
+            </div>
+            <div className="space-y-4 px-6 py-4">
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                Correção pós-pagamento: move o consumo do orçamento (tira do tipo antigo, soma no
+                novo). <strong>Não altera o Omie</strong> — ajuste a categoria no Omie manualmente.
+                Fica registrado no histórico.
+              </div>
+              <div className="text-sm">
+                <span className="text-muted-foreground">Tipo atual: </span>
+                <span className="font-medium">{resolveNamed(adminTipoModal.ctrl_expense_types) ?? "—"}</span>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">
+                  Novo tipo de despesa <span className="text-destructive">*</span>
+                </label>
+                <select
+                  value={novoTipoId}
+                  onChange={(e) => setNovoTipoId(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Selecione o novo tipo</option>
+                  {expenseTypes.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">
+                  Motivo <span className="text-destructive">*</span>
+                </label>
+                <textarea
+                  value={adminMotivo}
+                  onChange={(e) => setAdminMotivo(e.target.value)}
+                  rows={3}
+                  placeholder="Ex.: reclassificação — o Contas a Pagar lançou no tipo errado"
+                  className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t px-6 py-4">
+              <button
+                onClick={() => setAdminTipoModal(null)}
+                disabled={isPending}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAlterarTipo}
+                disabled={isPending || !novoTipoId || !adminMotivo.trim()}
+                className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isPending ? "Salvando..." : "Alterar tipo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pop-up de lembrete: alterar a categoria no Omie manualmente */}
+      {omieReminder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border-2 border-amber-400 bg-background shadow-2xl">
+            <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-6 py-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+              <h3 className="font-semibold text-amber-800 dark:text-amber-300">
+                Ajuste a categoria no Omie
+              </h3>
+            </div>
+            <div className="space-y-3 px-6 py-4 text-sm">
+              <p>
+                Tipo de despesa da requisição <strong>#{omieReminder.requestNumber}</strong> alterado
+                de <strong>{omieReminder.oldType}</strong> para <strong>{omieReminder.newType}</strong>.
+                O consumo do orçamento já foi atualizado.
+              </p>
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                ⚠️ Esta alteração <strong>não</strong> mexeu no Omie. Se ainda não fez, altere a
+                categoria correspondente <strong>no Omie manualmente</strong> para os dois lados
+                ficarem coerentes.
+              </p>
+            </div>
+            <div className="flex justify-end border-t px-6 py-4">
+              <button
+                onClick={() => setOmieReminder(null)}
+                className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Detail modal */}

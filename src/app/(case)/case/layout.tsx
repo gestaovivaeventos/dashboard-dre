@@ -7,6 +7,8 @@ import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
+import { isCaseContractApprover } from "@/lib/case/contract-config";
+import { countContractsAwaitingApproval } from "@/lib/case/queries";
 
 export default async function CaseLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getSessionContext();
@@ -25,6 +27,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
   const canContratos = Boolean(modules.contratos);
   const vbRole = modules.vb?.role ?? null;
+  const canCaixa = Boolean(modules.caixa);
 
   // Segmentos para o shell — fonte única compartilhada (resolveUserSegments):
   // admin vê todos; os demais recebem a UNIÃO de user_segment_access com os
@@ -43,11 +46,15 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
     canCase,
     canViagens,
     vbRole !== null,
+    canCaixa,
   );
 
   const unreadNotifications = profile?.id
     ? await getUnreadNotificationsCount(profile.id)
     : 0;
+
+  // Pendência do aprovador dos contratos: contador no item Contratos do menu.
+  const pendingApprovals = isCaseContractApprover(userEmail) ? await countContractsAwaitingApproval() : 0;
 
   return (
     <AppShell
@@ -60,6 +67,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
       vbRole={vbRole}
+      canCaixa={canCaixa}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}
@@ -69,6 +77,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       // para quem já tem o módulo — não concede o módulo a ninguém.
       ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
+      navBadges={{ "case-contratos": pendingApprovals }}
       // Perfil unificado: o tour guiado usa para escolher a variante de texto
       // dos passos que mudam conforme quem lê (os cinco perfis do Compras).
       userProfile={profile?.profile ?? null}

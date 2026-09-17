@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { defaultLandingFor } from "@/lib/auth/access";
+import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { hasVbGrant } from "@/lib/auth/vb";
 import { createClient } from "@/lib/supabase/server";
@@ -57,6 +58,8 @@ export default async function RootRouter() {
     Boolean(profileRow.contracts_only) ||
     userProfile === "admin";
   const canVb = hasVbGrant(profileRow.user_module_roles);
+  const canCaixa =
+    hasCaixaGrant(profileRow.user_module_roles) || userProfile === "admin";
 
   redirect(
     defaultLandingFor(
@@ -70,6 +73,7 @@ export default async function RootRouter() {
       false,
       canContratos,
       canVb,
+      canCaixa,
     ),
   );
 }

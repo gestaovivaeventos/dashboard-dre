@@ -42,9 +42,15 @@ export const MODULES: Record<ActiveModule, ModuleDefinition> = {
     usesSegments: false,
     defaultPath: "/vb",
   },
+  caixa: {
+    id: "caixa",
+    label: "Caixa",
+    usesSegments: false,
+    defaultPath: "/caixa/real",
+  },
 };
 
-export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "viagens", "vb"] as const;
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "caixa", "case", "viagens", "vb"] as const;
 
 /**
  * Returns the modules the user has any access to.
@@ -52,6 +58,7 @@ export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "vi
  * - Ctrl access if at least one ctrlRole is non-null/non-empty.
  * - Case access if canCase is set (visibilidade do módulo, boolean).
  * - VB access if canVb is set (concessão em user_module_roles; admin não herda).
+ * - Caixa access if canCaixa is set (concessão em user_module_roles OU admin).
  */
 export function resolveAvailableModules(
   dreRole: DreRole | null | undefined,
@@ -59,6 +66,7 @@ export function resolveAvailableModules(
   canCase?: boolean | null,
   canViagens?: boolean | null,
   canVb?: boolean | null,
+  canCaixa?: boolean | null,
 ): ModuleDefinition[] {
   const result: ModuleDefinition[] = [];
   if (dreRole) result.push(MODULES.dre);
@@ -66,6 +74,7 @@ export function resolveAvailableModules(
   if (canCase) result.push(MODULES.case);
   if (canViagens) result.push(MODULES.viagens);
   if (canVb) result.push(MODULES.vb);
+  if (canCaixa) result.push(MODULES.caixa);
   return result;
 }
 
@@ -107,8 +116,9 @@ export async function resolveLayoutContext(
   canCase?: boolean | null,
   canViagens?: boolean | null,
   canVb?: boolean | null,
+  canCaixa?: boolean | null,
 ): Promise<ResolvedLayoutContext> {
-  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase, canViagens, canVb);
+  const availableModules = resolveAvailableModules(dreRole, ctrlRoles, canCase, canViagens, canVb, canCaixa);
   const moduleCookie = await readActiveModule();
   const activeModuleDef = resolveActiveModule(moduleCookie, availableModules);
   const activeModule: ActiveModule = activeModuleDef?.id ?? fallbackModule;

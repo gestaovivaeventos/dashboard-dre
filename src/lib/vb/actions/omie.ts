@@ -9,6 +9,7 @@ import { VB_OMIE_PATH } from "@/lib/auth/vb";
 import { runCompanySyncAsSystem } from "@/lib/omie/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireVbGestor } from "@/lib/vb/auth";
+import { reconcileCdiAfterChange, type CdiReconcileResult } from "@/lib/vb/cdi/service";
 import { buildEntryRows, newEntriesSchema } from "@/lib/vb/new-entries";
 import { VB_OMIE_COMPANY_ID } from "@/lib/vb/omie/config";
 import { getCandidateMovement, getOmieSyncStatus } from "@/lib/vb/omie/queries";
@@ -88,7 +89,7 @@ export async function restoreOmieMovement(omieId: string): Promise<VbActionResul
  */
 export async function linkOmieMovement(
   input: LinkOmieInput,
-): Promise<VbActionResult<{ ids: string[]; group_id: string }>> {
+): Promise<VbActionResult<{ ids: string[]; group_id: string; cdi: CdiReconcileResult }>> {
   const user = await requireVbGestor();
   const parsed = linkOmieSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -137,16 +138,23 @@ export async function linkOmieMovement(
     return { error: triageError.code === UNIQUE_VIOLATION ? ALREADY_DECIDED : triageError.message };
   }
 
+  // A linha do tempo do credor mudou (pagamento geralmente já passado):
+  // fecha/recalcula o rendimento por CDI a partir da data do lançamento.
+  const cdi = await reconcileCdiAfterChange(admin, creditorIds, entriesInput.entry_date, user.id);
+
   revalidateOmie(creditorIds);
-  return { ok: true, ids: inserted.map((row) => row.id as string), group_id };
+  revalidatePath("/vb/relatorios");
+  return { ok: true, ids: inserted.map((row) => row.id as string), group_id, cdi };
 }
 
 /**
  * Desvincula: apaga os lançamentos do grupo e depois a decisão. Tolera zero
  * lançamentos (reexecução depois de uma falha parcial só apaga a decisão).
  */
-export async function unlinkOmieMovement(omieId: string): Promise<VbActionResult<{ removed: number }>> {
-  await requireVbGestor();
+export async function unlinkOmieMovement(
+  omieId: string,
+): Promise<VbActionResult<{ removed: number; cdi: CdiReconcileResult | null }>> {
+  const user = await requireVbGestor();
   const parsed = z.string().trim().min(1, "Movimento inválido.").safeParse(omieId);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Movimento inválido." };
   const admin = createAdminClient();
@@ -163,16 +171,21 @@ export async function unlinkOmieMovement(omieId: string): Promise<VbActionResult
   const groupId = triage.group_id as string | null;
   let removed = 0;
   let creditorIds: string[] = [];
+  let earliestDate: string | null = null;
   if (groupId) {
     const { data: deleted, error: deleteError } = await admin
       .from("vb_entries")
       .delete()
       .eq("group_id", groupId)
       .eq("status", "aprovado")
-      .select("id, creditor_id");
+      .select("id, creditor_id, entry_date");
     if (deleteError) return { error: deleteError.message };
     removed = deleted?.length ?? 0;
     creditorIds = Array.from(new Set((deleted ?? []).map((row) => row.creditor_id as string)));
+    for (const row of deleted ?? []) {
+      const d = row.entry_date as string;
+      if (!earliestDate || d < earliestDate) earliestDate = d;
+    }
   }
 
   const { error } = await admin.from("vb_omie_triage").delete().eq("id", triage.id as string);
@@ -181,8 +194,15 @@ export async function unlinkOmieMovement(omieId: string): Promise<VbActionResult
     return { error: `${error.message} (${removed} lançamento(s) já apagados; repita o desvincular)` };
   }
 
+  // Apagar um lançamento também muda o saldo lá atrás: recalcula o CDI dali.
+  const cdi =
+    earliestDate && creditorIds.length > 0
+      ? await reconcileCdiAfterChange(admin, creditorIds, earliestDate, user.id)
+      : null;
+
   revalidateOmie(creditorIds);
-  return { ok: true, removed };
+  revalidatePath("/vb/relatorios");
+  return { ok: true, removed, cdi };
 }
 
 /** "Buscar na Omie": o mesmo sync rolling (3 dias) do cron, agora. */

@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "11/09/2026";
+export const MANUAL_UPDATED_AT = "16/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -448,7 +448,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         tone: "info",
         title: "Preciso corrigir uma requisição já enviada",
         text:
-          "O solicitante não edita a requisição depois do envio. Peça ao aprovador para rejeitar (e crie uma nova corrigida) ou, se ela já estiver em Contas a Pagar, peça ao time para **Devolver**. Setor, tipo de despesa e método de pagamento também podem ser corrigidos pelo próprio Contas a Pagar.",
+          "O solicitante não edita a requisição depois do envio. Peça ao aprovador para rejeitar (e crie uma nova corrigida) ou, se ela já estiver em Contas a Pagar, peça ao time para **Devolver**. Setor, tipo de despesa e método de pagamento também podem ser corrigidos pelo próprio Contas a Pagar. Enquanto a requisição está **em aprovação**, o Contas a Pagar e o admin podem **editá-la** pela tela de Requisições (botão Editar) — se mudar setor, tipo ou valor, a alçada é recalculada e a aprovação reinicia. Em requisições **rateadas**, o editar cobre só título e descrição; para mudar a divisão (setores/valores), rejeite e recrie.",
       },
     ],
   },
@@ -478,6 +478,11 @@ export const MANUAL_SECTIONS: ManualSection[] = [
             "Fora do orçamento (saldo anual insuficiente)",
             "Gerente e depois Diretor",
             "Passa para Aguardando Diretor e notifica a diretoria.",
+          ],
+          [
+            "Fora do orçamento em setor que dispensa a diretoria (regra do setor — a lista atual está em Usuários › Regras especiais)",
+            "Somente o gerente",
+            "Vai direto para Aprovado, mesmo com o rótulo NÃO ORÇADO. O histórico registra que o diretor foi dispensado por regra.",
           ],
           [
             "Setor ou solicitante direcionado à diretoria por regra",
@@ -541,7 +546,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         items: [
           "Sua visibilidade em Aprovações vem dos setores vinculados ao seu usuário. Usuário sem nenhum setor vinculado enxerga todas as requisições — situação de cadastro incompleto, que deve ser corrigida pelo administrador do Control Hub. Na tela **Requisições** essa mesma falta de vínculo faz o contrário: sem setor, você vê apenas as suas.",
           "Alguns gerentes criam requisições em vários setores mas só aprovam alguns: existe uma restrição nominal de alçada configurada no sistema para esses casos. Ela vale nos dois lugares — são esses setores, e não os vínculos da tela de Usuários, que definem o que você aprova e o que vê na tela de Requisições. Se você não encontra uma requisição que esperava aprovar, é provavelmente isso — fale com o administrador.",
-          "Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, e um setor pode ir sempre direto à diretoria.",
+          "Existem direcionamentos fixos: um tipo de despesa pode ter a etapa gerencial dirigida a um gerente específico, um setor pode ir sempre direto à diretoria, e um setor pode dispensar a diretoria mesmo fora do orçamento (caso de setor recém-criado, ainda sem orçamento carregado — nele a sua aprovação encerra o fluxo). Todas essas regras aparecem em Usuários › Regras especiais.",
           "**Autoaprovação gerencial:** quando o próprio gerente é o solicitante e a despesa está prevista em orçamento, a etapa gerencial é dispensada e a requisição nasce aprovada, com registro no histórico. Fora do orçamento isso não vale — o diretor continua obrigatório.",
         ],
       },
@@ -583,7 +588,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "list",
         ordered: true,
         items: [
-          "**Fora do orçamento** — o saldo anual do setor + tipo de despesa não cobre o valor. A requisição chega com justificativa obrigatória e com o prefixo NÃO ORÇADO no título.",
+          "**Fora do orçamento** — o saldo anual do setor + tipo de despesa não cobre o valor. A requisição chega com justificativa obrigatória e com o prefixo NÃO ORÇADO no título. Exceção: setor configurado para dispensar a diretoria (em geral por ainda não ter orçamento carregado; a lista atual está em Usuários › Regras especiais) é concluído pelo gerente e não chega até você, mesmo NÃO ORÇADO.",
           "**Setor direcionado à diretoria** — requisições desse setor nascem direto na sua etapa, mesmo dentro do orçamento.",
           "**Solicitante direcionado** — regra nominal em que as requisições de uma pessoa específica vão direto ao diretor determinado.",
         ],
@@ -723,6 +728,13 @@ export const MANUAL_SECTIONS: ManualSection[] = [
         kind: "p",
         text:
           "O orçamento se ajusta sozinho: rejeitar, devolver ou excluir uma requisição libera o valor na próxima leitura da tela Orçamento — não existe lançamento manual de consumo.",
+      },
+      {
+        kind: "callout",
+        tone: "atencao",
+        title: "Alterar tipo de despesa depois de paga (só admin)",
+        text:
+          "Exceção rara, restrita a administradores: nas requisições já enviadas/pagas há o botão **Alterar tipo (admin)**, que corrige o **tipo de despesa** e move o consumo do orçamento (tira do tipo antigo, soma no novo) — mesmo paga, sem voltar para aprovação. Exige motivo e fica no histórico. **Não altera o Omie**: um pop-up lembra de ajustar a categoria no Omie manualmente, para os dois lados ficarem coerentes.",
       },
     ],
   },

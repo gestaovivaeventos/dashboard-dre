@@ -2,6 +2,7 @@
 
 import { PIX_TIPOS, formatPixForOmie, type PixTipo } from "@/lib/case/pix";
 import type { CaseBandInput, CaseBandRow } from "@/lib/case/types";
+import type { ArtistOcrResult } from "@/lib/case/actions/ocr";
 
 const INPUT_CLS =
   "h-9 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40";
@@ -64,6 +65,34 @@ export function bandCadastroToInput(b: BandCadastro, id?: string | null): CaseBa
     chave_pix: b.pix.trim() ? formatPixForOmie(b.pixTipo || null, b.pix) : null,
     chave_pix_tipo: b.pix.trim() ? (b.pixTipo || null) : null,
   };
+}
+
+/** Do que foi lido, só o que o cadastro ainda não tem — nunca sobrescreve dado salvo. */
+export function missingFromCadastro(atual: BandCadastro, lido: Partial<BandCadastro>): Partial<BandCadastro> {
+  const out: Partial<BandCadastro> = {};
+  for (const [k, v] of Object.entries(lido) as Array<[keyof BandCadastro, string | undefined]>) {
+    if (v && !String(atual[k] ?? "").trim()) Object.assign(out, { [k]: v });
+  }
+  return out;
+}
+
+/** Campos do cadastro lidos do contrato da atração — só os que vieram preenchidos. */
+export function artistOcrToBandPatch(d: ArtistOcrResult): Partial<BandCadastro> {
+  const patch: Partial<BandCadastro> = {};
+  if (d.bandName) patch.name = d.bandName;
+  if (d.bandDoc) patch.doc = d.bandDoc;
+  if (d.email) patch.email = d.email;
+  if (d.telefone) patch.phone = d.telefone;
+  if (d.titularBanco) patch.titular = d.titularBanco;
+  if (d.docTitular) patch.docTitular = d.docTitular;
+  if (d.banco) patch.banco = d.banco;
+  if (d.agencia) patch.agencia = d.agencia;
+  if (d.contaCorrente) patch.conta = d.contaCorrente;
+  if (d.chavePix) {
+    patch.pix = d.chavePix;
+    if (d.chavePixTipo) patch.pixTipo = d.chavePixTipo;
+  }
+  return patch;
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {

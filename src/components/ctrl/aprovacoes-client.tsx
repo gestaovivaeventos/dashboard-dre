@@ -15,7 +15,7 @@ import { ApprovalHistory, type PendingStage } from "@/components/ctrl/approval-h
 import { ExtraAttachments } from "@/components/ctrl/request-detail-modal";
 import { SupplierNotApprovedBadge } from "@/components/ctrl/supplier-status-badge";
 import { ExcelHeaderCell, useExcelTable, type ExcelColumn } from "@/components/ctrl/excel-table";
-import { isForcedDirectorRouting } from "@/lib/ctrl/routing";
+import { isForcedDirectorRouting, isManagerFinalSector } from "@/lib/ctrl/routing";
 import { formatDateBR, formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 
 type Req = {
@@ -729,7 +729,9 @@ export function AprovacoesClient({ requests, ctrlRoles, ownSectorIds = [], force
                         })
                           ? "Diretor (direto — regra do setor)"
                           : modal.req.approval_tier === "nivel_3"
-                            ? "Diretor (fora do orçamento)"
+                            ? isManagerFinalSector(modal.req.sector_id)
+                              ? "Gerente (fora do orçamento — setor dispensa o diretor)"
+                              : "Diretor (fora do orçamento)"
                             : "Gerente (nível 2)"
                       }
                     />

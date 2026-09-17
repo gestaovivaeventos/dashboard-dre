@@ -30,6 +30,22 @@
     {
       "path": "/api/cron/ctrl-approval-reminders",
       "schedule": "0 13 * * 1-5"
+    },
+    {
+      "path": "/api/cron/vb-cdi",
+      "schedule": "0 11 * * 1-5"
+    },
+    {
+      "path": "/api/cron/vb-monthly-reports",
+      "schedule": "0 12 5 * *"
+    },
+    {
+      "path": "/api/cron/caixa-saldos",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/caixa-saldos",
+      "schedule": "30 15 * * *"
     }
   ]
 }

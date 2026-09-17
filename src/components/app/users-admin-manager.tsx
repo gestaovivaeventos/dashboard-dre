@@ -73,6 +73,7 @@ interface UserItem {
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
   can_contratos: boolean;
+  can_caixa: boolean;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -197,6 +198,7 @@ interface FormState {
   can_viagens: boolean;
   can_viagens_aprovar: boolean;
   can_contratos: boolean;
+  can_caixa: boolean;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -213,6 +215,7 @@ const emptyForm: FormState = {
   can_viagens: false,
   can_viagens_aprovar: false,
   can_contratos: false,
+  can_caixa: false,
   sector_ids: [],
   company_ids: [],
 };
@@ -230,6 +233,7 @@ function userToForm(u: UserItem): FormState {
     can_viagens: u.can_viagens,
     can_viagens_aprovar: u.can_viagens_aprovar,
     can_contratos: u.can_contratos,
+    can_caixa: u.can_caixa,
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -311,6 +315,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           if (filterModule === "compras" && !(isAdmin || u.can_compras)) return false;
           if (filterModule === "case" && !(isAdmin || u.can_case)) return false;
           if (filterModule === "contratos" && !(isAdmin || u.can_contratos)) return false;
+          if (filterModule === "caixa" && !(isAdmin || u.can_caixa)) return false;
         }
         if (filterSector !== "all" && !u.sector_ids.includes(filterSector)) return false;
         if (
@@ -384,6 +389,9 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
         next.can_contratos = true;
+        // Ilha: o validador de contrato só enxerga /contratos, então o Caixa
+        // não teria efeito nenhum (ver o gate em @/lib/auth/access).
+        next.can_caixa = false;
         next.sector_ids = [];
         next.company_ids = [];
       }
@@ -457,6 +465,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens: boolean;
         can_viagens_aprovar: boolean;
         can_contratos: boolean;
+        can_caixa: boolean;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -476,6 +485,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens: u.can_viagens,
         can_viagens_aprovar: u.can_viagens_aprovar,
         can_contratos: u.can_contratos,
+        can_caixa: u.can_caixa,
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -495,6 +505,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       !form.can_compras &&
       !form.can_case &&
       !form.can_contratos &&
+      !form.can_caixa &&
       // Viagens saiu da tela, mas quem já tinha o módulo continua válido.
       !form.can_viagens &&
       form.profile !== "admin"
@@ -534,6 +545,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
         can_contratos: form.can_contratos,
+        can_caixa: form.can_caixa,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -572,6 +584,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens: form.can_viagens,
         can_viagens_aprovar: form.can_viagens_aprovar,
         can_contratos: form.can_contratos,
+        can_caixa: form.can_caixa,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -679,6 +692,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                   { value: "compras", label: "Compras" },
                   { value: "case", label: "Case" },
                   { value: "contratos", label: "Validação de Contratos" },
+                  { value: "caixa", label: "Caixa" },
                 ]}
               />
             </TableHead>
@@ -772,6 +786,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                       u.can_compras && "Compras",
                       u.can_case && "Case",
                       u.can_contratos && "Validação de Contratos",
+                      u.can_caixa && "Caixa",
                       // Viagens não é mais atribuível, mas segue exibido pra
                       // quem ainda tem o módulo.
                       u.can_viagens && (u.can_viagens_aprovar ? "Viagens (aprova)" : "Viagens"),
@@ -981,7 +996,9 @@ function ExceptionsDialog({
                         className={
                           ex.scope === "Compras"
                             ? "border-violet-200 bg-violet-50 text-violet-700"
-                            : "border-blue-200 bg-blue-50 text-blue-700"
+                            : ex.scope === "Case"
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-blue-200 bg-blue-50 text-blue-700"
                         }
                       >
                         {ex.scope}
@@ -1225,12 +1242,35 @@ function UserForm({
               {form.can_contratos ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
               Validação de Contratos
             </button>
+            {/* Caixa: como a Validação de Contratos, é um módulo à parte,
+                liberável em QUALQUER perfil (inclusive Visão Financeira e CSC,
+                que escondem o resto da seção). Por isso fica fora do bloco
+                !isFinanceiroOnly. */}
+            <button
+              type="button"
+              onClick={() => onChange("can_caixa", !form.can_caixa)}
+              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
+                form.can_caixa
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "hover:bg-muted"
+              }`}
+            >
+              {form.can_caixa ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+              Caixa
+            </button>
           </div>
           <p className="text-xs text-muted-foreground">
             {isFinanceiroOnly
-              ? "Este perfil é fixo no Financeiro (sem Compras e sem Case). A Validação de Contratos é um módulo à parte e pode ser liberada."
+              ? "Este perfil é fixo no Financeiro (sem Compras e sem Case). A Validação de Contratos e o Caixa são módulos à parte e podem ser liberados."
               : "Plataforma (Conexões, Usuários, Inteligência) é automática pra admin."}
           </p>
+          {form.can_caixa && (
+            <p className="text-xs text-muted-foreground">
+              O módulo <strong>Caixa</strong> mostra o saldo das contas correntes de{" "}
+              <strong>todas as empresas</strong> — não depende das unidades
+              selecionadas abaixo.
+            </p>
+          )}
         </div>
       )}
 

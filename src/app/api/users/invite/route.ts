@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { resolveAppUrl } from "@/lib/app-url";
+import { setCaixaGrant } from "@/lib/auth/caixa";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
     can_viagens?: boolean;
     can_viagens_aprovar?: boolean;
     can_contratos?: boolean;
+    can_caixa?: boolean;
     sector_ids?: string[];
     company_ids?: string[];
   };
@@ -161,6 +163,12 @@ export async function POST(request: Request) {
   // Módulo Validação de Contratos (linha em user_module_roles)
   if (canContratos) {
     const { error } = await setContratosGrant(adminClient, newUserId, true);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+  }
+
+  // Módulo Caixa (linha em user_module_roles — ver @/lib/auth/caixa)
+  if (body.can_caixa) {
+    const { error } = await setCaixaGrant(adminClient, newUserId, true);
     if (error) return NextResponse.json({ error }, { status: 400 });
   }
 

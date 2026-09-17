@@ -38,6 +38,8 @@ interface Props {
    */
   showRequester?: boolean;
   isAdmin?: boolean;
+  /** Pode editar requisição (admin + Contas a Pagar). Excluir segue só admin. */
+  canEdit?: boolean;
   canReconcile?: boolean;
   sectors?: CadastroOption[];
   expenseTypes?: CadastroOption[];
@@ -82,6 +84,7 @@ export function RequisicoesTable({
   requests,
   showRequester = false,
   isAdmin = false,
+  canEdit = false,
   canReconcile = false,
   sectors = [],
   expenseTypes = [],
@@ -308,21 +311,19 @@ export function RequisicoesTable({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50 text-left text-xs font-semibold">
-                <th className="px-4 py-3"><ExcelHeaderCell label="#" {...headerProps("numero")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("titulo")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Requisição" {...headerProps("titulo")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Fornecedor" {...headerProps("fornecedor")} /></th>
                 {showRequester && (
                   <>
-                    <th className="px-4 py-3"><ExcelHeaderCell label="Solicitante" {...headerProps("solicitante")} /></th>
-                    <th className="px-4 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
+                    <th className="px-3 py-3"><ExcelHeaderCell label="Solicitante" {...headerProps("solicitante")} /></th>
+                    <th className="px-3 py-3"><ExcelHeaderCell label="Setor" {...headerProps("setor")} /></th>
                   </>
                 )}
-                <th className="px-4 py-3"><ExcelHeaderCell label="Valor" {...headerProps("valor")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Status" {...headerProps("status")} /></th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Anexos</th>
-                <th className="px-4 py-3"><ExcelHeaderCell label="Criado em" menuSide="right" {...headerProps("criado")} /></th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ações</th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Valor" align="right" {...headerProps("valor")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Vencimento" {...headerProps("vencimento")} /></th>
+                <th className="px-3 py-3"><ExcelHeaderCell label="Status" menuSide="right" {...headerProps("status")} /></th>
+                <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Anexos</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -331,29 +332,33 @@ export function RequisicoesTable({
                 const needsComplement = req.status === "aguardando_complementacao";
                 return (
                   <tr key={req.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-muted-foreground">
-                      #{req.request_number}
+                    <td className="px-3 py-3">
+                      <p className="line-clamp-1 max-w-[16rem] font-medium" title={req.title}>{req.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        #{req.request_number} · {formatDateBR(req.created_at)}
+                      </p>
                     </td>
-                    <td className="px-4 py-3 font-medium">{req.title}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{supplierName(req)}</td>
+                    <td className="px-3 py-3 text-muted-foreground">
+                      <p className="line-clamp-1 max-w-[13rem]" title={supplierName(req)}>{supplierName(req)}</p>
+                    </td>
                     {showRequester && (
                       <>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {requesterName(req)}
+                        <td className="px-3 py-3 text-muted-foreground">
+                          <p className="line-clamp-1 max-w-[11rem]" title={requesterName(req)}>{requesterName(req)}</p>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {sectorName(req)}
+                        <td className="px-3 py-3 text-muted-foreground">
+                          <p className="line-clamp-1 max-w-[10rem]" title={sectorName(req)}>{sectorName(req)}</p>
                         </td>
                       </>
                     )}
-                    <td className="px-4 py-3">{fmt.format(req.amount)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="px-3 py-3 text-right font-medium whitespace-nowrap">{fmt.format(req.amount)}</td>
+                    <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
                       {formatDayBR(req.due_date)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <StatusBadge status={req.status} paid={isPaid(req)} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       {req.omie_contapagar_codigo ? (
                         <button
                           type="button"
@@ -374,10 +379,7 @@ export function RequisicoesTable({
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatDateBR(req.created_at)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
@@ -422,37 +424,37 @@ export function RequisicoesTable({
                             Responder
                           </button>
                         )}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setEditReq(req)}
+                            disabled={isOmieLaunched(req)}
+                            title={
+                              isOmieLaunched(req)
+                                ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                : "Editar requisição"
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Editar
+                          </button>
+                        )}
                         {isAdmin && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setEditReq(req)}
-                              disabled={isOmieLaunched(req)}
-                              title={
-                                isOmieLaunched(req)
-                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
-                                  : "Editar requisição"
-                              }
-                              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteReq(req)}
-                              disabled={isOmieLaunched(req)}
-                              title={
-                                isOmieLaunched(req)
-                                  ? "Já lançada no Omie — ajuste no Omie primeiro"
-                                  : "Excluir requisição"
-                              }
-                              className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Excluir
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteReq(req)}
+                            disabled={isOmieLaunched(req)}
+                            title={
+                              isOmieLaunched(req)
+                                ? "Já lançada no Omie — ajuste no Omie primeiro"
+                                : "Excluir requisição"
+                            }
+                            className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Excluir
+                          </button>
                         )}
                       </div>
                     </td>

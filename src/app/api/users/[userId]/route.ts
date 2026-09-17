@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { setCaixaGrant } from "@/lib/auth/caixa";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -46,6 +47,8 @@ export async function PATCH(request: Request, { params }: Params) {
     can_viagens_aprovar?: boolean;
     /** Módulo Validação de Contratos (user_module_roles, não coluna de users). */
     can_contratos?: boolean;
+    /** Módulo Caixa (user_module_roles, não coluna de users). */
+    can_caixa?: boolean;
     active?: boolean;
     /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
     sector_ids?: string[];
@@ -120,6 +123,15 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (contratosTarget !== undefined) {
     const { error } = await setContratosGrant(adminClient, params.userId, contratosTarget);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+  }
+
+  // ── Sync módulo Caixa ──
+  // Também vive em user_module_roles (ver @/lib/auth/caixa). Admin já enxerga
+  // sem a linha, então gravar a concessão pra ele é inofensivo e mantém o
+  // acesso caso o perfil mude depois. `undefined` não mexe em nada.
+  if (body.can_caixa !== undefined) {
+    const { error } = await setCaixaGrant(adminClient, params.userId, body.can_caixa);
     if (error) return NextResponse.json({ error }, { status: 400 });
   }
 

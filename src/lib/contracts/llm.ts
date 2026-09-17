@@ -6,6 +6,7 @@
 // (2026-08-14) to read LandingAI attestation blocks and to allow
 // "Indeterminado" (assinado, mas sem atribuição segura de parte).
 
+import { parseLlmJson } from './llm-json'
 import type { ContractExtraction } from './types'
 import { resolveAiProvider, logResolvedUsage } from '@/lib/ai/provider'
 
@@ -89,7 +90,14 @@ Classifique em UMA das 7 categorias. Preencha \`"tipo_documento"\` com o nome ex
           = "4550.00", \`pagamentoX_obs\` = "50%".
         - **PARA REEMBOLSO (ex: 99):** Use o **"Valor da Corrida"** (ex: "29.16"). IGNORE ATIVAMENTE
           "Desconto", "Cupom" ou "Subtotal".
-        - **PARA CONTRATOS/ATAS:** O valor total ou o valor líquido da rescisão.
+        - **PARA CONTRATOS:** O valor total do contrato.
+        - **!!! ATA DE DESLIGAMENTO / RESCISÃO / TERMO DE DISTRATO !!!:** o valor é o
+          **LÍQUIDO A RECEBER** pelo integrante — a linha "TOTAL A RECEBER", "VALOR A
+          RECEBER", "RECEBIMENTO de R$ ..." ou "valor líquido da rescisão". **NUNCA** use o
+          "Valor TOTAL do plano contratado", nem o crédito (valores pagos), nem o débito
+          (multa), nem a soma de crédito + débito: esses são a base do cálculo, não o que
+          será pago. Ex.: crédito 5254.20, débito 1899.71, plano 6332.38, TOTAL A RECEBER
+          3354.49 → \`valor_contrato\` = "3354.49" (e \`pagamento1_valor\` = "3354.49").
     - \`pagamentoX_valor\`: O valor de parcelas específicas.
     - \`pagamentoX_obs\`: só preencha quando a parcela veio como porcentagem (senão "").
 
@@ -247,7 +255,7 @@ export async function extractContractDataWithLlm(
 
   let parsed: ContractExtraction
   try {
-    parsed = JSON.parse(rawText) as ContractExtraction
+    parsed = parseLlmJson<ContractExtraction>(rawText)
   } catch (e) {
     throw new LlmExtractionError(
       `OpenAI: JSON inválido na resposta (${(e as Error).message}): ${rawText.slice(0, 200)}`,

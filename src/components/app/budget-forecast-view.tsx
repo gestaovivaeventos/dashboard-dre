@@ -251,6 +251,7 @@ export function BudgetForecastView({
   const [drillRows, setDrillRows] = useState<DrilldownRow[]>([]);
   const [drillLoading, setDrillLoading] = useState(false);
   const { showToast } = useToast();
+  const [exporting, setExporting] = useState(false);
   const [exportingDrill, setExportingDrill] = useState(false);
   const [drillSearch, setDrillSearch] = useState("");
   const [drillPage, setDrillPage] = useState(1);
@@ -437,6 +438,147 @@ export function BudgetForecastView({
   const columns = visibleBuckets;
   const totalCols = columns.length + 1;
 
+  // Exporta a tabela ATUAL (a aba/visão selecionada) para .xlsx, espelhando
+  // exatamente as colunas que estão na tela e as linhas visíveis (respeita o
+  // expandir/recolher). Import dinâmico do xlsx no clique, como no DRE Gerencial.
+  const exportExcel = async () => {
+    const XLSX = await import("xlsx");
+    try {
+      setExporting(true);
+
+      const indent = (row: BudgetForecastDisplayRow) =>
+        `${" ".repeat((row.level - 1) * 2)}${row.name}`;
+      const sheetRows: Record<string, string | number>[] = [];
+
+      if (view === "comparativo") {
+        const cmpCompanies = companies.filter((c) => selectedCompanyIds.includes(c.id));
+        const isCompare = subView === "realizado";
+        visibleRows.forEach((row) => {
+          const record: Record<string, string | number> = { Conta: indent(row) };
+          let totalBudget = 0;
+          let totalReal = 0;
+          cmpCompanies.forEach((c) => {
+            const bud = row.budgetByCompany?.[c.id] ?? 0;
+            const real = row.valuesByCompany?.[c.id] ?? 0;
+            totalBudget += bud;
+            totalReal += real;
+            if (isCompare) {
+              record[`${c.name} - Previsto`] = bud;
+              record[`${c.name} - Realizado`] = real;
+              record[`${c.name} - Var %`] = formatVar(bud, real);
+            } else {
+              record[c.name] = bud;
+            }
+          });
+          if (isCompare) {
+            record["Total - Previsto"] = totalBudget;
+            record["Total - Realizado"] = totalReal;
+            record["Total - Var %"] = formatVar(totalBudget, totalReal);
+          } else {
+            record["Total"] = totalBudget;
+          }
+          sheetRows.push(record);
+        });
+      } else if (view === "realizado" && subView === "consolidado") {
+        visibleRows.forEach((row) => {
+          const budgetVal = row.budgetValue ?? 0;
+          const actualVal = row.realizedValue ?? row.accumulatedValue ?? 0;
+          sheetRows.push({
+            Conta: indent(row),
+            Previsto: budgetVal,
+            Realizado: actualVal,
+            "Var %": formatVar(budgetVal, actualVal),
+          });
+        });
+      } else if (view === "realizado" && subView === "mensal") {
+        visibleRows.forEach((row) => {
+          const record: Record<string, string | number> = { Conta: indent(row) };
+          columns.forEach((column) => {
+            const real = row.valuesByBucket[column.key] ?? 0;
+            const bud = row.budgetByBucket?.[column.key] ?? 0;
+            record[`${column.label} - Prev`] = bud;
+            record[`${column.label} - Real`] = real;
+            record[`${column.label} - Var %`] = formatVar(bud, real);
+          });
+          const totalBudget = row.accumulatedBudget ?? 0;
+          const totalReal = row.accumulatedValue ?? 0;
+          record["Total - Prev"] = totalBudget;
+          record["Total - Real"] = totalReal;
+          record["Total - Var %"] = formatVar(totalBudget, totalReal);
+          sheetRows.push(record);
+        });
+      } else {
+        // Orçamento Anual e Projeção: colunas mensais + acumulado.
+        visibleRows.forEach((row) => {
+          const record: Record<string, string | number> = { Conta: indent(row) };
+          columns.forEach((column) => {
+            record[column.label] = row.valuesByBucket[column.key] ?? 0;
+          });
+          record[accumulatedBucket.label] = row.accumulatedValue ?? 0;
+          sheetRows.push(record);
+        });
+      }
+
+      if (sheetRows.length === 0) {
+        showToast({
+          title: "Nada para exportar",
+          description: "Nenhuma linha visivel na tabela.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+      // Formata como moeda apenas as celulas numericas — as colunas Var % ficam
+      // como texto ("+5.0%"), iguais a tela.
+      const rangeRef = XLSX.utils.decode_range(worksheet["!ref"] ?? "A1:A1");
+      for (let rowIndex = 1; rowIndex <= rangeRef.e.r; rowIndex += 1) {
+        for (let colIndex = 1; colIndex <= rangeRef.e.c; colIndex += 1) {
+          const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+          const cell = worksheet[cellAddress];
+          if (cell && cell.t === "n") cell.z = "R$ #,##0.00";
+        }
+      }
+
+      const unitsLabel =
+        selectedCompanyIds.length === companies.length
+          ? "Consolidado"
+          : companies
+              .filter((company) => selectedCompanyIds.includes(company.id))
+              .map((company) => company.name)
+              .join("_");
+      const periodLabel = range.label.replace(/\s+/g, "_");
+      const viewFileLabel =
+        view === "realizado"
+          ? subView === "mensal"
+            ? "PrevxReal_Mensal"
+            : "PrevxReal"
+          : view === "comparativo"
+            ? subView === "realizado"
+              ? "Comparativo_PrevxReal"
+              : "Comparativo_Orcamento"
+            : view === "projecao"
+              ? "Projecao"
+              : "Orcamento";
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Budget e Forecast");
+      XLSX.writeFile(
+        workbook,
+        `BudgetForecast_${viewFileLabel}_${unitsLabel || "Consolidado"}_${periodLabel || "Periodo"}.xlsx`,
+      );
+      showToast({ title: "Exportacao concluida", description: "Excel gerado.", variant: "success" });
+    } catch (error) {
+      showToast({
+        title: "Falha ao exportar",
+        description: error instanceof Error ? error.message : "Erro ao gerar Excel.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const titleByView: Record<ViewTab, string> = {
     orcamento: "Orcamento Anual",
     realizado: "Previsto x Realizado",
@@ -455,6 +597,20 @@ export function BudgetForecastView({
               {titleByView[view]} | {range.label}
             </p>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void exportExcel()}
+            disabled={exporting || rows.length === 0}
+            title="Exportar a tabela atual para Excel"
+          >
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+            )}
+            Exportar Excel
+          </Button>
         </div>
 
         {/* Tabs */}

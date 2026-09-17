@@ -252,6 +252,24 @@ function EntryForm({
         title = n === 1 ? "Lançamento gravado" : `${n} lançamentos gravados`;
       }
       showToast({ title, variant: "success" });
+      // As duas actions devolvem o resultado da reconciliação do CDI.
+      const cdi = "cdi" in result ? result.cdi : null;
+      if (cdi && cdi.retroativo) {
+        showToast({
+          title: "Data retroativa: rendimento recalculado",
+          description: `${cdi.removed} rendimento(s) refeito(s) sobre o saldo novo, ${cdi.created} gravado(s).`,
+          variant: "default",
+        });
+      } else if (cdi && cdi.created > 0) {
+        showToast({ title: `Rendimento fechado até a data: ${cdi.created} lançamento(s)`, variant: "default" });
+      }
+      if (cdi && cdi.historicoCongelado) {
+        showToast({
+          title: "Anterior ao histórico importado",
+          description: "Os rendimentos da planilha não são recalculados; só os por CDI.",
+          variant: "destructive",
+        });
+      }
       onSaved?.(result);
       onClose();
       router.refresh();

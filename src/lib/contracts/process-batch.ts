@@ -12,9 +12,25 @@ import { extractContract, mergeContas, mergeCpfCnpj } from './extract'
 import { decidirPorSaldoFee, loadFeeSaldo, type FeeSaldoMap } from './fee-saldo'
 import { LandingAIError } from './landingai'
 import { LlmExtractionError } from './llm'
-import { analisarRequisicao, isFeeCerimonial, type RequisitionDocument } from './validate'
+import {
+  agruparRpsIrmas,
+  analisarRequisicao,
+  isComissao,
+  isFeeCerimonial,
+  type RequisitionDocument,
+} from './validate'
 import type { ContractExtraction, ValidationStatus } from './types'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+// Veredito fixo das requisições de comissão (fase 0c e rede de segurança da
+// fase 1): a conferência é na OP, não no anexo.
+const COMISSAO_DECISAO = {
+  status: 'analise_especialista' as const,
+  resumo: 'Análise do especialista — Comissão: conferir na OP os valores orçados e já aprovados',
+  motivos: [
+    'Requisição de comissão (comercial/relacionamento/produção/atendimento/pós-venda): leitura do anexo dispensada — confira na OP o valor orçado e o já aprovado antes de pagar',
+  ],
+}
 
 interface BatchRow {
   id: string
@@ -26,6 +42,7 @@ interface BatchRow {
 interface ItemRow {
   id: string
   requisicao_codigo: string
+  descricao: string | null
   fornecedor: string | null
   favorecido: string | null
   cpf_cnpj: string | null
@@ -147,10 +164,15 @@ export async function processBatch(
     .eq('batch_id', batchId)
 
   const feeReqs = new Set<string>()
+  // Comissões (comercial, relacionamento, produção, atendimento, pós-venda):
+  // o valor a pagar vem da OP, não do anexo — sem leitura, direto para o
+  // especialista (fase 0c). FEE tem precedência se a descrição casar os dois.
+  const comissaoReqs = new Set<string>()
   for (const r of (descRows ?? []) as Array<{ requisicao_codigo: string; descricao: string | null }>) {
     if (isFeeCerimonial(r.descricao)) feeReqs.add(r.requisicao_codigo)
+    else if (isComissao(r.descricao)) comissaoReqs.add(r.requisicao_codigo)
   }
-  console.log(`[contracts] phase0 FEE/Cerimonial reqs=${feeReqs.size}`)
+  console.log(`[contracts] phase0 FEE/Cerimonial reqs=${feeReqs.size} comissao reqs=${comissaoReqs.size}`)
 
   // Recupera itens presos em 'processing' por execuções anteriores que foram
   // mortas no meio da extração (ex.: timeout do LandingAI estourando o
@@ -222,6 +244,33 @@ export async function processBatch(
     }
   }
 
+  // ── Phase 0c: comissões → análise especialista, sem leitura ───────────────
+  // O recibo/contrato anexo sempre "bate" com a RP (a pessoa emite o recibo
+  // pelo valor pedido), então a leitura não confere nada. O que decide é a OP:
+  // valor orçado e já aprovado. Isso é conferência humana.
+  if (comissaoReqs.size > 0) {
+    const { data: comissaoRows } = await db
+      .from('contract_validation_items')
+      .select('id, requisicao_codigo')
+      .eq('batch_id', batchId)
+      .eq('status', 'pending')
+    const comissaoIds = ((comissaoRows ?? []) as Array<Pick<ItemRow, 'id' | 'requisicao_codigo'>>)
+      .filter((r) => comissaoReqs.has(r.requisicao_codigo))
+      .map((r) => r.id)
+    if (comissaoIds.length > 0) {
+      await db
+        .from('contract_validation_items')
+        .update({
+          status: COMISSAO_DECISAO.status,
+          status_resumo: COMISSAO_DECISAO.resumo,
+          status_motivos: COMISSAO_DECISAO.motivos,
+          processed_at: new Date().toISOString(),
+        })
+        .in('id', comissaoIds)
+      console.log(`[contracts] phase0c comissao decided items=${comissaoIds.length}`)
+    }
+  }
+
   // ── Phase 1: extract missing data ──────────────────────────────────────────
   const { data: pendingExtraction } = await db
     .from('contract_validation_items')
@@ -254,6 +303,19 @@ export async function processBatch(
           status: 'analise_especialista',
           status_resumo: 'FEE/Cerimonial — análise especialista (decisão de saldo não aplicada)',
           status_motivos: ['Requisição de FEE/Cerimonial: leitura dispensada; checagem de saldo não concluiu'],
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', item.id)
+      continue
+    }
+    // Mesma rede para comissão: nunca gasta crédito lendo o anexo.
+    if (comissaoReqs.has(item.requisicao_codigo)) {
+      await db
+        .from('contract_validation_items')
+        .update({
+          status: COMISSAO_DECISAO.status,
+          status_resumo: COMISSAO_DECISAO.resumo,
+          status_motivos: COMISSAO_DECISAO.motivos,
           processed_at: new Date().toISOString(),
         })
         .eq('id', item.id)
@@ -340,7 +402,7 @@ export async function processBatch(
   const { data: allItems } = await db
     .from('contract_validation_items')
     .select(
-      'id, requisicao_codigo, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, tipo_pagamento, raw_extraction',
+      'id, requisicao_codigo, descricao, fornecedor, favorecido, cpf_cnpj, conta, valor, link_contrato, tipo_documento, extracted_fornecedor, extracted_cpf_cnpj, extracted_conta, extracted_valor_contrato, extracted_pagamentos, extracted_vencimentos, assinatura_contratante, assinatura_contratado, status, error_log, data_evento, modulo, valor_total_contrato, historico_rps_pagas, data_pagamento_prevista, data_contrato, fundo, numero_contrato, tipo_pagamento, raw_extraction',
     )
     .eq('batch_id', batchId)
 
@@ -355,6 +417,19 @@ export async function processBatch(
   }
 
   console.log(`[contracts] phase2 evaluating ${groups.size} requisitions (${items.length} items)`)
+
+  // RPs irmãs: mesma descrição (normalizada) e mesmo fundo dentro do lote. Uma
+  // parcela paga em duas RPs — o caso recorrente é o BV Viva, uma RP ao
+  // fornecedor e outra à Viva — só fecha quando somadas, e sem isso cada uma
+  // parecia pagamento parcial (ou reprovava por favorecido/conta da Viva).
+  const irmasPorRp = agruparRpsIrmas(
+    items.map((i) => ({
+      requisicao_codigo: i.requisicao_codigo,
+      descricao: i.descricao,
+      fundo: i.fundo,
+      valor: Number(i.valor) || 0,
+    })),
+  )
 
   // BV (saldo do contrato): carrega a base de RPs pagas uma vez e soma o já-pago
   // por (fundo + CNPJ + número do contrato), normalizado. O valor entra na RP
@@ -381,6 +456,11 @@ export async function processBatch(
       console.log('[contracts] time budget exhausted in phase2')
       break
     }
+
+    // Requisição decidida pela descrição (fase 0) não passa pela validação de
+    // documento: num reprocessamento de item já extraído (tipo_documento
+    // preenchido) a regra de anexo sobrescreveria o veredito de comissão/FEE.
+    if (feeReqs.has(reqCodigo) || comissaoReqs.has(reqCodigo)) continue
 
     // Skip a requisition if every item is already finalized AND we don't need
     // to re-evaluate. We always re-evaluate when there is fresh data (i.e.,
@@ -426,6 +506,8 @@ export async function processBatch(
 
     const validation = analisarRequisicao({
       requisicao_codigo: reqCodigo,
+      descricao: first.descricao,
+      irmas: irmasPorRp.get(reqCodigo) ?? [],
       req: {
         fornecedor: first.fornecedor,
         favorecido: first.favorecido,

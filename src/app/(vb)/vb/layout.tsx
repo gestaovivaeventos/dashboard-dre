@@ -32,6 +32,7 @@ export default async function VbLayout({ children }: { children: React.ReactNode
   const canViagensAprovar = Boolean(modules.viagens?.aprovador);
   const canContratos = Boolean(modules.contratos);
   const vbRole = modules.vb?.role ?? null;
+  const canCaixa = Boolean(modules.caixa);
 
   const segments = await resolveUserSegments(supabase, {
     isAdmin: dreRole === "admin",
@@ -47,6 +48,7 @@ export default async function VbLayout({ children }: { children: React.ReactNode
     canCase,
     canViagens,
     vbRole !== null,
+    canCaixa,
   );
 
   const unreadNotifications = profile?.id
@@ -66,6 +68,7 @@ export default async function VbLayout({ children }: { children: React.ReactNode
       canViagensAprovar={canViagensAprovar}
       canContratos={canContratos}
       vbRole={vbRole}
+      canCaixa={canCaixa}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

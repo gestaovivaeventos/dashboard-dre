@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Banknote,
   Bell,
   BookOpen,
   Brain,
@@ -16,6 +17,7 @@ import {
   Inbox,
   Landmark,
   LayoutDashboard,
+  LifeBuoy,
   Mail,
   MapPinned,
   Music2,
@@ -35,8 +37,16 @@ import {
   BI_VALIDATION_NAV_KEY,
   BI_VALIDATION_PATH,
 } from "@/lib/auth/bi-validation";
+import { CAIXA_NAV_KEY_REAL, CAIXA_REAL_PATH } from "@/lib/auth/caixa";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
-import { VB_NAV_KEY_OMIE, VB_NAV_KEY_OVERVIEW, VB_OMIE_PATH, VB_PATH } from "@/lib/auth/vb";
+import {
+  VB_NAV_KEY_OMIE,
+  VB_NAV_KEY_OVERVIEW,
+  VB_NAV_KEY_REPORTS,
+  VB_OMIE_PATH,
+  VB_PATH,
+  VB_REPORTS_PATH,
+} from "@/lib/auth/vb";
 import type { CtrlRole, DreRole } from "@/lib/supabase/types";
 
 /**
@@ -230,17 +240,29 @@ export interface NavItem {
   vbAccess?: boolean;
   /** Item só do papel gestor do VB (importação). */
   vbGestorOnly?: boolean;
+  /**
+   * Item do módulo Caixa — visível para quem tem a concessão ou é admin (ver
+   * @/lib/auth/caixa). Independe de dreRoles/ctrlRoles.
+   */
+  caixaAccess?: boolean;
+  /**
+   * Item visível a QUALQUER usuário logado (ex.: Chamados/Suporte). Ignora
+   * dreRoles/ctrlRoles e as whitelists de franqueado/CSC.
+   */
+  alwaysVisible?: boolean;
 }
 
 export type NavGroupId =
   | "financeiro"
   | "orcamento"
   | "compras"
+  | "caixa"
   | "case"
   | "viagens"
   | "contratos"
   | "vb"
-  | "plataforma";
+  | "plataforma"
+  | "suporte";
 
 export interface NavGroup {
   id: NavGroupId;
@@ -310,6 +332,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    // Módulo Caixa: saldo das contas correntes de todas as empresas, lido da
+    // Omie. Concedido por usuário em "Módulos visíveis" (ver @/lib/auth/caixa);
+    // admin enxerga sem a concessão. Grupo próprio porque não é um recorte do
+    // Financeiro — é a posição de caixa do grupo inteiro, sem filtro de
+    // segmento e sem a regra de empresas restritas.
+    id: "caixa",
+    label: "CAIXA",
+    items: [
+      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Real", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
+    ],
+  },
+  {
     id: "case",
     label: "CASE",
     items: [
@@ -342,6 +376,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: VB_NAV_KEY_OVERVIEW, title: "Visão geral", icon: Landmark, scope: "global", href: VB_PATH, vbAccess: true },
       { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
+      // Extrato mensal por e-mail aos credores: acompanhamento e envio manual.
+      { key: VB_NAV_KEY_REPORTS, title: "Relatórios mensais", icon: Mail, scope: "global", href: VB_REPORTS_PATH, vbAccess: true, vbGestorOnly: true },
     ],
   },
   {
@@ -356,6 +392,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       // Substitui a antiga aba "Configuracoes > Empresas", a tela "Conexoes" e o
       // antigo Painel Administrador global (/admin), todos removidos.
       { key: "pf-painel-admin", title: "Painel Administrador", icon: LayoutDashboard, scope: "segment", suffix: "/painel-administrador", dreRoles: ["admin"] },
+    ],
+  },
+  // Último grupo: aberto a qualquer usuário logado (abre chamados de melhoria/bug).
+  {
+    id: "suporte",
+    label: "SUPORTE",
+    items: [
+      { key: "sup-chamados", title: "Chamados", icon: LifeBuoy, scope: "global", href: "/chamados", alwaysVisible: true },
     ],
   },
 ] as const;
