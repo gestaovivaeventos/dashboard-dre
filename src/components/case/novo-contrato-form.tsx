@@ -8,7 +8,7 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
 import { salvarCliente, enviarParaAprovacao, salvarAtracao } from "@/lib/case/actions/stages";
 import { extractArtistContract } from "@/lib/case/actions/ocr";
-import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
 import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
@@ -210,7 +210,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
     setOcrLoading(false);
     if ("error" in res) return setError(res.error);
     const d = res.data;
-    if (d.bandName && bandMode === "new") { patchBand({ name: d.bandName, doc: d.bandDoc ?? "" }); }
+    if (d.bandName && bandMode === "new") patchBand(artistOcrToBandPatch(d));
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));

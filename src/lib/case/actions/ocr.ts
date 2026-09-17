@@ -14,6 +14,8 @@ import { extractPdfText } from "@/lib/pdf/text";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCaseUser } from "@/lib/case/auth";
+import { CONTRATADO, DADOS_BANCARIOS } from "@/lib/case/contract-config";
+import type { PixTipo } from "@/lib/case/pix";
 
 const ATTACHMENT_BUCKET = "case-attachments";
 const OCR_MODEL = "gpt-4o";
@@ -41,8 +43,21 @@ function regrasParcelas(): string {
 }
 
 const ArtistContractSchema = z.object({
-  artista_nome: z.string().nullable().describe("Nome do artista/banda contratada (a atração). Null se não encontrar."),
-  artista_cnpj_cpf: z.string().nullable().describe("CNPJ ou CPF do artista/banda ou de seu representante/produtora. Só números. Null se não encontrar."),
+  artista_nome: z.string().nullable().describe("Nome ARTÍSTICO da atração (banda, cantor, DJ) — como aparece no objeto do contrato. Null se não encontrar."),
+  contratado_nome: z.string().nullable().describe("Razão social (PJ) ou nome completo (PF) da parte CONTRATADA — quem presta o show e recebe o cachê. Nunca a CS Agência. Null se não encontrar."),
+  contratado_cnpj_cpf: z.string().nullable().describe("CNPJ ou CPF da parte CONTRATADA, tirado do parágrafo de qualificação dela. Só números. Null se não encontrar."),
+  contratado_email: z.string().nullable().describe("E-mail da parte CONTRATADA. Null se não encontrar."),
+  contratado_telefone: z.string().nullable().describe("Telefone da parte CONTRATADA. Null se não encontrar."),
+  favorecido_nome: z.string().nullable().describe("Titular da conta que recebe o cachê, como escrito na cláusula de pagamento. Null se não houver dados bancários."),
+  favorecido_cnpj_cpf: z.string().nullable().describe("CPF/CNPJ do titular da conta que recebe. Só números. Null se não encontrar."),
+  banco: z.string().nullable().describe("Banco da conta que recebe (nome e código se houver, ex.: '341 - Itaú'). Null se não encontrar."),
+  agencia: z.string().nullable().describe("Agência, com dígito se houver. Null se não encontrar."),
+  conta_corrente: z.string().nullable().describe("Conta, com dígito se houver. Null se não encontrar."),
+  chave_pix: z.string().nullable().describe("Chave PIX da conta que recebe, exatamente como escrita. Null se não encontrar."),
+  chave_pix_tipo: z
+    .enum(["cpf_cnpj", "telefone", "email", "aleatoria"])
+    .nullable()
+    .describe("Tipo da chave PIX. Null se não houver chave."),
   valor_cache: z.number().nullable().describe("Valor total do cachê pago ao artista, em reais (número decimal, ex.: 15000.00). Null se não encontrar."),
   parcelas_pagamento: z
     .array(
@@ -65,8 +80,18 @@ const ArtistContractSchema = z.object({
 const ARTIST_SCHEMA_HINT = JSON.stringify({
   type: "object",
   properties: {
-    artista_nome: { type: ["string", "null"], description: "Nome do artista/banda contratada (a atração)" },
-    artista_cnpj_cpf: { type: ["string", "null"], description: "CNPJ ou CPF do artista/produtora, só números" },
+    artista_nome: { type: ["string", "null"], description: "Nome artístico da atração" },
+    contratado_nome: { type: ["string", "null"], description: "Razão social/nome da parte CONTRATADA (quem recebe)" },
+    contratado_cnpj_cpf: { type: ["string", "null"], description: "CNPJ/CPF da parte CONTRATADA, só números" },
+    contratado_email: { type: ["string", "null"] },
+    contratado_telefone: { type: ["string", "null"] },
+    favorecido_nome: { type: ["string", "null"], description: "Titular da conta que recebe" },
+    favorecido_cnpj_cpf: { type: ["string", "null"], description: "CPF/CNPJ do titular da conta, só números" },
+    banco: { type: ["string", "null"] },
+    agencia: { type: ["string", "null"] },
+    conta_corrente: { type: ["string", "null"] },
+    chave_pix: { type: ["string", "null"] },
+    chave_pix_tipo: { type: ["string", "null"], enum: ["cpf_cnpj", "telefone", "email", "aleatoria", null] },
     valor_cache: { type: ["number", "null"], description: "Valor total do cachê em reais (decimal)" },
     parcelas_pagamento: {
       type: "array",
@@ -88,11 +113,58 @@ const ARTIST_SCHEMA_HINT = JSON.stringify({
   },
 });
 
+/**
+ * Regras de identificação das partes no contrato da atração. O erro recorrente
+ * era misturar as partes: a CS Agência é a CONTRATANTE aqui (no contrato com o
+ * cliente ela é a contratada), e o modelo pegava o CNPJ/conta dela, o CPF do
+ * representante legal ou da testemunha no lugar de quem de fato recebe.
+ */
+function regrasPartesArtista(): string {
+  return [
+    "COMO IDENTIFICAR AS PARTES:",
+    `- A CONTRATANTE é a nossa agência: ${CONTRATADO.razao} (CNPJ ${CONTRATADO.cnpj}), também chamada ` +
+      `"Case", "Case Shows" ou "CS Agência". NUNCA devolva nome, CNPJ, e-mail, telefone ou conta ` +
+      `bancária dela — nem a conta ${DADOS_BANCARIOS.banco} ag. ${DADOS_BANCARIOS.agencia} c/c ${DADOS_BANCARIOS.conta}. ` +
+      "Se o contrato for de um cliente (formatura, prefeitura, casa de show) contratando a atração, esse cliente também é contratante e deve ser ignorado.",
+    '- A CONTRATADA é quem presta o show e recebe o cachê. Pode aparecer como "CONTRATADA", "CONTRATADO", ' +
+      '"PRODUTORA", "EMPRESÁRIO", "AGENCIADORA", "REPRESENTANTE" ou "ARTISTA". Quando uma produtora/empresa ' +
+      "representa o artista, a CONTRATADA é a produtora (o artista pode aparecer como INTERVENIENTE/ANUENTE).",
+    '- contratado_cnpj_cpf vem do parágrafo de qualificação da CONTRATADA ("inscrita no CNPJ sob o nº…", ' +
+      '"portador do CPF nº…"). Se a CONTRATADA tem CNPJ, o CPF do sócio/representante legal que assina por ela NÃO ' +
+      "é o documento dela. CPF de testemunha nunca entra.",
+    "- Nome e documento do contratado têm que ser da MESMA pessoa/empresa. Se a CONTRATADA é só um nome de " +
+      "banda/grupo sem CNPJ próprio e o único documento é o CPF de quem a representa, devolva o nome dessa " +
+      "pessoa em contratado_nome com o CPF dela (o nome da banda vai em artista_nome).",
+    '- artista_nome é o nome artístico que vai se apresentar (ex.: "Banda Tal"), normalmente no objeto do ' +
+      "contrato. Pode ser diferente da razão social da CONTRATADA.",
+    "",
+    "DADOS DO FAVORECIDO (conta que recebe o cachê):",
+    '- Procure na cláusula de pagamento/remuneração e em anexos: "dados bancários", "depósito", ' +
+      '"transferência", "TED", "PIX", "favorecido", "titular", "em nome de".',
+    "- favorecido_nome e favorecido_cnpj_cpf são do TITULAR DA CONTA, que pode ser diferente da CONTRATADA " +
+      "(ex.: conta pessoal do artista ou do empresário). Copie como estiver escrito.",
+    '- Se a conta vier sem titular explícito, mas o texto disser que o pagamento é feito "à CONTRATADA" ' +
+      '/"em conta da CONTRATADA", use o nome e o documento da CONTRATADA como favorecido.',
+    "- Sem nenhum dado bancário no documento, deixe os campos do favorecido e do banco null — não repita a CONTRATADA.",
+    "- chave_pix_tipo: 11 dígitos (CPF) ou 14 dígitos (CNPJ) = cpf_cnpj; contém @ = email; DDD + número de " +
+      "telefone = telefone; código longo com letras e hífens (formato UUID) = aleatoria. Se o texto disser o " +
+      'tipo ("PIX CNPJ", "PIX celular"), siga o texto.',
+  ].join("\n");
+}
+
 export interface ArtistOcrResult {
-  bandId: string | null;
   bandName: string | null;
+  artistName: string | null;
   bandDoc: string | null;
-  bandCreated: boolean;
+  email: string | null;
+  telefone: string | null;
+  titularBanco: string | null;
+  docTitular: string | null;
+  banco: string | null;
+  agencia: string | null;
+  contaCorrente: string | null;
+  chavePix: string | null;
+  chavePixTipo: PixTipo | null;
   valorCache: number | null;
   parcelas: Array<{ data: string | null; valor: number | null }>;
   dataShow: string | null;
@@ -226,6 +298,7 @@ async function readContractDoc<T extends z.ZodTypeAny>(
       const res = await generateObject({
         model: resolved.provider(OCR_MODEL),
         schema: opts.schema,
+        system: opts.system,
         messages: [{ role: "user", content: [{ type: "text", text: opts.instrucao }, docPart] }],
       });
       await logResolvedUsage(resolved, "ocr", res.usage, { modelName: OCR_MODEL });
@@ -260,7 +333,9 @@ async function readContractDoc<T extends z.ZodTypeAny>(
         `${opts.instrucao}\n\nTEXTO DO CONTRATO (extraído do PDF — o layout se perdeu, mas os rótulos ` +
         `permaneceram):\n${pdf.plain}`,
       schemaHint: opts.schemaHint,
-      maxTokens: 2000,
+      // Provedores com raciocínio (Gemini Flash) gastam parte do teto pensando antes
+      // do JSON; com 2000 a leitura do artista cortava no meio (finish_reason=length).
+      maxTokens: 8000,
       temperature: 0,
     });
     await logResolvedUsage(resolved, "ocr", usage);
@@ -325,8 +400,9 @@ export async function extractFornecedorContract(
 }
 
 /**
- * Lê o contrato do artista (PDF/imagem) via GPT-4o visão, extrai valores/datas/dados
- * do show e AUTO-CADASTRA a banda em case_bands quando não existir (por CNPJ/CPF).
+ * Lê o contrato do artista (PDF/imagem) e extrai a parte contratada, o favorecido
+ * (conta que recebe), cachê, parcelas e dados do show. Não cria cadastro — como no
+ * fornecedor, o salvamento resolve/deduplica por CNPJ depois da revisão na tela.
  */
 export async function extractArtistContract(
   attachmentPath: string,
@@ -339,62 +415,57 @@ export async function extractArtistContract(
     schema: ArtistContractSchema,
     schemaHint: ARTIST_SCHEMA_HINT,
     instrucao:
-      "Leia este CONTRATO DO ARTISTA (contratação de show/atração). Extraia: o nome do " +
-      "artista/banda; o CNPJ/CPF do artista ou de sua produtora; o valor do cachê; as datas e " +
-      "valores de pagamento ao artista; e os dados do show (data, horário, duração/passagem de " +
-      "som, local, endereço e cidade). Não invente — deixe null o que não estiver no documento. " +
+      "Leia este CONTRATO DE CONTRATAÇÃO DE ATRAÇÃO (show de artista/banda/DJ). Extraia: o nome " +
+      "artístico da atração; a razão social/nome, CNPJ/CPF, e-mail e telefone da parte CONTRATADA; " +
+      "os dados do FAVORECIDO (titular, CPF/CNPJ do titular, banco, agência, conta e chave PIX); o " +
+      "valor do cachê; as datas e valores de pagamento; e os dados do show (data, horário, " +
+      "duração/passagem de som, local, endereço e cidade). Não invente — deixe null o que não " +
+      "estiver no documento.\n\n" +
+      regrasPartesArtista() +
+      "\n\n" +
       regrasParcelas(),
     system:
-      "Você lê contratos de artistas/shows a partir do texto de um PDF e devolve os campos " +
-      "pedidos em JSON. Não invente dados.",
+      "Você lê contratos de contratação de artistas/shows para a CS Agência (Case Shows), que é " +
+      "sempre a CONTRATANTE, e devolve os campos pedidos em JSON. Sua tarefa mais importante é não " +
+      "confundir as partes: os dados cadastrais e bancários são de quem RECEBE o cachê. Não invente dados.",
   });
   if ("error" in r) return { error: r.error };
-  const object = r.object;
+  const o = r.object;
 
-  // Auto-cadastro da banda por CNPJ/CPF.
-  const db = (createAdminClientIfAvailable() as DB | null) ?? ((await createClient()) as DB);
-  let bandId: string | null = null;
-  let bandCreated = false;
-  const doc = onlyDigits(object.artista_cnpj_cpf);
-  const name = (object.artista_nome ?? "").trim();
+  // Rede de segurança do prompt: documento da própria agência nunca é o contratado/favorecido.
+  const caseDoc = onlyDigits(CONTRATADO.cnpj);
+  const notCase = (doc: string | null) => (doc && onlyDigits(doc) !== caseDoc ? doc : null);
+  const contratadoDoc = notCase(o.contratado_cnpj_cpf);
+  const favorecidoDoc = notCase(o.favorecido_cnpj_cpf);
+  const bancarioDaCase =
+    (!!o.favorecido_cnpj_cpf && !favorecidoDoc) || (!!o.chave_pix && onlyDigits(o.chave_pix) === caseDoc);
 
-  if (doc) {
-    const { data: bands } = await db.from("case_bands").select("id, cnpj_cpf");
-    const match = (bands ?? []).find((b: { id: string; cnpj_cpf: string | null }) => onlyDigits(b.cnpj_cpf) === doc);
-    if (match) {
-      bandId = match.id as string;
-    } else if (name) {
-      const { data: inserted } = await db
-        .from("case_bands")
-        .insert({
-          name,
-          cnpj_cpf: object.artista_cnpj_cpf,
-          pessoa_fisica: doc.length === 11,
-          created_by: ctx.id,
-        })
-        .select("id")
-        .single();
-      if (inserted) {
-        bandId = inserted.id as string;
-        bandCreated = true;
-      }
-    }
-  }
+  const artista = (o.artista_nome ?? "").trim();
+  const contratado = (o.contratado_nome ?? "").trim();
 
   return {
     data: {
-      bandId,
-      bandName: name || null,
-      bandDoc: object.artista_cnpj_cpf,
-      bandCreated,
-      valorCache: object.valor_cache,
-      parcelas: object.parcelas_pagamento ?? [],
-      dataShow: object.data_show,
-      horario: object.horario,
-      duracao: object.duracao,
-      local: object.local,
-      endereco: object.endereco,
-      cidade: object.cidade,
+      // O cadastro vira fornecedor no Omie: razão social de quem recebe, não o nome artístico.
+      bandName: contratado || artista || null,
+      artistName: artista || null,
+      bandDoc: contratadoDoc,
+      email: o.contratado_email,
+      telefone: o.contratado_telefone,
+      titularBanco: bancarioDaCase ? null : (o.favorecido_nome ?? "").trim() || null,
+      docTitular: bancarioDaCase ? null : favorecidoDoc,
+      banco: bancarioDaCase ? null : o.banco,
+      agencia: bancarioDaCase ? null : o.agencia,
+      contaCorrente: bancarioDaCase ? null : o.conta_corrente,
+      chavePix: bancarioDaCase ? null : o.chave_pix,
+      chavePixTipo: bancarioDaCase || !o.chave_pix ? null : o.chave_pix_tipo,
+      valorCache: o.valor_cache,
+      parcelas: o.parcelas_pagamento ?? [],
+      dataShow: o.data_show,
+      horario: o.horario,
+      duracao: o.duracao,
+      local: o.local,
+      endereco: o.endereco,
+      cidade: o.cidade,
     },
   };
 }

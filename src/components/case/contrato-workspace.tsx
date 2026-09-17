@@ -24,7 +24,7 @@ import { extractArtistContract, extractFornecedorContract } from "@/lib/case/act
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract, lancarBvContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
-import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
 import { clientSignatureIssues, clientSignatureMessage } from "@/lib/case/signature-check";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
@@ -918,7 +918,7 @@ function AtracaoForm({
       setBandId(match.id);
     } else if (!atracao && d.bandName) {
       setBandMode("new");
-      patchBand({ name: d.bandName, doc: d.bandDoc ?? "" });
+      patchBand(artistOcrToBandPatch(d));
     }
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
@@ -930,7 +930,13 @@ function AtracaoForm({
       setErr(`As parcelas lidas somam ${brl(somaPs)}, mas o valor do contrato é ${brl(d.valorCache)}. Ajuste as parcelas para bater com o total antes de salvar.`);
       return;
     }
-    setMsg(match ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.` : "Contrato lido. Revise a atração, o valor e as parcelas antes de salvar.");
+    setMsg(
+      match
+        ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.`
+        : d.banco || d.chavePix
+          ? "Contrato lido. Revise a atração, o favorecido, o valor e as parcelas antes de salvar."
+          : "Contrato lido, mas sem dados bancários do favorecido — preencha antes de salvar.",
+    );
   }
 
   function buildBandInput() {
