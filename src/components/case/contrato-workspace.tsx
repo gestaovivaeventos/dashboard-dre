@@ -24,7 +24,7 @@ import { extractArtistContract, extractFornecedorContract } from "@/lib/case/act
 import { getSaleContractUrl, resendSignature } from "@/lib/case/actions/contracts";
 import { resyncContract, lancarBvContract } from "@/lib/case/actions/contract-launch";
 import { SearchSelect } from "@/components/case/novo-contrato-form";
-import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, bandRowToCadastro, missingFromCadastro, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
 import { clientSignatureIssues, clientSignatureMessage } from "@/lib/case/signature-check";
 import type { ContractDetail, ContractTitleRow } from "@/lib/case/queries";
@@ -861,6 +861,15 @@ function AtracaoForm({
   const [bandId, setBandId] = useState<string>(atracao?.band_id ?? "");
   const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
   const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
+  // Cadastro já existente pode ser corrigido aqui (o caso comum é faltar dado
+  // bancário em cadastro antigo, que trava o lançamento no Omie).
+  const [editCadastro, setEditCadastro] = useState(false);
+  function abrirCadastro(id: string, extra?: Partial<BandCadastro>) {
+    const row = bands.find((b) => b.id === id);
+    if (!row) return;
+    setBand({ ...bandRowToCadastro(row), ...(extra ?? {}) });
+    setEditCadastro(true);
+  }
   const [attachmentPath, setAttachmentPath] = useState<string | null>(atracao?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(atracao?.attachment_path ? "Contrato anexado" : "");
   const [uploading, setUploading] = useState(false);
@@ -913,9 +922,17 @@ function AtracaoForm({
     // Se o CNPJ/CPF do contrato bate com uma atração já cadastrada, seleciona-a.
     const doc = (d.bandDoc ?? "").replace(/\D/g, "");
     const match = !atracao && doc ? bands.find((b) => (b.cnpj_cpf ?? "").replace(/\D/g, "") === doc) : undefined;
+    let completou = false;
     if (match) {
       setBandMode("existing");
       setBandId(match.id);
+      // Cadastro antigo costuma estar sem dado bancário — o que o contrato trouxer
+      // e faltar no cadastro abre a edição já preenchido, para conferir e salvar.
+      const faltando = missingFromCadastro(bandRowToCadastro(match), artistOcrToBandPatch(d));
+      if (Object.keys(faltando).length > 0) {
+        abrirCadastro(match.id, faltando);
+        completou = true;
+      }
     } else if (!atracao && d.bandName) {
       setBandMode("new");
       patchBand(artistOcrToBandPatch(d));
@@ -932,7 +949,9 @@ function AtracaoForm({
     }
     setMsg(
       match
-        ? `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.`
+        ? completou
+          ? `Contrato lido — ${match.name} já cadastrado. Abri o cadastro com o que faltava (dados bancários/contato): confira e salve.`
+          : `Contrato lido — ${match.name} já cadastrado, selecionado automaticamente. Revise valor e parcelas.`
         : d.banco || d.chavePix
           ? "Contrato lido. Revise a atração, o favorecido, o valor e as parcelas antes de salvar."
           : "Contrato lido, mas sem dados bancários do favorecido — preencha antes de salvar.",
@@ -941,18 +960,26 @@ function AtracaoForm({
 
   function buildBandInput() {
     const sel = bands.find((b) => b.id === bandId);
-    return bandMode === "existing" && sel
-      ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
-        }
-      : bandCadastroToInput(band);
+    if (bandMode === "existing" && sel) {
+      // Com o cadastro aberto, o que está na tela é o que vale (resolveBand grava por id).
+      return editCadastro
+        ? bandCadastroToInput(band, sel.id)
+        : {
+            id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+            banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
+          };
+    }
+    return bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione a atração/artista.");
+    if (bandMode === "existing" && editCadastro) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
+    }
     if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome da atração/artista.");
     if (bandMode === "new") {
       const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "atração");
@@ -989,12 +1016,29 @@ function AtracaoForm({
         </div>
       </div>
       {bandMode === "existing" ? (
-        <SearchSelect
-          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
-          value={bandId}
-          onChange={setBandId}
-          placeholder="Buscar e selecionar a atração/artista…"
-        />
+        <div className="space-y-2">
+          <SearchSelect
+            items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+            value={bandId}
+            onChange={(id) => { setBandId(id); setEditCadastro(false); }}
+            placeholder="Buscar e selecionar a atração/artista…"
+          />
+          {bandId && !editCadastro && (
+            <button type="button" onClick={() => abrirCadastro(bandId)} className="text-xs text-amber-700 hover:underline dark:text-amber-400">
+              Editar cadastro (dados bancários, documento, contato)
+            </button>
+          )}
+          {bandId && editCadastro && (
+            <div className="space-y-2 rounded-md border border-border bg-surface-2/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Cadastro d a atração</span>
+                <button type="button" onClick={() => setEditCadastro(false)} className="text-xs text-ink-muted hover:underline">Fechar sem alterar</button>
+              </div>
+              <p className="text-xs text-ink-muted">O que você mudar aqui vale para o cadastro, em todos os contratos — é gravado ao salvar.</p>
+              <BandCadastroFields value={band} onChange={patchBand} />
+            </div>
+          )}
+        </div>
       ) : (
         <BandCadastroFields value={band} onChange={patchBand} />
       )}
@@ -1094,6 +1138,15 @@ function FornecedorForm({
   const [bandId, setBandId] = useState<string>(fornecedor?.band_id ?? "");
   const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
   const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
+  // Cadastro já existente pode ser corrigido aqui (o caso comum é faltar dado
+  // bancário em cadastro antigo, que trava o lançamento no Omie).
+  const [editCadastro, setEditCadastro] = useState(false);
+  function abrirCadastro(id: string, extra?: Partial<BandCadastro>) {
+    const row = bands.find((b) => b.id === id);
+    if (!row) return;
+    setBand({ ...bandRowToCadastro(row), ...(extra ?? {}) });
+    setEditCadastro(true);
+  }
   const [descricao, setDescricao] = useState(fornecedor?.descricao ?? "");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(fornecedor?.attachment_path ?? null);
   const [attachmentName, setAttachmentName] = useState<string>(fornecedor?.attachment_path ? "Contrato anexado" : "");
@@ -1198,18 +1251,26 @@ function FornecedorForm({
 
   function buildBandInput() {
     const sel = bands.find((b) => b.id === bandId);
-    return bandMode === "existing" && sel
-      ? {
-          id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
-          banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
-        }
-      : bandCadastroToInput(band);
+    if (bandMode === "existing" && sel) {
+      // Com o cadastro aberto, o que está na tela é o que vale (resolveBand grava por id).
+      return editCadastro
+        ? bandCadastroToInput(band, sel.id)
+        : {
+            id: sel.id, name: sel.name, cnpj_cpf: sel.cnpj_cpf, pessoa_fisica: sel.pessoa_fisica, email: sel.email, phone: sel.phone,
+            banco: sel.banco, agencia: sel.agencia, conta_corrente: sel.conta_corrente, titular_banco: sel.titular_banco, doc_titular: sel.doc_titular, chave_pix: sel.chave_pix, chave_pix_tipo: sel.chave_pix_tipo,
+          };
+    }
+    return bandCadastroToInput(band);
   }
 
   async function submit() {
     setErr(null);
     setMsg(null);
     if (bandMode === "existing" && !bandId) return setErr("Selecione o fornecedor.");
+    if (bandMode === "existing" && editCadastro) {
+      const pixErr = validatePix(band.pixTipo || null, band.pix);
+      if (pixErr) return setErr(pixErr);
+    }
     if (bandMode === "new" && !band.name.trim()) return setErr("Informe o nome do fornecedor.");
     if (bandMode === "new") {
       const bankErr = newBandBankError({ doc: band.doc, banco: band.banco, agencia: band.agencia, conta: band.conta, pix: band.pix }, "fornecedor");
@@ -1268,12 +1329,29 @@ function FornecedorForm({
         </div>
       </div>
       {bandMode === "existing" ? (
-        <SearchSelect
-          items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
-          value={bandId}
-          onChange={setBandId}
-          placeholder="Buscar e selecionar o fornecedor…"
-        />
+        <div className="space-y-2">
+          <SearchSelect
+            items={bands.map((b) => ({ id: b.id, label: b.name, sub: b.cnpj_cpf }))}
+            value={bandId}
+            onChange={(id) => { setBandId(id); setEditCadastro(false); }}
+            placeholder="Buscar e selecionar o fornecedor…"
+          />
+          {bandId && !editCadastro && (
+            <button type="button" onClick={() => abrirCadastro(bandId)} className="text-xs text-amber-700 hover:underline dark:text-amber-400">
+              Editar cadastro (dados bancários, documento, contato)
+            </button>
+          )}
+          {bandId && editCadastro && (
+            <div className="space-y-2 rounded-md border border-border bg-surface-2/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Cadastro do fornecedor</span>
+                <button type="button" onClick={() => setEditCadastro(false)} className="text-xs text-ink-muted hover:underline">Fechar sem alterar</button>
+              </div>
+              <p className="text-xs text-ink-muted">O que você mudar aqui vale para o cadastro, em todos os contratos — é gravado ao salvar.</p>
+              <BandCadastroFields value={band} onChange={patchBand} />
+            </div>
+          )}
+        </div>
       ) : (
         <BandCadastroFields value={band} onChange={patchBand} />
       )}
