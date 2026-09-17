@@ -7,6 +7,8 @@ import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
+import { isCaseContractApprover } from "@/lib/case/contract-config";
+import { countContractsAwaitingApproval } from "@/lib/case/queries";
 
 export default async function CaseLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getSessionContext();
@@ -51,6 +53,9 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
     ? await getUnreadNotificationsCount(profile.id)
     : 0;
 
+  // Pendência do aprovador dos contratos: contador no item Contratos do menu.
+  const pendingApprovals = isCaseContractApprover(userEmail) ? await countContractsAwaitingApproval() : 0;
+
   return (
     <AppShell
       userName={userName}
@@ -72,6 +77,7 @@ export default async function CaseLayout({ children }: { children: React.ReactNo
       // para quem já tem o módulo — não concede o módulo a ninguém.
       ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
+      navBadges={{ "case-contratos": pendingApprovals }}
       // Perfil unificado: o tour guiado usa para escolher a variante de texto
       // dos passos que mudam conforme quem lê (os cinco perfis do Compras).
       userProfile={profile?.profile ?? null}

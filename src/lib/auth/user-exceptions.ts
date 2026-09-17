@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { BI_VALIDATION_EXTRA_EMAILS } from "@/lib/auth/bi-validation";
+import { CASE_CONTRACT_APPROVER_EMAILS } from "@/lib/case/contract-config";
 import { CTRL_FULL_VIEW_EMAILS } from "@/lib/ctrl/full-view";
 import {
   APPROVAL_ROUTING,
@@ -28,7 +29,7 @@ export interface UserException {
   /** Identificador estável da regra (chave de render). */
   key: string;
   /** Módulo onde a exceção age — vira o rótulo colorido no diálogo. */
-  scope: "Compras" | "Financeiro";
+  scope: "Compras" | "Financeiro" | "Case";
   title: string;
   detail: string;
   /** Arquivo que precisa ser editado para mudar a regra. */
@@ -52,6 +53,20 @@ function normalizeEmail(email: string | null | undefined): string {
 export function describeUserExceptions(user: UserRef): UserException[] {
   const email = normalizeEmail(user.email);
   const out: UserException[] = [];
+
+  // ── Case: aprovadores dos contratos (contract-config.ts) ──────────────────
+  if (CASE_CONTRACT_APPROVER_EMAILS.some((a) => normalizeEmail(a) === email)) {
+    out.push({
+      key: "case-contract-approver",
+      scope: "Case",
+      title: "Aprovador dos contratos Case",
+      detail:
+        "Aprova (ou devolve) contrato antes da ClickSign — recebe o aviso por e-mail e o contador no " +
+        "menu Contratos. Aprovar não é assinar: quem assina pela CS Agência, por último, continua sendo " +
+        "só o signatário do contrato.",
+      source: "src/lib/case/contract-config.ts",
+    });
+  }
 
   // ── Compras: alçada de aprovação restrita (routing.ts) ────────────────────
   const restriction = APPROVER_SECTOR_RESTRICTIONS.find(
@@ -191,6 +206,11 @@ export function findOrphanExceptionRules(users: UserRef[]): OrphanExceptionRule[
       key: `fullview:${email}`,
       email,
       label: "Visão completa do módulo Compras",
+    })),
+    ...CASE_CONTRACT_APPROVER_EMAILS.map((email) => ({
+      key: `case-approver:${email}`,
+      email,
+      label: "Aprovador dos contratos Case",
     })),
     ...Array.from(BI_VALIDATION_EXTRA_EMAILS).map((email) => ({
       key: `bi:${email}`,

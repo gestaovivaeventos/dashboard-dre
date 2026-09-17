@@ -3,6 +3,7 @@
 export type CaseLegKind = "pagar_custodia" | "receber_custodia" | "receber_servicos";
 export type CaseContractStatus =
   | "rascunho"
+  | "aguardando_aprovacao"
   | "aguardando_assinatura"
   | "assinado"
   | "lancado"
@@ -114,6 +115,12 @@ export interface Etapa1Input extends CaseContractExtras {
   /** A atração/artista fica na aba Contrato Atração — opcional no salvamento do cliente. */
   band?: CaseBandInput | null;
   event_name: string | null;
+  /**
+   * Nome da atração como vai no contrato do cliente. Fica no contrato (e não no
+   * cadastro da banda) porque o contrato é enviado para assinatura antes de a
+   * atração ser cadastrada.
+   */
+  atracao_nome: string | null;
   event_date: string | null;
   show_time: string | null;
   show_duration: string | null;

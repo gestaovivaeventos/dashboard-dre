@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCaseUser } from "@/lib/case/auth";
 import { getContractDetail, getBands } from "@/lib/case/queries";
 import { ContratoWorkspace } from "@/components/case/contrato-workspace";
+import { isCaseContractApprover } from "@/lib/case/contract-config";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export default async function CaseContratoDetailPage({ params }: { params: { id:
 
   return (
     <div className="mx-auto max-w-4xl">
-      <ContratoWorkspace detail={detail} bands={bands} fornecedorBands={bands} />
+      <ContratoWorkspace detail={detail} bands={bands} fornecedorBands={bands} isApprover={isCaseContractApprover(ctx.email)} />
     </div>
   );
 }

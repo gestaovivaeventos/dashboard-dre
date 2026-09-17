@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown } from "lucide-react";
+import { Plus, Trash2, Loader2, Upload, ScanLine, CheckCircle2, Circle, Search, Check, ChevronsUpDown, ClipboardPaste, Wand2 } from "lucide-react";
 
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/toaster";
-import { salvarCliente, gerarEnviarContrato, salvarAtracao } from "@/lib/case/actions/stages";
-import { extractArtistContract } from "@/lib/case/actions/ocr";
-import { BandCadastroFields, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
+import { salvarCliente, enviarParaAprovacao, salvarAtracao } from "@/lib/case/actions/stages";
+import { extractArtistContract, extractContractFromText } from "@/lib/case/actions/ocr";
+import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
+import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
 import type { ContractEditData } from "@/lib/case/queries";
 
@@ -78,7 +79,7 @@ function ParcelasEditor({ label, rows, onChange, total, onFillSingle }: {
   );
 }
 
-export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData }) {
+export function NovoContratoForm({ clients, bands, edit, isApprover = false }: { clients: CaseClientRow[]; bands: CaseBandRow[]; edit?: ContractEditData; isApprover?: boolean }) {
   const router = useRouter();
   const { showToast } = useToast();
   const [tab, setTab] = useState<"cliente" | "atracao">("cliente");
@@ -98,18 +99,19 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   const [cCidadeEstado, setCCidadeEstado] = useState(initialClient?.cidade_estado ?? "");
   const [cCep, setCCep] = useState(initialClient?.cep ?? "");
 
-  // Na edição, trocar o cliente selecionado recarrega os campos do cadastro.
+  // Trocar o cliente selecionado recarrega os campos do cadastro (na criação,
+  // alimenta os campos de assinatura que aparecem se o cadastro estiver incompleto).
   function selectClient(id: string) {
     setClientId(id);
-    if (!edit) return;
     const c = clients.find((x) => x.id === id);
     if (!c) return;
-    setCName(c.name);
-    setCDoc(c.cnpj_cpf ?? "");
     setCEmail(c.email ?? "");
-    setCPhone(c.phone ?? "");
     setCRespLegal(c.resp_legal ?? "");
     setCCpfResp(c.cpf_resp_legal ?? "");
+    if (!edit) return;
+    setCName(c.name);
+    setCDoc(c.cnpj_cpf ?? "");
+    setCPhone(c.phone ?? "");
     setCEndereco(c.endereco ?? "");
     setCCidadeEstado(c.cidade_estado ?? "");
     setCCep(c.cep ?? "");
@@ -117,6 +119,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
 
   // Evento / objeto
   const [eventName, setEventName] = useState(edit?.event_name ?? "");
+  const [atracaoNome, setAtracaoNome] = useState(edit?.atracao_nome ?? "");
   const [eventDate, setEventDate] = useState(edit?.event_date ?? "");
   const [showTime, setShowTime] = useState(edit?.show_time ?? "");
   const [showDuration, setShowDuration] = useState(edit?.show_duration ?? "");
@@ -171,6 +174,12 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
   const [vArtista, setVArtista] = useState("");
   const [pagarArtista, setPagarArtista] = useState<ParcelaRow[]>([emptyParcela()]);
 
+  // Pedido colado (WhatsApp) — preenche o formulário como sugestão.
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefingText, setBriefingText] = useState("");
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingMsg, setBriefingMsg] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
@@ -208,7 +217,8 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     setOcrLoading(false);
     if ("error" in res) return setError(res.error);
     const d = res.data;
-    if (d.bandName && bandMode === "new") { patchBand({ name: d.bandName, doc: d.bandDoc ?? "" }); }
+    if (d.bandName && bandMode === "new") patchBand(artistOcrToBandPatch(d));
+    if (d.artistName && !atracaoNome.trim()) setAtracaoNome(d.artistName);
     if (d.valorCache != null) setVArtista(brlFromNumber(d.valorCache));
     const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
     if (ps.length) setPagarArtista(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
@@ -220,6 +230,86 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       return;
     }
     setOcrMsg("Contrato lido — revise os dados da atração.");
+  }
+
+  /**
+   * Lê o texto do pedido e preenche o que ainda está vazio — nunca por cima do
+   * que já foi digitado, porque a leitura é sugestão e o usuário é quem decide.
+   */
+  async function aplicarBriefing() {
+    setError(null);
+    setBriefingMsg(null);
+    setBriefingLoading(true);
+    const res = await extractContractFromText(briefingText);
+    setBriefingLoading(false);
+    if ("error" in res) return setError(res.error);
+    const d = res.data;
+    const preenchidos: string[] = [];
+    const fill = (label: string, atual: string, set: (v: string) => void, valor: string | null | undefined) => {
+      if (!valor || atual.trim()) return;
+      set(valor);
+      preenchidos.push(label);
+    };
+
+    // Cliente: cadastro existente ganha do texto (evita duplicar cadastro).
+    const doc = (d.clienteDoc ?? "").replace(/\D/g, "");
+    const nome = (d.clienteNome ?? "").trim().toLowerCase();
+    const jaCadastrado =
+      (doc && clients.find((c) => (c.cnpj_cpf ?? "").replace(/\D/g, "") === doc)) ||
+      (nome && clients.find((c) => c.name.trim().toLowerCase() === nome)) ||
+      null;
+    if (jaCadastrado && !clientId) {
+      setClientMode("existing");
+      selectClient(jaCadastrado.id);
+      preenchidos.push(`cliente (${jaCadastrado.name}, já cadastrado)`);
+    } else if (!jaCadastrado && !clientId && d.clienteNome) {
+      setClientMode("new");
+      fill("cliente", cName, setCName, d.clienteNome);
+      fill("CNPJ/CPF", cDoc, setCDoc, d.clienteDoc);
+    }
+    fill("responsável", cRespLegal, setCRespLegal, d.clienteResponsavel);
+    fill("CPF do responsável", cCpfResp, setCCpfResp, d.clienteCpfResponsavel);
+    fill("e-mail", cEmail, setCEmail, d.clienteEmail);
+    fill("telefone", cPhone, setCPhone, d.clienteTelefone);
+    fill("cidade do cliente", cCidadeEstado, setCCidadeEstado, d.clienteCidadeEstado);
+
+    fill("evento", eventName, setEventName, d.eventoNome);
+    fill("atração", atracaoNome, setAtracaoNome, d.atracaoNome);
+    fill("data", eventDate, setEventDate, d.dataEvento);
+    fill("horário", showTime, setShowTime, d.horario);
+    fill("duração", showDuration, setShowDuration, d.duracao);
+    fill("passagem de som", passagemSom, setPassagemSom, d.passagemSom);
+    fill("local", localName, setLocalName, d.localNome);
+    fill("endereço", localAddress, setLocalAddress, d.localEndereco);
+    fill("cidade", localCity, setLocalCity, d.localCidade);
+    fill("CEP", localCep, setLocalCep, d.localCep);
+    fill("cortesias", cortesias, setCortesias, d.cortesias);
+    fill("observação", observacao, setObservacao, d.observacao);
+    if (d.tipoEvento && !tipoEvento) {
+      setTipoEvento(d.tipoEvento);
+      preenchidos.push("tipo de evento");
+    }
+    if (d.valorCobradoCliente != null && d.valorCobradoCliente > 0 && !vAtracao.trim()) {
+      setVAtracao(brlFromNumber(d.valorCobradoCliente));
+      preenchidos.push("valor");
+    }
+    const ps = (d.parcelas ?? []).filter((p) => p.data && p.valor);
+    const parcelasVazias = receberCliente.every((r) => !r.vencimento && !parseBRL(r.valorStr));
+    if (ps.length && parcelasVazias) {
+      setReceberCliente(ps.map((p) => ({ vencimento: p.data!, valorStr: brlFromNumber(p.valor!) })));
+      preenchidos.push(`${ps.length} parcela${ps.length > 1 ? "s" : ""}`);
+    }
+
+    if (preenchidos.length === 0) {
+      setBriefingMsg("Não achei nada novo nesse texto — os campos que ele traz já estavam preenchidos.");
+      return;
+    }
+    const soma = ps.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    const alerta =
+      d.valorCobradoCliente != null && ps.length > 0 && Math.abs(soma - d.valorCobradoCliente) >= 0.01
+        ? " Atenção: as parcelas não somam o valor do contrato."
+        : "";
+    setBriefingMsg(`Preenchi: ${preenchidos.join(", ")}. Confira tudo antes de salvar.${alerta}`);
   }
 
   function buildClientInput(): Etapa1Input {
@@ -240,9 +330,10 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                 endereco: cEndereco.trim() || null, cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
               }
             : {
+                // Responsável, CPF e e-mail podem ter sido completados aqui (exigidos na assinatura).
                 id: selectedClient.id, name: selectedClient.name, cnpj_cpf: selectedClient.cnpj_cpf,
-                pessoa_fisica: selectedClient.pessoa_fisica, email: selectedClient.email, phone: selectedClient.phone,
-                resp_legal: selectedClient.resp_legal, cpf_resp_legal: selectedClient.cpf_resp_legal,
+                pessoa_fisica: selectedClient.pessoa_fisica, email: cEmail.trim() || null, phone: selectedClient.phone,
+                resp_legal: cRespLegal.trim() || null, cpf_resp_legal: cCpfResp.trim() || null,
                 endereco: selectedClient.endereco, cidade_estado: selectedClient.cidade_estado, cep: selectedClient.cep,
               }
           : {
@@ -252,6 +343,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
               cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
             },
       event_name: eventName.trim() || null,
+      atracao_nome: atracaoNome.trim() || null,
       event_date: eventDate || null,
       show_time: showTime.trim() || null,
       show_duration: showDuration.trim() || null,
@@ -281,6 +373,11 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
     };
   }
 
+  // Avaliado sobre o cadastro original (não sobre o que está sendo digitado),
+  // senão o bloco sumiria no meio do preenchimento.
+  const selectedClientRow = clients.find((c) => c.id === clientId);
+  const selectedClientIncomplete = !!selectedClientRow && clientSignatureIssues(selectedClientRow).length > 0;
+
   function buildBandInput() {
     const selectedBand = bandsList.find((b) => b.id === bandId);
     return bandMode === "existing" && selectedBand
@@ -303,6 +400,12 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
     }
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
+    if (enviar) {
+      const issues = clientSignatureIssues({ email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp });
+      if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues)); }
+      if (test1Email.trim() && !isPersonName(test1Nome)) return setError("A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas).");
+      if (test1Email.trim() && test1Cpf.trim() && !isValidCpf(test1Cpf)) return setError("O CPF da testemunha é inválido.");
+    }
     if (!edit && bandMode === "new" && band.name.trim()) {
       const pixErr = validatePix(band.pixTipo || null, band.pix);
       if (pixErr) return setError(pixErr);
@@ -322,16 +425,16 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
       }
 
       if (enviar) {
-        const g = await gerarEnviarContrato(contractId);
+        const g = await enviarParaAprovacao(contractId);
         if ("error" in g) {
           showToast({ title: "Contrato salvo, mas o envio falhou", description: g.error, variant: "destructive" });
           router.push(`/case/contratos/${contractId}`);
           return;
         }
-        if (g.warning) {
-          showToast({ title: "Contrato gerado", description: g.warning });
+        if (g.status === "aguardando_aprovacao") {
+          showToast({ title: "Enviado para aprovação", description: "Os aprovadores receberam o aviso por e-mail. Depois da aprovação o contrato segue para assinatura.", variant: "success" });
         } else {
-          showToast({ title: "Contrato enviado para assinatura", description: "Os signatários receberão o link por e-mail.", variant: "success" });
+          showToast({ title: "Contrato aprovado e enviado para assinatura", description: "Cliente e testemunha recebem o link agora; o contratado assina por último.", variant: "success" });
         }
       }
       router.push(`/case/contratos/${contractId}`);
@@ -353,6 +456,45 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
         </div>
       )}
 
+      {!edit && (
+        <section className="rounded-lg border border-dashed border-amber-500/50 bg-surface-1 p-4">
+          {!briefingOpen ? (
+            <button type="button" onClick={() => setBriefingOpen(true)} className="inline-flex items-center gap-2 text-sm font-medium text-amber-700 hover:underline dark:text-amber-400">
+              <ClipboardPaste className="h-4 w-4" /> Colar o pedido (WhatsApp) e preencher automaticamente
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-ink-primary">Pedido recebido</h2>
+                <button type="button" onClick={() => { setBriefingOpen(false); setBriefingMsg(null); }} className="text-xs text-ink-muted hover:underline">Fechar</button>
+              </div>
+              <p className="text-xs text-ink-muted">Cole a mensagem como ela chegou. O sistema preenche os campos vazios como sugestão — nada é salvo e o que você já digitou não é sobrescrito.</p>
+              <textarea
+                value={briefingText}
+                onChange={(e) => setBriefingText(e.target.value)}
+                rows={5}
+                placeholder="Ex.: Boa tarde! Queremos fechar a Ousa Samba pra formatura de Medicina da FAGOC, dia 14/11, no Espaço Parthenon em Ubá, das 23h às 2h. Valor 12 mil, metade na assinatura e o resto até uma semana antes."
+                className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm text-ink-primary outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={aplicarBriefing}
+                  disabled={briefingLoading || briefingText.trim().length < 15}
+                  className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {briefingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} Preencher campos
+                </button>
+                {briefingText.trim() && (
+                  <button type="button" onClick={() => { setBriefingText(""); setBriefingMsg(null); }} className="text-xs text-ink-muted hover:underline">Limpar texto</button>
+                )}
+              </div>
+              {briefingMsg && <p className="text-xs text-emerald-600 dark:text-emerald-400">{briefingMsg}</p>}
+            </div>
+          )}
+        </section>
+      )}
+
       {edit || tab === "cliente" ? (
         <>
           <div className={SECTION_CLS}>
@@ -368,6 +510,18 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
                   onChange={selectClient}
                   placeholder="Buscar e selecionar o cliente…"
                 />
+                {!edit && selectedClientIncomplete && (
+                  <div className="space-y-3 rounded-md border border-amber-500/50 bg-amber-500/5 p-3">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      O cadastro deste cliente está incompleto para a assinatura. Quem assina é o <strong>responsável legal</strong> (pessoa física) — preencha abaixo; o cadastro do cliente é atualizado ao salvar.
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Responsável legal — nome completo *" value={cRespLegal} onChange={setCRespLegal} />
+                      <Field label="CPF do responsável *" value={cCpfResp} onChange={setCCpfResp} />
+                      <Field label="E-mail (para assinatura) *" value={cEmail} onChange={setCEmail} />
+                    </div>
+                  </div>
+                )}
                 {edit && clientId && (
                   <div className="space-y-3 rounded-md border border-border/70 p-3">
                     <p className="text-xs text-ink-muted">Dados do cadastro do cliente — editar aqui atualiza o cadastro (ex.: completar o CNPJ/CPF exigido pelo Omie).</p>
@@ -408,7 +562,8 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
           <div className={SECTION_CLS}>
             <h2 className="text-sm font-semibold text-ink-primary">Evento (objeto do contrato)</h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Nome do evento / atração" value={eventName} onChange={setEventName} />
+              <Field label="Nome do evento" value={eventName} onChange={setEventName} />
+              <Field label="Nome da atração (vai no contrato)" value={atracaoNome} onChange={setAtracaoNome} />
               <div><label className={LABEL_CLS}>Data do evento</label><input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} className={INPUT_CLS} /></div>
               <Field label="Horário da apresentação" value={showTime} onChange={setShowTime} />
               <Field label="Duração" value={showDuration} onChange={setShowDuration} />
@@ -549,7 +704,7 @@ export function NovoContratoForm({ clients, bands, edit }: { clients: CaseClient
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar alterações" : "Salvar rascunho"}
         </button>
         <button type="button" onClick={() => handleSalvar(true)} disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60">
-          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {edit ? "Salvar e enviar para assinatura" : "Gerar e enviar para assinatura"}
+          {submitting && <Loader2 className="h-4 w-4 animate-spin" />} {isApprover ? (edit ? "Salvar, aprovar e enviar para assinatura" : "Aprovar e enviar para assinatura") : edit ? "Salvar e enviar para aprovação" : "Enviar para aprovação"}
         </button>
       </div>
     </form>

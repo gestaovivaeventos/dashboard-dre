@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { getCaseUser } from "@/lib/case/auth";
 import { getClients, getContractForEdit } from "@/lib/case/queries";
 import { NovoContratoForm } from "@/components/case/novo-contrato-form";
+import { isCaseContractApprover } from "@/lib/case/contract-config";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +30,11 @@ export default async function EditarContratoPage({ params }: { params: { id: str
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-ink-primary">Editar contrato #{edit.contract_number}</h1>
         <p className="text-sm text-ink-muted">
-          Corrija os dados do cliente, do evento e das testemunhas. Depois de salvar, gere e reenvie para assinatura.
+          Corrija os dados do cliente, do evento e das testemunhas. Depois de salvar, envie para aprovação — se o contrato estava aguardando aprovação, ele volta para rascunho.
         </p>
       </div>
 
-      <NovoContratoForm clients={clients} bands={[]} edit={edit} />
+      <NovoContratoForm clients={clients} bands={[]} edit={edit} isApprover={isCaseContractApprover(ctx.email)} />
     </div>
   );
 }
