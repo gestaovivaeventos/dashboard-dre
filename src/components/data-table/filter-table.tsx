@@ -17,17 +17,17 @@
 // Genérico de propósito: a primeira tela é o Caixa Real, mas nada aqui conhece
 // saldo ou empresa.
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, Filter, Search, X } from "lucide-react";
+
+import { AnchoredPopover } from "@/components/common/anchored-popover";
+import {
+  allShownSelected as isAllShownSelected,
+  noneShownSelected as isNoneShownSelected,
+  passesValueFilter,
+  setAllShown,
+  toggleValue,
+} from "./filter-logic";
 
 export interface FilterColumn<T> {
   key: string;
@@ -47,6 +47,14 @@ export interface FilterColumn<T> {
   className?: string;
 }
 
+/**
+  * Filtro de valores por coluna. A distinção importa:
+  *   • chave AUSENTE  = sem filtro (tudo passa)
+  *   • Set com itens  = só esses valores passam
+  *   • Set VAZIO      = nada passa
+  * Conflar "vazio" com "sem filtro" tornaria impossível desmarcar tudo, que no
+  * Excel é um gesto normal (e mostra zero linhas).
+  */
 type ValueFilters = Record<string, Set<string>>;
 type RangeFilters = Record<string, { min: string; max: string }>;
 
@@ -133,9 +141,7 @@ export function FilterTable<T>({
         if (max !== null && value > max) return false;
         return true;
       }
-      const set = values[col.key];
-      if (!set || set.size === 0) return true;
-      return set.has(col.plain(row));
+      return passesValueFilter(col.plain(row), values[col.key]);
     },
     [values, ranges],
   );
@@ -180,11 +186,16 @@ export function FilterTable<T>({
         continue;
       }
       const set = values[col.key];
-      if (set && set.size > 0) {
+      if (set !== undefined) {
         chips.push({
           key: col.key,
           label: col.label,
-          detail: set.size === 1 ? Array.from(set)[0] : `${set.size} selecionados`,
+          detail:
+            set.size === 0
+              ? "nenhum"
+              : set.size === 1
+              ? Array.from(set)[0]
+              : `${set.size} selecionados`,
         });
       }
     }
@@ -297,7 +308,7 @@ export function FilterTable<T>({
                     active={
                       col.kind === "number"
                         ? Boolean(ranges[col.key]?.min || ranges[col.key]?.max)
-                        : (values[col.key]?.size ?? 0) > 0
+                        : values[col.key] !== undefined
                     }
                     open={openKey === col.key}
                     onToggleOpen={() => setOpenKey((k) => (k === col.key ? null : col.key))}
@@ -310,13 +321,14 @@ export function FilterTable<T>({
                     options={
                       col.kind === "number"
                         ? []
-                        : distinctValues(rowsPassingExcept(col.key), col, values[col.key])
+                        : distinctValues(rowsPassingExcept(col.key), col, values[col.key] ?? null)
                     }
-                    selectedValues={values[col.key] ?? new Set()}
+                    selectedValues={values[col.key] ?? null}
                     onValuesChange={(next) =>
                       setValues((prev) => {
                         const copy = { ...prev };
-                        if (next.size === 0) delete copy[col.key];
+                        // null = o popover pediu "sem filtro" (tudo marcado).
+                        if (next === null) delete copy[col.key];
                         else copy[col.key] = next;
                         return copy;
                       })
@@ -395,7 +407,7 @@ export function FilterTable<T>({
 function distinctValues<T>(
   rows: T[],
   col: FilterColumn<T>,
-  selected: Set<string> | undefined,
+  selected: Set<string> | null | undefined,
 ): string[] {
   const set = new Set<string>();
   for (const row of rows) set.add(col.plain(row));
@@ -415,8 +427,10 @@ interface HeaderCellProps {
   onSort: (dir: "asc" | "desc") => void;
   onHeaderClick: () => void;
   options: string[];
-  selectedValues: Set<string>;
-  onValuesChange: (next: Set<string>) => void;
+  /** null = sem filtro nesta coluna (todos marcados). */
+  selectedValues: Set<string> | null;
+  /** null pede "sem filtro"; Set vazio filtra tudo fora. */
+  onValuesChange: (next: Set<string> | null) => void;
   range: { min: string; max: string };
   onRangeChange: (next: { min: string; max: string }) => void;
   onClear: () => void;
@@ -495,8 +509,8 @@ interface PopoverProps {
   onClose: () => void;
   isNumber: boolean;
   options: string[];
-  selectedValues: Set<string>;
-  onValuesChange: (next: Set<string>) => void;
+  selectedValues: Set<string> | null;
+  onValuesChange: (next: Set<string> | null) => void;
   range: { min: string; max: string };
   onRangeChange: (next: { min: string; max: string }) => void;
   onSort: (dir: "asc" | "desc") => void;
@@ -520,37 +534,7 @@ function FilterPopover({
   onSort,
   onClear,
 }: PopoverProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [search, setSearch] = useState("");
-
-  useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const width = 260;
-    // Não deixa escapar pela direita da janela.
-    const left = Math.min(rect.left, window.innerWidth - width - 12);
-    setPos({ top: rect.bottom + 6, left: Math.max(12, left) });
-  }, [anchorRef]);
-
-  useEffect(() => {
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      if (panelRef.current?.contains(target)) return;
-      if (anchorRef.current?.contains(target)) return;
-      onClose();
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [anchorRef, onClose]);
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -558,34 +542,13 @@ function FilterPopover({
     return options.filter((o) => o.toLowerCase().includes(q));
   }, [options, search]);
 
-  // "Selecionar tudo" opera sobre o que a busca está mostrando — é o que o
-  // Excel faz, e é o que torna "buscar + marcar tudo" um gesto só.
-  const allShownSelected =
-    shown.length > 0 && shown.every((o) => selectedValues.size === 0 || selectedValues.has(o));
+  // Semântica do filtro (ausente × vazio × subconjunto) vive em
+  // ./filter-logic, isolada e coberta por testes — é onde é fácil errar.
+  const allShownSelected = isAllShownSelected(selectedValues, shown);
+  const noneShownSelected = isNoneShownSelected(selectedValues, shown);
 
-  function toggleAllShown() {
-    const next = new Set(selectedValues);
-    if (selectedValues.size === 0) {
-      // Nada marcado = "todos". Marcar tudo explicitamente não muda nada, mas
-      // desmarcar precisa partir do conjunto completo.
-      options.forEach((o) => next.add(o));
-      shown.forEach((o) => next.delete(o));
-    } else if (allShownSelected) {
-      shown.forEach((o) => next.delete(o));
-    } else {
-      shown.forEach((o) => next.add(o));
-    }
-    onValuesChange(next);
-  }
-
-  if (!pos) return null;
-
-  return createPortal(
-    <div
-      ref={panelRef}
-      style={{ top: pos.top, left: pos.left, width: 260 }}
-      className="fixed z-50 overflow-hidden rounded-viva-lg border border-border bg-surface-1 shadow-viva-lg"
-    >
+  return (
+    <AnchoredPopover anchorRef={anchorRef} onClose={onClose} label="Filtrar coluna">
       <div className="flex items-center gap-1 border-b border-border p-1.5">
         <button
           type="button"
@@ -639,46 +602,44 @@ function FilterPopover({
             />
           </div>
 
+          <div className="flex items-center gap-1 border-b border-border p-1.5">
+            <button
+              type="button"
+              disabled={allShownSelected}
+              onClick={() => onValuesChange(setAllShown(selectedValues, shown, options, true))}
+              className="flex-1 rounded-viva-sm px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              Marcar todos
+            </button>
+            <button
+              type="button"
+              disabled={noneShownSelected}
+              onClick={() => onValuesChange(setAllShown(selectedValues, shown, options, false))}
+              className="flex-1 rounded-viva-sm px-2 py-1 text-xs text-ink-secondary hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              Desmarcar todos
+            </button>
+          </div>
+
           <div className="max-h-56 overflow-y-auto py-1">
             {shown.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-ink-muted">Nenhum valor.</p>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={toggleAllShown}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm font-medium text-ink-primary hover:bg-surface-2"
-                >
-                  <CheckBox
-                    checked={selectedValues.size === 0 || allShownSelected}
-                    readOnlyBox
-                    label=""
-                  />
-                  (Selecionar tudo)
-                </button>
-                {shown.map((option) => {
-                  // Nenhum valor marcado significa "sem filtro" = todos marcados.
-                  const checked = selectedValues.size === 0 || selectedValues.has(option);
+              shown.map((option) => {
+                  // Sem filtro (null) = todos marcados.
+                  const checked = selectedValues === null || selectedValues.has(option);
                   return (
                     <button
                       key={option}
                       type="button"
-                      onClick={() => {
-                        const next =
-                          selectedValues.size === 0 ? new Set(options) : new Set(selectedValues);
-                        if (next.has(option)) next.delete(option);
-                        else next.add(option);
-                        // Tudo marcado = sem filtro; guarda vazio para o chip sumir.
-                        onValuesChange(next.size === options.length ? new Set() : next);
-                      }}
+                      onClick={() => onValuesChange(toggleValue(selectedValues, option, options))}
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-ink-secondary hover:bg-surface-2"
                     >
                       <CheckBox checked={checked} readOnlyBox label="" />
                       <span className="truncate">{option || "(vazio)"}</span>
                     </button>
-                  );
-                })}
-              </>
+                );
+              })
             )}
           </div>
         </>
@@ -703,8 +664,7 @@ function FilterPopover({
           Concluir
         </button>
       </div>
-    </div>,
-    document.body,
+    </AnchoredPopover>
   );
 }
 

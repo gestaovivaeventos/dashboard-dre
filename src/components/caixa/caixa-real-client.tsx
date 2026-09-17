@@ -7,12 +7,14 @@ import {
   Building2,
   Download,
   Landmark,
+  ListPlus,
   RefreshCw,
   TrendingDown,
   TrendingUp,
   Wallet,
 } from "lucide-react";
 
+import { CompanyPicker, type PickerCompany } from "@/components/caixa/company-picker";
 import { FilterTable, type FilterColumn } from "@/components/data-table/filter-table";
 import { BANCOS_BR } from "@/lib/ctrl/bancos";
 import {
@@ -23,6 +25,26 @@ import {
 } from "@/lib/caixa/types";
 
 const BANCO_NOMES = new Map(BANCOS_BR.map((b) => [b.codigo, b.nome]));
+
+/** Rótulos dos tipos que a tela mostra ao abrir (ver CAIXA_TIPOS_LIQUIDOS). */
+const LIQUIDOS_LABEL = new Set(CAIXA_TIPOS_LIQUIDOS.map((t) => tipoLabel(t)));
+
+function ehLiquida(row: CaixaAccountRow): boolean {
+  return LIQUIDOS_LABEL.has(tipoLabel(row.tipo));
+}
+
+const STATUS_ATIVA = "Ativa";
+const STATUS_INATIVA = "Inativa";
+
+/** Espelha `inativo` da Omie: conta encerrada some do cadastro de lá. */
+function statusLabel(row: CaixaAccountRow): string {
+  return row.ativo ? STATUS_ATIVA : STATUS_INATIVA;
+}
+
+/** O recorte com que a tela abre: dinheiro E conta ativa. */
+function ehPadrao(row: CaixaAccountRow): boolean {
+  return row.ativo && ehLiquida(row);
+}
 
 const brl = (v: number | null | undefined) =>
   v === null || v === undefined
@@ -87,6 +109,12 @@ function shiftDay(isoDay: string, days: number): string {
 
 interface Props {
   rows: CaixaAccountRow[];
+  /**
+   * Empresas que entram na varredura (ativas e com credencial Omie). Vem do
+   * servidor, não das linhas: uma empresa nova ainda não tem conta nenhuma
+   * aqui, e é exatamente ela que precisa do "Sincronizar contas".
+   */
+  companies: PickerCompany[];
   /** Hoje em Brasília ('YYYY-MM-DD'), resolvido no servidor. */
   today: string;
   lastUpdate: string | null;
@@ -94,11 +122,18 @@ interface Props {
 
 type Progress = { label: string; done: number; total: number } | null;
 
-export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
+export function CaixaRealClient({ rows, companies, today, lastUpdate }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [visible, setVisible] = useState<CaixaAccountRow[]>(rows);
+  // Começa no MESMO recorte que a tabela vai aplicar. A FilterTable só reporta
+  // as linhas visíveis num efeito, isto é, depois da primeira pintura: iniciar
+  // com `rows` faria o card mostrar o total de tudo (R$ 58,4 mi, com aplicações
+  // e cartões) por um frame antes de corrigir para o caixa (R$ 3,2 mi). Piscar
+  // um número de dinheiro errado é pior que demorar a mostrá-lo.
+  const [visible, setVisible] = useState<CaixaAccountRow[]>(() => rows.filter(ehPadrao));
   const [progress, setProgress] = useState<Progress>(null);
+  /** Escopo das ações. `null` = todas (ver CompanyPicker). */
+  const [scope, setScope] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -110,13 +145,16 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
   // na tela. Sem isto, "Caixa Real" somaria fatura de cartão (que é dívida) ao
   // dinheiro em conta e responderia outra pergunta.
   const initialValues = useMemo(
-    () => ({ tipo: CAIXA_TIPOS_LIQUIDOS.map((t) => tipoLabel(t)) }),
+    () => ({
+      tipo: CAIXA_TIPOS_LIQUIDOS.map((t) => tipoLabel(t)),
+      // Contas encerradas na Omie continuam na tabela (o histórico de saldo
+      // delas é fato), mas fora do recorte de abertura: o saldo delas não é
+      // mais atualizado, então somá-las daria um caixa que não existe.
+      status: [STATUS_ATIVA],
+    }),
     [],
   );
-  const liquidosLabel = useMemo(
-    () => new Set(CAIXA_TIPOS_LIQUIDOS.map((t) => tipoLabel(t))),
-    [],
-  );
+
 
   // Memoizado: a FilterTable recalcula tudo quando `columns` muda de
   // identidade, e ela reporta as linhas visíveis de volta para cá — um array
@@ -129,6 +167,29 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
         plain: (r) => r.companyName,
         sortVal: (r) => r.companyName.toLowerCase(),
         cell: (r) => <span className="font-medium text-ink-primary">{r.companyName}</span>,
+      },
+      {
+        key: "status",
+        label: "Status",
+        plain: statusLabel,
+        sortVal: (r) => statusLabel(r),
+        className: "whitespace-nowrap",
+        cell: (r) => (
+          <span
+            className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${
+              r.ativo
+                ? "bg-status-success/10 text-status-success"
+                : "bg-surface-3 text-ink-muted"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                r.ativo ? "bg-status-success" : "bg-ink-disabled"
+              }`}
+            />
+            {statusLabel(r)}
+          </span>
+        ),
       },
       {
         key: "conta",
@@ -240,10 +301,9 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
   // "Saldo em caixa" quando o recorte é exatamente o padrão (todo dinheiro e
   // só dinheiro); "(filtrado)" quando o usuário mexeu; "total" quando tudo
   // está à vista. O rótulo tem que contar qual pergunta o número responde.
-  const contasLiquidas = rows.filter((r) => liquidosLabel.has(tipoLabel(r.tipo)));
+  const contasPadrao = rows.filter(ehPadrao);
   const ehVisaoDeCaixa =
-    visible.length === contasLiquidas.length &&
-    visible.every((r) => liquidosLabel.has(tipoLabel(r.tipo)));
+    visible.length === contasPadrao.length && visible.every(ehPadrao);
   const saldoLabel =
     visible.length === rows.length
       ? "Saldo total"
@@ -263,7 +323,9 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
     const porTipo = new Map<string, number>();
     for (const r of rows) {
       if (visiveis.has(r.id) || r.saldo === null) continue;
-      const label = tipoLabel(r.tipo);
+      // Conta encerrada aparece como "contas inativas", não pelo tipo dela —
+      // o motivo de estar fora do total é o encerramento, não ser aplicação.
+      const label = r.ativo ? tipoLabel(r.tipo) : "contas inativas";
       porTipo.set(label, (porTipo.get(label) ?? 0) + r.saldo);
     }
     return Array.from(porTipo.entries())
@@ -271,23 +333,38 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
       .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
   }, [rows, visible]);
   const desatualizadas = visible.filter(
-    (r) => atualizadoBucket(r, today, ontem) !== "Hoje",
+    (r) => r.ativo && atualizadoBucket(r, today, ontem) !== "Hoje",
   ).length;
+
+  // Empresas com alguma conta sem saldo de hoje — alimenta o atalho "só as
+  // desatualizadas" do seletor. Olha TODAS as linhas, não as visíveis: o
+  // escopo é sobre o trabalho a fazer, não sobre o recorte da tela.
+  const staleIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rows) {
+      // Só contas ATIVAS: as inativas nunca são atualizadas (a varredura de
+      // saldos as ignora), então incluí-las marcaria quase toda empresa como
+      // desatualizada e o atalho "só as desatualizadas" perderia a utilidade.
+      if (!r.ativo) continue;
+      if (atualizadoBucket(r, today, ontem) !== "Hoje") ids.add(r.companyId);
+    }
+    return ids;
+  }, [rows, today, ontem]);
+
+  const alvo = useMemo(
+    () => (scope === null ? companies : companies.filter((c) => scope.has(c.id))),
+    [companies, scope],
+  );
 
   // ── Varredura empresa a empresa, com progresso ──────────────────────────
   async function sweep(kind: "cadastro" | "saldos") {
+    if (alvo.length === 0) return;
     setError(null);
-    setProgress({ label: "Carregando empresas…", done: 0, total: 0 });
     try {
-      const res = await fetch("/api/caixa/companies");
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error ?? "Falha ao listar empresas.");
-      const companies = payload.companies as Array<{ id: string; name: string }>;
-
       const falhas: string[] = [];
-      for (let i = 0; i < companies.length; i += 1) {
-        const company = companies[i];
-        setProgress({ label: company.name, done: i, total: companies.length });
+      for (let i = 0; i < alvo.length; i += 1) {
+        const company = alvo[i];
+        setProgress({ label: company.name, done: i, total: alvo.length });
         try {
           const r = await fetch("/api/caixa/sync", {
             method: "POST",
@@ -303,7 +380,7 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
         }
       }
 
-      setProgress({ label: "Concluído", done: companies.length, total: companies.length });
+      setProgress({ label: "Concluído", done: alvo.length, total: alvo.length });
       if (falhas.length > 0) {
         setError(
           `${falhas.length} empresa(s) com problema — ${falhas.slice(0, 3).join(" · ")}${
@@ -327,9 +404,13 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
       const XLSX = await import("xlsx-js-style");
 
       const MONEY = 'R$ #,##0.00;[Red]-R$ #,##0.00';
-      const header = ["Empresa", "Conta Corrente", "Agência / Conta", "Banco", "Tipo", "Saldo", "Variação no dia", "Atualizado"];
+      const header = ["Empresa", "Status", "Conta Corrente", "Agência / Conta", "Banco", "Tipo", "Saldo", "Variação no dia", "Atualizado"];
+      // Índices das colunas de dinheiro. Constante porque já mudaram uma vez
+      // (ao inserir "Status") e estavam escritos à mão em três lugares.
+      const MONEY_COLS = [6, 7];
       const body = visible.map((r) => [
         r.companyName,
+        statusLabel(r),
         r.descricao,
         contaLabel(r),
         bancoLabel(r),
@@ -338,12 +419,17 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
         r.variacaoDia,
         atualizadoBucket(r, today, ontem),
       ]);
-      const totalRow = ["TOTAL", `${visible.length} conta(s)`, "", "", "", totalVisivel, variacaoVisivel, ""];
+      const totalRow = ["TOTAL", "", `${visible.length} conta(s)`, "", "", "", totalVisivel, variacaoVisivel, ""];
 
       const ws = XLSX.utils.aoa_to_sheet([header, ...body, totalRow]);
-      ws["!cols"] = [{ wch: 26 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
-      // Congela o cabeçalho: a tabela costuma passar de uma tela.
-      ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+      ws["!cols"] = [{ wch: 26 }, { wch: 10 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
+      // Autofiltro: o arquivo abre com os menus de filtro do próprio Excel,
+      // então quem recebe continua fatiando como fazia na tela.
+      //
+      // NÃO tente congelar o cabeçalho aqui: o xlsx-js-style 1.2.0 ignora
+      // `!freeze` (string OU objeto) e `!panes` — conferido gerando o arquivo e
+      // lendo o XML, nenhum deles emite <pane>. A linha existia e foi removida
+      // por ser decoração morta.
       ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: body.length, c: header.length - 1 } }) };
 
       const lastRow = body.length + 1;
@@ -353,7 +439,7 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
           head.s = {
             font: { bold: true, color: { rgb: "FFFFFF" } },
             fill: { fgColor: { rgb: "AE1800" } },
-            alignment: { horizontal: c >= 5 && c <= 6 ? "right" : "left" },
+            alignment: { horizontal: MONEY_COLS.includes(c) ? "right" : "left" },
           };
         }
         const total = ws[XLSX.utils.encode_cell({ r: lastRow, c })];
@@ -362,11 +448,11 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
             font: { bold: true },
             border: { top: { style: "thin", color: { rgb: "999999" } } },
           };
-          if (c === 5 || c === 6) total.z = MONEY;
+          if (MONEY_COLS.includes(c)) total.z = MONEY;
         }
       }
       for (let r = 1; r <= body.length; r += 1) {
-        for (const c of [5, 6]) {
+        for (const c of MONEY_COLS) {
           const cell = ws[XLSX.utils.encode_cell({ r, c })];
           if (cell && typeof cell.v === "number") cell.z = MONEY;
         }
@@ -428,19 +514,28 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <CompanyPicker
+            companies={companies}
+            selected={scope}
+            onChange={setScope}
+            staleIds={staleIds}
+            disabled={busy}
+          />
           <button
             type="button"
             onClick={() => sweep("cadastro")}
-            disabled={busy}
+            disabled={busy || alvo.length === 0}
+            title="Busca na Omie as contas correntes cadastradas"
             className="inline-flex items-center gap-1.5 rounded-viva-md border border-border bg-surface-1 px-3 py-2 text-sm font-medium text-ink-secondary transition-colors hover:bg-surface-2 disabled:opacity-50"
           >
-            <Building2 className="h-4 w-4" />
+            <ListPlus className="h-4 w-4" />
             Sincronizar contas
           </button>
           <button
             type="button"
             onClick={() => sweep("saldos")}
-            disabled={busy}
+            disabled={busy || alvo.length === 0}
+            title="Busca o saldo de agora de cada conta"
             className="inline-flex items-center gap-1.5 rounded-viva-md bg-viva-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-viva-600 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
@@ -448,6 +543,16 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
           </button>
         </div>
       </div>
+
+      {alvo.length !== companies.length && (
+        <p className="-mt-2 text-xs text-ink-muted">
+          As ações acima vão rodar em{" "}
+          <strong className="font-medium text-viva-700">
+            {alvo.length} de {companies.length} empresas
+          </strong>
+          . A tabela continua mostrando todas.
+        </p>
+      )}
 
       {/* Progresso da varredura */}
       {progress && (
@@ -560,7 +665,7 @@ export function CaixaRealClient({ rows, today, lastUpdate }: Props) {
             <td className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-label text-ink-muted">
               Total
             </td>
-            <td colSpan={3} className="px-3 py-2.5 text-xs text-ink-muted">
+            <td colSpan={4} className="px-3 py-2.5 text-xs text-ink-muted">
               {visibleRows.length} conta(s)
             </td>
             <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-ink-primary">

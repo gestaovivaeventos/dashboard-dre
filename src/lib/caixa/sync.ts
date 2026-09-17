@@ -113,14 +113,23 @@ export async function syncCompanyAccounts(
 
     // Some da Omie → inativa aqui. Só mexe em quem ainda está marcada ativa,
     // para não reescrever a tabela inteira a cada varredura.
+    //
+    // O `if` não é otimização, é trava: lista VAZIA significa que a Omie não
+    // devolveu nada — resposta transitória ou credencial com problema —, e
+    // aplicar o "não está na lista" nesse caso inativaria TODAS as contas da
+    // empresa de uma vez. Sem contas, não há o que reconciliar.
     const vistos = contas.map((c) => c.omieCcId);
     if (vistos.length > 0) {
-      await admin
+      const { error } = await admin
         .from("caixa_accounts")
         .update({ ativo: false, updated_at: new Date().toISOString() })
         .eq("company_id", company.id)
         .eq("ativo", true)
         .not("omie_cc_id", "in", `(${vistos.map((v) => `"${v}"`).join(",")})`);
+      // Falha silenciosa aqui deixaria conta encerrada marcada como ativa para
+      // sempre: ela seguiria consumindo uma chamada de saldo por varredura e
+      // entrando no total da tela.
+      if (error) throw new Error(`Falha ao inativar contas removidas: ${error.message}`);
     }
 
     return { ...base, ok: true, accountsOk: contas.length, accountsError: 0, error: null };
@@ -132,7 +141,14 @@ export async function syncCompanyAccounts(
 // ── Saldos ─────────────────────────────────────────────────────────────────
 
 /**
- * Atualiza o saldo de todas as contas ATIVAS de uma empresa.
+ * Atualiza o saldo das contas de uma empresa.
+ *
+ * Entram as ATIVAS (sempre) e as que nunca foram capturadas (`saldo_at` nulo),
+ * o que inclui as inativas na primeira vez que são vistas. É o que faz a tela
+ * mostrar um número para a conta encerrada em vez de um traço, sem pagar por
+ * ela duas vezes por dia para sempre: conta fechada não movimenta, então o
+ * saldo do encerramento é o saldo final. Uma conta que já foi capturada e
+ * depois foi encerrada conserva o último valor, congelado no fechamento.
  *
  * Uma conta que falha não derruba as outras: grava `saldo_error` na linha,
  * mantém o saldo anterior e segue. A tela mostra o erro junto do número velho
@@ -149,7 +165,7 @@ export async function refreshCompanyBalances(
       .from("caixa_accounts")
       .select("id,omie_cc_id")
       .eq("company_id", company.id)
-      .eq("ativo", true);
+      .or("ativo.eq.true,saldo_at.is.null");
     if (error) throw new Error(error.message);
 
     const accounts = (data ?? []) as Array<{ id: string; omie_cc_id: string }>;

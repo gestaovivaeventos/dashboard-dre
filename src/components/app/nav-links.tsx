@@ -74,25 +74,8 @@ interface RenderGroup {
   items: RenderItem[];
 }
 
-export function NavLinks({
-  dreRole,
-  ctrlRoles,
-  canCase,
-  canViagens,
-  canViagensAprovar,
-  canContratos,
-  vbRole,
-  segments,
-  activeSegmentSlug,
-  collapsed,
-  onNavigate,
-  contractsOnly,
-  isFranqueado,
-  isCsc,
-  canBiValidation,
-  ctrlFullView,
-  navBadges,
-}: NavLinksProps) {
+export function NavLinks(props: NavLinksProps) {
+  const { collapsed, onNavigate, contractsOnly } = props;
   const pathname = usePathname();
 
   // contracts_only users see ONLY the Validacao de Contratos entry. We bypass
@@ -100,7 +83,11 @@ export function NavLinks({
   // when the user's underlying role would normally hide it.
   const groups: RenderGroup[] = contractsOnly
     ? buildContractsOnlyGroups()
-    : buildGroups({ dreRole, ctrlRoles, canCase, canViagens, canViagensAprovar, canContratos, vbRole, segments, activeSegmentSlug, isFranqueado, isCsc, canBiValidation, ctrlFullView, navBadges });
+    // `props` inteiro, NÃO um objeto montado campo a campo: as flags de módulo
+    // são opcionais em BuildInput, então esquecer uma na lista compila sem erro
+    // e o item some do menu para todo mundo, em silêncio. Foi o que aconteceu
+    // com o Caixa. Repassando o objeto, uma flag nova chega aqui sozinha.
+    : buildGroups(props);
 
   const allHrefs = groups.flatMap((g) => g.items.map((i) => i.href));
   const activeHref =

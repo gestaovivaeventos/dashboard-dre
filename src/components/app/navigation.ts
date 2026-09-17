@@ -256,11 +256,11 @@ export type NavGroupId =
   | "financeiro"
   | "orcamento"
   | "compras"
+  | "caixa"
   | "case"
   | "viagens"
   | "contratos"
   | "vb"
-  | "caixa"
   | "plataforma"
   | "suporte";
 
@@ -332,6 +332,18 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    // Módulo Caixa: saldo das contas correntes de todas as empresas, lido da
+    // Omie. Concedido por usuário em "Módulos visíveis" (ver @/lib/auth/caixa);
+    // admin enxerga sem a concessão. Grupo próprio porque não é um recorte do
+    // Financeiro — é a posição de caixa do grupo inteiro, sem filtro de
+    // segmento e sem a regra de empresas restritas.
+    id: "caixa",
+    label: "CAIXA",
+    items: [
+      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Real", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
+    ],
+  },
+  {
     id: "case",
     label: "CASE",
     items: [
@@ -366,18 +378,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
       // Extrato mensal por e-mail aos credores: acompanhamento e envio manual.
       { key: VB_NAV_KEY_REPORTS, title: "Relatórios mensais", icon: Mail, scope: "global", href: VB_REPORTS_PATH, vbAccess: true, vbGestorOnly: true },
-    ],
-  },
-  {
-    // Módulo Caixa: saldo das contas correntes de todas as empresas, lido da
-    // Omie. Concedido por usuário em "Módulos visíveis" (ver @/lib/auth/caixa);
-    // admin enxerga sem a concessão. Grupo próprio porque não é um recorte do
-    // Financeiro — é a posição de caixa do grupo inteiro, sem filtro de
-    // segmento e sem a regra de empresas restritas.
-    id: "caixa",
-    label: "CAIXA",
-    items: [
-      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Real", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
     ],
   },
   {

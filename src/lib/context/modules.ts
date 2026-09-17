@@ -50,7 +50,7 @@ export const MODULES: Record<ActiveModule, ModuleDefinition> = {
   },
 };
 
-export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "case", "viagens", "vb", "caixa"] as const;
+export const MODULE_ORDER: readonly ActiveModule[] = ["dre", "ctrl", "caixa", "case", "viagens", "vb"] as const;
 
 /**
  * Returns the modules the user has any access to.

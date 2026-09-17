@@ -125,6 +125,12 @@ export function AppShell({
   }, [userRole, hasCtrl]);
 
   // Telas que entram no roteiro: as mesmas chaves que o menu montou para ele.
+  //
+  // Este objeto é montado campo a campo porque os nomes divergem (dreRole ←
+  // userRole), então não dá para repassar as props inteiras como o NavLinks
+  // faz. Ao adicionar a flag de um MÓDULO NOVO, inclua-a aqui e no array de
+  // dependências: as flags são opcionais em BuildInput, e esquecer uma compila
+  // sem erro e some com o item do menu em silêncio (aconteceu com o Caixa).
   const tourNavKeys = useMemo(
     () =>
       visibleNavKeys({
