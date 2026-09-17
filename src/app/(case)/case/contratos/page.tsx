@@ -27,13 +27,22 @@ export default async function CaseContratosPage() {
             Contratos de shows vendidos — lançados no Omie da Case Shows.
           </p>
         </div>
-        <Link
-          href="/case/contratos/novo"
-          className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
-        >
-          <Plus className="h-4 w-4" />
-          Novo contrato
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/case/contratos/novo?tipo=bv"
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-2"
+          >
+            <Plus className="h-4 w-4" />
+            BV artístico
+          </Link>
+          <Link
+            href="/case/contratos/novo"
+            className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
+          >
+            <Plus className="h-4 w-4" />
+            Novo contrato
+          </Link>
+        </div>
       </div>
 
       {!omieOk && (
