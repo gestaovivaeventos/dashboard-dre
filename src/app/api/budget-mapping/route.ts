@@ -90,6 +90,7 @@ export async function GET(request: Request) {
         .eq("active", true)
         .or(`company_id.is.null,company_id.eq.${companyId}`)
         .order("code")
+        .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
         .range(from, to),
     ),
   ]);
@@ -228,6 +229,7 @@ export async function POST(request: Request) {
         .eq("active", true)
         .or(`company_id.is.null,company_id.eq.${companyId}`)
         .order("code")
+        .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
         .range(from, to),
     );
     const validSet = new Set(

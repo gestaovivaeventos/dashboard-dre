@@ -128,7 +128,7 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
           ? query.or(`company_id.is.null,company_id.in.(${scopeCompanyIds.join(",")})`)
           : query.is("company_id", null);
     }
-    return query.order("code").range(from, to);
+    return query.order("code").order("id").range(from, to);
   });
   const allowedCompanyIds = await resolveAllowedCompanyIds(
     supabase,

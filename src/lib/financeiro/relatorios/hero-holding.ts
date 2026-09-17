@@ -233,6 +233,7 @@ export async function buildHeroHoldingComparativo(
       )
       .eq("active", true)
       .order("code")
+      .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
       .range(from, to),
   );
 

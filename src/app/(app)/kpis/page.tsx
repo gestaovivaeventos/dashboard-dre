@@ -54,7 +54,7 @@ export default async function KpisPage({ searchParams, params }: KpisPageProps) 
     companiesQuery.order("name"),
     // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
     fetchAllDreAccountRows<Pick<DreAccountBase, "id" | "code">>((from, to) =>
-      supabase.from("dre_accounts").select("id,code").eq("active", true).order("code").range(from, to),
+      supabase.from("dre_accounts").select("id,code").eq("active", true).order("code").order("id").range(from, to),
     ),
     supabase
       .from("kpi_definitions")
