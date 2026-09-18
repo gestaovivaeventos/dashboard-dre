@@ -134,7 +134,7 @@ export async function POST(request: Request, { params }: Params) {
   // Paginado: o cap de 1000 do PostgREST truncava os codes "8"/"9" (ver fetchAllDreAccountRows).
   const dreAccounts = await fetchAllDreAccountRows<{ id: string; code: string; name: string }>(
     (from, to) =>
-      db.from("dre_accounts").select("id,code,name").eq("active", true).order("code").range(from, to),
+      db.from("dre_accounts").select("id,code,name").eq("active", true).order("code").order("id").range(from, to),
   );
 
   function normalize(s: string): string {

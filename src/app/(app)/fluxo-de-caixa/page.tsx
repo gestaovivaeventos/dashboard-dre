@@ -102,29 +102,49 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     companiesQuery = companiesQuery.eq("segment_id", segmentId);
   }
 
-  const [{ data: companiesData }, { data: cashFlowAccountsData }, dreAccountsData] = await Promise.all([
-    companiesQuery.order("name"),
-    supabase
-      .from("cash_flow_accounts")
-      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active,company_id")
-      .eq("active", true)
-      .order("sort_order"),
-    // Paginado: evita o truncamento em 1000 linhas do PostgREST que sumia
-    // com os codes "8"/"9" do DRE (ver fetchAllDreAccountRows).
-    fetchAllDreAccountRows<RawDreAccount>((from, to) =>
-      supabase
-        .from("dre_accounts")
-        .select(SCOPED_DRE_ACCOUNTS_SELECT)
-        .eq("active", true)
-        .order("code")
-        .range(from, to),
-    ),
-  ]);
+  const { data: companiesData } = await companiesQuery.order("name");
 
   const companies = (companiesData ?? []).map((company) => ({
     id: company.id as string,
     name: company.name as string,
   }));
+
+  // Plano DRE: carregamento IDÊNTICO ao do Dashboard DRE (dashboard/page.tsx).
+  // Duas garantias que esta tela NÃO tinha e que faziam o "Resultado do
+  // Exercício" divergir do DRE Gerencial (caso real: Viva Barbacena):
+  //  1) Escopo por segmento (global + empresas do segmento) em vez de TODAS as
+  //     empresas — o plano completo passa de 2.000 linhas e cruzava a fronteira
+  //     de 1000 do PostgREST; escopado cabe em bem menos páginas (mais leve).
+  //  2) `.order("id")` como desempate único. Só `code` NÃO é único (cada plano
+  //     custom repete os mesmos codes), então a paginação por range ficava
+  //     INSTÁVEL na fronteira: a conta "7.2.1 Salarios" da Barbacena vinha
+  //     DUPLICADA (e a de outras empresas sumia). Com a duplicata, o somatório
+  //     por parent_id em buildDashboardRows contava Salários 2x em "7.2" → "7"
+  //     → Resultado do Exercício menor que o do Dashboard exatamente pelo valor
+  //     de Salários. Ver a nota em fetchAllDreAccountRows (dre.ts).
+  // Nenhuma mudança na regra de cálculo — apenas o conjunto correto de linhas.
+  const scopeCompanyIds = companies.map((c) => c.id);
+  const [{ data: cashFlowAccountsData }, dreAccountsData] = await Promise.all([
+    supabase
+      .from("cash_flow_accounts")
+      .select("id,code,name,parent_id,level,type,is_summary,formula,source,is_highlight_block,sort_order,active,company_id")
+      .eq("active", true)
+      .order("sort_order"),
+    fetchAllDreAccountRows<RawDreAccount>((from, to) => {
+      let query = supabase
+        .from("dre_accounts")
+        .select(SCOPED_DRE_ACCOUNTS_SELECT)
+        .eq("active", true);
+      if (segmentId) {
+        query =
+          scopeCompanyIds.length > 0
+            ? query.or(`company_id.is.null,company_id.in.(${scopeCompanyIds.join(",")})`)
+            : query.is("company_id", null);
+      }
+      // .order("id"): desempate único → paginação por range estável (ver fetchAllDreAccountRows)
+      return query.order("code").order("id").range(from, to);
+    }),
+  ]);
   const allowedCompanyIds = await resolveAllowedCompanyIds(
     supabase,
     profile,

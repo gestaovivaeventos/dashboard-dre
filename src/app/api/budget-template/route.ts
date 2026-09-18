@@ -25,6 +25,7 @@ export async function GET(request: Request) {
         .select("code,name,is_summary")
         .eq("active", true)
         .order("code")
+        .order("id") // desempate único → paginação por range estável (ver fetchAllDreAccountRows)
         .range(from, to),
   );
 
