@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toaster";
+import { syncOmieCategories } from "@/lib/dashboard/sync-omie-categories";
 
 interface CashFlowAccountOption {
   id: string;
@@ -30,6 +31,13 @@ interface CashFlowMappingTabProps {
   companyId: string;
   search: string;
   cashFlowAccounts: CashFlowAccountOption[];
+  /**
+   * Muda quando o botão "Atualizar" do cabeçalho (MappingManager) já sincronizou
+   * o cadastro de categorias da Omie e quer recarregar esta aba — aqui só relê a
+   * lista (o sync já rodou lá fora). O botão "Atualizar" desta própria aba faz o
+   * sync + relê por conta própria.
+   */
+  reloadKey?: number;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -42,10 +50,11 @@ async function safeJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-export function CashFlowMappingTab({ companyId, search, cashFlowAccounts }: CashFlowMappingTabProps) {
+export function CashFlowMappingTab({ companyId, search, cashFlowAccounts, reloadKey }: CashFlowMappingTabProps) {
   const { showToast } = useToast();
   const [rows, setRows] = useState<CashFlowMappingRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [originalByCode, setOriginalByCode] = useState<Record<string, string>>({});
@@ -78,7 +87,32 @@ export function CashFlowMappingTab({ companyId, search, cashFlowAccounts }: Cash
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // reloadKey: recarrega quando o "Atualizar" do cabeçalho já sincronizou a
+    // Omie. `load` já depende de companyId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, reloadKey]);
+
+  // "Atualizar" desta aba: sincroniza o cadastro de categorias da Omie (traz as
+  // novas, sem lançamento) e depois relê a lista.
+  const refresh = async () => {
+    setSyncing(true);
+    const res = await syncOmieCategories(companyId);
+    setSyncing(false);
+    if (!res.ok) {
+      showToast({
+        title: "Falha ao atualizar categorias da Omie",
+        description: res.error,
+        variant: "destructive",
+      });
+    } else {
+      showToast({
+        title: "Categorias atualizadas",
+        description: `${res.count ?? 0} categoria(s) do cadastro da Omie.`,
+        variant: "success",
+      });
+    }
+    await load();
+  };
 
   const changedCodes = useMemo(() => {
     const codes: string[] = [];
@@ -170,8 +204,8 @@ export function CashFlowMappingTab({ companyId, search, cashFlowAccounts }: Cash
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">{mappedCount}/{rows.length} mapeadas</span>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading || saving}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading || saving || syncing}>
+            {loading || syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
             Atualizar
           </Button>
           {hasChanges && (

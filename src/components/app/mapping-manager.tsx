@@ -11,6 +11,7 @@ import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
 import { ProjectMappingTab, type ProjectMappingAccountOption } from "@/components/app/project-mapping-tab";
 import { RoutedDepartmentMapping } from "@/components/app/routed-department-mapping";
 import { SegmentSelector } from "@/components/app/segment-selector";
+import { syncOmieCategories } from "@/lib/dashboard/sync-omie-categories";
 import type { Segment } from "@/lib/supabase/types";
 
 type Tab = "omie" | "cashflow" | "budget" | "projects";
@@ -84,6 +85,11 @@ export function MappingManager({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  // "Atualizar" puxa as categorias do cadastro da Omie antes de reler (abas
+  // Omie/DRE e Fluxo). `cashflowReloadKey` força o recarregamento da aba de
+  // Fluxo, que vive num componente próprio (CashFlowMappingTab).
+  const [syncing, setSyncing] = useState(false);
+  const [cashflowReloadKey, setCashflowReloadKey] = useState(0);
 
   // Estado atual dos selects (draft) e estado original (salvo no banco)
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
@@ -511,13 +517,36 @@ export function MappingManager({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => {
+                onClick={async () => {
                   void loadScopedDreAccounts();
-                  return tab === "omie" ? void loadRows() : void loadBudgetRows();
+                  // Abas Omie (DRE) e Fluxo: primeiro sincroniza o cadastro de
+                  // categorias da Omie (traz as novas, sem lançamento), depois
+                  // recarrega a lista. As demais abas só recarregam.
+                  if (tab === "omie" || tab === "cashflow") {
+                    setSyncing(true);
+                    const res = await syncOmieCategories(companyId);
+                    setSyncing(false);
+                    if (!res.ok) {
+                      showToast({
+                        title: "Falha ao atualizar categorias da Omie",
+                        description: res.error,
+                        variant: "destructive",
+                      });
+                    } else {
+                      showToast({
+                        title: "Categorias atualizadas",
+                        description: `${res.count ?? 0} categoria(s) do cadastro da Omie.`,
+                        variant: "success",
+                      });
+                    }
+                  }
+                  if (tab === "omie") void loadRows();
+                  else if (tab === "cashflow") setCashflowReloadKey((k) => k + 1);
+                  else void loadBudgetRows();
                 }}
-                disabled={loading || saving || budgetLoading || budgetSaving}
+                disabled={loading || saving || budgetLoading || budgetSaving || syncing}
               >
-                {(tab === "omie" ? loading : budgetLoading) ? (
+                {syncing || (tab === "omie" ? loading : budgetLoading) ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <RefreshCcw className="mr-2 h-4 w-4" />
@@ -560,6 +589,7 @@ export function MappingManager({
             companyId={companyId}
             search={search}
             cashFlowAccounts={cashFlowAccounts}
+            reloadKey={cashflowReloadKey}
           />
           <RoutedDepartmentMapping
             companyId={companyId}
