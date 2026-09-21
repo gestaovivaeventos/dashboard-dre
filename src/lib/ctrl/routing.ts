@@ -286,7 +286,7 @@ export const APPROVAL_COVERAGE: ReadonlyArray<{
       "Despesas Gerais",
     ],
     since: "2026-09-21",
-    until: "a definir (retorno do Régis)",
+    until: "2026-10-05",
     reason:
       "Férias do Régis — Vitor (Diretor) assume as aprovações: recebe os lembretes " +
       "diários da etapa de gerente destes setores; o roteamento do tipo Capacitações e " +
