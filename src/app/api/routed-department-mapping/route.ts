@@ -100,10 +100,22 @@ export async function GET(request: Request) {
     .select("company_id, code, description")
     .in("company_id", sourceIds);
   const descByKey = new Map<string, string>();
+  // Todas as categorias do CADASTRO (omie_categories) por empresa de origem —
+  // é o que permite listar toda categoria da origem, e não só as que já têm
+  // lançamento no departamento roteado (RPC). Exclui os códigos sintéticos
+  // '__fundos_*', como a tela de mapeamento principal.
+  const omieCodesBySource = new Map<string, Set<string>>();
   (sourceCategories ?? []).forEach((c) => {
+    const company = c.company_id as string;
+    const code = c.code as string;
     const description = (c.description as string | null) ?? "";
     if (description) {
-      descByKey.set(`${c.company_id as string}|${c.code as string}`, description);
+      descByKey.set(`${company}|${code}`, description);
+    }
+    if (code && !code.startsWith("__fundos_")) {
+      const set = omieCodesBySource.get(company) ?? new Set<string>();
+      set.add(code);
+      omieCodesBySource.set(company, set);
     }
   });
 
@@ -150,19 +162,33 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: catError.message }, { status: 400 });
     }
 
-    const categoryItems: CategoryItem[] = (categories ?? []).map(
-      (c: { category_code: string; category_name: string | null }) => ({
-        code: c.category_code,
-        name:
-          descByKey.get(`${sourceCompanyId}|${c.category_code}`) ??
-          c.category_name ??
-          c.category_code,
-        accountId:
-          overrideByKey.get(
-            overrideKey(sourceCompanyId, departmentCode, c.category_code),
-          ) ?? null,
-      }),
+    // Une DUAS fontes de códigos:
+    //   1) o CADASTRO completo da empresa de origem (omie_categories) — todas as
+    //      categorias, independentemente do departamento em que foram usadas;
+    //   2) as categorias com lançamento neste departamento (RPC) — pega alguma
+    //      que exista em financial_entries mas ainda não esteja no cadastro.
+    // Assim o admin pode pré-mapear (override) qualquer categoria da origem, sem
+    // esperar o primeiro lançamento no departamento roteado.
+    const rpcNameByCode = new Map<string, string | null>();
+    (categories ?? []).forEach((c: { category_code: string; category_name: string | null }) => {
+      if (c.category_code) rpcNameByCode.set(c.category_code, c.category_name);
+    });
+    const allCodes = new Set<string>(
+      Array.from(omieCodesBySource.get(sourceCompanyId) ?? new Set<string>()),
     );
+    rpcNameByCode.forEach((_name, code) => allCodes.add(code));
+
+    const categoryItems: CategoryItem[] = Array.from(allCodes)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((code) => ({
+        code,
+        name:
+          descByKey.get(`${sourceCompanyId}|${code}`) ??
+          rpcNameByCode.get(code) ??
+          code,
+        accountId:
+          overrideByKey.get(overrideKey(sourceCompanyId, departmentCode, code)) ?? null,
+      }));
 
     sections.push({
       sourceCompanyId,

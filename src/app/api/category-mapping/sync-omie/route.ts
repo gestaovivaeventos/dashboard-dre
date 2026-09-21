@@ -4,6 +4,7 @@ import { getCurrentSessionContext } from "@/lib/auth/session";
 import { listCategorias } from "@/lib/omie/cadastros";
 import { decryptSecret } from "@/lib/security/encryption";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { isUuid } from "@/lib/utils/uuid";
 
 // Puxa TODAS as categorias ATIVAS direto do cadastro da Omie (ListarCategorias)
@@ -12,8 +13,14 @@ import { isUuid } from "@/lib/utils/uuid";
 // Por que existe: omie_categories era populada SOMENTE a partir dos lançamentos
 // durante o sync (ver src/lib/omie/sync.ts, passo 6). Uma categoria nova só
 // aparecia no Mapeamento (DRE e Fluxo de Caixa) depois do primeiro lançamento.
-// Aqui a fonte é o CADASTRO, não o movimento, então a categoria aparece assim
-// que é criada na Omie e o admin clica em "Atualizar".
+// Aqui a fonte é o CADASTRO, não o movimento.
+//
+// Empresa COMPOSTA (sem Omie própria, ex.: Salvaterra Estacionamento): ela puxa
+// dados de OUTRAS empresas por departamento roteado. Neste caso sincronizamos o
+// cadastro das empresas de ORIGEM — assim o mapeamento roteado (que lista as
+// categorias das origens) enxerga todas as categorias delas, independente do
+// departamento. Empresa que tem Omie própria E também recebe roteamento
+// sincroniza as duas pontas.
 //
 // Sem filtro de tipo: DRE e Fluxo de Caixa mapeiam categorias de RECEITA e de
 // DESPESA (diferente do Compras, que só usa despesa).
@@ -42,34 +49,84 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: company, error: compErr } = await admin
+  // Empresas cujo cadastro de categorias vamos puxar: a própria (se tiver Omie)
+  // + as empresas de ORIGEM dos departamentos roteados para ela.
+  const targetIds = new Set<string>([companyId]);
+  const { data: routedDepts } = await admin
+    .from("company_departments")
+    .select("company_id")
+    .eq("routed_to_company_id", companyId);
+  (routedDepts ?? []).forEach((d) => {
+    const src = d.company_id as string | null;
+    if (src) targetIds.add(src);
+  });
+
+  const { data: companies, error: compErr } = await admin
     .from("companies")
-    .select("omie_app_key, omie_app_secret")
-    .eq("id", companyId)
-    .single();
-  if (compErr || !company?.omie_app_key || !company?.omie_app_secret) {
-    return NextResponse.json({ error: "Empresa sem conexao Omie." }, { status: 400 });
+    .select("id, name, omie_app_key, omie_app_secret")
+    .in("id", Array.from(targetIds));
+  if (compErr) {
+    return NextResponse.json({ error: compErr.message }, { status: 400 });
   }
 
-  const appKey = decryptSecret(company.omie_app_key);
-  const appSecret = decryptSecret(company.omie_app_secret);
-
-  let categorias;
-  try {
-    categorias = await listCategorias(appKey, appSecret);
-  } catch (e) {
+  const withCreds = (companies ?? []).filter(
+    (c) => c.omie_app_key && c.omie_app_secret,
+  );
+  if (withCreds.length === 0) {
     return NextResponse.json(
-      {
-        error: `Erro ao buscar categorias na Omie: ${
+      { error: "Empresa sem conexao Omie (nem ela, nem as empresas de origem)." },
+      { status: 400 },
+    );
+  }
+
+  let totalCount = 0;
+  const perCompany: Array<{ name: string; count: number }> = [];
+  const errors: string[] = [];
+
+  for (const company of withCreds) {
+    try {
+      const appKey = decryptSecret(company.omie_app_key as string);
+      const appSecret = decryptSecret(company.omie_app_secret as string);
+      const count = await syncCompanyCategories(admin, company.id as string, appKey, appSecret);
+      totalCount += count;
+      perCompany.push({ name: (company.name as string) ?? "Empresa", count });
+    } catch (e) {
+      errors.push(
+        `${(company.name as string) ?? "Empresa"}: ${
           e instanceof Error ? e.message : String(e)
         }`,
-      },
+      );
+    }
+  }
+
+  // Todas falharam → erro. Sucesso parcial → ok com aviso.
+  if (perCompany.length === 0) {
+    return NextResponse.json(
+      { error: `Erro ao buscar categorias na Omie: ${errors.join(" | ")}` },
       { status: 502 },
     );
   }
 
-  // Dedup por code (defensivo — o upsert em lote falha se o mesmo code aparecer
-  // duas vezes: "ON CONFLICT ... cannot affect row a second time").
+  return NextResponse.json({
+    ok: true,
+    count: totalCount,
+    companies: perCompany,
+    ...(errors.length > 0 ? { warning: errors.join(" | ") } : {}),
+  });
+}
+
+// Puxa o cadastro de categorias de UMA empresa (com Omie própria) e faz upsert
+// idempotente em omie_categories. NÃO apaga o que a Omie não devolveu: categoria
+// inativada que já tem lançamento continua visível para remapear/auditar.
+async function syncCompanyCategories(
+  admin: SupabaseClient,
+  companyId: string,
+  appKey: string,
+  appSecret: string,
+): Promise<number> {
+  const categorias = await listCategorias(appKey, appSecret);
+
+  // Dedup por code (o upsert em lote falha se o mesmo code repetir).
   const byCode = new Map<string, { company_id: string; code: string; description: string }>();
   for (const c of categorias) {
     const code = c.codigo?.trim();
@@ -77,20 +134,11 @@ export async function POST(request: Request) {
     byCode.set(code, { company_id: companyId, code, description: c.descricao?.trim() || code });
   }
   const rows = Array.from(byCode.values());
+  if (rows.length === 0) return 0;
 
-  if (rows.length === 0) {
-    return NextResponse.json({ ok: true, count: 0 });
-  }
-
-  // Upsert idempotente. NÃO apaga o que a Omie não devolveu: categoria inativada
-  // que já tem lançamento continua visível para remapear/auditar. Só adiciona as
-  // novas e atualiza a descrição das existentes.
-  const { error: upsertErr } = await admin
+  const { error } = await admin
     .from("omie_categories")
     .upsert(rows, { onConflict: "company_id,code" });
-  if (upsertErr) {
-    return NextResponse.json({ error: upsertErr.message }, { status: 400 });
-  }
-
-  return NextResponse.json({ ok: true, count: rows.length });
+  if (error) throw new Error(error.message);
+  return rows.length;
 }

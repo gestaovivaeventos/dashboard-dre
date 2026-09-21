@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toaster";
+import { describeSyncResult, syncOmieCategories } from "@/lib/dashboard/sync-omie-categories";
 
 interface AccountOption {
   id: string;
@@ -33,6 +34,11 @@ interface RoutedDepartmentMappingProps {
   // Contas ja escopadas para a empresa de destino (mesma lista do mapeamento
   // proprio: plano custom da empresa ou global).
   accounts: AccountOption[];
+  /**
+   * Muda quando o "Atualizar" do cabeçalho já sincronizou o cadastro das
+   * empresas de origem — aqui só relê as seções (o sync já rodou lá fora).
+   */
+  reloadKey?: number;
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
@@ -52,10 +58,12 @@ export function RoutedDepartmentMapping({
   companyId,
   kind,
   accounts,
+  reloadKey,
 }: RoutedDepartmentMappingProps) {
   const { showToast } = useToast();
   const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftByKey, setDraftByKey] = useState<Record<string, string>>({});
   const [originalByKey, setOriginalByKey] = useState<Record<string, string>>({});
@@ -102,7 +110,33 @@ export function RoutedDepartmentMapping({
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // reloadKey: recarrega quando o "Atualizar" do cabeçalho já sincronizou a
+    // Omie das empresas de origem. `load` já depende de companyId/kind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, reloadKey]);
+
+  // "Atualizar" desta seção: sincroniza o cadastro de categorias das empresas de
+  // ORIGEM (o endpoint resolve as origens roteadas quando a empresa é composta)
+  // e depois relê as seções.
+  const refresh = async () => {
+    setSyncing(true);
+    const res = await syncOmieCategories(companyId);
+    setSyncing(false);
+    if (!res.ok) {
+      showToast({
+        title: "Falha ao atualizar categorias da Omie",
+        description: res.error,
+        variant: "destructive",
+      });
+    } else {
+      showToast({
+        title: "Categorias atualizadas",
+        description: describeSyncResult(res),
+        variant: res.warning ? "destructive" : "success",
+      });
+    }
+    await load();
+  };
 
   const changedKeys = useMemo(() => {
     const keys: string[] = [];
@@ -190,14 +224,15 @@ export function RoutedDepartmentMapping({
         <div>
           <h3 className="text-base font-semibold">Departamentos roteados de outras empresas</h3>
           <p className="text-xs text-muted-foreground">
-            Categorias dos departamentos roteados para esta empresa. Deixe em
-            branco para herdar o mapeamento automatico (mesma conta por codigo);
+            Todas as categorias do cadastro de cada empresa de origem roteada
+            para esta empresa (independente do departamento). Deixe em branco
+            para herdar o mapeamento automatico (mesma conta por codigo);
             selecione uma {accountLabel} para sobrescrever.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={saving}>
-            <RefreshCcw className="mr-2 h-4 w-4" />
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={saving || syncing || loading}>
+            {syncing || loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
             Atualizar
           </Button>
           {hasChanges && (
@@ -240,7 +275,7 @@ export function RoutedDepartmentMapping({
                   {section.categories.length === 0 ? (
                     <tr>
                       <td colSpan={3} className="py-6 text-center text-muted-foreground">
-                        Nenhuma categoria com lancamentos neste departamento.
+                        Nenhuma categoria no cadastro desta empresa. Clique em Atualizar para buscar na Omie.
                       </td>
                     </tr>
                   ) : (

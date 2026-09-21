@@ -11,7 +11,7 @@ import { CashFlowMappingTab } from "@/components/app/cash-flow-mapping-tab";
 import { ProjectMappingTab, type ProjectMappingAccountOption } from "@/components/app/project-mapping-tab";
 import { RoutedDepartmentMapping } from "@/components/app/routed-department-mapping";
 import { SegmentSelector } from "@/components/app/segment-selector";
-import { syncOmieCategories } from "@/lib/dashboard/sync-omie-categories";
+import { describeSyncResult, syncOmieCategories } from "@/lib/dashboard/sync-omie-categories";
 import type { Segment } from "@/lib/supabase/types";
 
 type Tab = "omie" | "cashflow" | "budget" | "projects";
@@ -90,6 +90,9 @@ export function MappingManager({
   // Fluxo, que vive num componente próprio (CashFlowMappingTab).
   const [syncing, setSyncing] = useState(false);
   const [cashflowReloadKey, setCashflowReloadKey] = useState(0);
+  // Recarrega o mapeamento de departamentos roteados (empresa composta) depois
+  // que o sync trouxe as categorias das empresas de origem.
+  const [routedReloadKey, setRoutedReloadKey] = useState(0);
 
   // Estado atual dos selects (draft) e estado original (salvo no banco)
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
@@ -535,10 +538,12 @@ export function MappingManager({
                     } else {
                       showToast({
                         title: "Categorias atualizadas",
-                        description: `${res.count ?? 0} categoria(s) do cadastro da Omie.`,
-                        variant: "success",
+                        description: describeSyncResult(res),
+                        variant: res.warning ? "destructive" : "success",
                       });
                     }
+                    // Recarrega também o mapeamento roteado (empresa composta).
+                    setRoutedReloadKey((k) => k + 1);
                   }
                   if (tab === "omie") void loadRows();
                   else if (tab === "cashflow") setCashflowReloadKey((k) => k + 1);
@@ -595,6 +600,7 @@ export function MappingManager({
             companyId={companyId}
             kind="cashflow"
             accounts={availableCashFlowAccounts}
+            reloadKey={routedReloadKey}
           />
         </div>
       ) : tab === "projects" ? (
@@ -714,6 +720,7 @@ export function MappingManager({
         companyId={companyId}
         kind="dre"
         accounts={availableDreAccounts}
+        reloadKey={routedReloadKey}
       />
       </div>
 
