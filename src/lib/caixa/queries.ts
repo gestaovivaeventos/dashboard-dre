@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { todayBR } from "@/lib/ctrl/datetime";
 import { evaluateSyncHealth, type CaixaRunSummary, type CaixaSyncAlert } from "@/lib/caixa/health";
+import { CAIXA_REAL_PREFS_KEY, parseCaixaRealPrefs, type CaixaRealPrefs } from "@/lib/caixa/prefs";
 import type { CaixaAccountRow } from "@/lib/caixa/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -194,4 +195,25 @@ export async function getCaixaSyncAlert(db: CaixaDb): Promise<CaixaSyncAlert | n
     toRunSummary(lastCron.data as Record<string, unknown> | null),
     new Date(),
   );
+}
+
+// ── Preferências da tela ───────────────────────────────────────────────────
+
+/**
+ * Filtros salvos do usuário para a tela Caixa Real, ou null (nunca salvou /
+ * JSON inválido → a tela abre no padrão). Falha de leitura também vira null:
+ * preferência não pode derrubar a tela.
+ */
+export async function getCaixaRealPrefs(
+  db: CaixaDb,
+  userId: string,
+): Promise<CaixaRealPrefs | null> {
+  const { data, error } = await db
+    .from("user_preferences")
+    .select("value")
+    .eq("user_id", userId)
+    .eq("key", CAIXA_REAL_PREFS_KEY)
+    .maybeSingle();
+  if (error || !data) return null;
+  return parseCaixaRealPrefs(data.value);
 }

@@ -33,6 +33,14 @@ export const CAIXA_TIPOS: Record<string, string> = {
  */
 export const CAIXA_TIPOS_LIQUIDOS: readonly string[] = ["CC", "CX", "PG"];
 
+/** Rótulos da coluna Status (espelham `ativo`). Fonte única para tela e padrão salvo. */
+export const CAIXA_STATUS_ATIVA = "Ativa";
+export const CAIXA_STATUS_INATIVA = "Inativa";
+
+export function statusLabel(ativo: boolean): string {
+  return ativo ? CAIXA_STATUS_ATIVA : CAIXA_STATUS_INATIVA;
+}
+
 export function tipoLabel(tipo: string | null | undefined): string {
   if (!tipo) return "—";
   return CAIXA_TIPOS[tipo] ?? tipo;

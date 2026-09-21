@@ -46,11 +46,13 @@
 //     Sócio"): os dois derivam o mesmo CtrlRole e têm alçada idêntica.
 
 import {
+  APPROVAL_COVERAGE,
   APPROVAL_ROUTING,
   approverSectorRestrictionFor,
   DIRECTOR_HIGHLIGHT_SECTORS,
   directorHighlightSectorsFor,
   isForcedDirectorRouting,
+  managerCoverageSectorsFor,
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -188,6 +190,23 @@ async function loadHighlightDirectors(db: SupabaseClient): Promise<ApproverUser[
   return ((data ?? []) as ApproverUser[]).filter((u) => Boolean(u.email?.trim()));
 }
 
+/**
+ * Usuários que estão COBRINDO aprovações (APPROVAL_COVERAGE, ex.: férias). Podem
+ * não ter perfil de aprovador; entram na etapa de GERENTE dos setores cobertos.
+ */
+async function loadCoveringUsers(db: SupabaseClient): Promise<ApproverUser[]> {
+  const emails = Array.from(
+    new Set(APPROVAL_COVERAGE.map((c) => c.coveringEmail.trim().toLowerCase())),
+  );
+  if (emails.length === 0) return [];
+  const { data } = await db
+    .from("users")
+    .select("id, name, email, profile, active")
+    .or(emails.map((e) => `email.ilike.${e}`).join(","))
+    .eq("active", true);
+  return ((data ?? []) as ApproverUser[]).filter((u) => Boolean(u.email?.trim()));
+}
+
 /** Vínculos user_sectors — filtram quem é notificado nas DUAS etapas. */
 async function loadSectorLinks(
   db: SupabaseClient,
@@ -225,6 +244,14 @@ export async function buildApprovalReminderPlan(
   // entram na etapa do diretor, restritos aos setores declarados para eles.
   const highlightDirectors = await loadHighlightDirectors(db);
   for (const u of highlightDirectors) {
+    if (!allApprovers.has(u.id)) allApprovers.set(u.id, u);
+  }
+
+  // Cobertura temporária (APPROVAL_COVERAGE, ex.: férias): quem cobre pode não
+  // estar no pool por perfil (um diretor cobrindo um gerente). Carrega-os para
+  // poderem receber a etapa de gerente dos setores cobertos.
+  const coveringUsers = await loadCoveringUsers(db);
+  for (const u of coveringUsers) {
     if (!allApprovers.has(u.id)) allApprovers.set(u.id, u);
   }
   const directorCandidates = [
@@ -294,13 +321,25 @@ export async function buildApprovalReminderPlan(
     } else {
       // Gerente: filtrado pelo setor da requisição (sem vínculo => recebe tudo,
       // mesmo fallback do getRequests e do notifyPendingApproval).
-      candidateIds = pool.gerente
+      const base = pool.gerente
         .filter((u) => {
           const links = sectorLinks.get(u.id);
           if (!links || links.size === 0) return true;
           return links.has(sectorId);
         })
         .map((u) => u.id);
+      // Cobertura temporária (APPROVAL_COVERAGE): quem cobre passa a receber a
+      // etapa de gerente dos setores cobertos, mesmo sem perfil de gerente. Não
+      // muda alçada — só notificação (aprovar segue pelo perfil próprio).
+      const covering = Array.from(allApprovers.values())
+        .filter(
+          (u) =>
+            managerCoverageSectorsFor({ email: u.email })?.has(
+              normalizeSectorName(sectorName),
+            ) ?? false,
+        )
+        .map((u) => u.id);
+      candidateIds = Array.from(new Set([...base, ...covering]));
     }
 
     const forcedDirector = isForcedDirectorRouting({

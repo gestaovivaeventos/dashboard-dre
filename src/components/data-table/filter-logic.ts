@@ -88,3 +88,76 @@ export function noneShownSelected(
   if (shown.length === 0) return false;
   return shown.every((o) => !passesValueFilter(o, selected));
 }
+
+// ── Estado serializável da tabela ──────────────────────────────────────────
+// É o que se guarda para lembrar os filtros de alguém (JSON no banco). A
+// convenção do Set vale aqui: chave ausente = sem filtro; array vazio = nada
+// passa. Ordenação e faixas numéricas vão junto — "o último filtro" inclui
+// como a pessoa deixou a tabela ordenada.
+
+export interface FilterTableSnapshot {
+  values: Record<string, string[]>;
+  ranges: Record<string, { min: string; max: string }>;
+  sortKey: string | null;
+  sortDir: "asc" | "desc";
+}
+
+export const EMPTY_SNAPSHOT: FilterTableSnapshot = {
+  values: {},
+  ranges: {},
+  sortKey: null,
+  sortDir: "asc",
+};
+
+/**
+ * Valida um JSON vindo de fora (banco, request) e devolve um snapshot são.
+ * Qualquer coisa fora do formato é descartada campo a campo — um valor
+ * corrompido não pode derrubar a tela nem travar a pessoa num filtro que ela
+ * não consegue tirar.
+ */
+export function parseSnapshot(raw: unknown): FilterTableSnapshot {
+  if (!raw || typeof raw !== "object") return EMPTY_SNAPSHOT;
+  const r = raw as Record<string, unknown>;
+
+  const values: Record<string, string[]> = {};
+  if (r.values && typeof r.values === "object") {
+    for (const [key, list] of Object.entries(r.values as Record<string, unknown>)) {
+      if (Array.isArray(list) && list.every((v) => typeof v === "string")) {
+        values[key] = list as string[];
+      }
+    }
+  }
+
+  const ranges: Record<string, { min: string; max: string }> = {};
+  if (r.ranges && typeof r.ranges === "object") {
+    for (const [key, range] of Object.entries(r.ranges as Record<string, unknown>)) {
+      if (range && typeof range === "object") {
+        const { min, max } = range as Record<string, unknown>;
+        const m = typeof min === "string" ? min : "";
+        const x = typeof max === "string" ? max : "";
+        if (m || x) ranges[key] = { min: m, max: x };
+      }
+    }
+  }
+
+  return {
+    values,
+    ranges,
+    sortKey: typeof r.sortKey === "string" && r.sortKey ? r.sortKey : null,
+    sortDir: r.sortDir === "desc" ? "desc" : "asc",
+  };
+}
+
+/** Igualdade estrutural, para não salvar o que não mudou. */
+export function snapshotsEqual(a: FilterTableSnapshot, b: FilterTableSnapshot): boolean {
+  return stableJson(a) === stableJson(b);
+}
+
+/** JSON com chaves ordenadas e listas de valores ordenadas: mesma escolha, mesma string. */
+export function stableJson(s: FilterTableSnapshot): string {
+  const values: Record<string, string[]> = {};
+  for (const k of Object.keys(s.values).sort()) values[k] = s.values[k].slice().sort();
+  const ranges: Record<string, { min: string; max: string }> = {};
+  for (const k of Object.keys(s.ranges).sort()) ranges[k] = s.ranges[k];
+  return JSON.stringify({ values, ranges, sortKey: s.sortKey, sortDir: s.sortDir });
+}

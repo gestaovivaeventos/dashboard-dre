@@ -24,20 +24,19 @@ import {
   YAxis,
 } from "recharts";
 
+import { CHART_DAYS_OPTIONS, type ChartDays } from "@/lib/caixa/prefs";
 import type { CaixaHistoryPoint } from "@/lib/caixa/types";
 import { compactBRL } from "@/lib/vb/format";
 
 /** Mesmo hue do "Evolução do saldo" do VB — é o mesmo conceito no produto. */
 const SERIES = "#0d9488";
 
-const RANGES = [
-  { days: 30, label: "30 dias" },
-  { days: 90, label: "90 dias" },
-  { days: 180, label: "6 meses" },
-  { days: 365, label: "1 ano" },
-] as const;
-
-type Days = (typeof RANGES)[number]["days"];
+const RANGE_LABEL: Record<ChartDays, string> = {
+  30: "30 dias",
+  90: "90 dias",
+  180: "6 meses",
+  365: "1 ano",
+};
 
 const brl = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 });
@@ -57,10 +56,12 @@ interface Props {
   accountIds: string[];
   /** Quantas contas há ao todo, para o subtítulo dizer se é recorte. */
   totalAccounts: number;
+  /** Janela, controlada pelo pai (é lembrada por usuário). */
+  days: ChartDays;
+  onDaysChange: (days: ChartDays) => void;
 }
 
-export function CaixaHistoryChart({ accountIds, totalAccounts }: Props) {
-  const [days, setDays] = useState<Days>(90);
+export function CaixaHistoryChart({ accountIds, totalAccounts, days, onDaysChange }: Props) {
   const [points, setPoints] = useState<CaixaHistoryPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -143,18 +144,18 @@ export function CaixaHistoryChart({ accountIds, totalAccounts }: Props) {
 
         {/* Controle de período: uma linha, acima do gráfico. */}
         <div className="flex items-center gap-0.5 rounded-viva-md border border-border bg-surface-0 p-0.5">
-          {RANGES.map((r) => (
+          {CHART_DAYS_OPTIONS.map((d) => (
             <button
-              key={r.days}
+              key={d}
               type="button"
-              onClick={() => setDays(r.days)}
+              onClick={() => onDaysChange(d)}
               className={`rounded-viva-sm px-2 py-1 text-xs transition-colors ${
-                days === r.days
+                days === d
                   ? "bg-surface-3 font-medium text-ink-primary"
                   : "text-ink-muted hover:text-ink-secondary"
               }`}
             >
-              {r.label}
+              {RANGE_LABEL[d]}
             </button>
           ))}
         </div>

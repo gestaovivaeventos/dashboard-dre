@@ -24,7 +24,12 @@ export const APPROVAL_ROUTING = {
   // Tipo de despesa cuja etapa de gerente é direcionada a este gerente.
   expenseTypeManager: {
     expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
-    managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
+    // ⚠️ COBERTURA DE FÉRIAS (desde 21/09/2026): temporariamente com o Vitor
+    // (Diretor), enquanto o Régis está de férias. ORIGINAL (Régis Adriano Da
+    // Costa): "bcacac55-230e-447c-bb7c-c0ff63ce18ee". Para reverter no retorno do
+    // Régis, restaure o ID original e esvazie APPROVAL_COVERAGE (ver abaixo e
+    // docs/ferias-regis-vitor.md).
+    managerId: "f159c959-55c2-4cc9-a1e4-acc4b2ab69c3", // Vitor de Oliveira Pedrosa (cobertura de férias)
   },
   // Setor cujas requisições vão sempre direto ao diretor, mesmo com orçamento
   // aprovado (pula o gerente). Notifica todos os diretores.
@@ -240,4 +245,67 @@ export function approverSectorRestrictionFor(user: {
   );
   if (!rule) return null;
   return new Set(rule.allowedSectorNames.map(normalizeSectorName));
+}
+
+// ─── Cobertura temporária de aprovações (férias / ausências) ──────────────────
+//
+// Enquanto um aprovador está fora, outro ASSUME os fluxos dele sem que nenhum
+// perfil mude no banco. Cada entrada é um acordo TEMPORÁRIO e deve ser REMOVIDA
+// no retorno da pessoa — não expira sozinha (`until` é lembrete, não expiração:
+// desligar sem ninguém saber é pior do que esquecer).
+//
+// Efeito hoje: o `coveringEmail` passa a RECEBER o lembrete diário da etapa de
+// GERENTE dos setores listados, mesmo que o perfil dele não seja gerente (ex.:
+// um diretor cobrindo um gerente). NÃO altera alçada: quem cobre aprova pelo
+// próprio perfil — um diretor já pode aprovar qualquer setor e já vê tudo na
+// tela; a cobertura só garante que ele seja NOTIFICADO. O roteamento fixo por
+// tipo de despesa (expenseTypeManager) é coberto à parte, trocando o managerId.
+//
+// ⚠️ Ao adicionar/remover uma entrada, atualize o catálogo em
+//    src/lib/auth/user-exceptions.ts ("Regras especiais" da tela de Usuários) e
+//    o registro em docs/ferias-regis-vitor.md.
+export const APPROVAL_COVERAGE: ReadonlyArray<{
+  /** Quem está COBRINDO (assume os fluxos). */
+  coveringEmail: string;
+  /** Quem está AUSENTE (dono original dos fluxos). */
+  coveredEmail: string;
+  /** Setores (por NOME) cuja etapa de GERENTE o coveringEmail passa a receber no lembrete diário. */
+  managerSectorNames: readonly string[];
+  since: string;
+  /** Retorno previsto — lembrete, não expiração automática. */
+  until: string;
+  reason: string;
+}> = [
+  {
+    coveringEmail: "vitor@vivaeventos.com.br",
+    coveredEmail: "regis@vivaeventos.com.br",
+    managerSectorNames: [
+      "Gestão de Pessoas",
+      "Bem Laranja",
+      "Eventos Oficiais",
+      "Despesas Gerais",
+    ],
+    since: "2026-09-21",
+    until: "a definir (retorno do Régis)",
+    reason:
+      "Férias do Régis — Vitor (Diretor) assume as aprovações: recebe os lembretes " +
+      "diários da etapa de gerente destes setores; o roteamento do tipo Capacitações e " +
+      "Treinamentos foi passado ao Vitor em APPROVAL_ROUTING.expenseTypeManager.",
+  },
+];
+
+/**
+ * Setores (normalizados) cuja etapa de GERENTE este e-mail está COBRINDO no
+ * lembrete diário. `null` quando o usuário não cobre ninguém.
+ */
+export function managerCoverageSectorsFor(user: {
+  email?: string | null;
+}): Set<string> | null {
+  const email = user.email?.trim().toLowerCase();
+  if (!email) return null;
+  const names = APPROVAL_COVERAGE.filter(
+    (c) => c.coveringEmail.trim().toLowerCase() === email,
+  ).flatMap((c) => c.managerSectorNames);
+  if (names.length === 0) return null;
+  return new Set(names.map(normalizeSectorName));
 }

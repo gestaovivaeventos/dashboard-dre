@@ -27,6 +27,7 @@ import {
   passesValueFilter,
   setAllShown,
   toggleValue,
+  type FilterTableSnapshot,
 } from "./filter-logic";
 
 export interface FilterColumn<T> {
@@ -58,10 +59,7 @@ export interface FilterColumn<T> {
 type ValueFilters = Record<string, Set<string>>;
 type RangeFilters = Record<string, { min: string; max: string }>;
 
-export interface FilterTableState {
-  values: ValueFilters;
-  ranges: RangeFilters;
-}
+export type { FilterTableSnapshot } from "./filter-logic";
 
 interface Props<T> {
   rows: T[];
@@ -79,11 +77,28 @@ interface Props<T> {
   /** Destaca a linha (ex.: saldo desatualizado). */
   rowClassName?: (row: T) => string | undefined;
   /**
-   * Filtro já aplicado ao abrir, por chave de coluna → valores aceitos.
-   * Aparece como chip e sai em um clique, como qualquer outro — a tela nunca
-   * esconde linhas sem dizer. Lido só na montagem.
+   * Estado com que a tabela abre (filtros, faixas, ordenação). Aparece como
+   * chips e sai em um clique, como qualquer outro — a tela nunca esconde
+   * linhas sem dizer. Lido na montagem e sempre que `stateVersion` mudar.
    */
-  initialValues?: Record<string, string[]>;
+  initialState?: FilterTableSnapshot;
+  /**
+   * Incrementar força a tabela a reaplicar `initialState` — é como o pai
+   * "restaura o padrão" sem remontar (remontar perderia a seleção).
+   */
+  stateVersion?: number;
+  /** Chamado a cada mudança de filtro/faixa/ordenação, com o estado serializável. */
+  onStateChange?: (state: FilterTableSnapshot) => void;
+}
+
+function valuesFromSnapshot(snap: FilterTableSnapshot | undefined): ValueFilters {
+  const out: ValueFilters = {};
+  for (const [key, list] of Object.entries(snap?.values ?? {})) out[key] = new Set(list);
+  return out;
+}
+
+function rangesFromSnapshot(snap: FilterTableSnapshot | undefined): RangeFilters {
+  return { ...(snap?.ranges ?? {}) };
 }
 
 // Aceita "1.234,56", "1234,56", "1234.56", "250".
@@ -97,6 +112,48 @@ function parseNum(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Aplica um snapshot a linhas, fora do componente. O pai usa para calcular o
+ * estado inicial de "linhas visíveis" ANTES da primeira pintura — a tabela só
+ * reporta as visíveis num efeito, e um card de total que pisca no valor
+ * errado por um frame é pior que demorar. Mesmo predicado da tabela.
+ */
+export function applySnapshot<T>(
+  rows: T[],
+  columns: FilterColumn<T>[],
+  snap: FilterTableSnapshot | undefined,
+): T[] {
+  if (!snap) return rows;
+  const values = valuesFromSnapshot(snap);
+  const ranges = rangesFromSnapshot(snap);
+  const filtered = rows.filter((row) =>
+    columns.every((col) => {
+      if (col.kind === "number") {
+        const range = ranges[col.key];
+        if (!range || (!range.min && !range.max)) return true;
+        const value = col.numeric?.(row) ?? null;
+        if (value === null) return false;
+        const min = parseNum(range.min);
+        const max = parseNum(range.max);
+        if (min !== null && value < min) return false;
+        if (max !== null && value > max) return false;
+        return true;
+      }
+      return passesValueFilter(col.plain(row), values[col.key]);
+    }),
+  );
+  if (!snap.sortKey) return filtered;
+  const col = columns.find((c) => c.key === snap.sortKey);
+  if (!col) return filtered;
+  const dir = snap.sortDir === "asc" ? 1 : -1;
+  return filtered.slice().sort((a, b) => {
+    const va = col.sortVal(a);
+    const vb = col.sortVal(b);
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
+  });
+}
+
 export function FilterTable<T>({
   rows,
   columns,
@@ -108,19 +165,39 @@ export function FilterTable<T>({
   footer,
   emptyMessage = "Nenhum resultado.",
   rowClassName,
-  initialValues,
+  initialState,
+  stateVersion = 0,
+  onStateChange,
 }: Props<T>) {
-  const [values, setValues] = useState<ValueFilters>(() => {
-    const initial: ValueFilters = {};
-    for (const [key, list] of Object.entries(initialValues ?? {})) {
-      if (list.length > 0) initial[key] = new Set(list);
-    }
-    return initial;
-  });
-  const [ranges, setRanges] = useState<RangeFilters>({});
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [values, setValues] = useState<ValueFilters>(() => valuesFromSnapshot(initialState));
+  const [ranges, setRanges] = useState<RangeFilters>(() => rangesFromSnapshot(initialState));
+  const [sortKey, setSortKey] = useState<string | null>(initialState?.sortKey ?? null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(initialState?.sortDir ?? "asc");
   const [openKey, setOpenKey] = useState<string | null>(null);
+
+  // Reaplica o estado inicial quando o pai pede (stateVersion). Pula a
+  // montagem: o useState acima já leu o initialState.
+  const appliedVersion = useRef(stateVersion);
+  useEffect(() => {
+    if (appliedVersion.current === stateVersion) return;
+    appliedVersion.current = stateVersion;
+    setValues(valuesFromSnapshot(initialState));
+    setRanges(rangesFromSnapshot(initialState));
+    setSortKey(initialState?.sortKey ?? null);
+    setSortDir(initialState?.sortDir ?? "asc");
+  }, [stateVersion, initialState]);
+
+  // Reporta o estado serializável a cada mudança — é o que o pai salva.
+  useEffect(() => {
+    if (!onStateChange) return;
+    const snapValues: Record<string, string[]> = {};
+    for (const [key, set] of Object.entries(values)) snapValues[key] = Array.from(set);
+    const snapRanges: Record<string, { min: string; max: string }> = {};
+    for (const [key, range] of Object.entries(ranges)) {
+      if (range.min || range.max) snapRanges[key] = range;
+    }
+    onStateChange({ values: snapValues, ranges: snapRanges, sortKey, sortDir });
+  }, [values, ranges, sortKey, sortDir, onStateChange]);
 
   const colByKey = useMemo(
     () => new Map(columns.map((c) => [c.key, c])),

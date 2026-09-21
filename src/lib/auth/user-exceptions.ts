@@ -19,6 +19,7 @@ import { BI_VALIDATION_EXTRA_EMAILS } from "@/lib/auth/bi-validation";
 import { CASE_CONTRACT_APPROVER_EMAILS } from "@/lib/case/contract-config";
 import { CTRL_FULL_VIEW_EMAILS } from "@/lib/ctrl/full-view";
 import {
+  APPROVAL_COVERAGE,
   APPROVAL_ROUTING,
   APPROVER_SECTOR_RESTRICTIONS,
   DIRECTOR_HIGHLIGHT_SECTORS,
@@ -84,6 +85,22 @@ export function describeUserExceptions(user: UserRef): UserException[] {
         `também na tela de Requisições, onde estes setores (e não os vínculos) definem quais ` +
         `requisições de terceiros ele enxerga.`,
       source: "src/lib/ctrl/routing.ts",
+    });
+  }
+
+  // ── Compras: cobertura temporária de aprovações (férias — routing.ts) ─────
+  for (const cov of APPROVAL_COVERAGE.filter(
+    (c) => normalizeEmail(c.coveringEmail) === email,
+  )) {
+    out.push({
+      key: `approval-coverage:${normalizeEmail(cov.coveredEmail)}`,
+      scope: "Compras",
+      title: "Cobertura temporária de aprovações (férias/ausência)",
+      detail:
+        `Enquanto ${cov.coveredEmail} está fora, recebe os lembretes diários da etapa de gerente ` +
+        `dos setores: ${cov.managerSectorNames.join(", ")}. Aprova pelo próprio perfil (não muda ` +
+        `alçada). Desde ${cov.since}; retorno: ${cov.until}. TEMPORÁRIO — remover no retorno.`,
+      source: "src/lib/ctrl/routing.ts (APPROVAL_COVERAGE)",
     });
   }
 
@@ -216,6 +233,11 @@ export function findOrphanExceptionRules(users: UserRef[]): OrphanExceptionRule[
       key: `bi:${email}`,
       email,
       label: 'Acesso à tela "Validação Relatório"',
+    })),
+    ...APPROVAL_COVERAGE.map((c) => ({
+      key: `coverage:${c.coveringEmail}`,
+      email: c.coveringEmail,
+      label: "Cobertura temporária de aprovações (férias/ausência)",
     })),
   ];
 

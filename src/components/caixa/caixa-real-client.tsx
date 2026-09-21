@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -17,13 +17,21 @@ import {
 import { CaixaHistoryChart } from "@/components/caixa/caixa-history-chart";
 import { CompanyPicker, type PickerCompany } from "@/components/caixa/company-picker";
 import { SyncAlertBanner } from "@/components/caixa/sync-alert-banner";
-import { FilterTable, type FilterColumn } from "@/components/data-table/filter-table";
+import { applySnapshot, FilterTable, type FilterColumn } from "@/components/data-table/filter-table";
+import type { FilterTableSnapshot } from "@/components/data-table/filter-logic";
 import { BANCOS_BR } from "@/lib/ctrl/bancos";
 import type { CaixaSyncAlert } from "@/lib/caixa/health";
+import {
+  defaultCaixaRealPrefs,
+  prefsKey,
+  type CaixaRealPrefs,
+  type ChartDays,
+} from "@/lib/caixa/prefs";
 import { CAIXA_CRON_SLOTS_LABEL } from "@/lib/caixa/schedule";
 import {
   CAIXA_TIPOS_LIQUIDOS,
   OMIE_BANCO_SEM_BANCO,
+  statusLabel as statusOf,
   tipoLabel,
   type CaixaAccountRow,
 } from "@/lib/caixa/types";
@@ -37,12 +45,9 @@ function ehLiquida(row: CaixaAccountRow): boolean {
   return LIQUIDOS_LABEL.has(tipoLabel(row.tipo));
 }
 
-const STATUS_ATIVA = "Ativa";
-const STATUS_INATIVA = "Inativa";
-
 /** Espelha `inativo` da Omie: conta encerrada some do cadastro de lá. */
 function statusLabel(row: CaixaAccountRow): string {
-  return row.ativo ? STATUS_ATIVA : STATUS_INATIVA;
+  return statusOf(row.ativo);
 }
 
 /** O recorte com que a tela abre: dinheiro E conta ativa. */
@@ -124,41 +129,37 @@ interface Props {
   lastUpdate: string | null;
   /** Falha/atraso da atualização, se houver (ver @/lib/caixa/health). */
   syncAlert: CaixaSyncAlert | null;
+  /** Filtros salvos deste usuário; null = nunca salvou → padrão. */
+  savedPrefs: CaixaRealPrefs | null;
 }
 
 type Progress = { label: string; done: number; total: number } | null;
 
-export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert }: Props) {
+export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert, savedPrefs }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Começa no MESMO recorte que a tabela vai aplicar. A FilterTable só reporta
-  // as linhas visíveis num efeito, isto é, depois da primeira pintura: iniciar
-  // com `rows` faria o card mostrar o total de tudo (R$ 58,4 mi, com aplicações
-  // e cartões) por um frame antes de corrigir para o caixa (R$ 3,2 mi). Piscar
-  // um número de dinheiro errado é pior que demorar a mostrá-lo.
-  const [visible, setVisible] = useState<CaixaAccountRow[]>(() => rows.filter(ehPadrao));
   const [progress, setProgress] = useState<Progress>(null);
-  /** Escopo das ações. `null` = todas (ver CompanyPicker). */
-  const [scope, setScope] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const ontem = useMemo(() => shiftDay(today, -1), [today]);
 
-  // A tela abre mostrando só DINHEIRO (conta corrente, caixa físico, conta de
-  // pagamento). Aplicação, cartão de crédito e garantia continuam na tabela,
-  // a um clique no chip "Tipo" — o total nunca deixa de ser a soma do que está
-  // na tela. Sem isto, "Caixa Real" somaria fatura de cartão (que é dívida) ao
-  // dinheiro em conta e responderia outra pergunta.
-  const initialValues = useMemo(
-    () => ({
-      tipo: CAIXA_TIPOS_LIQUIDOS.map((t) => tipoLabel(t)),
-      // Contas encerradas na Omie continuam na tabela (o histórico de saldo
-      // delas é fato), mas fora do recorte de abertura: o saldo delas não é
-      // mais atualizado, então somá-las daria um caixa que não existe.
-      status: [STATUS_ATIVA],
-    }),
-    [],
+  // ── Preferências: o que a pessoa deixou da última vez ────────────────────
+  // Sem nada salvo, o padrão: contas ATIVAS e só DINHEIRO (conta corrente,
+  // caixa físico, conta de pagamento). Aplicação, cartão e garantia continuam
+  // na tabela, a um clique no chip "Tipo" — o total nunca deixa de ser a soma
+  // do que está na tela. Sem isto, "Caixa Real" somaria fatura de cartão (que
+  // é dívida) ao dinheiro em conta e responderia outra pergunta.
+  const initialPrefs = useMemo(() => savedPrefs ?? defaultCaixaRealPrefs(), [savedPrefs]);
+  // O estado que a tabela recebe. Muda só em "Voltar ao padrão" (com o
+  // stateVersion abaixo); o dia a dia do filtro fica dentro da tabela.
+  const [tableInitial, setTableInitial] = useState<FilterTableSnapshot>(initialPrefs.table);
+  const [tableVersion, setTableVersion] = useState(0);
+  const [tableState, setTableState] = useState<FilterTableSnapshot>(initialPrefs.table);
+  const [chartDays, setChartDays] = useState<ChartDays>(initialPrefs.chartDays);
+  /** Escopo das ações. `null` = todas (ver CompanyPicker). */
+  const [scope, setScope] = useState<Set<string> | null>(
+    initialPrefs.scope ? new Set(initialPrefs.scope) : null,
   );
 
 
@@ -302,6 +303,54 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert 
   );
 
   const rowKey = useCallback((r: CaixaAccountRow) => r.id, []);
+
+  // Começa no MESMO recorte que a tabela vai aplicar. A FilterTable só reporta
+  // as linhas visíveis num efeito, isto é, depois da primeira pintura: iniciar
+  // com `rows` faria o card mostrar o total de tudo (R$ 58,4 mi, com aplicações
+  // e cartões) por um frame antes de corrigir para o caixa (R$ 3,2 mi). Piscar
+  // um número de dinheiro errado é pior que demorar a mostrá-lo.
+  const [visible, setVisible] = useState<CaixaAccountRow[]>(() =>
+    applySnapshot(rows, columns, initialPrefs.table),
+  );
+
+  // ── Salvar automaticamente, sem botão ────────────────────────────────────
+  // Debounce de 800ms depois da última mudança; só grava o que mudou em
+  // relação ao último salvo (chave estável, então reordenar uma lista de
+  // valores não conta como mudança).
+  const prefs = useMemo<CaixaRealPrefs>(
+    () => ({ v: 1, table: tableState, chartDays, scope: scope ? Array.from(scope) : null }),
+    [tableState, chartDays, scope],
+  );
+  const lastSavedKey = useRef(prefsKey(initialPrefs));
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  useEffect(() => {
+    const key = prefsKey(prefs);
+    if (key === lastSavedKey.current) return;
+    const timer = setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        const res = await fetch("/api/caixa/prefs", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(prefs),
+        });
+        if (!res.ok) throw new Error();
+        lastSavedKey.current = key;
+        setSaveState("saved");
+      } catch {
+        setSaveState("error");
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [prefs]);
+
+  function restoreDefaults() {
+    const d = defaultCaixaRealPrefs();
+    setTableInitial(d.table);
+    setTableVersion((v) => v + 1);
+    setChartDays(d.chartDays);
+    setScope(null);
+  }
 
   const totalVisivel = visible.reduce((s, r) => s + (r.saldo ?? 0), 0);
   // "Saldo em caixa" quando o recorte é exatamente o padrão (todo dinheiro e
@@ -656,7 +705,31 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert 
       )}
 
       {/* Evolução: obedece ao mesmo recorte da tabela (recebe os ids visíveis). */}
-      <CaixaHistoryChart accountIds={visibleIds} totalAccounts={rows.length} />
+      <CaixaHistoryChart
+        accountIds={visibleIds}
+        totalAccounts={rows.length}
+        days={chartDays}
+        onDaysChange={setChartDays}
+      />
+
+      {/* Estado dos filtros salvos — quem abre e vê a tela já filtrada precisa
+          saber por quê, e ter o caminho de volta ao padrão à vista. */}
+      <div className="-mb-3 flex items-center justify-end gap-2 text-xs text-ink-muted">
+        <span>
+          {saveState === "saving"
+            ? "Salvando seus filtros…"
+            : saveState === "error"
+            ? "Não foi possível salvar os filtros — valem só nesta visita."
+            : "Seus filtros e ordenação ficam salvos para você."}
+        </span>
+        <button
+          type="button"
+          onClick={restoreDefaults}
+          className="underline-offset-2 hover:text-ink-primary hover:underline"
+        >
+          Voltar ao padrão
+        </button>
+      </div>
 
       {/* Tabela */}
       <FilterTable
@@ -667,7 +740,9 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert 
         selected={selected}
         onSelectedChange={setSelected}
         onVisibleChange={setVisible}
-        initialValues={initialValues}
+        initialState={tableInitial}
+        stateVersion={tableVersion}
+        onStateChange={setTableState}
         emptyMessage={
           rows.length === 0
             ? "Nenhuma conta cadastrada. Use “Sincronizar contas” para buscar na Omie."
