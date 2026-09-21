@@ -111,6 +111,65 @@ export function isManagerFinalSector(sectorId: string | null | undefined): boole
   return MANAGER_FINAL_SECTORS.some((rule) => rule.sectorId === sectorId);
 }
 
+// ─── Setores ISENTOS de controle de orçamento ─────────────────────────────────
+//
+// Setores cujas despesas são RESSARCIDAS e NÃO compõem o resultado da empresa —
+// por isso nunca foram orçadas. Sem esta regra, toda requisição deles cairia como
+// "fora do orçamento" (nivel_3): prefixo NÃO ORÇADO, justificativa obrigatória e
+// roteamento ao diretor. Aqui o confronto com o orçamento é DISPENSADO: a
+// requisição é tratada como nivel_2 e segue só com a aprovação do gerente do
+// setor (manual, sem auto-aprovação — is_budgeted continua false).
+//
+// Diferente de MANAGER_FINAL_SECTORS (que só dispensa o diretor, mantendo o
+// nivel_3, o prefixo e a justificativa): aqui a despesa não é "fora do orçamento",
+// é FORA DO CONTROLE de orçamento, por natureza.
+//
+// Identificado por ID (estável a renomeação), com o nome em comentário. Qualquer
+// linha de ctrl_budget que porventura exista para esses setores passa a ser
+// IGNORADA no fluxo de aprovação (decisão consciente — o setor não tem controle).
+export const BUDGET_EXEMPT_SECTORS: ReadonlyArray<{
+  sectorId: string;
+  /** Só para leitura humana — a comparação é pelo ID. */
+  sectorName: string;
+  since: string;
+  reason: string;
+}> = [
+  {
+    sectorId: "521074f1-cb92-4ef9-a40a-a0e45c1711c6",
+    sectorName: "CSC",
+    since: "2026-09-21",
+    reason: "Despesas ressarcidas — não compõem o resultado da empresa; nunca orçadas.",
+  },
+  {
+    sectorId: "eb14752a-f384-4978-ac0c-d6c3c6fb430b",
+    sectorName: "CSC Consultoria",
+    since: "2026-09-21",
+    reason: "Despesas ressarcidas — não compõem o resultado da empresa; nunca orçadas.",
+  },
+  {
+    sectorId: "a0e587ff-1ecc-42f6-9f7e-4bdec7312093",
+    sectorName: "CSC Gestão",
+    since: "2026-09-21",
+    reason: "Despesas ressarcidas — não compõem o resultado da empresa; nunca orçadas.",
+  },
+  {
+    sectorId: "5769358c-b068-4bb4-8a7b-0e749ed13ec1",
+    sectorName: "CSC Pós-Vendas",
+    since: "2026-09-21",
+    reason: "Despesas ressarcidas — não compõem o resultado da empresa; nunca orçadas.",
+  },
+];
+
+/**
+ * True quando o setor é ISENTO de controle de orçamento (despesas ressarcidas).
+ * Requisições dele não são confrontadas com orçamento e seguem só com a aprovação
+ * do gerente. Vale para requisição de 1 setor e para a linha do setor num rateio.
+ */
+export function isBudgetExemptSector(sectorId: string | null | undefined): boolean {
+  if (!sectorId) return false;
+  return BUDGET_EXEMPT_SECTORS.some((rule) => rule.sectorId === sectorId);
+}
+
 /**
  * Uma requisição é roteada direto ao diretor (pulando o gerente) por REGRA —
  * setor Diretoria ou solicitante especial —, independente do orçamento. Isso é

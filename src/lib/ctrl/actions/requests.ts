@@ -8,6 +8,7 @@ import { requireCtrlRole, requireCtrlRoleOrFullView } from "@/lib/ctrl/auth";
 import {
   APPROVAL_ROUTING,
   approverSectorRestrictionFor,
+  isBudgetExemptSector,
   isManagerFinalSector,
   normalizeSectorName,
 } from "@/lib/ctrl/routing";
@@ -57,6 +58,13 @@ export interface BudgetVerification {
   budgetedAnnual: number;
   totalApproved: number;
   statusLabel: string;
+  /**
+   * Setor ISENTO de controle de orçamento (despesas ressarcidas — ver
+   * BUDGET_EXEMPT_SECTORS em routing.ts). Não é "fora do orçamento": segue nivel_2
+   * (só gerente), sem prefixo NÃO ORÇADO e sem justificativa. A tela usa esta flag
+   * para não exibir os avisos de orçamento (que não se aplicam).
+   */
+  budgetExempt?: boolean;
 }
 
 export interface CreateRequestInput {
@@ -130,6 +138,28 @@ async function performBudgetVerification(
     style: "currency",
     currency: "BRL",
   });
+
+  // Setor ISENTO de controle de orçamento (despesas ressarcidas — ver
+  // BUDGET_EXEMPT_SECTORS em routing.ts). Não confronta orçamento: nivel_2, só o
+  // gerente aprova (manual — isBudgeted=false evita a auto-aprovação gerencial),
+  // sem prefixo NÃO ORÇADO e sem justificativa obrigatória. Qualquer linha de
+  // ctrl_budget desse setor é ignorada de propósito.
+  if (isBudgetExemptSector(sectorId)) {
+    return {
+      approvalTier: "nivel_2",
+      autoApproved: false,
+      isBudgeted: false,
+      justificationRequired: false,
+      budgetExempt: true,
+      currentBalance: 0,
+      futureBalance: 0,
+      budgetedUpToMonth: 0,
+      budgetedAnnual: 0,
+      totalApproved: 0,
+      statusLabel:
+        "Setor sem controle de orçamento (despesas ressarcidas) — requer aprovação do gerente do setor",
+    };
+  }
 
   // Budget accumulated Jan → referenceMonth
   const { data: budgetUpTo } = await supabase

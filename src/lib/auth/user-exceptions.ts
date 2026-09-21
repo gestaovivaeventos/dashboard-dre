@@ -22,6 +22,7 @@ import {
   APPROVAL_COVERAGE,
   APPROVAL_ROUTING,
   APPROVER_SECTOR_RESTRICTIONS,
+  BUDGET_EXEMPT_SECTORS,
   DIRECTOR_HIGHLIGHT_SECTORS,
   MANAGER_FINAL_SECTORS,
 } from "@/lib/ctrl/routing";
@@ -306,6 +307,19 @@ export const NON_USER_RULES: ReadonlyArray<{ title: string; detail: string; sour
         "não existe — e por isso o gerente que também solicita no setor aprova a própria requisição. " +
         `Motivo: ${rule.reason} Vigente desde ${br(rule.since)}; REVISAR EM ${br(rule.reviewBy)}.`,
       source: "src/lib/ctrl/routing.ts (MANAGER_FINAL_SECTORS)",
+    };
+  }),
+  ...BUDGET_EXEMPT_SECTORS.map((rule) => {
+    const br = (iso: string) => iso.split("-").reverse().join("/");
+    return {
+      title: `Setor ${rule.sectorName} é isento de controle de orçamento`,
+      detail:
+        `Requisições do setor ${rule.sectorName} NÃO são confrontadas com orçamento: seguem como ` +
+        '"dentro do orçamento" (nivel 2) e são concluídas só com a aprovação do gerente do setor — ' +
+        "sem etapa do diretor, sem prefixo NÃO ORÇADO e sem justificativa obrigatória. A aprovação do " +
+        "gerente é manual (não há auto-aprovação). Qualquer orçamento cadastrado para o setor é ignorado. " +
+        `Motivo: ${rule.reason} Vigente desde ${br(rule.since)}.`,
+      source: "src/lib/ctrl/routing.ts (BUDGET_EXEMPT_SECTORS)",
     };
   }),
 ];

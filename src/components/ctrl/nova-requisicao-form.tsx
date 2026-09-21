@@ -1826,6 +1826,30 @@ function BudgetResultCard({
   verification: BudgetVerification;
   heading?: string;
 }) {
+  // Setor isento de controle de orçamento (despesas ressarcidas): não faz sentido
+  // mostrar orçado/saldo nem os avisos de "fora do orçamento". Cartão informativo.
+  if (verification.budgetExempt) {
+    return (
+      <div className="rounded-lg p-4 ring-1 space-y-2 bg-sky-50 ring-sky-200 dark:bg-sky-950/20 dark:ring-sky-800">
+        {heading && (
+          <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            {heading}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-5 w-5 text-sky-600 dark:text-sky-400 shrink-0" />
+          <span className="text-sm font-bold text-sky-700 dark:text-sky-300">
+            {verification.statusLabel}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Este setor não é confrontado com orçamento (despesas ressarcidas). A requisição
+          segue só com a aprovação do gerente do setor.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className={`rounded-lg p-4 ring-1 space-y-3 ${
       verification.autoApproved
