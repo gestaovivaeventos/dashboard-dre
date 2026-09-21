@@ -14,7 +14,7 @@
 //     estado indeterminado — nunca linhas escondidas. Somar uma linha que não
 //     está na tela seria um erro silencioso no card de total.
 //
-// Genérico de propósito: a primeira tela é o Caixa Real, mas nada aqui conhece
+// Genérico de propósito: a primeira tela é o Caixa Geral, mas nada aqui conhece
 // saldo ou empresa.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";

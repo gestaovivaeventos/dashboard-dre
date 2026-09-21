@@ -42,7 +42,7 @@ export const CAIXA_MODULE_ROLE = "user";
 /** Rota raiz do módulo. */
 export const CAIXA_PATH = "/caixa";
 
-/** Primeira (e por ora única) tela: Caixa Real. */
+/** Primeira (e por ora única) tela: Caixa Geral (rota /caixa/real — o nome de tela mudou, a URL não). */
 export const CAIXA_REAL_PATH = "/caixa/real";
 
 /** Chave do item no menu lateral (grupo próprio "CAIXA"). */

@@ -218,7 +218,7 @@ Controle dos créditos de sócios/credores que emprestaram ao grupo na construç
 
 ### Módulo Caixa (`/caixa`)
 
-Posição de caixa do grupo inteiro: saldo de todas as contas correntes de todas as empresas, lido da Omie. Primeira (e por ora única) tela: **Caixa Real** (`/caixa/real`).
+Posição de caixa do grupo inteiro: saldo de todas as contas correntes de todas as empresas, lido da Omie. Primeira (e por ora única) tela: **Caixa Geral** (`/caixa/real` — chamava-se "Caixa Geral" até 21/09/2026; a URL, a chave de preferência `caixa_real` e os identificadores no código ficaram).
 
 - **Acesso**: linha em `user_module_roles` (`module='caixa'`, `role='user'`) **OU** admin — modelo do Case/Contratos, não o do VB (lá admin não passa por cima). Marcável em "Módulos visíveis" na tela de Usuários, em qualquer perfil, inclusive `franqueado`/`csc`. Fonte de verdade: `src/lib/auth/caixa.ts`. O perfil `validador_contrato` segue ilha e não alcança.
 - **Quem tem o módulo vê TODAS as empresas.** Este módulo **não** herda a regra de `restricted-companies.ts` (Dataforte) — decisão explícita do dono do projeto em 17/09/2026, não esquecimento. A pergunta que a tela responde ("quanto o grupo tem em caixa agora") só faz sentido com o grupo inteiro somado; esconder uma empresa devolveria um total errado sem avisar. Ao aplicar `restrictedCompanyIds` numa tela nova, **não** inclua o Caixa achando que ficou de fora por descuido.
@@ -246,7 +246,7 @@ Posição de caixa do grupo inteiro: saldo de todas as contas correntes de todas
 - **Access**: `user_module_roles`, `user_company_access`, `user_segment_access`, `user_sectors`.
 - **VB** (prefixed `vb_*`): creditors, entries, import_batches.
 - **Caixa** (prefixed `caixa_*`): `caixa_accounts` (espelho do cadastro Omie + saldo corrente), `caixa_balance_snapshots` (cada captura), `caixa_sync_runs` (execuções). Predicado de policy: `caixa_has_access()`. Função `caixa_history(uuid[], int)` (série diária com carry-forward, só service_role).
-- **Preferências**: `user_preferences` (user_id × key → jsonb; RLS pela própria linha). Primeiro uso: filtros da tela Caixa Real.
+- **Preferências**: `user_preferences` (user_id × key → jsonb; RLS pela própria linha). Primeiro uso: filtros da tela Caixa Geral.
 - **CTRL** (prefixed `ctrl_*`): requests, suppliers, sectors, events, budgets, omie-mapping, notifications, contapagar launches, `ctrl_approval_email_log` (rastro + trava de duplicidade do lembrete diário de aprovações). Note: `contas_a_pagar` absorbs the legacy `csc` concept in-app — RLS policies that list `csc` must also include `contas_a_pagar`.
 
 SQL functions: `get_dre_consolidated()` (account aggregation), `get_dre_drilldown()` (transaction detail), plus aggregate-refresh functions.

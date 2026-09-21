@@ -1,4 +1,4 @@
-// Visibilidade do item "Caixa Real" no menu: trava a REGRA (quem vê, quem não
+// Visibilidade do item "Caixa Geral" no menu: trava a REGRA (quem vê, quem não
 // vê), que é o que se muda por engano ao mexer nas whitelists de perfil.
 //
 // O que ele NÃO cobre, e vale saber: o bug que segurou o lançamento do módulo
@@ -25,11 +25,11 @@ function keys(over: Partial<Parameters<typeof visibleNavKeys>[0]>): string[] {
   return visibleNavKeys({ ...BASE, ...over });
 }
 
-test("com o módulo concedido, Caixa Real aparece", () => {
+test("com o módulo concedido, Caixa Geral aparece", () => {
   assert.ok(keys({ canCaixa: true }).includes(CAIXA_NAV_KEY_REAL));
 });
 
-test("sem o módulo, Caixa Real não aparece nem para admin", () => {
+test("sem o módulo, Caixa Geral não aparece nem para admin", () => {
   // O acesso de admin é resolvido na sessão (canCaixa = concessão || admin);
   // aqui o menu só obedece ao booleano que recebe.
   assert.ok(!keys({ canCaixa: false }).includes(CAIXA_NAV_KEY_REAL));

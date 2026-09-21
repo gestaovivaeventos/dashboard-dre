@@ -340,7 +340,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     id: "caixa",
     label: "CAIXA",
     items: [
-      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Real", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
+      { key: CAIXA_NAV_KEY_REAL, title: "Caixa Geral", icon: Banknote, scope: "global", href: CAIXA_REAL_PATH, caixaAccess: true },
     ],
   },
   {

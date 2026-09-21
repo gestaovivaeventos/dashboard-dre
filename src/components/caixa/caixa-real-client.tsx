@@ -148,7 +148,7 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert,
   // Sem nada salvo, o padrão: contas ATIVAS e só DINHEIRO (conta corrente,
   // caixa físico, conta de pagamento). Aplicação, cartão e garantia continuam
   // na tabela, a um clique no chip "Tipo" — o total nunca deixa de ser a soma
-  // do que está na tela. Sem isto, "Caixa Real" somaria fatura de cartão (que
+  // do que está na tela. Sem isto, "Caixa Geral" somaria fatura de cartão (que
   // é dívida) ao dinheiro em conta e responderia outra pergunta.
   const initialPrefs = useMemo(() => savedPrefs ?? defaultCaixaRealPrefs(), [savedPrefs]);
   // O estado que a tabela recebe. Muda só em "Voltar ao padrão" (com o
@@ -517,12 +517,12 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert,
       }
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Caixa Real");
+      XLSX.utils.book_append_sheet(wb, ws, "Caixa Geral");
 
       // Aba de contexto: um XLSX solto na mão de outra pessoa não diz por si só
       // que está filtrado. Aqui fica o recorte e a hora da extração.
       const meta: string[][] = [
-        ["Caixa Real — Grupo Viva"],
+        ["Caixa Geral — Grupo Viva"],
         ["Gerado em", new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date())],
         ["Contas no arquivo", String(visible.length)],
         ["Contas cadastradas", String(rows.length)],
@@ -540,7 +540,7 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert,
       if (wsMeta["A1"]) wsMeta["A1"].s = { font: { bold: true, sz: 14 } };
       XLSX.utils.book_append_sheet(wb, wsMeta, "Sobre este arquivo");
 
-      XLSX.writeFile(wb, `caixa-real-${today}.xlsx`);
+      XLSX.writeFile(wb, `caixa-geral-${today}.xlsx`);
     } finally {
       setExporting(false);
     }
@@ -554,7 +554,7 @@ export function CaixaRealClient({ rows, companies, today, lastUpdate, syncAlert,
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-semibold tracking-tight text-ink-primary">
-            Caixa Real
+            Caixa Geral
           </h1>
           <p className="text-sm text-ink-muted">
             {lastUpdate ? (

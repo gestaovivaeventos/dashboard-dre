@@ -1,4 +1,4 @@
-// Preferências da tela Caixa Real, por usuário: os filtros/ordenação da
+// Preferências da tela Caixa Geral, por usuário: os filtros/ordenação da
 // tabela, a janela do gráfico e o escopo dos botões. Guardadas em
 // user_preferences (chave CAIXA_REAL_PREFS_KEY) e restauradas ao abrir —
 // sobrevivem a logout, a dias sem entrar e a outra máquina.

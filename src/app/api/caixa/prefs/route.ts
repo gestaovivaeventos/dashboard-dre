@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 
 /**
- * PUT /api/caixa/prefs — salva os filtros da tela Caixa Real do usuário logado.
+ * PUT /api/caixa/prefs — salva os filtros da tela Caixa Geral do usuário logado.
  *
  * O user_id vem da SESSÃO, nunca do corpo: a rota não é um jeito de escrever
  * a preferência de outra pessoa. O corpo passa pelo mesmo parser que a

@@ -200,7 +200,7 @@ export async function getCaixaSyncAlert(db: CaixaDb): Promise<CaixaSyncAlert | n
 // ── Preferências da tela ───────────────────────────────────────────────────
 
 /**
- * Filtros salvos do usuário para a tela Caixa Real, ou null (nunca salvou /
+ * Filtros salvos do usuário para a tela Caixa Geral, ou null (nunca salvou /
  * JSON inválido → a tela abre no padrão). Falha de leitura também vira null:
  * preferência não pode derrubar a tela.
  */

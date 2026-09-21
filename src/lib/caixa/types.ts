@@ -18,7 +18,7 @@ export const CAIXA_TIPOS: Record<string, string> = {
 };
 
 /**
- * Tipos que são DINHEIRO DISPONÍVEL — o que "Caixa Real" quer dizer.
+ * Tipos que são DINHEIRO DISPONÍVEL — o que "Caixa Geral" quer dizer.
  *
  * Fora daqui, de propósito:
  *  • CA (aplicação) — é dinheiro do grupo, mas investido, não em conta;
