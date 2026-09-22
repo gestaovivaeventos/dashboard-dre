@@ -218,7 +218,7 @@ async function main() {
     porSource.set(k, acc);
   }
   if (porSource.size === 0) console.log("  budget_uploads_raw: vazio");
-  for (const [k, v] of porSource) {
+  for (const [k, v] of Array.from(porSource)) {
     console.log(`  raw source='${k}': ${v.linhas} linha(s), ${BRL(v.total)}`);
   }
   if (porSource.has("orcamento") && porSource.has("planilha")) {
