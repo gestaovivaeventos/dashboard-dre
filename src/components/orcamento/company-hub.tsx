@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  ClipboardCheck,
   Clock,
   Coins,
   Handshake,
@@ -19,6 +20,7 @@ import {
   workspaceTabHref,
   workspaceConfigHref,
   workspacePreviaHref,
+  workspaceValidacaoHref,
 } from "@/lib/orcamento/workspace-tabs";
 import { statusGeral, type OrcamentoStatusRaw } from "@/lib/orcamento/status";
 import { StatusBadge } from "@/components/orcamento/status-badge";
@@ -174,6 +176,19 @@ export function CompanyHub({
             />
           );
         })}
+
+        {/* Validação da diretoria. Só aparece depois de o orçamento sair para
+            validação: antes disso não há o que validar, e uma caixa que abre
+            uma tela vazia é ruído. Continua visível nas fases seguintes porque
+            é por ela que se confere o que foi decidido. */}
+        {ciclo && ciclo.estado !== "em_construcao" && (
+          <Tile
+            icon={ClipboardCheck}
+            title="Validação da diretoria"
+            desc="O que a diretoria cancelou, alterou ou pediu para ajustar."
+            href={workspaceValidacaoHref(companyId, year)}
+          />
+        )}
 
         {/* Configuração da empresa — sub-hub com as seções de config por
             empresa. Admin-only (ver isAdmin acima). */}

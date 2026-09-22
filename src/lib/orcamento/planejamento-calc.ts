@@ -113,6 +113,17 @@ export interface PlanejamentoItemProposto {
   origem: "mantido" | "novo";
   fornecedor?: string | null;
   incluir?: boolean;
+  /**
+   * Cancelado pela DIRETORIA na validação. O item continua na proposta (visível,
+   * riscado, com o motivo) mas não entra em número nenhum — ver
+   * `itemPropostaAtivo` em @/lib/orcamento/validacao, aplicado na Prévia.
+   *
+   * Vive aqui, e não numa coluna, porque o item do planejamento é um objeto
+   * dentro do jsonb `orcamento_planejamento_socios.proposta`.
+   */
+  cancelado?: boolean;
+  cancelado_motivo?: string | null;
+  cancelado_por?: string | null;
 }
 
 export interface PlanejamentoProposta {

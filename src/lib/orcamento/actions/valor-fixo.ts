@@ -5,7 +5,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { diffCampos } from "@/lib/orcamento/trilha";
+import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
+import {
+  camposPermitidosLabel,
+  camposRecusadosParaDiretoria,
+  podeEscreverNoItem,
+} from "@/lib/orcamento/validacao";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -304,9 +309,40 @@ export async function saveValorFixoContrato(
         return { error: SEM_ACESSO_SETOR };
       }
     }
+    // Trava da diretoria no contrato.
+    const trava = podeEscreverNoItem(
+      auth.user.papel,
+      (atual ?? null) as { diretoria_travado?: boolean | null } | null,
+    );
+    if (!trava.pode) return { error: trava.motivo };
+    // GATE POR CAMPO: valor fixo é do administrador (são contratos). A diretoria
+    // só troca índice e mês de reajuste — o resto vira solicitação.
+    if (auth.user.papel === "validador") {
+      const mexidos = diffCampos(
+        (atual ?? null) as Record<string, unknown> | null,
+        patch as Record<string, unknown>,
+      );
+      const recusados = camposRecusadosParaDiretoria(
+        "valor_fixo",
+        Object.keys(mexidos.depois),
+      );
+      if (recusados.length > 0) {
+        return {
+          error: `No valor fixo a diretoria pode alterar ${camposPermitidosLabel("valor_fixo")}. Para o restante, use "Solicitar ajuste".`,
+        };
+      }
+    }
+    const patchFinal = travaOItem(auth.user.papel, "alterou", undefined)
+      ? {
+          ...patch,
+          diretoria_travado: true,
+          diretoria_alterado_em: new Date().toISOString(),
+          diretoria_alterado_por: auth.user.userId,
+        }
+      : patch;
     const { error } = await supabase
       .from("orcamento_valor_fixo_categorias")
-      .update({ ...patch, category_name: categoryName })
+      .update({ ...patchFinal, category_name: categoryName })
       .eq("id", contrato.id)
       .eq("company_id", companyId);
     if (error) {

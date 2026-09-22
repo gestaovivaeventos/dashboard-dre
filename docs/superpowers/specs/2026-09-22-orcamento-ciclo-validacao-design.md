@@ -9,19 +9,35 @@ Data: 2026-09-22. Esta spec é o contrato da implementação.
   207 testes e build verdes). Migration `20260923120000_orcamento_ciclo_trilha_versao.sql`
   escrita; **aplicar antes de o ciclo funcionar** (o código degrada sozinho até lá).
   Uma parte foi deliberadamente adiada — ver "Desvio da fase B" abaixo.
-- C, D, E, F: não começadas.
+- **C (validação) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e build
+  verdes), com o filtro de item cancelado ligado junto, como combinado.
+- D, E, F: não começadas.
 
-**Desvio da fase B (consciente)**: o filtro `itemAtivo()` existe e está testado,
-mas **não foi ligado aos motores**. Ligá-lo agora exigiria selecionar
-`cancelado_em` nas consultas das telas, e antes de a migration rodar isso
-derruba as telas existentes (42703) em vez de degradar. Como nada pode ser
-cancelado até a fase C (é o diretor quem cancela), o filtro não protege nada
-hoje. Ele entra na fase C, no MESMO commit da ação de cancelar — assim a marca
-e o filtro nascem juntos e são testados juntos. **Não implemente "cancelar" sem
-ligar o filtro nos seis motores** (`pessoal-calc`, `serieItem`/`categoriaSerie`,
-`projetarValorFixoSerie`, `previa-orcamento`, `previa-budget`, contagens de
-status): sem ele, o item cancelado volta a somar e o orçamento fecha maior sem
-erro nenhum.
+### O que a fase C descobriu, e que muda a spec
+
+**O item do planejamento NÃO é linha de tabela.** A Prévia lê o planejamento do
+jsonb `orcamento_planejamento_socios.proposta`, não de
+`orcamento_planejamento_socios_itens` (essa tabela guarda a BASE da entrevista).
+Consequências:
+
+1. **Cancelar um item do planejamento é marcar `cancelado: true` dentro do
+   jsonb** (`marcarItemProposta`, pura e testada), identificando o item por
+   índice + descrição — a descrição é conferida para o cancelamento não cair no
+   item errado se a proposta mudou desde que a tela carregou.
+2. O filtro que vale é `itemPropostaAtivo`, aplicado na Prévia. O `itemAtivo()`
+   (coluna `cancelado_em`) ficou para o PESSOAL, onde o item é linha de tabela.
+3. **`orcamento_planejamento_socios_itens.cancelado_em`, criada na migration da
+   fase B, não é usada** — foi criada na premissa errada. É nullable e inofensiva;
+   fica como espaço para um cancelamento de item da base, se algum dia fizer
+   sentido. Não a use esperando efeito no orçamento.
+4. **`sanitizeItensProposta` precisou preservar a marca**: ele reconstrói o item
+   campo a campo, então tudo o que não for copiado é descartado em silêncio — uma
+   edição da proposta "descancelaria" o que a diretoria cortou, sem erro. A
+   preservação está lá com comentário; **ao acrescentar campo ao item da
+   proposta, copie-o no sanitizador**.
+5. **A trava do planejamento mora na categoria × setor** (`diretoria_travado` na
+   linha de `orcamento_planejamento_socios`), não no item: o item não tem linha
+   própria, e é a proposta inteira que o construtor reescreve.
 
 ## 1. Contexto
 

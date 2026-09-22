@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { diffCampos } from "@/lib/orcamento/trilha";
+import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
+import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
 import type { TrilhaFase } from "@/lib/orcamento/ciclo";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
@@ -62,6 +63,15 @@ export interface Colaborador {
   mov2: Movimentacao | null;
   justificativa: string | null;
   beneficios: Beneficios;
+  /**
+   * Cancelado pela diretoria. A linha CONTINUA na tela, riscada, com o motivo —
+   * cancelar é marca, não exclusão: apagar faria o gestor perder o que escreveu
+   * e deixaria a trilha como único lugar onde a contratação existiu.
+   */
+  canceladoEm: string | null;
+  canceladoMotivo: string | null;
+  /** Alterado pela diretoria e travado para o construtor (ver validacao.ts). */
+  diretoriaTravado: boolean;
 }
 
 export interface ColaboradorInput {
@@ -366,7 +376,7 @@ export async function setRegimeApuracao(
 // A cauda são as colunas de benefício: ao acrescentar um item em BENEFICIOS,
 // acrescente a coluna aqui também, senão o valor é gravado mas nunca lido.
 const COLAB_COLS =
-  "id, setor_id, empresa_encargos_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida";
+  "id, setor_id, empresa_encargos_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida, cancelado_em, cancelado_motivo, diretoria_travado";
 
 /** Lê os valores de benefício de uma linha crua. */
 function readBeneficios(r: Record<string, unknown>): Beneficios {
@@ -423,6 +433,9 @@ export async function getColaboradores(
     mov2: readMov(r.mov2_tipo, r.mov2_data, r.mov2_cargo, r.mov2_salario),
     justificativa: (r.justificativa as string) ?? null,
     beneficios: readBeneficios(r as Record<string, unknown>),
+    canceladoEm: (r.cancelado_em as string) ?? null,
+    canceladoMotivo: (r.cancelado_motivo as string) ?? null,
+    diretoriaTravado: Boolean(r.diretoria_travado),
   }));
   return { items };
 }
@@ -492,6 +505,10 @@ async function autorizarColaborador(
   if (!podeEscreverNoSetor(auth.setores, (linha.setor_id as string | null) ?? null)) {
     return { ok: false, error: SEM_ACESSO_SETOR };
   }
+  // TRAVA DA DIRETORIA: item que ela alterou sai das mãos do construtor até ser
+  // liberado. O caminho dele é "Pedir liberação", não desfazer.
+  const trava = podeEscreverNoItem(auth.user.papel, linha as { diretoria_travado?: boolean | null });
+  if (!trava.pode) return { ok: false, error: trava.motivo ?? SEM_ACESSO_SETOR };
   return {
     ok: true,
     userId: auth.user.userId,
@@ -566,9 +583,19 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
     return { error: SEM_ACESSO_SETOR };
   }
   const row = toRow(input, auth.userId);
+  // Alteração da diretoria pelo caminho normal também trava o item (a tela da
+  // validação manda `permiteAlteracao`; sem ele, trava).
+  const patch = travaOItem(auth.papel, "alterou", undefined)
+    ? {
+        ...row,
+        diretoria_travado: true,
+        diretoria_alterado_em: new Date().toISOString(),
+        diretoria_alterado_por: auth.userId,
+      }
+    : row;
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .update(row)
+    .update(patch)
     .eq("id", id);
   if (error) return { error: error.message };
   // Só registra se algo realmente mudou: salvar sem editar não é alteração.
@@ -730,6 +757,11 @@ export async function getPrevia(
     const especifico = setorEspecifico(setorFiltro);
     query = especifico ? query.eq("setor_id", especifico) : query.is("setor_id", null);
   }
+  // Colaborador CANCELADO pela diretoria não entra em número nenhum. Este é o
+  // filtro que faz o cancelamento valer: sem ele a prévia (e o que vai ao
+  // Budget) continuaria somando a contratação que a diretoria cortou — maior,
+  // e sem erro nenhum.
+  query = query.is("cancelado_em", null);
 
   const { data, error } = await query.order("nome", { ascending: true, nullsFirst: false });
   if (error) {
@@ -749,6 +781,9 @@ export async function getPrevia(
     mov2: readMov(r.mov2_tipo, r.mov2_data, r.mov2_cargo, r.mov2_salario),
     justificativa: (r.justificativa as string) ?? null,
     beneficios: readBeneficios(r as Record<string, unknown>),
+    canceladoEm: (r.cancelado_em as string) ?? null,
+    canceladoMotivo: (r.cancelado_motivo as string) ?? null,
+    diretoriaTravado: Boolean(r.diretoria_travado),
   }));
 
   const enc = await getEncargos(companyId, year);

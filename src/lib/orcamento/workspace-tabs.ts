@@ -53,6 +53,15 @@ export function workspaceTabHref(companyId: string, year: number, slug: string):
 }
 
 /**
+ * URL da tela de VALIDAÇÃO (diretoria). Como a Prévia, não é um método — é uma
+ * etapa do ciclo, com rota própria. A caixa no hub só aparece quando há o que
+ * validar ou já houve validação.
+ */
+export function workspaceValidacaoHref(companyId: string, year: number): string {
+  return `/orcamento/empresa/${companyId}/${year}/validacao`;
+}
+
+/**
  * URL da Prévia do orçamento — a DRE da empresa preenchida com os valores
  * orçados. Não é um método (não entra em WORKSPACE_TABS); é a leitura do
  * resultado, com rota própria.

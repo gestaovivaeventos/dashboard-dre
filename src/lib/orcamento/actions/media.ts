@@ -5,6 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { travaOItem } from "@/lib/orcamento/trilha";
+import {
+  camposPermitidosLabel,
+  camposRecusadosParaDiretoria,
+} from "@/lib/orcamento/validacao";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -453,6 +458,17 @@ export async function setMediaValor(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GATE POR CAMPO: média é construída pelo administrador. A diretoria, na
+  // validação, só troca o ÍNDICE — mudar o valor aqui viraria uma decisão sem
+  // quem a sustente. O caminho dela é solicitar o ajuste.
+  if (auth.user.papel === "validador") {
+    const recusados = camposRecusadosParaDiretoria("media", ["media_valor"]);
+    if (recusados.length > 0) {
+      return {
+        error: `Na média a diretoria pode alterar ${camposPermitidosLabel("media")}. Para mudar o valor, use "Solicitar ajuste".`,
+      };
+    }
+  }
   const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
@@ -530,6 +546,14 @@ export async function setMediaIndice(
       category_name: categoryName,
       setor_id: alvo.id,
       indice_key: indiceKey,
+      // Índice trocado pela diretoria trava a linha para o construtor.
+      ...(travaOItem(auth.user.papel, "alterou", undefined)
+        ? {
+            diretoria_travado: true,
+            diretoria_alterado_em: new Date().toISOString(),
+            diretoria_alterado_por: auth.user.userId,
+          }
+        : {}),
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code,setor_id" },

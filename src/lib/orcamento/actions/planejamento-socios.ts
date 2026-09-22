@@ -6,6 +6,8 @@ import { generateText, type ModelMessage } from "ai";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
+import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -188,6 +190,18 @@ function sanitizeItensProposta(raw: unknown): PlanejamentoItemProposto[] {
       origem: o.origem === "mantido" ? "mantido" : "novo",
       fornecedor: typeof o.fornecedor === "string" ? o.fornecedor : null,
       incluir: o.incluir !== false,
+      // PRESERVA o cancelamento da diretoria. O sanitizador reconstrói o item
+      // campo a campo, então tudo o que não for copiado aqui é DESCARTADO em
+      // silêncio — e uma edição da proposta "descancelaria" o que a diretoria
+      // cortou, sem erro e sem ninguém notar.
+      ...(o.cancelado === true
+        ? {
+            cancelado: true as const,
+            cancelado_motivo:
+              typeof o.cancelado_motivo === "string" ? o.cancelado_motivo : null,
+            cancelado_por: typeof o.cancelado_por === "string" ? o.cancelado_por : null,
+          }
+        : {}),
     });
   });
   return out;
@@ -760,6 +774,35 @@ async function fetchRealizadoItensIrmaos(
 
 // ─── Leitura: lista (landing) ───────────────────────────────────────────────────
 
+/**
+ * A linha (categoria × setor) está travada pela diretoria?
+ *
+ * O item do planejamento não tem linha própria — vive no jsonb `proposta` —,
+ * então a trava mora na categoria × setor, que é justamente o que o construtor
+ * edita. Sem esta checagem, ele reescreveria a proposta inteira e desfaria a
+ * decisão da diretoria em silêncio.
+ */
+async function travaDaDiretoria(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  papel: OrcamentoPapel,
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  setorId: string | null,
+): Promise<string | null> {
+  let q = supabase
+    .from("orcamento_planejamento_socios")
+    .select("diretoria_travado")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
+  const { data } = await q.maybeSingle();
+  if (!data) return null; // linha nova: nada a travar
+  const r = podeEscreverNoItem(papel, data as { diretoria_travado?: boolean | null });
+  return r.pode ? null : r.motivo ?? "Item travado pela diretoria.";
+}
+
 export async function getPlanejamentoSocios(
   companyId: string,
   year: number,
@@ -1173,6 +1216,15 @@ export async function enviarMensagemPlanejamento(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
 
   const payload: Record<string, unknown> = {
@@ -1294,6 +1346,15 @@ export async function persistirConversaEntrevista(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
@@ -1356,6 +1417,15 @@ export async function salvarBasePlanejamento(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
 
   const { error: catErr } = await supabase.from("orcamento_planejamento_socios").upsert(
@@ -1449,6 +1519,15 @@ export async function confirmarPropostaPlanejamento(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1519,6 +1598,15 @@ export async function editarPropostaPlanejamento(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1583,6 +1671,15 @@ export async function reiniciarConversaPlanejamento(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1628,6 +1725,15 @@ export async function removerPlanejamentoSocios(
   // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum).
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  const travado = await travaDaDiretoria(
+    supabase,
+    auth.user.papel,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+  );
+  if (travado) return { error: travado };
   if (alvo.error) return { error: alvo.error };
   const { error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")

@@ -26,6 +26,7 @@ import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { vinculoLabel } from "@/lib/orcamento/vinculos";
 import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { itemPropostaAtivo } from "@/lib/orcamento/validacao";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
@@ -582,7 +583,13 @@ export async function getPreviaOrcamento(
           // A proposta é por (categoria × setor): filtrando, só entra a do setor.
           if (filtroSetor && r.setor_id !== filtroSetor) return;
           const p = r.proposta as { itens?: unknown } | null;
-          const itens = Array.isArray(p?.itens) ? (p!.itens as Record<string, unknown>[]) : [];
+          const todos = Array.isArray(p?.itens) ? (p!.itens as Record<string, unknown>[]) : [];
+          // Item CANCELADO pela diretoria não entra em número nenhum. O item do
+          // planejamento não é linha de tabela: vive dentro deste jsonb, então é
+          // AQUI que o cancelamento tem de ser respeitado — a coluna
+          // `cancelado_em` de orcamento_planejamento_socios_itens guarda a BASE
+          // da entrevista, que não é o que a Prévia lê.
+          const itens = todos.filter(itemPropostaAtivo);
           const arr = itens.map((it) => {
             const valor = Number(it.valorMensal ?? it.valor_mensal ?? 0);
             const mes = Number(it.mesInicio ?? it.mes_inicio ?? 1);
