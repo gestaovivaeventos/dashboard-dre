@@ -37,14 +37,16 @@ function ehDecisor(papel: string): boolean {
 
 export async function cancelarColaborador(
   id: string,
-  motivo: string,
+  motivo = "",
   permiteAlteracao = false,
   reativar = false,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   if (!id) return { error: "Colaborador inválido." };
-  if (!reativar && !motivo.trim()) {
-    return { error: "Explique o motivo do cancelamento — é o que o gestor vai ler no retorno." };
-  }
+  // Motivo é OPCIONAL aqui. Obrigá-lo em toda decisão fazia a diretoria digitar
+  // uma justificativa por item — inviável para quem corta vinte de uma vez, e o
+  // resultado prático seria texto de preenchimento ("ajuste", "corte"), que não
+  // informa nada. Continua obrigatório onde o texto É a ação: solicitar um
+  // ajuste e pedir liberação.
 
   const supabase = db() ?? (await createClient());
   const { data: linha, error: lerErr } = await supabase
@@ -135,7 +137,8 @@ export async function cancelarItemPlanejamento(params: {
   setorId: string | null;
   indice: number;
   descricao: string;
-  motivo: string;
+  /** Opcional: só explica quando a diretoria quiser dizer algo. */
+  motivo?: string;
   permiteAlteracao?: boolean;
   reativar?: boolean;
 }): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
@@ -146,15 +149,12 @@ export async function cancelarItemPlanejamento(params: {
     setorId,
     indice,
     descricao,
-    motivo,
+    motivo = "",
     permiteAlteracao = false,
     reativar = false,
   } = params;
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
-  if (!reativar && !motivo.trim()) {
-    return { error: "Explique o motivo do cancelamento — é o que o gestor vai ler no retorno." };
-  }
 
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
@@ -240,7 +240,8 @@ export async function alterarItemPlanejamento(params: {
   indice: number;
   descricao: string;
   valorMensal: number;
-  motivo: string;
+  /** Opcional: só explica quando a diretoria quiser dizer algo. */
+  motivo?: string;
   permiteAlteracao?: boolean;
 }): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
   const {
@@ -251,15 +252,12 @@ export async function alterarItemPlanejamento(params: {
     indice,
     descricao,
     valorMensal,
-    motivo,
+    motivo = "",
     permiteAlteracao = false,
   } = params;
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!Number.isFinite(valorMensal) || valorMensal < 0) return { error: "Valor inválido." };
-  if (!motivo.trim()) {
-    return { error: "Explique o motivo da alteração — é o que o gestor vai ler no retorno." };
-  }
 
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
