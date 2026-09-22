@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download } from "lucide-react";
 
@@ -272,6 +272,43 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
     }
   }
 
+  // Barra de rolagem horizontal também no TOPO da tabela (só quando há overflow),
+  // espelhando a de baixo — em tabela larga dá pra rolar sem descer até o fim.
+  // Os dois containers sincronizam o scrollLeft entre si.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollW, setScrollW] = useState(0);
+  const [hasHOverflow, setHasHOverflow] = useState(false);
+
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      setScrollW(el.scrollWidth);
+      setHasHOverflow(el.scrollWidth - el.clientWidth > 1);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+    // Recalcula quando o conteúdo muda (filtro/ordenação mudam a largura das colunas).
+  }, [sorted]);
+
+  const syncFromTop = () => {
+    const t = topScrollRef.current;
+    const b = tableScrollRef.current;
+    if (t && b && b.scrollLeft !== t.scrollLeft) b.scrollLeft = t.scrollLeft;
+  };
+  const syncFromTable = () => {
+    const t = topScrollRef.current;
+    const b = tableScrollRef.current;
+    if (t && b && t.scrollLeft !== b.scrollLeft) t.scrollLeft = b.scrollLeft;
+  };
+
   return (
     <div className="space-y-4">
       {/* Top bar */}
@@ -310,9 +347,26 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
         ))}
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border overflow-auto">
-        <table className="w-full text-sm">
+      {/* Tabela + barra de rolagem horizontal espelhada no topo (agrupadas para
+          ficarem coladas). */}
+      <div className="space-y-1.5">
+        {/* Barra de rolagem horizontal no topo — aparece só quando a tabela
+            transborda; espelha a de baixo. Mesma borda da tabela para o
+            scrollLeft casar exatamente. */}
+        {hasHOverflow && (
+          <div
+            ref={topScrollRef}
+            onScroll={syncFromTop}
+            aria-hidden
+            className="overflow-x-auto overflow-y-hidden rounded-lg border"
+          >
+            <div style={{ width: scrollW }} className="h-px" />
+          </div>
+        )}
+
+        {/* Table */}
+        <div ref={tableScrollRef} onScroll={syncFromTable} className="rounded-lg border overflow-auto">
+          <table className="w-full text-sm">
           <thead>
             {/* Cabeçalho clicável (ordenação) */}
             <tr className="border-b bg-muted/40">
@@ -425,6 +479,7 @@ export function RelatoriosClient({ requests }: { requests: Req[] }) {
             </tr>
           </tfoot>
         </table>
+        </div>
       </div>
     </div>
   );
