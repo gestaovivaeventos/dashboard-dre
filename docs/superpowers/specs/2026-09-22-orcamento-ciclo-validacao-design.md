@@ -11,7 +11,28 @@ Data: 2026-09-22. Esta spec é o contrato da implementação.
   Uma parte foi deliberadamente adiada — ver "Desvio da fase B" abaixo.
 - **C (validação) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e build
   verdes), com o filtro de item cancelado ligado junto, como combinado.
-- D, E, F: não começadas.
+- **D (retorno) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e build verdes).
+- E, F: não começadas.
+
+### Decisões da fase D
+
+- **"Ciente" é uma entrada da trilha**, não uma coluna. Fica auditável (quem e
+  quando) pelo mesmo mecanismo do resto — era a razão de a trilha existir.
+- **A tela mostra a trava de AGORA, não a de quando a decisão saiu**: a diretoria
+  pode ter liberado depois. Mostrar o histórico faria o gestor pedir liberação do
+  que já está liberado, ou tentar editar o que ainda está travado.
+- **O retorno filtra `fase='validacao'`** e os setores do usuário. O que ele
+  próprio fez na construção está na aba Histórico — misturar transformaria a
+  tela numa lista de tudo, quando o que ele precisa é "o que mudou por decisão de
+  outra pessoa".
+- **A linha travada da tela de pessoal recusa a edição** (`pointer-events` nos
+  campos + `aria-disabled`), além de ficar riscada/amarela. O servidor já recusa;
+  deixar o campo editável faria a pessoa digitar para levar erro no fim.
+- **Reenviar mostra quantas alterações houve desde o último congelamento** e
+  avisa quando é zero — reenviar sem mudança devolve à diretoria o mesmo
+  orçamento que ela acabou de revisar. Movimento de ciclo (`alvo_tipo='ciclo'`)
+  não entra nessa contagem, senão o próprio envio anterior apareceria como
+  mudança.
 
 ### O que a fase C descobriu, e que muda a spec
 

@@ -60,6 +60,12 @@ export interface CicloInfo {
   bloqueio: string | null;
   /** A migration da fase B ainda não rodou: o ciclo opera em modo degradado. */
   needsMigration?: boolean;
+  /**
+   * Quantas alterações houve DESDE a última versão congelada. É o que o diálogo
+   * de reenvio mostra: reenviar sem nada alterado devolve à diretoria o mesmo
+   * orçamento que ela acabou de validar, e é um erro fácil de cometer.
+   */
+  alteracoesDesdeVersao: number;
 }
 
 /**
@@ -174,6 +180,29 @@ async function montarInfo(
 
   const perm = podeEscreverNaFase(estado, user.papel);
 
+  // Alterações depois do último congelamento. Sem versão ainda, conta tudo.
+  let alteracoesDesdeVersao = 0;
+  if (linha && !needsMigration) {
+    const { data: ultima } = await supabase
+      .from("orcamento_versoes")
+      .select("criada_em")
+      .eq("ciclo_id", linha.id)
+      .order("numero", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    let cq = supabase
+      .from("orcamento_alteracoes")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("year", year)
+      // Movimento de ciclo não é alteração de orçamento: contá-lo faria o
+      // próprio envio anterior aparecer como "mudança desde então".
+      .neq("alvo_tipo", "ciclo");
+    if (ultima?.criada_em) cq = cq.gt("created_at", ultima.criada_em as string);
+    const { count } = await cq;
+    alteracoesDesdeVersao = count ?? 0;
+  }
+
   return {
     id: linha?.id ?? null,
     estado,
@@ -185,6 +214,7 @@ async function montarInfo(
     entregas,
     podeEscrever: perm.pode,
     bloqueio: perm.pode ? null : perm.motivo ?? null,
+    alteracoesDesdeVersao,
     ...(needsMigration ? { needsMigration: true } : {}),
   };
 }

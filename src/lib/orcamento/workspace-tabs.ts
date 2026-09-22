@@ -62,6 +62,14 @@ export function workspaceValidacaoHref(companyId: string, year: number): string 
 }
 
 /**
+ * URL do RETORNO da diretoria (visão de quem montou o orçamento). Como a
+ * validação, é etapa do ciclo, não método.
+ */
+export function workspaceRetornoHref(companyId: string, year: number): string {
+  return `/orcamento/empresa/${companyId}/${year}/retorno`;
+}
+
+/**
  * URL da Prévia do orçamento — a DRE da empresa preenchida com os valores
  * orçados. Não é um método (não entra em WORKSPACE_TABS); é a leitura do
  * resultado, com rota própria.

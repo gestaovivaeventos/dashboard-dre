@@ -211,6 +211,20 @@ export function CicloPainel({
                 </span>
               </div>
             )}
+          {confirmando === "reenviar" && (
+            <p
+              className={cn(
+                "text-xs",
+                ciclo.alteracoesDesdeVersao === 0
+                  ? "font-medium text-amber-700 dark:text-amber-500"
+                  : "text-muted-foreground",
+              )}
+            >
+              {ciclo.alteracoesDesdeVersao === 0
+                ? "Nada foi alterado desde a última validação — a diretoria receberia o mesmo orçamento que acabou de revisar."
+                : `${ciclo.alteracoesDesdeVersao} alteração(ões) desde a última validação. Uma nova versão será congelada agora.`}
+            </p>
+          )}
           {confirmando === "enviar_validacao" && (
             <p className="text-xs text-muted-foreground">
               O orçamento será <strong>congelado numa versão</strong> e ficará somente leitura para

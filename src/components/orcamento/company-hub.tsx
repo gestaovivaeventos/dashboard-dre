@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ClipboardCheck,
   Clock,
+  History,
   Coins,
   Handshake,
   LineChart,
@@ -20,6 +21,7 @@ import {
   workspaceTabHref,
   workspaceConfigHref,
   workspacePreviaHref,
+  workspaceRetornoHref,
   workspaceValidacaoHref,
 } from "@/lib/orcamento/workspace-tabs";
 import { statusGeral, type OrcamentoStatusRaw } from "@/lib/orcamento/status";
@@ -189,6 +191,21 @@ export function CompanyHub({
             href={workspaceValidacaoHref(companyId, year)}
           />
         )}
+
+        {/* Retorno da diretoria. Aparece a partir do momento em que existe
+            decisão para ler — antes disso a lista estaria vazia. Fica visível
+            nas fases seguintes porque é também o histórico do orçamento. */}
+        {ciclo &&
+          (ciclo.estado === "em_ajuste" ||
+            ciclo.estado === "concluido" ||
+            ciclo.estado === "publicado") && (
+            <Tile
+              icon={History}
+              title="Retorno da diretoria"
+              desc="O que mudou, por quê, e o que ainda depende de você."
+              href={workspaceRetornoHref(companyId, year)}
+            />
+          )}
 
         {/* Configuração da empresa — sub-hub com as seções de config por
             empresa. Admin-only (ver isAdmin acima). */}

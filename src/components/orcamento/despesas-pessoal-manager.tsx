@@ -746,8 +746,34 @@ function ColaboradorRow({
   // PJ e Estágio não escolhem cargo do plano: o cargo atual é o próprio vínculo.
   const cargoIsAuto = draft.vinculo === "pj" || draft.vinculo === "estagio";
 
+  // Estado da diretoria. O CANCELADO fica visível e riscado (cancelar é marca,
+  // não exclusão) e o TRAVADO não aceita edição — sem isto o gestor digitaria e
+  // levaria erro só ao salvar, o que parece defeito.
+  const cancelado = Boolean(colab.canceladoEm);
+  const travado = colab.diretoriaTravado;
+  const bloqueado = cancelado || travado;
+
   return (
-    <tr className="align-top hover:bg-muted/20">
+    <tr
+      className={cn(
+        "align-top hover:bg-muted/20",
+        cancelado && "bg-muted/30 opacity-60 [&_input]:line-through [&_select]:line-through",
+        travado && !cancelado && "bg-amber-500/5",
+        // Bloqueio de verdade na tela. O servidor já recusa a gravação
+        // (`podeEscreverNoItem`), mas deixar o campo editável faria a pessoa
+        // digitar para depois levar erro — o pior dos dois mundos.
+        bloqueado &&
+          "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none",
+      )}
+      aria-disabled={bloqueado || undefined}
+      title={
+        cancelado
+          ? `Cancelado pela diretoria${colab.canceladoMotivo ? `: ${colab.canceladoMotivo}` : ""}`
+          : travado
+            ? "Alterado pela diretoria — peça liberação no Retorno da diretoria para ajustar"
+            : undefined
+      }
+    >
       {/* Empresa dos encargos — só aparece quando habilitada na configuração.
           Vazio significa a empresa do quadro. */}
       {mostrarEmpresa && (
