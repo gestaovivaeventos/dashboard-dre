@@ -8,13 +8,16 @@ export default async function RelatoriosPage() {
   const ctx = await getCtrlUser();
   if (!ctx) redirect("/login");
 
-  if (!hasCtrlRole(ctx, "gerente", "diretor", "csc", "contas_a_pagar", "admin")) {
+  if (
+    !hasCtrlRole(ctx, "solicitante", "gerente", "diretor", "csc", "contas_a_pagar", "admin")
+  ) {
     redirect("/ctrl/requisicoes");
   }
 
   // Visibilidade por SETOR — fonte única em getRequests (mesma regra das telas
-  // de Requisições e Aprovações): cada usuário vê os relatórios só dos setores
-  // pelos quais responde; diretor, admin e a visão completa nominal veem todos.
+  // de Requisições e Aprovações): cada usuário (inclusive o solicitante) vê os
+  // relatórios só dos setores vinculados a ele; diretor, admin e a visão completa
+  // nominal veem todos.
   const result = await getRequests({ reportScope: true });
   const requests = "requests" in result ? result.requests : [];
 

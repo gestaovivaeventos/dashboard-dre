@@ -93,7 +93,16 @@ Consequências:
    edição da proposta "descancelaria" o que a diretoria cortou, sem erro. A
    preservação está lá com comentário; **ao acrescentar campo ao item da
    proposta, copie-o no sanitizador**.
-5. **A trava do planejamento mora na categoria × setor** (`diretoria_travado` na
+5. **A migration da fase B pôs a trava na tabela errada.** `diretoria_travado`
+   foi para `orcamento_planejamento_socios_itens` (a base) e NÃO para
+   `orcamento_planejamento_socios` (a categoria × setor, onde o código da fase C
+   a grava). Resultado: toda ação de trava do planejamento falhava com 42703 —
+   e nem `tsc`, nem o lint, nem o build pegam isso, porque as consultas do
+   Supabase são strings. Corrigido pela migration `20260924120000`, encontrado
+   só ao conferir contra o banco real com `scripts/orcamento-ciclo-check.ts`.
+   **Lição para as próximas fases**: mudança de premissa sobre ONDE um dado mora
+   exige reconferir a migration, não só o código.
+6. **A trava do planejamento mora na categoria × setor** (`diretoria_travado` na
    linha de `orcamento_planejamento_socios`), não no item: o item não tem linha
    própria, e é a proposta inteira que o construtor reescreve.
 
