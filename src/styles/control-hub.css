@@ -318,6 +318,37 @@ html.ch-dark body {
   letter-spacing: 0.1em;
   color: var(--color-text);
 }
+/* Cabeçalho do módulo é um botão (accordion): ocupa a linha para o clique pegar
+   todo o rótulo. A régua vermelha (::before) e o botão de tour ficam nas pontas. */
+.ch-module__toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.ch-module__toggle:hover span {
+  color: var(--color-accent);
+}
+/* Chevron: aponta para baixo quando aberto; para a direita quando fechado. */
+.ch-module__chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--color-text);
+  opacity: 0.5;
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+.ch-module__chevron[data-open="true"] {
+  transform: rotate(0deg);
+}
 /* Botão do tour guiado do módulo. Encostado à direita da régua, discreto:
    é oferta permanente, não chamada para ação. */
 .ch-module__tour {

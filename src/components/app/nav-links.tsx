@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import {
   CSC_NAV_KEYS,
@@ -101,6 +103,29 @@ export function NavLinks(props: NavLinksProps) {
       .filter((h) => pathname === h || pathname.startsWith(`${h}/`))
       .sort((a, b) => b.length - a.length)[0] ?? null;
 
+  // Accordion dos módulos: cada grupo começa FECHADO e abre ao clicar no
+  // cabeçalho. O grupo da página atual nasce aberto (para o usuário não ficar
+  // "perdido") e é reaberto ao navegar. No modo trilho (colapsado) não há
+  // cabeçalho para clicar — os itens seguem sempre visíveis como ícones.
+  const activeGroupId =
+    groups.find((g) => g.items.some((i) => i.href === activeHref))?.id ?? null;
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(activeGroupId ? [activeGroupId] : []),
+  );
+  useEffect(() => {
+    if (!activeGroupId) return;
+    setOpenGroups((prev) =>
+      prev.has(activeGroupId) ? prev : new Set(prev).add(activeGroupId),
+    );
+  }, [activeGroupId]);
+  const toggleGroup = (id: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   if (groups.length === 0) {
     return (
       <p className="px-4 py-4 text-[12.5px] text-ink-muted">
@@ -150,23 +175,38 @@ export function NavLinks(props: NavLinksProps) {
 
   return (
     <nav>
-      {groups.map((group, idx) => (
+      {groups.map((group, idx) => {
+        // No trilho (colapsado) não há cabeçalho para clicar → itens sempre
+        // visíveis. Fora dele, o grupo só mostra os itens quando aberto.
+        const isOpen = collapsed || openGroups.has(group.id);
+        return (
         <div key={group.id}>
-          {/* Modulo: sem numeracao, sem caixa — barra vermelha + regua. */}
+          {/* Modulo: cabeçalho clicável (accordion) — barra vermelha + régua. */}
           {!collapsed && (
             <div className="ch-module">
-              <span>{group.label}</span>
+              <button
+                type="button"
+                className="ch-module__toggle"
+                onClick={() => toggleGroup(group.id)}
+                aria-expanded={isOpen}
+              >
+                <ChevronDown className="ch-module__chevron" data-open={isOpen} aria-hidden />
+                <span>{group.label}</span>
+              </button>
               {/* Só rende algo nos grupos que têm tour (ver @/lib/tour) e para
                   quem tem aquele módulo — nos demais o componente devolve null. */}
               <ModuleTourButton navGroupId={group.id} />
             </div>
           )}
           {collapsed && idx > 0 && <div className="ch-rail-sep" aria-hidden />}
-          <div className={cn("ch-nav", collapsed && "ch-nav--rail")}>
-            {group.items.map((item) => renderItem(item))}
-          </div>
+          {isOpen && (
+            <div className={cn("ch-nav", collapsed && "ch-nav--rail")}>
+              {group.items.map((item) => renderItem(item))}
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }
