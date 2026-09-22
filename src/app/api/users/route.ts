@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fetchCaixaGrantUserIds } from "@/lib/auth/caixa";
+import { fetchOrcamentoGrantUserIds } from "@/lib/auth/orcamento";
 import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -44,6 +45,8 @@ export async function GET() {
   const contratosUserIds = await fetchContratosGrantUserIds(adminClient);
   // Modulo Caixa: mesma ideia (ver @/lib/auth/caixa).
   const caixaUserIds = await fetchCaixaGrantUserIds(adminClient);
+  // Modulo Orcamento: idem (ver @/lib/auth/orcamento).
+  const orcamentoUserIds = await fetchOrcamentoGrantUserIds(adminClient);
 
   const companyNames = new Map((companiesData ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorNames = new Map((sectorsData ?? []).map((s) => [s.id as string, s.name as string]));
@@ -90,6 +93,9 @@ export async function GET() {
     // Admin enxerga o Caixa sem a linha (modelo do Case/Contratos).
     can_caixa:
       caixaUserIds.has(item.id as string) || item.profile === "admin",
+    // Admin enxerga o Orcamento sem a linha (mesmo modelo).
+    can_orcamento:
+      orcamentoUserIds.has(item.id as string) || item.profile === "admin",
     active: Boolean(item.active),
     created_at: item.created_at as string,
     // Legacy fields for backwards compatibility with the existing UI:

@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  getOrcamentoAdmin,
+  getOrcamentoUser,
+  podeVerEmpresa,
+  setoresDeEscrita,
+  SEM_ACESSO,
+  SEM_ACESSO_ADMIN,
+} from "@/lib/orcamento/auth";
 import { friendlySetorError, isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 
@@ -34,10 +41,14 @@ export async function getSetores(companyId: string, year: number): Promise<{
   error?: string;
   needsMigration?: boolean;
 }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // LEITURA: qualquer usuário do módulo. As telas de montagem (média, valor
+  // fixo, planejamento, prévia) montam o seletor de setor a partir daqui — se
+  // isto continuasse admin-only, o gerente abriria a tela sem setor nenhum.
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
   if (!companyId) return { items: [] };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!podeVerEmpresa(user, companyId)) return { error: SEM_ACESSO };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { data, error } = await supabase
@@ -67,8 +78,16 @@ export async function getSetores(companyId: string, year: number): Promise<{
     .eq("active", true)
     .order("name");
 
+  // Recorte do construtor: o "Gerente" (gerente_setor) só escolhe entre os
+  // setores dele. Admin, diretoria e Gerente Sócio veem a lista inteira.
+  const permitidos = await setoresDeEscrita(supabase, user, companyId, year);
+  const visiveis =
+    user.papel === "construtor" && permitidos !== null
+      ? (data ?? []).filter((r) => permitidos.includes(r.id as string))
+      : (data ?? []);
+
   return {
-    items: (data ?? []).map((r) => ({
+    items: visiveis.map((r) => ({
       id: r.id as string,
       name: r.name as string,
       active: Boolean(r.active),
@@ -87,7 +106,7 @@ export async function getSetores(companyId: string, year: number): Promise<{
  */
 export async function setSetorCtrlVinculo(id: string, ctrlSectorId: string | null) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!id) return { error: "Setor inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -105,7 +124,7 @@ export async function setSetorCtrlVinculo(id: string, ctrlSectorId: string | nul
 
 export async function createSetor(companyId: string, year: number, name: string) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   const clean = name.trim();
@@ -125,7 +144,7 @@ export async function createSetor(companyId: string, year: number, name: string)
 
 export async function renameSetor(id: string, name: string) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   const clean = name.trim();
   if (!clean) return { error: "Informe o nome do setor." };
 
@@ -141,7 +160,7 @@ export async function renameSetor(id: string, name: string) {
 
 export async function setSetorActive(id: string, active: boolean) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const { error } = await supabase
@@ -160,7 +179,7 @@ export async function setSetorActive(id: string, active: boolean) {
  */
 export async function cloneSetores(companyId: string, fromYear: number, toYear: number) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(fromYear) || !isValidBudgetYear(toYear)) {
     return { error: "Ano do orçamento inválido." };

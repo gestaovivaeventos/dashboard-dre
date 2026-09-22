@@ -33,6 +33,7 @@ export default async function ProtectedLayout({
   const canContratos = Boolean(modules?.contratos);
   const vbRole = modules?.vb?.role ?? null;
   const canCaixa = Boolean(modules?.caixa);
+  const orcamentoPapel = modules?.orcamento?.papel ?? null;
   const contractsOnly = profile?.contracts_only === true;
   const isFranqueado = profile?.profile === "franqueado";
   const isCsc = profile?.profile === "csc";
@@ -78,6 +79,7 @@ export default async function ProtectedLayout({
       canContratos={canContratos}
       vbRole={vbRole}
       canCaixa={canCaixa}
+      orcamentoPapel={orcamentoPapel}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

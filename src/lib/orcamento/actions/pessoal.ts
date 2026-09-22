@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  autorizarEscrita,
+  autorizarLeitura,
+  getOrcamentoAdmin,
+  podeEscreverNoSetor,
+  SEM_ACESSO_ADMIN,
+  SEM_ACESSO_SETOR,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import {
@@ -181,8 +188,6 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
   setup?: PessoalSetup;
   error?: string;
 }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) {
     return {
       setup: {
@@ -199,6 +204,8 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarLeitura(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
 
   // Config do ano: orça por setor? regime de apuração?
   const { data: cfg } = await supabase
@@ -220,10 +227,13 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
     .eq("active", true)
     .order("name");
   if (setErr) return { error: setErr.message };
-  const setores: SetorOption[] = (setoresData ?? []).map((s) => ({
-    id: s.id as string,
-    name: s.name as string,
-  }));
+  const setores: SetorOption[] = (setoresData ?? [])
+    // Construtor restrito ("Gerente") só escolhe entre os setores dele.
+    .filter((s) => auth.setores === null || auth.setores.includes(s.id as string))
+    .map((s) => ({
+      id: s.id as string,
+      name: s.name as string,
+    }));
 
   // Opções de cargo (cargo ativo × nível) → salário-base, com o setor do cargo.
   const { data: cargos, error: cargosErr } = await supabase
@@ -297,7 +307,7 @@ export async function setBeneficioAgrupar(
   agrupar: boolean,
 ) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!BENEFICIOS.some((b) => b.key === beneficio)) return { error: "Benefício inválido." };
@@ -323,7 +333,7 @@ export async function setRegimeApuracao(
   regime: RegimeApuracao,
 ) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!isRegimeApuracao(regime)) return { error: "Regime de apuração inválido." };
@@ -371,12 +381,12 @@ export async function getColaboradores(
   year: number,
   setorId: string | null,
 ): Promise<{ items?: Colaborador[]; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { items: [] };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarLeitura(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
   let query = supabase
     .from("orcamento_pessoal_colaboradores")
     .select(COLAB_COLS)
@@ -385,6 +395,9 @@ export async function getColaboradores(
   if (!isTodosSetores(setorId)) {
     query = setorId ? query.eq("setor_id", setorId) : query.is("setor_id", null);
   }
+  // Construtor restrito ("Gerente"): o quadro que ele vê é o dos setores dele,
+  // inclusive na visão "Todos os setores".
+  if (auth.setores !== null) query = query.in("setor_id", auth.setores);
 
   const { data, error } = await query
     .order("nome", { ascending: true, nullsFirst: false })
@@ -433,19 +446,56 @@ function toRow(input: ColaboradorInput, adminId: string) {
   };
 }
 
+/**
+ * Autoriza uma escrita que chega só com o ID do colaborador (editar, benefícios,
+ * excluir). A empresa, o ano e o setor vêm da LINHA — a tela não os envia, e
+ * mesmo que enviasse não provariam nada. Sem esta leitura, bastaria mandar o id
+ * de um colaborador de outro setor (ou de outra empresa) para alterá-lo.
+ */
+async function autorizarColaborador(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+): Promise<
+  { ok: true; userId: string; setores: string[] | null } | { ok: false; error: string }
+> {
+  const { data: linha, error } = await supabase
+    .from("orcamento_pessoal_colaboradores")
+    .select("company_id, year, setor_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!linha) return { ok: false, error: "Colaborador não encontrado." };
+
+  const auth = await autorizarEscrita(
+    supabase,
+    linha.company_id as string,
+    Number(linha.year),
+  );
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (!podeEscreverNoSetor(auth.setores, (linha.setor_id as string | null) ?? null)) {
+    return { ok: false, error: SEM_ACESSO_SETOR };
+  }
+  return { ok: true, userId: auth.user.userId, setores: auth.setores };
+}
+
 export async function createColaborador(
   companyId: string,
   year: number,
   input: ColaboradorInput,
 ) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   const err = validateInput(input);
   if (err) return { error: err };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
+  // Colaborador nasce num setor: o construtor só cadastra nos setores dele.
+  if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
+    return { error: SEM_ACESSO_SETOR };
+  }
   const { error } = await supabase.from("orcamento_pessoal_colaboradores").insert({
     company_id: companyId,
     year,
@@ -460,16 +510,21 @@ export async function createColaborador(
 }
 
 export async function updateColaborador(id: string, input: ColaboradorInput) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!id) return { error: "Colaborador inválido." };
   const err = validateInput(input);
   if (err) return { error: err };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarColaborador(supabase, id);
+  if (!auth.ok) return { error: auth.error };
+  // Mover o colaborador para outro setor é escrita NOS DOIS: o de origem (já
+  // conferido acima) e o de destino, que vem no input.
+  if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
+    return { error: SEM_ACESSO_SETOR };
+  }
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .update(toRow(input, admin.userId))
+    .update(toRow(input, auth.userId))
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath(PATH);
@@ -479,8 +534,6 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
 /** Atualiza só os benefícios (parte verde) de um colaborador. Não toca nos
  * campos do quadro (parte azul). */
 export async function updateColaboradorBeneficios(id: string, beneficios: Beneficios) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!id) return { error: "Colaborador inválido." };
 
   const row: Record<string, number | null> = {};
@@ -491,9 +544,11 @@ export async function updateColaboradorBeneficios(id: string, beneficios: Benefi
   }
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarColaborador(supabase, id);
+  if (!auth.ok) return { error: auth.error };
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .update({ ...row, updated_by: admin.userId })
+    .update({ ...row, updated_by: auth.userId })
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath(PATH);
@@ -561,12 +616,12 @@ export async function getPrevia(
   year: number,
   filtro?: PreviaFiltro,
 ): Promise<{ payload?: PreviaPayload; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarLeitura(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
 
   const { data: cfg } = await supabase
     .from("orcamento_company_config")
@@ -692,10 +747,11 @@ export async function getPrevia(
 }
 
 export async function deleteColaborador(id: string) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!id) return { error: "Colaborador inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarColaborador(supabase, id);
+  if (!auth.ok) return { error: auth.error };
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
     .delete()

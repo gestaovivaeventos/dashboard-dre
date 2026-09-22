@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 
-import { getCurrentSessionContext } from "@/lib/auth/session";
+import { getOrcamentoUser, podeVerEmpresa } from "@/lib/orcamento/auth";
 import { getCompaniesBudgetConfig } from "@/lib/orcamento/actions/config";
 import { WorkspaceHeader } from "@/components/orcamento/workspace-header";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 
 export const dynamic = "force-dynamic";
 
-// Layout do workspace de uma empresa: guarda admin, resolve empresa + ano da
+// Layout do workspace de uma empresa: guarda o módulo e o escopo de empresa,
+// resolve empresa + ano da
 // rota e monta o cabeçalho fixo (empresa/ano travados + abas). As páginas de
 // aba (pessoal, media, …) renderizam dentro dele.
 export default async function OrcamentoEmpresaLayout({
@@ -17,9 +18,11 @@ export default async function OrcamentoEmpresaLayout({
   children: React.ReactNode;
   params: { companyId: string; ano: string };
 }) {
-  const { user, profile } = await getCurrentSessionContext();
-  if (!user) redirect("/login");
-  if (!profile || profile.profile !== "admin") redirect("/dashboard");
+  const user = await getOrcamentoUser();
+  if (!user) redirect("/home");
+  // Empresa fora do escopo (URL montada à mão) volta ao painel, que mostra só
+  // as que ele alcança.
+  if (!podeVerEmpresa(user, params.companyId)) redirect("/orcamento");
 
   const year = Number(params.ano);
   // Ano fora da faixa (URL adulterada) → volta ao painel para reescolher.

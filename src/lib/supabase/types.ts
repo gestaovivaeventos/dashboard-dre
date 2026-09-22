@@ -21,6 +21,18 @@ export type CtrlRole =
 /** Papel no módulo VB (Viva Bank). Concedido em user_module_roles — ver @/lib/auth/vb. */
 export type VbRole = "gestor" | "credor";
 
+// ─── Papel no módulo Orçamento ────────────────────────────────────────────────
+/**
+ * Papel dentro do módulo Orçamento. Derivado do `profile` do usuário mais a
+ * concessão em user_module_roles — ver @/lib/auth/orcamento.
+ *
+ *  - `admin`            → tudo, todas as empresas, transições do ciclo
+ *  - `validador`        → diretoria: valida item a item nas empresas dela
+ *  - `construtor_amplo` → "Gerente Sócio": vê a empresa inteira, edita os seus setores
+ *  - `construtor`       → "Gerente": só os setores vinculados a ele
+ */
+export type OrcamentoPapel = "admin" | "validador" | "construtor_amplo" | "construtor";
+
 // ─── Acesso por módulo ────────────────────────────────────────────────────────
 export interface ModuleAccess {
   dre: {
@@ -52,6 +64,13 @@ export interface ModuleAccess {
    * todas, inclusive as restritas de @/lib/auth/restricted-companies.
    */
   caixa: Record<string, never> | null;
+  /**
+   * Módulo Orçamento. Concessão em user_module_roles (module='orcamento') OU
+   * admin — ver `@/lib/auth/orcamento`. O `papel` decide o que a pessoa faz
+   * dentro do módulo (construir, validar, tudo); o recorte por empresa e setor
+   * é resolvido nas actions (`getOrcamentoUser`).
+   */
+  orcamento: { papel: OrcamentoPapel } | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -116,6 +135,12 @@ export interface UnifiedProfile {
    * de `users` — ver `@/lib/auth/caixa`. Admin enxerga sem a linha.
    */
   can_caixa: boolean;
+  /**
+   * Papel no módulo Orçamento, ou null sem acesso. Como `can_contratos`, vem de
+   * `user_module_roles` (+ o perfil), não de coluna de `users` — ver
+   * `@/lib/auth/orcamento`. Admin entra sem a concessão.
+   */
+  orcamento_papel: OrcamentoPapel | null;
   /**
    * Já viu o tour guiado de boas-vindas. Como `can_contratos`, NÃO é coluna de
    * `users`: é derivada da linha em `user_module_roles` (module='tour') — ver

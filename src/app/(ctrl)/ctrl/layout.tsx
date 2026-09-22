@@ -33,6 +33,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   const canContratos = Boolean(modules.contratos);
   const vbRole = modules.vb?.role ?? null;
   const canCaixa = Boolean(modules.caixa);
+  const orcamentoPapel = modules.orcamento?.papel ?? null;
 
   // Segmentos para o shell DRE — fonte única compartilhada com o (app) layout
   // e as páginas DRE (resolveUserSegments): admin vê todos; os demais recebem a
@@ -74,6 +75,7 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       canContratos={canContratos}
       vbRole={vbRole}
       canCaixa={canCaixa}
+      orcamentoPapel={orcamentoPapel}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

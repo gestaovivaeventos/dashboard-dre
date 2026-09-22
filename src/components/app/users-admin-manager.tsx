@@ -40,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isOrcamentoEligibleProfile } from "@/lib/auth/orcamento";
 import {
   describeUserExceptions,
   findOrphanExceptionRules,
@@ -74,6 +75,7 @@ interface UserItem {
   can_viagens_aprovar: boolean;
   can_contratos: boolean;
   can_caixa: boolean;
+  can_orcamento: boolean;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -199,6 +201,7 @@ interface FormState {
   can_viagens_aprovar: boolean;
   can_contratos: boolean;
   can_caixa: boolean;
+  can_orcamento: boolean;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -216,6 +219,7 @@ const emptyForm: FormState = {
   can_viagens_aprovar: false,
   can_contratos: false,
   can_caixa: false,
+  can_orcamento: false,
   sector_ids: [],
   company_ids: [],
 };
@@ -234,6 +238,7 @@ function userToForm(u: UserItem): FormState {
     can_viagens_aprovar: u.can_viagens_aprovar,
     can_contratos: u.can_contratos,
     can_caixa: u.can_caixa,
+    can_orcamento: u.can_orcamento,
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -316,6 +321,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
           if (filterModule === "case" && !(isAdmin || u.can_case)) return false;
           if (filterModule === "contratos" && !(isAdmin || u.can_contratos)) return false;
           if (filterModule === "caixa" && !(isAdmin || u.can_caixa)) return false;
+          if (filterModule === "orcamento" && !(isAdmin || u.can_orcamento)) return false;
         }
         if (filterSector !== "all" && !u.sector_ids.includes(filterSector)) return false;
         if (
@@ -392,6 +398,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         // Ilha: o validador de contrato só enxerga /contratos, então o Caixa
         // não teria efeito nenhum (ver o gate em @/lib/auth/access).
         next.can_caixa = false;
+        next.can_orcamento = false;
         next.sector_ids = [];
         next.company_ids = [];
       }
@@ -466,6 +473,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens_aprovar: boolean;
         can_contratos: boolean;
         can_caixa: boolean;
+        can_orcamento: boolean;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -486,6 +494,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens_aprovar: u.can_viagens_aprovar,
         can_contratos: u.can_contratos,
         can_caixa: u.can_caixa,
+        can_orcamento: u.can_orcamento,
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -506,6 +515,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
       !form.can_case &&
       !form.can_contratos &&
       !form.can_caixa &&
+      !form.can_orcamento &&
       // Viagens saiu da tela, mas quem já tinha o módulo continua válido.
       !form.can_viagens &&
       form.profile !== "admin"
@@ -546,6 +556,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens_aprovar: form.can_viagens_aprovar,
         can_contratos: form.can_contratos,
         can_caixa: form.can_caixa,
+        can_orcamento: form.can_orcamento,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -585,6 +596,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_viagens_aprovar: form.can_viagens_aprovar,
         can_contratos: form.can_contratos,
         can_caixa: form.can_caixa,
+        can_orcamento: form.can_orcamento,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -693,6 +705,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                   { value: "case", label: "Case" },
                   { value: "contratos", label: "Validação de Contratos" },
                   { value: "caixa", label: "Caixa" },
+                  { value: "orcamento", label: "Orçamento" },
                 ]}
               />
             </TableHead>
@@ -787,6 +800,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
                       u.can_case && "Case",
                       u.can_contratos && "Validação de Contratos",
                       u.can_caixa && "Caixa",
+                      u.can_orcamento && "Orçamento",
                       // Viagens não é mais atribuível, mas segue exibido pra
                       // quem ainda tem o módulo.
                       u.can_viagens && (u.can_viagens_aprovar ? "Viagens (aprova)" : "Viagens"),
@@ -1258,6 +1272,25 @@ function UserForm({
               {form.can_caixa ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
               Caixa
             </button>
+            {/* Orçamento: módulo à parte, como o Caixa — mas só aparece para os
+                perfis em que ele faz efeito (admin, diretor, gerente, gerente
+                de setor). Para um solicitante ou Visão Financeira a marcação
+                não daria acesso nenhum (ver resolveOrcamentoPapel), e um botão
+                que não faz nada é pior do que botão nenhum. */}
+            {isOrcamentoEligibleProfile(form.profile) && (
+              <button
+                type="button"
+                onClick={() => onChange("can_orcamento", !form.can_orcamento)}
+                className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium transition-colors ${
+                  form.can_orcamento
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "hover:bg-muted"
+                }`}
+              >
+                {form.can_orcamento ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                Orçamento
+              </button>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             {isFinanceiroOnly
@@ -1269,6 +1302,20 @@ function UserForm({
               O módulo <strong>Caixa</strong> mostra o saldo das contas correntes de{" "}
               <strong>todas as empresas</strong> — não depende das unidades
               selecionadas abaixo.
+            </p>
+          )}
+          {form.can_orcamento && (
+            <p className="text-xs text-muted-foreground">
+              No <strong>Orçamento</strong>, o que a pessoa faz vem do perfil:{" "}
+              {form.profile === "diretor"
+                ? "Diretor valida o orçamento das unidades selecionadas abaixo."
+                : form.profile === "gerente"
+                  ? "Gerente Sócio vê a empresa inteira e edita os setores vinculados a ele."
+                  : form.profile === "gerente_setor"
+                    ? "Gerente monta o orçamento apenas dos setores vinculados a ele."
+                    : "Admin acessa tudo, inclusive a configuração do módulo."}{" "}
+              O recorte usa as <strong>unidades</strong> e os <strong>setores</strong>{" "}
+              marcados abaixo.
             </p>
           )}
         </div>

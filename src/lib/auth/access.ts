@@ -3,6 +3,7 @@ import {
   canAccessBiValidationByProfile,
 } from "@/lib/auth/bi-validation";
 import { isCaixaPath } from "@/lib/auth/caixa";
+import { isOrcamentoConfigPath, isOrcamentoPath } from "@/lib/auth/orcamento";
 import { isVbPath } from "@/lib/auth/vb";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
@@ -22,6 +23,7 @@ export function defaultLandingFor(
   canContratos: boolean = false,
   canVb: boolean = false,
   canCaixa: boolean = false,
+  canOrcamento: boolean = false,
 ): string {
   // TODO perfil pousa na tela inicial. Ela é o cockpit comum do Control Hub:
   // saudação, indicadores e notícias econômicas para todos, e as seções
@@ -38,6 +40,7 @@ export function defaultLandingFor(
     canContratos ||
     canVb ||
     canCaixa ||
+    canOrcamento ||
     profile === "admin"
   ) {
     return "/home";
@@ -110,6 +113,13 @@ export function canAccessPathByProfile(
    * @/lib/auth/caixa.
    */
   canCaixa: boolean = false,
+  /**
+   * Módulo Orçamento (/orcamento). Concedido por usuário em "Módulos
+   * visíveis"; admin enxerga sem a concessão — ver @/lib/auth/orcamento. O
+   * PAPEL (construtor × validador) não é decidido aqui: as telas e as server
+   * actions do módulo resolvem por `getOrcamentoUser`.
+   */
+  canOrcamento: boolean = false,
 ): boolean {
   // Tela inicial (cockpit): liberada para TODOS os perfis, sem depender de
   // módulo. O que cada um VÊ lá dentro é decidido por perfil na própria tela
@@ -169,6 +179,20 @@ export function canAccessPathByProfile(
   // o módulo marcado, e o Caixa é liberável em qualquer perfil.
   if (isCaixaPath(pathname)) return canCaixa || profile === "admin";
 
+  // Módulo Orçamento: concessão explícita OU admin. Como Contratos e Caixa,
+  // precisa vir ANTES do bloco franqueado/CSC (a whitelist deles negaria a
+  // rota) e antes do bloco "Plataforma é admin-only" mais abaixo, que é o que
+  // mantinha /orcamento fechado a todo mundo que não fosse admin.
+  //
+  // As telas de CONFIGURAÇÃO do módulo seguem admin-only mesmo para quem tem o
+  // módulo: um gerente constrói o orçamento, não redefine as premissas dele
+  // (método por categoria, plano de cargos, encargos, índices).
+  if (isOrcamentoPath(pathname)) {
+    if (profile === "admin") return true;
+    if (!canOrcamento) return false;
+    return !isOrcamentoConfigPath(pathname);
+  }
+
   // Franqueado (e a cópia CSC): whitelist explícita de telas do Financeiro.
   // Bloqueia Conexões, Mapeamento, Configurações, /admin, /usuarios, /ctrl e
   // qualquer página fora das visualizações permitidas. As telas "Validação
@@ -191,14 +215,17 @@ export function canAccessPathByProfile(
   // Admin: tudo.
   if (profile === "admin") return true;
 
-  // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios
-  // exige admin. O módulo Orçamento (/orcamento*) também é admin-only: admin
-  // já retornou true no topo, então aqui negamos para todos os demais perfis.
-  // (Não confundir com /ctrl/orcamento, do módulo Compras, tratado abaixo.)
+  // Plataforma é admin-only — qualquer outra rota /admin* ou /usuarios exige
+  // admin (que já retornou true no topo).
+  //
+  // `/orcamento` SAIU desta lista: o módulo deixou de ser admin-only e é
+  // decidido acima, junto dos outros módulos concedidos por usuário. Não o
+  // traga de volta para cá — seria negar o módulo a gerente e diretor depois
+  // do gate que os libera. (Não confundir com /ctrl/orcamento, do módulo
+  // Compras, tratado abaixo.)
   if (
     pathname.startsWith("/admin") ||
     pathname.startsWith("/usuarios") ||
-    pathname.startsWith("/orcamento") ||
     pathname.startsWith("/menu-lab")
   ) {
     return false;

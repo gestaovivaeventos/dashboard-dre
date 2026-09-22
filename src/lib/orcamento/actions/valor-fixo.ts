@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  autorizarEscrita,
+  autorizarLeitura,
+  podeEscreverNoSetor,
+  SEM_ACESSO_SETOR,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
@@ -139,12 +144,12 @@ export async function getValorFixoCategorias(
   /** Setor da tela: os contratos listados são os deste setor. */
   setorId: string | null = null,
 ): Promise<{ setup?: ValorFixoSetup; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { setup: { items: [], indices: [] } };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarLeitura(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
 
   // Índices do ano do orçamento (para o seletor de correção). Inclui o salário
   // mínimo, cujo valor cadastrado é o próprio orçado quando escolhido.
@@ -178,6 +183,8 @@ export async function getValorFixoCategorias(
   // "Todos os setores" não filtra — o literal iria para uma coluna uuid.
   const especificoLeitura = setorEspecifico(setorId);
   if (especificoLeitura) savedQuery = savedQuery.eq("setor_id", especificoLeitura);
+  // Construtor restrito ("Gerente"): mesmo em "Todos os setores", só os dele.
+  if (auth.setores !== null) savedQuery = savedQuery.in("setor_id", auth.setores);
   const { data: saved, error: savedError } = await savedQuery
     .order("created_at", { ascending: true })
     .order("id", { ascending: true });
@@ -254,8 +261,6 @@ export async function saveValorFixoContrato(
   /** Setor a que o contrato pertence. */
   setorId: string | null = null,
 ): Promise<{ id?: string; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -269,6 +274,9 @@ export async function saveValorFixoContrato(
   if (validationError) return { error: validationError };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   const descricao = (contrato.descricao ?? "").trim() || null;
   const patch = {
     descricao,
@@ -278,8 +286,21 @@ export async function saveValorFixoContrato(
     updated_by: admin.userId,
   };
 
-  // Atualização de contrato existente.
+  // Atualização de contrato existente. O setor que vale é o DA LINHA: sem esta
+  // leitura, bastaria mandar o id de um contrato de outro setor para alterá-lo
+  // (a tela manda o setor dela, que não prova nada).
   if (contrato.id) {
+    if (auth.setores !== null) {
+      const { data: atual } = await supabase
+        .from("orcamento_valor_fixo_categorias")
+        .select("setor_id")
+        .eq("id", contrato.id)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (!podeEscreverNoSetor(auth.setores, (atual?.setor_id as string | null) ?? null)) {
+        return { error: SEM_ACESSO_SETOR };
+      }
+    }
     const { error } = await supabase
       .from("orcamento_valor_fixo_categorias")
       .update({ ...patch, category_name: categoryName })
@@ -297,6 +318,7 @@ export async function saveValorFixoContrato(
   // linha com setor nulo some de qualquer filtro por setor e não pode ser movida.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
   if (alvo.error) return { error: alvo.error };
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   const { data, error } = await supabase
     .from("orcamento_valor_fixo_categorias")
     .insert({
@@ -323,12 +345,23 @@ export async function removeValorFixoContrato(
   year: number,
   contratoId: string,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !contratoId) return { error: "Contrato inválido." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  if (auth.setores !== null) {
+    const { data: atual } = await supabase
+      .from("orcamento_valor_fixo_categorias")
+      .select("setor_id")
+      .eq("id", contratoId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (!podeEscreverNoSetor(auth.setores, (atual?.setor_id as string | null) ?? null)) {
+      return { error: SEM_ACESSO_SETOR };
+    }
+  }
   const { error } = await supabase
     .from("orcamento_valor_fixo_categorias")
     .delete()

@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  getOrcamentoAdmin,
+  getOrcamentoUser,
+  podeVerEmpresa,
+  SEM_ACESSO,
+  SEM_ACESSO_ADMIN,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { defaultBudgetYear, isValidBudgetYear } from "@/lib/orcamento/years";
 
@@ -27,8 +33,10 @@ export async function getCompaniesBudgetConfig(year?: number): Promise<{
   error?: string;
   needsMigration?: boolean;
 }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // LEITURA: é a lista de empresas do painel e o nome no cabeçalho do
+  // workspace. Admin-only aqui deixaria o painel vazio para gerente e diretor.
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
   const y = year && isValidBudgetYear(year) ? year : defaultBudgetYear();
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -59,7 +67,11 @@ export async function getCompaniesBudgetConfig(year?: number): Promise<{
     ]),
   );
 
-  const items: CompanyBudgetConfig[] = (companies ?? []).map((c) => {
+  const items: CompanyBudgetConfig[] = (companies ?? [])
+    // A consulta roda com service role (as policies de orcamento_* são
+    // admin-only): o recorte por empresa é aplicado aqui.
+    .filter((c) => podeVerEmpresa(user, c.id as string))
+    .map((c) => {
     const cfg = configByCompany.get(c.id as string);
     return {
       companyId: c.id as string,
@@ -75,7 +87,7 @@ export async function getCompaniesBudgetConfig(year?: number): Promise<{
 /** Liga/desliga o detalhamento por setor no orçamento de uma empresa, no ano. */
 export async function setOrcarPorSetor(companyId: string, year: number, value: boolean) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Empresa inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -110,7 +122,7 @@ export async function setOrcarPorSetor(companyId: string, year: number, value: b
  */
 export async function setUsarEmpresaEncargos(companyId: string, year: number, value: boolean) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Empresa inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -141,7 +153,7 @@ export async function setUsarEmpresaEncargos(companyId: string, year: number, va
  */
 export async function cloneOrcarPorSetorFromYear(fromYear: number, toYear: number) {
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!isValidBudgetYear(fromYear) || !isValidBudgetYear(toYear)) {
     return { error: "Ano do orçamento inválido." };
   }

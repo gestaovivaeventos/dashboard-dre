@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  autorizarEscrita,
+  autorizarLeitura,
+  podeEscreverNoSetor,
+  SEM_ACESSO_SETOR,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
@@ -148,14 +153,14 @@ export async function getMediaCategorias(
   /** Setor da tela. As categorias e os valores são os DESTE setor. */
   setorId: string | null = null,
 ): Promise<{ setup?: MediaSetup; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) {
     return { setup: { items: [], baseYear: year - 1, indices: [] } };
   }
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarLeitura(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
   const baseYear = year - 1;
 
   // Índices percentuais do ano do orçamento (para o seletor de correção).
@@ -269,7 +274,16 @@ export async function getMediaCategorias(
       (a.setorNome ?? "").localeCompare(b.setorNome ?? "", "pt-BR"),
   );
 
-  return { setup: { items, baseYear, indices } };
+  // Recorte do construtor restrito ("Gerente"): mesmo escolhendo "Todos os
+  // setores" na tela, ele só enxerga as linhas dos setores dele. Sem isto, a
+  // visão consolidada seria uma porta aberta para o orçamento dos colegas.
+  // `auth.setores === null` = vê tudo (admin, diretoria, Gerente Sócio).
+  const visiveis =
+    auth.setores === null
+      ? items
+      : items.filter((i) => i.setorId !== null && auth.setores!.includes(i.setorId));
+
+  return { setup: { items: visiveis, baseYear, indices } };
 }
 
 // ─── Cálculo / edição ─────────────────────────────────────────────────────────
@@ -284,12 +298,13 @@ export async function calcularMedia(
   /** Setor da tela — a linha do orçamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; item?: MediaCategoriaItem; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   const baseYear = year - 1;
   const realizados = await fetchRealizados(supabase, companyId, baseYear, [categoryCode]);
   const realizado = realizados.get(categoryCode) ?? REALIZADO_VAZIO;
@@ -299,6 +314,9 @@ export async function calcularMedia(
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
   if (alvo.error) return { error: alvo.error };
+  // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum.
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
 
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
@@ -345,12 +363,13 @@ export async function recalcularTodasMedias(
   year: number,
   setorId: string | null = null,
 ): Promise<{ ok?: true; atualizadas?: number; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   const cats = await fetchCategoriasMedia(supabase, companyId, year, setorId);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
@@ -365,6 +384,9 @@ export async function recalcularTodasMedias(
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
   if (alvo.error) return { error: alvo.error };
+  // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum.
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
 
   const rows = codes.map((code) => {
     const realizado = realizados.get(code) ?? REALIZADO_VAZIO;
@@ -404,8 +426,6 @@ export async function setMediaValor(
   /** Setor da tela — a linha do orçamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (valor != null && (!Number.isFinite(valor) || valor < 0)) {
@@ -413,10 +433,16 @@ export async function setMediaValor(
   }
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
   if (alvo.error) return { error: alvo.error };
+  // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum.
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
@@ -448,17 +474,21 @@ export async function setMediaIndice(
   /** Setor da tela — a linha do orçamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (indiceKey != null && !isIndiceKey(indiceKey)) return { error: "Índice inválido." };
 
   const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
   if (alvo.error) return { error: alvo.error };
+  // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum.
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,

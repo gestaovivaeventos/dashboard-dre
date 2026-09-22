@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoUser, podeVerEmpresa, SEM_ACESSO } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
@@ -206,10 +206,14 @@ export async function getPreviaOrcamento(
    */
   setorId?: string | null,
 ): Promise<{ data?: PreviaOrcamentoData; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // LEITURA: qualquer usuário do módulo, na empresa que ele alcança. O recorte
+  // por setor continua sendo escolha da tela (o construtor também precisa ver
+  // o total da empresa para saber onde o orçamento dele entra).
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!podeVerEmpresa(user, companyId)) return { error: SEM_ACESSO };
 
   const filtroSetor = setorEspecifico(setorId);
 

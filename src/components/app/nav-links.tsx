@@ -14,7 +14,7 @@ import {
 } from "@/components/app/navigation";
 import { ModuleTourButton } from "@/components/app/tour/module-tour-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { CtrlRole, DreRole, Segment, VbRole } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, OrcamentoPapel, Segment, VbRole } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 interface NavLinksProps {
@@ -29,6 +29,12 @@ interface NavLinksProps {
   vbRole?: VbRole | null;
   /** Módulo Caixa (grupo CAIXA). Concessão OU admin. */
   canCaixa?: boolean;
+  /**
+   * Papel no módulo Orçamento (grupo ORÇAMENTO); null sem acesso. É papel e não
+   * booleano porque "Configurações gerais" é admin-only dentro do módulo —
+   * mesma mecânica de vbRole/vbGestorOnly.
+   */
+  orcamentoPapel?: OrcamentoPapel | null;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -189,6 +195,7 @@ interface BuildInput {
   canContratos?: boolean;
   vbRole?: VbRole | null;
   canCaixa?: boolean;
+  orcamentoPapel?: OrcamentoPapel | null;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -234,6 +241,7 @@ function buildGroups({
   canContratos,
   vbRole,
   canCaixa,
+  orcamentoPapel,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -254,7 +262,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null, Boolean(canCaixa))) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null, Boolean(canCaixa), orcamentoPapel ?? null)) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -285,6 +293,7 @@ function isItemVisible(
   ctrlFullView?: boolean,
   vbRole: VbRole | null = null,
   canCaixa: boolean = false,
+  orcamentoPapel: OrcamentoPapel | null = null,
 ): boolean {
   // Item aberto a qualquer usuário logado (ex.: Chamados/Suporte). Vem antes de
   // tudo — ignora dreRole/ctrlRole e as whitelists de franqueado/CSC.
@@ -303,6 +312,14 @@ function isItemVisible(
   // é decidido ANTES de FRANQUEADO_NAV_KEYS/CSC_NAV_KEYS — o módulo é liberável
   // em qualquer perfil, e a whitelist deles esconderia o item.
   if (item.caixaAccess) return canCaixa;
+
+  // Orçamento: módulo próprio, concedido por usuário (ou admin). Como o
+  // Contratos e o Caixa, é decidido ANTES de FRANQUEADO_NAV_KEYS/CSC_NAV_KEYS,
+  // e fora do dreRole — o construtor do orçamento pode não ter o Financeiro.
+  if (item.orcamentoAccess) {
+    if (orcamentoPapel === null) return false;
+    return !item.orcamentoAdminOnly || orcamentoPapel === "admin";
+  }
 
   // CSC: cópia do franqueado + a tela "Validação Relatório".
   if (isCsc) return CSC_NAV_KEYS.has(item.key);
@@ -338,7 +355,8 @@ function isItemVisible(
     !item.viagensAccess &&
     !item.contratosAccess &&
     !item.vbAccess &&
-    !item.caixaAccess
+    !item.caixaAccess &&
+    !item.orcamentoAccess
   )
     return false;
   return dreOk || ctrlOk || caseOk || viagensOk;

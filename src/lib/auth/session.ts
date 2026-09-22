@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
+import { resolveOrcamentoPapel } from "@/lib/auth/orcamento";
 import { resolveVbRole } from "@/lib/auth/vb";
 import { hasSeenTour } from "@/lib/tour/seen";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
@@ -65,6 +66,15 @@ export function isVbGestor(ctx: SessionContext): boolean {
 
 export function hasCaixaAccess(ctx: SessionContext): boolean {
   return Boolean(ctx.modules?.caixa);
+}
+
+export function hasOrcamentoAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.orcamento);
+}
+
+/** Admin do módulo Orçamento (configuração, transições do ciclo). */
+export function isOrcamentoAdmin(ctx: SessionContext): boolean {
+  return ctx.modules?.orcamento?.papel === "admin";
 }
 
 // ─── Função principal ─────────────────────────────────────────────────────────
@@ -175,6 +185,14 @@ async function loadSessionContext(): Promise<SessionContext> {
   // Contratos, não o do VB) — ver @/lib/auth/caixa.
   const canCaixa = hasCaixaGrant(moduleRoleRows) || isAdminUser;
 
+  // Módulo Orçamento: concessão em user_module_roles OU admin, com o PAPEL
+  // derivado do perfil (gerente constrói, diretor valida) — ver
+  // @/lib/auth/orcamento. Perfil não elegível com a marca concedida não entra.
+  const orcamentoPapel = resolveOrcamentoPapel(
+    userProfile ?? (isAdminUser ? "admin" : null),
+    moduleRoleRows,
+  );
+
   const sectorIds = (
     (profileRow.user_sectors as Array<{ sector_id: string }> | null) ?? []
   ).map((s) => s.sector_id);
@@ -203,6 +221,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     can_contratos: canContratos,
     vb_role: vbRole,
     can_caixa: canCaixa,
+    orcamento_papel: orcamentoPapel,
     // Tour guiado de boas-vindas: linha em user_module_roles (module='tour'),
     // pelo mesmo motivo do módulo Contratos — sem coluna nova, sem migration.
     tour_seen: hasSeenTour(moduleRoleRows),
@@ -225,6 +244,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     contratos: canContratos ? {} : null,
     vb: vbRole ? { role: vbRole } : null,
     caixa: canCaixa ? {} : null,
+    orcamento: orcamentoPapel ? { papel: orcamentoPapel } : null,
   };
 
   return { supabase, user, profile, modules };

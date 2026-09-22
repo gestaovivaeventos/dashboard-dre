@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getCurrentSessionContext } from "@/lib/auth/session";
+import { getOrcamentoUser } from "@/lib/orcamento/auth";
 import { getCompaniesBudgetConfig } from "@/lib/orcamento/actions/config";
 import { OrcamentoPainel } from "@/components/orcamento/orcamento-painel";
 
@@ -10,9 +10,11 @@ export const dynamic = "force-dynamic";
 // no workspace dela. O fluxo do módulo é por empresa — o analista trabalha uma
 // de cada vez, passando por todas as telas como abas.
 export default async function OrcamentoPainelPage() {
-  const { user, profile } = await getCurrentSessionContext();
-  if (!user) redirect("/login");
-  if (!profile || profile.profile !== "admin") redirect("/dashboard");
+  // Qualquer usuário do módulo entra: o painel lista as empresas que ELE
+  // alcança (o recorte vem de getCompaniesBudgetConfig). O destino da negativa
+  // é /home, não /dashboard — um gerente do Compras pode não ter o Financeiro.
+  const user = await getOrcamentoUser();
+  if (!user) redirect("/home");
 
   const { items, error, needsMigration } = await getCompaniesBudgetConfig();
   const companies = (items ?? []).map((c) => ({

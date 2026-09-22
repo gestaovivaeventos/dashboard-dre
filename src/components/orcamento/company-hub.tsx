@@ -100,10 +100,18 @@ export function CompanyHub({
   companyId,
   year,
   status,
+  isAdmin = false,
 }: {
   companyId: string;
   year: number;
   status?: OrcamentoStatusRaw;
+  /**
+   * Mostra a caixa "Configuração". As telas de config redefinem as PREMISSAS
+   * do orçamento (método por categoria, plano de cargos, encargos) e seguem
+   * admin-only — a rota é negada em access.ts e no layout de `config/`; aqui é
+   * só não oferecer um caminho que terminaria em redirect.
+   */
+  isAdmin?: boolean;
 }) {
   // Só os 4 métodos de despesa (VE ficam de fora do hub padrão).
   const metodos = METODOS.filter((m) => !m.ve);
@@ -155,13 +163,16 @@ export function CompanyHub({
           );
         })}
 
-        {/* Configuração da empresa — sub-hub com as seções de config por empresa. */}
-        <Tile
-          icon={SlidersHorizontal}
-          title="Configuração"
-          desc="Método por categoria, setores, plano de cargos e encargos."
-          href={workspaceConfigHref(companyId, year)}
-        />
+        {/* Configuração da empresa — sub-hub com as seções de config por
+            empresa. Admin-only (ver isAdmin acima). */}
+        {isAdmin && (
+          <Tile
+            icon={SlidersHorizontal}
+            title="Configuração"
+            desc="Método por categoria, setores, plano de cargos e encargos."
+            href={workspaceConfigHref(companyId, year)}
+          />
+        )}
       </div>
     </div>
   );

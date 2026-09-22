@@ -33,6 +33,7 @@ export default async function VbLayout({ children }: { children: React.ReactNode
   const canContratos = Boolean(modules.contratos);
   const vbRole = modules.vb?.role ?? null;
   const canCaixa = Boolean(modules.caixa);
+  const orcamentoPapel = modules.orcamento?.papel ?? null;
 
   const segments = await resolveUserSegments(supabase, {
     isAdmin: dreRole === "admin",
@@ -69,6 +70,7 @@ export default async function VbLayout({ children }: { children: React.ReactNode
       canContratos={canContratos}
       vbRole={vbRole}
       canCaixa={canCaixa}
+      orcamentoPapel={orcamentoPapel}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

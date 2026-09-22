@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { streamText } from "ai";
 
 import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
 import {
   montarPromptEntrevista,
   persistirConversaEntrevista,
@@ -48,8 +48,12 @@ function json(status: number, body: unknown): Response {
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return json(403, { error: "Acesso restrito a administradores." });
+  // Conduzir a entrevista é construir o orçamento: liberado a quem tem o
+  // módulo. O recorte por empresa/setor vale na hora de GRAVAR (as actions de
+  // planejamento), não na conversa — aqui não se escreve nada.
+  const user = await getOrcamentoUser();
+  if (!user) return json(403, { error: SEM_ACESSO });
+  const admin = { userId: user.userId };
 
   let body: ChatBody;
   try {

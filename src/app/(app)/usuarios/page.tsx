@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { UsersAdminManager } from "@/components/app/users-admin-manager";
 import { fetchCaixaGrantUserIds } from "@/lib/auth/caixa";
+import { fetchOrcamentoGrantUserIds } from "@/lib/auth/orcamento";
 import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -39,6 +40,8 @@ export default async function UsuariosPage() {
   const contratosUserIds = await fetchContratosGrantUserIds(adminClient);
   // Modulo Caixa: mesma ideia (ver @/lib/auth/caixa).
   const caixaUserIds = await fetchCaixaGrantUserIds(adminClient);
+  // Modulo Orcamento: mesma ideia (ver @/lib/auth/orcamento).
+  const orcamentoUserIds = await fetchOrcamentoGrantUserIds(adminClient);
 
   const companyById = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorById = new Map((sectors ?? []).map((s) => [s.id as string, s.name as string]));
@@ -80,6 +83,8 @@ export default async function UsuariosPage() {
       contratosUserIds.has(item.id as string) || item.profile === "validador_contrato",
     // Admin enxerga o Caixa sem a linha (modelo do Case/Contratos).
     can_caixa: caixaUserIds.has(item.id as string) || item.profile === "admin",
+    can_orcamento:
+      orcamentoUserIds.has(item.id as string) || item.profile === "admin",
     active: Boolean(item.active),
     company_ids: userCompanies.get(item.id as string) ?? [],
     sector_ids: userSectors.get(item.id as string) ?? [],

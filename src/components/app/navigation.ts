@@ -246,6 +246,14 @@ export interface NavItem {
    */
   caixaAccess?: boolean;
   /**
+   * Item do módulo Orçamento — visível para quem tem a concessão ou é admin
+   * (ver @/lib/auth/orcamento). Independe de dreRoles/ctrlRoles: o módulo é
+   * liberável a gerente e diretor, que podem não ter o Financeiro.
+   */
+  orcamentoAccess?: boolean;
+  /** Item só do papel admin do Orçamento (Configurações gerais). */
+  orcamentoAdminOnly?: boolean;
+  /**
    * Item visível a QUALQUER usuário logado (ex.: Chamados/Suporte). Ignora
    * dreRoles/ctrlRoles e as whitelists de franqueado/CSC.
    */
@@ -297,18 +305,22 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
   {
     // Módulo Orçamento — planejamento orçamentário (empresa × mês × categoria ×
-    // setor). Admin-only em todas as telas: o gate por `dreRoles: ["admin"]`
-    // esconde do menu, e /orcamento é bloqueado no access.ts para não-admins.
+    // setor). Deixou de ser admin-only: é concedido por usuário em "Módulos
+    // visíveis" e o PAPEL vem do perfil (gerente constrói, diretor valida) —
+    // ver @/lib/auth/orcamento. Por isso os itens usam `orcamentoAccess`, não
+    // `dreRoles`: quem constrói o orçamento pode não ter o módulo Financeiro.
     id: "orcamento",
     label: "ORÇAMENTO",
     items: [
       // O módulo é organizado POR EMPRESA: o "Painel" é a entrada onde se escolhe
       // a empresa; as telas de montagem (pessoal, média, …) viram abas do
       // workspace daquela empresa, sem itens soltos no menu.
-      { key: "orc-home", title: "Painel", icon: LayoutDashboard, scope: "global", href: "/orcamento", dreRoles: ["admin"] },
+      { key: "orc-home", title: "Painel", icon: LayoutDashboard, scope: "global", href: "/orcamento", orcamentoAccess: true },
       // Configurações GERAIS (globais, não por empresa) — hoje só os índices. As
       // configs por empresa viraram caixas dentro do workspace de cada empresa.
-      { key: "orc-config", title: "Configurações gerais", icon: Cog, scope: "global", href: "/orcamento/configuracoes-gerais", dreRoles: ["admin"] },
+      // Configurações gerais (índices, globais) segue ADMIN-ONLY mesmo para
+      // quem tem o módulo — espelha isOrcamentoConfigPath em access.ts.
+      { key: "orc-config", title: "Configurações gerais", icon: Cog, scope: "global", href: "/orcamento/configuracoes-gerais", orcamentoAccess: true, orcamentoAdminOnly: true },
     ],
   },
   {

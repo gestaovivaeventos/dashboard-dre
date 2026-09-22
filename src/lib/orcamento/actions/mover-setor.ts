@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  autorizarEscrita,
+  podeEscreverNoSetor,
+  SEM_ACESSO_SETOR,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores } from "@/lib/orcamento/setor-filtro";
@@ -51,8 +55,6 @@ export async function moverLinhaDeSetor(params: {
   /** Só para valor fixo, que tem N contratos por categoria. */
   linhaId?: string;
 }) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   const { companyId, year, metodo, categoryCode, origemSetorId, destinoSetorId, linhaId } = params;
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
@@ -66,6 +68,18 @@ export async function moverLinhaDeSetor(params: {
   if (destinoSetorId === origemSetorId) return { ok: true as const, movidas: 0 };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
+  // Mover é escrita nos DOIS lados: tirar da origem e pôr no destino. Conferir
+  // só um deles deixaria um gerente empurrar despesa para o setor do colega —
+  // ou puxar a dele para si.
+  if (
+    !podeEscreverNoSetor(auth.setores, origemSetorId) ||
+    !podeEscreverNoSetor(auth.setores, destinoSetorId)
+  ) {
+    return { error: SEM_ACESSO_SETOR };
+  }
 
   // O setor de destino tem de ser da MESMA empresa e ano — senão a linha sairia
   // do orçamento sem deixar rastro.
@@ -179,13 +193,14 @@ export async function removerLinhaDoSetor(params: {
   categoryCode: string;
   setorId: string;
 }) {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   const { companyId, year, metodo, categoryCode, setorId } = params;
   if (!companyId || !categoryCode || !setorId) return { error: "Dados inválidos." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  if (!podeEscreverNoSetor(auth.setores, setorId)) return { error: SEM_ACESSO_SETOR };
 
   const { error } = await supabase
     .from(TABELA[metodo])

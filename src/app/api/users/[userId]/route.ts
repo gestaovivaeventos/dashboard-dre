@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { setCaixaGrant } from "@/lib/auth/caixa";
+import { setOrcamentoGrant } from "@/lib/auth/orcamento";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -49,6 +50,8 @@ export async function PATCH(request: Request, { params }: Params) {
     can_contratos?: boolean;
     /** Módulo Caixa (user_module_roles, não coluna de users). */
     can_caixa?: boolean;
+    /** Módulo Orçamento (user_module_roles, não coluna de users). */
+    can_orcamento?: boolean;
     active?: boolean;
     /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
     sector_ids?: string[];
@@ -132,6 +135,14 @@ export async function PATCH(request: Request, { params }: Params) {
   // acesso caso o perfil mude depois. `undefined` não mexe em nada.
   if (body.can_caixa !== undefined) {
     const { error } = await setCaixaGrant(adminClient, params.userId, body.can_caixa);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+  }
+
+  // ── Sync módulo Orçamento ──
+  // Mesma mecânica do Caixa (ver @/lib/auth/orcamento). A linha só CONCEDE o
+  // módulo: o papel (construtor × validador) vem do perfil do usuário.
+  if (body.can_orcamento !== undefined) {
+    const { error } = await setOrcamentoGrant(adminClient, params.userId, body.can_orcamento);
     if (error) return NextResponse.json({ error }, { status: 400 });
   }
 

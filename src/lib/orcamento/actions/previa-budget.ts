@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoAdmin, SEM_ACESSO_ADMIN } from "@/lib/orcamento/auth";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
@@ -41,8 +41,11 @@ export async function enviarPreviaParaOrcamento(
   companyId: string,
   year: number,
 ): Promise<{ resultado?: EnvioBudgetResultado; error?: string; needsMigration?: boolean }> {
+  // Publicar no Budget e Forecast é ato de ADMIN: manda o orçamento para fora
+  // do módulo, onde vira a base de comparação com o realizado. (No ciclo
+  // completo isso vira a fase "publicado" — ver a spec do ciclo.)
   const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 

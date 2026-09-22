@@ -16,7 +16,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { BI_VALIDATION_PATH } from "@/lib/auth/bi-validation";
 import type { ActiveModule } from "@/lib/context/active-context";
 import type { ModuleDefinition } from "@/lib/context/modules";
-import type { CtrlRole, DreRole, Segment, UserProfileType, VbRole } from "@/lib/supabase/types";
+import type { CtrlRole, DreRole, OrcamentoPapel, Segment, UserProfileType, VbRole } from "@/lib/supabase/types";
 import { tourAudienceForProfile, type TourModuleId } from "@/lib/tour";
 
 interface AppShellProps {
@@ -35,6 +35,8 @@ interface AppShellProps {
   vbRole?: VbRole | null;
   /** Módulo Caixa — grupo CAIXA no menu. Concessão OU admin. */
   canCaixa?: boolean;
+  /** Papel no módulo Orçamento — grupo ORÇAMENTO no menu; null sem acesso. */
+  orcamentoPapel?: OrcamentoPapel | null;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -75,6 +77,7 @@ export function AppShell({
   canContratos,
   vbRole,
   canCaixa,
+  orcamentoPapel,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -142,6 +145,7 @@ export function AppShell({
         canContratos,
         vbRole,
         canCaixa,
+        orcamentoPapel,
         segments,
         activeSegmentSlug,
         contractsOnly,
@@ -159,6 +163,7 @@ export function AppShell({
       canContratos,
       vbRole,
       canCaixa,
+      orcamentoPapel,
       segments,
       activeSegmentSlug,
       contractsOnly,
@@ -179,6 +184,7 @@ export function AppShell({
       canContratos={canContratos}
       vbRole={vbRole}
       canCaixa={canCaixa}
+      orcamentoPapel={orcamentoPapel}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

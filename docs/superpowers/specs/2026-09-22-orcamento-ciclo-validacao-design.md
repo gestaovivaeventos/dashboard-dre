@@ -1,7 +1,11 @@
 # Orçamento — ciclo construção → validação → retorno (desenho)
 
-Data: 2026-09-22. Status: decisões tomadas em conversa (21–22/09/2026); nada
-implementado. Esta spec é o contrato da implementação.
+Data: 2026-09-22. Esta spec é o contrato da implementação.
+
+**Status por fase**: **A (acesso por papel) — IMPLEMENTADA em 22/09/2026**
+(lint, 177 testes e build verdes; a migration de RLS
+`20260922120000_orcamento_acesso_por_papel.sql` está escrita mas **ainda não
+aplicada** — ver §11). B, C, D, E, F: não começadas.
 
 ## 1. Contexto
 
@@ -560,19 +564,30 @@ snapshot por setor no *Entregar setor* (tipo `entrega`), que só existiria para
 essa distinção. Quem quiser saber quem mexeu em quê durante a construção lê a
 trilha, que guarda autor e papel de cada alteração.
 
-## 11. Verificar antes de começar
+## 11. Estado do banco (conferido em 22/09/2026)
 
-1. **Estado real das migrations no Supabase.** Várias de julho/setembro estão
-   anotadas como não aplicadas (`20260730140000`, `20260731120000`,
-   `20260731130000`, `20260731140000`, `20260731150000`, `20260731160000`,
-   `20260904120000`, `20260904130000`). Como `schema_migrations` guarda a data
-   de **aplicação**, casar **por nome**. A fase B depende de `setor_id` em todos
-   os métodos, que é justamente a `20260904120000`.
-2. **`ctrl_sector_id` preenchido** em todo setor de orçamento ativo — sem a
-   ponte o gerente não vê nada, e o sintoma é uma tela vazia sem erro.
-3. **Setores "Não atribuído"** criados pela `20260904120000`: decidir se entram
-   no ciclo (sugestão: entram, mas com aviso — é dívida visível de propósito, e
-   um orçamento inteiro pousado ali não pode ser entregue por ninguém).
+Sondado contra produção com script de schema (`select` por tabela/coluna,
+classificando 42P01/42703 — a mesma técnica do `isSchemaMissing` do app):
+
+1. **Todas as migrations do módulo estão APLICADAS**, inclusive as que notas
+   antigas marcavam como pendentes (`20260730140000`, `20260731120000/130000/
+   140000/150000/160000`, `20260904120000`, `20260904130000`) e os três RPCs
+   (`orcamento_status_por_empresa`, `orcamento_media_realizado`,
+   `orcamento_planejamento_realizado_itens` na assinatura de 4 args). A fase B
+   não está bloqueada por schema.
+2. **A migration de RLS da fase A (`20260922120000`) NÃO está aplicada.** Ela é
+   a segunda linha de defesa da LEITURA: o módulo lê e grava com service role
+   depois do guard da action, então a fase A funciona sem ela. Aplicar quando
+   houver MCP do Supabase, `SUPABASE_ACCESS_TOKEN` ou CLI linkada.
+3. **A ponte com o Compras está VAZIA**: os 6 setores ativos (VE Franqueadora e
+   a empresa de teste) estão todos sem `ctrl_sector_id`. Enquanto isso, um
+   gerente entra no módulo e não vê despesa nenhuma — de propósito (falha para
+   o lado de esconder). O aviso na tela de Setores foi construído na fase A
+   justamente para isso; **preencher o vínculo é pré-requisito operacional**
+   para liberar o primeiro gerente.
+4. **Setores "Não atribuído"**: entram no ciclo, mas nenhum construtor grava
+   neles (`podeEscreverNoSetor` recusa linha sem dono) — dívida visível de
+   propósito.
 
 ## 12. Riscos conhecidos
 

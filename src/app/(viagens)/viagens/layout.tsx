@@ -25,6 +25,7 @@ export default async function ViagensLayout({ children }: { children: React.Reac
   const canContratos = Boolean(modules.contratos);
   const vbRole = modules.vb?.role ?? null;
   const canCaixa = Boolean(modules.caixa);
+  const orcamentoPapel = modules.orcamento?.papel ?? null;
 
   // Segmentos para o shell — fonte única compartilhada (resolveUserSegments):
   // admin vê todos; os demais recebem a UNIÃO de user_segment_access com os
@@ -62,6 +63,7 @@ export default async function ViagensLayout({ children }: { children: React.Reac
       canContratos={canContratos}
       vbRole={vbRole}
       canCaixa={canCaixa}
+      orcamentoPapel={orcamentoPapel}
       segments={segments}
       activeModule={activeModule}
       availableModules={availableModules}

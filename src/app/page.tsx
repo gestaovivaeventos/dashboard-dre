@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { defaultLandingFor } from "@/lib/auth/access";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { hasContratosGrant } from "@/lib/auth/contratos";
+import { canAccessOrcamento } from "@/lib/auth/orcamento";
 import { hasVbGrant } from "@/lib/auth/vb";
 import { createClient } from "@/lib/supabase/server";
 import type { UserProfileType } from "@/lib/supabase/types";
@@ -32,7 +33,7 @@ export default async function RootRouter() {
   const { data: profileRow } = await supabase
     .from("users")
     .select(
-      "profile, active, contracts_only, can_financeiro, can_compras, can_case, user_module_roles!user_module_roles_user_id_fkey(module)",
+      "profile, active, contracts_only, can_financeiro, can_compras, can_case, user_module_roles!user_module_roles_user_id_fkey(module, role)",
     )
     .eq("id", user.id)
     .maybeSingle<{
@@ -42,7 +43,7 @@ export default async function RootRouter() {
       can_financeiro: boolean | null;
       can_compras: boolean | null;
       can_case: boolean | null;
-      user_module_roles: Array<{ module: string | null }> | null;
+      user_module_roles: Array<{ module: string | null; role: string | null }> | null;
     }>();
 
   // Sem profile (signup ainda não materializado) ou inativo → /pendente.
@@ -60,6 +61,8 @@ export default async function RootRouter() {
   const canVb = hasVbGrant(profileRow.user_module_roles);
   const canCaixa =
     hasCaixaGrant(profileRow.user_module_roles) || userProfile === "admin";
+  // Módulo Orçamento: concessão + perfil elegível, ou admin.
+  const canOrcamento = canAccessOrcamento(userProfile, profileRow.user_module_roles);
 
   redirect(
     defaultLandingFor(
@@ -74,6 +77,7 @@ export default async function RootRouter() {
       canContratos,
       canVb,
       canCaixa,
+      canOrcamento,
     ),
   );
 }

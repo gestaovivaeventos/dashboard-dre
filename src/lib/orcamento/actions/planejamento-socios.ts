@@ -5,7 +5,12 @@ import { generateText, type ModelMessage } from "ai";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  autorizarEscrita,
+  autorizarLeitura,
+  podeEscreverNoSetor,
+  SEM_ACESSO_SETOR,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
@@ -760,10 +765,12 @@ export async function getPlanejamentoSocios(
   /** Setor da tela: cada categoria é planejada por setor. */
   setorId: string | null = null,
 ): Promise<{ items?: PlanejamentoListItem[]; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId) return { items: [] };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const authLeitura = await autorizarLeitura(supabaseAuth, companyId, year);
+  if (!authLeitura.ok) return { error: authLeitura.error };
 
   const cats = await getCategoriaMetodo(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
@@ -868,10 +875,12 @@ export async function getPlanejamentoCategoria(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ detalhe?: PlanejamentoCategoriaDetalhe; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const authLeitura = await autorizarLeitura(supabaseAuth, companyId, year);
+  if (!authLeitura.ok) return { error: authLeitura.error };
 
   const cats = await getCategoriaMetodo(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
@@ -1065,8 +1074,10 @@ export async function enviarMensagemPlanejamento(
   error?: string;
   needsMigration?: boolean;
 }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1158,6 +1169,9 @@ export async function enviarMensagemPlanejamento(
   // A chave do upsert inclui o setor, e NULL nunca casa com a linha anterior —
   // gravaria uma conversa nova a cada turno. Ver setor-gravacao.ts.
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
 
   const payload: Record<string, unknown> = {
@@ -1214,8 +1228,11 @@ export async function montarPromptEntrevista(
   error?: string;
   needsMigration?: boolean;
 }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // Monta o prompt da entrevista — não grava nada, mas exige permissão de
+  // ESCRITA: conduzir a entrevista é construir o orçamento daquele setor.
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -1260,8 +1277,10 @@ export async function persistirConversaEntrevista(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1271,6 +1290,9 @@ export async function persistirConversaEntrevista(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase.from("orcamento_planejamento_socios").upsert(
     {
@@ -1310,8 +1332,10 @@ export async function salvarBasePlanejamento(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1328,6 +1352,9 @@ export async function salvarBasePlanejamento(
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
 
   const { error: catErr } = await supabase.from("orcamento_planejamento_socios").upsert(
@@ -1390,8 +1417,10 @@ export async function confirmarPropostaPlanejamento(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1401,6 +1430,9 @@ export async function confirmarPropostaPlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1435,8 +1467,10 @@ export async function editarPropostaPlanejamento(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1449,6 +1483,9 @@ export async function editarPropostaPlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1479,8 +1516,10 @@ export async function reiniciarConversaPlanejamento(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1490,6 +1529,9 @@ export async function reiniciarConversaPlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -1519,8 +1561,10 @@ export async function removerPlanejamentoSocios(
   /** Setor da tela — a linha de planejamento pertence a ele. */
   setorId: string | null = null,
 ): Promise<{ ok?: true; error?: string }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  const supabaseAuth = createAdminClientIfAvailable() ?? (await createClient());
+  const auth = await autorizarEscrita(supabaseAuth, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  const admin = { userId: auth.user.userId };
   // "Todos os setores" é só leitura: sem setor de destino a linha nasceria órfã.
   if (isTodosSetores(setorId)) {
     return { error: "Escolha um setor para editar — \"Todos os setores\" é só leitura." };
@@ -1530,6 +1574,9 @@ export async function removerPlanejamentoSocios(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, admin.userId);
+  // O destino só é conhecido aqui ("Todos os setores" cai no balde "Não
+  // atribuído", que não pertence a gerente nenhum).
+  if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
   if (alvo.error) return { error: alvo.error };
   const { error: itemErr } = await supabase
     .from("orcamento_planejamento_socios_itens")

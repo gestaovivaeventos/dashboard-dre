@@ -3,10 +3,13 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 
 export const dynamic = "force-dynamic";
 
-// Aba "Planejamento dos gestores" do workspace. Empresa + ano vêm da rota; o guard
-// admin fica no layout pai. As categorias marcadas com este método são orçadas
-// por uma entrevista conduzida por IA (Gemini). A base de pagamentos do ano
-// anterior é visível só para admin (o construtor do orçamento).
+// Aba "Planejamento dos gestores" do workspace. Empresa + ano vêm da rota; o
+// guard do módulo fica no layout pai. As categorias marcadas com este método
+// são orçadas por uma entrevista conduzida por IA.
+//
+// `isAdmin` continua governando a ETAPA 1 (a curadoria da base de pagamentos do
+// ano anterior, semeada da Omie): quem monta a base é o administrador; o gestor
+// entra pela entrevista. Isso NÃO é o guard de acesso — é o recorte da tela.
 export default async function WorkspacePlanejamentoSociosPage({
   params,
 }: {

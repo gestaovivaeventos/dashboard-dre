@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoUser, podeVerEmpresa } from "@/lib/orcamento/auth";
 import { isValidBudgetYear, defaultBudgetYear } from "@/lib/orcamento/years";
 import type { OrcamentoStatusRaw } from "@/lib/orcamento/status";
 
@@ -15,8 +15,8 @@ import type { OrcamentoStatusRaw } from "@/lib/orcamento/status";
 export async function getOrcamentoStatus(
   year?: number,
 ): Promise<{ statuses: Record<string, OrcamentoStatusRaw> }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { statuses: {} };
+  const user = await getOrcamentoUser();
+  if (!user) return { statuses: {} };
   const y = year && isValidBudgetYear(year) ? year : defaultBudgetYear();
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
@@ -57,6 +57,9 @@ export async function getOrcamentoStatus(
   }
 
   const statuses: Record<string, OrcamentoStatusRaw> = {};
+  // O RPC é agregado e roda como service_role: soma TODAS as empresas. O
+  // recorte por empresa é aplicado aqui — sem isto o painel de um gerente
+  // mostraria o andamento de unidades que ele não alcança.
   for (const row of rpc.data as Array<{
     company_id: string;
     colaboradores: number | null;
@@ -64,6 +67,7 @@ export async function getOrcamentoStatus(
     media_com_valor: number | null;
     metodo_count: number | null;
   }>) {
+    if (!podeVerEmpresa(user, row.company_id)) continue;
     statuses[row.company_id] = {
       colaboradores: Number(row.colaboradores ?? 0),
       mediaTotal: Number(row.media_total ?? 0),

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getCurrentSessionContext } from "@/lib/auth/session";
+import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { getIndices } from "@/lib/orcamento/actions/indices";
 import { IndicesManager } from "@/components/orcamento/indices-manager";
 
@@ -10,9 +10,9 @@ export const dynamic = "force-dynamic";
 // de correção (nacionais, por ano). As configs por empresa vivem dentro do
 // workspace de cada empresa (Orçamento → empresa → Configuração).
 export default async function ConfiguracoesGeraisPage() {
-  const { user, profile } = await getCurrentSessionContext();
-  if (!user) redirect("/login");
-  if (!profile || profile.profile !== "admin") redirect("/dashboard");
+  // Índices valem para TODAS as empresas: continua admin-only mesmo para quem
+  // tem o módulo (espelha isOrcamentoConfigPath em @/lib/auth/access).
+  if (!(await getOrcamentoAdmin())) redirect("/orcamento");
 
   const { items, error, needsMigration } = await getIndices();
 
