@@ -7,6 +7,8 @@ import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
+import { contarPendenciasOrcamento } from "@/lib/orcamento/actions/retorno";
+import { ORCAMENTO_NAV_KEY_PAINEL } from "@/lib/auth/orcamento";
 
 export default async function ProtectedLayout({
   children,
@@ -67,6 +69,12 @@ export default async function ProtectedLayout({
     ? await getUnreadNotificationsCount(profile.id)
     : 0;
 
+  // Contador do Orçamento: o que espera ESTE usuário (solicitação da diretoria
+  // para o construtor; pedido de liberação para a diretoria). Acessório — a
+  // função engole qualquer erro e devolve 0, porque o menu não pode quebrar por
+  // causa de um número.
+  const pendenciasOrcamento = orcamentoPapel ? await contarPendenciasOrcamento() : 0;
+
   return (
     <AppShell
       userName={userName}
@@ -92,6 +100,7 @@ export default async function ProtectedLayout({
       // para quem já tem o módulo — não concede o módulo a ninguém.
       ctrlFullView={ctrlRoles.length > 0 && hasCtrlFullView(userEmail)}
       unreadNotifications={unreadNotifications}
+      navBadges={{ [ORCAMENTO_NAV_KEY_PAINEL]: pendenciasOrcamento }}
       // Perfil unificado: o tour guiado usa para escolher a variante de texto
       // dos passos que mudam conforme quem lê (os cinco perfis do Compras).
       userProfile={profile?.profile ?? null}

@@ -1226,6 +1226,12 @@ export async function getRequests(filters?: {
   //     deste escopo (tela de Requisições) a visibilidade é outra: própria para
   //     o solicitante, por setor para gerente/diretor — ver o bloco abaixo.
   approvalScope?: boolean;
+  // Escopo da tela de RELATÓRIOS. Regra pedida pelo dono do projeto: todos os
+  // usuários enxergam só os setores pelos quais respondem (mesma noção de
+  // "permissão por setor" das outras telas: restrição nominal ?? user_sectors);
+  // DIRETOR e ADMIN (e a visão completa nominal) veem TODOS. Sem setor vinculado
+  // e sem ser global → não vê nada (falha fechada). Exclusivo com approvalScope.
+  reportScope?: boolean;
 }) {
   const ctx = await requireCtrlRole(
     "solicitante",
@@ -1330,7 +1336,30 @@ export async function getRequests(filters?: {
   // Escopo efetivo — devolvido à tela para rotular a listagem.
   let scope: RequestsVisibilityScope = "todas";
 
-  if (!filters?.approvalScope) {
+  if (filters?.reportScope) {
+    // Tela de Relatórios: cada usuário vê só os setores pelos quais responde;
+    // DIRETOR, ADMIN e a visão completa nominal veem TODOS. A restrição nominal
+    // (ex.: Régis, vinculado a todos os setores para CRIAR, mas com alçada só em
+    // alguns) SUBSTITUI os vínculos — é ela que diz "os setores dele".
+    const reportGlobal =
+      fullView || ctx.ctrlRoles.some((r) => ["diretor", "admin"].includes(r));
+    if (reportGlobal) {
+      scope = "todas";
+    } else {
+      const restriction = approverSectorRestrictionFor(ctx);
+      const sectorIds = restriction ? await sectorIdsByName(restriction) : ctx.sectorIds;
+      if (sectorIds.length > 0) {
+        const rateioIds = await rateioReqIdsForSectors(sectorIds);
+        query = query.or(sectorOrRateio(sectorIds, rateioIds));
+        scope = "setores";
+      } else {
+        // Sem permissão de setor → não mostra nada (falha fechada, mesmo padrão
+        // do bloco de alçada abaixo).
+        query = query.in("sector_id", []);
+        scope = "setores";
+      }
+    }
+  } else if (!filters?.approvalScope) {
     if (ctx.ctrlRoles.includes("admin") || fullView) {
       scope = "todas";
     } else if (isSectorResponsible) {

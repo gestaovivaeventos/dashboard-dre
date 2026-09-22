@@ -28,6 +28,8 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { getPreviaOrcamento } from "@/lib/orcamento/actions/previa-orcamento";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { publicarOrcamentoNoBudget } from "@/lib/orcamento/actions/publicar";
+import { avisarTransicao } from "@/lib/orcamento/notificacoes";
 
 const db = () => createAdminClientIfAvailable();
 
@@ -314,6 +316,13 @@ export interface TransicaoResultado {
   versaoTotalAno?: number;
   /** Linhas gravadas em orcamento_versao_linhas (conferência). */
   versaoLinhas?: number;
+  /** Só na transição "publicar": o que foi para o Budget e Forecast. */
+  publicacao?: {
+    contas: number;
+    totalAno: number;
+    celulasOrcamento: number;
+    conflitoComPlanilha: boolean;
+  };
 }
 
 /**
@@ -365,6 +374,16 @@ export async function executarTransicao(
     });
     if (snap.error) return { error: snap.error };
     versao = snap.versao;
+  }
+
+  // ── Publica no Budget e Forecast, quando é esta a transição ──────────────
+  // ANTES de mudar o estado: se a publicação falhar, o ciclo não deve dizer
+  // "publicado" — o Budget e o módulo passariam a contar histórias diferentes.
+  let publicacao: Awaited<ReturnType<typeof publicarOrcamentoNoBudget>>["resultado"];
+  if (transicao === "publicar") {
+    const pub = await publicarOrcamentoNoBudget(companyId, year);
+    if (pub.error) return { error: pub.error };
+    publicacao = pub.resultado;
   }
 
   // ── Move o estado ────────────────────────────────────────────────────────
@@ -423,11 +442,43 @@ export async function executarTransicao(
     // ainda estava no estado anterior.
     fase: faseDoEstado(ciclo.estado),
     antes: { estado: ciclo.estado, rodada: ciclo.rodada },
-    depois: { estado: passo.estado, rodada: novaRodada },
+    depois: {
+      estado: passo.estado,
+      rodada: novaRodada,
+      ...(publicacao
+        ? { contas_publicadas: publicacao.contas, total_publicado: publicacao.totalAno }
+        : {}),
+    },
     motivo: motivo ?? null,
     autorId: user.userId,
     autorPapel: user.papel,
   });
+
+  // Aviso por e-mail — best-effort: a transição já aconteceu e é o fato; um
+  // Resend fora do ar não pode desfazê-la nem devolver erro a quem clicou.
+  try {
+    const { data: empresa } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", companyId)
+      .maybeSingle();
+    const { data: autor } = await supabase
+      .from("users")
+      .select("name, email")
+      .eq("id", user.userId)
+      .maybeSingle();
+    await avisarTransicao({
+      companyId,
+      companyName: (empresa?.name as string) ?? "empresa",
+      year,
+      transicao,
+      estadoNovo: passo.estado,
+      autorNome: (autor?.name as string) ?? (autor?.email as string) ?? null,
+      motivo: motivo ?? null,
+    });
+  } catch (erro) {
+    console.error("[orcamento] aviso de transição falhou:", erro);
+  }
 
   revalidatePath(`/orcamento/empresa/${companyId}/${year}`);
   revalidatePath("/orcamento");
@@ -437,6 +488,16 @@ export async function executarTransicao(
       rodada: novaRodada,
       ...(versao
         ? { versaoId: versao.id, versaoTotalAno: versao.totalAno, versaoLinhas: versao.linhas }
+        : {}),
+      ...(publicacao
+        ? {
+            publicacao: {
+              contas: publicacao.contas,
+              totalAno: publicacao.totalAno,
+              celulasOrcamento: publicacao.celulasOrcamento,
+              conflitoComPlanilha: publicacao.conflitoComPlanilha,
+            },
+          }
         : {}),
     },
   };

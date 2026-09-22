@@ -18,7 +18,7 @@ export const MANUAL_SUBTITLE =
   "Requisições, aprovações e contas a pagar no Control Hub";
 export const MANUAL_ORG = "Grupo Viva · Control Hub";
 export const MANUAL_VERSION = "1.0";
-export const MANUAL_UPDATED_AT = "21/09/2026";
+export const MANUAL_UPDATED_AT = "22/09/2026";
 
 // ─── Perfis (público-alvo de cada seção) ─────────────────────────────────────
 
@@ -621,7 +621,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "p",
         text:
-          "A tela **Relatórios** dá a visão consolidada: filtre por qualquer coluna, ordene pelo cabeçalho e exporte em XLSX para análise fora do sistema.",
+          "A tela **Relatórios** dá a visão consolidada: filtre por qualquer coluna, ordene pelo cabeçalho e exporte em XLSX para análise fora do sistema. Você vê apenas os setores pelos quais responde (os mesmos da tela de Aprovações/Requisições); diretor e administrador veem todos os setores.",
       },
     ],
   },

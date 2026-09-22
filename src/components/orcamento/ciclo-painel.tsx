@@ -35,6 +35,11 @@ export function CicloPainel({
   const [erro, setErro] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<CicloTransicao | null>(null);
   const [motivo, setMotivo] = useState("");
+  const [publicado, setPublicado] = useState<{
+    contas: number;
+    totalAno: number;
+    conflitoComPlanilha: boolean;
+  } | null>(null);
 
   const entregues = ciclo.entregas.filter((e) => e.entregueEm).length;
   const totalSetores = ciclo.entregas.length;
@@ -76,6 +81,13 @@ export function CicloPainel({
           rodada: res.resultado!.rodada,
           acoes: [],
         }));
+        if (res.resultado.publicacao) {
+          setPublicado({
+            contas: res.resultado.publicacao.contas,
+            totalAno: res.resultado.publicacao.totalAno,
+            conflitoComPlanilha: res.resultado.publicacao.conflitoComPlanilha,
+          });
+        }
       }
     });
   }
@@ -195,6 +207,27 @@ export function CicloPainel({
         <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</div>
       )}
 
+      {publicado && (
+        <div className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-sm">
+          <p className="font-medium">
+            Publicado no Budget e Forecast: {publicado.contas} conta(s),{" "}
+            {publicado.totalAno.toLocaleString("pt-BR", {
+              style: "currency",
+              currency: "BRL",
+              maximumFractionDigits: 0,
+            })}{" "}
+            no ano.
+          </p>
+          {publicado.conflitoComPlanilha && (
+            <p className="text-amber-700 dark:text-amber-500">
+              Atenção: existe orçamento importado por <strong>planilha</strong> neste mesmo ano.
+              As duas origens <strong>somam</strong> no Budget — remova uma delas em Mapeamento se
+              não for isso o esperado.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Confirmação da transição. Enviar para validação com setor pendente é
           possível de propósito — mas o aviso diz quantos e quais. */}
       {confirmando && (
@@ -229,6 +262,14 @@ export function CicloPainel({
             <p className="text-xs text-muted-foreground">
               O orçamento será <strong>congelado numa versão</strong> e ficará somente leitura para
               quem o montou, até a diretoria concluir a validação.
+            </p>
+          )}
+          {confirmando === "publicar" && (
+            <p className="text-xs text-muted-foreground">
+              Todo o orçamento (pessoal, média, valor fixo e planejamento) vai para o{" "}
+              <strong>Budget e Forecast</strong>, substituindo a publicação anterior deste
+              módulo. Uma planilha de orçamento importada no mesmo ano continua valendo e{" "}
+              <strong>soma</strong> — o aviso aparece depois de publicar, se for o caso.
             </p>
           )}
           {confirmando === "concluir" && (

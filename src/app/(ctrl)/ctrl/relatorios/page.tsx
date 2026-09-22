@@ -1,53 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
-import { createClient } from "@/lib/supabase/server";
+import { getRequests } from "@/lib/ctrl/actions/requests";
 import { RelatoriosClient } from "@/components/ctrl/relatorios-client";
-
-async function getRelatorioData(params: {
-  sectorId?: string;
-  status?: string;
-  monthFrom?: number;
-  monthTo?: number;
-  year?: number;
-}) {
-  const supabase = await createClient();
-
-  let query = supabase
-    .from("ctrl_requests")
-    .select(`
-      id,
-      request_number,
-      title,
-      description,
-      amount,
-      status,
-      due_date,
-      created_at,
-      payment_method,
-      reference_month,
-      reference_year,
-      paying_company,
-      sector_id,
-      ctrl_sectors(name),
-      ctrl_expense_types(name),
-      ctrl_suppliers(name),
-      creator:users!ctrl_requests_created_by_fkey(name, email),
-      approver:users!ctrl_requests_approved_by_fkey(name, email)
-    `)
-    .is("deleted_at", null) // exclui requisições excluídas logicamente
-    .order("created_at", { ascending: false });
-
-  if (params.sectorId) query = query.eq("sector_id", params.sectorId);
-  if (params.status) query = query.eq("status", params.status);
-  if (params.year) query = query.eq("reference_year", params.year);
-  if (params.monthFrom) query = query.gte("reference_month", params.monthFrom);
-  if (params.monthTo) query = query.lte("reference_month", params.monthTo);
-
-  const { data, error } = await query.limit(1000);
-  if (error) return { error: error.message };
-  return { requests: data ?? [] };
-}
 
 export default async function RelatoriosPage() {
   const ctx = await getCtrlUser();
@@ -57,8 +12,11 @@ export default async function RelatoriosPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const requestsResult = await getRelatorioData({});
-  const requests = requestsResult.requests ?? [];
+  // Visibilidade por SETOR — fonte única em getRequests (mesma regra das telas
+  // de Requisições e Aprovações): cada usuário vê os relatórios só dos setores
+  // pelos quais responde; diretor, admin e a visão completa nominal veem todos.
+  const result = await getRequests({ reportScope: true });
+  const requests = "requests" in result ? result.requests : [];
 
   return (
     <div className="space-y-6">

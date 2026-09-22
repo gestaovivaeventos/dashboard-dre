@@ -20,3 +20,24 @@ export const PREVIA_BUDGET_PREFIXO = "Pessoal — ";
 export function rotuloOrcamento(labelDaLinha: string): string {
   return `${PREVIA_BUDGET_PREFIXO}${labelDaLinha}`;
 }
+
+// ─── Publicação do orçamento COMPLETO (os quatro métodos) ────────────────────
+// Um arquivo `"use server"` só pode exportar funções async, então estas duas
+// constantes moram aqui, no módulo puro, junto das do pessoal.
+
+/** Origem das linhas cruas da publicação completa. Convive com 'planilha'. */
+export const ORCAMENTO_BUDGET_SOURCE = "orcamento";
+
+export const ORCAMENTO_BUDGET_PREFIXO = "Orçamento — ";
+
+/**
+ * Rótulo determinístico de uma conta da DRE.
+ *
+ * Diferente do pessoal, a publicação completa é POR CONTA, não por linha da
+ * prévia: a Prévia já resolveu categoria → conta com o mapeamento do Financeiro,
+ * e refazer esse trabalho em `budget_account_mappings` seria pedir o mesmo
+ * cadastro duas vezes. O rótulo só precisa ser estável e inconfundível.
+ */
+export function rotuloDaConta(code: string, name: string): string {
+  return `${ORCAMENTO_BUDGET_PREFIXO}${code} ${name}`.trim();
+}

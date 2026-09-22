@@ -12,7 +12,44 @@ Data: 2026-09-22. Esta spec é o contrato da implementação.
 - **C (validação) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e build
   verdes), com o filtro de item cancelado ligado junto, como combinado.
 - **D (retorno) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e build verdes).
-- E, F: não começadas.
+- **E (publicação + avisos) — IMPLEMENTADA** em 23/09/2026 (lint, 220 testes e
+  build verdes). Com isso o ciclo está completo de ponta a ponta.
+- F: não começada (é a etapa futura, por decisão do dono do projeto).
+
+### O que a fase E mudou em relação ao que esta spec previa
+
+A spec dizia "a Prévia inteira vai para `budget_uploads_raw` com
+`source='orcamento'` → `reprocessBudgetEntriesForCompany`". O caminho está certo
+(escrever `budget_entries` direto seria destruído: o reprocessamento APAGA o ano
+e reconstrói do raw), mas faltava resolver o **mapeamento**:
+
+- o fluxo das planilhas é `label → budget_account_mappings → conta`, mapeado À
+  MÃO. Repeti-lo aqui exigiria mapear cada categoria outra vez, quando a Prévia
+  já resolveu a conta com `category_mapping` — dois cadastros para a mesma
+  decisão, e toda categoria sem o segundo cairia calada em `naoMapeados`;
+- então a publicação é **POR CONTA**, não por categoria: um rótulo
+  determinístico (`Orçamento — <code> <nome>`) por conta da DRE que recebeu
+  valor, com `dre_account_id` **já preenchido** (upsert, para acompanhar quando
+  a conta da categoria mudar no Mapeamento do Financeiro). O mapeamento virou
+  artefato derivado, e nada que a Prévia mostra fica fora do Budget;
+- só as **folhas de despesa** são publicadas — grupo é soma dos filhos e linha
+  calculada é fórmula sobre eles; publicar qualquer dos dois dobraria tudo;
+- a publicação **apaga também as linhas antigas de `source='pessoal'`**: a
+  Prévia completa já contém o pessoal, e deixar as duas origens somaria a folha
+  duas vezes;
+- **planilha no mesmo ano continua valendo e SOMA**. A publicação não bloqueia
+  (a decisão é do administrador) mas avisa, no diálogo e no resultado.
+
+**Avisos** (`src/lib/orcamento/notificacoes.ts`): envio/reenvio → diretores da
+empresa; validação concluída → construtores; concluído/publicado → todos.
+Reabrir não avisa (é conserto do admin, e um e-mail a cada reabertura ensina a
+ignorar os outros). Destinatário resolvido **no servidor**, cruzando
+`user_company_access` com perfil e concessão do módulo. Best-effort: falha de
+e-mail não derruba a transição.
+
+**Contador no menu**: pendências que esperam ESTE usuário — solicitação da
+diretoria para o construtor, pedido de liberação para a diretoria. Item travado
+não entra: travado é estado, não tarefa, e o número nunca zeraria.
 
 ### Decisões da fase D
 

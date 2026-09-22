@@ -288,3 +288,48 @@ export async function marcarCiente(
   revalidatePath(PATH);
   return { ok: true };
 }
+
+/**
+ * Quantas pendências do Orçamento esperam ESTE usuário, em todas as empresas e
+ * anos que ele alcança. Alimenta o contador do menu.
+ *
+ * Conta o que tem dono definido: solicitação da diretoria e pedido de liberação
+ * em aberto. Item travado NÃO entra — travado é estado, não tarefa; contá-lo
+ * faria o número nunca zerar e o contador perderia o sentido.
+ *
+ * Acessório: qualquer erro (migration ausente, sem service role) devolve 0 —
+ * o menu não pode quebrar por causa de um número.
+ */
+export async function contarPendenciasOrcamento(): Promise<number> {
+  try {
+    const { getOrcamentoUser } = await import("@/lib/orcamento/auth");
+    const user = await getOrcamentoUser();
+    if (!user) return 0;
+
+    const supabase = db();
+    if (!supabase) return 0;
+
+    let q = supabase
+      .from("orcamento_alteracoes")
+      .select("id", { count: "exact", head: true })
+      .eq("resolucao", "pendente");
+
+    // O construtor responde solicitações; a diretoria responde pedidos de
+    // liberação. Cada um vê o que é dele.
+    if (user.papel === "validador") {
+      q = q.eq("acao", "contestou");
+    } else if (user.papel !== "admin") {
+      q = q.eq("acao", "solicitou");
+    }
+
+    if (user.companyIds !== "todas") {
+      if (user.companyIds.length === 0) return 0;
+      q = q.in("company_id", user.companyIds);
+    }
+
+    const { count } = await q;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
