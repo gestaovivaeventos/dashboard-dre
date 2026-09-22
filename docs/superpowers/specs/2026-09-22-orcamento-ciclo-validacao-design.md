@@ -51,6 +51,40 @@ e-mail não derruba a transição.
 diretoria para o construtor, pedido de liberação para a diretoria. Item travado
 não entra: travado é estado, não tarefa, e o número nunca zeraria.
 
+### Simplificação de 24/09/2026 (depois do 1º teste em tela)
+
+O primeiro contato com o ciclo montado deu a impressão de "complicado". Parte
+era **defeito** (a transição não pedia `router.refresh()`, então o painel ficava
+no estado novo sem botão nenhum e as caixas do hub não apareciam); parte era
+desenho. Três mudanças, decididas com o dono do projeto:
+
+1. **A diretoria também CONSTRÓI.** O diretor tem setor próprio (Diretoria), e
+   o modelo tratava `validador` como revisor puro. Agora: em construção e no
+   retorno ele escreve como qualquer gestor, **restrito aos setores dele**; só
+   durante a validação decide sobre a empresa inteira (`validadorEscreveEmTudo`,
+   aplicada em `setoresDeEscrita`). O que separa os papéis na construção não é
+   poder escrever — é ONDE.
+2. **"Concluir" já publica.** Eram dois botões para um ato só, e o estado
+   `concluido` no meio era uma parada sem função: orçamento fechado fora do
+   Budget não serve a ninguém. O estado continua no CHECK e `publicar` segue
+   disponível a partir dele, como rede de segurança para linhas antigas.
+3. **"Voltar para edição" vale de qualquer estado** (admin). Era só de
+   concluído/publicado; um clique errado em "Enviar" só se desfazia no banco. A
+   trava dos itens **não** cai ao voltar: ela é decisão da diretoria, não estado
+   do ciclo — destravar tudo seria desfazer a validação pela porta dos fundos.
+4. **O hub mostra o que o papel faz.** Gestor não vê a caixa de validação;
+   diretor vê a validação em destaque quando é a vez dela. **Sem redirecionamento
+   automático**, de propósito: o diretor também monta o setor dele, e cair numa
+   tela que não escolheu esconderia o resto.
+
+**Rejeitado**: mover as ações da diretoria para dentro das telas de Pessoal e
+Planejamento, eliminando a tela consolidada. Aquelas duas são ferramentas de
+CONSTRUÇÃO (uma planilha de ~20 colunas; uma entrevista com IA em 3 etapas), não
+mostram média nem valor fixo, e a pergunta do diretor ("quanto ficou e está
+aprovado?") é sobre a empresa inteira — respondê-la andando por 4 telas × N
+setores seria mais complicado, não menos. Inline nas telas de método fica como
+caminho ADICIONAL, se um dia fizer falta.
+
 ### Decisões da fase D
 
 - **"Ciente" é uma entrada da trilha**, não uma coluna. Fica auditável (quem e
