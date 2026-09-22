@@ -11,6 +11,7 @@ import {
   isBudgetExemptSector,
   isManagerFinalSector,
   normalizeSectorName,
+  reportExtraSectorsFor,
 } from "@/lib/ctrl/routing";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { semDocumentoError } from "@/lib/ctrl/cnpj";
@@ -1226,11 +1227,13 @@ export async function getRequests(filters?: {
   //     deste escopo (tela de Requisições) a visibilidade é outra: própria para
   //     o solicitante, por setor para gerente/diretor — ver o bloco abaixo.
   approvalScope?: boolean;
-  // Escopo da tela de RELATÓRIOS. Regra pedida pelo dono do projeto: todos os
-  // usuários enxergam só os setores pelos quais respondem (mesma noção de
-  // "permissão por setor" das outras telas: restrição nominal ?? user_sectors);
-  // DIRETOR e ADMIN (e a visão completa nominal) veem TODOS. Sem setor vinculado
-  // e sem ser global → não vê nada (falha fechada). Exclusivo com approvalScope.
+  // Escopo da tela de RELATÓRIOS (exclusivo com approvalScope). Regra pedida pelo
+  // dono do projeto, SÓ para esta tela:
+  //  - Diretor / admin / visão completa nominal → TODAS as requisições;
+  //  - Gerente / Contas a Pagar → todas as dos setores vinculados (restrição
+  //    nominal ?? user_sectors); sem setor → nada;
+  //  - Solicitante → só as que ele criou; exceção nominal REPORT_EXTRA_SECTORS
+  //    (ex.: Larissa) adiciona todos os setores extras dela.
   reportScope?: boolean;
 }) {
   const ctx = await requireCtrlRole(
@@ -1337,15 +1340,21 @@ export async function getRequests(filters?: {
   let scope: RequestsVisibilityScope = "todas";
 
   if (filters?.reportScope) {
-    // Tela de Relatórios: cada usuário vê só os setores pelos quais responde;
-    // DIRETOR, ADMIN e a visão completa nominal veem TODOS. A restrição nominal
-    // (ex.: Régis, vinculado a todos os setores para CRIAR, mas com alçada só em
-    // alguns) SUBSTITUI os vínculos — é ela que diz "os setores dele".
+    // Regras EXCLUSIVAS da tela de Relatórios (as outras telas não passam aqui):
+    //  - DIRETOR / ADMIN / visão completa nominal → TODAS as requisições.
+    //  - GERENTE / CONTAS A PAGAR (que carrega o papel csc) → todas as dos setores
+    //    VINCULADOS a ele (restrição nominal ?? user_sectors). Sem setor → nada.
+    //  - SOLICITANTE → apenas as que ELE criou. Exceção nominal por e-mail
+    //    (REPORT_EXTRA_SECTORS, ex.: Larissa Militino): as próprias MAIS todas as
+    //    requisições dos setores extras dela.
     const reportGlobal =
       fullView || ctx.ctrlRoles.some((r) => ["diretor", "admin"].includes(r));
+    const reportBySector = ctx.ctrlRoles.some((r) =>
+      ["gerente", "csc", "contas_a_pagar"].includes(r),
+    );
     if (reportGlobal) {
       scope = "todas";
-    } else {
+    } else if (reportBySector) {
       const restriction = approverSectorRestrictionFor(ctx);
       const sectorIds = restriction ? await sectorIdsByName(restriction) : ctx.sectorIds;
       if (sectorIds.length > 0) {
@@ -1353,10 +1362,24 @@ export async function getRequests(filters?: {
         query = query.or(sectorOrRateio(sectorIds, rateioIds));
         scope = "setores";
       } else {
-        // Sem permissão de setor → não mostra nada (falha fechada, mesmo padrão
-        // do bloco de alçada abaixo).
+        // Sem setor vinculado → não mostra nada (falha fechada).
         query = query.in("sector_id", []);
         scope = "setores";
+      }
+    } else {
+      // Solicitante: só as próprias — salvo exceção nominal de relatório.
+      const extra = reportExtraSectorsFor(ctx);
+      if (extra) {
+        const extraIds = await sectorIdsByName(extra);
+        const rateioIds = extraIds.length ? await rateioReqIdsForSectors(extraIds) : [];
+        // Próprias OU (requisição/parcela de rateio nos setores extras).
+        const parts = [`created_by.eq.${ctx.id}`];
+        if (extraIds.length) parts.push(sectorOrRateio(extraIds, rateioIds));
+        query = query.or(parts.join(","));
+        scope = "setores";
+      } else {
+        query = query.eq("created_by", ctx.id);
+        scope = "proprias";
       }
     }
   } else if (!filters?.approvalScope) {

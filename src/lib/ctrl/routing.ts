@@ -306,6 +306,54 @@ export function approverSectorRestrictionFor(user: {
   return new Set(rule.allowedSectorNames.map(normalizeSectorName));
 }
 
+// ─── Relatórios: setores extras visíveis (exceção nominal, por e-mail) ─────────
+//
+// SÓ na tela de Relatórios (/ctrl/relatorios). Um SOLICITANTE normalmente só
+// enxerga no relatório as requisições que ELE criou; os e-mails aqui veem, ALÉM
+// das próprias, TODAS as requisições (qualquer criador) dos setores listados.
+// Não vale em nenhuma outra tela — Requisições e Aprovações seguem as regras
+// normais do perfil.
+//
+// ⚠️ AO ADICIONAR/ALTERAR AQUI, atualize o catálogo em
+//    src/lib/auth/user-exceptions.ts ("Regras especiais" da tela de Usuários).
+export const REPORT_EXTRA_SECTORS: ReadonlyArray<{
+  email: string;
+  /** Setores (por NOME) que o e-mail vê por inteiro no relatório. */
+  sectorNames: readonly string[];
+  reason: string;
+}> = [
+  {
+    // Larissa Militino (perfil solicitante).
+    email: "administrativo@vivaeventos.com.br",
+    sectorNames: [
+      "Bem Laranja",
+      "Despesas Gerais",
+      "Diretoria",
+      "Eventos Oficiais",
+      "Gestão de Pessoas",
+    ],
+    reason:
+      "Larissa Militino: além das próprias requisições, acompanha no relatório todas as " +
+      "requisições destes setores, independentemente de quem criou. Só na tela de Relatórios.",
+  },
+];
+
+/**
+ * Setores (normalizados) que este e-mail vê POR INTEIRO apenas na tela de
+ * Relatórios (além das próprias requisições). `null` quando não há exceção.
+ */
+export function reportExtraSectorsFor(user: {
+  email?: string | null;
+}): Set<string> | null {
+  const email = user.email?.trim().toLowerCase();
+  if (!email) return null;
+  const names = REPORT_EXTRA_SECTORS.filter(
+    (r) => r.email.trim().toLowerCase() === email,
+  ).flatMap((r) => r.sectorNames);
+  if (names.length === 0) return null;
+  return new Set(names.map(normalizeSectorName));
+}
+
 // ─── Cobertura temporária de aprovações (férias / ausências) ──────────────────
 //
 // Enquanto um aprovador está fora, outro ASSUME os fluxos dele sem que nenhum

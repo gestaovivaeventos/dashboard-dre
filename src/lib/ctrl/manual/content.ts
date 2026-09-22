@@ -621,7 +621,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "p",
         text:
-          "A tela **Relatórios** dá a visão consolidada: filtre por qualquer coluna, ordene pelo cabeçalho e exporte em XLSX para análise fora do sistema. Você vê os setores vinculados ao seu usuário (todos os perfis, inclusive o solicitante, enxergam as requisições desses setores); diretor e administrador veem todos os setores.",
+          "A tela **Relatórios** dá a visão consolidada: filtre por qualquer coluna, ordene pelo cabeçalho e exporte em XLSX para análise fora do sistema. O que você vê depende do perfil: o **solicitante** vê apenas as requisições que criou; o **gerente** vê todas as dos setores vinculados a ele; **diretor** e **administrador** veem todas. Exceções pontuais por usuário aparecem em Usuários › Regras especiais.",
       },
     ],
   },

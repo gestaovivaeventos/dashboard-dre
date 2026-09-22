@@ -25,6 +25,7 @@ import {
   BUDGET_EXEMPT_SECTORS,
   DIRECTOR_HIGHLIGHT_SECTORS,
   MANAGER_FINAL_SECTORS,
+  REPORT_EXTRA_SECTORS,
 } from "@/lib/ctrl/routing";
 
 export interface UserException {
@@ -102,6 +103,22 @@ export function describeUserExceptions(user: UserRef): UserException[] {
         `dos setores: ${cov.managerSectorNames.join(", ")}. Aprova pelo próprio perfil (não muda ` +
         `alçada). Desde ${cov.since}; retorno: ${cov.until}. TEMPORÁRIO — remover no retorno.`,
       source: "src/lib/ctrl/routing.ts (APPROVAL_COVERAGE)",
+    });
+  }
+
+  // ── Compras: setores extras SÓ no relatório (routing.ts) ──────────────────
+  for (const rule of REPORT_EXTRA_SECTORS.filter(
+    (r) => normalizeEmail(r.email) === email,
+  )) {
+    out.push({
+      key: "report-extra-sectors",
+      scope: "Compras",
+      title: "Relatório: enxerga setores extras",
+      detail:
+        `Só na tela de Relatórios: além das próprias requisições, vê TODAS as requisições ` +
+        `(qualquer criador) dos setores ${rule.sectorNames.join(", ")}. Não vale em Requisições ` +
+        `nem em Aprovações. ${rule.reason}`,
+      source: "src/lib/ctrl/routing.ts (REPORT_EXTRA_SECTORS)",
     });
   }
 
@@ -239,6 +256,11 @@ export function findOrphanExceptionRules(users: UserRef[]): OrphanExceptionRule[
       key: `coverage:${c.coveringEmail}`,
       email: c.coveringEmail,
       label: "Cobertura temporária de aprovações (férias/ausência)",
+    })),
+    ...REPORT_EXTRA_SECTORS.map((r) => ({
+      key: `report-extra:${r.email}`,
+      email: r.email,
+      label: "Relatório: enxerga setores extras",
     })),
   ];
 
