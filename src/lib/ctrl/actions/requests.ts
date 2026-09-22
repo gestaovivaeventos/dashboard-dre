@@ -1244,7 +1244,15 @@ export async function getRequests(filters?: {
     "contas_a_pagar",
     "admin"
   );
-  const supabase = await createClient();
+  // Tela de RELATÓRIOS: a autorização é o FILTRO por código (own / setores /
+  // todas, montado abaixo a partir do ctx). Precisa ler com admin client porque,
+  // sob a RLS do usuário, um SOLICITANTE só leria as próprias requisições
+  // (ctrl_requests_read_own) — o que zeraria a exceção de relatório
+  // (REPORT_EXTRA_SECTORS, ex.: Larissa) e a visão por setor do solicitante.
+  // Para as demais telas segue o client do usuário (RLS), como antes.
+  const supabase =
+    (filters?.reportScope ? createAdminClientIfAvailable() : null) ??
+    (await createClient());
 
   let query = supabase
     .from("ctrl_requests")
