@@ -380,7 +380,7 @@ export async function executarTransicao(
   // ANTES de mudar o estado: se a publicação falhar, o ciclo não deve dizer
   // "publicado" — o Budget e o módulo passariam a contar histórias diferentes.
   let publicacao: Awaited<ReturnType<typeof publicarOrcamentoNoBudget>>["resultado"];
-  if (transicao === "publicar") {
+  if (transicao === "publicar" || transicao === "concluir") {
     const pub = await publicarOrcamentoNoBudget(companyId, year);
     if (pub.error) return { error: pub.error };
     publicacao = pub.resultado;
@@ -405,13 +405,18 @@ export async function executarTransicao(
     patch.ajuste_concluido_em = agora;
     patch.ajuste_concluido_por = user.userId;
   }
-  if (transicao === "publicar") {
+  if (transicao === "publicar" || transicao === "concluir") {
     patch.publicado_em = agora;
     patch.publicado_por = user.userId;
   }
   if (transicao === "reabrir") {
-    // Reabrir NÃO apaga as datas anteriores nem a versão final: elas são
-    // auditoria. O histórico é aditivo.
+    // Reabrir NÃO apaga a versão congelada nem a trilha: elas são auditoria, e
+    // o histórico é aditivo. Só as marcas de "está publicado" saem, porque
+    // deixam de ser verdade.
+    //
+    // A TRAVA DOS ITENS também não cai: ela é decisão da diretoria, não estado
+    // do ciclo. Voltar para edição destrava tudo seria desfazer a validação
+    // pela porta dos fundos.
     patch.publicado_em = null;
     patch.publicado_por = null;
   }

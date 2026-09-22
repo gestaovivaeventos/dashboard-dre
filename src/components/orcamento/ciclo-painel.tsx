@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, Loader2, Lock, Send, Undo2 } from "lucide-react";
 
 import { entregarSetor, executarTransicao, type CicloInfo } from "@/lib/orcamento/actions/ciclo";
@@ -30,6 +31,7 @@ export function CicloPainel({
   year: number;
   ciclo: CicloInfo;
 }) {
+  const router = useRouter();
   const [ciclo, setCiclo] = useState(cicloInicial);
   const [isPending, startTransition] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function CicloPainel({
             : e,
         ),
       }));
+      router.refresh();
     });
   }
 
@@ -79,8 +82,12 @@ export function CicloPainel({
           ...prev,
           estado: res.resultado!.estado,
           rodada: res.resultado!.rodada,
-          acoes: [],
         }));
+        // O estado novo muda o que o SERVIDOR monta: as ações disponíveis do
+        // ciclo e as caixas do hub (Validação, Retorno). Sem este refresh o
+        // painel ficava no estado novo SEM botão nenhum, e a caixa da validação
+        // não aparecia até alguém recarregar a página na mão.
+        router.refresh();
         if (res.resultado.publicacao) {
           setPublicado({
             contas: res.resultado.publicacao.contas,

@@ -73,9 +73,9 @@ export const TRANSICAO_LABEL: Record<CicloTransicao, string> = {
   enviar_validacao: "Enviar para validação",
   concluir_validacao: "Concluir validação",
   reenviar: "Reenviar para validação",
-  concluir: "Concluir orçamento",
+  concluir: "Concluir e publicar",
   publicar: "Publicar no Budget e Forecast",
-  reabrir: "Reabrir orçamento",
+  reabrir: "Voltar para edição",
 };
 
 /** Estado de destino de cada transição, a partir de um estado de origem. */
@@ -83,9 +83,20 @@ const DESTINO: Record<CicloTransicao, { de: CicloEstado[]; para: CicloEstado }> 
   enviar_validacao: { de: ["em_construcao"], para: "em_validacao" },
   concluir_validacao: { de: ["em_validacao"], para: "em_ajuste" },
   reenviar: { de: ["em_ajuste"], para: "em_validacao" },
-  concluir: { de: ["em_ajuste", "em_validacao"], para: "concluido" },
+  // Concluir JÁ PUBLICA: eram dois botões para um ato só ("o orçamento está
+  // fechado"), e o estado `concluido` no meio era uma parada sem função — o
+  // orçamento fechado mas fora do Budget não serve a ninguém.
+  concluir: { de: ["em_ajuste", "em_validacao"], para: "publicado" },
+  // Rede de segurança: linha que já estava em `concluido` (antes desta
+  // simplificação) ainda consegue publicar. Não aparece no fluxo normal.
   publicar: { de: ["concluido"], para: "publicado" },
-  reabrir: { de: ["concluido", "publicado"], para: "em_construcao" },
+  // "Voltar para edição": de QUALQUER estado. É a válvula do administrador —
+  // erro de envio, decisão revista, orçamento reaberto no meio do ano. Sem
+  // isso, um clique errado em "Enviar" só se desfazia no banco.
+  reabrir: {
+    de: ["em_validacao", "em_ajuste", "concluido", "publicado"],
+    para: "em_construcao",
+  },
 };
 
 /**
@@ -205,17 +216,15 @@ export function podeEscreverNaFase(
 ): PermissaoEscrita {
   if (papel === "admin") return { pode: true };
 
-  const construtor = papel === "construtor" || papel === "construtor_amplo";
-
   switch (estado) {
+    // Em construção TODO MUNDO monta — inclusive a diretoria, que também tem
+    // setor próprio (o Diretoria). O que separa os papéis aqui não é PODER
+    // escrever, é ONDE: o escopo de setor (ver `setoresDeEscrita`).
     case "em_construcao":
-      return construtor
-        ? { pode: true }
-        : {
-            pode: false,
-            motivo:
-              "A diretoria valida o orçamento depois que ele é enviado — este ainda está em construção.",
-          };
+      return { pode: true };
+
+    // Na validação, só a diretoria mexe: quem montou fica somente leitura, para
+    // o número não mudar embaixo de quem está decidindo.
     case "em_validacao":
       return papel === "validador"
         ? { pode: true }
@@ -224,20 +233,29 @@ export function podeEscreverNaFase(
             motivo:
               "Este orçamento está em validação pela diretoria e ficou somente leitura. Você poderá ajustar quando ele voltar.",
           };
+
+    // No retorno, cada um ajusta os próprios setores — a diretoria também, pelo
+    // que ela mesma pediu no setor dela.
     case "em_ajuste":
-      return construtor
-        ? { pode: true }
-        : {
-            pode: false,
-            motivo: "A validação deste orçamento já foi concluída.",
-          };
+      return { pode: true };
+
     case "concluido":
     case "publicado":
       return {
         pode: false,
-        motivo: `Este orçamento está ${ESTADO_LABEL[estado].toLowerCase()} e não aceita mais alterações.`,
+        motivo: `Este orçamento está ${ESTADO_LABEL[estado].toLowerCase()} e não aceita mais alterações. Um administrador pode voltá-lo para edição.`,
       };
   }
+}
+
+/**
+ * Na fase atual, o VALIDADOR escreve na empresa inteira ou só nos setores dele?
+ *
+ * Só durante a validação ele decide sobre tudo. Fora dela, ele é mais um
+ * construtor — e do setor dele, como qualquer gestor.
+ */
+export function validadorEscreveEmTudo(estado: CicloEstado): boolean {
+  return estado === "em_validacao";
 }
 
 /** O construtor pode ENTREGAR setor? Só faz sentido enquanto ele constrói. */

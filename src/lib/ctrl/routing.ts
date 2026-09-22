@@ -336,6 +336,21 @@ export const REPORT_EXTRA_SECTORS: ReadonlyArray<{
       "Larissa Militino: além das próprias requisições, acompanha no relatório todas as " +
       "requisições destes setores, independentemente de quem criou. Só na tela de Relatórios.",
   },
+  {
+    // TESTE — "Teste Controladoria" (perfil solicitante). Mesma exceção da Larissa,
+    // só para validar o comportamento. REMOVER ao concluir os testes.
+    email: "lucasm.quokka@gmail.com",
+    sectorNames: [
+      "Bem Laranja",
+      "Despesas Gerais",
+      "Diretoria",
+      "Eventos Oficiais",
+      "Gestão de Pessoas",
+    ],
+    reason:
+      "Usuário de teste: mesma exceção de relatório da Larissa Militino, para validação. " +
+      "TEMPORÁRIO — remover ao concluir os testes.",
+  },
 ];
 
 /**

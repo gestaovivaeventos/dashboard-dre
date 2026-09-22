@@ -15,6 +15,7 @@ import {
   podeEntregarSetor,
   podeEscreverNaFase,
   transicoesDisponiveis,
+  validadorEscreveEmTudo,
   versaoDaTransicao,
   type CicloEstado,
 } from "./ciclo";
@@ -29,13 +30,13 @@ const ESTADOS: CicloEstado[] = [
 
 // ─── Transições ──────────────────────────────────────────────────────────────
 
-test("o fluxo completo anda: construção → validação → ajuste → concluído → publicado", () => {
+test("o fluxo completo anda: construção → validação → ajuste → publicado", () => {
+  // "Concluir" já publica: eram dois botões para um ato só.
   let estado: CicloEstado = "em_construcao";
   for (const [transicao, esperado] of [
     ["enviar_validacao", "em_validacao"],
     ["concluir_validacao", "em_ajuste"],
-    ["concluir", "concluido"],
-    ["publicar", "publicado"],
+    ["concluir", "publicado"],
   ] as const) {
     const r = aplicarTransicao(estado, transicao, "admin");
     assert.ok(r.ok, `${transicao} de ${estado}`);
@@ -78,10 +79,16 @@ test("construtor não tem transição nenhuma disponível, em nenhum estado", ()
   }
 });
 
-test("reabrir existe só a partir de concluído/publicado", () => {
-  assert.ok(aplicarTransicao("concluido", "reabrir", "admin").ok);
-  assert.ok(aplicarTransicao("publicado", "reabrir", "admin").ok);
+test("voltar para edição vale de qualquer estado, menos do próprio", () => {
+  // É a válvula do administrador: envio por engano, decisão revista. Sem ela um
+  // clique errado em "Enviar" só se desfazia no banco.
+  for (const de of ["em_validacao", "em_ajuste", "concluido", "publicado"] as const) {
+    const r = aplicarTransicao(de, "reabrir", "admin");
+    assert.ok(r.ok, de);
+    assert.equal(r.estado, "em_construcao");
+  }
   assert.ok(!aplicarTransicao("em_construcao", "reabrir", "admin").ok);
+  assert.ok(!aplicarTransicao("em_validacao", "reabrir", "validador").ok, "só admin");
 });
 
 // ─── Rodada ──────────────────────────────────────────────────────────────────
@@ -123,6 +130,21 @@ test("admin escreve em qualquer estado", () => {
   }
 });
 
+test("em construção TODO MUNDO monta — inclusive a diretoria", () => {
+  // O diretor também tem setor próprio (Diretoria). O que separa os papéis na
+  // construção não é poder escrever, é ONDE (o escopo de setor).
+  for (const papel of ["construtor", "construtor_amplo", "validador", "admin"] as const) {
+    assert.ok(podeEscreverNaFase("em_construcao", papel).pode, papel);
+  }
+});
+
+test("o validador só decide sobre a empresa inteira DURANTE a validação", () => {
+  assert.equal(validadorEscreveEmTudo("em_validacao"), true);
+  for (const e of ["em_construcao", "em_ajuste", "concluido", "publicado"] as const) {
+    assert.equal(validadorEscreveEmTudo(e), false, e);
+  }
+});
+
 test("em validação o construtor fica SOMENTE LEITURA", () => {
   for (const papel of ["construtor", "construtor_amplo"] as const) {
     const r = podeEscreverNaFase("em_validacao", papel);
@@ -131,16 +153,23 @@ test("em validação o construtor fica SOMENTE LEITURA", () => {
   }
 });
 
-test("em validação o validador escreve; em construção e em ajuste, não", () => {
-  assert.ok(podeEscreverNaFase("em_validacao", "validador").pode);
-  assert.equal(podeEscreverNaFase("em_construcao", "validador").pode, false);
-  assert.equal(podeEscreverNaFase("em_ajuste", "validador").pode, false);
+test("o validador escreve na validação, na construção e no ajuste", () => {
+  // Fora da validação ele é construtor do setor dele — e no retorno ajusta o
+  // que ele mesmo pediu no próprio setor.
+  for (const e of ["em_validacao", "em_construcao", "em_ajuste"] as const) {
+    assert.ok(podeEscreverNaFase(e, "validador").pode, e);
+  }
 });
 
 test("no retorno (ajuste) os construtores voltam a escrever", () => {
   for (const papel of ["construtor", "construtor_amplo"] as const) {
     assert.ok(podeEscreverNaFase("em_ajuste", papel).pode, papel);
   }
+});
+
+test("a versão final sai do concluir, que também publica", () => {
+  assert.equal(versaoDaTransicao("concluir", 2), "final");
+  assert.equal(versaoDaTransicao("publicar", 2), null, "publicar é só rede de segurança");
 });
 
 test("concluído e publicado não aceitam escrita de ninguém além do admin", () => {

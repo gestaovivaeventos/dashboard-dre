@@ -3,6 +3,7 @@ import {
   CICLO_PADRAO,
   faseDoEstado,
   podeEscreverNaFase,
+  validadorEscreveEmTudo,
   type CicloEstado,
   type TrilhaFase,
 } from "@/lib/orcamento/ciclo";
@@ -29,8 +30,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * ── Quem faz o quê ─────────────────────────────────────────────────────────
  *  - `admin`            → tudo, todas as empresas, inclusive a configuração, em
  *                         qualquer fase do ciclo.
- *  - `validador`        → lê as empresas dele sempre; ESCREVE só enquanto o
- *                         ciclo está `em_validacao` (é a janela da diretoria).
+ *  - `validador`        → lê as empresas dele sempre. Na janela da validação,
+ *                         decide sobre a empresa INTEIRA; fora dela é um
+ *                         construtor como os outros, restrito aos setores
+ *                         vinculados a ele — a diretoria também monta o próprio
+ *                         orçamento (o setor Diretoria).
  *  - `construtor_amplo` → ("Gerente Sócio") lê a empresa inteira, escreve nos
  *                         setores vinculados a ele — e só fora da validação.
  *  - `construtor`       → ("Gerente") lê e escreve só nos setores dele, e só
@@ -142,9 +146,15 @@ export async function setoresDeEscrita(
   user: OrcamentoUser,
   companyId: string,
   year: number,
+  /**
+   * Estado do ciclo. Importa para o VALIDADOR: durante a validação ele decide
+   * sobre a empresa inteira; fora dela é construtor do setor dele — a diretoria
+   * também monta o próprio orçamento (o setor Diretoria).
+   */
+  estado: CicloEstado = CICLO_PADRAO,
 ): Promise<string[] | null> {
   if (user.isAdmin) return null;
-  if (user.papel === "validador") return [];
+  if (user.papel === "validador" && validadorEscreveEmTudo(estado)) return null;
   return resolverSetoresDoUsuario(supabase, user, companyId, year);
 }
 
@@ -254,7 +264,7 @@ export async function autorizarEscrita(
     return { ok: false, error: perm.motivo ?? SEM_ACESSO };
   }
 
-  const setores = await setoresDeEscrita(supabase, user, companyId, year);
+  const setores = await setoresDeEscrita(supabase, user, companyId, year, estado);
   return { ok: true, user, setores, estado, fase: faseDoEstado(estado), cicloId };
 }
 

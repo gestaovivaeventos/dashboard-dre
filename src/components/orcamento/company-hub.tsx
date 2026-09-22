@@ -16,6 +16,7 @@ import {
 import { CicloPainel } from "@/components/orcamento/ciclo-painel";
 import type { CicloInfo } from "@/lib/orcamento/actions/ciclo";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   isWorkspaceTabBuilt,
   workspaceTabHref,
@@ -108,10 +109,20 @@ export function CompanyHub({
   status,
   isAdmin = false,
   ciclo = null,
+  papel = null,
 }: {
   companyId: string;
   year: number;
   status?: OrcamentoStatusRaw;
+  /**
+   * Papel de quem está olhando. O hub mostra o que ESTE papel faz: o gestor não
+   * precisa da tela de validação, o diretor não precisa de 8 portas para achar
+   * a dele. (Admin continua vendo tudo — é quem opera o ciclo.)
+   *
+   * Todos veem as telas de método: a diretoria também monta o orçamento do
+   * setor dela (o Diretoria), como qualquer gestor.
+   */
+  papel?: OrcamentoPapel | null;
   /**
    * Estado do ciclo. Quando presente, o painel do ciclo substitui o selo
    * heurístico de `status.ts` (que adivinhava o andamento contando linhas
@@ -129,6 +140,18 @@ export function CompanyHub({
   // Só os 4 métodos de despesa (VE ficam de fora do hub padrão).
   const metodos = METODOS.filter((m) => !m.ve);
 
+  const ehDiretoria = papel === "validador";
+  const emValidacao = ciclo?.estado === "em_validacao";
+  // A validação é do diretor (e do admin). Para o gestor a caixa só abriria uma
+  // tela que ele não opera — é ruído.
+  const mostraValidacao =
+    Boolean(ciclo) && ciclo!.estado !== "em_construcao" && (ehDiretoria || isAdmin);
+  // O retorno é de quem montou. O diretor também vê: é onde ele confere o que
+  // decidiu e responde aos pedidos de liberação.
+  const mostraRetorno =
+    Boolean(ciclo) &&
+    ["em_ajuste", "concluido", "publicado"].includes(ciclo!.estado);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -143,6 +166,28 @@ export function CompanyHub({
       </div>
 
       {ciclo && <CicloPainel companyId={companyId} year={year} ciclo={ciclo} />}
+
+      {/* Quando é a vez da diretoria, a validação vira a chamada principal —
+          em vez de mais uma caixa no meio de oito. Não há redirecionamento
+          automático de propósito: o diretor também monta o setor dele, e cair
+          numa tela que ele não escolheu esconderia o resto. */}
+      {mostraValidacao && emValidacao && (
+        <Link
+          href={workspaceValidacaoHref(companyId, year)}
+          className="group flex items-center gap-4 rounded-xl border border-amber-500/40 bg-amber-500/5 p-5 transition-colors hover:border-amber-500/70 hover:bg-amber-500/10"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            <ClipboardCheck className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">Validar o orçamento</div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Percorra por setor e categoria, decida item a item e conclua a validação.
+            </p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+        </Link>
+      )}
 
       {/* Prévia do orçamento — o resultado consolidado dos métodos, em destaque
           acima das caixas de entrada. */}
@@ -183,7 +228,7 @@ export function CompanyHub({
             validação: antes disso não há o que validar, e uma caixa que abre
             uma tela vazia é ruído. Continua visível nas fases seguintes porque
             é por ela que se confere o que foi decidido. */}
-        {ciclo && ciclo.estado !== "em_construcao" && (
+        {mostraValidacao && !emValidacao && (
           <Tile
             icon={ClipboardCheck}
             title="Validação da diretoria"
@@ -195,10 +240,7 @@ export function CompanyHub({
         {/* Retorno da diretoria. Aparece a partir do momento em que existe
             decisão para ler — antes disso a lista estaria vazia. Fica visível
             nas fases seguintes porque é também o histórico do orçamento. */}
-        {ciclo &&
-          (ciclo.estado === "em_ajuste" ||
-            ciclo.estado === "concluido" ||
-            ciclo.estado === "publicado") && (
+        {mostraRetorno && (
             <Tile
               icon={History}
               title="Retorno da diretoria"
