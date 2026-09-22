@@ -1,4 +1,11 @@
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import {
+  CICLO_PADRAO,
+  faseDoEstado,
+  podeEscreverNaFase,
+  type CicloEstado,
+  type TrilhaFase,
+} from "@/lib/orcamento/ciclo";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -19,17 +26,21 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * de `user_sectors` (o cadastro do COMPRAS), atravessando para o orçamento pela
  * ponte `orcamento_setores.ctrl_sector_id`.
  *
- * ── Quem faz o quê nesta fase ──────────────────────────────────────────────
- *  - `admin`            → tudo, todas as empresas, inclusive a configuração.
- *  - `validador`        → LEITURA das empresas dele. A edição da diretoria é a
- *                         etapa de validação, que ainda não existe (fase C):
- *                         enquanto não há ciclo, tudo está "em construção" e,
- *                         nessa fase, o validador lê. Liberar a escrita agora
- *                         seria edição sem trilha e sem trava — exatamente o
- *                         que o ciclo existe para evitar.
+ * ── Quem faz o quê ─────────────────────────────────────────────────────────
+ *  - `admin`            → tudo, todas as empresas, inclusive a configuração, em
+ *                         qualquer fase do ciclo.
+ *  - `validador`        → lê as empresas dele sempre; ESCREVE só enquanto o
+ *                         ciclo está `em_validacao` (é a janela da diretoria).
  *  - `construtor_amplo` → ("Gerente Sócio") lê a empresa inteira, escreve nos
- *                         setores vinculados a ele.
- *  - `construtor`       → ("Gerente") lê e escreve só nos setores dele.
+ *                         setores vinculados a ele — e só fora da validação.
+ *  - `construtor`       → ("Gerente") lê e escreve só nos setores dele, e só
+ *                         fora da validação.
+ *
+ * A quarta pergunta, que a fase B acrescentou: **em que FASE o ciclo está?**
+ * `podeEscreverNaFase` (em ciclo.ts, puro e testado) é aplicada dentro de
+ * `autorizarEscrita`, então as 15 actions de escrita ganharam a trava sem
+ * mudar nenhuma delas. Era o que faltava para a validação valer: sem a trava,
+ * o construtor mudava os números enquanto o diretor os revisava.
  */
 export interface OrcamentoUser {
   userId: string;
@@ -88,11 +99,16 @@ export function podeVerEmpresa(user: OrcamentoUser, companyId: string): boolean 
   return user.companyIds.includes(companyId);
 }
 
-/** True quando o usuário pode ESCREVER no orçamento da empresa. */
+/**
+ * True quando o usuário pode ESCREVER no orçamento da empresa.
+ *
+ * Só o escopo de EMPRESA. Quem decide se o papel escreve AGORA é a fase do
+ * ciclo (`podeEscreverNaFase`), aplicada em `autorizarEscrita` — foi assim que
+ * o validador deixou de ser "nunca escreve" e passou a ser "escreve durante a
+ * validação".
+ */
 export function podeEditarEmpresa(user: OrcamentoUser, companyId: string): boolean {
-  if (!podeVerEmpresa(user, companyId)) return false;
-  // O validador (diretoria) ainda não escreve — ver o cabeçalho deste arquivo.
-  return user.papel !== "validador";
+  return podeVerEmpresa(user, companyId);
 }
 
 /**
@@ -154,6 +170,31 @@ async function resolverSetoresDoUsuario(
 }
 
 /**
+ * Estado do ciclo da empresa × ano, para a trava por fase.
+ *
+ * Tolera a migration da fase B ausente: sem a tabela, tudo está "em
+ * construção" — o módulo se comporta como antes do ciclo em vez de travar
+ * ninguém. É o que permite subir o código antes do SQL.
+ */
+async function estadoDoCiclo(
+  supabase: SupabaseClient,
+  companyId: string,
+  year: number,
+): Promise<{ estado: CicloEstado; cicloId: string | null }> {
+  const { data, error } = await supabase
+    .from("orcamento_ciclos")
+    .select("id, estado")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .maybeSingle();
+  if (error || !data) return { estado: CICLO_PADRAO, cicloId: null };
+  return {
+    estado: (data.estado as CicloEstado) ?? CICLO_PADRAO,
+    cicloId: (data.id as string) ?? null,
+  };
+}
+
+/**
  * Guard completo de uma LEITURA de empresa × ano: usuário do módulo, ano
  * válido e empresa no escopo. Devolve também os setores que ele enxerga
  * (`null` = todos), para a action filtrar sem repetir a regra.
@@ -188,22 +229,33 @@ export async function autorizarEscrita(
   companyId: string,
   year: number,
 ): Promise<
-  | { ok: true; user: OrcamentoUser; setores: string[] | null }
+  | {
+      ok: true;
+      user: OrcamentoUser;
+      setores: string[] | null;
+      /** Estado do ciclo no momento da escrita. */
+      estado: CicloEstado;
+      /** Fase para a trilha (derivada do estado). */
+      fase: TrilhaFase;
+      cicloId: string | null;
+    }
   | { ok: false; error: string }
 > {
   const user = await getOrcamentoUser();
   if (!user) return { ok: false, error: SEM_ACESSO };
-  if (!podeEditarEmpresa(user, companyId)) {
-    return {
-      ok: false,
-      error:
-        user.papel === "validador"
-          ? "A diretoria ainda não edita o orçamento — a etapa de validação será liberada em breve."
-          : SEM_ACESSO,
-    };
+  if (!podeVerEmpresa(user, companyId)) return { ok: false, error: SEM_ACESSO };
+
+  // TRAVA POR FASE — o coração do ciclo. Enquanto a diretoria valida, quem
+  // montou o orçamento fica somente leitura; concluído, ninguém mexe. Sem isto
+  // o diretor validaria números que mudam embaixo dele.
+  const { estado, cicloId } = await estadoDoCiclo(supabase, companyId, year);
+  const perm = podeEscreverNaFase(estado, user.papel);
+  if (!perm.pode) {
+    return { ok: false, error: perm.motivo ?? SEM_ACESSO };
   }
+
   const setores = await setoresDeEscrita(supabase, user, companyId, year);
-  return { ok: true, user, setores };
+  return { ok: true, user, setores, estado, fase: faseDoEstado(estado), cicloId };
 }
 
 /**

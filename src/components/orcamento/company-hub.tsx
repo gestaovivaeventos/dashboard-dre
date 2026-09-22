@@ -11,6 +11,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { CicloPainel } from "@/components/orcamento/ciclo-painel";
+import type { CicloInfo } from "@/lib/orcamento/actions/ciclo";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import {
   isWorkspaceTabBuilt,
@@ -101,10 +103,17 @@ export function CompanyHub({
   year,
   status,
   isAdmin = false,
+  ciclo = null,
 }: {
   companyId: string;
   year: number;
   status?: OrcamentoStatusRaw;
+  /**
+   * Estado do ciclo. Quando presente, o painel do ciclo substitui o selo
+   * heurístico de `status.ts` (que adivinhava o andamento contando linhas
+   * preenchidas) — o estado passou a ser fato registrado, não estimativa.
+   */
+  ciclo?: CicloInfo | null;
   /**
    * Mostra a caixa "Configuração". As telas de config redefinem as PREMISSAS
    * do orçamento (método por categoria, plano de cargos, encargos) e seguem
@@ -125,8 +134,11 @@ export function CompanyHub({
             Escolha por onde começar. Cada módulo guarda seus próprios valores.
           </p>
         </div>
-        {status && <StatusBadge selo={statusGeral(status)} className="mt-0.5" />}
+        {/* Selo heurístico só como reserva: se o ciclo existe, ele é a fonte. */}
+        {!ciclo && status && <StatusBadge selo={statusGeral(status)} className="mt-0.5" />}
       </div>
+
+      {ciclo && <CicloPainel companyId={companyId} year={year} ciclo={ciclo} />}
 
       {/* Prévia do orçamento — o resultado consolidado dos métodos, em destaque
           acima das caixas de entrada. */}

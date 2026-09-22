@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import {
   autorizarEscrita,
   podeEscreverNoSetor,
@@ -253,6 +254,20 @@ export async function removerLinhaDoSetor(params: {
     if (limpaErr) return { error: limpaErr.message };
   }
 
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId,
+    metodo,
+    alvoTipo: "categoria_setor",
+    alvoRotulo: categoryCode,
+    acao: "excluiu",
+    fase: auth.fase,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true as const };
 }

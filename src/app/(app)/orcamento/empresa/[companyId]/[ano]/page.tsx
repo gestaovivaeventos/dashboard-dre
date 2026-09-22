@@ -1,6 +1,7 @@
 import { CompanyHub } from "@/components/orcamento/company-hub";
 import { getOrcamentoStatus } from "@/lib/orcamento/actions/status";
 import { getOrcamentoUser } from "@/lib/orcamento/auth";
+import { getCiclo } from "@/lib/orcamento/actions/ciclo";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +15,10 @@ export default async function OrcamentoEmpresaHubPage({
   params: { companyId: string; ano: string };
 }) {
   const year = Number(params.ano);
-  const [{ statuses }, user] = await Promise.all([
+  const [{ statuses }, user, { ciclo }] = await Promise.all([
     getOrcamentoStatus(year),
     getOrcamentoUser(),
+    getCiclo(params.companyId, year),
   ]);
 
   return (
@@ -25,6 +27,7 @@ export default async function OrcamentoEmpresaHubPage({
       year={year}
       status={statuses[params.companyId]}
       isAdmin={Boolean(user?.isAdmin)}
+      ciclo={ciclo ?? null}
     />
   );
 }

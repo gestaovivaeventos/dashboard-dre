@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -412,6 +413,23 @@ export async function recalcularTodasMedias(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  // UMA entrada agregada: o recálculo em lote é um ato do usuário ("recalculei
+  // tudo"), não N alterações. Uma linha por categoria afogaria a trilha e
+  // esconderia as alterações que importam no retorno.
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    setorId: alvo.id,
+    metodo: "media",
+    alvoTipo: "media_linha",
+    alvoRotulo: `Recálculo de ${rows.length} categoria(s) por média`,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: { categorias: rows.length, base_year: baseYear },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true, atualizadas: rows.length };
 }
@@ -460,6 +478,21 @@ export async function setMediaValor(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "media",
+    alvoTipo: "media_linha",
+    alvoRotulo: categoryName,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: { media_valor: valor, manual: valor != null },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }
@@ -505,6 +538,21 @@ export async function setMediaIndice(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "media",
+    alvoTipo: "media_linha",
+    alvoRotulo: categoryName,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: { indice_key: indiceKey },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { diffCampos } from "@/lib/orcamento/trilha";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -290,13 +292,14 @@ export async function saveValorFixoContrato(
   // leitura, bastaria mandar o id de um contrato de outro setor para alterá-lo
   // (a tela manda o setor dela, que não prova nada).
   if (contrato.id) {
+    // Linha inteira: serve ao gate de setor E ao `antes` da trilha.
+    const { data: atual } = await supabase
+      .from("orcamento_valor_fixo_categorias")
+      .select("*")
+      .eq("id", contrato.id)
+      .eq("company_id", companyId)
+      .maybeSingle();
     if (auth.setores !== null) {
-      const { data: atual } = await supabase
-        .from("orcamento_valor_fixo_categorias")
-        .select("setor_id")
-        .eq("id", contrato.id)
-        .eq("company_id", companyId)
-        .maybeSingle();
       if (!podeEscreverNoSetor(auth.setores, (atual?.setor_id as string | null) ?? null)) {
         return { error: SEM_ACESSO_SETOR };
       }
@@ -309,6 +312,29 @@ export async function saveValorFixoContrato(
     if (error) {
       if (isSchemaMissing(error.message)) return { needsMigration: true };
       return { error: error.message };
+    }
+    const diff = diffCampos(
+      (atual ?? null) as Record<string, unknown> | null,
+      patch as Record<string, unknown>,
+    );
+    if (diff.mudou) {
+      await registrarAlteracao({
+        companyId,
+        year,
+        cicloId: auth.cicloId,
+        categoryCode,
+        setorId: (atual?.setor_id as string | null) ?? null,
+        metodo: "valor_fixo",
+        alvoTipo: "valor_fixo_contrato",
+        alvoId: contrato.id,
+        alvoRotulo: descricao || categoryName,
+        acao: "alterou",
+        fase: auth.fase,
+        antes: diff.antes,
+        depois: diff.depois,
+        autorId: auth.user.userId,
+        autorPapel: auth.user.papel,
+      });
     }
     revalidatePath(PATH);
     return { id: contrato.id };
@@ -335,6 +361,22 @@ export async function saveValorFixoContrato(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "valor_fixo",
+    alvoTipo: "valor_fixo_contrato",
+    alvoId: (data as { id: string }).id,
+    alvoRotulo: descricao || categoryName,
+    acao: "criou",
+    fase: auth.fase,
+    depois: patch as Record<string, unknown>,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { id: (data as { id: string }).id };
 }
@@ -351,17 +393,35 @@ export async function removeValorFixoContrato(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  const { data: atual } = await supabase
+    .from("orcamento_valor_fixo_categorias")
+    .select("*")
+    .eq("id", contratoId)
+    .eq("company_id", companyId)
+    .maybeSingle();
   if (auth.setores !== null) {
-    const { data: atual } = await supabase
-      .from("orcamento_valor_fixo_categorias")
-      .select("setor_id")
-      .eq("id", contratoId)
-      .eq("company_id", companyId)
-      .maybeSingle();
     if (!podeEscreverNoSetor(auth.setores, (atual?.setor_id as string | null) ?? null)) {
       return { error: SEM_ACESSO_SETOR };
     }
   }
+  // Antes de apagar: depois disto o contrato só existe na trilha.
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode: (atual?.category_code as string | null) ?? null,
+    setorId: (atual?.setor_id as string | null) ?? null,
+    metodo: "valor_fixo",
+    alvoTipo: "valor_fixo_contrato",
+    alvoId: contratoId,
+    alvoRotulo:
+      (atual?.descricao as string | null) || (atual?.category_name as string | null) || "Contrato",
+    acao: "excluiu",
+    fase: auth.fase,
+    antes: (atual ?? null) as Record<string, unknown> | null,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   const { error } = await supabase
     .from("orcamento_valor_fixo_categorias")
     .delete()

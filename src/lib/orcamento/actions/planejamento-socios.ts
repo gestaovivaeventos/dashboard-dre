@@ -5,6 +5,7 @@ import { generateText, type ModelMessage } from "ai";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -1402,6 +1403,21 @@ export async function salvarBasePlanejamento(
   const { error: insErr } = await supabase.from("orcamento_planejamento_socios_itens").insert(rows);
   if (insErr) return { error: insErr.message };
 
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "planejamento_socios",
+    alvoTipo: "planejamento_item",
+    alvoRotulo: `Base de ${categoryName} (${rows.length} item(ns))`,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: { itens: rows.length, contexto_admin: (contextoAdmin ?? "").trim() || null },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }
@@ -1450,6 +1466,23 @@ export async function confirmarPropostaPlanejamento(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  // Confirmar é o momento em que a proposta VIRA orçamento (é o que a Prévia
+  // lê) — o registro mais importante deste método.
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "planejamento_socios",
+    alvoTipo: "planejamento_item",
+    alvoRotulo: `Proposta de ${categoryCode} confirmada`,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: { proposta_confirmada: true },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }
@@ -1501,6 +1534,24 @@ export async function editarPropostaPlanejamento(
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "planejamento_socios",
+    alvoTipo: "planejamento_item",
+    alvoRotulo: `Proposta de ${categoryCode}`,
+    acao: "alterou",
+    fase: auth.fase,
+    depois: {
+      itens: limpos.length,
+      total_mensal: limpos.reduce((a, i) => a + (i.valorMensal ?? 0), 0),
+    },
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }
@@ -1594,6 +1645,20 @@ export async function removerPlanejamentoSocios(
     .eq("category_code", categoryCode)
     .eq("setor_id", alvo.id);
   if (error) return { error: error.message };
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: alvo.id,
+    metodo: "planejamento_socios",
+    alvoTipo: "planejamento_item",
+    alvoRotulo: `Planejamento de ${categoryCode}`,
+    acao: "excluiu",
+    fase: auth.fase,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true };
 }

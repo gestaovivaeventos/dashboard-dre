@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { getOrcamentoUser, podeVerEmpresa } from "@/lib/orcamento/auth";
 import { getCompaniesBudgetConfig } from "@/lib/orcamento/actions/config";
 import { WorkspaceHeader } from "@/components/orcamento/workspace-header";
+import { CicloFaixa } from "@/components/orcamento/ciclo-faixa";
+import { getCiclo } from "@/lib/orcamento/actions/ciclo";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +30,10 @@ export default async function OrcamentoEmpresaLayout({
   // Ano fora da faixa (URL adulterada) → volta ao painel para reescolher.
   if (!isValidBudgetYear(year)) redirect("/orcamento");
 
-  const { items } = await getCompaniesBudgetConfig(year);
+  const [{ items }, { ciclo }] = await Promise.all([
+    getCompaniesBudgetConfig(year),
+    getCiclo(params.companyId, year),
+  ]);
   const companyName =
     (items ?? []).find((c) => c.companyId === params.companyId)?.companyName ?? "Empresa";
 
@@ -39,6 +44,8 @@ export default async function OrcamentoEmpresaLayout({
         companyId={params.companyId}
         year={year}
       />
+      {/* Faixa do ciclo: explica a trava ANTES de a pessoa tentar editar. */}
+      <CicloFaixa ciclo={ciclo ?? null} />
       {children}
     </div>
   );

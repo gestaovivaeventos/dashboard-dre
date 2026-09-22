@@ -2,10 +2,26 @@
 
 Data: 2026-09-22. Esta spec é o contrato da implementação.
 
-**Status por fase**: **A (acesso por papel) — IMPLEMENTADA em 22/09/2026**
-(lint, 177 testes e build verdes; a migration de RLS
-`20260922120000_orcamento_acesso_por_papel.sql` está escrita mas **ainda não
-aplicada** — ver §11). B, C, D, E, F: não começadas.
+**Status por fase**:
+- **A (acesso por papel) — IMPLEMENTADA** em 22/09/2026. Migration de RLS
+  `20260922120000` **aplicada**.
+- **B (trilha + ciclo + versão + trava) — IMPLEMENTADA** em 23/09/2026 (lint,
+  207 testes e build verdes). Migration `20260923120000_orcamento_ciclo_trilha_versao.sql`
+  escrita; **aplicar antes de o ciclo funcionar** (o código degrada sozinho até lá).
+  Uma parte foi deliberadamente adiada — ver "Desvio da fase B" abaixo.
+- C, D, E, F: não começadas.
+
+**Desvio da fase B (consciente)**: o filtro `itemAtivo()` existe e está testado,
+mas **não foi ligado aos motores**. Ligá-lo agora exigiria selecionar
+`cancelado_em` nas consultas das telas, e antes de a migration rodar isso
+derruba as telas existentes (42703) em vez de degradar. Como nada pode ser
+cancelado até a fase C (é o diretor quem cancela), o filtro não protege nada
+hoje. Ele entra na fase C, no MESMO commit da ação de cancelar — assim a marca
+e o filtro nascem juntos e são testados juntos. **Não implemente "cancelar" sem
+ligar o filtro nos seis motores** (`pessoal-calc`, `serieItem`/`categoriaSerie`,
+`projetarValorFixoSerie`, `previa-orcamento`, `previa-budget`, contagens de
+status): sem ele, o item cancelado volta a somar e o orçamento fecha maior sem
+erro nenhum.
 
 ## 1. Contexto
 

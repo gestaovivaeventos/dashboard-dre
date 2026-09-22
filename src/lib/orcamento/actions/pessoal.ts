@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
+import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { diffCampos } from "@/lib/orcamento/trilha";
+import type { TrilhaFase } from "@/lib/orcamento/ciclo";
+import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -456,11 +460,24 @@ async function autorizarColaborador(
   supabase: Awaited<ReturnType<typeof createClient>>,
   id: string,
 ): Promise<
-  { ok: true; userId: string; setores: string[] | null } | { ok: false; error: string }
+  | {
+      ok: true;
+      userId: string;
+      papel: OrcamentoPapel;
+      setores: string[] | null;
+      /** A linha COMO ESTAVA — é o `antes` da trilha. */
+      linha: Record<string, unknown>;
+      companyId: string;
+      year: number;
+      fase: TrilhaFase;
+      cicloId: string | null;
+    }
+  | { ok: false; error: string }
 > {
+  // Linha inteira: além do escopo, é o `antes` do diff da trilha.
   const { data: linha, error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .select("company_id, year, setor_id")
+    .select("*")
     .eq("id", id)
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
@@ -475,7 +492,17 @@ async function autorizarColaborador(
   if (!podeEscreverNoSetor(auth.setores, (linha.setor_id as string | null) ?? null)) {
     return { ok: false, error: SEM_ACESSO_SETOR };
   }
-  return { ok: true, userId: auth.user.userId, setores: auth.setores };
+  return {
+    ok: true,
+    userId: auth.user.userId,
+    papel: auth.user.papel,
+    setores: auth.setores,
+    linha: linha as Record<string, unknown>,
+    companyId: linha.company_id as string,
+    year: Number(linha.year),
+    fase: auth.fase,
+    cicloId: auth.cicloId,
+  };
 }
 
 export async function createColaborador(
@@ -496,15 +523,31 @@ export async function createColaborador(
   if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  const { error } = await supabase.from("orcamento_pessoal_colaboradores").insert({
-    company_id: companyId,
-    year,
-    ...toRow(input, admin.userId),
-  });
+  const row = toRow(input, admin.userId);
+  const { data: criado, error } = await supabase
+    .from("orcamento_pessoal_colaboradores")
+    .insert({ company_id: companyId, year, ...row })
+    .select("id")
+    .maybeSingle();
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
   }
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    setorId: input.setorId ?? null,
+    metodo: "pessoal",
+    alvoTipo: "colaborador",
+    alvoId: (criado?.id as string) ?? null,
+    alvoRotulo: input.nome?.trim() || input.cargoAtual?.trim() || "Colaborador",
+    acao: "criou",
+    fase: auth.fase,
+    depois: row as Record<string, unknown>,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
   revalidatePath(PATH);
   return { ok: true as const };
 }
@@ -522,11 +565,33 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
   if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
+  const row = toRow(input, auth.userId);
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .update(toRow(input, auth.userId))
+    .update(row)
     .eq("id", id);
   if (error) return { error: error.message };
+  // Só registra se algo realmente mudou: salvar sem editar não é alteração.
+  const diff = diffCampos(auth.linha, row as Record<string, unknown>);
+  if (diff.mudou) {
+    await registrarAlteracao({
+      companyId: auth.companyId,
+      year: auth.year,
+      cicloId: auth.cicloId,
+      setorId: input.setorId ?? ((auth.linha.setor_id as string | null) ?? null),
+      metodo: "pessoal",
+      alvoTipo: "colaborador",
+      alvoId: id,
+      alvoRotulo:
+        input.nome?.trim() || (auth.linha.nome as string | null) || "Colaborador",
+      acao: "alterou",
+      fase: auth.fase,
+      antes: diff.antes,
+      depois: diff.depois,
+      autorId: auth.userId,
+      autorPapel: auth.papel,
+    });
+  }
   revalidatePath(PATH);
   return { ok: true as const };
 }
@@ -551,6 +616,25 @@ export async function updateColaboradorBeneficios(id: string, beneficios: Benefi
     .update({ ...row, updated_by: auth.userId })
     .eq("id", id);
   if (error) return { error: error.message };
+  const diffBen = diffCampos(auth.linha, row as Record<string, unknown>);
+  if (diffBen.mudou) {
+    await registrarAlteracao({
+      companyId: auth.companyId,
+      year: auth.year,
+      cicloId: auth.cicloId,
+      setorId: (auth.linha.setor_id as string | null) ?? null,
+      metodo: "pessoal",
+      alvoTipo: "colaborador",
+      alvoId: id,
+      alvoRotulo: (auth.linha.nome as string | null) || "Colaborador",
+      acao: "alterou",
+      fase: auth.fase,
+      antes: diffBen.antes,
+      depois: diffBen.depois,
+      autorId: auth.userId,
+      autorPapel: auth.papel,
+    });
+  }
   revalidatePath(PATH);
   return { ok: true as const };
 }
@@ -752,6 +836,23 @@ export async function deleteColaborador(id: string) {
   const supabase = db() ?? (await createClient());
   const auth = await autorizarColaborador(supabase, id);
   if (!auth.ok) return { error: auth.error };
+  // A trilha guarda o rótulo e a linha ANTES de apagar: depois disto o
+  // colaborador não existe em lugar nenhum além daqui.
+  await registrarAlteracao({
+    companyId: auth.companyId,
+    year: auth.year,
+    cicloId: auth.cicloId,
+    setorId: (auth.linha.setor_id as string | null) ?? null,
+    metodo: "pessoal",
+    alvoTipo: "colaborador",
+    alvoId: id,
+    alvoRotulo: (auth.linha.nome as string | null) || "Colaborador",
+    acao: "excluiu",
+    fase: auth.fase,
+    antes: auth.linha,
+    autorId: auth.userId,
+    autorPapel: auth.papel,
+  });
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
     .delete()
