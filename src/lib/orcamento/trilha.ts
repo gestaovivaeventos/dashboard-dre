@@ -12,7 +12,7 @@
 
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
-import type { TrilhaFase } from "@/lib/orcamento/ciclo";
+import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
 
 /** O que a alteração atingiu. Uma por granularidade natural de cada método. */
 export type AlvoTipo =
@@ -92,16 +92,27 @@ const ACOES_DE_DIRETORIA: ReadonlySet<TrilhaAcao> = new Set<TrilhaAcao>([
 /**
  * A alteração TRAVA o item para o construtor?
  *
- * Regra: toda alteração do VALIDADOR num item o trava, salvo se ele marcar
- * "Permitir que o gestor ajuste". Solicitação (`solicitou`) nunca trava — ela
- * pressupõe que o construtor vá editar. Ação do próprio construtor, nunca.
+ * Regra: alteração feita EM NOME DA DIRETORIA trava o item, salvo se quem
+ * decidiu marcar "Permitir que o gestor ajuste". Solicitação (`solicitou`)
+ * nunca trava — ela pressupõe que o construtor vá editar.
+ *
+ * "Em nome da diretoria" é o validador sempre, **e o admin durante a
+ * validação**: naquela janela ele está no lugar da diretoria, e é normal que
+ * ele decida (é quem opera o ciclo, e pode ser o único a testar). Antes o admin
+ * era excluído, e o efeito prático era uma validação sem trava nenhuma — o
+ * botão "Liberar" nunca acendia porque nada ficava travado.
+ *
+ * Fora da validação, alteração do admin é manutenção, não decisão: não trava.
  */
 export function travaOItem(
   papel: OrcamentoPapel,
   acao: TrilhaAcao,
   permiteAlteracao: boolean | null | undefined,
+  estado: CicloEstado = "em_construcao",
 ): boolean {
-  if (papel !== "validador") return false;
+  const comoDiretoria =
+    papel === "validador" || (papel === "admin" && estado === "em_validacao");
+  if (!comoDiretoria) return false;
   if (!ACOES_DE_DIRETORIA.has(acao)) return false;
   return permiteAlteracao !== true;
 }

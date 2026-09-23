@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Ban,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   Loader2,
@@ -20,6 +22,7 @@ import {
   liberarItem,
   solicitarAjuste,
 } from "@/lib/orcamento/actions/validacao";
+import { executarTransicao } from "@/lib/orcamento/actions/ciclo";
 import {
   getValidacao,
   type ValidacaoCategoria,
@@ -69,7 +72,9 @@ export function ValidacaoView({
   const [comentario, setComentario] = useState("");
   const [permitir, setPermitir] = useState(false);
   const [novoValor, setNovoValor] = useState("");
+  const [concluindo, setConcluindo] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
 
   async function recarregar() {
     setCarregando(true);
@@ -105,6 +110,36 @@ export function ValidacaoView({
     if (!dados?.propostoAno || setorFiltro !== null) return null;
     return dados.totalAno - dados.propostoAno;
   }, [dados, setorFiltro]);
+
+  // O que fica pendurado depois que a diretoria termina. Não impede concluir —
+  // item travado é decisão consciente, e solicitação é justamente o que o
+  // gestor vai responder no retorno —, mas ele tem de saber o que está deixando.
+  const resumo = useMemo(() => {
+    if (!dados) return { travados: 0, pendencias: 0 };
+    let travados = 0;
+    for (const s of dados.setores) {
+      for (const c of s.categorias) {
+        for (const i of c.itens) if (i.travado) travados += 1;
+      }
+    }
+    return { travados, pendencias: dados.pendencias.length };
+  }, [dados]);
+
+  function concluirValidacao() {
+    setErro(null);
+    startTransition(async () => {
+      const res = await executarTransicao(companyId, year, "concluir_validacao");
+      if (res.error) {
+        setErro(res.error);
+        return;
+      }
+      setConcluindo(false);
+      // A conclusão muda o estado do ciclo, que o servidor renderiza (faixa,
+      // caixas do hub, e esta própria tela vira leitura).
+      router.refresh();
+      await recarregar();
+    });
+  }
 
   function abrirCategoria(chave: string) {
     setAberta((atual) => (atual === chave ? null : chave));
@@ -441,6 +476,70 @@ export function ValidacaoView({
         Em Despesas com pessoal, o valor mostrado é <strong>12 × o salário</strong> — a referência
         da decisão. O custo com encargos, férias e 13º aparece na Prévia do orçamento.
       </p>
+
+      {/* Concluir a validação MORA AQUI, não só no painel do ciclo: quem acabou
+          de decidir está nesta tela, e mandá-lo procurar o botão noutro lugar é
+          o tipo de detalhe que faz um fluxo parecer quebrado. */}
+      {podeDecidir && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/20 p-4">
+          <div className="min-w-0 text-sm">
+            <p className="font-medium">Terminou de revisar?</p>
+            <p className="text-muted-foreground">
+              Concluir devolve o orçamento aos gestores, com o que você decidiu.
+              {resumo.travados > 0 && (
+                <>
+                  {" "}
+                  <strong className="text-foreground">{resumo.travados}</strong> item(ns) ficarão
+                  travados
+                </>
+              )}
+              {resumo.pendencias > 0 && (
+                <>
+                  {resumo.travados > 0 ? " e " : " "}
+                  <strong className="text-foreground">{resumo.pendencias}</strong> pendência(s)
+                  aguardando resposta
+                </>
+              )}
+              {(resumo.travados > 0 || resumo.pendencias > 0) && "."}
+            </p>
+          </div>
+          {concluindo ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={concluirValidacao}
+                disabled={isPending}
+                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCheck className="h-4 w-4" />
+                )}
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConcluindo(false)}
+                disabled={isPending}
+                className="rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+              >
+                Voltar
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConcluindo(true)}
+              disabled={isPending}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <CheckCheck className="h-4 w-4" />
+              Concluir validação
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

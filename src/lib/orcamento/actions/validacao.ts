@@ -88,7 +88,7 @@ export async function cancelarColaborador(
   // A trava acompanha a decisão: item mexido pela diretoria sai das mãos do
   // gestor, salvo liberação explícita.
   const acao = reativar ? "reativou" : "cancelou";
-  const travar = travaOItem(auth.user.papel, acao, permiteAlteracao);
+  const travar = travaOItem(auth.user.papel, acao, permiteAlteracao, auth.estado);
 
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
@@ -189,7 +189,7 @@ export async function cancelarItemPlanejamento(params: {
   if (marcado.error) return { error: marcado.error };
 
   const acao = reativar ? "reativou" : "cancelou";
-  const travar = travaOItem(auth.user.papel, acao, permiteAlteracao);
+  const travar = travaOItem(auth.user.papel, acao, permiteAlteracao, auth.estado);
 
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
@@ -294,7 +294,7 @@ export async function alterarItemPlanejamento(params: {
   const anterior = Number(atual.valorMensal ?? atual.valor_mensal ?? 0);
   const novos = itens.map((it, i) => (i === indice ? { ...it, valorMensal: valorMensal } : it));
 
-  const travar = travaOItem(auth.user.papel, "alterou", permiteAlteracao);
+  const travar = travaOItem(auth.user.papel, "alterou", permiteAlteracao, auth.estado);
   const { error } = await supabase
     .from("orcamento_planejamento_socios")
     .update({

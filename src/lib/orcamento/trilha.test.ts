@@ -80,10 +80,26 @@ test("solicitação nunca trava — ela pressupõe que o construtor vá editar",
   assert.equal(travaOItem("validador", "solicitou", null), false);
 });
 
-test("ação do construtor ou do admin nunca trava", () => {
-  for (const papel of ["construtor", "construtor_amplo", "admin"] as const) {
+test("ação do construtor nunca trava", () => {
+  for (const papel of ["construtor", "construtor_amplo"] as const) {
     assert.equal(travaOItem(papel, "alterou", null), false, papel);
   }
+});
+
+test("o admin trava DURANTE a validação — e só nela", () => {
+  // Naquela janela ele está no lugar da diretoria (e pode ser o único a
+  // decidir). Fora dela, alteração de admin é manutenção, não decisão — travar
+  // tiraria o item do gestor sem que ninguém tivesse decidido nada.
+  assert.equal(travaOItem("admin", "cancelou", null, "em_validacao"), true);
+  assert.equal(travaOItem("admin", "cancelou", null, "em_construcao"), false);
+  assert.equal(travaOItem("admin", "cancelou", null, "em_ajuste"), false);
+  // O checkbox continua valendo para ele.
+  assert.equal(travaOItem("admin", "cancelou", true, "em_validacao"), false);
+});
+
+test("o validador trava em qualquer fase em que consiga escrever", () => {
+  assert.equal(travaOItem("validador", "alterou", null, "em_validacao"), true);
+  assert.equal(travaOItem("validador", "alterou", null, "em_construcao"), true);
 });
 
 test("solicitar e contestar abrem pendência; alterar não", () => {

@@ -7,7 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
 import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
-import type { TrilhaFase } from "@/lib/orcamento/ciclo";
+import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   autorizarEscrita,
@@ -483,6 +483,7 @@ async function autorizarColaborador(
       companyId: string;
       year: number;
       fase: TrilhaFase;
+      estado: CicloEstado;
       cicloId: string | null;
     }
   | { ok: false; error: string }
@@ -518,6 +519,7 @@ async function autorizarColaborador(
     companyId: linha.company_id as string,
     year: Number(linha.year),
     fase: auth.fase,
+    estado: auth.estado,
     cicloId: auth.cicloId,
   };
 }
@@ -585,7 +587,7 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
   const row = toRow(input, auth.userId);
   // Alteração da diretoria pelo caminho normal também trava o item (a tela da
   // validação manda `permiteAlteracao`; sem ele, trava).
-  const patch = travaOItem(auth.papel, "alterou", undefined)
+  const patch = travaOItem(auth.papel, "alterou", undefined, auth.estado)
     ? {
         ...row,
         diretoria_travado: true,

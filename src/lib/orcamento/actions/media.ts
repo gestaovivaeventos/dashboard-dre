@@ -547,7 +547,7 @@ export async function setMediaIndice(
       setor_id: alvo.id,
       indice_key: indiceKey,
       // Índice trocado pela diretoria trava a linha para o construtor.
-      ...(travaOItem(auth.user.papel, "alterou", undefined)
+      ...(travaOItem(auth.user.papel, "alterou", undefined, auth.estado)
         ? {
             diretoria_travado: true,
             diretoria_alterado_em: new Date().toISOString(),

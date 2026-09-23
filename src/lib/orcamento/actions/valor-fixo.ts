@@ -332,7 +332,7 @@ export async function saveValorFixoContrato(
         };
       }
     }
-    const patchFinal = travaOItem(auth.user.papel, "alterou", undefined)
+    const patchFinal = travaOItem(auth.user.papel, "alterou", undefined, auth.estado)
       ? {
           ...patch,
           diretoria_travado: true,
