@@ -27,7 +27,6 @@ export default async function OrcamentoEmpresaHubPage({
       year={year}
       status={statuses[params.companyId]}
       isAdmin={Boolean(user?.isAdmin)}
-      papel={user?.papel ?? null}
       ciclo={ciclo ?? null}
     />
   );

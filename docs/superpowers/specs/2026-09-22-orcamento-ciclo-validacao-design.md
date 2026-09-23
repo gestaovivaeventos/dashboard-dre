@@ -51,6 +51,44 @@ e-mail não derruba a transição.
 diretoria para o construtor, pedido de liberação para a diretoria. Item travado
 não entra: travado é estado, não tarefa, e o número nunca zeraria.
 
+### REFORMULAÇÃO de 25/09/2026 — a validação não tem tela própria
+
+Depois de usar, o dono do projeto foi claro: a tela consolidada era confusa. O
+sintoma concreto: dentro dela ele clicava em "Despesas com pessoal" e nada
+acontecia, porque ali aquilo era só um agrupamento — e as ações reais estavam
+num rodapé distante.
+
+**A tela `/validacao` foi APAGADA** (rota, view e o leitor `validacao-dados.ts`).
+A validação passou a acontecer **dentro das telas de método**: o diretor entra em
+Despesas com pessoal (ou média, valor fixo, planejamento), escolhe o setor no
+mesmo seletor de sempre e percorre as linhas.
+
+O que isso derrubou do meu próprio argumento anterior: eu defendi a tela
+consolidada dizendo que o diretor precisa ver o todo — **mas a visão do todo já
+existia, é a Prévia**. Eu havia construído uma segunda árvore para responder uma
+pergunta que já tinha resposta.
+
+Peças novas:
+- **`orcamento_revisoes`** (migration `20260925120000`): o visto linha a linha,
+  por ciclo e por RODADA — reenviou, tudo volta a não revisado. Tabela e não
+  coluna porque o item do planejamento não é linha de tabela e porque a revisão
+  precisa zerar a cada rodada.
+- **`chaveDoAlvo`** (puro): a chave textual do item. O item do planejamento usa a
+  DESCRIÇÃO e não o índice — índice muda quando alguém reordena a proposta, e o
+  visto pularia de item.
+- **`BarraValidacao`** + **`VistoRevisao`**: a barra do topo (progresso da tela,
+  "marcar todas", **Concluir validação**) e o visto da linha. A barra só aparece
+  para a diretoria e só enquanto o ciclo está `em_validacao`.
+
+Por tela: **pessoal** ganhou coluna própria com visto + cancelar + pedir;
+**média** e **valor fixo**, visto + pedir (ali a diretoria não edita — a unidade
+do valor fixo é a categoria); **planejamento**, visto + pedir no card da
+categoria (os itens da proposta vivem dentro da entrevista).
+
+**Justificativa virou opcional** em cancelar e alterar — obrigá-la fazia o
+diretor digitar por item, e o que sai disso é texto de preenchimento. Segue
+obrigatória só onde o texto É a ação: solicitar ajuste e pedir liberação.
+
 ### Simplificação de 24/09/2026 (depois do 1º teste em tela)
 
 O primeiro contato com o ciclo montado deu a impressão de "complicado". Parte

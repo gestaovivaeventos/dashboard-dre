@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Ban,
   CheckCircle2,
   Circle,
   CircleDot,
-  Lock,
   Loader2,
+  Lock,
   MessageSquare,
+  MessageSquarePlus,
   PartyPopper,
   Pencil,
   Plus,
@@ -47,7 +49,16 @@ import {
 } from "@/lib/orcamento/planejamento-calc";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
-import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import { BarraValidacao, VistoRevisao } from "@/components/orcamento/barra-validacao";
+import { DespesaDetalhe, NovaDespesa } from "@/components/orcamento/planejamento-despesa";
+import { ESTADO_LABEL } from "@/lib/orcamento/ciclo";
+import { getRevisoes, marcarRevisado } from "@/lib/orcamento/actions/revisao";
+import {
+  cancelarItemPlanejamento,
+  solicitarAjuste,
+} from "@/lib/orcamento/actions/validacao";
+import { chaveDoAlvo } from "@/lib/orcamento/validacao";
+import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -1498,6 +1509,56 @@ export function PlanejamentoSociosManager({
   const [needsMigration, setNeedsMigration] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  // Validação da diretoria nesta mesma tela. A unidade aqui é a CATEGORIA: os
+  // itens da proposta vivem dentro da entrevista, e o que a diretoria decide no
+  // nível do card é "esta categoria está revisada" e "quero pedir um ajuste".
+  const [revisadas, setRevisadas] = useState<Set<string>>(new Set());
+  const [podeDecidir, setPodeDecidir] = useState(false);
+  // `papelDecide` é "sou diretoria", independente da fase — é o que faz a
+  // barra aparecer em modo informativo fora da janela de validação.
+  const [papelDecide, setPapelDecide] = useState(false);
+  const [estadoCiclo, setEstadoCiclo] = useState<string>("em_construcao");
+  const [telaConcluida, setTelaConcluida] = useState(false);
+  const [pedindoEm, setPedindoEm] = useState<string | null>(null);
+  const [pedidoTexto, setPedidoTexto] = useState("");
+  // Despesa aberta: mostra a série mês a mês e permite editar.
+  const [despesaAberta, setDespesaAberta] = useState<string | null>(null);
+  const [novaEm, setNovaEm] = useState<string | null>(null);
+
+  async function recarregarRevisoes() {
+    if (!companyId) return;
+    const res = await getRevisoes(companyId, year, { metodo: "planejamento_socios" });
+    if (res.dados) {
+      setRevisadas(new Set(res.dados.revisadas));
+      setPodeDecidir(res.dados.podeDecidir);
+      setPapelDecide(res.dados.papelDecide);
+      setEstadoCiclo(res.dados.estado);
+      setTelaConcluida(res.dados.telaConcluida);
+    }
+  }
+
+  // A aprovação é por DESPESA: a chave inclui a descrição do item. Uma
+  // categoria reúne contratações e assinaturas distintas, e aprovar o conjunto
+  // esconderia justamente o que a diretoria precisa olhar uma a uma.
+  const chaveItem = (code: string, setorDaLinha: string | null, descricao: string) =>
+    chaveDoAlvo("planejamento_socios", {
+      categoryCode: code,
+      setorId: setorDaLinha ?? setorEspecifico(setorId),
+      descricao,
+    });
+
+  /**
+   * Primeiro setor da lista que tem alguma categoria por este método; se
+   * nenhum tiver, devolve o primeiro (para a tela não ficar sem seleção).
+   */
+  async function primeiroSetorComConteudo(ids: string[]): Promise<string | null> {
+    if (ids.length === 0) return null;
+    for (const id of ids) {
+      const res = await getPlanejamentoSocios(companyId, year, id);
+      if ((res.items?.length ?? 0) > 0) return id;
+    }
+    return ids[0];
+  }
 
   async function reload(sid: string | null = setorId) {
     if (!companyId) {
@@ -1520,6 +1581,7 @@ export function PlanejamentoSociosManager({
       return;
     }
     setItems(res.items);
+    await recarregarRevisoes();
   }
 
   useEffect(() => {
@@ -1536,7 +1598,16 @@ export function PlanejamentoSociosManager({
         ? (res.items ?? []).filter((x) => x.active)
         : [];
       setSetores(ativos);
-      const primeiro = ativos[0]?.id ?? null;
+
+      // Pousa num setor QUE TENHA categorias, não no primeiro da lista.
+      //
+      // O orçamento raramente está distribuído por todos os setores — na
+      // empresa de teste, por exemplo, TODO o planejamento estava em "Não
+      // atribuído". Abrindo no primeiro da ordem alfabética, a tela aparecia
+      // vazia e parecia que a validação não funcionava; a pessoa teria de
+      // caçar o setor certo no seletor.
+      const primeiro = await primeiroSetorComConteudo(ativos.map((x) => x.id));
+      if (cancelado) return;
       setSetorId(primeiro);
       await reload(primeiro);
     })();
@@ -1550,6 +1621,65 @@ export function PlanejamentoSociosManager({
     setSetorId(sid);
     setSelected(null);
     void reload(sid);
+  }
+
+  async function alternarVistoItem(
+    item: PlanejamentoListItem,
+    despesa: { descricao: string },
+  ) {
+    const chave = chaveItem(item.categoryCode, item.setorId, despesa.descricao);
+    const res = await marcarRevisado({
+      companyId,
+      year,
+      alvoChave: chave,
+      alvoTipo: "planejamento_item",
+      metodo: "planejamento_socios",
+      setorId: item.setorId ?? setorEspecifico(setorId),
+      revisado: !revisadas.has(chave),
+    });
+    if (res.error) setLoadError(res.error);
+    else await recarregarRevisoes();
+  }
+
+  async function cancelarDespesa(
+    item: PlanejamentoListItem,
+    despesa: { indice: number; descricao: string; cancelado: boolean },
+  ) {
+    const res = await cancelarItemPlanejamento({
+      companyId,
+      year,
+      categoryCode: item.categoryCode,
+      setorId: item.setorId ?? setorEspecifico(setorId),
+      indice: despesa.indice,
+      descricao: despesa.descricao,
+      motivo: "",
+      reativar: despesa.cancelado,
+    });
+    if (res.error) setLoadError(res.error);
+    else await reload();
+  }
+
+  async function pedirNaDespesa(
+    item: PlanejamentoListItem,
+    despesa: { descricao: string },
+  ) {
+    if (!pedidoTexto.trim()) {
+      setLoadError("Escreva o que você está pedindo ao gestor.");
+      return;
+    }
+    const res = await solicitarAjuste({
+      companyId,
+      year,
+      categoryCode: item.categoryCode,
+      setorId: item.setorId ?? setorEspecifico(setorId),
+      metodo: "planejamento_socios",
+      alvoTipo: "planejamento_item",
+      alvoRotulo: despesa.descricao,
+      motivo: pedidoTexto,
+    });
+    setPedindoEm(null);
+    setPedidoTexto("");
+    if (res.error) setLoadError(res.error);
   }
 
   const filtered = useMemo(() => {
@@ -1619,8 +1749,32 @@ export function PlanejamentoSociosManager({
     );
   }
 
+  // O progresso conta DESPESAS, não categorias — é a unidade da aprovação.
+  const alvosPlan = filtered.flatMap((i) =>
+    i.itensProposta.map((d) => ({
+      chave: chaveItem(i.categoryCode, i.setorId, d.descricao),
+      tipo: "planejamento_item",
+    })),
+  );
+
   return (
     <div className="space-y-4">
+      {papelDecide && (
+        <BarraValidacao
+          companyId={companyId}
+          year={year}
+          metodo="planejamento_socios"
+          setorId={setorEspecifico(setorId)}
+          setorNome={setores.find((x) => x.id === setorId)?.name ?? null}
+          total={alvosPlan.length}
+          revisados={alvosPlan.filter((a) => revisadas.has(a.chave)).length}
+          alvos={alvosPlan}
+          aberta={podeDecidir}
+          estadoLabel={ESTADO_LABEL[estadoCiclo as keyof typeof ESTADO_LABEL] ?? estadoCiclo}
+          telaConcluida={telaConcluida}
+        />
+      )}
+
       {loadError && (
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">{loadError}</div>
       )}
@@ -1735,11 +1889,11 @@ export function PlanejamentoSociosManager({
                   ? "andamento"
                   : "nao_iniciado";
               return (
+                <div key={item.categoryCode} className="relative">
                 <button
-                  key={item.categoryCode}
                   type="button"
                   onClick={() => setSelected(item.categoryCode)}
-                  className="group flex flex-col rounded-xl border bg-card p-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-muted/40"
+                  className="group flex w-full flex-col rounded-xl border bg-card p-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-muted/40"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -1770,6 +1924,142 @@ export function PlanejamentoSociosManager({
                     )}
                   </div>
                 </button>
+
+                {/* Despesas da categoria — a diretoria aprova UMA A UMA, sem
+                    entrar na entrevista. Sem isto ela teria de abrir categoria
+                    por categoria só para dar o visto. */}
+                {podeDecidir && item.itensProposta.length > 0 && (
+                  <ul className="mt-1 space-y-1 rounded-lg border bg-muted/20 p-2">
+                    {item.itensProposta.map((d) => {
+                      const chave = chaveItem(item.categoryCode, item.setorId, d.descricao);
+                      const vistoOk = revisadas.has(chave);
+                      const pedidoChave = `${item.categoryCode}:${d.indice}`;
+                      return (
+                        <li key={pedidoChave} className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <VistoRevisao
+                              revisado={vistoOk}
+                              onToggle={() => void alternarVistoItem(item, d)}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void cancelarDespesa(item, d)}
+                              title={d.cancelado ? "Reativar esta despesa" : "Cancelar esta despesa"}
+                              className={cn(
+                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors",
+                                d.cancelado
+                                  ? "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                  : "text-muted-foreground hover:bg-muted",
+                              )}
+                            >
+                              {d.cancelado ? (
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPedindoEm((v) => (v === pedidoChave ? null : pedidoChave))
+                              }
+                              title="Pedir um ajuste nesta despesa"
+                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
+                            >
+                              <MessageSquarePlus className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDespesaAberta((v) => (v === pedidoChave ? null : pedidoChave))
+                              }
+                              className={cn(
+                                "min-w-0 flex-1 truncate text-left text-xs hover:underline",
+                                d.cancelado && "line-through opacity-60",
+                              )}
+                              title="Ver o valor mês a mês e editar"
+                            >
+                              {d.descricao}
+                              <span className="ml-1.5 text-[10px] text-muted-foreground">
+                                {d.periodicidadeLabel}
+                              </span>
+                            </button>
+                            <span
+                              className={cn(
+                                "shrink-0 text-xs tabular-nums text-muted-foreground",
+                                d.cancelado && "line-through",
+                              )}
+                            >
+                              {formatBRL(d.totalAno)}
+                            </span>
+                          </div>
+                          {despesaAberta === pedidoChave && (
+                            <DespesaDetalhe
+                              companyId={companyId}
+                              year={year}
+                              categoryCode={item.categoryCode}
+                              setorId={item.setorId ?? setorEspecifico(setorId)}
+                              despesa={d}
+                              podeEditar={podeDecidir}
+                              onSalvo={() => {
+                                setDespesaAberta(null);
+                                void reload();
+                              }}
+                              onError={setLoadError}
+                            />
+                          )}
+
+                          {pedindoEm === pedidoChave && (
+                            <div className="flex items-center gap-1 pl-1">
+                              <input
+                                value={pedidoTexto}
+                                onChange={(e) => setPedidoTexto(e.target.value)}
+                                placeholder="O que pedir ao gestor"
+                                className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void pedirNaDespesa(item, d)}
+                                className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700"
+                              >
+                                Enviar
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+
+                    {/* A diretoria também ACRESCENTA: revisar não é só cortar,
+                        e mandar o gestor voltar à entrevista para incluir uma
+                        linha é caro para os dois. */}
+                    <li>
+                      {novaEm === item.categoryCode ? (
+                        <NovaDespesa
+                          companyId={companyId}
+                          year={year}
+                          categoryCode={item.categoryCode}
+                          setorId={item.setorId ?? setorEspecifico(setorId)}
+                          onSalvo={() => {
+                            setNovaEm(null);
+                            void reload();
+                          }}
+                          onCancelar={() => setNovaEm(null)}
+                          onError={setLoadError}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setNovaEm(item.categoryCode)}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                        >
+                          <Plus className="h-3 w-3" /> despesa
+                        </button>
+                      )}
+                    </li>
+                  </ul>
+                )}
+                </div>
               );
             })}
             {filtered.length === 0 && (

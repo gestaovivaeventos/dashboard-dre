@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  ClipboardCheck,
   Clock,
   History,
   Coins,
@@ -16,14 +15,12 @@ import {
 import { CicloPainel } from "@/components/orcamento/ciclo-painel";
 import type { CicloInfo } from "@/lib/orcamento/actions/ciclo";
 import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
-import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   isWorkspaceTabBuilt,
   workspaceTabHref,
   workspaceConfigHref,
   workspacePreviaHref,
   workspaceRetornoHref,
-  workspaceValidacaoHref,
 } from "@/lib/orcamento/workspace-tabs";
 import { statusGeral, type OrcamentoStatusRaw } from "@/lib/orcamento/status";
 import { StatusBadge } from "@/components/orcamento/status-badge";
@@ -109,20 +106,16 @@ export function CompanyHub({
   status,
   isAdmin = false,
   ciclo = null,
-  papel = null,
 }: {
   companyId: string;
   year: number;
   status?: OrcamentoStatusRaw;
-  /**
-   * Papel de quem está olhando. O hub mostra o que ESTE papel faz: o gestor não
-   * precisa da tela de validação, o diretor não precisa de 8 portas para achar
-   * a dele. (Admin continua vendo tudo — é quem opera o ciclo.)
-   *
-   * Todos veem as telas de método: a diretoria também monta o orçamento do
-   * setor dela (o Diretoria), como qualquer gestor.
+  /*
+   * Não há mais recorte de caixas por papel: com a validação acontecendo DENTRO
+   * das telas de método, todo mundo usa as mesmas portas. O que muda por papel
+   * é o que cada tela oferece lá dentro (a barra de validação, o visto, as
+   * ações da diretoria) — não a lista de caixas.
    */
-  papel?: OrcamentoPapel | null;
   /**
    * Estado do ciclo. Quando presente, o painel do ciclo substitui o selo
    * heurístico de `status.ts` (que adivinhava o andamento contando linhas
@@ -140,12 +133,6 @@ export function CompanyHub({
   // Só os 4 métodos de despesa (VE ficam de fora do hub padrão).
   const metodos = METODOS.filter((m) => !m.ve);
 
-  const ehDiretoria = papel === "validador";
-  const emValidacao = ciclo?.estado === "em_validacao";
-  // A validação é do diretor (e do admin). Para o gestor a caixa só abriria uma
-  // tela que ele não opera — é ruído.
-  const mostraValidacao =
-    Boolean(ciclo) && ciclo!.estado !== "em_construcao" && (ehDiretoria || isAdmin);
   // O retorno é de quem montou. O diretor também vê: é onde ele confere o que
   // decidiu e responde aos pedidos de liberação.
   const mostraRetorno =
@@ -165,29 +152,12 @@ export function CompanyHub({
         {!ciclo && status && <StatusBadge selo={statusGeral(status)} className="mt-0.5" />}
       </div>
 
-      {ciclo && <CicloPainel companyId={companyId} year={year} ciclo={ciclo} />}
-
-      {/* Quando é a vez da diretoria, a validação vira a chamada principal —
-          em vez de mais uma caixa no meio de oito. Não há redirecionamento
-          automático de propósito: o diretor também monta o setor dele, e cair
-          numa tela que ele não escolheu esconderia o resto. */}
-      {mostraValidacao && emValidacao && (
-        <Link
-          href={workspaceValidacaoHref(companyId, year)}
-          className="group flex items-center gap-4 rounded-xl border border-amber-500/40 bg-amber-500/5 p-5 transition-colors hover:border-amber-500/70 hover:bg-amber-500/10"
-        >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-            <ClipboardCheck className="h-5 w-5" strokeWidth={1.75} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="font-semibold">Validar o orçamento</div>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Percorra por setor e categoria, decida item a item e conclua a validação.
-            </p>
-          </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-        </Link>
-      )}
+      {/* Painel do ciclo: ADMIN-ONLY. As transições (enviar, devolver, voltar
+          para edição, concluir) são atos da empresa inteira e só o administrador
+          as dispara — para o gestor e para o diretor o painel seria informação
+          que eles não acionam. Quem valida vê o estado na barra da própria tela
+          de método; quem constrói, na faixa do workspace. */}
+      {ciclo && isAdmin && <CicloPainel companyId={companyId} year={year} ciclo={ciclo} />}
 
       {/* Prévia do orçamento — o resultado consolidado dos métodos, em destaque
           acima das caixas de entrada. */}
@@ -228,15 +198,6 @@ export function CompanyHub({
             validação: antes disso não há o que validar, e uma caixa que abre
             uma tela vazia é ruído. Continua visível nas fases seguintes porque
             é por ela que se confere o que foi decidido. */}
-        {mostraValidacao && !emValidacao && (
-          <Tile
-            icon={ClipboardCheck}
-            title="Validação da diretoria"
-            desc="O que a diretoria cancelou, alterou ou pediu para ajustar."
-            href={workspaceValidacaoHref(companyId, year)}
-          />
-        )}
-
         {/* Retorno da diretoria. Aparece a partir do momento em que existe
             decisão para ler — antes disso a lista estaria vazia. Fica visível
             nas fases seguintes porque é também o histórico do orçamento. */}

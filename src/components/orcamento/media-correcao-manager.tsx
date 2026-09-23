@@ -5,11 +5,17 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  MessageSquarePlus,
   RefreshCw,
   Search,
   TriangleAlert,
 } from "lucide-react";
 
+import { BarraValidacao, VistoRevisao } from "@/components/orcamento/barra-validacao";
+import { ESTADO_LABEL } from "@/lib/orcamento/ciclo";
+import { getRevisoes, marcarRevisado } from "@/lib/orcamento/actions/revisao";
+import { solicitarAjuste } from "@/lib/orcamento/actions/validacao";
+import { chaveDoAlvo } from "@/lib/orcamento/validacao";
 import {
   calcularMedia,
   getMediaCategorias,
@@ -88,6 +94,9 @@ function MediaRow({
   setorId,
   setores,
   onMoved,
+  podeDecidir,
+  revisado,
+  onRevisado,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
@@ -101,6 +110,10 @@ function MediaRow({
   /** Setores ativos, para o destino do "Mover". */
   setores: OrcamentoSetor[];
   onMoved: () => void;
+  /** Diretoria (ou admin) com o ciclo em validação. */
+  podeDecidir: boolean;
+  revisado: boolean;
+  onRevisado: () => void;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
   // ao vivo do realizado enquanto nada foi salvo.
@@ -191,9 +204,97 @@ function MediaRow({
   const indiceIndefinido = item.indiceKey != null && indiceValue == null;
   const projetado = projetarMedia(efetiva, indiceValue);
 
+  const [validandoLinha, setValidandoLinha] = useState(false);
+  const [pedindo, setPedindo] = useState(false);
+  const [pedido, setPedido] = useState("");
+  const chave = chaveDoAlvo("media", {
+    categoryCode: item.categoryCode,
+    setorId: item.setorId,
+    id: item.categoryCode + ":" + (item.setorId ?? "-"),
+  });
+
+  async function alternarVisto() {
+    setValidandoLinha(true);
+    const res = await marcarRevisado({
+      companyId,
+      year: budgetYear,
+      alvoChave: chave,
+      alvoTipo: "media_linha",
+      metodo: "media",
+      setorId: item.setorId,
+      revisado: !revisado,
+    });
+    setValidandoLinha(false);
+    if (res.error) onError(res.error);
+    else onRevisado();
+  }
+
+  async function enviarPedido() {
+    if (!pedido.trim()) {
+      onError("Escreva o que você está pedindo.");
+      return;
+    }
+    setValidandoLinha(true);
+    const res = await solicitarAjuste({
+      companyId,
+      year: budgetYear,
+      categoryCode: item.categoryCode,
+      setorId: item.setorId,
+      metodo: "media",
+      alvoTipo: "media_linha",
+      alvoRotulo: item.categoryName,
+      motivo: pedido,
+    });
+    setValidandoLinha(false);
+    setPedindo(false);
+    setPedido("");
+    if (res.error) onError(res.error);
+  }
+
   return (
     <>
       <tr className="align-top">
+        {/* Diretoria: aqui ela NÃO edita o valor — média é série histórica do
+            administrador. Ela dá o visto e pede o ajuste; o índice, que ela pode
+            trocar, fica no próprio seletor da linha. */}
+        {podeDecidir && (
+          <td className="px-2 py-2 align-middle">
+            <div className="flex items-center gap-1">
+              <VistoRevisao
+                revisado={revisado}
+                ocupado={validandoLinha}
+                onToggle={() => void alternarVisto()}
+              />
+              <button
+                type="button"
+                onClick={() => setPedindo((v) => !v)}
+                title="Pedir um ajuste ao administrador"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {pedindo && (
+              <div className="mt-1 flex items-center gap-1">
+                <input
+                  value={pedido}
+                  onChange={(e) => setPedido(e.target.value)}
+                  placeholder="O que pedir"
+                  className="w-36 rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                />
+                <button
+                  type="button"
+                  onClick={() => void enviarPedido()}
+                  disabled={validandoLinha}
+                  className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Enviar
+                </button>
+              </div>
+            )}
+          </td>
+        )}
+
         {/* Categoria */}
         <td className="px-3 py-2">
           <button
@@ -385,9 +486,39 @@ export function MediaCorrecaoManager({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  // Validação da diretoria acontece nesta mesma tela (não há tela separada).
+  const [revisadas, setRevisadas] = useState<Set<string>>(new Set());
+  const [podeDecidir, setPodeDecidir] = useState(false);
+  // `papelDecide` é "sou diretoria", independente da fase — é o que faz a
+  // barra aparecer em modo informativo fora da janela de validação.
+  const [papelDecide, setPapelDecide] = useState(false);
+  const [estadoCiclo, setEstadoCiclo] = useState<string>("em_construcao");
+  const [telaConcluida, setTelaConcluida] = useState(false);
+
+  async function recarregarRevisoes() {
+    if (!companyId) return;
+    const res = await getRevisoes(companyId, year, { metodo: "media" });
+    if (res.dados) {
+      setRevisadas(new Set(res.dados.revisadas));
+      setPodeDecidir(res.dados.podeDecidir);
+      setPapelDecide(res.dados.papelDecide);
+      setEstadoCiclo(res.dados.estado);
+      setTelaConcluida(res.dados.telaConcluida);
+    }
+  }
   const [recalcAll, setRecalcAll] = useState(false);
   const [search, setSearch] = useState("");
   const [, startTransition] = useTransition();
+
+  /** Primeiro setor com alguma categoria por média; senão, o primeiro da lista. */
+  async function primeiroSetorComConteudo(ids: string[]): Promise<string | null> {
+    if (ids.length === 0) return null;
+    for (const id of ids) {
+      const res = await getMediaCategorias(companyId, year, id);
+      if ((res.setup?.items.length ?? 0) > 0) return id;
+    }
+    return ids[0];
+  }
 
   async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
@@ -412,6 +543,7 @@ export function MediaCorrecaoManager({
     setItems(res.setup.items);
     setIndices(res.setup.indices);
     setBaseYear(res.setup.baseYear);
+    await recarregarRevisoes();
   }
 
   // Empresa/ano mudou: recarrega a lista de setores e cai no primeiro deles.
@@ -429,7 +561,11 @@ export function MediaCorrecaoManager({
         ? (res.items ?? []).filter((x) => x.active)
         : [];
       setSetores(ativos);
-      const primeiro = ativos[0]?.id ?? null;
+      // Pousa num setor QUE TENHA conteúdo, não no primeiro da lista. O
+      // orçamento raramente se distribui por todos os setores, e abrir num
+      // vazio faz a tela parecer quebrada — foi o que aconteceu no teste.
+      const primeiro = await primeiroSetorComConteudo(ativos.map((x) => x.id));
+      if (cancelado) return;
       setSetorId(primeiro);
       await reload(companyId, year, primeiro);
     })();
@@ -478,8 +614,33 @@ export function MediaCorrecaoManager({
     );
   }, [items, search]);
 
+  const alvosVisiveis = filtered.map((i) => ({
+    chave: chaveDoAlvo("media", {
+      categoryCode: i.categoryCode,
+      setorId: i.setorId,
+      id: i.categoryCode + ":" + (i.setorId ?? "-"),
+    }),
+    tipo: "media_linha",
+  }));
+
   return (
     <div className="space-y-4">
+      {papelDecide && (
+        <BarraValidacao
+          companyId={companyId}
+          year={year}
+          metodo="media"
+          setorId={setorEspecifico(setorId)}
+          setorNome={setores.find((x) => x.id === setorId)?.name ?? null}
+          total={alvosVisiveis.length}
+          revisados={alvosVisiveis.filter((a) => revisadas.has(a.chave)).length}
+          alvos={alvosVisiveis}
+          aberta={podeDecidir}
+          estadoLabel={ESTADO_LABEL[estadoCiclo as keyof typeof ESTADO_LABEL] ?? estadoCiclo}
+          telaConcluida={telaConcluida}
+        />
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-3">
         {setores.length > 0 && (
@@ -571,6 +732,7 @@ export function MediaCorrecaoManager({
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
+                  {podeDecidir && <th className="px-2 py-2.5 font-medium">Validar</th>}
                   <th className="px-3 py-2.5 font-medium">Categoria</th>
                   <th className="px-3 py-2.5 font-medium">Média {baseYear}</th>
                   <th className="px-3 py-2.5 font-medium">Correção</th>
@@ -591,11 +753,20 @@ export function MediaCorrecaoManager({
                     onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}
                     onError={setLoadError}
+                    podeDecidir={podeDecidir}
+                    revisado={revisadas.has(
+                      chaveDoAlvo("media", {
+                        categoryCode: item.categoryCode,
+                        setorId: item.setorId,
+                        id: item.categoryCode + ":" + (item.setorId ?? "-"),
+                      }),
+                    )}
+                    onRevisado={() => void recarregarRevisoes()}
                   />
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={podeDecidir ? 5 : 4} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>

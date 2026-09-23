@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Trash2, UserPlus } from "lucide-react";
+import { Ban, Loader2, MessageSquarePlus, RotateCcw, Trash2, UserPlus } from "lucide-react";
 
 import {
   createColaborador,
@@ -38,6 +38,15 @@ import {
 import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
 import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
+import {
+  BarraFinalizacao,
+  BarraValidacao,
+  VistoRevisao,
+} from "@/components/orcamento/barra-validacao";
+import { ESTADO_LABEL } from "@/lib/orcamento/ciclo";
+import { getRevisoes, marcarRevisado } from "@/lib/orcamento/actions/revisao";
+import { cancelarColaborador, solicitarAjuste } from "@/lib/orcamento/actions/validacao";
+import { chaveDoAlvo } from "@/lib/orcamento/validacao";
 
 const INPUT_CLS =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
@@ -157,6 +166,41 @@ export function DespesasPessoalManager({
   const [savingAgrupar, setSavingAgrupar] = useState<BeneficioKey | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // ── Validação da diretoria ───────────────────────────────────────────────
+  // A validação acontece AQUI, na tela de quem constrói: o diretor escolhe o
+  // setor no mesmo seletor e percorre as linhas. Não há tela separada.
+  const [revisadas, setRevisadas] = useState<Set<string>>(new Set());
+  const [podeDecidir, setPodeDecidir] = useState(false);
+  // `papelDecide` é "sou diretoria", independente da fase — é o que faz a
+  // barra aparecer em modo informativo fora da janela de validação.
+  const [papelDecide, setPapelDecide] = useState(false);
+  const [estadoCiclo, setEstadoCiclo] = useState<string>("em_construcao");
+  const [telaConcluida, setTelaConcluida] = useState(false);
+  const [finalizada, setFinalizada] = useState(false);
+  const [podeReabrir, setPodeReabrir] = useState(false);
+  const [podeEscreverCiclo, setPodeEscreverCiclo] = useState(true);
+
+  async function recarregarRevisoes(id: string, y: number, setorId: string | null) {
+    // Sem recorte de setor na consulta: o visto vale para a linha, e o filtro
+    // da tela já decide quais linhas aparecem.
+    // O setor entra na consulta: a finalização e a validação são por tela ×
+    // SETOR, e sem ele a tela diria "finalizado" olhando outra combinação.
+    const res = await getRevisoes(id, y, { metodo: "pessoal", setorId: setorEspecifico(setorId) });
+    if (res.dados) {
+      setRevisadas(new Set(res.dados.revisadas));
+      setPodeDecidir(res.dados.podeDecidir);
+      setPapelDecide(res.dados.papelDecide);
+      setEstadoCiclo(res.dados.estado);
+      setTelaConcluida(res.dados.telaConcluida);
+      setFinalizada(res.dados.finalizada);
+      setPodeReabrir(res.dados.podeReabrir);
+      setPodeEscreverCiclo(
+        res.dados.estado === "em_construcao" || res.dados.estado === "em_ajuste",
+      );
+    }
+  }
+
+
   async function loadColabs(cid: string, y: number, sid: string | null) {
     const res = await getColaboradores(cid, y, sid);
     if (res?.needsMigration) {
@@ -170,6 +214,7 @@ export function DespesasPessoalManager({
       return;
     }
     setItems(res.items ?? []);
+    await recarregarRevisoes(cid, y, sid);
   }
 
   async function init(cid: string, y: number) {
@@ -309,8 +354,38 @@ export function DespesasPessoalManager({
       ? "todos os setores"
       : `setor ${setup.setores.find((s) => s.id === setorAtual)?.name ?? ""}`.trim();
 
+  // Linhas visíveis desta tela, para o progresso e o "marcar todas".
+  const alvosVisiveis = items.map((c) => ({
+    chave: chaveDoAlvo("pessoal", { id: c.id }),
+    tipo: "colaborador",
+  }));
+  const revisadosAqui = alvosVisiveis.filter((a) => revisadas.has(a.chave)).length;
+
   return (
     <div className="space-y-5">
+      {/* Barra de validação: só aparece para a diretoria, e só enquanto o
+          orçamento está na janela dela. É aqui que ela acompanha o progresso e
+          conclui — sem voltar ao hub. */}
+      {papelDecide && (
+        <BarraValidacao
+          companyId={companyId}
+          year={year}
+          metodo="pessoal"
+          setorId={setorEspecifico(setorId)}
+          setorNome={
+            todosSetores
+              ? null
+              : setup.setores.find((x) => x.id === setorAtual)?.name ?? null
+          }
+          total={alvosVisiveis.length}
+          revisados={revisadosAqui}
+          alvos={alvosVisiveis}
+          aberta={podeDecidir}
+          estadoLabel={ESTADO_LABEL[estadoCiclo as keyof typeof ESTADO_LABEL] ?? estadoCiclo}
+          telaConcluida={telaConcluida}
+        />
+      )}
+
       {/* Regime de apuração + setor (empresa e ano ficam no cabeçalho do workspace) */}
       <div className="flex flex-wrap items-end gap-3">
         {/* Regime de apuração — distribui o 13º (caixa: nov/dez; competência: 1/12). */}
@@ -458,6 +533,7 @@ export function DespesasPessoalManager({
                   <table className="min-w-[1040px] w-full border-collapse text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {podeDecidir && <th className="border-r px-2 py-2 text-left">Validar</th>}
                         <th
                           className="border-r px-2 py-2 text-left"
                           colSpan={setup.usarEmpresaEncargos ? 3 : 2}
@@ -480,6 +556,7 @@ export function DespesasPessoalManager({
                         <th className="px-2 py-2" />
                       </tr>
                       <tr className="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground">
+                        {podeDecidir && <th className="border-r px-2 py-1.5" />}
                         {setup.usarEmpresaEncargos && (
                           <th
                             className="border-r px-2 py-1.5 text-left"
@@ -515,6 +592,11 @@ export function DespesasPessoalManager({
                           mostrarEmpresa={setup.usarEmpresaEncargos}
                           onError={(msg) => setFeedback({ ok: false, msg })}
                           onDelete={() => handleDelete(colab)}
+                          podeDecidir={podeDecidir}
+                          revisado={revisadas.has(chaveDoAlvo("pessoal", { id: colab.id }))}
+                          companyId={companyId}
+                          onRevisado={() => void recarregarRevisoes(companyId, year, setorId)}
+                          onMudou={() => void loadColabs(companyId, year, setorId)}
                         />
                       ))}
                     </tbody>
@@ -589,6 +671,22 @@ export function DespesasPessoalManager({
           )}
         </>
       )}
+
+      {/* Rodapé da construção: o gestor declara que terminou ESTE setor e o
+          fecha para edição. O botão de reabrir ao lado só aparece para admin. */}
+      <BarraFinalizacao
+        companyId={companyId}
+        year={year}
+        metodo="pessoal"
+        setorId={setorEspecifico(setorId)}
+        setorNome={
+          todosSetores ? null : setup.setores.find((x) => x.id === setorAtual)?.name ?? null
+        }
+        finalizada={finalizada}
+        podeReabrir={podeReabrir}
+        // Sem setor escolhido não há o que finalizar: a trava é por setor.
+        disponivel={podeEscreverCiclo && !todosSetores && Boolean(setorEspecifico(setorId))}
+      />
     </div>
   );
 }
@@ -661,6 +759,13 @@ interface RowProps {
   mostrarEmpresa: boolean;
   onError: (msg: string) => void;
   onDelete: () => void;
+  /** Diretoria (ou admin) com o ciclo em validação: mostra visto e ações. */
+  podeDecidir: boolean;
+  revisado: boolean;
+  companyId: string;
+  onRevisado: () => void;
+  /** Recarrega a lista (cancelamento muda o que a linha mostra). */
+  onMudou: () => void;
 }
 
 function ColaboradorRow({
@@ -671,7 +776,71 @@ function ColaboradorRow({
   mostrarEmpresa,
   onError,
   onDelete,
+  podeDecidir,
+  revisado,
+  companyId,
+  onRevisado,
+  onMudou,
 }: RowProps) {
+  const [validando, setValidando] = useState(false);
+  const [comentando, setComentando] = useState(false);
+  const [comentario, setComentario] = useState("");
+
+  /** Visto da diretoria — não altera orçamento, só registra que ela olhou. */
+  async function alternarVisto() {
+    setValidando(true);
+    const res = await marcarRevisado({
+      companyId,
+      year,
+      alvoChave: chaveDoAlvo("pessoal", { id: colab.id }),
+      alvoTipo: "colaborador",
+      metodo: "pessoal",
+      setorId: colab.setorId,
+      revisado: !revisado,
+    });
+    setValidando(false);
+    if (res.error) onError(res.error);
+    else onRevisado();
+  }
+
+  /** Cancelar é MARCA: a linha fica, riscada, e sai de todos os números. */
+  async function alternarCancelamento() {
+    setValidando(true);
+    const res = await cancelarColaborador(
+      colab.id,
+      comentario,
+      false,
+      Boolean(colab.canceladoEm),
+    );
+    setValidando(false);
+    setComentando(false);
+    setComentario("");
+    if (res.error) onError(res.error);
+    else onMudou();
+  }
+
+  async function enviarSolicitacao() {
+    if (!comentario.trim()) {
+      onError("Escreva o que você está pedindo ao gestor.");
+      return;
+    }
+    setValidando(true);
+    const res = await solicitarAjuste({
+      companyId,
+      year,
+      setorId: colab.setorId,
+      metodo: "pessoal",
+      alvoTipo: "colaborador",
+      alvoId: colab.id,
+      alvoRotulo: colab.nome ?? colab.cargoAtual ?? "Colaborador",
+      motivo: comentario,
+    });
+    setValidando(false);
+    setComentando(false);
+    setComentario("");
+    if (res.error) onError(res.error);
+    else onMudou();
+  }
   const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
   const [saving, setSaving] = useState(false);
   const draftRef = useRef(draft);
@@ -774,6 +943,63 @@ function ColaboradorRow({
             : undefined
       }
     >
+      {/* Coluna da diretoria: o visto e as duas ações que não são edição
+          (cancelar e pedir/comentar). Editar o salário ou o cargo, o diretor faz
+          nos próprios campos da linha — na validação ele tem escrita. Por isso
+          aqui não há "alterar": seria um segundo caminho para a mesma coisa. */}
+      {podeDecidir && (
+        <td className="border-r px-1.5 py-1 align-middle">
+          <div className="flex items-center gap-1">
+            <VistoRevisao revisado={revisado} ocupado={validando} onToggle={alternarVisto} />
+            <button
+              type="button"
+              onClick={() => void alternarCancelamento()}
+              disabled={validando}
+              title={colab.canceladoEm ? "Reativar" : "Cancelar esta contratação"}
+              className={cn(
+                "inline-flex h-6 w-6 items-center justify-center rounded-md border transition-colors disabled:opacity-50",
+                colab.canceladoEm
+                  ? "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {colab.canceladoEm ? (
+                <RotateCcw className="h-3.5 w-3.5" />
+              ) : (
+                <Ban className="h-3.5 w-3.5" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setComentando((v) => !v)}
+              disabled={validando}
+              title="Pedir um ajuste ao gestor"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {comentando && (
+            <div className="mt-1 flex items-center gap-1">
+              <input
+                value={comentario}
+                onChange={(e) => setComentario(e.target.value)}
+                placeholder="O que pedir ao gestor"
+                className="w-40 rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => void enviarSolicitacao()}
+                disabled={validando}
+                className="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Enviar
+              </button>
+            </div>
+          )}
+        </td>
+      )}
+
       {/* Empresa dos encargos — só aparece quando habilitada na configuração.
           Vazio significa a empresa do quadro. */}
       {mostrarEmpresa && (

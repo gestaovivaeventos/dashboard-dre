@@ -52,14 +52,11 @@ export function workspaceTabHref(companyId: string, year: number, slug: string):
   return `/orcamento/empresa/${companyId}/${year}/${slug}`;
 }
 
-/**
- * URL da tela de VALIDAÇÃO (diretoria). Como a Prévia, não é um método — é uma
- * etapa do ciclo, com rota própria. A caixa no hub só aparece quando há o que
- * validar ou já houve validação.
- */
-export function workspaceValidacaoHref(companyId: string, year: number): string {
-  return `/orcamento/empresa/${companyId}/${year}/validacao`;
-}
+// A validação NÃO tem rota própria (decisão de 25/09/2026). Ela acontece
+// DENTRO das telas de método: o diretor escolhe o setor e percorre as linhas,
+// como quem constrói. Uma tela consolidada existiu e foi removida — era uma
+// segunda árvore para responder o que a Prévia já responde, e a caixa dela
+// ("Despesas com pessoal") não levava a lugar nenhum, o que confundia.
 
 /**
  * URL do RETORNO da diretoria (visão de quem montou o orçamento). Como a

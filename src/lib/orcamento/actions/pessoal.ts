@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { telaSetorFinalizada } from "@/lib/orcamento/actions/revisao";
 import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
 import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
 import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
@@ -39,6 +40,10 @@ import type { EncargoValues } from "@/lib/orcamento/encargos";
 import { calcularPrevia, type PreviaResultado } from "@/lib/orcamento/pessoal-calc";
 
 const PATH = "/orcamento/despesas/pessoal";
+
+/** Recusa padrão quando a tela × setor está finalizada pelo gestor. */
+const FINALIZADO_MSG =
+  "Este setor foi finalizado e está fechado para edição. Peça a um administrador para reabrir.";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -510,6 +515,17 @@ async function autorizarColaborador(
   // liberado. O caminho dele é "Pedir liberação", não desfazer.
   const trava = podeEscreverNoItem(auth.user.papel, linha as { diretoria_travado?: boolean | null });
   if (!trava.pode) return { ok: false, error: trava.motivo ?? SEM_ACESSO_SETOR };
+  if (
+    !auth.user.isAdmin &&
+    (await telaSetorFinalizada(
+      linha.company_id as string,
+      Number(linha.year),
+      "pessoal",
+      (linha.setor_id as string | null) ?? null,
+    ))
+  ) {
+    return { ok: false, error: FINALIZADO_MSG };
+  }
   return {
     ok: true,
     userId: auth.user.userId,
@@ -541,6 +557,15 @@ export async function createColaborador(
   // Colaborador nasce num setor: o construtor só cadastra nos setores dele.
   if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
     return { error: SEM_ACESSO_SETOR };
+  }
+  // TRAVA DA FINALIZAÇÃO: o gestor declarou o setor terminado. Só o admin passa
+  // — é ele quem reabre, e exigir que reabra para corrigir uma linha seria
+  // cerimônia sem ganho.
+  if (
+    !auth.user.isAdmin &&
+    (await telaSetorFinalizada(companyId, year, "pessoal", input.setorId ?? null))
+  ) {
+    return { error: FINALIZADO_MSG };
   }
   const row = toRow(input, admin.userId);
   const { data: criado, error } = await supabase

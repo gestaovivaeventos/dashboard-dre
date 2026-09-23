@@ -18,11 +18,30 @@ import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 
 /**
- * Código interno da "categoria" que agrupa o quadro de pessoal na tela de
- * validação. Vive aqui, e não no arquivo da leitura, porque um módulo
- * `"use server"` só pode exportar funções async.
+ * Chave textual de um item para a REVISÃO linha a linha (tabela
+ * `orcamento_revisoes`). Precisa ser estável entre recargas e única no ciclo.
+ *
+ * O item do planejamento usa a DESCRIÇÃO, não o índice: índice muda quando
+ * alguém reordena a proposta, e o visto pularia de item — o diretor veria
+ * "revisado" no que não olhou.
  */
-export const PESSOAL_GRUPO = "__pessoal__";
+export function chaveDoAlvo(
+  metodo: OrcamentoMetodo,
+  ref: { id?: string | null; categoryCode?: string | null; setorId?: string | null; descricao?: string | null },
+): string {
+  switch (metodo) {
+    case "pessoal":
+      return `colab:${ref.id ?? ""}`;
+    case "media":
+      return `media:${ref.id ?? ""}`;
+    case "valor_fixo":
+      return `vf:${ref.id ?? ""}`;
+    case "planejamento_socios":
+      return `ps:${ref.categoryCode ?? ""}:${ref.setorId ?? "-"}:${(ref.descricao ?? "").trim()}`;
+    default:
+      return `${metodo}:${ref.id ?? ""}`;
+  }
+}
 
 /**
  * Campos que a DIRETORIA pode alterar em cada método.

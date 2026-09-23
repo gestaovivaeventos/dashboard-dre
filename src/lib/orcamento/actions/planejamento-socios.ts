@@ -40,6 +40,7 @@ import {
   codigosIrmaos,
   normNomeCategoria,
   periodicidadeLabel,
+  serieItem,
   toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
 
@@ -62,6 +63,32 @@ export interface PlanejamentoListItem {
   /** Total da PROPOSTA (0 se ainda não há proposta). */
   totalOrcado: number;
   realizadoAnterior: { total: number; media: number | null } | null;
+  /**
+   * Itens da proposta confirmada, para a diretoria aprovar UM A UM sem entrar
+   * na entrevista. A validação é por despesa, não pelo conjunto da categoria:
+   * uma categoria reúne contratações e assinaturas distintas, e aprovar o bloco
+   * esconderia exatamente o que ela precisa olhar.
+   */
+  itensProposta: Array<{
+    indice: number;
+    descricao: string;
+    valorMensal: number;
+    /** Chave da periodicidade (para editar), não o rótulo. */
+    periodicidade: Periodicidade;
+    periodicidadeLabel: string;
+    mesInicio: number;
+    mesFim: number | null;
+    /**
+     * Série de 12 meses da despesa. É o que mostra a FREQUÊNCIA: onde o
+     * pagamento cai e onde não cai. Sem ela, "R$ 1.000 trimestral" não diz em
+     * quais meses o dinheiro sai.
+     */
+    meses: number[];
+    totalAno: number;
+    cancelado: boolean;
+    canceladoMotivo: string | null;
+  }>;
+  setorId: string | null;
 }
 
 export interface PlanejamentoCategoriaDetalhe {
@@ -854,7 +881,7 @@ export async function getPlanejamentoSocios(
 
   let catQuery = supabase
     .from("orcamento_planejamento_socios")
-    .select("category_code, base_salva, proposta, proposta_confirmada")
+    .select("category_code, base_salva, proposta, proposta_confirmada, setor_id")
     .eq("company_id", companyId)
     .eq("year", year);
   if (porSetorLista) catQuery = catQuery.eq("setor_id", setorEspecifico(setorId));
@@ -863,17 +890,27 @@ export async function getPlanejamentoSocios(
     if (isSchemaMissing(catErr.message)) return { needsMigration: true };
     return { error: catErr.message };
   }
-  const byCode = new Map<string, { baseSalva: boolean; proposta: PlanejamentoProposta | null; confirmada: boolean }>();
+  const byCode = new Map<
+    string,
+    {
+      baseSalva: boolean;
+      proposta: PlanejamentoProposta | null;
+      confirmada: boolean;
+      setorId: string | null;
+    }
+  >();
   ((catRows ?? []) as {
     category_code: string;
     base_salva: boolean | null;
     proposta: unknown;
     proposta_confirmada: boolean | null;
+    setor_id: string | null;
   }[]).forEach((r) =>
     byCode.set(r.category_code, {
       baseSalva: r.base_salva === true,
       proposta: parsePropostaColumn(r.proposta),
       confirmada: r.proposta_confirmada === true,
+      setorId: r.setor_id ?? null,
     }),
   );
 
@@ -904,6 +941,33 @@ export async function getPlanejamentoSocios(
       itemCount: st?.proposta?.itens.length ?? 0,
       totalOrcado: propostaTotal(st?.proposta ?? null),
       realizadoAnterior: totalAno > 0 || r.media != null ? { total: totalAno, media: r.media } : null,
+      // Itens da proposta CONFIRMADA: é o que vira orçamento, e é o que a
+      // diretoria aprova um a um. Proposta não confirmada não é orçamento.
+      itensProposta:
+        st?.confirmada && st.proposta
+          ? st.proposta.itens.map((it, indice) => {
+              const meses = serieItem(
+                it.valorMensal,
+                it.mesInicio,
+                it.periodicidade,
+                it.mesFim ?? null,
+              );
+              return {
+                indice,
+                descricao: it.descricao,
+                valorMensal: it.valorMensal,
+                periodicidade: it.periodicidade,
+                periodicidadeLabel: periodicidadeLabel(it.periodicidade),
+                mesInicio: it.mesInicio,
+                mesFim: it.mesFim ?? null,
+                meses,
+                totalAno: meses.reduce((a, b) => a + b, 0),
+                cancelado: it.cancelado === true,
+                canceladoMotivo: it.cancelado_motivo ?? null,
+              };
+            })
+          : [],
+      setorId: st?.setorId ?? null,
     };
   });
 

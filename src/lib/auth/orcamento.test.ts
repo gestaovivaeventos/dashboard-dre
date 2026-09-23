@@ -65,6 +65,23 @@ test("o papel explícito na linha sobrepõe o perfil", () => {
   );
 });
 
+test('o override serve de "ver como" para o ADMIN', () => {
+  // É o caminho para o administrador viver as limitações do papel — o gate por
+  // campo em média/valor fixo, a trava do item, o recorte por empresa e setor —
+  // que de outro modo ele nunca sente. Só reduz privilégio.
+  assert.equal(
+    resolveOrcamentoPapel("admin", [{ module: "orcamento", role: "validador" }]),
+    "validador",
+  );
+  assert.equal(
+    resolveOrcamentoPapel("admin", [{ module: "orcamento", role: "construtor" }]),
+    "construtor",
+  );
+  // 'auto' (o que a tela de Usuários grava) não rebaixa ninguém.
+  assert.equal(resolveOrcamentoPapel("admin", [{ module: "orcamento", role: "auto" }]), "admin");
+  assert.equal(resolveOrcamentoPapel("admin", null), "admin");
+});
+
 test("canAccessOrcamento é o booleano do papel", () => {
   assert.equal(canAccessOrcamento("gerente", CONCEDIDO), true);
   assert.equal(canAccessOrcamento("gerente", null), false);

@@ -122,13 +122,22 @@ export function resolveOrcamentoPapel(
   // Ilha: só /contratos, mesmo com a concessão marcada por engano.
   if (profile === "validador_contrato") return null;
 
+  // O OVERRIDE vem antes do atalho de admin, de propósito — e é o que permite
+  // "ver como": um admin que grave `role='validador'` (ou 'construtor') na
+  // própria linha de concessão passa a viver as MESMAS limitações do papel,
+  // inclusive as que o admin normalmente não sente (o gate por campo em média e
+  // valor fixo, a trava do item, o recorte por empresa e por setor).
+  //
+  // Só REDUZ privilégio, nunca amplia, e exige uma linha escrita à mão: a tela
+  // de Usuários grava sempre 'auto'. Para voltar a ser admin no módulo, troque o
+  // role de volta para 'auto' (ou apague a linha).
+  const override = papelOverride(rows);
+  if (override) return override;
+
   if (profile === "admin") return "admin";
 
   const concedido = hasOrcamentoGrant(rows);
   if (!concedido) return null;
-
-  const override = papelOverride(rows);
-  if (override) return override;
 
   if (!profile || !PERFIS_ELEGIVEIS.has(profile)) return null;
 

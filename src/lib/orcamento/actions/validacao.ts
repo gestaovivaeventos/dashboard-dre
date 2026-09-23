@@ -238,8 +238,19 @@ export async function alterarItemPlanejamento(params: {
   categoryCode: string;
   setorId: string | null;
   indice: number;
+  /** Descrição ATUAL — trava contra corrida (a proposta pode ter mudado). */
   descricao: string;
   valorMensal: number;
+  /**
+   * Demais campos da despesa. A diretoria não altera só o valor: mudar a
+   * periodicidade ou os meses é o que corrige "isso não é mensal, é trimestral"
+   * — e sem isso ela teria de pedir ao gestor uma correção que ela mesma sabe
+   * fazer.
+   */
+  descricaoNova?: string;
+  mesInicio?: number;
+  mesFim?: number | null;
+  periodicidade?: string;
   /** Opcional: só explica quando a diretoria quiser dizer algo. */
   motivo?: string;
   permiteAlteracao?: boolean;
@@ -292,7 +303,17 @@ export async function alterarItemPlanejamento(params: {
     return { error: "A proposta mudou desde que a tela carregou. Recarregue e tente de novo." };
   }
   const anterior = Number(atual.valorMensal ?? atual.valor_mensal ?? 0);
-  const novos = itens.map((it, i) => (i === indice ? { ...it, valorMensal: valorMensal } : it));
+  const patch: Record<string, unknown> = { valorMensal };
+  if (params.descricaoNova?.trim()) patch.descricao = params.descricaoNova.trim();
+  if (params.periodicidade) patch.periodicidade = params.periodicidade;
+  if (params.mesInicio != null) {
+    patch.mesInicio = Math.min(12, Math.max(1, Math.round(params.mesInicio)));
+  }
+  if (params.mesFim !== undefined) {
+    patch.mesFim =
+      params.mesFim == null ? null : Math.min(12, Math.max(1, Math.round(params.mesFim)));
+  }
+  const novos = itens.map((it, i) => (i === indice ? { ...it, ...patch } : it));
 
   const travar = travaOItem(auth.user.papel, "alterou", permiteAlteracao, auth.estado);
   const { error } = await supabase
@@ -322,9 +343,106 @@ export async function alterarItemPlanejamento(params: {
     acao: "alterou",
     fase: auth.fase,
     antes: { valorMensal: anterior },
-    depois: { valorMensal },
+    depois: patch,
     motivo: motivo.trim(),
     permiteAlteracao,
+    autorId: auth.user.userId,
+    autorPapel: auth.user.papel,
+  });
+
+  revalidatePath(PATH);
+  return { ok: true };
+}
+
+/**
+ * A diretoria ACRESCENTA uma despesa à proposta.
+ *
+ * Existe porque revisar não é só cortar: na conversa com o gestor aparece o que
+ * faltou, e pedir que ele volte à entrevista para incluir uma linha é caro para
+ * os dois. O item entra como qualquer outro e a trilha registra quem o criou.
+ */
+export async function adicionarItemPlanejamento(params: {
+  companyId: string;
+  year: number;
+  categoryCode: string;
+  setorId: string | null;
+  descricao: string;
+  valorMensal: number;
+  mesInicio: number;
+  mesFim?: number | null;
+  periodicidade: string;
+  motivo?: string;
+}): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
+  const { companyId, year, categoryCode, setorId, descricao, valorMensal } = params;
+  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+  if (!descricao.trim()) return { error: "Descreva a despesa." };
+  if (!Number.isFinite(valorMensal) || valorMensal < 0) return { error: "Valor inválido." };
+
+  const supabase = db() ?? (await createClient());
+  const auth = await autorizarEscrita(supabase, companyId, year);
+  if (!auth.ok) return { error: auth.error };
+  if (!ehDecisor(auth.user.papel)) {
+    return { error: "Só a diretoria acrescenta despesas na validação." };
+  }
+
+  let q = supabase
+    .from("orcamento_planejamento_socios")
+    .select("id, proposta, setor_id")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
+  const { data: linha, error: lerErr } = await q.maybeSingle();
+  if (lerErr) {
+    if (isSchemaMissing(lerErr.message)) return { needsMigration: true };
+    return { error: lerErr.message };
+  }
+  if (!linha) return { error: "Planejamento não encontrado para esta categoria/setor." };
+
+  const proposta = (linha.proposta ?? null) as { itens?: unknown } | null;
+  const itens = Array.isArray(proposta?.itens)
+    ? (proposta!.itens as Record<string, unknown>[])
+    : [];
+
+  const novo = {
+    descricao: descricao.trim(),
+    valorMensal,
+    mesInicio: Math.min(12, Math.max(1, Math.round(params.mesInicio))),
+    mesFim:
+      params.mesFim == null ? null : Math.min(12, Math.max(1, Math.round(params.mesFim))),
+    periodicidade: params.periodicidade,
+    // `origem` marca que a linha NÃO veio da entrevista — é da diretoria.
+    origem: "novo" as const,
+  };
+
+  const { error } = await supabase
+    .from("orcamento_planejamento_socios")
+    .update({
+      proposta: { ...(proposta ?? {}), itens: [...itens, novo] },
+      diretoria_alterado_em: new Date().toISOString(),
+      diretoria_alterado_por: auth.user.userId,
+      updated_by: auth.user.userId,
+    })
+    .eq("id", linha.id as string);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { needsMigration: true };
+    return { error: error.message };
+  }
+
+  await registrarAlteracao({
+    companyId,
+    year,
+    cicloId: auth.cicloId,
+    categoryCode,
+    setorId: (linha.setor_id as string) ?? null,
+    metodo: "planejamento_socios",
+    alvoTipo: "planejamento_item",
+    alvoRotulo: novo.descricao,
+    acao: "criou",
+    fase: auth.fase,
+    depois: novo as unknown as Record<string, unknown>,
+    motivo: params.motivo?.trim() || null,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
   });
