@@ -805,6 +805,7 @@ function CategoriaInterview({
           dreLineName: detalhe.dreLineName,
           realizadoTotal: detalhe.realizadoAnterior?.total ?? 0,
           realizadoMedia: detalhe.realizadoAnterior?.media ?? null,
+          realizadoMeses: detalhe.realizadoAnterior?.meses ?? null,
         }
       : undefined;
   }
@@ -1211,7 +1212,7 @@ function CategoriaInterview({
         <Step
           n={2}
           title="Entrevista com a IA"
-          description="Com a base validada, a IA entrevista o gestor item por item. Ao terminar, clique em “Concluir entrevista e gerar proposta” para destravar a Etapa 3."
+          description="Com a base validada, a IA conduz uma entrevista de orçamento base zero: contexto do ano, propósito e alternativas de cada item relevante, gastos novos e um fechamento com desafio. Ao terminar, clique em “Concluir entrevista e gerar proposta” para destravar a Etapa 3."
           state={step2State}
           chip={
             conversaIniciada ? (
