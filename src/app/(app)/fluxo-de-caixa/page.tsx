@@ -505,7 +505,9 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   // caso contrario, computa recursivamente o "Caixa Final" do mes anterior
   // (garante que ao virar o ano — ex.: Dez/2025 → Jan/2026 — o saldo inicial
   // de Janeiro = caixa final de Dezembro, em vez de zerar).
-  // Para os SEGUINTES, encadeia-se a partir do bucket anterior calculado.
+  // Para os SEGUINTES, encadeia-se a partir do bucket anterior calculado —
+  // salvo quando há saldo inicial cadastrado para o próprio mês, que reinicia a
+  // cadeia (ver `manualOpeningThisMonth` no laço abaixo).
   const buckets = visibleBuckets;
 
   const findCodeId = (code: string) => cashFlowAccounts.find((a) => a.code === code)?.id;
@@ -726,7 +728,18 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
       continue;
     }
 
-    const saldoInicial = i === 0 ? saldoInicialBucket : previousCaixaFinal;
+    // Um saldo inicial cadastrado para ESTE mês (cash_flow_opening_balances)
+    // reinicia a cadeia — mesmo que o mês não seja o primeiro exibido. Sem isso,
+    // o ajuste só aparecia se a visão começasse exatamente nele; num período que
+    // começa antes, o mês herdava o caixa final anterior e ignorava o cadastro.
+    // O primeiro bucket já resolve o manual via saldoInicialBucket (resolver).
+    const manualOpeningThisMonth = openingByMonth.get(`${bucket.year}-${bucket.month}`);
+    const saldoInicial =
+      i === 0
+        ? saldoInicialBucket
+        : manualOpeningThisMonth !== undefined
+          ? manualOpeningThisMonth
+          : previousCaixaFinal;
     const { dreResultado, amounts, partnerBreakdown } = agg;
 
     if (isVvrExceptionMonth(bucket.year, bucket.month)) {
