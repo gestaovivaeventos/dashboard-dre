@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { getIndices } from "@/lib/orcamento/actions/indices";
 import { IndicesManager } from "@/components/orcamento/indices-manager";
+import { GruposArvoreManager } from "@/components/orcamento/grupos-arvore-manager";
+import { getCompaniesBudgetConfig } from "@/lib/orcamento/actions/config";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,8 @@ export default async function ConfiguracoesGeraisPage() {
   if (!(await getOrcamentoAdmin())) redirect("/orcamento");
 
   const { items, error, needsMigration } = await getIndices();
+  // A árvore dos grupos filtra a empresa por dentro; aqui só se passa a lista.
+  const { items: empresas } = await getCompaniesBudgetConfig(defaultBudgetYear());
 
   return (
     <div className="space-y-6">
@@ -50,6 +55,28 @@ export default async function ConfiguracoesGeraisPage() {
       ) : (
         <IndicesManager initialItems={items ?? []} />
       )}
+
+      <div className="border-t pt-6">
+        <h2 className="text-lg font-semibold tracking-tight">Grupos de despesas</h2>
+        <p className="text-sm text-muted-foreground">
+          O nível entre a categoria e a despesa, usado no Planejamento dos gestores. Escolha a
+          empresa, abra o setor e a categoria, e cadastre ali os grupos que valem naquele ponto —
+          é essa a lista que a IA oferece ao gestor e o subnível que a Prévia abre.
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          O nome vive <strong>uma vez por empresa</strong>: digitar &quot;Publicidade&quot; num
+          segundo setor reaproveita o mesmo grupo, e por isso a Prévia soma os dois setores num
+          subnível só em vez de repetir o nome.
+        </p>
+        <div className="mt-4">
+          <GruposArvoreManager
+            companies={(empresas ?? []).map((c) => ({
+              companyId: c.companyId,
+              companyName: c.companyName,
+            }))}
+          />
+        </div>
+      </div>
     </div>
   );
 }

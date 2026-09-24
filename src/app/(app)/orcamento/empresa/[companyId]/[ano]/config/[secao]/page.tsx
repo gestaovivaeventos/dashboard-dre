@@ -6,7 +6,6 @@ import { CONFIG_SECOES, isConfigSecao } from "@/lib/orcamento/workspace-tabs";
 import { OrcarPorSetorManager } from "@/components/orcamento/orcar-por-setor-manager";
 import { SetoresManager } from "@/components/orcamento/setores-manager";
 import { CategoriaMetodoManager } from "@/components/orcamento/categoria-metodo-manager";
-import { GruposDespesaManager } from "@/components/orcamento/grupos-despesa-manager";
 import { PlanoCargosManager } from "@/components/orcamento/plano-cargos-manager";
 import { EmpresaEncargosManager } from "@/components/orcamento/empresa-encargos-manager";
 import { EncargosManager } from "@/components/orcamento/encargos-manager";
@@ -41,12 +40,10 @@ export default async function OrcamentoConfigSecaoPage({
 
   let body: React.ReactNode;
 
-  // Grupos de despesa: cadastro por EMPRESA (sem ano) e sem dependência da
-  // lista de empresas — o manager carrega sozinho. Fica antes do ramo geral
-  // para não pagar `getCompaniesBudgetConfig`, que esta seção não usa.
-  if (secao === "grupos-despesa") {
-    body = <GruposDespesaManager key={key} companyId={companyId} year={year} />;
-  } else if (secao === "encargos") {
+  // Os "Grupos de despesas" moraram aqui até 24/09/2026. Foram para as
+  // Configurações gerais do módulo quando ganharam escopo por setor × categoria:
+  // a árvore precisa da empresa como filtro de topo, e não como contexto fixo.
+  if (secao === "encargos") {
     const { items, error, needsMigration } = await getEncargosCompanies(year);
     body = needsMigration ? (
       <MigrationNotice />

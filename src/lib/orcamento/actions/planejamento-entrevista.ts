@@ -13,6 +13,7 @@ import {
   type EntrevistaBaseItem,
   type EntrevistaDespesaRegistrada,
 } from "@/lib/orcamento/entrevista-prompt";
+import { gruposDisponiveis, type EscopoGrupo } from "@/lib/orcamento/grupos";
 import {
   codigosIrmaos,
   toPeriodicidade,
@@ -119,7 +120,7 @@ export async function montarPromptEntrevista(input: MontarPromptInput): Promise<
     ),
     supabase
       .from("orcamento_grupos_despesa")
-      .select("name")
+      .select("id, name")
       .eq("company_id", companyId)
       .eq("active", true),
     filtroSetor(
@@ -154,8 +155,27 @@ export async function montarPromptEntrevista(input: MontarPromptInput): Promise<
     grupoNome: (r.orcamento_grupos_despesa as { name?: string } | null | undefined)?.name ?? null,
   }));
 
-  const grupos = ((gruposRes.data ?? []) as Array<{ name: string }>)
-    .map((r) => r.name)
+  // Só os grupos que valem NESTA categoria × setor. Oferecer o catálogo inteiro
+  // fazia a IA sugerir grupo de marketing numa categoria de pró-labore.
+  const { data: escopoRows } = await supabase
+    .from("orcamento_grupo_escopo")
+    .select("grupo_id, setor_id, category_code")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  const escopos: EscopoGrupo[] = (escopoRows ?? []).map((r) => ({
+    grupoId: r.grupo_id as string,
+    setorId: (r.setor_id as string | null) ?? null,
+    categoryCode: r.category_code as string,
+  }));
+  const grupos = gruposDisponiveis(
+    ((gruposRes.data ?? []) as Array<{ id: string; name: string }>).map((r) => ({
+      id: r.id,
+      name: r.name,
+    })),
+    escopos,
+    { categoryCode, setorIds: [setorId] },
+  )
+    .map((g) => g.name)
     .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
 
   // Realizado: do cache do cliente quando ele o mandou, senão da Omie.

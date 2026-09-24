@@ -32,7 +32,11 @@ import {
   mesesFechados,
   totalGastoAno,
 } from "@/lib/orcamento/media-realizado";
-import { agruparPorGrupo } from "@/lib/orcamento/grupos";
+import {
+  agruparPorGrupo,
+  gruposDisponiveis,
+  type EscopoGrupo,
+} from "@/lib/orcamento/grupos";
 import { getPreviaOrcamento } from "@/lib/orcamento/actions/previa-orcamento";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 
@@ -232,6 +236,48 @@ function comSetor<Q>(q: Q, setorId: string | null): Q {
   return filtrado as unknown as Q;
 }
 
+/**
+ * Grupos que valem num ponto da árvore (categoria × setores).
+ *
+ * `setorIds` com VÁRIOS setores devolve a UNIÃO — é o "compilar independente do
+ * setor" quando se olha o consolidado. O grupo é um registro só por empresa,
+ * então ele aparece UMA vez mesmo valendo em cinco setores.
+ */
+async function gruposDoEscopo(
+  supabase: Supabase,
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  setorIds: (string | null)[],
+): Promise<PlanejamentoGrupoOption[]> {
+  const [{ data: catalogo }, { data: escopoRows }] = await Promise.all([
+    supabase
+      .from("orcamento_grupos_despesa")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .eq("active", true),
+    supabase
+      .from("orcamento_grupo_escopo")
+      .select("grupo_id, setor_id, category_code")
+      .eq("company_id", companyId)
+      .eq("year", year),
+  ]);
+
+  const todos: PlanejamentoGrupoOption[] = (catalogo ?? []).map((r) => ({
+    id: r.id as string,
+    name: r.name as string,
+  }));
+  const escopos: EscopoGrupo[] = (escopoRows ?? []).map((r) => ({
+    grupoId: r.grupo_id as string,
+    setorId: (r.setor_id as string | null) ?? null,
+    categoryCode: r.category_code as string,
+  }));
+
+  return gruposDisponiveis(todos, escopos, { categoryCode, setorIds }).sort((a, b) =>
+    a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }),
+  );
+}
+
 // ─── Leitura ─────────────────────────────────────────────────────────────────
 
 export async function getPlanejamentoMontagem(
@@ -277,16 +323,10 @@ export async function getPlanejamentoMontagem(
     setores.find((s) => s.id === setorIdPedido) ?? (setores.length === 1 ? setores[0] : null);
   const setorId = escolhido?.id ?? null;
 
-  const grupos = await (async () => {
-    const { data } = await supabase
-      .from("orcamento_grupos_despesa")
-      .select("id, name")
-      .eq("company_id", companyId)
-      .eq("active", true);
-    return (data ?? [])
-      .map((r) => ({ id: r.id as string, name: r.name as string }))
-      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
-  })();
+  // Grupos DESTA categoria × setor, não todos os da empresa. O escopo é o que
+  // impede "Publicidade" de ser oferecida em "Pró-labore" — e um grupo sem
+  // escopo nenhum continua valendo em todo lugar (ver gruposDisponiveis).
+  const grupos = await gruposDoEscopo(supabase, companyId, year, categoryCode, [setorId]);
 
   // Sem setor escolhido (a tela vai pedir), devolve só o cabeçalho.
   const vazio: PlanejamentoMontagemDetalhe = {

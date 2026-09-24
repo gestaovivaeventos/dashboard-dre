@@ -8,6 +8,8 @@ import {
   SEM_GRUPO_LABEL,
   agruparPorGrupo,
   compararNomes,
+  grupoTemEscopo,
+  gruposDisponiveis,
   normalizarNomeGrupo,
 } from "./grupos";
 
@@ -81,4 +83,86 @@ test("normaliza espaço para o índice único não deixar passar duplicata", () 
 
 test("compararNomes é estável para nomes iguais a menos de acento", () => {
   assert.equal(compararNomes("agua", "água"), 0);
+});
+
+// ─── Escopo por setor × categoria ────────────────────────────────────────────
+
+const g = (id: string) => ({ id, name: id });
+const esc = (grupoId: string, setorId: string | null, categoryCode: string) => ({
+  grupoId,
+  setorId,
+  categoryCode,
+});
+
+test("grupo SEM escopo vale em todo lugar", () => {
+  // É o que torna a introdução do escopo aditiva: nada do que já existia some.
+  const r = gruposDisponiveis([g("a")], [], { categoryCode: "2.01", setorIds: ["s1"] });
+  assert.deepEqual(r.map((x) => x.id), ["a"]);
+});
+
+test("grupo com escopo só aparece na categoria dele", () => {
+  const escopos = [esc("a", "s1", "2.01")];
+  assert.equal(
+    gruposDisponiveis([g("a")], escopos, { categoryCode: "2.01", setorIds: ["s1"] }).length,
+    1,
+  );
+  assert.equal(
+    gruposDisponiveis([g("a")], escopos, { categoryCode: "2.02", setorIds: ["s1"] }).length,
+    0,
+  );
+});
+
+test("grupo preso a um setor não vaza para outro", () => {
+  const escopos = [esc("a", "s1", "2.01")];
+  assert.equal(
+    gruposDisponiveis([g("a")], escopos, { categoryCode: "2.01", setorIds: ["s2"] }).length,
+    0,
+  );
+});
+
+test("vários setores compilam: é a UNIÃO, e o grupo continua um só", () => {
+  // O pedido do dono do projeto: olhando todos os setores, aparecem os grupos
+  // de todos, compilados. Como o grupo é UM id usado em vários escopos, ele
+  // aparece uma vez — não uma por setor.
+  const escopos = [esc("a", "s1", "2.01"), esc("a", "s2", "2.01"), esc("b", "s2", "2.01")];
+  const r = gruposDisponiveis([g("a"), g("b")], escopos, {
+    categoryCode: "2.01",
+    setorIds: ["s1", "s2"],
+  });
+  assert.deepEqual(r.map((x) => x.id), ["a", "b"]);
+  assert.equal(r.filter((x) => x.id === "a").length, 1, "sem repetir por setor");
+});
+
+test("escopo sem setor vale para qualquer setor daquela categoria", () => {
+  const escopos = [esc("a", null, "2.01")];
+  for (const setor of ["s1", "s9", null]) {
+    assert.equal(
+      gruposDisponiveis([g("a")], escopos, { categoryCode: "2.01", setorIds: [setor] }).length,
+      1,
+      String(setor),
+    );
+  }
+});
+
+test("empresa sem setor casa com escopo sem setor, não com escopo de setor", () => {
+  assert.equal(
+    gruposDisponiveis([g("a")], [esc("a", "s1", "2.01")], {
+      categoryCode: "2.01",
+      setorIds: [null],
+    }).length,
+    0,
+  );
+});
+
+test("um escopo basta: o grupo aparece se QUALQUER um casar", () => {
+  const escopos = [esc("a", "s1", "2.09"), esc("a", "s2", "2.01")];
+  assert.equal(
+    gruposDisponiveis([g("a")], escopos, { categoryCode: "2.01", setorIds: ["s2"] }).length,
+    1,
+  );
+});
+
+test("grupoTemEscopo distingue o amplo do restrito", () => {
+  assert.equal(grupoTemEscopo([esc("a", "s1", "2.01")], "a"), true);
+  assert.equal(grupoTemEscopo([esc("a", "s1", "2.01")], "b"), false);
 });

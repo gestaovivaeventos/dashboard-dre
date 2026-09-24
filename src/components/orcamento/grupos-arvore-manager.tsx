@@ -1,0 +1,361 @@
+"use client";
+
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { ChevronDown, ChevronRight, Copy, Loader2, Plus, Tags, X } from "lucide-react";
+
+import {
+  adicionarGrupoNoNo,
+  getGruposArvore,
+  removerGrupoDoNo,
+  replicarGruposDoNo,
+  type GruposArvore,
+} from "@/lib/orcamento/actions/grupos-arvore";
+import { YearSelect } from "@/components/orcamento/year-select";
+import { defaultBudgetYear } from "@/lib/orcamento/years";
+import { cn } from "@/lib/utils";
+
+const INPUT_CLS =
+  "rounded-md border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+const BTN_GHOST =
+  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors";
+
+interface CompanyOption {
+  companyId: string;
+  companyName: string;
+}
+
+/**
+ * Cadastro dos grupos de despesa em ÁRVORE: empresa → setor → categoria →
+ * grupos. Mesma sensação da Prévia, que é onde o resultado disto aparece.
+ *
+ * O que a tela edita é o ESCOPO (onde o grupo vale), não o grupo. O nome vive
+ * uma vez por empresa: digitar "Publicidade" num segundo setor reaproveita o
+ * MESMO registro, e é por isso que a Prévia compila os dois setores num
+ * subnível só em vez de mostrar "Publicidade" duas vezes.
+ */
+export function GruposArvoreManager({ companies }: { companies: CompanyOption[] }) {
+  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
+  const [year, setYear] = useState<number>(defaultBudgetYear());
+  const [arvore, setArvore] = useState<GruposArvore | null>(null);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const [abertos, setAbertos] = useState<Set<string>>(new Set());
+  const [novoEm, setNovoEm] = useState<string | null>(null);
+  const [novoNome, setNovoNome] = useState("");
+
+  const recarregar = useCallback(async () => {
+    if (!companyId) {
+      setArvore(null);
+      return;
+    }
+    setCarregando(true);
+    const res = await getGruposArvore(companyId, year);
+    setCarregando(false);
+    if (res.needsMigration) {
+      setNeedsMigration(true);
+      setArvore(null);
+      return;
+    }
+    if (res.error) {
+      setErro(res.error);
+      setArvore(null);
+      return;
+    }
+    setNeedsMigration(false);
+    setErro(null);
+    setArvore(res.data ?? null);
+  }, [companyId, year]);
+
+  useEffect(() => {
+    void recarregar();
+    setAbertos(new Set());
+    setNovoEm(null);
+  }, [recarregar]);
+
+  function alternar(chave: string) {
+    setAbertos((prev) => {
+      const proxima = new Set(prev);
+      if (proxima.has(chave)) proxima.delete(chave);
+      else proxima.add(chave);
+      return proxima;
+    });
+  }
+
+  function run(acao: () => Promise<{ error?: string }>) {
+    setErro(null);
+    startTransition(async () => {
+      const res = await acao();
+      if (res?.error) {
+        setErro(res.error);
+        return;
+      }
+      await recarregar();
+    });
+  }
+
+  if (needsMigration) {
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+        <p className="font-medium">Migration pendente</p>
+        <p className="mt-1 text-muted-foreground">
+          A tabela de escopo dos grupos (<code>20260927120000</code>) ainda não foi aplicada.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* ── Filtros ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-4">
+        <div className="w-72 space-y-1.5">
+          <label className="text-sm font-medium">Empresa</label>
+          <select
+            value={companyId}
+            onChange={(e) => setCompanyId(e.target.value)}
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          >
+            {companies.map((c) => (
+              <option key={c.companyId} value={c.companyId}>
+                {c.companyName}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="w-32 space-y-1.5">
+          <label className="text-sm font-medium">Ano</label>
+          <YearSelect value={year} onChange={setYear} />
+        </div>
+        {arvore && arvore.amplos.length > 0 && (
+          <p className="ml-auto max-w-sm text-xs text-muted-foreground">
+            <strong>{arvore.amplos.length}</strong> grupo(s) do catálogo não estão presos a nenhum
+            nó — eles continuam aparecendo em <strong>todas</strong> as categorias até serem
+            colocados em algum lugar aqui.
+          </p>
+        )}
+      </div>
+
+      {erro && <p className="text-sm text-destructive">{erro}</p>}
+
+      {carregando && !arvore ? (
+        <div className="flex items-center justify-center gap-2 rounded-lg border p-12 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
+        </div>
+      ) : !arvore || arvore.setores.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
+          Nenhum setor com categorias do Planejamento dos gestores em {year}. O método por categoria
+          é definido no orçamento da empresa (Configuração › Método por categoria).
+        </div>
+      ) : (
+        <div className="divide-y rounded-lg border">
+          {arvore.setores.map((setor) => {
+            const chaveSetor = setor.setorId ?? "__sem_setor__";
+            const abertoSetor = abertos.has(chaveSetor) || !arvore.orcaPorSetor;
+            const totalGrupos = setor.categorias.reduce((a, c) => a + c.grupos.length, 0);
+            return (
+              <div key={chaveSetor}>
+                {arvore.orcaPorSetor && (
+                  <button
+                    type="button"
+                    onClick={() => alternar(chaveSetor)}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/40"
+                  >
+                    {abertoSetor ? (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="flex-1 font-semibold">{setor.setorNome}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {setor.categorias.length} categoria(s) · {totalGrupos} grupo(s)
+                    </span>
+                  </button>
+                )}
+
+                {abertoSetor && (
+                  <div className={cn(arvore.orcaPorSetor && "border-t bg-muted/10")}>
+                    {setor.categorias.length === 0 ? (
+                      <p className="px-4 py-3 pl-10 text-xs text-muted-foreground">
+                        Nenhuma categoria do Planejamento atribuída a este setor.
+                      </p>
+                    ) : (
+                      setor.categorias.map((cat) => {
+                        const chaveCat = `${chaveSetor}|${cat.categoryCode}`;
+                        const abertaCat = abertos.has(chaveCat);
+                        return (
+                          <div key={chaveCat} className="border-b last:border-b-0">
+                            <button
+                              type="button"
+                              onClick={() => alternar(chaveCat)}
+                              className={cn(
+                                "flex w-full items-center gap-2 py-2 pr-4 text-left hover:bg-muted/40",
+                                arvore.orcaPorSetor ? "pl-10" : "pl-4",
+                              )}
+                            >
+                              {abertaCat ? (
+                                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              )}
+                              <span className="flex-1 truncate text-sm">{cat.categoryName}</span>
+                              <span
+                                className={cn(
+                                  "text-xs",
+                                  cat.grupos.length === 0
+                                    ? "text-amber-700"
+                                    : "text-muted-foreground",
+                                )}
+                              >
+                                {cat.grupos.length === 0
+                                  ? "sem grupos"
+                                  : `${cat.grupos.length} grupo(s)`}
+                              </span>
+                            </button>
+
+                            {abertaCat && (
+                              <div
+                                className={cn(
+                                  "space-y-2 py-2 pr-4",
+                                  arvore.orcaPorSetor ? "pl-[3.75rem]" : "pl-10",
+                                )}
+                              >
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {cat.grupos.map((g) => (
+                                    <span
+                                      key={g.id}
+                                      className={cn(
+                                        "inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[11px]",
+                                        !g.active && "opacity-50 line-through",
+                                      )}
+                                    >
+                                      <Tags className="h-3 w-3 text-muted-foreground" />
+                                      {g.name}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          run(() =>
+                                            removerGrupoDoNo({
+                                              companyId,
+                                              year,
+                                              setorId: setor.setorId,
+                                              categoryCode: cat.categoryCode,
+                                              grupoId: g.id,
+                                            }),
+                                          )
+                                        }
+                                        disabled={isPending}
+                                        title="Tirar este grupo desta categoria (o grupo continua no catálogo)"
+                                        className="rounded-full p-0.5 hover:bg-muted"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </span>
+                                  ))}
+
+                                  {novoEm === chaveCat ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <input
+                                        value={novoNome}
+                                        onChange={(e) => setNovoNome(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Escape") setNovoEm(null);
+                                          if (e.key === "Enter" && novoNome.trim()) {
+                                            run(() =>
+                                              adicionarGrupoNoNo({
+                                                companyId,
+                                                year,
+                                                setorId: setor.setorId,
+                                                categoryCode: cat.categoryCode,
+                                                nome: novoNome,
+                                              }),
+                                            );
+                                            setNovoNome("");
+                                          }
+                                        }}
+                                        list="catalogo-grupos"
+                                        autoFocus
+                                        placeholder="Nome do grupo"
+                                        className={INPUT_CLS + " w-44"}
+                                      />
+                                      <button
+                                        onClick={() => setNovoEm(null)}
+                                        className={BTN_GHOST}
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </button>
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        setNovoEm(chaveCat);
+                                        setNovoNome("");
+                                      }}
+                                      disabled={isPending}
+                                      className={BTN_GHOST}
+                                    >
+                                      <Plus className="h-3.5 w-3.5" /> Grupo
+                                    </button>
+                                  )}
+
+                                  {/* Replicar: o caso comum é a mesma categoria
+                                      ter os mesmos grupos em todos os setores. */}
+                                  {arvore.orcaPorSetor &&
+                                    cat.grupos.length > 0 &&
+                                    arvore.setores.length > 1 && (
+                                      <button
+                                        onClick={() =>
+                                          run(() =>
+                                            replicarGruposDoNo({
+                                              companyId,
+                                              year,
+                                              origemSetorId: setor.setorId,
+                                              categoryCode: cat.categoryCode,
+                                              destinoSetorIds: arvore.setores
+                                                .filter(
+                                                  (s) =>
+                                                    s.setorId &&
+                                                    s.setorId !== setor.setorId &&
+                                                    s.categorias.some(
+                                                      (c) =>
+                                                        c.categoryCode === cat.categoryCode,
+                                                    ),
+                                                )
+                                                .map((s) => s.setorId as string),
+                                            }),
+                                          )
+                                        }
+                                        disabled={isPending}
+                                        title="Usar estes mesmos grupos nesta categoria nos demais setores"
+                                        className={BTN_GHOST}
+                                      >
+                                        <Copy className="h-3.5 w-3.5" /> Replicar nos outros setores
+                                      </button>
+                                    )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sugestões de nome já usados na empresa — reaproveitar o mesmo registro
+          é o que mantém o grupo único na hora de somar. */}
+      <datalist id="catalogo-grupos">
+        {(arvore?.catalogo ?? []).map((g) => (
+          <option key={g.id} value={g.name} />
+        ))}
+      </datalist>
+    </div>
+  );
+}

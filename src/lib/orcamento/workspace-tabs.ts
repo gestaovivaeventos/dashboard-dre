@@ -113,11 +113,6 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     desc: "Por qual método cada categoria de despesa é orçada.",
   },
   {
-    slug: "grupos-despesa",
-    label: "Grupos de despesas",
-    desc: "O nível entre a categoria e a despesa, usado no Planejamento dos gestores.",
-  },
-  {
     slug: "plano-cargos",
     label: "Plano de cargos",
     desc: "Cargos, níveis e salários-base do quadro de pessoal.",

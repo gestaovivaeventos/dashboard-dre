@@ -87,3 +87,66 @@ export function agruparPorGrupo<T extends ComGrupo>(itens: T[]): GrupoAgrupado<T
 export function normalizarNomeGrupo(nome: string): string {
   return (nome ?? "").replace(/\s+/g, " ").trim();
 }
+
+// ─── Escopo: onde cada grupo vale ────────────────────────────────────────────
+// O grupo é um NOME por empresa; esta camada diz em quais (setor, categoria)
+// ele é oferecido. Ver a migration 20260927120000 para o porquê de não ser uma
+// coluna no próprio grupo — em resumo: o mesmo "Publicidade" precisa servir a
+// vários setores sem virar vários ids, senão a Prévia mostra o subnível
+// repetido em vez de compilar.
+
+export interface EscopoGrupo {
+  grupoId: string;
+  /** Nulo = vale para a categoria em qualquer setor. */
+  setorId: string | null;
+  categoryCode: string;
+}
+
+/** Onde se quer saber quais grupos valem. */
+export interface AlvoEscopo {
+  categoryCode: string;
+  /**
+   * Setores em jogo. UM setor na tela de montagem; VÁRIOS quando se olha o
+   * consolidado — e aí o resultado é a UNIÃO, que é o "compilar independente do
+   * setor". `[null]` é a empresa que não orça por setor.
+   */
+  setorIds: (string | null)[];
+}
+
+/**
+ * Filtra os grupos disponíveis num alvo.
+ *
+ * Grupo SEM NENHUM escopo vale em todo lugar. É o que torna a introdução do
+ * escopo aditiva: o que já estava cadastrado continua aparecendo até alguém
+ * restringi-lo de propósito.
+ */
+export function gruposDisponiveis<T extends { id: string }>(
+  grupos: readonly T[],
+  escopos: readonly EscopoGrupo[],
+  alvo: AlvoEscopo,
+): T[] {
+  const porGrupo = new Map<string, EscopoGrupo[]>();
+  escopos.forEach((e) => {
+    const lista = porGrupo.get(e.grupoId) ?? [];
+    lista.push(e);
+    porGrupo.set(e.grupoId, lista);
+  });
+
+  const setores = new Set(alvo.setorIds);
+
+  return grupos.filter((g) => {
+    const meus = porGrupo.get(g.id);
+    if (!meus || meus.length === 0) return true;
+    return meus.some(
+      (e) =>
+        e.categoryCode === alvo.categoryCode &&
+        // Escopo sem setor vale para todos; com setor, precisa estar em jogo.
+        (e.setorId === null || setores.has(e.setorId)),
+    );
+  });
+}
+
+/** True quando o grupo está explicitamente preso a algum escopo. */
+export function grupoTemEscopo(escopos: readonly EscopoGrupo[], grupoId: string): boolean {
+  return escopos.some((e) => e.grupoId === grupoId);
+}

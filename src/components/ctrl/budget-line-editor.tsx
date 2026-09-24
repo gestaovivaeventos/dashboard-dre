@@ -9,6 +9,7 @@ import {
   saveBudgetLine,
   type BudgetMonth,
 } from "@/lib/ctrl/actions/budget-editor";
+import { BudgetItemsSection } from "@/components/ctrl/budget-items-section";
 
 const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -247,6 +248,9 @@ export function BudgetLineEditor({
               {saving ? "Salvando…" : "Salvar"}
             </button>
           </div>
+
+          {/* Itens de orçamento (rubricas) deste setor × tipo × ano. */}
+          <BudgetItemsSection sectorId={sectorId} expenseTypeId={expenseTypeId} year={year} />
         </div>
       ) : null}
     </div>

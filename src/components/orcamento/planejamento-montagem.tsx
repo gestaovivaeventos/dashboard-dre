@@ -12,7 +12,7 @@ import {
   type PreviaSetorResumo,
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { formatBRL } from "@/lib/orcamento/format";
-import { workspaceConfigSecaoHref, workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
+import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { PlanejamentoBaseEditor } from "@/components/orcamento/planejamento-base-editor";
 import { PlanejamentoDespesas } from "@/components/orcamento/planejamento-despesas";
 import { PlanejamentoEntrevista } from "@/components/orcamento/planejamento-entrevista";
@@ -166,7 +166,7 @@ export function PlanejamentoMontagem({
               acha estando aqui — é aqui que a falta dele aparece. */}
           {detalhe.isAdmin && (
             <Link
-              href={workspaceConfigSecaoHref(companyId, year, "grupos-despesa")}
+              href="/orcamento/configuracoes-gerais"
               className="ml-1 text-[11px] font-medium text-emerald-700 underline-offset-2 hover:underline"
             >
               cadastrar grupos
@@ -181,14 +181,15 @@ export function PlanejamentoMontagem({
             vão cair em &quot;Sem grupo&quot; na prévia, e a IA não vai ter o que perguntar.{" "}
             {detalhe.isAdmin ? (
               <Link
-                href={workspaceConfigSecaoHref(companyId, year, "grupos-despesa")}
+                href="/orcamento/configuracoes-gerais"
                 className="font-medium text-amber-900 underline underline-offset-2"
               >
-                Cadastrar agora em Configuração › Grupos de despesas
+                Cadastrar em Configurações gerais › Grupos de despesas
               </Link>
             ) : (
               <>
-                O administrador cadastra em <strong>Configuração › Grupos de despesas</strong>.
+                O administrador cadastra em{" "}
+                <strong>Configurações gerais › Grupos de despesas</strong>.
               </>
             )}
           </span>
