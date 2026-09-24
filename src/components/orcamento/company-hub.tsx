@@ -14,7 +14,7 @@ import {
 
 import { CicloPainel } from "@/components/orcamento/ciclo-painel";
 import type { CicloInfo } from "@/lib/orcamento/actions/ciclo";
-import { METODOS, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { METODOS, metodoVisivelPara, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import {
   isWorkspaceTabBuilt,
   workspaceTabHref,
@@ -130,8 +130,9 @@ export function CompanyHub({
    */
   isAdmin?: boolean;
 }) {
-  // Só os 4 métodos de despesa (VE ficam de fora do hub padrão).
-  const metodos = METODOS.filter((m) => !m.ve);
+  // Só os 4 métodos de despesa (VE ficam de fora do hub padrão), menos os que
+  // ainda estão em validação e só o admin enxerga (METODOS_EM_VALIDACAO).
+  const metodos = METODOS.filter((m) => !m.ve && metodoVisivelPara(m.key, Boolean(isAdmin)));
 
   // O retorno é de quem montou. O diretor também vê: é onde ele confere o que
   // decidiu e responde aos pedidos de liberação.

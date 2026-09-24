@@ -21,9 +21,12 @@ import type { OrcamentoPapel } from "@/lib/supabase/types";
  * Chave textual de um item para a REVISÃO linha a linha (tabela
  * `orcamento_revisoes`). Precisa ser estável entre recargas e única no ciclo.
  *
- * O item do planejamento usa a DESCRIÇÃO, não o índice: índice muda quando
- * alguém reordena a proposta, e o visto pularia de item — o diretor veria
- * "revisado" no que não olhou.
+ * O planejamento usava `categoria:setor:descrição` porque o item vivia dentro
+ * de um jsonb e não tinha id — e a descrição era o menos instável dos apoios
+ * (o índice pulava quando a proposta era reordenada, e o visto ia parar no item
+ * errado). Desde 23/09/2026 a despesa é linha de tabela: a chave é o id, como
+ * nos outros métodos. Vistos gravados no formato antigo deixam de casar, o que
+ * é aceitável — eles são por RODADA do ciclo, não permanentes.
  */
 export function chaveDoAlvo(
   metodo: OrcamentoMetodo,
@@ -37,7 +40,7 @@ export function chaveDoAlvo(
     case "valor_fixo":
       return `vf:${ref.id ?? ""}`;
     case "planejamento_socios":
-      return `ps:${ref.categoryCode ?? ""}:${ref.setorId ?? "-"}:${(ref.descricao ?? "").trim()}`;
+      return `ps:${ref.id ?? ""}`;
     default:
       return `${metodo}:${ref.id ?? ""}`;
   }
@@ -122,6 +125,10 @@ export interface ItemTravavel {
  *
  * A trava só vale para quem NÃO é a diretoria nem o admin: o diretor que travou
  * continua podendo alterar, e o admin conserta o que precisa ser consertado.
+ *
+ * No planejamento a trava mora na DESPESA desde 23/09/2026. Antes ficava na
+ * linha categoria × setor, por falta de linha própria do item (foi o que a
+ * migration 20260924120000 corrigiu no modelo antigo).
  */
 export function podeEscreverNoItem(
   papel: OrcamentoPapel,
@@ -139,61 +146,15 @@ export function podeEscreverNoItem(
 // ─── Item cancelado ──────────────────────────────────────────────────────────
 
 /**
- * Item da PROPOSTA do planejamento que conta para o orçamento.
+ * O CANCELAMENTO do planejamento não tem mais função pura.
  *
- * O item do planejamento não é uma linha de tabela: ele vive dentro do jsonb
- * `orcamento_planejamento_socios.proposta`. Cancelar, aqui, é marcar
- * `cancelado: true` no próprio objeto — e é ESTE filtro que a Prévia precisa
- * aplicar, não o `cancelado_em` da tabela `_itens` (que guarda a BASE da
- * entrevista, não o orçamento).
+ * `itemPropostaAtivo` e `marcarItemProposta` viviam aqui porque o item era um
+ * objeto dentro do jsonb `orcamento_planejamento_socios.proposta`: cancelar era
+ * reescrever o array inteiro, e o índice precisava de uma trava contra corrida
+ * (a tela mandava a posição que tinha visto, e a lista podia ter mudado).
+ *
+ * Com a despesa virando linha (`orcamento_planejamento_despesas`), cancelar é
+ * um UPDATE por id e a Prévia filtra por `cancelado = false` na própria
+ * consulta. Não recrie a marcação em jsonb.
  */
-export function itemPropostaAtivo(item: { cancelado?: unknown } | null | undefined): boolean {
-  return item?.cancelado !== true;
-}
 
-/**
- * Marca (ou desmarca) o cancelamento do item na posição `indice` de uma lista
- * de itens da proposta. Função pura: devolve a lista NOVA.
- *
- * `descricaoEsperada` é uma trava contra corrida: a tela manda o índice que ela
- * viu, e se a lista mudou nesse meio-tempo o cancelamento cairia no item
- * errado. Sem conferir, o diretor cancelaria "Trello" achando que cancelou
- * "Google Ads".
- */
-export function marcarItemProposta(
-  itens: readonly Record<string, unknown>[],
-  indice: number,
-  descricaoEsperada: string,
-  marca: { cancelado: boolean; motivo?: string | null; por?: string | null },
-): { itens: Record<string, unknown>[]; error?: string } {
-  if (!Number.isInteger(indice) || indice < 0 || indice >= itens.length) {
-    return { itens: [...itens], error: "Item não encontrado na proposta." };
-  }
-  const atual = itens[indice];
-  const desc = typeof atual.descricao === "string" ? atual.descricao.trim() : "";
-  if (desc !== descricaoEsperada.trim()) {
-    return {
-      itens: [...itens],
-      error: "A proposta mudou desde que a tela carregou. Recarregue e tente de novo.",
-    };
-  }
-  const novos = itens.map((it, i) => {
-    if (i !== indice) return { ...it };
-    if (!marca.cancelado) {
-      // Reativar: some com as marcas em vez de gravar `cancelado: false`, para
-      // o item voltar a ser exatamente o que era.
-      const { cancelado, cancelado_motivo, cancelado_por, ...resto } = it;
-      void cancelado;
-      void cancelado_motivo;
-      void cancelado_por;
-      return resto;
-    }
-    return {
-      ...it,
-      cancelado: true,
-      cancelado_motivo: marca.motivo ?? null,
-      cancelado_por: marca.por ?? null,
-    };
-  });
-  return { itens: novos };
-}

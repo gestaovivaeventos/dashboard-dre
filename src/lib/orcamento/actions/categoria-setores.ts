@@ -125,7 +125,10 @@ export async function setCategoriaSetores(
     for (const [tabela, rotulo] of [
       ["orcamento_media_categorias", "Média com correção"],
       ["orcamento_valor_fixo_categorias", "Valor fixo com correção"],
-      ["orcamento_planejamento_socios", "Planejamento dos gestores"],
+      // Modelo novo do Planejamento (23/09/2026): a despesa é linha própria,
+      // em `orcamento_planejamento_despesas`. A tabela antiga saiu daqui —
+      // deixá-la deixaria passar a desatribuição de um setor que TEM orçamento.
+      ["orcamento_planejamento_despesas", "Planejamento dos gestores"],
     ] as const) {
       const { data: usados } = await supabase
         .from(tabela)
@@ -196,7 +199,7 @@ export async function contarNaoAtribuido(
   for (const tabela of [
     "orcamento_media_categorias",
     "orcamento_valor_fixo_categorias",
-    "orcamento_planejamento_socios",
+    "orcamento_planejamento_despesas",
   ] as const) {
     const { count } = await supabase
       .from(tabela)

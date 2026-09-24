@@ -31,7 +31,8 @@ export type MetodoComSetor = "media" | "valor_fixo" | "planejamento_socios";
 const TABELA: Record<MetodoComSetor, string> = {
   media: "orcamento_media_categorias",
   valor_fixo: "orcamento_valor_fixo_categorias",
-  planejamento_socios: "orcamento_planejamento_socios",
+  // Modelo novo (23/09/2026): a despesa do Planejamento é linha própria.
+  planejamento_socios: "orcamento_planejamento_despesas",
 };
 
 // As telas de método vivem no workspace (/orcamento/empresa/[id]/[ano]/[slug]),
@@ -131,16 +132,41 @@ export async function moverLinhaDeSetor(params: {
     return { error: atribErr.message };
   }
 
-  // O planejamento guarda os ITENS numa tabela à parte — eles seguem a linha.
+  // O Planejamento tem duas tabelas satélites por categoria × setor: a BASE do
+  // ano anterior e a ENTREVISTA (conversa + justificativa). Elas seguem as
+  // despesas, senão o setor de destino fica com orçamento sem o histórico que o
+  // explica, e a origem guarda uma conversa órfã.
   if (metodo === "planejamento_socios" && !linhaId) {
-    const { error: itensErr } = await supabase
-      .from("orcamento_planejamento_socios_itens")
+    const { error: baseErr } = await supabase
+      .from("orcamento_planejamento_base")
       .update({ setor_id: destinoSetorId, updated_by: admin.userId })
       .eq("company_id", companyId)
       .eq("year", year)
       .eq("category_code", categoryCode)
       .eq("setor_id", origemSetorId);
-    if (itensErr) return { error: itensErr.message };
+    if (baseErr) return { error: baseErr.message };
+
+    // A entrevista é UMA por categoria × setor (índice único). Se o destino já
+    // tem a dele, a da origem fica onde está: sobrescrever apagaria uma
+    // conversa real, e duas linhas dariam 23505 no meio da movimentação.
+    const { data: destinoJaTem } = await supabase
+      .from("orcamento_planejamento_entrevistas")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("category_code", categoryCode)
+      .eq("setor_id", destinoSetorId)
+      .maybeSingle();
+    if (!destinoJaTem) {
+      const { error: entrevErr } = await supabase
+        .from("orcamento_planejamento_entrevistas")
+        .update({ setor_id: destinoSetorId, updated_by: admin.userId })
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("category_code", categoryCode)
+        .eq("setor_id", origemSetorId);
+      if (entrevErr) return { error: entrevErr.message };
+    }
   }
 
   // Se não sobrou NENHUMA linha da categoria no setor de origem, a atribuição
@@ -215,16 +241,23 @@ export async function removerLinhaDoSetor(params: {
     return { error: error.message };
   }
 
-  // O planejamento guarda os itens à parte.
+  // A base e a entrevista daquela categoria × setor vão junto: sem a despesa
+  // elas não descrevem orçamento nenhum, e a base reaparecendo numa semeadura
+  // futura confundiria a curadoria.
   if (metodo === "planejamento_socios") {
-    const { error: itensErr } = await supabase
-      .from("orcamento_planejamento_socios_itens")
-      .delete()
-      .eq("company_id", companyId)
-      .eq("year", year)
-      .eq("category_code", categoryCode)
-      .eq("setor_id", setorId);
-    if (itensErr) return { error: itensErr.message };
+    for (const satelite of [
+      "orcamento_planejamento_base",
+      "orcamento_planejamento_entrevistas",
+    ] as const) {
+      const { error: satErr } = await supabase
+        .from(satelite)
+        .delete()
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("category_code", categoryCode)
+        .eq("setor_id", setorId);
+      if (satErr) return { error: satErr.message };
+    }
   }
 
   // Sem linha em nenhum método, a categoria sai do setor — senão ela continua

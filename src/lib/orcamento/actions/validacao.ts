@@ -9,7 +9,7 @@ import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaOItem, type AlvoTipo } from "@/lib/orcamento/trilha";
-import { marcarItemProposta } from "@/lib/orcamento/validacao";
+import { toPeriodicidade } from "@/lib/orcamento/planejamento-calc";
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 
 const db = () => createAdminClientIfAvailable();
@@ -122,21 +122,79 @@ export async function cancelarColaborador(
   return { ok: true };
 }
 
-// ─── Planejamento: cancelar / reativar item da PROPOSTA ──────────────────────
+// ─── Planejamento: as ações da diretoria sobre UMA despesa ──────────────
+//
+// As três funções abaixo eram cirurgia em jsonb: o item vivia dentro de
+// `orcamento_planejamento_socios.proposta`, então cancelar significava
+// reescrever o array inteiro, e a identificação era (índice + descrição) com
+// trava contra corrida — sem ela o diretor cancelaria "Trello" achando que
+// cancelou "Google Ads".
+//
+// Desde 23/09/2026 a despesa é LINHA (`orcamento_planejamento_despesas`): cada
+// uma tem id, `cancelado` e `diretoria_travado` próprios. A identificação é o
+// id, e a corrida deixa de existir.
+
+/** Lê a despesa e confere empresa, ano e escopo de setor de quem decide. */
+async function despesaDaDiretoria(
+  supabase: NonNullable<ReturnType<typeof db>> | Awaited<ReturnType<typeof createClient>>,
+  despesaId: string,
+  companyId: string,
+  year: number,
+  setoresPermitidos: string[] | null,
+): Promise<
+  | {
+      ok: true;
+      linha: {
+        id: string;
+        setor_id: string | null;
+        category_code: string;
+        descricao: string;
+        valor: number;
+      };
+    }
+  | { ok: false; error: string; needsMigration?: boolean }
+> {
+  const { data, error } = await supabase
+    .from("orcamento_planejamento_despesas")
+    .select("id, setor_id, category_code, descricao, valor, company_id, year")
+    .eq("id", despesaId)
+    .maybeSingle();
+  if (error) {
+    if (isSchemaMissing(error.message)) return { ok: false, error: "", needsMigration: true };
+    return { ok: false, error: error.message };
+  }
+  if (!data) return { ok: false, error: "Despesa não encontrada." };
+  // Empresa e ano vêm do CORPO da requisição; conferí-los contra a linha impede
+  // que um id de outra empresa passe pelo guard de escrita desta.
+  if ((data.company_id as string) !== companyId || Number(data.year) !== year) {
+    return { ok: false, error: "Despesa não pertence a este orçamento." };
+  }
+  if (!podeEscreverNoSetor(setoresPermitidos, (data.setor_id as string | null) ?? null)) {
+    return { ok: false, error: SEM_ACESSO_SETOR };
+  }
+  return {
+    ok: true,
+    linha: {
+      id: data.id as string,
+      setor_id: (data.setor_id as string | null) ?? null,
+      category_code: data.category_code as string,
+      descricao: data.descricao as string,
+      valor: Number(data.valor) || 0,
+    },
+  };
+}
 
 /**
- * O item do planejamento não é linha de tabela: é um objeto dentro do jsonb
- * `proposta`. Por isso a identificação é (índice + descrição) — e a descrição
- * é conferida para o cancelamento não cair no item errado se a proposta mudou
- * desde que a tela carregou.
+ * Cancela (ou reativa) uma despesa do planejamento.
+ *
+ * Cancelar é MARCA, não exclusão: a linha fica visível, riscada e com o motivo
+ * — é o que o gestor lê na etapa de retorno. Reativar limpa as três colunas do
+ * cancelamento, para a despesa voltar a ser exatamente o que era.
  */
 export async function cancelarItemPlanejamento(params: {
   companyId: string;
   year: number;
-  categoryCode: string;
-  setorId: string | null;
-  indice: number;
-  descricao: string;
+  despesaId: string;
   /** Opcional: só explica quando a diretoria quiser dizer algo. */
   motivo?: string;
   permiteAlteracao?: boolean;
@@ -145,15 +203,12 @@ export async function cancelarItemPlanejamento(params: {
   const {
     companyId,
     year,
-    categoryCode,
-    setorId,
-    indice,
-    descricao,
+    despesaId,
     motivo = "",
     permiteAlteracao = false,
     reativar = false,
   } = params;
-  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  if (!despesaId) return { error: "Despesa inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
@@ -163,44 +218,24 @@ export async function cancelarItemPlanejamento(params: {
     return { error: "Só a diretoria cancela itens do orçamento." };
   }
 
-  let q = supabase
-    .from("orcamento_planejamento_socios")
-    .select("id, proposta, setor_id")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("category_code", categoryCode);
-  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
-  const { data: linha, error: lerErr } = await q.maybeSingle();
-  if (lerErr) {
-    if (isSchemaMissing(lerErr.message)) return { needsMigration: true };
-    return { error: lerErr.message };
-  }
-  if (!linha) return { error: "Planejamento não encontrado para esta categoria/setor." };
-
-  const proposta = (linha.proposta ?? null) as { itens?: unknown; justificativa?: unknown } | null;
-  const itens = Array.isArray(proposta?.itens)
-    ? (proposta!.itens as Record<string, unknown>[])
-    : [];
-  const marcado = marcarItemProposta(itens, indice, descricao, {
-    cancelado: !reativar,
-    motivo: motivo.trim() || null,
-    por: auth.user.userId,
-  });
-  if (marcado.error) return { error: marcado.error };
+  const alvo = await despesaDaDiretoria(supabase, despesaId, companyId, year, auth.setores);
+  if (!alvo.ok) return alvo.needsMigration ? { needsMigration: true } : { error: alvo.error };
 
   const acao = reativar ? "reativou" : "cancelou";
-  const travar = travaOItem(auth.user.papel, acao, permiteAlteracao, auth.estado);
-
+  const agora = new Date().toISOString();
   const { error } = await supabase
-    .from("orcamento_planejamento_socios")
+    .from("orcamento_planejamento_despesas")
     .update({
-      proposta: { ...(proposta ?? {}), itens: marcado.itens },
-      diretoria_travado: travar,
-      diretoria_alterado_em: new Date().toISOString(),
+      cancelado: !reativar,
+      cancelado_motivo: reativar ? null : motivo.trim() || null,
+      cancelado_por: reativar ? null : auth.user.userId,
+      cancelado_em: reativar ? null : agora,
+      diretoria_travado: travaOItem(auth.user.papel, acao, permiteAlteracao, auth.estado),
+      diretoria_alterado_em: agora,
       diretoria_alterado_por: auth.user.userId,
       updated_by: auth.user.userId,
     })
-    .eq("id", linha.id as string);
+    .eq("id", alvo.linha.id);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -210,11 +245,12 @@ export async function cancelarItemPlanejamento(params: {
     companyId,
     year,
     cicloId: auth.cicloId,
-    categoryCode,
-    setorId: (linha.setor_id as string) ?? null,
+    categoryCode: alvo.linha.category_code,
+    setorId: alvo.linha.setor_id,
     metodo: "planejamento_socios",
     alvoTipo: "planejamento_item",
-    alvoRotulo: descricao,
+    alvoId: alvo.linha.id,
+    alvoRotulo: alvo.linha.descricao,
     acao,
     fase: auth.fase,
     depois: { cancelado: !reativar },
@@ -229,24 +265,17 @@ export async function cancelarItemPlanejamento(params: {
 }
 
 /**
- * A diretoria altera o VALOR de um item do planejamento. Mesma identificação
- * (índice + descrição) e a mesma trava.
+ * A diretoria altera uma despesa do planejamento.
+ *
+ * Não é só o valor: mudar a periodicidade ou os meses é o que corrige "isso não
+ * é mensal, é trimestral" — e sem isso ela teria de pedir ao gestor uma
+ * correção que ela mesma sabe fazer.
  */
 export async function alterarItemPlanejamento(params: {
   companyId: string;
   year: number;
-  categoryCode: string;
-  setorId: string | null;
-  indice: number;
-  /** Descrição ATUAL — trava contra corrida (a proposta pode ter mudado). */
-  descricao: string;
-  valorMensal: number;
-  /**
-   * Demais campos da despesa. A diretoria não altera só o valor: mudar a
-   * periodicidade ou os meses é o que corrige "isso não é mensal, é trimestral"
-   * — e sem isso ela teria de pedir ao gestor uma correção que ela mesma sabe
-   * fazer.
-   */
+  despesaId: string;
+  valor: number;
   descricaoNova?: string;
   mesInicio?: number;
   mesFim?: number | null;
@@ -255,20 +284,10 @@ export async function alterarItemPlanejamento(params: {
   motivo?: string;
   permiteAlteracao?: boolean;
 }): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const {
-    companyId,
-    year,
-    categoryCode,
-    setorId,
-    indice,
-    descricao,
-    valorMensal,
-    motivo = "",
-    permiteAlteracao = false,
-  } = params;
-  if (!companyId || !categoryCode) return { error: "Categoria inválida." };
+  const { companyId, year, despesaId, valor, motivo = "", permiteAlteracao = false } = params;
+  if (!despesaId) return { error: "Despesa inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
-  if (!Number.isFinite(valorMensal) || valorMensal < 0) return { error: "Valor inválido." };
+  if (!Number.isFinite(valor) || valor < 0) return { error: "Valor inválido." };
 
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
@@ -277,55 +296,27 @@ export async function alterarItemPlanejamento(params: {
     return { error: "Só a diretoria altera o orçamento na validação." };
   }
 
-  let q = supabase
-    .from("orcamento_planejamento_socios")
-    .select("id, proposta, setor_id")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("category_code", categoryCode);
-  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
-  const { data: linha, error: lerErr } = await q.maybeSingle();
-  if (lerErr) {
-    if (isSchemaMissing(lerErr.message)) return { needsMigration: true };
-    return { error: lerErr.message };
-  }
-  if (!linha) return { error: "Planejamento não encontrado para esta categoria/setor." };
+  const alvo = await despesaDaDiretoria(supabase, despesaId, companyId, year, auth.setores);
+  if (!alvo.ok) return alvo.needsMigration ? { needsMigration: true } : { error: alvo.error };
 
-  const proposta = (linha.proposta ?? null) as { itens?: unknown } | null;
-  const itens = Array.isArray(proposta?.itens)
-    ? (proposta!.itens as Record<string, unknown>[])
-    : [];
-  if (!Number.isInteger(indice) || indice < 0 || indice >= itens.length) {
-    return { error: "Item não encontrado na proposta." };
-  }
-  const atual = itens[indice];
-  if (String(atual.descricao ?? "").trim() !== descricao.trim()) {
-    return { error: "A proposta mudou desde que a tela carregou. Recarregue e tente de novo." };
-  }
-  const anterior = Number(atual.valorMensal ?? atual.valor_mensal ?? 0);
-  const patch: Record<string, unknown> = { valorMensal };
+  const patch: Record<string, unknown> = {
+    valor,
+    diretoria_travado: travaOItem(auth.user.papel, "alterou", permiteAlteracao, auth.estado),
+    diretoria_alterado_em: new Date().toISOString(),
+    diretoria_alterado_por: auth.user.userId,
+    updated_by: auth.user.userId,
+  };
   if (params.descricaoNova?.trim()) patch.descricao = params.descricaoNova.trim();
-  if (params.periodicidade) patch.periodicidade = params.periodicidade;
-  if (params.mesInicio != null) {
-    patch.mesInicio = Math.min(12, Math.max(1, Math.round(params.mesInicio)));
-  }
+  if (params.mesInicio != null) patch.mes_inicio = Math.min(12, Math.max(1, params.mesInicio));
   if (params.mesFim !== undefined) {
-    patch.mesFim =
-      params.mesFim == null ? null : Math.min(12, Math.max(1, Math.round(params.mesFim)));
+    patch.mes_fim = params.mesFim == null ? null : Math.min(12, Math.max(1, params.mesFim));
   }
-  const novos = itens.map((it, i) => (i === indice ? { ...it, ...patch } : it));
+  if (params.periodicidade) patch.periodicidade = toPeriodicidade(params.periodicidade);
 
-  const travar = travaOItem(auth.user.papel, "alterou", permiteAlteracao, auth.estado);
   const { error } = await supabase
-    .from("orcamento_planejamento_socios")
-    .update({
-      proposta: { ...(proposta ?? {}), itens: novos },
-      diretoria_travado: travar,
-      diretoria_alterado_em: new Date().toISOString(),
-      diretoria_alterado_por: auth.user.userId,
-      updated_by: auth.user.userId,
-    })
-    .eq("id", linha.id as string);
+    .from("orcamento_planejamento_despesas")
+    .update(patch)
+    .eq("id", alvo.linha.id);
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -335,16 +326,17 @@ export async function alterarItemPlanejamento(params: {
     companyId,
     year,
     cicloId: auth.cicloId,
-    categoryCode,
-    setorId: (linha.setor_id as string) ?? null,
+    categoryCode: alvo.linha.category_code,
+    setorId: alvo.linha.setor_id,
     metodo: "planejamento_socios",
     alvoTipo: "planejamento_item",
-    alvoRotulo: descricao,
+    alvoId: alvo.linha.id,
+    alvoRotulo: params.descricaoNova?.trim() || alvo.linha.descricao,
     acao: "alterou",
     fase: auth.fase,
-    antes: { valorMensal: anterior },
-    depois: patch,
-    motivo: motivo.trim(),
+    antes: { valor: alvo.linha.valor },
+    depois: { valor },
+    motivo: motivo.trim() || null,
     permiteAlteracao,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -355,11 +347,12 @@ export async function alterarItemPlanejamento(params: {
 }
 
 /**
- * A diretoria ACRESCENTA uma despesa à proposta.
+ * A diretoria ACRESCENTA uma despesa.
  *
  * Existe porque revisar não é só cortar: na conversa com o gestor aparece o que
  * faltou, e pedir que ele volte à entrevista para incluir uma linha é caro para
- * os dois. O item entra como qualquer outro e a trilha registra quem o criou.
+ * os dois. A despesa entra como qualquer outra — com `origem: 'nova'` — e a
+ * trilha registra quem a criou.
  */
 export async function adicionarItemPlanejamento(params: {
   companyId: string;
@@ -367,17 +360,18 @@ export async function adicionarItemPlanejamento(params: {
   categoryCode: string;
   setorId: string | null;
   descricao: string;
-  valorMensal: number;
+  valor: number;
   mesInicio: number;
   mesFim?: number | null;
   periodicidade: string;
+  grupoId?: string | null;
   motivo?: string;
 }): Promise<{ ok?: true; error?: string; needsMigration?: boolean }> {
-  const { companyId, year, categoryCode, setorId, descricao, valorMensal } = params;
+  const { companyId, year, categoryCode, setorId, descricao, valor } = params;
   if (!companyId || !categoryCode) return { error: "Categoria inválida." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!descricao.trim()) return { error: "Descreva a despesa." };
-  if (!Number.isFinite(valorMensal) || valorMensal < 0) return { error: "Valor inválido." };
+  if (!Number.isFinite(valor) || valor < 0) return { error: "Valor inválido." };
 
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
@@ -385,46 +379,31 @@ export async function adicionarItemPlanejamento(params: {
   if (!ehDecisor(auth.user.papel)) {
     return { error: "Só a diretoria acrescenta despesas na validação." };
   }
+  if (!podeEscreverNoSetor(auth.setores, setorId)) return { error: SEM_ACESSO_SETOR };
 
-  let q = supabase
-    .from("orcamento_planejamento_socios")
-    .select("id, proposta, setor_id")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("category_code", categoryCode);
-  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
-  const { data: linha, error: lerErr } = await q.maybeSingle();
-  if (lerErr) {
-    if (isSchemaMissing(lerErr.message)) return { needsMigration: true };
-    return { error: lerErr.message };
-  }
-  if (!linha) return { error: "Planejamento não encontrado para esta categoria/setor." };
-
-  const proposta = (linha.proposta ?? null) as { itens?: unknown } | null;
-  const itens = Array.isArray(proposta?.itens)
-    ? (proposta!.itens as Record<string, unknown>[])
-    : [];
-
-  const novo = {
-    descricao: descricao.trim(),
-    valorMensal,
-    mesInicio: Math.min(12, Math.max(1, Math.round(params.mesInicio))),
-    mesFim:
-      params.mesFim == null ? null : Math.min(12, Math.max(1, Math.round(params.mesFim))),
-    periodicidade: params.periodicidade,
-    // `origem` marca que a linha NÃO veio da entrevista — é da diretoria.
-    origem: "novo" as const,
-  };
-
-  const { error } = await supabase
-    .from("orcamento_planejamento_socios")
-    .update({
-      proposta: { ...(proposta ?? {}), itens: [...itens, novo] },
+  const { data: criada, error } = await supabase
+    .from("orcamento_planejamento_despesas")
+    .insert({
+      company_id: companyId,
+      year,
+      category_code: categoryCode,
+      setor_id: setorId,
+      grupo_id: params.grupoId ?? null,
+      descricao: descricao.trim(),
+      valor,
+      periodicidade: toPeriodicidade(params.periodicidade),
+      mes_inicio: Math.min(12, Math.max(1, params.mesInicio)),
+      mes_fim: params.mesFim == null ? null : Math.min(12, Math.max(1, params.mesFim)),
+      // A despesa da diretoria NÃO veio da entrevista nem da base do ano
+      // anterior: é nova por definição.
+      origem: "nova",
       diretoria_alterado_em: new Date().toISOString(),
       diretoria_alterado_por: auth.user.userId,
+      created_by: auth.user.userId,
       updated_by: auth.user.userId,
     })
-    .eq("id", linha.id as string);
+    .select("id")
+    .maybeSingle();
   if (error) {
     if (isSchemaMissing(error.message)) return { needsMigration: true };
     return { error: error.message };
@@ -435,13 +414,14 @@ export async function adicionarItemPlanejamento(params: {
     year,
     cicloId: auth.cicloId,
     categoryCode,
-    setorId: (linha.setor_id as string) ?? null,
+    setorId,
     metodo: "planejamento_socios",
     alvoTipo: "planejamento_item",
-    alvoRotulo: novo.descricao,
+    alvoId: (criada?.id as string) ?? null,
+    alvoRotulo: descricao.trim(),
     acao: "criou",
     fase: auth.fase,
-    depois: novo as unknown as Record<string, unknown>,
+    depois: { valor, periodicidade: params.periodicidade, mesInicio: params.mesInicio },
     motivo: params.motivo?.trim() || null,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -513,6 +493,10 @@ const TABELA_DO_ALVO: Partial<Record<AlvoTipo, string>> = {
   colaborador: "orcamento_pessoal_colaboradores",
   valor_fixo_contrato: "orcamento_valor_fixo_categorias",
   media_linha: "orcamento_media_categorias",
+  // O planejamento entrou aqui em 23/09/2026, quando a despesa virou linha.
+  // Antes precisava de um ramo próprio, porque a trava morava na categoria ×
+  // setor e destravava TODAS as despesas dela de uma vez.
+  planejamento_item: "orcamento_planejamento_despesas",
 };
 
 /**
@@ -550,18 +534,6 @@ export async function liberarItem(params: {
       .update({ diretoria_travado: false })
       .eq("id", alvoId)
       .eq("company_id", companyId);
-    if (error) return { error: error.message };
-  } else if (alvoTipo === "planejamento_item") {
-    // O item do planejamento não tem linha própria: a trava vive na categoria ×
-    // setor, que é o que o construtor edita.
-    let q = supabase
-      .from("orcamento_planejamento_socios")
-      .update({ diretoria_travado: false })
-      .eq("company_id", companyId)
-      .eq("year", year);
-    if (params.categoryCode) q = q.eq("category_code", params.categoryCode);
-    q = params.setorId ? q.eq("setor_id", params.setorId) : q.is("setor_id", null);
-    const { error } = await q;
     if (error) return { error: error.message };
   }
 

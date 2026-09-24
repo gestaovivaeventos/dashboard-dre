@@ -24,3 +24,20 @@ export function friendlySetorError(message: string): string {
   }
   return message;
 }
+
+/**
+ * Mensagem amigável para o cadastro de grupos de despesa. Duas colisões
+ * diferentes caem aqui:
+ *  - nome repetido na empresa (índice único por `lower(name)`);
+ *  - grupo em uso por alguma despesa, ao tentar apagar (FK com RESTRICT) —
+ *    caso em que o caminho é inativar, não excluir.
+ */
+export function friendlyGrupoError(message: string): string {
+  if (/duplicate key|unique/i.test(message)) {
+    return "Já existe um grupo com esse nome nesta empresa.";
+  }
+  if (/foreign key|violates foreign key constraint/i.test(message)) {
+    return "Este grupo já está em uso por despesas do orçamento. Inative-o em vez de excluir.";
+  }
+  return message;
+}

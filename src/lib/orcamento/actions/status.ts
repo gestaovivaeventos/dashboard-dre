@@ -21,8 +21,10 @@ export async function getOrcamentoStatus(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  // RPC agregado + status do planejamento dos gestores (categorias do método ×
-  // propostas confirmadas). O planejamento vem de duas tabelas — busca junto.
+  // RPC agregado + status do Planejamento dos gestores (categorias do método ×
+  // categorias já com despesa). No modelo novo não existe "proposta
+  // confirmada": a despesa entra no orçamento assim que o gestor confirma o
+  // cartão, então a categoria conta como preenchida quando TEM despesa ativa.
   const [rpc, metodoRes, psRes] = await Promise.all([
     supabase.rpc("orcamento_status_por_empresa", { p_year: y }),
     supabase
@@ -31,20 +33,20 @@ export async function getOrcamentoStatus(
       .eq("year", y)
       .eq("metodo", "planejamento_socios"),
     supabase
-      .from("orcamento_planejamento_socios")
-      .select("company_id, category_code, proposta_confirmada")
-      .eq("year", y),
+      .from("orcamento_planejamento_despesas")
+      .select("company_id, category_code")
+      .eq("year", y)
+      .eq("cancelado", false),
   ]);
   if (rpc.error || !rpc.data) return { statuses: {} };
 
-  // (company_id|category_code) das propostas CONFIRMADAS.
+  // (company_id|category_code) das categorias que já têm despesa orçada.
   const confirmadas = new Set<string>();
   for (const r of (psRes.data ?? []) as Array<{
     company_id: string;
     category_code: string;
-    proposta_confirmada: boolean | null;
   }>) {
-    if (r.proposta_confirmada === true) confirmadas.add(`${r.company_id}|${r.category_code}`);
+    confirmadas.add(`${r.company_id}|${r.category_code}`);
   }
   // Por empresa: total de categorias do método e quantas estão confirmadas.
   const planTotal: Record<string, number> = {};

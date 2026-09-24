@@ -213,6 +213,9 @@ async function lerTravas(
     ["colaborador", "orcamento_pessoal_colaboradores"],
     ["valor_fixo_contrato", "orcamento_valor_fixo_categorias"],
     ["media_linha", "orcamento_media_categorias"],
+    // O planejamento entrou aqui em 23/09/2026: a despesa virou linha e tem
+    // `diretoria_travado` próprio, como os demais alvos.
+    ["planejamento_item", "orcamento_planejamento_despesas"],
   ];
   for (const [tipo, tabela] of tabelas) {
     const lista = ids(tipo);
@@ -226,19 +229,10 @@ async function lerTravas(
     }
   }
 
-  // Planejamento: a trava vive na linha categoria × setor.
-  if (rows.some((r) => r.alvo_tipo === "planejamento_item")) {
-    const { data } = await supabase
-      .from("orcamento_planejamento_socios")
-      .select("category_code, setor_id, diretoria_travado")
-      .eq("company_id", companyId)
-      .eq("year", year);
-    for (const r of data ?? []) {
-      if (r.diretoria_travado) {
-        out.add(`ps:${r.category_code as string}:${(r.setor_id as string) ?? "-"}`);
-      }
-    }
-  }
+  // O ramo especial do planejamento saiu daqui: a trava morava na linha
+  // categoria × setor (por falta de linha do item) e por isso a chave era
+  // `ps:<categoria>:<setor>`, que travava a categoria inteira de uma vez.
+  // Agora cada despesa carrega a própria trava e cai no laço genérico acima.
   return out;
 }
 

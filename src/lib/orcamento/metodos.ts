@@ -36,3 +36,23 @@ export function isOrcamentoMetodo(value: unknown): value is OrcamentoMetodo {
 export function metodoLabel(key: OrcamentoMetodo): string {
   return METODOS.find((m) => m.key === key)?.label ?? key;
 }
+
+/**
+ * Métodos AINDA EM VALIDAÇÃO — visíveis só para administradores.
+ *
+ * O Planejamento dos gestores foi refeito do zero em 23/09/2026 e está sendo
+ * conferido antes de chegar a gerentes e diretores (pedido do dono do projeto).
+ * Enquanto o nome estiver aqui, a caixa some do hub e as rotas do método
+ * redirecionam quem não é admin.
+ *
+ * Para liberar: tire a chave deste conjunto. É o único lugar — o hub, a lista e
+ * a tela de montagem leem daqui, e nenhum deles repete a regra.
+ */
+export const METODOS_EM_VALIDACAO: ReadonlySet<OrcamentoMetodo> = new Set<OrcamentoMetodo>([
+  "planejamento_socios",
+]);
+
+/** O método aparece para este usuário? Admin vê tudo. */
+export function metodoVisivelPara(key: OrcamentoMetodo, isAdmin: boolean): boolean {
+  return isAdmin || !METODOS_EM_VALIDACAO.has(key);
+}

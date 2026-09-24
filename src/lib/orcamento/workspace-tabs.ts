@@ -59,6 +59,21 @@ export function workspaceTabHref(companyId: string, year: number, slug: string):
 // ("Despesas com pessoal") não levava a lugar nenhum, o que confundia.
 
 /**
+ * URL da tela de MONTAGEM de uma categoria no Planejamento dos gestores.
+ *
+ * O código da categoria vem da Omie ("2.01.04") e vai como segmento de rota —
+ * `encodeURIComponent` porque nada garante que um código não traga barra ou
+ * espaço, e aí a rota quebraria em silêncio (viraria outro segmento).
+ */
+export function planejamentoCategoriaHref(
+  companyId: string,
+  year: number,
+  categoryCode: string,
+): string {
+  return `/orcamento/empresa/${companyId}/${year}/planejamento_socios/${encodeURIComponent(categoryCode)}`;
+}
+
+/**
  * URL do RETORNO da diretoria (visão de quem montou o orçamento). Como a
  * validação, é etapa do ciclo, não método.
  */
@@ -101,6 +116,11 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     slug: "categoria-metodo",
     label: "Método por categoria",
     desc: "Por qual método cada categoria de despesa é orçada.",
+  },
+  {
+    slug: "grupos-despesa",
+    label: "Grupos de despesas",
+    desc: "O nível entre a categoria e a despesa, usado no Planejamento dos gestores.",
   },
   {
     slug: "plano-cargos",

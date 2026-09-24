@@ -26,7 +26,6 @@ import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { vinculoLabel } from "@/lib/orcamento/vinculos";
 import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
-import { itemPropostaAtivo } from "@/lib/orcamento/validacao";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 
@@ -72,6 +71,13 @@ export interface PreviaFonteItem {
   nome: string;
   /** Complemento curto (periodicidade, vínculo, índice…). */
   detalhe?: string;
+  /**
+   * GRUPO de despesa — o subnível entre a categoria e a despesa, preenchido só
+   * pelo Planejamento dos gestores (os outros métodos não têm grupo, e ali fica
+   * `undefined`). A tela agrupa por ele em ordem alfabética, com as despesas
+   * sem grupo num balde ao fim. Ver src/lib/orcamento/grupos.ts.
+   */
+  grupo?: string | null;
   meses: number[];
   totalAno: number;
 }
@@ -546,20 +552,31 @@ export async function getPreviaOrcamento(
       }
     }
 
-    // PLANEJAMENTO DOS SÓCIOS — só a PROPOSTA CONFIRMADA (Etapa 3, saída da
-    // entrevista) entra na Prévia. Ela vive na coluna jsonb `proposta` da
-    // categoria; a base (o que a IA considera) NÃO é orçamento. Cada item tem
-    // valor + mês + periodicidade; o orçado = SOMA das séries; cai na linha da
-    // DRE pela mesma chave category_code → category_mapping.
+    // PLANEJAMENTO DOS GESTORES — cada despesa é uma LINHA em
+    // `orcamento_planejamento_despesas` (modelo de 23/09/2026). Antes o item
+    // vivia dentro do jsonb `proposta` da categoria, e por isso o cancelamento
+    // da diretoria tinha de ser lido de dentro do objeto (`itemPropostaAtivo`);
+    // agora é a coluna `cancelado`, filtrada na própria consulta.
+    //
+    // NÃO existe mais "proposta confirmada": a despesa entra na Prévia assim que
+    // o gestor confirma o cartão que a IA propôs. É o que faz a prévia do setor
+    // se preencher durante a entrevista.
+    //
+    // O GRUPO da despesa vai junto e vira o subnível do drilldown (categoria ›
+    // grupo › despesa).
     if (psCats.length > 0) {
       const { data: psRows, error: psErr } = await supabase
-        .from("orcamento_planejamento_socios")
-        .select("category_code, setor_id, proposta, proposta_confirmada")
+        .from("orcamento_planejamento_despesas")
+        .select(
+          "category_code, setor_id, descricao, valor, periodicidade, mes_inicio, mes_fim, orcamento_grupos_despesa(name)",
+        )
         .eq("company_id", companyId)
-        .eq("year", year);
+        .eq("year", year)
+        .eq("cancelado", false);
       // Migration ainda não aplicada: não bloqueia a Prévia inteira (os demais
       // métodos continuam) — essas categorias só contam como "sem valor".
       if (psErr && !isSchemaMissing(psErr.message)) return { error: psErr.message };
+
       const psByCode = new Map<
         string,
         {
@@ -568,56 +585,39 @@ export async function getPreviaOrcamento(
           mesInicio: number;
           mesFim: number | null;
           periodicidade: Periodicidade;
-          /** Setor da proposta que gerou o item — só para rotular o drilldown. */
+          grupo: string | null;
+          /** Setor da despesa — só para rotular o drilldown. */
           setorId: string | null;
         }[]
       >();
-      ((psRows ?? []) as {
-        category_code: string;
-        setor_id: string | null;
-        proposta: unknown;
-        proposta_confirmada: boolean | null;
-      }[]).forEach(
-        (r) => {
-          if (r.proposta_confirmada !== true) return; // só a proposta CONFIRMADA
-          // A proposta é por (categoria × setor): filtrando, só entra a do setor.
-          if (filtroSetor && r.setor_id !== filtroSetor) return;
-          const p = r.proposta as { itens?: unknown } | null;
-          const todos = Array.isArray(p?.itens) ? (p!.itens as Record<string, unknown>[]) : [];
-          // Item CANCELADO pela diretoria não entra em número nenhum. O item do
-          // planejamento não é linha de tabela: vive dentro deste jsonb, então é
-          // AQUI que o cancelamento tem de ser respeitado — a coluna
-          // `cancelado_em` de orcamento_planejamento_socios_itens guarda a BASE
-          // da entrevista, que não é o que a Prévia lê.
-          const itens = todos.filter(itemPropostaAtivo);
-          const arr = itens.map((it) => {
-            const valor = Number(it.valorMensal ?? it.valor_mensal ?? 0);
-            const mes = Number(it.mesInicio ?? it.mes_inicio ?? 1);
-            const fimRaw = it.mesFim ?? it.mes_fim;
-            const fim = fimRaw == null ? null : Number(fimRaw);
-            // toPeriodicidade cobre as 5 opções (mensal..anual) e cai em mensal
-            // quando o valor gravado é desconhecido.
-            const periodicidade = toPeriodicidade(it.periodicidade);
-            return {
-              setorId: r.setor_id ?? null,
-              descricao: typeof it.descricao === "string" && it.descricao.trim() !== ""
-                ? it.descricao.trim()
-                : "Item sem descrição",
-              valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
-              mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
-              mesFim: fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
-              periodicidade,
-            };
-          });
-          // ACUMULA: a categoria pode ter uma proposta POR SETOR, e o orçado da
-          // categoria é a soma de todas. Sobrescrever perderia setores.
-          if (arr.length > 0) {
-            const acumulado = psByCode.get(r.category_code) ?? [];
-            acumulado.push(...arr);
-            psByCode.set(r.category_code, acumulado);
-          }
-        },
-      );
+
+      ((psRows ?? []) as Array<Record<string, unknown>>).forEach((r) => {
+        const setorDaLinha = (r.setor_id as string | null) ?? null;
+        // A despesa é de UM setor: filtrando, só entra a dele.
+        if (filtroSetor && setorDaLinha !== filtroSetor) return;
+        const valor = Number(r.valor);
+        const mes = Number(r.mes_inicio);
+        const fimRaw = r.mes_fim;
+        const fim = fimRaw == null ? null : Number(fimRaw);
+        const descricao =
+          typeof r.descricao === "string" && r.descricao.trim() !== ""
+            ? r.descricao.trim()
+            : "Despesa sem descrição";
+        const acumulado = psByCode.get(r.category_code as string) ?? [];
+        acumulado.push({
+          setorId: setorDaLinha,
+          descricao,
+          valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
+          mesInicio: Number.isFinite(mes) ? Math.min(12, Math.max(1, Math.round(mes))) : 1,
+          mesFim:
+            fim != null && Number.isFinite(fim) && fim >= 1 && fim <= 12 ? Math.round(fim) : null,
+          periodicidade: toPeriodicidade(r.periodicidade),
+          grupo:
+            (r.orcamento_grupos_despesa as { name?: string } | null | undefined)?.name ?? null,
+        });
+        psByCode.set(r.category_code as string, acumulado);
+      });
+
       const psEscopo = noEscopo(psCats, new Set(psByCode.keys()));
       planejamentoCategorias = psEscopo.length;
       for (const cat of psEscopo) {
@@ -627,8 +627,8 @@ export async function getPreviaOrcamento(
           planejamentoSemValor += 1;
           continue;
         }
-        // Cada item que o gestor planejou vira uma linha do drilldown, com a
-        // própria série (a periodicidade muda em quais meses ele cai).
+        // Cada despesa vira uma linha do drilldown, com a própria série (a
+        // periodicidade muda em quais meses ela cai).
         const itensPs: PreviaFonteItem[] = itensProposta
           .map((it) => {
             const serie = serieItem(it.valorMensal, it.mesInicio, it.periodicidade, it.mesFim);
@@ -638,6 +638,7 @@ export async function getPreviaOrcamento(
                 : "";
             return {
               nome: it.descricao,
+              grupo: it.grupo,
               detalhe: `${formatBRLSimples(it.valorMensal)} ${periodicidadeLabel(it.periodicidade)} · a partir de ${MESES_CURTO[it.mesInicio - 1]}${ate}${etiquetaSetor(it.setorId)}`,
               meses: serie,
               totalAno: serie.reduce((a, b) => a + b, 0),
@@ -654,7 +655,7 @@ export async function getPreviaOrcamento(
         );
       }
 
-      // Proposta gravada numa gêmea "(*)" que o card canônico substituiu: não
+      // Despesa gravada numa gêmea "(*)" que o card canônico substituiu: não
       // entra no orçamento, mas é reportada para o planejamento não sumir calado.
       for (const cat of psGemeasIgnoradas) {
         const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);

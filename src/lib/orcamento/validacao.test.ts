@@ -6,8 +6,7 @@ import assert from "node:assert/strict";
 import {
   camposPermitidosLabel,
   camposRecusadosParaDiretoria,
-  itemPropostaAtivo,
-  marcarItemProposta,
+  chaveDoAlvo,
   podeCancelarNoMetodo,
   podeEscreverNoItem,
 } from "./validacao";
@@ -69,50 +68,27 @@ test("a trava não alcança quem travou nem o admin", () => {
   assert.ok(podeEscreverNoItem("admin", { diretoria_travado: true }).pode);
 });
 
-// ─── Item cancelado na proposta (jsonb) ──────────────────────────────────────
+// ─── Chave do alvo (o visto linha a linha) ────────────────────────────
 
-test("item sem marca é ativo; com cancelado=true, não", () => {
-  assert.equal(itemPropostaAtivo({}), true);
-  assert.equal(itemPropostaAtivo({ cancelado: false }), true);
-  assert.equal(itemPropostaAtivo(null), true);
-  assert.equal(itemPropostaAtivo({ cancelado: true }), false);
+test("a chave usa o id em todos os métodos, inclusive no planejamento", () => {
+  // O planejamento usava `categoria:setor:descrição` enquanto o item vivia num
+  // jsonb sem id. Agora é linha de tabela: a chave é o id, como nos outros.
+  assert.equal(chaveDoAlvo("planejamento_socios", { id: "d1" }), "ps:d1");
+  assert.equal(chaveDoAlvo("pessoal", { id: "c1" }), "colab:c1");
+  assert.equal(chaveDoAlvo("media", { id: "m1" }), "media:m1");
+  assert.equal(chaveDoAlvo("valor_fixo", { id: "v1" }), "vf:v1");
 });
 
-test("marcar cancela só o item do índice, preservando os demais", () => {
-  const itens = [
-    { descricao: "Google Ads", valorMensal: 1000 },
-    { descricao: "Trello", valorMensal: 200 },
-  ];
-  const r = marcarItemProposta(itens, 1, "Trello", {
-    cancelado: true,
-    motivo: "não renovar",
-    por: "u1",
-  });
-  assert.equal(r.error, undefined);
-  assert.equal(r.itens[0].cancelado, undefined, "o outro item fica intacto");
-  assert.equal(r.itens[1].cancelado, true);
-  assert.equal(r.itens[1].cancelado_motivo, "não renovar");
-  assert.equal(r.itens[1].valorMensal, 200, "o valor não é perdido — cancelar é marca");
+test("a chave do planejamento ignora descri\u00e7\u00e3o e setor", () => {
+  // Renomear a despesa ou mov\u00ea-la de setor n\u00e3o pode fazer o visto pular de item.
+  const a = chaveDoAlvo("planejamento_socios", { id: "d1", descricao: "Figma", setorId: "s1" });
+  const b = chaveDoAlvo("planejamento_socios", { id: "d1", descricao: "Figma Pro", setorId: "s2" });
+  assert.equal(a, b);
 });
 
-test("descrição divergente RECUSA em vez de cancelar o item errado", () => {
-  // A trava contra corrida: a lista mudou desde que a tela carregou.
-  const itens = [{ descricao: "Google Ads" }, { descricao: "Trello" }];
-  const r = marcarItemProposta(itens, 1, "Google Analytics", { cancelado: true });
-  assert.match(r.error ?? "", /mudou desde/);
-  assert.equal(r.itens[1].cancelado, undefined, "nada foi marcado");
-});
-
-test("índice fora da lista recusa", () => {
-  const r = marcarItemProposta([{ descricao: "A" }], 5, "A", { cancelado: true });
-  assert.match(r.error ?? "", /não encontrado/i);
-});
-
-test("reativar remove as marcas, devolvendo o item original", () => {
-  const cancelado = [
-    { descricao: "Trello", valorMensal: 200, cancelado: true, cancelado_motivo: "x", cancelado_por: "u1" },
-  ];
-  const r = marcarItemProposta(cancelado, 0, "Trello", { cancelado: false });
-  assert.equal(r.error, undefined);
-  assert.deepEqual(r.itens[0], { descricao: "Trello", valorMensal: 200 });
+test("ids diferentes nunca colidem", () => {
+  assert.notEqual(
+    chaveDoAlvo("planejamento_socios", { id: "d1" }),
+    chaveDoAlvo("planejamento_socios", { id: "d2" }),
+  );
 });

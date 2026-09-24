@@ -8,19 +8,44 @@
 // (preço × volume) e só então a decisão. A profundidade de cada item vem da
 // MATERIALIDADE (Pareto) e a condução vem da CLASSE da despesa — base zero não
 // se aplica a aluguel, e um item de R$ 20/mês não merece cinco perguntas.
+//
+// ── O que mudou no modelo novo (23/09/2026) ─────────────────────────────────
+// A entrevista deixou de terminar numa PROPOSTA montada de uma vez. Agora cada
+// despesa é fechada DURANTE a conversa: quando a IA reúne os dados de uma, ela
+// emite um cartão [[DESPESA]]{json}[[/DESPESA]], o gestor confere e clica em
+// adicionar — e a prévia do setor reflete na hora. A IA sugere; quem grava é o
+// gestor. O fim da entrevista produz só a JUSTIFICATIVA do conjunto.
+//
+// As perguntas de KPI, impacto e alternativas existem para PROVOCAR REFLEXÃO em
+// quem orça — a resposta fica no transcript, não vira campo. Não as transforme
+// em atributos do cartão: viraria formulário, que é o que a entrevista veio
+// substituir.
 
 import { formatBRL } from "@/lib/orcamento/format";
 import type { MediaRealizado } from "@/lib/orcamento/media-realizado";
-import { periodicidadeLabel, totalItem, type Periodicidade } from "@/lib/orcamento/planejamento-calc";
+import { periodicidadeLabel, type Periodicidade } from "@/lib/orcamento/planejamento-calc";
 
-/** Item da base como o prompt o recebe (o que o cliente manda como contexto vivo). */
-export interface EntrevistaItem {
+/** Linha da BASE do ano anterior, como o prompt a recebe. */
+export interface EntrevistaBaseItem {
+  nome: string;
+  /** Total pago no ano anterior. A base é história: não tem periodicidade. */
+  valorAno: number;
+  grupoNome: string | null;
+}
+
+/** Despesa JÁ registrada nesta conversa (para a IA não perguntar de novo). */
+export interface EntrevistaDespesaRegistrada {
   descricao: string;
-  valorMensal: number;
+  valor: number;
   periodicidade: Periodicidade;
   mesInicio: number;
   mesFim: number | null;
+  grupoNome: string | null;
 }
+
+/** Marcador do CARTÃO de despesa. Tudo entre as duas tags é JSON. */
+export const MARCADOR_DESPESA_ABRE = "[[DESPESA]]";
+export const MARCADOR_DESPESA_FECHA = "[[/DESPESA]]";
 
 const MESES_NOME = [
   "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -32,7 +57,7 @@ function normNome(name: string): string {
   return (name ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[̀-ͯ]/g, "");
 }
 
 // ─── Classe da despesa ───────────────────────────────────────────────────────
@@ -189,8 +214,14 @@ const PARETO_CORTE = 0.8;
 const PESO_MINIMO_COMPLETO = 0.1;
 const ITENS_TODOS_COMPLETOS = 3;
 
-export function materialidade(itens: EntrevistaItem[]): ItemMaterialidade[] {
-  const totais = itens.map((i) => totalItem(i.valorMensal, i.mesInicio, i.periodicidade, i.mesFim ?? null));
+/**
+ * Recebe os TOTAIS DO ANO de cada item, na ordem da lista.
+ *
+ * Passou a receber totais (e não itens) quando a base virou "nome + valor pago
+ * no ano": história não tem periodicidade, então não há série a calcular. O
+ * critério de profundidade é o mesmo de antes.
+ */
+export function materialidade(totais: number[]): ItemMaterialidade[] {
   const total = totais.reduce((a, b) => a + b, 0);
   const ordem = totais.map((t, indice) => ({ indice, t })).sort((a, b) => b.t - a.t);
   const out: ItemMaterialidade[] = [];
@@ -199,7 +230,7 @@ export function materialidade(itens: EntrevistaItem[]): ItemMaterialidade[] {
     const peso = total > 0 ? t / total : 0;
     const antes = total > 0 ? acumulado / total : 0;
     const completa =
-      itens.length <= ITENS_TODOS_COMPLETOS || antes < PARETO_CORTE || peso >= PESO_MINIMO_COMPLETO;
+      totais.length <= ITENS_TODOS_COMPLETOS || antes < PARETO_CORTE || peso >= PESO_MINIMO_COMPLETO;
     out.push({ indice, totalAno: t, peso, profundidade: completa ? "completa" : "rapida" });
     acumulado += t;
   }
@@ -231,54 +262,67 @@ export function realizadoContexto(r: MediaRealizado | undefined): string {
   return linhas.join("\n");
 }
 
-// ─── Lista da base, com peso e profundidade ──────────────────────────────────
+// ─── Listas ──────────────────────────────────────────────────────────────────
 
 function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
 }
 
-function linhaItem(i: EntrevistaItem, m: ItemMaterialidade): string {
-  const mes = MESES_NOME[Math.min(12, Math.max(1, Math.round(i.mesInicio))) - 1];
-  const marca = m.profundidade === "completa" ? "[pacote completo]" : "[conferência rápida]";
-  const peso = `${pct(m.peso)} do total`;
-  if (i.periodicidade === "anual") {
-    return `- ${i.descricao}: ${formatBRL(i.valorMensal)}/ano, pago em ${mes} — ${peso} ${marca}`;
-  }
-  const fim = i.mesFim != null && i.mesFim >= 1 && i.mesFim <= 12 ? i.mesFim : null;
-  const ate = fim != null && fim < 12 ? `, até ${MESES_NOME[fim - 1]} (cancela depois)` : "";
-  // Bimestral/trimestral/semestral: diz o intervalo, para a IA não tratar o
-  // valor como mensal ao conversar com o gestor.
-  const cada =
-    i.periodicidade === "mensal" ? "/mês" : `/${periodicidadeLabel(i.periodicidade).replace(/al$/, "e")}`;
-  return `- ${i.descricao}: ${formatBRL(i.valorMensal)}${cada}, a partir de ${mes}${ate} — ${peso} ${marca}`;
+export function listaBase(itens: EntrevistaBaseItem[]): string {
+  const m = materialidade(itens.map((i) => i.valorAno));
+  return itens
+    .map((i, idx) => {
+      const marca = m[idx].profundidade === "completa" ? "[pacote completo]" : "[conferência rápida]";
+      const grupo = i.grupoNome ? ` · grupo: ${i.grupoNome}` : " · sem grupo";
+      return `- ${i.nome}: ${formatBRL(i.valorAno)} no ano${grupo} — ${pct(m[idx].peso)} do total ${marca}`;
+    })
+    .join("\n");
 }
 
-export function listaBase(itens: EntrevistaItem[]): string {
-  const m = materialidade(itens);
-  return itens.map((i, idx) => linhaItem(i, m[idx])).join("\n");
+/** As despesas já registradas — a IA não pode perguntar de novo nem repetir. */
+export function listaRegistradas(itens: EntrevistaDespesaRegistrada[]): string {
+  return itens
+    .map((i) => {
+      const mes = MESES_NOME[Math.min(12, Math.max(1, Math.round(i.mesInicio))) - 1];
+      const grupo = i.grupoNome ? ` · ${i.grupoNome}` : "";
+      const ate =
+        i.mesFim != null && i.mesFim < 12 && i.periodicidade !== "anual"
+          ? `, até ${MESES_NOME[i.mesFim - 1]}`
+          : "";
+      return `- ${i.descricao}: ${formatBRL(i.valor)} ${periodicidadeLabel(i.periodicidade)}, a partir de ${mes}${ate}${grupo}`;
+    })
+    .join("\n");
 }
 
 // ─── System prompt ───────────────────────────────────────────────────────────
 
 export interface BuildSystemPromptInput {
   companyName: string;
+  /** Nome do setor. Vazio quando a empresa não orça por setor. */
+  setorNome: string;
   categoryName: string;
   dreLineCode: string;
   dreLineName: string;
   year: number;
   realizado: MediaRealizado | undefined;
-  /** Itens da base (só os incluídos). Vazio = entrevista aberta. */
-  itens: EntrevistaItem[];
+  /** Base curada pelo admin (só as linhas incluídas). Vazia = entrevista aberta. */
+  base: EntrevistaBaseItem[];
+  /** Despesas já registradas pelo gestor nesta conversa. */
+  registradas: EntrevistaDespesaRegistrada[];
+  /** Nomes dos grupos de despesa ativos da empresa. */
+  grupos: string[];
   contextoAdmin: string;
-  /** true = turno de entrevista via STREAMING (texto corrido + marcador [[FECHAR]]);
-   *  false = turno de ENCERRAR (JSON estruturado com a proposta). */
-  streaming: boolean;
+  /**
+   * 'entrevista' = turno normal (texto corrido + cartões [[DESPESA]]);
+   * 'fechamento' = o gestor encerrou, a IA escreve só a justificativa final.
+   */
+  modo: "entrevista" | "fechamento";
 }
 
 export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
   const { year, categoryName } = opts;
   const anoAnterior = year - 1;
-  const semBase = opts.itens.length === 0;
+  const semBase = opts.base.length === 0;
   const classe = classeDespesa(categoryName, opts.dreLineName);
   const regra = regraCategoria(categoryName);
   const descricao = descricaoCategoria(categoryName);
@@ -332,12 +376,56 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
     "- UMA pergunta por mensagem, curta, em português do Brasil, tom de colega experiente — não de",
     "  auditor nem de formulário. Se o gestor já respondeu algo espontaneamente, não pergunte de novo.",
     "- Você PROVOCA a reflexão e REGISTRA a decisão; não decide pelo gestor nem sugere corte por conta",
-    "  própria. A RESPOSTA DO GESTOR SEMPRE PREVALECE sobre valor/mês pré-cadastrado: se ele disser outro",
-    "  valor, outro mês, mensal↔anual, ou pedir para incluir/remover, a proposta final TEM de refletir",
-    "  isso. Reler TODA a conversa antes de propor é obrigatório.",
-    "- NUNCA invente itens fora da lista nem citados pelo gestor.",
+    "  própria. A RESPOSTA DO GESTOR SEMPRE PREVALECE sobre valor/mês pré-cadastrado.",
+    "- NUNCA invente itens fora da base nem citados pelo gestor.",
     "",
   ];
+
+  // As perguntas que fazem o gestor PENSAR. Elas não viram campo em lugar
+  // nenhum — o valor delas é o raciocínio que provocam, e ele fica registrado
+  // na própria conversa (decisão do dono do projeto, 23/09/2026).
+  const reflexao: string[] = [
+    "PERGUNTAS DE REFLEXÃO (o coração desta entrevista — use-as nos itens [pacote completo],",
+    "escolhendo as que fazem sentido no caso; uma por mensagem, nunca em bloco):",
+    "  - PARA QUE SERVE: o que esta despesa entrega? Que processo ou resultado depende dela?",
+    "  - NECESSIDADE: o que acontece se ela não existir em " + String(year) + "? Quem sente primeiro?",
+    `  - KPI: a qual indicador da empresa ou do setor esta despesa está ligada? Como se mede se ela`,
+    "    valeu a pena?",
+    `  - IMPACTO E PROJEÇÃO: onde isso impactou em ${anoAnterior} (resultado, volume, produtividade)`,
+    `    e qual é a projeção de impacto em ${year}?`,
+    "  - OUTROS ORÇAMENTOS: o gestor cotou alternativas? Comparou com outro fornecedor ou plano?",
+    "    Se não cotou, vale cotar antes de fechar?",
+    "As respostas ficam na conversa (a diretoria a lê). NÃO as coloque dentro do cartão da despesa,",
+    "e não transforme esta lista num questionário: são provocações, não formulário.",
+    "",
+  ];
+
+  const blocoGrupos: string[] =
+    opts.grupos.length > 0
+      ? [
+          "GRUPOS DE DESPESA disponíveis nesta empresa (é o nível abaixo da categoria, e TODA despesa",
+          "precisa de um). Use EXATAMENTE um destes nomes no cartão:",
+          opts.grupos.map((g) => `- ${g}`).join("\n"),
+          "Se nenhum servir, pergunte ao gestor qual usar e, persistindo a dúvida, deixe o grupo em",
+          "branco — quem cadastra grupo novo é o administrador, não você.",
+          "",
+        ]
+      : [
+          "GRUPOS DE DESPESA: esta empresa ainda não tem grupos cadastrados. Deixe o campo 'grupo'",
+          "vazio nos cartões e não pergunte sobre isso ao gestor.",
+          "",
+        ];
+
+  const blocoRegistradas: string[] =
+    opts.registradas.length > 0
+      ? [
+          "DESPESAS JÁ REGISTRADAS nesta conversa (o gestor já confirmou; NÃO pergunte de novo sobre",
+          "elas e NÃO emita cartão repetido). Se ele pedir para mudar uma, diga que basta editar na",
+          "lista ao lado:",
+          listaRegistradas(opts.registradas),
+          "",
+        ]
+      : [];
 
   const bloco0: string[] = [
     "BLOCO 0 — ABERTURA E CONTEXTO DO ANO (sua primeira mensagem, sempre):",
@@ -351,28 +439,23 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
   ];
 
   const bloco1ComBase: string[] = [
-    "BLOCO 1 — UM ITEM POR VEZ, do maior para o menor (a lista acima):",
-    "Item marcado [pacote completo] — cubra os 5 pontos, uma pergunta por mensagem, pulando os que o",
-    "gestor já respondeu:",
-    "  1. PROPÓSITO: para que serve hoje? Que entrega ou processo depende dele? Quem usa?",
-    "  2. TESTE DO ZERO: se não existisse, contrataria hoje? O que para se for cancelado amanhã?",
-    "  3. ALTERNATIVAS: plano menor, renegociação, troca de fornecedor, fazer internamente,",
-    "     consolidar com outra empresa do grupo? (Pergunte; não proponha a alternativa você mesmo.)",
-    `  4. DRIVER: em ${year} o valor muda por PREÇO (reajuste) ou por VOLUME (usuários, unidades,`,
-    "     eventos)? Ligue à resposta do Bloco 0. Se o mês a mês mostrou pico, pergunte se ele se repete.",
-    "  5. DECISÃO: manter / reduzir / aumentar / cancelar — com valor, periodicidade e mês de início.",
-    "Item marcado [conferência rápida] — informe valor e mês (em tom de fato) e pergunte, numa frase",
-    "só, se mantém e para que serve. Registre qualquer mudança de valor/mês que o gestor der.",
-    "Cancelamento no meio do ano (ex.: 'cancelo em julho'): o item continua na proposta como",
-    "MENSAL com mesFim = ÚLTIMO mês ainda pago; confirme qual é (cancela em julho → último pago",
-    "costuma ser junho → mesFim=6). Não deixe item cancelado com 12 meses cheios.",
-    "Item que o gestor NÃO mantém fica FORA da proposta.",
+    "BLOCO 1 — UM ITEM DA BASE POR VEZ, do maior para o menor:",
+    "Item marcado [pacote completo] — cubra, uma pergunta por mensagem, pulando o que o gestor já",
+    "respondeu: propósito, teste do zero, as PERGUNTAS DE REFLEXÃO que couberem, alternativas,",
+    `driver (em ${year} muda por PREÇO ou por VOLUME?) e a DECISÃO (manter / reduzir / aumentar /`,
+    "cancelar), com valor, periodicidade e mês de início.",
+    "Item marcado [conferência rápida] — informe o valor do ano anterior (em tom de fato) e pergunte,",
+    "numa frase só, se mantém e para que serve.",
+    "Item que o gestor decidir MANTER (com qualquer valor) vira um CARTÃO. Item que ele NÃO mantém",
+    "não vira cartão nenhum — apenas registre na conversa que sai.",
+    "Cancelamento no meio do ano ('cancelo em julho'): o cartão vai como MENSAL com mesFim = ÚLTIMO",
+    "mês ainda pago (cancela em julho → mesFim = 6). Confirme qual é antes de emitir.",
     "",
   ];
 
   const bloco1SemBase: string[] = [
-    "Esta categoria NÃO tem itens pré-cadastrados: o administrador não definiu uma base para você",
-    "confirmar item por item — a entrevista é ABERTA e você GUIA o gestor.",
+    "Esta categoria NÃO tem base cadastrada: o administrador não definiu itens para você confirmar",
+    "um a um — a entrevista é ABERTA e você GUIA o gestor.",
     "O QUE É esta despesa (explique em 1–2 frases para o gestor reconhecer o cenário):",
     descricao ?? `Descreva, em 1–2 frases, o que costuma ser a despesa "${categoryName}".`,
     "",
@@ -380,83 +463,76 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
     `aberta e neutra, qual é a previsão de gasto com "${categoryName}" em ${year}. NÃO pressuponha`,
     "\"contrato\", \"assinatura\", \"contratação\" ou \"investimento\" — muitas dessas despesas são",
     "variáveis. Cada gasto que ele citar é tratado como item NOVO (Bloco 2). Se ele não prevê nada,",
-    "tudo bem: não haverá itens.",
+    "tudo bem: não haverá despesa.",
     "",
   ];
 
   const bloco2: string[] = [
-    "BLOCO 2 — GASTOS NOVOS: pergunte se há gasto novo previsto nesta categoria (serviço, contrato,",
-    "ação ou despesa). Para CADA item novo colete, uma pergunta por vez e sem chutar nada:",
-    "  (a) O QUE é o gasto;",
-    "  (b) RESULTADO esperado / problema que resolve (é a justificativa);",
-    "  (c) PRIORIDADE: essencial (o negócio para sem), importante (piora sem) ou desejável;",
-    "  (d) VALOR em reais;",
-    "  (e) MENSAL ou ANUAL (ou outra periodicidade) e a partir de QUAL mês;",
-    "  (f) ALTERNATIVA considerada, ou por que não dá para adiar.",
-    "(a), (b), (d) e (e) são OBRIGATÓRIOS: faltando qualquer um, peça SOMENTE o que falta antes de",
-    "seguir. Depois de fechar um item, pergunte se há outro.",
+    "BLOCO 2 — GASTOS NOVOS: pergunte se há gasto novo previsto nesta categoria. Para CADA um,",
+    "colete uma pergunta por vez, sem chutar nada: o que é; o resultado esperado; as PERGUNTAS DE",
+    "REFLEXÃO que couberem (em especial KPI, impacto e se cotou alternativas); valor; periodicidade",
+    "e mês de início; grupo. Depois de fechar um, pergunte se há outro.",
     "",
   ];
 
   const bloco3: string[] = [
     "BLOCO 3 — FECHAMENTO COM DESAFIO (antes de encerrar, sempre):",
     `1. Resuma em poucas linhas: total proposto para ${year} versus o realizado de ${anoAnterior}`,
-    "   (com a variação em %), o que foi cortado/reduzido/renegociado, o que é novo e com que prioridade.",
+    "   (com a variação em %), o que foi cortado/reduzido/renegociado e o que é novo.",
     "2. Faça UMA pergunta de desafio, a que mais se aplica ao caso — por exemplo: a proposta cresce",
     "   sem o negócio crescer, o que justifica? Nada foi cortado: nenhum item merece revisão? O maior",
-    "   item foi mantido sem alternativa avaliada, vale uma cotação? Um item novo \"essencial\" sem",
-    "   resultado claro, o que muda se ele não entrar?",
+    "   item foi mantido sem alternativa avaliada, vale uma cotação?",
     "3. Se o gestor mudar algo, registre. Só então escreva a mensagem final.",
     "",
   ];
 
-  const tailStream: string[] = [
-    "Durante a entrevista você só faz a PRÓXIMA pergunta (uma por mensagem). Responda em português",
-    "do Brasil, em TEXTO CORRIDO — SEM JSON e sem blocos de código. Escreva APENAS a sua mensagem",
-    "ao gestor.",
+  const tailEntrevista: string[] = [
+    "COMO REGISTRAR UMA DESPESA — o cartão:",
+    "Quando (e somente quando) você tiver os QUATRO dados obrigatórios de uma despesa — nome, valor,",
+    "periodicidade e mês de início —, escreva sua mensagem normalmente e acrescente no FIM um bloco:",
+    `${MARCADOR_DESPESA_ABRE}{"descricao":"...","grupo":"...","valor":0,"periodicidade":"mensal","mesInicio":1,"mesFim":null,"fornecedor":null,"origem":"base"}${MARCADOR_DESPESA_FECHA}`,
+    "Regras do cartão:",
+    "  - UM cartão por mensagem, no máximo. Nunca emita dois de uma vez.",
+    "  - 'valor' é o valor de CADA pagamento: mensal na periodicidade 'mensal', do trimestre na",
+    "    'trimestral', o valor anual na 'anual'.",
+    "  - 'periodicidade': 'mensal', 'bimestral', 'trimestral', 'semestral' ou 'anual'.",
+    "  - 'mesInicio': 1..12, o PRIMEIRO pagamento (na 'anual', o mês da renovação).",
+    "  - 'mesFim': 1..12 no ÚLTIMO pagamento quando a despesa acaba no meio do ano; null se vai até",
+    "    dezembro. Ignorado quando 'anual'.",
+    "  - 'grupo': um dos nomes da lista de grupos, ou null.",
+    "  - 'origem': 'base' se a despesa já existia no ano anterior, 'nova' se é nova.",
+    "  - NÃO comente o bloco com o gestor e NÃO diga que 'registrou' — ele ainda vai confirmar na",
+    "    tela. Escreva como quem resume: \"Fechando esse então: Figma, R$ 350/mês a partir de janeiro.\"",
+    "  - Falta um dado obrigatório? NÃO emita cartão: pergunte só o que falta.",
     "",
-    "SINAL DE FIM: quando NÃO houver mais NADA a perguntar — todos os itens da base decididos, todo",
-    "item NOVO com os dados obrigatórios, o gestor já disse que não há mais gastos novos E o Bloco 3",
-    "já foi feito — escreva a mensagem final avisando que terminou (ex.: \"Terminei as perguntas.",
-    "Clique em 'Concluir entrevista e gerar proposta' para eu montar a proposta.\") e, SOMENTE nesse",
-    "caso, acrescente no FIM uma última linha isolada com EXATAMENTE: [[FECHAR]]",
-    "NUNCA escreva [[FECHAR]] enquanto ainda houver qualquer pergunta pendente. NÃO comente o",
-    "marcador com o gestor — ele é só um sinal interno. (Se o gestor não previu NENHUM item, ainda",
-    "assim finalize, explique que não há despesa prevista e escreva [[FECHAR]].)",
+    "Fora o bloco do cartão, responda em português do Brasil, em TEXTO CORRIDO — sem JSON solto e sem",
+    "blocos de código. Uma pergunta por mensagem.",
+    "",
+    "SINAL DE FIM: quando NÃO houver mais NADA a perguntar — todo item da base decidido, todo gasto",
+    "novo com cartão emitido, o gestor já disse que não há mais nada E o Bloco 3 já foi feito —",
+    "escreva a mensagem final avisando que terminou e, SOMENTE nesse caso, acrescente no FIM uma",
+    "linha isolada com EXATAMENTE: [[FECHAR]]",
+    "NUNCA escreva [[FECHAR]] enquanto houver qualquer pergunta pendente, e nunca na mesma mensagem",
+    "de um cartão. NÃO comente o marcador com o gestor.",
   ];
 
-  const tailJson: string[] = [
-    "MONTAR A PROPOSTA: você recebeu a instrução de ENCERRAR a entrevista.",
-    "Devolva a LISTA COMPLETA de itens: cada item mantido (com o valor/mês que o gestor CONFIRMOU —",
-    "já atualizado se ele mudou), MAIS cada item NOVO, EXCLUINDO os que ele disse não manter. Confira",
-    "item por item contra a conversa: nenhuma alteração pode faltar. Cada item:",
-    "  - descricao: nome da plataforma/serviço/gasto;",
-    "  - valorMensal: o VALOR em reais de CADA pagamento — mensal na periodicidade 'mensal', do",
-    "    bimestre na 'bimestral', do trimestre na 'trimestral', do semestre na 'semestral' e o valor",
-    "    anual na 'anual';",
-    "  - mesInicio: mês (1..12) do PRIMEIRO pagamento (na 'anual', o mês da renovação);",
-    "  - mesFim: mês (1..12) do ÚLTIMO pagamento, quando o item será cancelado no meio do ano; use",
-    "    null (ou omita) quando vai até dezembro; ignorado se 'anual';",
-    "  - periodicidade: 'mensal', 'bimestral', 'trimestral', 'semestral' ou 'anual';",
-    "  - origem: 'mantido' (já pago no ano anterior) ou 'novo'.",
-    "E a JUSTIFICATIVA (4 a 8 frases, é o que a diretoria lê na validação): o contexto do ano que o",
-    "gestor deu; para cada item relevante, o propósito e a decisão (mantido/reduzido/aumentado/",
-    "cancelado e por quê); os itens novos com prioridade e resultado esperado; a variação do total",
-    `frente a ${anoAnterior} e o que a explica. Sem floreio: o que foi dito na conversa.`,
-    "Se ainda faltar um dado OBRIGATÓRIO de item novo, NÃO proponha: 'proposta' null, 'podeFechar'",
-    "false e o 'reply' pedindo só o que falta.",
-    "",
-    "CATEGORIA ZERADA: se NÃO houver nenhum item (nada mantido e nada novo), a proposta MESMO ASSIM",
-    "deve ser montada com a LISTA VAZIA:",
-    "'proposta': { \"itens\": [], \"justificativa\": \"...explique que não há despesa prevista...\" }",
-    "e 'podeFechar': true. NUNCA devolva 'proposta': null nesse caso.",
-    "",
-    "Responda SEMPRE com um ÚNICO objeto JSON, sem nenhum texto fora dele.",
-    'Se ainda faltar dado obrigatório: { "reply": "pergunta do que falta", "proposta": null, "podeFechar": false }',
-    'Categoria zerada: { "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [], "justificativa": "..." } }',
-    "Ao montar a proposta, preencha:",
-    '{ "reply": "texto curto", "podeFechar": true, "proposta": { "itens": [ { "descricao": "...", "valorMensal": 0, "mesInicio": 1, "mesFim": null, "periodicidade": "mensal", "origem": "mantido" } ], "justificativa": "..." } }',
+  const tailFechamento: string[] = [
+    "ENCERRAMENTO: o gestor encerrou a entrevista. Você NÃO vai mais perguntar nada e NÃO emite",
+    "cartão.",
+    "Escreva APENAS a JUSTIFICATIVA do orçamento desta categoria — 4 a 8 frases, em texto corrido,",
+    "sem título, sem lista e sem markdown. É o texto que a DIRETORIA lê na validação, então ele",
+    "precisa se sustentar sozinho, sem a conversa ao lado. Cubra, na ordem:",
+    "  - o contexto do ano que o gestor deu (o que muda no setor);",
+    "  - as decisões relevantes item a item (mantido / reduzido / aumentado / cancelado e por quê),",
+    "    citando o raciocínio que o gestor deu — KPI, impacto, alternativas cotadas;",
+    "  - o que é novo e o resultado esperado;",
+    `  - a variação do total frente a ${anoAnterior} e o que a explica.`,
+    "Use SOMENTE o que foi dito na conversa. Não invente número nem promessa.",
   ];
+
+  const escopo = opts.setorNome
+    ? `Setor: ${opts.setorNome} (o orçamento desta conversa é SÓ deste setor)`
+    : "Esta empresa não orça por setor: o orçamento é da categoria inteira.";
 
   return [
     "Você conduz, para o Grupo Viva, a ENTREVISTA DE ORÇAMENTO BASE ZERO de UMA categoria de",
@@ -464,9 +540,10 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
     "fazer o gestor PENSAR sobre cada gasto, não apenas confirmar o que já existe. Um orçamento bom",
     "sai desta conversa com decisões justificadas, não com o ano anterior copiado.",
     "",
-    "O orçado da categoria é a SOMA de VÁRIOS ITENS independentes (cada serviço/gasto é um item).",
+    "O orçado da categoria é a SOMA de VÁRIAS DESPESAS independentes.",
     "",
     `Empresa: ${opts.companyName}`,
+    escopo,
     `Categoria: ${categoryName} (linha da DRE: ${opts.dreLineCode} — ${opts.dreLineName})`,
     `Ano do orçamento: ${year}`,
     `Realizado de ${anoAnterior} nesta categoria:`,
@@ -476,20 +553,20 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
     ...blocoClasse,
     ...blocoContexto,
     ...blocoRegra,
+    ...blocoGrupos,
     ...(semBase
       ? []
       : [
-          "ITENS DA BASE (cadastrados pela administração; valor e mês são o PONTO DE PARTIDA, não um",
-          "teto nem um piso). Não invente itens MANTIDOS fora desta lista; o gestor pode alterar",
-          "qualquer valor/mês e adicionar itens novos:",
-          listaBase(opts.itens),
+          `BASE — o que o setor pagou em ${anoAnterior} (cadastrado pela administração; é PONTO DE`,
+          "PARTIDA, não teto nem piso). Não invente itens fora desta lista:",
+          listaBase(opts.base),
           "",
         ]),
-    "ROTEIRO:",
-    ...bloco0,
-    ...(semBase ? bloco1SemBase : bloco1ComBase),
-    ...bloco2,
-    ...bloco3,
-    ...(opts.streaming ? tailStream : tailJson),
+    ...blocoRegistradas,
+    ...(opts.modo === "fechamento" ? [] : reflexao),
+    ...(opts.modo === "fechamento"
+      ? []
+      : ["ROTEIRO:", ...bloco0, ...(semBase ? bloco1SemBase : bloco1ComBase), ...bloco2, ...bloco3]),
+    ...(opts.modo === "entrevista" ? tailEntrevista : tailFechamento),
   ].join("\n");
 }

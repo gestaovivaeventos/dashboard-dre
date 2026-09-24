@@ -101,3 +101,49 @@ export async function fetchRealizados(
   if (error) return new Map();
   return buildRealizados((data ?? []) as RealizadoRow[], mesesFechados(baseYear));
 }
+
+/**
+ * Soma o realizado (mês a mês) de VÁRIOS códigos num único `MediaRealizado`.
+ *
+ * Serve às categorias IRMÃS ("Marketing" e "Marketing (*)"): para o gestor é
+ * uma despesa só, e o card canônico precisa mostrar o gasto das duas somado.
+ * Nasceu privada em actions/planejamento-socios.ts; subiu para cá quando a tela
+ * nova do Planejamento passou a precisar do mesmo número — duas cópias da mesma
+ * soma divergem no dia em que uma delas ganha um ajuste.
+ */
+export function combinarRealizados(
+  map: Map<string, MediaRealizado>,
+  codes: string[],
+  baseYear: number,
+): MediaRealizado {
+  const meses = Array<number | null>(12).fill(null);
+  let algum = false;
+  for (const code of codes) {
+    const r = map.get(code);
+    if (!r) continue;
+    algum = true;
+    for (let i = 0; i < 12; i += 1) {
+      const v = r.meses[i];
+      if (v != null) meses[i] = (meses[i] ?? 0) + v;
+    }
+  }
+  if (!algum) return REALIZADO_VAZIO;
+  return resumirRealizado(meses, mesesFechados(baseYear));
+}
+
+/**
+ * TOTAL gasto no ano inteiro (todos os meses com dado, não só os fechados),
+ * somando os códigos irmãos. É o "total gasto no ano anterior" que o gestor
+ * espera ver — diferente do total de MESES FECHADOS que a Média usa como
+ * numerador. `abs` porque despesa pode vir com sinal negativo em
+ * `financial_entries`.
+ */
+export function totalGastoAno(map: Map<string, MediaRealizado>, codes: string[]): number {
+  let soma = 0;
+  for (const code of codes) {
+    const r = map.get(code);
+    if (!r) continue;
+    for (let i = 0; i < 12; i += 1) soma += r.meses[i] ?? 0;
+  }
+  return Math.round(Math.abs(soma) * 100) / 100;
+}

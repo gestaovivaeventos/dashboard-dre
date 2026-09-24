@@ -256,3 +256,96 @@ export function apenasCanonicas<T extends { categoryName: string }>(items: T[]):
     (c) => !(ehCategoriaEstrela(c.categoryName) && canonicas.has(normNomeCategoria(c.categoryName))),
   );
 }
+
+// ─── Cartão de despesa (o protocolo da entrevista) ───────────────────────────
+// A IA propõe UMA despesa por mensagem num bloco no FIM do texto:
+//
+//   ...texto ao gestor... [[DESPESA]]{ "descricao": "...", ... }[[/DESPESA]]
+//
+// O gestor confirma na tela e só então ela vira linha no orçamento (decisão do
+// dono do projeto em 23/09/2026: a IA sugere, quem grava é o gestor).
+//
+// A extração precisa ser PURA e tolerante a texto PARCIAL: o cliente lê o
+// stream token a token, então na maior parte dos quadros o bloco está pela
+// metade. Bloco incompleto = nenhum cartão, e o texto é cortado no primeiro
+// "[[" para o marcador não "piscar" na tela enquanto chega.
+
+export interface CartaoDespesa {
+  descricao: string;
+  /** Nome do grupo de despesa, como a IA o escreveu. A tela casa com o cadastro. */
+  grupo: string | null;
+  /** Valor de CADA pagamento (ver serieItem). */
+  valor: number;
+  periodicidade: Periodicidade;
+  mesInicio: number;
+  mesFim: number | null;
+  fornecedor: string | null;
+  origem: "base" | "nova";
+}
+
+const RE_DESPESA = /\[\[DESPESA\]\]([\s\S]*?)\[\[\/DESPESA\]\]/i;
+
+function mesValido(v: unknown, padrao: number | null): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return padrao;
+  const r = Math.round(n);
+  return r >= 1 && r <= 12 ? r : padrao;
+}
+
+/** Converte o JSON do bloco num cartão, ou null se faltar dado obrigatório. */
+export function parseCartaoDespesa(bruto: string): CartaoDespesa | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(bruto.trim());
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj as Record<string, unknown>;
+
+  const descricao = typeof o.descricao === "string" ? o.descricao.trim() : "";
+  const valor = Number(o.valor);
+  // Nome e valor são o mínimo: sem eles não há despesa, e um cartão pela metade
+  // na tela é pior do que cartão nenhum.
+  if (!descricao || !Number.isFinite(valor) || valor < 0) return null;
+
+  const periodicidade = toPeriodicidade(o.periodicidade);
+  const mesInicio = mesValido(o.mesInicio, 1) ?? 1;
+  // 'anual' paga uma vez só: mesFim não significa nada e seria ruído na tela.
+  const mesFim = periodicidade === "anual" ? null : mesValido(o.mesFim, null);
+
+  const grupo = typeof o.grupo === "string" && o.grupo.trim() ? o.grupo.trim() : null;
+  const fornecedor =
+    typeof o.fornecedor === "string" && o.fornecedor.trim() ? o.fornecedor.trim() : null;
+
+  return {
+    descricao,
+    grupo,
+    valor,
+    periodicidade,
+    mesInicio,
+    // mesFim anterior ao início é dado inconsistente da IA — vira "até dezembro"
+    // em vez de produzir uma despesa de zero mês, que somaria nada em silêncio.
+    mesFim: mesFim != null && mesFim < mesInicio ? null : mesFim,
+    fornecedor,
+    origem: o.origem === "base" ? "base" : "nova",
+  };
+}
+
+/**
+ * Separa o texto exibível, o cartão proposto e o sinal de encerramento.
+ *
+ * Substitui `limparMarcadorFechar` nos caminhos da entrevista nova: os dois
+ * marcadores convivem no fim da mensagem, e cortar no primeiro "[[" sem antes
+ * extrair o cartão o perderia.
+ */
+export function extrairCartaoDespesa(texto: string): {
+  texto: string;
+  cartao: CartaoDespesa | null;
+  podeFechar: boolean;
+} {
+  const m = RE_DESPESA.exec(texto);
+  const cartao = m ? parseCartaoDespesa(m[1]) : null;
+  const { texto: limpo, podeFechar } = limparMarcadorFechar(texto);
+  return { texto: limpo, cartao, podeFechar };
+}

@@ -6,15 +6,20 @@ import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
 import {
   montarPromptEntrevista,
   persistirConversaEntrevista,
-  type PlanejamentoContextoItem,
-  type PlanejamentoPromptContexto,
-} from "@/lib/orcamento/actions/planejamento-socios";
-import { limparMarcadorFechar, type PlanejamentoMensagem } from "@/lib/orcamento/planejamento-calc";
+  type EntrevistaRealizadoCache,
+} from "@/lib/orcamento/actions/planejamento-entrevista";
+import { extrairCartaoDespesa, type PlanejamentoMensagem } from "@/lib/orcamento/planejamento-calc";
 
-// Streaming de UM turno da ENTREVISTA (Planejamento dos gestores). Retorna a
-// resposta da IA em texto corrido (o cliente lê o stream e vai desenhando).
-// O ENCERRAR (que gera a proposta em JSON) NÃO passa por aqui — segue no server
-// action `enviarMensagemPlanejamento`, que precisa da resposta estruturada.
+// Streaming de UM turno da ENTREVISTA (Planejamento dos gestores).
+//
+// A resposta vai em texto corrido e o cliente a desenha token a token. Dois
+// marcadores podem vir no FIM: o cartão [[DESPESA]]{…}[[/DESPESA]], que o
+// cliente transforma no cartão de confirmação, e [[FECHAR]], que libera o botão
+// de encerrar. O cliente corta o texto no primeiro "[[" para nenhum deles
+// aparecer na tela — ver `extrairCartaoDespesa`.
+//
+// O modo 'fechamento' usa a MESMA rota: muda só o prompt (a IA escreve a
+// justificativa final em vez de perguntar).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -32,12 +37,11 @@ interface ChatBody {
   year?: number;
   categoryCode?: string;
   categoryName?: string;
+  setorId?: string | null;
   conversa?: PlanejamentoMensagem[];
   texto?: string;
-  itensContexto?: PlanejamentoContextoItem[];
-  promptCtx?: PlanejamentoPromptContexto;
-  /** Setor da tela: o planejamento da categoria é o deste setor. */
-  setorId?: string | null;
+  modo?: "entrevista" | "fechamento";
+  realizadoCache?: EntrevistaRealizadoCache | null;
 }
 
 function json(status: number, body: unknown): Response {
@@ -49,11 +53,11 @@ function json(status: number, body: unknown): Response {
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Conduzir a entrevista é construir o orçamento: liberado a quem tem o
-  // módulo. O recorte por empresa/setor vale na hora de GRAVAR (as actions de
-  // planejamento), não na conversa — aqui não se escreve nada.
+  // módulo. O recorte por empresa/setor é conferido dentro de
+  // `montarPromptEntrevista`, e o de ESCRITA vale quando a despesa é gravada
+  // (`adicionarDespesa`) — aqui nenhum número entra no orçamento.
   const user = await getOrcamentoUser();
   if (!user) return json(403, { error: SEM_ACESSO });
-  const admin = { userId: user.userId };
 
   let body: ChatBody;
   try {
@@ -67,26 +71,26 @@ export async function POST(req: NextRequest): Promise<Response> {
     year = 0,
     categoryCode = "",
     categoryName = "",
+    setorId = null,
     conversa = [],
     texto = "",
-    itensContexto = [],
-    promptCtx,
-    setorId = null,
+    modo = "entrevista",
+    realizadoCache = null,
   } = body;
 
-  // Prompt (system + messages) e provedor em PARALELO.
+  // Prompt e provedor em PARALELO — o preparo do prompt são consultas curtas,
+  // e resolver o provedor lê a configuração de IA.
   const [prep, resolved] = await Promise.all([
-    montarPromptEntrevista(
+    montarPromptEntrevista({
       companyId,
       year,
       categoryCode,
-      categoryName,
-      conversa,
+      setorId,
       texto,
-      itensContexto,
-      promptCtx,
-      setorId ?? null,
-    ),
+      conversa,
+      modo,
+      realizadoCache,
+    }),
     resolverProvedor(),
   ]);
   if (prep.needsMigration) return json(409, { needsMigration: true });
@@ -101,18 +105,33 @@ export async function POST(req: NextRequest): Promise<Response> {
     system: prep.system,
     messages: prep.messages,
     temperature: 0.4,
-    // Depois de gerar a resposta completa, persiste a conversa (sem o marcador)
-    // e registra o consumo — tudo server-side, o cliente não precisa esperar.
     onFinish: async ({ text, usage }) => {
-      const { texto: limpo } = limparMarcadorFechar(text);
-      const novaConversa: PlanejamentoMensagem[] = [
-        ...(Array.isArray(conversa) ? conversa : []),
-        ...(textoUsuario ? [{ role: "user" as const, content: textoUsuario }] : []),
-        { role: "assistant" as const, content: limpo },
-      ];
+      // Guarda a mensagem SEM os marcadores: o transcript é o que a diretoria
+      // lê na validação, e [[DESPESA]]{…} ali seria ruído.
+      const { texto: limpo } = extrairCartaoDespesa(text);
+      const novaConversa: PlanejamentoMensagem[] =
+        modo === "fechamento"
+          ? Array.isArray(conversa)
+            ? conversa
+            : []
+          : [
+              ...(Array.isArray(conversa) ? conversa : []),
+              ...(textoUsuario ? [{ role: "user" as const, content: textoUsuario }] : []),
+              { role: "assistant" as const, content: limpo },
+            ];
+
       await Promise.all([
-        persistirConversaEntrevista(companyId, year, categoryCode, categoryName, novaConversa),
-        logResolvedUsage(resolved, "orcamento", usage, { companyId, userId: admin.userId }),
+        persistirConversaEntrevista(
+          companyId,
+          year,
+          categoryCode,
+          setorId,
+          categoryName,
+          novaConversa,
+          // No fechamento, a resposta INTEIRA é a justificativa.
+          modo === "fechamento" ? limpo : undefined,
+        ),
+        logResolvedUsage(resolved, "orcamento", usage, { companyId, userId: user.userId }),
       ]);
     },
   });
