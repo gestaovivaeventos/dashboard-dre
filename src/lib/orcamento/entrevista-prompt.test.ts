@@ -203,6 +203,34 @@ test("prompt: modo fechamento pede só a justificativa, sem cartão nem roteiro"
   assert.doesNotMatch(p, /BLOCO 0/);
 });
 
+test("prompt: o cartão FECHA a despesa — ter os dados não autoriza emitir", () => {
+  // O defeito que isto tranca: a regra do cartão dizia "quando tiver nome,
+  // valor, periodicidade e mês, emita". Gestor que chegava com tudo pronto
+  // pulava a entrevista inteira, e a segunda despesa entrava sem uma pergunta.
+  const p = prompt();
+  assert.match(p, /O cartão FECHA uma despesa/);
+  assert.match(p, /NÃO é motivo/);
+  assert.match(p, /adiantou a parte/i);
+  assert.match(p, /Também não emita/);
+});
+
+test("prompt: exige conversa antes do cartão de despesa NOVA", () => {
+  const p = prompt();
+  assert.match(p, /Despesa NOVA: precisa de/);
+  assert.match(p, /pelo menos UMA das/);
+  assert.match(p, /não emita cartão na mesma mensagem/);
+});
+
+test("prompt: a conferência rápida da base segue curta", () => {
+  // A válvula contra entrevista interminável não pode ser fechada junto.
+  assert.match(prompt(), /\[conferência rápida\]: basta o gestor confirmar/);
+});
+
+test("prompt: a reflexão vale para toda despesa, não só a primeira", () => {
+  assert.match(prompt(), /VALEM PARA TODA DESPESA/);
+  assert.match(prompt(), /piloto automático/);
+});
+
 test("prompt: as perguntas de reflexão estão no modo entrevista e fora do fechamento", () => {
   const p = prompt();
   assert.match(p, /KPI/);

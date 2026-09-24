@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BarChart3, Building2, ChevronRight, GitBranch, Table2, Users } from "lucide-react";
+import { BarChart3, Building2, ChevronRight, GitBranch, Table2, Users, Wallet } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { SegmentSelector } from "@/components/app/segment-selector";
@@ -51,6 +51,12 @@ const CARDS: ConfigCard[] = [
     description: "Sócios por empresa e seus vínculos para dividendos e aportes.",
     slug: "socios",
     icon: Users,
+  },
+  {
+    title: "Saldo anterior ao Omie",
+    description: "Saldo inicial de caixa das empresas em jan/2022 (corte Mundo Viva → Omie).",
+    slug: "saldo-pre-omie",
+    icon: Wallet,
   },
 ];
 
