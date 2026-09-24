@@ -888,3 +888,61 @@ export async function deleteColaborador(id: string) {
   revalidatePath(PATH);
   return { ok: true as const };
 }
+
+/**
+ * Limpa as marcas da diretoria de um colaborador — ADMIN-ONLY.
+ *
+ * Existe porque a VALIDAÇÃO saiu do sistema em 24/09/2026 e levou junto as
+ * ações que reativavam um item cancelado. Quem tinha cancelamento gravado (de
+ * um teste, ou de uma rodada real) ficou com a linha riscada e sem caminho de
+ * volta pela tela — o único jeito seria SQL.
+ *
+ * É de admin de propósito: o gestor vê a decisão da diretoria, não a desfaz.
+ * Quando a validação for redesenhada, ela volta a ser a dona destas colunas.
+ */
+export async function reativarColaborador(id: string) {
+  if (!id) return { error: "Colaborador inválido." };
+
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
+
+  const supabase = db() ?? (await createClient());
+  const { data: linha } = await supabase
+    .from("orcamento_pessoal_colaboradores")
+    .select("company_id, year, setor_id, nome")
+    .eq("id", id)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("orcamento_pessoal_colaboradores")
+    .update({
+      cancelado_em: null,
+      cancelado_motivo: null,
+      cancelado_por: null,
+      diretoria_travado: false,
+      diretoria_alterado_em: null,
+      diretoria_alterado_por: null,
+      updated_by: admin.userId,
+    })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  if (linha) {
+    await registrarAlteracao({
+      companyId: linha.company_id as string,
+      year: Number(linha.year),
+      setorId: (linha.setor_id as string | null) ?? null,
+      metodo: "pessoal",
+      alvoTipo: "colaborador",
+      alvoId: id,
+      alvoRotulo: (linha.nome as string | null) || "Colaborador",
+      acao: "reativou",
+      motivo: "Marcas da diretoria limpas pelo administrador.",
+      autorId: admin.userId,
+      autorPapel: "admin",
+    });
+  }
+
+  revalidatePath(PATH);
+  return { ok: true as const };
+}

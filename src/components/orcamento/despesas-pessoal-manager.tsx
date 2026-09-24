@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Trash2, UserPlus } from "lucide-react";
+import { Loader2, RotateCcw, Trash2, UserPlus } from "lucide-react";
 
 import {
   createColaborador,
   deleteColaborador,
+  reativarColaborador,
   getColaboradores,
   getPessoalSetup,
   setBeneficioAgrupar,
@@ -141,9 +142,12 @@ const EMPTY_SETUP: PessoalSetup = {
 export function DespesasPessoalManager({
   companyId,
   year,
+  isAdmin = false,
 }: {
   companyId: string;
   year: number;
+  /** Admin desfaz cancelamento da diretoria; o gestor só vê. */
+  isAdmin?: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>("quadro");
   const [setorId, setSetorId] = useState<string | null>(null);
@@ -524,6 +528,8 @@ export function DespesasPessoalManager({
                           mostrarEmpresa={setup.usarEmpresaEncargos}
                           onError={(msg) => setFeedback({ ok: false, msg })}
                           onDelete={() => handleDelete(colab)}
+                          isAdmin={isAdmin}
+                          onReativado={() => void loadColabs(companyId, year, setorId)}
                         />
                       ))}
                     </tbody>
@@ -671,6 +677,9 @@ interface RowProps {
   mostrarEmpresa: boolean;
   onError: (msg: string) => void;
   onDelete: () => void;
+  /** Admin: mostra o botão que limpa as marcas da diretoria. */
+  isAdmin: boolean;
+  onReativado: () => void;
 }
 
 function ColaboradorRow({
@@ -681,6 +690,8 @@ function ColaboradorRow({
   mostrarEmpresa,
   onError,
   onDelete,
+  isAdmin,
+  onReativado,
 }: RowProps) {
 
   const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
@@ -770,13 +781,16 @@ function ColaboradorRow({
         "align-top hover:bg-muted/20",
         cancelado && "bg-muted/30 opacity-60 [&_input]:line-through [&_select]:line-through",
         travado && !cancelado && "bg-amber-500/5",
-        // Bloqueio de verdade na tela. O servidor já recusa a gravação
-        // (`podeEscreverNoItem`), mas deixar o campo editável faria a pessoa
-        // digitar para depois levar erro — o pior dos dois mundos.
-        bloqueado &&
-          "[&_input]:pointer-events-none [&_select]:pointer-events-none [&_button]:pointer-events-none",
+        // Campos travados enquanto a marca da diretoria existir — mas NUNCA
+        // os botões: era isso que impedia até de excluir a linha, deixando o
+        // colaborador cancelado sem nenhum caminho de saída pela tela.
+        //
+        // O admin passa por cima: com a validação fora do sistema, ele é o
+        // único que pode desfazer a decisão (`reativarColaborador`).
+        bloqueado && !isAdmin &&
+          "[&_input]:pointer-events-none [&_select]:pointer-events-none",
       )}
-      aria-disabled={bloqueado || undefined}
+      aria-disabled={(bloqueado && !isAdmin) || undefined}
       title={
         cancelado
           ? `Cancelado pela diretoria${colab.canceladoMotivo ? `: ${colab.canceladoMotivo}` : ""}`
@@ -997,14 +1011,30 @@ function ColaboradorRow({
           {saving ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : (
-            <button
-              type="button"
-              onClick={onDelete}
-              title="Excluir colaborador"
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <>
+              {bloqueado && isAdmin && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await reativarColaborador(colab.id);
+                    if (res?.error) onError(res.error);
+                    else onReativado();
+                  }}
+                  title="Desfazer o cancelamento/travamento da diretoria"
+                  className="rounded p-1 text-amber-700 hover:bg-muted"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onDelete}
+                title="Excluir colaborador"
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
           )}
         </div>
       </td>

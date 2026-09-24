@@ -1025,6 +1025,13 @@ export async function getPreviaSetor(
 
   const categorias: PreviaSetorCategoria[] = [];
   for (const linha of res.data.linhas) {
+    // SÓ AS FOLHAS. `coletarFontes` (em previa-orcamento.ts) acumula as fontes
+    // dos filhos em cada linha-resumo de propósito, para o drilldown de um
+    // grupo da DRE mostrar o que há embaixo. Varrer todas as linhas conta a
+    // MESMA despesa uma vez na folha, outra no pai e outra no avô — três
+    // níveis, três cópias, e o total do setor sai multiplicado. É o mesmo
+    // recorte que a Prévia usa para somar a despesa (`!hasChildren`).
+    if (linha.hasChildren || linha.isCalculado) continue;
     for (const fonte of linha.fontes) {
       if (fonte.totalAno === 0 && fonte.itens.length === 0) continue;
       const grupos = agruparPorGrupo(

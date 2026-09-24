@@ -1,14 +1,18 @@
 import { DespesasPessoalManager } from "@/components/orcamento/despesas-pessoal-manager";
+import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 
 export const dynamic = "force-dynamic";
 
 // Aba "Despesas com pessoal" do workspace. Empresa + ano vêm da rota (o
 // cabeçalho do layout é quem os troca); o guard admin fica no layout pai.
-export default function WorkspacePessoalPage({
+export default async function WorkspacePessoalPage({
   params,
 }: {
   params: { companyId: string; ano: string };
 }) {
+  // Só o admin desfaz um cancelamento da diretoria (ver `reativarColaborador`).
+  const isAdmin = Boolean(await getOrcamentoAdmin());
+
   return (
     <div className="space-y-2">
       <div>
@@ -19,7 +23,11 @@ export default function WorkspacePessoalPage({
           setor.
         </p>
       </div>
-      <DespesasPessoalManager companyId={params.companyId} year={Number(params.ano)} />
+      <DespesasPessoalManager
+        companyId={params.companyId}
+        year={Number(params.ano)}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

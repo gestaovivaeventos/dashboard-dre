@@ -427,8 +427,16 @@ export function buildSystemPrompt(opts: BuildSystemPromptInput): string {
           "GRUPOS DE DESPESA disponíveis nesta empresa (é o nível abaixo da categoria, e TODA despesa",
           "precisa de um). Use EXATAMENTE um destes nomes no cartão:",
           opts.grupos.map((g) => `- ${g}`).join("\n"),
-          "Se nenhum servir, pergunte ao gestor qual usar e, persistindo a dúvida, deixe o grupo em",
-          "branco — quem cadastra grupo novo é o administrador, não você.",
+          "COMO CHEGAR NO GRUPO, nesta ordem:",
+          "  1. DEDUZA pela finalidade que o gestor acabou de dar. \"Google Ads\" e \"Facebook Ads\"",
+          "     servem à mesma coisa e vão para o mesmo grupo; \"Canva\" e \"Adobe\" idem. Proponha o",
+          "     grupo já escolhido, em meia frase (\"coloco em Publicidade, certo?\") — não devolva a",
+          "     lista inteira para ele escolher.",
+          "  2. Em dúvida entre dois, PERGUNTE oferecendo esses DOIS, não a lista toda.",
+          "  3. Se ele disser que não sabe, ESCOLHA VOCÊ o mais próximo e diga qual escolheu.",
+          "  4. Só se nenhum servir mesmo, deixe o grupo em branco e avise que o administrador",
+          "     precisa cadastrar um — quem cria grupo novo é ele, nunca você.",
+          "Nunca emita cartão com grupo em branco sem ter passado pelos passos 1 a 3.",
           "",
         ]
       : [

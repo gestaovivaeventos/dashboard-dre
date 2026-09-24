@@ -12,7 +12,7 @@ import {
   type PreviaSetorResumo,
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { formatBRL } from "@/lib/orcamento/format";
-import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
+import { workspaceConfigSecaoHref, workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { PlanejamentoBaseEditor } from "@/components/orcamento/planejamento-base-editor";
 import { PlanejamentoDespesas } from "@/components/orcamento/planejamento-despesas";
 import { PlanejamentoEntrevista } from "@/components/orcamento/planejamento-entrevista";
@@ -162,14 +162,35 @@ export function PlanejamentoMontagem({
               {g.name}
             </span>
           ))}
+          {/* O cadastro fica em Configuração › Grupos de despesas, e ninguém o
+              acha estando aqui — é aqui que a falta dele aparece. */}
+          {detalhe.isAdmin && (
+            <Link
+              href={workspaceConfigSecaoHref(companyId, year, "grupos-despesa")}
+              className="ml-1 text-[11px] font-medium text-emerald-700 underline-offset-2 hover:underline"
+            >
+              cadastrar grupos
+            </Link>
+          )}
         </div>
       ) : (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
           <span>
             Esta empresa ainda não tem <strong>grupos de despesas</strong> cadastrados — as despesas
-            vão cair em &quot;Sem grupo&quot; na prévia. O administrador cadastra em{" "}
-            <strong>Configuração › Grupos de despesas</strong>.
+            vão cair em &quot;Sem grupo&quot; na prévia, e a IA não vai ter o que perguntar.{" "}
+            {detalhe.isAdmin ? (
+              <Link
+                href={workspaceConfigSecaoHref(companyId, year, "grupos-despesa")}
+                className="font-medium text-amber-900 underline underline-offset-2"
+              >
+                Cadastrar agora em Configuração › Grupos de despesas
+              </Link>
+            ) : (
+              <>
+                O administrador cadastra em <strong>Configuração › Grupos de despesas</strong>.
+              </>
+            )}
           </span>
         </div>
       )}

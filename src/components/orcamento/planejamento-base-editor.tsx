@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Download, EyeOff, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, Download, Eye, EyeOff, Loader2, Plus, Trash2, X } from "lucide-react";
 
 import {
   adicionarLinhaBase,
@@ -70,9 +70,18 @@ export function PlanejamentoBaseEditor({
   const [novoValor, setNovoValor] = useState("");
   const [contexto, setContexto] = useState(contextoAdmin);
   const [contextoAberto, setContextoAberto] = useState(false);
+  // Desconsiderar OCULTA a linha. Ela continua gravada (a semeadura precisa
+  // dela para não ressugerir o que já foi descartado), mas riscada na tela era
+  // ruído: o admin curou justamente para não olhar mais aquilo.
+  const [mostrarOcultas, setMostrarOcultas] = useState(false);
 
   const incluidas = base.filter((b) => b.incluir);
+  const ocultas = base.length - incluidas.length;
   const total = incluidas.reduce((a, b) => a + b.valorAno, 0);
+  // O gestor NUNCA vê a linha desconsiderada: para ele ela não faz parte da
+  // base, e mostrá-la riscada só levantaria a pergunta "por que isso sumiu?".
+  // Quem curou (o admin) pode reexibir para desfazer.
+  const visiveis = isAdmin && mostrarOcultas ? base : incluidas;
 
   function run(acao: () => Promise<{ error?: string; aviso?: string }>, msgOk: string) {
     setFeedback(null);
@@ -135,11 +144,34 @@ export function PlanejamentoBaseEditor({
               : "Montada pela administração. É só referência — o orçamento sai da entrevista."}
           </p>
         </div>
-        <div className="text-right">
-          <div className="text-xs text-muted-foreground">
-            {incluidas.length} linha(s) considerada(s)
+        <div className="flex items-center gap-3">
+          {isAdmin && ocultas > 0 && (
+            <button
+              onClick={() => setMostrarOcultas((v) => !v)}
+              className={BTN_GHOST}
+              title={
+                mostrarOcultas
+                  ? "Voltar a esconder as linhas desconsideradas"
+                  : "Mostrar as linhas que você desconsiderou, para desfazer"
+              }
+            >
+              {mostrarOcultas ? (
+                <>
+                  <EyeOff className="h-3.5 w-3.5" /> Esconder {ocultas} desconsiderada(s)
+                </>
+              ) : (
+                <>
+                  <Eye className="h-3.5 w-3.5" /> Mostrar {ocultas} desconsiderada(s)
+                </>
+              )}
+            </button>
+          )}
+          <div className="text-right">
+            <div className="text-xs text-muted-foreground">
+              {incluidas.length} linha(s) considerada(s)
+            </div>
+            <div className="font-semibold tabular-nums">{formatBRL(total)}</div>
           </div>
-          <div className="font-semibold tabular-nums">{formatBRL(total)}</div>
         </div>
       </header>
 
@@ -238,15 +270,17 @@ export function PlanejamentoBaseEditor({
         </div>
       )}
 
-      {base.length === 0 ? (
+      {visiveis.length === 0 ? (
         <p className="p-6 text-center text-sm text-muted-foreground">
-          {isAdmin
-            ? `Base vazia. Use "Trazer de ${year - 1}" para buscar os fornecedores da Omie, ou acrescente linhas à mão.`
-            : `Sem base cadastrada para ${year - 1}. A entrevista será aberta.`}
+          {base.length > 0
+            ? `Todas as ${base.length} linha(s) foram desconsideradas.`
+            : isAdmin
+              ? `Base vazia. Use "Trazer de ${year - 1}" para buscar os fornecedores da Omie, ou acrescente linhas à mão.`
+              : `Sem base cadastrada para ${year - 1}. A entrevista será aberta.`}
         </p>
       ) : (
         <ul className="divide-y">
-          {base.map((linha) => {
+          {visiveis.map((linha) => {
             const editando = editandoId === linha.id;
             return (
               <li
@@ -347,11 +381,17 @@ export function PlanejamentoBaseEditor({
                           className={BTN_GHOST}
                           title={
                             linha.incluir
-                              ? "Desconsiderar: some da entrevista, mas fica registrada"
+                              ? "Desconsiderar: some da lista e da entrevista (dá para reexibir no topo)"
                               : "Voltar a considerar"
                           }
                         >
-                          <EyeOff className="h-3.5 w-3.5" />
+                          {linha.incluir ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <>
+                              <Eye className="h-3.5 w-3.5" /> Reconsiderar
+                            </>
+                          )}
                         </button>
                         <button
                           onClick={() => run(() => removerLinhaBase(linha.id), "Linha excluída.")}

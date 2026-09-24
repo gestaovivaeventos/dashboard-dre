@@ -305,6 +305,17 @@ test("prompt: lista os grupos disponíveis e manda usar o nome exato", () => {
   assert.match(p, /EXATAMENTE um destes nomes/);
 });
 
+test("prompt: a IA deduz o grupo pela finalidade antes de perguntar", () => {
+  // O gestor não conhece a lista de grupos; devolvê-la inteira transfere para
+  // ele um trabalho que a finalidade já respondeu.
+  const p = prompt({ grupos: ["Publicidade", "Software"] });
+  assert.match(p, /DEDUZA pela finalidade/);
+  assert.match(p, /Google Ads/);
+  assert.match(p, /não devolva a/);
+  assert.match(p, /ESCOLHA VOCÊ o mais próximo/);
+  assert.match(p, /Nunca emita cartão com grupo em branco/);
+});
+
 test("prompt: empresa sem grupos manda deixar em branco e não perguntar", () => {
   const p = prompt({ grupos: [] });
   assert.match(p, /ainda não tem grupos cadastrados/);
