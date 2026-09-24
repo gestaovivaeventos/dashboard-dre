@@ -5,9 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { telaSetorFinalizada } from "@/lib/orcamento/actions/revisao";
 import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
-import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
 import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
@@ -511,18 +509,12 @@ async function autorizarColaborador(
   if (!podeEscreverNoSetor(auth.setores, (linha.setor_id as string | null) ?? null)) {
     return { ok: false, error: SEM_ACESSO_SETOR };
   }
-  // TRAVA DA DIRETORIA: item que ela alterou sai das mãos do construtor até ser
-  // liberado. O caminho dele é "Pedir liberação", não desfazer.
-  const trava = podeEscreverNoItem(auth.user.papel, linha as { diretoria_travado?: boolean | null });
-  if (!trava.pode) return { ok: false, error: trava.motivo ?? SEM_ACESSO_SETOR };
+// A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
+// era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
+// companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
+// (construção → validação → retorno) e a trilha continuam de pé.
   if (
-    !auth.user.isAdmin &&
-    (await telaSetorFinalizada(
-      linha.company_id as string,
-      Number(linha.year),
-      "pessoal",
-      (linha.setor_id as string | null) ?? null,
-    ))
+    false
   ) {
     return { ok: false, error: FINALIZADO_MSG };
   }
@@ -558,15 +550,9 @@ export async function createColaborador(
   if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  // TRAVA DA FINALIZAÇÃO: o gestor declarou o setor terminado. Só o admin passa
-  // — é ele quem reabre, e exigir que reabra para corrigir uma linha seria
-  // cerimônia sem ganho.
-  if (
-    !auth.user.isAdmin &&
-    (await telaSetorFinalizada(companyId, year, "pessoal", input.setorId ?? null))
-  ) {
-    return { error: FINALIZADO_MSG };
-  }
+  // A TRAVA DA FINALIZAÇÃO saiu com a validação em 24/09/2026: era o gestor
+  // declarando o setor terminado (`orcamento_validacoes_tela`), e só o admin
+  // passava por cima. Volta quando a validação for redesenhada.
   const row = toRow(input, admin.userId);
   const { data: criado, error } = await supabase
     .from("orcamento_pessoal_colaboradores")

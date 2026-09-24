@@ -1,13 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, MessageSquarePlus, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
 
-import { BarraValidacao, VistoRevisao } from "@/components/orcamento/barra-validacao";
-import { ESTADO_LABEL } from "@/lib/orcamento/ciclo";
-import { getRevisoes, marcarRevisado } from "@/lib/orcamento/actions/revisao";
-import { solicitarAjuste } from "@/lib/orcamento/actions/validacao";
-import { chaveDoAlvo } from "@/lib/orcamento/validacao";
 import {
   getValorFixoCategorias,
   saveValorFixoContrato,
@@ -102,118 +97,6 @@ function CurrencyCell({
   );
 }
 
-/**
- * Visto e pedido de ajuste de UM contrato.
- *
- * Contrato sem id (linha nova, ainda não salva) não tem o que validar — a
- * diretoria aprova o que existe.
- */
-function ControlesContrato({
-  contrato,
-  budgetYear,
-  revisado,
-  companyId,
-  categoryCode,
-  categoryName,
-  setorId,
-  onRevisado,
-  onError,
-}: {
-  contrato: LocalContrato;
-  budgetYear: number;
-  podeDecidir: boolean;
-  revisado: boolean;
-  companyId: string;
-  categoryCode: string;
-  categoryName: string;
-  setorId: string | null;
-  onRevisado: () => void;
-  onError: (msg: string) => void;
-}) {
-  const [ocupado, setOcupado] = useState(false);
-  const [pedindo, setPedindo] = useState(false);
-  const [pedido, setPedido] = useState("");
-
-  if (!contrato.id) {
-    return <span className="text-[11px] text-muted-foreground">—</span>;
-  }
-  const chave = chaveDoAlvo("valor_fixo", { id: contrato.id });
-  const rotulo = contrato.descricao.trim() || categoryName;
-
-  async function alternar() {
-    setOcupado(true);
-    const res = await marcarRevisado({
-      companyId,
-      year: budgetYear,
-      alvoChave: chave,
-      alvoTipo: "valor_fixo_contrato",
-      metodo: "valor_fixo",
-      setorId,
-      revisado: !revisado,
-    });
-    setOcupado(false);
-    if (res.error) onError(res.error);
-    else onRevisado();
-  }
-
-  async function enviar() {
-    if (!pedido.trim()) {
-      onError("Escreva o que você está pedindo.");
-      return;
-    }
-    setOcupado(true);
-    const res = await solicitarAjuste({
-      companyId,
-      year: budgetYear,
-      categoryCode,
-      setorId,
-      metodo: "valor_fixo",
-      alvoTipo: "valor_fixo_contrato",
-      alvoId: contrato.id,
-      alvoRotulo: rotulo,
-      motivo: pedido,
-    });
-    setOcupado(false);
-    setPedindo(false);
-    setPedido("");
-    if (res.error) onError(res.error);
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1">
-        <VistoRevisao revisado={revisado} ocupado={ocupado} onToggle={() => void alternar()} />
-        <button
-          type="button"
-          onClick={() => setPedindo((v) => !v)}
-          title={`Pedir um ajuste em "${rotulo}"`}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"
-        >
-          <MessageSquarePlus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      {pedindo && (
-        <div className="flex items-center gap-1">
-          <input
-            value={pedido}
-            onChange={(e) => setPedido(e.target.value)}
-            placeholder="O que pedir"
-            className="w-32 rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={() => void enviar()}
-            disabled={ocupado}
-            className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            Enviar
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Linha de contrato ──────────────────────────────────────────────────────
 // Renderiza as 4 colunas de dado (valor, correção, mês, orçado) de UM contrato.
 // A 1ª coluna (categoria/descrição) vem de fora via `firstCell`, porque muda
@@ -228,29 +111,12 @@ function ContratoRow({
   onField,
   onCommitBase,
   onRemove,
-  validacao,
 }: {
   firstCell: React.ReactNode;
   contrato: LocalContrato;
   indices: IndiceOption[];
   budgetYear: number;
   showRemove: boolean;
-  /**
-   * Controles da diretoria DESTE contrato. A aprovação é por contrato e não por
-   * categoria: uma categoria pode ter cinco contratos de fornecedores
-   * diferentes, e aprovar o conjunto esconderia justamente o que a diretoria
-   * precisa olhar um a um.
-   */
-  validacao?: {
-    podeDecidir: boolean;
-    revisado: boolean;
-    companyId: string;
-    categoryCode: string;
-    categoryName: string;
-    setorId: string | null;
-    onRevisado: () => void;
-    onError: (msg: string) => void;
-  };
   onField: (partial: Partial<LocalContrato>) => void;
   onCommitBase: (parsed: number | null) => void;
   onRemove: () => void;
@@ -285,12 +151,6 @@ function ContratoRow({
 
   return (
     <tr className="align-top">
-      {validacao?.podeDecidir && (
-        <td className="px-2 py-2 align-middle">
-          <ControlesContrato contrato={contrato} budgetYear={budgetYear} {...validacao} />
-        </td>
-      )}
-
       {/* Categoria / descrição */}
       <td className="px-3 py-2">{firstCell}</td>
 
@@ -396,9 +256,6 @@ function ValorFixoCategoryGroup({
   setores,
   onMoved,
   onError,
-  podeDecidir,
-  revisadas,
-  onRevisado,
 }: {
   item: ValorFixoItem;
   indices: IndiceOption[];
@@ -406,10 +263,6 @@ function ValorFixoCategoryGroup({
   budgetYear: number;
   /** Setor a que os contratos desta categoria pertencem. */
   setorId: string | null;
-  podeDecidir: boolean;
-  /** Chaves de contrato já revisadas — a aprovação é por CONTRATO. */
-  revisadas: Set<string>;
-  onRevisado: () => void;
   /** Setores ativos, para o destino do "Mover". */
   setores: OrcamentoSetor[];
   onMoved: () => void;
@@ -554,7 +407,7 @@ function ValorFixoCategoryGroup({
 
   const detailRow = expanded && (
     <tr className="bg-muted/20">
-      <td colSpan={podeDecidir ? 6 : 5} className="px-3 pb-3 pt-1">
+      <td colSpan={5} className="px-3 pb-3 pt-1">
         <div className="rounded-md border bg-background p-3">
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             Orçamento mês a mês {budgetYear}
@@ -603,16 +456,6 @@ function ValorFixoCategoryGroup({
           onField={(partial) => commit(c.key, partial, true)}
           onCommitBase={(parsed) => commit(c.key, { valorBase: parsed }, true)}
           onRemove={() => {}}
-          validacao={{
-            podeDecidir,
-            revisado: revisadas.has(chaveDoAlvo("valor_fixo", { id: c.id ?? "" })),
-            companyId,
-            categoryCode: item.categoryCode,
-            categoryName: item.categoryName,
-            setorId: setorEspecifico(setorId),
-            onRevisado,
-            onError,
-          }}
         />
         {detailRow}
       </>
@@ -623,7 +466,6 @@ function ValorFixoCategoryGroup({
   return (
     <>
       <tr className="border-t-2 bg-muted/30 align-top">
-        {podeDecidir && <td className="border-r px-2 py-2" />}
         <td className="px-3 py-2">
           <div className="space-y-0.5">
             {chevron}
@@ -672,16 +514,6 @@ function ValorFixoCategoryGroup({
             onField={(partial) => commit(c.key, partial, true)}
             onCommitBase={(parsed) => commit(c.key, { valorBase: parsed }, true)}
             onRemove={() => removeContrato(c)}
-            validacao={{
-              podeDecidir,
-              revisado: revisadas.has(chaveDoAlvo("valor_fixo", { id: c.id ?? "" })),
-              companyId,
-              categoryCode: item.categoryCode,
-              categoryName: item.categoryName,
-              setorId: setorEspecifico(setorId),
-              onRevisado,
-              onError,
-            }}
           />
         );
       })}
@@ -700,26 +532,8 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
   const [indices, setIndices] = useState<IndiceOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Validação da diretoria acontece nesta mesma tela (não há tela separada).
-  const [revisadas, setRevisadas] = useState<Set<string>>(new Set());
-  const [podeDecidir, setPodeDecidir] = useState(false);
-  // `papelDecide` é "sou diretoria", independente da fase — é o que faz a
-  // barra aparecer em modo informativo fora da janela de validação.
-  const [papelDecide, setPapelDecide] = useState(false);
-  const [estadoCiclo, setEstadoCiclo] = useState<string>("em_construcao");
-  const [telaConcluida, setTelaConcluida] = useState(false);
-
-  async function recarregarRevisoes() {
-    if (!companyId) return;
-    const res = await getRevisoes(companyId, year, { metodo: "valor_fixo" });
-    if (res.dados) {
-      setRevisadas(new Set(res.dados.revisadas));
-      setPodeDecidir(res.dados.podeDecidir);
-      setPapelDecide(res.dados.papelDecide);
-      setEstadoCiclo(res.dados.estado);
-      setTelaConcluida(res.dados.telaConcluida);
-    }
-  }
+  // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). Aqui viviam a
+  // barra de validação, o visto por CONTRATO e o "pedir ajuste".
   const [needsMigration, setNeedsMigration] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -755,7 +569,6 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
     }
     setItems(res.setup.items);
     setIndices(res.setup.indices);
-    await recarregarRevisoes();
   }
 
   useEffect(() => {
@@ -802,33 +615,8 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
   // A aprovação é por CONTRATO: o progresso da barra conta contratos salvos,
   // não categorias. Contrato ainda não salvo (sem id) não entra — não há o que
   // aprovar numa linha que não existe no banco.
-  const alvosVf = filtered.flatMap((i) =>
-    i.contratos
-      .filter((c) => Boolean(c.id))
-      .map((c) => ({
-        chave: chaveDoAlvo("valor_fixo", { id: c.id }),
-        tipo: "valor_fixo_contrato",
-      })),
-  );
-
   return (
     <div className="space-y-4">
-      {papelDecide && (
-        <BarraValidacao
-          companyId={companyId}
-          year={year}
-          metodo="valor_fixo"
-          setorId={setorEspecifico(setorId)}
-          setorNome={setores.find((x) => x.id === setorId)?.name ?? null}
-          total={alvosVf.length}
-          revisados={alvosVf.filter((a) => revisadas.has(a.chave)).length}
-          alvos={alvosVf}
-          aberta={podeDecidir}
-          estadoLabel={ESTADO_LABEL[estadoCiclo as keyof typeof ESTADO_LABEL] ?? estadoCiclo}
-          telaConcluida={telaConcluida}
-        />
-      )}
-
       <div className="flex flex-wrap items-end gap-3">
         {setores.length > 0 && (
           <div className="w-56 space-y-1.5">
@@ -903,7 +691,6 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  {podeDecidir && <th className="px-2 py-2.5 font-medium">Validar</th>}
                   <th className="px-3 py-2.5 font-medium">Categoria / contrato</th>
                   <th className="px-3 py-2.5 font-medium">Valor atual</th>
                   <th className="px-3 py-2.5 font-medium">Correção</th>
@@ -923,14 +710,11 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
                     setores={setores}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}
-                    podeDecidir={podeDecidir}
-                    revisadas={revisadas}
-                    onRevisado={() => void recarregarRevisoes()}
                   />
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={podeDecidir ? 6 : 5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>

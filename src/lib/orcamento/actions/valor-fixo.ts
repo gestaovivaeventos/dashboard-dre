@@ -7,11 +7,6 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
 import {
-  camposPermitidosLabel,
-  camposRecusadosParaDiretoria,
-  podeEscreverNoItem,
-} from "@/lib/orcamento/validacao";
-import {
   autorizarEscrita,
   autorizarLeitura,
   podeEscreverNoSetor,
@@ -309,29 +304,10 @@ export async function saveValorFixoContrato(
         return { error: SEM_ACESSO_SETOR };
       }
     }
-    // Trava da diretoria no contrato.
-    const trava = podeEscreverNoItem(
-      auth.user.papel,
-      (atual ?? null) as { diretoria_travado?: boolean | null } | null,
-    );
-    if (!trava.pode) return { error: trava.motivo };
-    // GATE POR CAMPO: valor fixo é do administrador (são contratos). A diretoria
-    // só troca índice e mês de reajuste — o resto vira solicitação.
-    if (auth.user.papel === "validador") {
-      const mexidos = diffCampos(
-        (atual ?? null) as Record<string, unknown> | null,
-        patch as Record<string, unknown>,
-      );
-      const recusados = camposRecusadosParaDiretoria(
-        "valor_fixo",
-        Object.keys(mexidos.depois),
-      );
-      if (recusados.length > 0) {
-        return {
-          error: `No valor fixo a diretoria pode alterar ${camposPermitidosLabel("valor_fixo")}. Para o restante, use "Solicitar ajuste".`,
-        };
-      }
-    }
+    // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
+    // era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
+    // companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
+    // (construção → validação → retorno) e a trilha continuam de pé.
     const patchFinal = travaOItem(auth.user.papel, "alterou", undefined, auth.estado)
       ? {
           ...patch,

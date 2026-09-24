@@ -12,7 +12,7 @@ npm run start        # Start production server
 npm run lint         # ESLint
 ```
 
-Testes: `npm test` (node:test + tsx, sobre `src/**/*.test.ts`). Cobrem os módulos PUROS — ciclo, trilha, validação, prompt da entrevista, grupos de despesa, filtros do Caixa, CDI do VB. Valide também com `npm run lint` e `npm run build`.
+Testes: `npm test` (node:test + tsx, sobre `src/**/*.test.ts`). Cobrem os módulos PUROS — ciclo, trilha, prompt da entrevista, grupos de despesa, filtros do Caixa, CDI do VB. Valide também com `npm run lint` e `npm run build`.
 
 To test the cron endpoint locally:
 ```bash
@@ -148,9 +148,20 @@ O método foi reconstruído do zero. O caminho é **filtrar setores → escolher
 - **KPI, impacto, finalidade e prioridade NÃO têm coluna** — e isso é decisão, não esquecimento. A IA faz essas perguntas para **instigar a reflexão** de quem orça; a resposta é o raciocínio do gestor e fica no transcript, junto com a pergunta que o provocou. Virar campo transformaria a entrevista no formulário que ela veio substituir. O que a diretoria lê é a **justificativa do conjunto**, escrita pela IA no modo `fechamento`.
 - **O prompt continua base zero** (`entrevista-prompt.ts`, puro e testado) e mantém o que funcionava: materialidade (Pareto — itens que somam 80%, qualquer um com ≥10%, todos quando há até 3; a cauda vai em conferência rápida), classe da despesa (estrutural/contratual/discricionária/variável), `CATEGORIA_DESCRICOES` com regra por categoria prevalecendo sobre tudo, e o mês a mês do ano anterior com os meses fora da curva. `materialidade()` passou a receber **totais**, não itens — a base não tem mais periodicidade.
 - **O método está EM VALIDAÇÃO**: `METODOS_EM_VALIDACAO` em `metodos.ts` esconde a caixa do hub e redireciona as rotas para quem não é admin. Para liberar a gerentes e diretores, tire a chave desse conjunto — é o único lugar.
-- **As ações da diretoria migraram junto** (`actions/validacao.ts`): `cancelarItemPlanejamento`, `alterarItemPlanejamento` e `adicionarItemPlanejamento` recebem `despesaId` e fazem UPDATE por id. Sumiram a cirurgia em jsonb e a trava contra corrida por (índice + descrição) — e, com elas, as funções puras `marcarItemProposta` e `itemPropostaAtivo`. **Não recrie a marcação em jsonb.** `planejamento_item` entrou em `TABELA_DO_ALVO`, então `liberarItem` perdeu o ramo especial que destravava a categoria inteira de uma vez; `chaveDoAlvo` passou a ser `ps:<id>` (vistos gravados no formato antigo deixam de casar — eles são por rodada, não permanentes).
+- As colunas `cancelado`, `cancelado_motivo` e `diretoria_travado` existem na despesa e **ninguém escreve nelas** desde que a validação saiu do sistema (ver a seção abaixo). A Prévia continua filtrando `cancelado = false`, então a coluna está pronta para o redesenho. **Não recrie a marcação em jsonb** que existia antes.
 - **Nenhum código lê mais `orcamento_planejamento_socios` / `_itens`.** A migration `20260926120000` as remove e é **destrutiva**: aplique só depois do deploy do código novo.
-- **O que a fase seguinte precisa construir**: a INTERFACE do diretor sobre a lista nova (cancelar/alterar com motivo, `BarraValidacao` e o visto linha a linha, como em pessoal/média/valor fixo). As actions já existem e estão sem chamador.
+
+### Orçamento — a VALIDAÇÃO foi removida do sistema (24/09/2026)
+
+O aparato de validação da diretoria **não existe mais no código** e será redesenhado. Antes de reconstruir, saiba o que foi tirado e o que ficou — e por quê.
+
+**Saiu** (~2.700 linhas): `validacao.ts` (puro) e `actions/validacao.ts` (cancelar / alterar / adicionar item, solicitar ajuste, liberar item, pedir liberação, responder solicitação); `actions/revisao.ts` (o "visto" linha a linha e a finalização da tela por setor); `actions/retorno.ts` e a tela `/retorno` (`retorno-view.tsx`); `barra-validacao.tsx` (`BarraValidacao`, `VistoRevisao`, `BarraFinalizacao`). Junto com eles saiu o **gate por campo** (a diretoria só trocava o índice na média e índice+mês no valor fixo), a **trava por item** (`diretoria_travado`), a trava de **tela finalizada** no pessoal e o contador de pendências no menu (`navBadges` ficou zerado, com a fiação pronta).
+
+**Ficou**: o **ciclo** (`ciclo.ts`, `actions/ciclo.ts`, `ciclo-painel.tsx`, `ciclo-faixa.tsx`, tabela `orcamento_ciclos`) com a máquina de estados construção → validação → retorno e a **trava por fase** dentro de `autorizarEscrita` — ou seja, o orçamento **continua ficando somente leitura** quando o ciclo entra em validação, mesmo sem tela de validação. E ficou a **trilha** (`trilha.ts`, `orcamento_alteracoes`), que segue registrando cada alteração.
+
+**As colunas do banco não foram tocadas**, por decisão do dono do projeto: `diretoria_travado`, `cancelado`, `cancelado_motivo`, `cancelado_por`, `cancelado_em` continuam nas tabelas de método, e as tabelas `orcamento_revisoes`, `orcamento_validacoes_tela`, `orcamento_setor_entregas`, `orcamento_versoes` e `orcamento_versao_linhas` continuam existindo. Ninguém lê nem escreve nelas. É reversível e o redesenho provavelmente quer algo parecido — **não as remova achando que são lixo**.
+
+**Duas decisões antigas que vale herdar**: a validação acontecia DENTRO das telas de método (o diretor escolhia o setor e percorria as mesmas linhas de quem constrói) porque uma tela consolidada chegou a existir e foi removida por duplicar a Prévia; e cancelar era MARCA, nunca exclusão — a linha ficava visível, riscada e com o motivo, senão o gestor perdia o que escreveu e a trilha virava o único lugar onde aquela despesa existiu.
 
 ### Manual do módulo Compras — `src/lib/ctrl/manual/content.ts`
 

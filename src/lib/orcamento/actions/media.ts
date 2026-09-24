@@ -7,10 +7,6 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaOItem } from "@/lib/orcamento/trilha";
 import {
-  camposPermitidosLabel,
-  camposRecusadosParaDiretoria,
-} from "@/lib/orcamento/validacao";
-import {
   autorizarEscrita,
   autorizarLeitura,
   podeEscreverNoSetor,
@@ -458,17 +454,10 @@ export async function setMediaValor(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
-  // GATE POR CAMPO: média é construída pelo administrador. A diretoria, na
-  // validação, só troca o ÍNDICE — mudar o valor aqui viraria uma decisão sem
-  // quem a sustente. O caminho dela é solicitar o ajuste.
-  if (auth.user.papel === "validador") {
-    const recusados = camposRecusadosParaDiretoria("media", ["media_valor"]);
-    if (recusados.length > 0) {
-      return {
-        error: `Na média a diretoria pode alterar ${camposPermitidosLabel("media")}. Para mudar o valor, use "Solicitar ajuste".`,
-      };
-    }
-  }
+// A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
+// era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
+// companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
+// (construção → validação → retorno) e a trilha continuam de pé.
   const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.

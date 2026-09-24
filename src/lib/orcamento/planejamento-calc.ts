@@ -116,7 +116,8 @@ export interface PlanejamentoItemProposto {
   /**
    * Cancelado pela DIRETORIA na validação. O item continua na proposta (visível,
    * riscado, com o motivo) mas não entra em número nenhum — ver
-   * `itemPropostaAtivo` em @/lib/orcamento/validacao, aplicado na Prévia.
+   * a coluna `cancelado` da despesa. (A validação saiu do sistema em
+   * 24/09/2026 e será redesenhada; a coluna ficou, sem ninguém escrever nela.)
    *
    * Vive aqui, e não numa coluna, porque o item do planejamento é um objeto
    * dentro do jsonb `orcamento_planejamento_socios.proposta`.

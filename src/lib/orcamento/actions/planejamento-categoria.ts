@@ -18,7 +18,6 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { podeEscreverNoItem } from "@/lib/orcamento/validacao";
 import {
   codigosIrmaos,
   normNomeCategoria,
@@ -880,17 +879,16 @@ export async function editarDespesa(
 
   const { data: atual } = await supabase
     .from("orcamento_planejamento_despesas")
-    .select("setor_id, category_code, descricao, valor, diretoria_travado")
+    .select("setor_id, category_code, descricao, valor")
     .eq("id", despesaId)
     .maybeSingle();
   if (!atual) return { error: "Despesa não encontrada." };
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  // Trava da diretoria: agora por DESPESA, porque a despesa virou linha. No
-  // modelo antigo ela morava na categoria × setor por falta de linha própria.
-  const trava = podeEscreverNoItem(auth.user.papel, atual as { diretoria_travado?: boolean | null });
-  if (!trava.pode) return { error: trava.motivo ?? "Item travado pela diretoria." };
+  // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). Aqui havia a
+  // trava da diretoria sobre a despesa; a coluna `diretoria_travado` continua no
+  // banco, sem ninguém lendo nem escrevendo. O ciclo e a trilha ficaram.
 
   const { error } = await supabase
     .from("orcamento_planejamento_despesas")
@@ -942,15 +940,16 @@ export async function removerDespesa(
 
   const { data: atual } = await supabase
     .from("orcamento_planejamento_despesas")
-    .select("setor_id, descricao, valor, diretoria_travado")
+    .select("setor_id, descricao, valor")
     .eq("id", despesaId)
     .maybeSingle();
   if (!atual) return { error: "Despesa não encontrada." };
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  const trava = podeEscreverNoItem(auth.user.papel, atual as { diretoria_travado?: boolean | null });
-  if (!trava.pode) return { error: trava.motivo ?? "Item travado pela diretoria." };
+  // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). Aqui havia a
+  // trava da diretoria sobre a despesa; a coluna `diretoria_travado` continua no
+  // banco, sem ninguém lendo nem escrevendo. O ciclo e a trilha ficaram.
 
   const { error } = await supabase
     .from("orcamento_planejamento_despesas")

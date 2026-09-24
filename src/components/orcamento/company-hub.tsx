@@ -2,7 +2,6 @@ import Link from "next/link";
 import {
   ArrowRight,
   Clock,
-  History,
   Coins,
   Handshake,
   LineChart,
@@ -20,7 +19,6 @@ import {
   workspaceTabHref,
   workspaceConfigHref,
   workspacePreviaHref,
-  workspaceRetornoHref,
 } from "@/lib/orcamento/workspace-tabs";
 import { statusGeral, type OrcamentoStatusRaw } from "@/lib/orcamento/status";
 import { StatusBadge } from "@/components/orcamento/status-badge";
@@ -134,12 +132,6 @@ export function CompanyHub({
   // ainda estão em validação e só o admin enxerga (METODOS_EM_VALIDACAO).
   const metodos = METODOS.filter((m) => !m.ve && metodoVisivelPara(m.key, Boolean(isAdmin)));
 
-  // O retorno é de quem montou. O diretor também vê: é onde ele confere o que
-  // decidiu e responde aos pedidos de liberação.
-  const mostraRetorno =
-    Boolean(ciclo) &&
-    ["em_ajuste", "concluido", "publicado"].includes(ciclo!.estado);
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -195,21 +187,10 @@ export function CompanyHub({
           );
         })}
 
-        {/* Validação da diretoria. Só aparece depois de o orçamento sair para
-            validação: antes disso não há o que validar, e uma caixa que abre
-            uma tela vazia é ruído. Continua visível nas fases seguintes porque
-            é por ela que se confere o que foi decidido. */}
-        {/* Retorno da diretoria. Aparece a partir do momento em que existe
-            decisão para ler — antes disso a lista estaria vazia. Fica visível
-            nas fases seguintes porque é também o histórico do orçamento. */}
-        {mostraRetorno && (
-            <Tile
-              icon={History}
-              title="Retorno da diretoria"
-              desc="O que mudou, por quê, e o que ainda depende de você."
-              href={workspaceRetornoHref(companyId, year)}
-            />
-          )}
+        {/* A caixa "Retorno da diretoria" saiu daqui com a VALIDAÇÃO, em
+            24/09/2026 — ela será redesenhada. O ciclo (construção → validação →
+            retorno) e a trilha de alterações continuam de pé; o que não existe
+            mais é a tela que lia as decisões. */}
 
         {/* Configuração da empresa — sub-hub com as seções de config por
             empresa. Admin-only (ver isAdmin acima). */}

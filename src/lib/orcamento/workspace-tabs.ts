@@ -52,11 +52,11 @@ export function workspaceTabHref(companyId: string, year: number, slug: string):
   return `/orcamento/empresa/${companyId}/${year}/${slug}`;
 }
 
-// A validação NÃO tem rota própria (decisão de 25/09/2026). Ela acontece
-// DENTRO das telas de método: o diretor escolhe o setor e percorre as linhas,
-// como quem constrói. Uma tela consolidada existiu e foi removida — era uma
-// segunda árvore para responder o que a Prévia já responde, e a caixa dela
-// ("Despesas com pessoal") não levava a lugar nenhum, o que confundia.
+// A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 e será redesenhada. Ela vivia
+// DENTRO das telas de método (barra no topo, visto linha a linha, cancelar e
+// pedir ajuste) — não havia rota própria, e uma tela consolidada chegou a
+// existir antes disso e foi removida por duplicar a Prévia. Vale lembrar disso
+// ao desenhar a próxima: a decisão de ficar junto do dado era deliberada.
 
 /**
  * URL da tela de MONTAGEM de uma categoria no Planejamento dos gestores.
@@ -73,13 +73,8 @@ export function planejamentoCategoriaHref(
   return `/orcamento/empresa/${companyId}/${year}/planejamento_socios/${encodeURIComponent(categoryCode)}`;
 }
 
-/**
- * URL do RETORNO da diretoria (visão de quem montou o orçamento). Como a
- * validação, é etapa do ciclo, não método.
- */
-export function workspaceRetornoHref(companyId: string, year: number): string {
-  return `/orcamento/empresa/${companyId}/${year}/retorno`;
-}
+// A rota do RETORNO da diretoria saiu com a validação em 24/09/2026 (será
+// redesenhada). O ciclo e a trilha ficaram — o que não existe mais é a tela.
 
 /**
  * URL da Prévia do orçamento — a DRE da empresa preenchida com os valores
