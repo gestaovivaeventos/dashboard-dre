@@ -4,15 +4,32 @@
 // Módulo PURO (client + server): tipos, rótulos e o diff de campos. A gravação
 // fica em `actions/trilha.ts`.
 //
-// Por que registrar sempre, e não só durante a validação: custa uma linha por
-// escrita e é o que faz "ver tudo o que foi feito" ser completo — a tela de
-// retorno filtra por fase='validacao', mas a linha do tempo mostra o ciclo
-// inteiro. Uma trilha que só existe numa fase não responde "quem mudou isso?".
+// Por que registrar sempre: custa uma linha por escrita e é o que faz "ver tudo
+// o que foi feito" ser completo. Uma trilha que só existe numa fase não responde
+// "quem mudou isso?".
+//
+// O CICLO foi removido em 24/09/2026 junto com a validação (ambos serão
+// redesenhados). A trilha ficou: ela registra o fato, não a etapa. Por isso
+// `TrilhaFase` passou a morar AQUI e `fase` virou opcional — sem ciclo, toda
+// escrita é construção. O tipo continua com os cinco valores para as linhas já
+// gravadas seguirem legíveis.
 // =============================================================================
 
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
-import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
+
+/**
+ * Em que etapa do processo a alteração aconteceu.
+ *
+ * Nasceu no ciclo (construção → validação → retorno) e veio para cá quando ele
+ * saiu. Hoje toda escrita nova é 'construcao'; os outros valores existem para
+ * as linhas antigas continuarem legíveis, e para o redesenho da validação
+ * voltar a preenchê-los sem migration.
+ */
+export type TrilhaFase = "construcao" | "validacao" | "ajuste" | "concluido" | "publicado";
+
+/** Fase de toda escrita enquanto não existe ciclo. */
+export const FASE_PADRAO: TrilhaFase = "construcao";
 
 /** O que a alteração atingiu. Uma por granularidade natural de cada método. */
 export type AlvoTipo =
@@ -79,43 +96,10 @@ export const ALVO_LABEL: Record<AlvoTipo, string> = {
   ciclo: "ciclo",
 };
 
-/** Ações que a diretoria pratica — as que travam o item para o construtor. */
-const ACOES_DE_DIRETORIA: ReadonlySet<TrilhaAcao> = new Set<TrilhaAcao>([
-  "alterou",
-  "cancelou",
-  "reativou",
-  "moveu_categoria",
-  "moveu_setor",
-  "excluiu",
-]);
-
-/**
- * A alteração TRAVA o item para o construtor?
- *
- * Regra: alteração feita EM NOME DA DIRETORIA trava o item, salvo se quem
- * decidiu marcar "Permitir que o gestor ajuste". Solicitação (`solicitou`)
- * nunca trava — ela pressupõe que o construtor vá editar.
- *
- * "Em nome da diretoria" é o validador sempre, **e o admin durante a
- * validação**: naquela janela ele está no lugar da diretoria, e é normal que
- * ele decida (é quem opera o ciclo, e pode ser o único a testar). Antes o admin
- * era excluído, e o efeito prático era uma validação sem trava nenhuma — o
- * botão "Liberar" nunca acendia porque nada ficava travado.
- *
- * Fora da validação, alteração do admin é manutenção, não decisão: não trava.
- */
-export function travaOItem(
-  papel: OrcamentoPapel,
-  acao: TrilhaAcao,
-  permiteAlteracao: boolean | null | undefined,
-  estado: CicloEstado = "em_construcao",
-): boolean {
-  const comoDiretoria =
-    papel === "validador" || (papel === "admin" && estado === "em_validacao");
-  if (!comoDiretoria) return false;
-  if (!ACOES_DE_DIRETORIA.has(acao)) return false;
-  return permiteAlteracao !== true;
-}
+// `travaOItem` vivia aqui: decidia se a alteração feita EM NOME DA DIRETORIA
+// travava o item para quem o montou. Saiu com a validação em 24/09/2026 — ela
+// escrevia `diretoria_travado`, coluna que hoje ninguém lê. A coluna ficou no
+// banco para o redesenho reaproveitar.
 
 /** Ações que criam uma pendência para o outro lado responder. */
 export function abrePendencia(acao: TrilhaAcao): boolean {
@@ -136,7 +120,8 @@ export interface TrilhaEntradaInput {
   /** Nome do item NO MOMENTO — sobrevive à renomeação e ao item apagado. */
   alvoRotulo?: string | null;
   acao: TrilhaAcao;
-  fase: TrilhaFase;
+  /** Sem ciclo, quem não informa cai em FASE_PADRAO. */
+  fase?: TrilhaFase;
   antes?: Record<string, unknown> | null;
   depois?: Record<string, unknown> | null;
   motivo?: string | null;

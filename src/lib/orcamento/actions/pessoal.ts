@@ -5,8 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
-import type { CicloEstado, TrilhaFase } from "@/lib/orcamento/ciclo";
+import { diffCampos } from "@/lib/orcamento/trilha";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
   autorizarEscrita,
@@ -485,9 +484,6 @@ async function autorizarColaborador(
       linha: Record<string, unknown>;
       companyId: string;
       year: number;
-      fase: TrilhaFase;
-      estado: CicloEstado;
-      cicloId: string | null;
     }
   | { ok: false; error: string }
 > {
@@ -526,9 +522,6 @@ async function autorizarColaborador(
     linha: linha as Record<string, unknown>,
     companyId: linha.company_id as string,
     year: Number(linha.year),
-    fase: auth.fase,
-    estado: auth.estado,
-    cicloId: auth.cicloId,
   };
 }
 
@@ -566,14 +559,12 @@ export async function createColaborador(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     setorId: input.setorId ?? null,
     metodo: "pessoal",
     alvoTipo: "colaborador",
     alvoId: (criado?.id as string) ?? null,
     alvoRotulo: input.nome?.trim() || input.cargoAtual?.trim() || "Colaborador",
     acao: "criou",
-    fase: auth.fase,
     depois: row as Record<string, unknown>,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -596,16 +587,10 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
     return { error: SEM_ACESSO_SETOR };
   }
   const row = toRow(input, auth.userId);
-  // Alteração da diretoria pelo caminho normal também trava o item (a tela da
-  // validação manda `permiteAlteracao`; sem ele, trava).
-  const patch = travaOItem(auth.papel, "alterou", undefined, auth.estado)
-    ? {
-        ...row,
-        diretoria_travado: true,
-        diretoria_alterado_em: new Date().toISOString(),
-        diretoria_alterado_por: auth.userId,
-      }
-    : row;
+  // O CICLO saiu em 24/09/2026, junto com a validação (ambos serão redesenhados).
+  // Aqui a alteração da diretoria marcava `diretoria_travado` — coluna que hoje
+  // ninguém lê. A coluna ficou no banco para o redesenho reaproveitar.
+  const patch = row;
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
     .update(patch)
@@ -617,7 +602,6 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
     await registrarAlteracao({
       companyId: auth.companyId,
       year: auth.year,
-      cicloId: auth.cicloId,
       setorId: input.setorId ?? ((auth.linha.setor_id as string | null) ?? null),
       metodo: "pessoal",
       alvoTipo: "colaborador",
@@ -625,7 +609,6 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
       alvoRotulo:
         input.nome?.trim() || (auth.linha.nome as string | null) || "Colaborador",
       acao: "alterou",
-      fase: auth.fase,
       antes: diff.antes,
       depois: diff.depois,
       autorId: auth.userId,
@@ -661,14 +644,12 @@ export async function updateColaboradorBeneficios(id: string, beneficios: Benefi
     await registrarAlteracao({
       companyId: auth.companyId,
       year: auth.year,
-      cicloId: auth.cicloId,
       setorId: (auth.linha.setor_id as string | null) ?? null,
       metodo: "pessoal",
       alvoTipo: "colaborador",
       alvoId: id,
       alvoRotulo: (auth.linha.nome as string | null) || "Colaborador",
       acao: "alterou",
-      fase: auth.fase,
       antes: diffBen.antes,
       depois: diffBen.depois,
       autorId: auth.userId,
@@ -889,14 +870,12 @@ export async function deleteColaborador(id: string) {
   await registrarAlteracao({
     companyId: auth.companyId,
     year: auth.year,
-    cicloId: auth.cicloId,
     setorId: (auth.linha.setor_id as string | null) ?? null,
     metodo: "pessoal",
     alvoTipo: "colaborador",
     alvoId: id,
     alvoRotulo: (auth.linha.nome as string | null) || "Colaborador",
     acao: "excluiu",
-    fase: auth.fase,
     antes: auth.linha,
     autorId: auth.userId,
     autorPapel: auth.papel,

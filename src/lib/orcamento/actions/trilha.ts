@@ -5,7 +5,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoUser, podeVerEmpresa, SEM_ACESSO } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import type { TrilhaEntrada, TrilhaEntradaInput } from "@/lib/orcamento/trilha";
+import { FASE_PADRAO, type TrilhaEntrada, type TrilhaEntradaInput } from "@/lib/orcamento/trilha";
 
 const db = () => createAdminClientIfAvailable();
 
@@ -37,7 +37,7 @@ export async function registrarAlteracao(entrada: TrilhaEntradaInput): Promise<v
     alvo_id: entrada.alvoId ?? null,
     alvo_rotulo: entrada.alvoRotulo ?? null,
     acao: entrada.acao,
-    fase: entrada.fase,
+    fase: entrada.fase ?? FASE_PADRAO,
     antes: entrada.antes ?? null,
     depois: entrada.depois ?? null,
     motivo: entrada.motivo ?? null,

@@ -290,14 +290,12 @@ export async function removerLinhaDoSetor(params: {
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     categoryCode,
     setorId,
     metodo,
     alvoTipo: "categoria_setor",
     alvoRotulo: categoryCode,
     acao: "excluiu",
-    fase: auth.fase,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
   });

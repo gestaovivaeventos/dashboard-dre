@@ -12,7 +12,7 @@ npm run start        # Start production server
 npm run lint         # ESLint
 ```
 
-Testes: `npm test` (node:test + tsx, sobre `src/**/*.test.ts`). Cobrem os módulos PUROS — ciclo, trilha, prompt da entrevista, grupos de despesa, filtros do Caixa, CDI do VB. Valide também com `npm run lint` e `npm run build`.
+Testes: `npm test` (node:test + tsx, sobre `src/**/*.test.ts`). Cobrem os módulos PUROS — trilha, prompt da entrevista, grupos de despesa, filtros do Caixa, CDI do VB. Valide também com `npm run lint` e `npm run build`.
 
 To test the cron endpoint locally:
 ```bash
@@ -152,17 +152,21 @@ O método foi reconstruído do zero. O caminho é **filtrar setores → escolher
 - As colunas `cancelado`, `cancelado_motivo` e `diretoria_travado` existem na despesa e **ninguém escreve nelas** desde que a validação saiu do sistema (ver a seção abaixo). A Prévia continua filtrando `cancelado = false`, então a coluna está pronta para o redesenho. **Não recrie a marcação em jsonb** que existia antes.
 - **Nenhum código lê mais `orcamento_planejamento_socios` / `_itens`.** A migration `20260926120000` as remove e é **destrutiva**: aplique só depois do deploy do código novo.
 
-### Orçamento — a VALIDAÇÃO foi removida do sistema (24/09/2026)
+### Orçamento — a VALIDAÇÃO e o CICLO foram removidos do sistema (24/09/2026)
 
 O aparato de validação da diretoria **não existe mais no código** e será redesenhado. Antes de reconstruir, saiba o que foi tirado e o que ficou — e por quê.
 
 **Saiu** (~2.700 linhas): `validacao.ts` (puro) e `actions/validacao.ts` (cancelar / alterar / adicionar item, solicitar ajuste, liberar item, pedir liberação, responder solicitação); `actions/revisao.ts` (o "visto" linha a linha e a finalização da tela por setor); `actions/retorno.ts` e a tela `/retorno` (`retorno-view.tsx`); `barra-validacao.tsx` (`BarraValidacao`, `VistoRevisao`, `BarraFinalizacao`). Junto com eles saiu o **gate por campo** (a diretoria só trocava o índice na média e índice+mês no valor fixo), a **trava por item** (`diretoria_travado`), a trava de **tela finalizada** no pessoal e o contador de pendências no menu (`navBadges` ficou zerado, com a fiação pronta).
 
-**Ficou**: o **ciclo** (`ciclo.ts`, `actions/ciclo.ts`, `ciclo-painel.tsx`, `ciclo-faixa.tsx`, tabela `orcamento_ciclos`) com a máquina de estados construção → validação → retorno e a **trava por fase** dentro de `autorizarEscrita` — ou seja, o orçamento **continua ficando somente leitura** quando o ciclo entra em validação, mesmo sem tela de validação. E ficou a **trilha** (`trilha.ts`, `orcamento_alteracoes`), que segue registrando cada alteração.
+**O CICLO saiu junto, numa segunda passada** (~2.000 linhas): `ciclo.ts` + `ciclo.test.ts`, `actions/ciclo.ts`, `notificacoes.ts`, `ciclo-painel.tsx` (o quadro do hub com as transições e as entregas dos setores) e `ciclo-faixa.tsx`. Com ele foi embora a **trava por fase** dentro de `autorizarEscrita`: **o orçamento voltou a ser sempre editável** por quem alcança o setor. O motivo de tirar tudo: o painel era o único caminho para mover o estado, então mantê-lo fora com a trava dentro prenderia em somente leitura, sem saída pela tela, qualquer empresa que já estivesse em `em_validacao`.
 
-**As colunas do banco não foram tocadas**, por decisão do dono do projeto: `diretoria_travado`, `cancelado`, `cancelado_motivo`, `cancelado_por`, `cancelado_em` continuam nas tabelas de método, e as tabelas `orcamento_revisoes`, `orcamento_validacoes_tela`, `orcamento_setor_entregas`, `orcamento_versoes` e `orcamento_versao_linhas` continuam existindo. Ninguém lê nem escreve nelas. É reversível e o redesenho provavelmente quer algo parecido — **não as remova achando que são lixo**.
+`autorizarEscrita` devolve só `{ user, setores }` — sumiram `estado`, `fase` e `cicloId`. **É nele que a trava volta** quando a validação for redesenhada: foi assim que as 15 actions de escrita a ganharam de uma vez, sem mudar nenhuma delas. O selo heurístico de `status.ts` (conta linhas preenchidas) voltou a ser a única leitura de andamento no hub.
 
-**Duas decisões antigas que vale herdar**: a validação acontecia DENTRO das telas de método (o diretor escolhia o setor e percorria as mesmas linhas de quem constrói) porque uma tela consolidada chegou a existir e foi removida por duplicar a Prévia; e cancelar era MARCA, nunca exclusão — a linha ficava visível, riscada e com o motivo, senão o gestor perdia o que escreveu e a trilha virava o único lugar onde aquela despesa existiu.
+**Ficou a TRILHA** (`trilha.ts`, `actions/trilha.ts`, `orcamento_alteracoes`), que segue registrando cada escrita. Duas mudanças nela: `TrilhaFase` passou a ser definida no próprio `trilha.ts` (era do ciclo) e `fase` virou **opcional**, caindo em `FASE_PADRAO` (`'construcao'`) — sem ciclo, toda escrita é construção. Os cinco valores do tipo continuam existindo para as linhas já gravadas seguirem legíveis e para o redesenho voltar a preenchê-los sem migration. `travaOItem` saiu (escrevia `diretoria_travado`, que ninguém lê).
+
+**As colunas e tabelas do banco não foram tocadas**, por decisão do dono do projeto: `diretoria_travado`, `cancelado`, `cancelado_motivo`, `cancelado_por`, `cancelado_em` continuam nas tabelas de método, e as tabelas `orcamento_ciclos`, `orcamento_revisoes`, `orcamento_validacoes_tela`, `orcamento_setor_entregas`, `orcamento_versoes` e `orcamento_versao_linhas` continuam existindo. Ninguém lê nem escreve nelas. É reversível e o redesenho provavelmente quer algo parecido — **não as remova achando que são lixo**.
+
+**Três decisões antigas que vale herdar**: o ciclo tinha **entrega por setor** (cada gestor declarava o seu pronto, e o admin podia enviar para validação mesmo com setor pendente, avisando quais faltavam); a validação acontecia DENTRO das telas de método (o diretor escolhia o setor e percorria as mesmas linhas de quem constrói) porque uma tela consolidada chegou a existir e foi removida por duplicar a Prévia; e cancelar era MARCA, nunca exclusão — a linha ficava visível, riscada e com o motivo, senão o gestor perdia o que escreveu e a trilha virava o único lugar onde aquela despesa existiu.
 
 ### Manual do módulo Compras — `src/lib/ctrl/manual/content.ts`
 

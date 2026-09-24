@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { diffCampos, travaOItem } from "@/lib/orcamento/trilha";
+import { diffCampos } from "@/lib/orcamento/trilha";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -308,14 +308,7 @@ export async function saveValorFixoContrato(
     // era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
     // companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
     // (construção → validação → retorno) e a trilha continuam de pé.
-    const patchFinal = travaOItem(auth.user.papel, "alterou", undefined, auth.estado)
-      ? {
-          ...patch,
-          diretoria_travado: true,
-          diretoria_alterado_em: new Date().toISOString(),
-          diretoria_alterado_por: auth.user.userId,
-        }
-      : patch;
+    const patchFinal = patch;
     const { error } = await supabase
       .from("orcamento_valor_fixo_categorias")
       .update({ ...patchFinal, category_name: categoryName })
@@ -333,7 +326,6 @@ export async function saveValorFixoContrato(
       await registrarAlteracao({
         companyId,
         year,
-        cicloId: auth.cicloId,
         categoryCode,
         setorId: (atual?.setor_id as string | null) ?? null,
         metodo: "valor_fixo",
@@ -341,7 +333,6 @@ export async function saveValorFixoContrato(
         alvoId: contrato.id,
         alvoRotulo: descricao || categoryName,
         acao: "alterou",
-        fase: auth.fase,
         antes: diff.antes,
         depois: diff.depois,
         autorId: auth.user.userId,
@@ -376,7 +367,6 @@ export async function saveValorFixoContrato(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     categoryCode,
     setorId: alvo.id,
     metodo: "valor_fixo",
@@ -384,7 +374,6 @@ export async function saveValorFixoContrato(
     alvoId: (data as { id: string }).id,
     alvoRotulo: descricao || categoryName,
     acao: "criou",
-    fase: auth.fase,
     depois: patch as Record<string, unknown>,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -420,7 +409,6 @@ export async function removeValorFixoContrato(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     categoryCode: (atual?.category_code as string | null) ?? null,
     setorId: (atual?.setor_id as string | null) ?? null,
     metodo: "valor_fixo",
@@ -429,7 +417,6 @@ export async function removeValorFixoContrato(
     alvoRotulo:
       (atual?.descricao as string | null) || (atual?.category_name as string | null) || "Contrato",
     acao: "excluiu",
-    fase: auth.fase,
     antes: (atual ?? null) as Record<string, unknown> | null,
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,

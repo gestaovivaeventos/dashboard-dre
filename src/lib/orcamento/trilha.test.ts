@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { diffCampos, itemAtivo, travaOItem, abrePendencia } from "./trilha";
+import { diffCampos, itemAtivo, abrePendencia } from "./trilha";
 
 test("só os campos que mudaram entram no diff", () => {
   const r = diffCampos(
@@ -64,43 +64,10 @@ test("jsonb é comparado por conteúdo", () => {
   assert.equal(diffCampos({ p: { a: 1 } }, { p: { a: 2 } }).mudou, true);
 });
 
-// ─── Trava da diretoria ──────────────────────────────────────────────────────
-
-test("alteração do validador trava o item por padrão", () => {
-  assert.equal(travaOItem("validador", "alterou", null), true);
-  assert.equal(travaOItem("validador", "cancelou", undefined), true);
-  assert.equal(travaOItem("validador", "moveu_categoria", false), true);
-});
-
-test('"Permitir que o gestor ajuste" é a única forma de NÃO travar', () => {
-  assert.equal(travaOItem("validador", "alterou", true), false);
-});
-
-test("solicitação nunca trava — ela pressupõe que o construtor vá editar", () => {
-  assert.equal(travaOItem("validador", "solicitou", null), false);
-});
-
-test("ação do construtor nunca trava", () => {
-  for (const papel of ["construtor", "construtor_amplo"] as const) {
-    assert.equal(travaOItem(papel, "alterou", null), false, papel);
-  }
-});
-
-test("o admin trava DURANTE a validação — e só nela", () => {
-  // Naquela janela ele está no lugar da diretoria (e pode ser o único a
-  // decidir). Fora dela, alteração de admin é manutenção, não decisão — travar
-  // tiraria o item do gestor sem que ninguém tivesse decidido nada.
-  assert.equal(travaOItem("admin", "cancelou", null, "em_validacao"), true);
-  assert.equal(travaOItem("admin", "cancelou", null, "em_construcao"), false);
-  assert.equal(travaOItem("admin", "cancelou", null, "em_ajuste"), false);
-  // O checkbox continua valendo para ele.
-  assert.equal(travaOItem("admin", "cancelou", true, "em_validacao"), false);
-});
-
-test("o validador trava em qualquer fase em que consiga escrever", () => {
-  assert.equal(travaOItem("validador", "alterou", null, "em_validacao"), true);
-  assert.equal(travaOItem("validador", "alterou", null, "em_construcao"), true);
-});
+// A "Trava da diretoria" (`travaOItem`) foi testada aqui até 24/09/2026, quando
+// a validação e o ciclo saíram do sistema. Ela decidia se a alteração feita em
+// nome da diretoria travava o item para quem o montou — regra que volta com o
+// redesenho, e com ela os testes.
 
 test("solicitar e contestar abrem pendência; alterar não", () => {
   assert.ok(abrePendencia("solicitou"));

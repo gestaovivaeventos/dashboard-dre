@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
-import { travaOItem } from "@/lib/orcamento/trilha";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -420,13 +419,11 @@ export async function recalcularTodasMedias(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     setorId: alvo.id,
     metodo: "media",
     alvoTipo: "media_linha",
     alvoRotulo: `Recálculo de ${rows.length} categoria(s) por média`,
     acao: "alterou",
-    fase: auth.fase,
     depois: { categorias: rows.length, base_year: baseYear },
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -486,14 +483,12 @@ export async function setMediaValor(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     categoryCode,
     setorId: alvo.id,
     metodo: "media",
     alvoTipo: "media_linha",
     alvoRotulo: categoryName,
     acao: "alterou",
-    fase: auth.fase,
     depois: { media_valor: valor, manual: valor != null },
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,
@@ -535,14 +530,9 @@ export async function setMediaIndice(
       category_name: categoryName,
       setor_id: alvo.id,
       indice_key: indiceKey,
-      // Índice trocado pela diretoria trava a linha para o construtor.
-      ...(travaOItem(auth.user.papel, "alterou", undefined, auth.estado)
-        ? {
-            diretoria_travado: true,
-            diretoria_alterado_em: new Date().toISOString(),
-            diretoria_alterado_por: auth.user.userId,
-          }
-        : {}),
+      // O CICLO saiu em 24/09/2026, junto com a validação (ambos serão redesenhados).
+      // Aqui a alteração da diretoria marcava `diretoria_travado` — coluna que hoje
+      // ninguém lê. A coluna ficou no banco para o redesenho reaproveitar.
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code,setor_id" },
@@ -554,14 +544,12 @@ export async function setMediaIndice(
   await registrarAlteracao({
     companyId,
     year,
-    cicloId: auth.cicloId,
     categoryCode,
     setorId: alvo.id,
     metodo: "media",
     alvoTipo: "media_linha",
     alvoRotulo: categoryName,
     acao: "alterou",
-    fase: auth.fase,
     depois: { indice_key: indiceKey },
     autorId: auth.user.userId,
     autorPapel: auth.user.papel,

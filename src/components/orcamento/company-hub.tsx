@@ -11,8 +11,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { CicloPainel } from "@/components/orcamento/ciclo-painel";
-import type { CicloInfo } from "@/lib/orcamento/actions/ciclo";
 import { METODOS, metodoVisivelPara, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import {
   isWorkspaceTabBuilt,
@@ -103,7 +101,6 @@ export function CompanyHub({
   year,
   status,
   isAdmin = false,
-  ciclo = null,
 }: {
   companyId: string;
   year: number;
@@ -114,12 +111,6 @@ export function CompanyHub({
    * é o que cada tela oferece lá dentro (a barra de validação, o visto, as
    * ações da diretoria) — não a lista de caixas.
    */
-  /**
-   * Estado do ciclo. Quando presente, o painel do ciclo substitui o selo
-   * heurístico de `status.ts` (que adivinhava o andamento contando linhas
-   * preenchidas) — o estado passou a ser fato registrado, não estimativa.
-   */
-  ciclo?: CicloInfo | null;
   /**
    * Mostra a caixa "Configuração". As telas de config redefinem as PREMISSAS
    * do orçamento (método por categoria, plano de cargos, encargos) e seguem
@@ -141,16 +132,15 @@ export function CompanyHub({
             Escolha por onde começar. Cada módulo guarda seus próprios valores.
           </p>
         </div>
-        {/* Selo heurístico só como reserva: se o ciclo existe, ele é a fonte. */}
-        {!ciclo && status && <StatusBadge selo={statusGeral(status)} className="mt-0.5" />}
+        {/* Selo heurístico (conta linhas preenchidas). Era reserva enquanto o
+            ciclo existia; com o ciclo fora, voltou a ser a única leitura de
+            andamento. */}
+        {status && <StatusBadge selo={statusGeral(status)} className="mt-0.5" />}
       </div>
 
-      {/* Painel do ciclo: ADMIN-ONLY. As transições (enviar, devolver, voltar
-          para edição, concluir) são atos da empresa inteira e só o administrador
-          as dispara — para o gestor e para o diretor o painel seria informação
-          que eles não acionam. Quem valida vê o estado na barra da própria tela
-          de método; quem constrói, na faixa do workspace. */}
-      {ciclo && isAdmin && <CicloPainel companyId={companyId} year={year} ciclo={ciclo} />}
+      {/* Aqui ficava o PAINEL DO CICLO (admin-only): estado, entregas dos
+          setores e as transições construção → validação → retorno. Saiu em
+          24/09/2026 junto com a validação — os dois serão redesenhados. */}
 
       {/* Prévia do orçamento — o resultado consolidado dos métodos, em destaque
           acima das caixas de entrada. */}
@@ -187,10 +177,9 @@ export function CompanyHub({
           );
         })}
 
-        {/* A caixa "Retorno da diretoria" saiu daqui com a VALIDAÇÃO, em
-            24/09/2026 — ela será redesenhada. O ciclo (construção → validação →
-            retorno) e a trilha de alterações continuam de pé; o que não existe
-            mais é a tela que lia as decisões. */}
+        {/* A caixa "Retorno da diretoria" saiu daqui com a VALIDAÇÃO e o
+            CICLO, em 24/09/2026 — tudo será redesenhado. Só a trilha de
+            alterações continua de pé. */}
 
         {/* Configuração da empresa — sub-hub com as seções de config por
             empresa. Admin-only (ver isAdmin acima). */}
