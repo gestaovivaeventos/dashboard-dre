@@ -8,7 +8,9 @@ import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { INDICES, type IndiceValues, type IndiceYear } from "@/lib/orcamento/indices";
 
-const PATH = "/orcamento/configuracoes/indices";
+// A tela virou uma seção das Configurações gerais em 24/09/2026; o caminho
+// antigo ("/orcamento/configuracoes/indices") não existe como rota.
+const PATH = "/orcamento/configuracoes-gerais/indices";
 
 /** Lista os índices de todos os anos (mais recente primeiro). */
 export async function getIndices(): Promise<{

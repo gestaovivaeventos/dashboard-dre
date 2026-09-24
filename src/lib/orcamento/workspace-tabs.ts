@@ -85,6 +85,43 @@ export function workspacePreviaHref(companyId: string, year: number): string {
   return `/orcamento/empresa/${companyId}/${year}/previa`;
 }
 
+// ─── Configurações GERAIS do módulo (fora do workspace da empresa) ───────────
+// O que NÃO é por empresa, ou o que precisa da empresa como FILTRO em vez de
+// contexto fixo. Mesmo padrão de caixas do sub-hub da empresa, um nível acima.
+
+export interface ConfigGeralSecao {
+  slug: string;
+  label: string;
+  desc: string;
+}
+
+export const CONFIG_GERAIS_SECOES: readonly ConfigGeralSecao[] = [
+  {
+    slug: "indices",
+    label: "Índices de correção",
+    desc: "IPCA, IGP-M, salário mínimo e demais índices por ano, para todas as empresas.",
+  },
+  {
+    slug: "grupos",
+    label: "Grupos de despesas",
+    desc: "O nível entre a categoria e a despesa, por empresa, setor e categoria.",
+  },
+] as const;
+
+export function isConfigGeralSecao(slug: string): boolean {
+  return CONFIG_GERAIS_SECOES.some((s) => s.slug === slug);
+}
+
+/** URL do hub das Configurações gerais. */
+export function configGeraisHref(): string {
+  return "/orcamento/configuracoes-gerais";
+}
+
+/** URL de uma seção das Configurações gerais. */
+export function configGeraisSecaoHref(secao: string): string {
+  return `/orcamento/configuracoes-gerais/${secao}`;
+}
+
 // ─── Configuração da empresa (subárea dentro do workspace) ───────────────────
 // A caixa "Configuração" do hub abre um sub-hub com estas seções. São as telas
 // de config POR EMPRESA; os "Índices de correção" são GLOBAIS e ficam fora daqui
