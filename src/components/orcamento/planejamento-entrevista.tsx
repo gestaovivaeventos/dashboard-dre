@@ -158,6 +158,18 @@ export function PlanejamentoEntrevista({
     }
   }
 
+  /**
+   * Frase curta descrevendo o cartão — vira a mensagem que avisa a IA do que o
+   * gestor fez com ele.
+   */
+  function resumoCartao(d: CartaoDespesa): string {
+    const ate =
+      d.periodicidade !== "anual" && d.mesFim != null && d.mesFim < 12
+        ? ` até ${MESES[d.mesFim - 1]}`
+        : "";
+    return `${d.descricao} — ${formatBRL(d.valor)} ${d.periodicidade}, a partir de ${MESES[d.mesInicio - 1]}${ate}`;
+  }
+
   async function confirmarCartao(dados: CartaoDespesa) {
     setSalvandoCartao(true);
     setErro(null);
@@ -182,6 +194,10 @@ export function PlanejamentoEntrevista({
     }
     setCartao(null);
     onDespesaAdicionada();
+    // A IA só fala quando recebe um turno. Sem este aviso ela não sabe que a
+    // despesa entrou e a conversa fica parada esperando o gestor digitar — era
+    // por isso que ela não perguntava pela próxima.
+    void enviar(`Adicionei ao orçamento: ${resumoCartao(dados)}.`);
   }
 
   const vazia = mensagens.length === 0;
@@ -269,7 +285,15 @@ export function PlanejamentoEntrevista({
             cartao={cartao}
             grupos={grupos}
             salvando={salvandoCartao}
-            onCancelar={() => setCartao(null)}
+            onCancelar={() => {
+              const descartado = cartao;
+              setCartao(null);
+              // Mesma razão do confirmar: sem o aviso, a IA fica esperando e o
+              // gestor tem de reabrir o assunto sozinho.
+              void enviar(
+                `Descartei a sugestão de ${descartado.descricao}. Não quero incluir essa despesa.`,
+              );
+            }}
             onConfirmar={confirmarCartao}
           />
         )}

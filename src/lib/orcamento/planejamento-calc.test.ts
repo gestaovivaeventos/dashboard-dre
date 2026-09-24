@@ -122,3 +122,26 @@ test("texto sem marcador nenhum passa intacto", () => {
   assert.equal(r.cartao, null);
   assert.equal(r.podeFechar, false);
 });
+
+test("os dois trechos de uma mudança de valor no meio do ano se encaixam", () => {
+  // O cartão tem UM valor; reajuste no meio do ano vira duas despesas, e o
+  // prompt manda a IA quebrar assim. Se o encaixe falhasse, um mês ficaria sem
+  // valor (buraco) ou contaria duas vezes (sobreposição) — em silêncio, porque
+  // a Prévia só soma.
+  const jan_mai = serieItem(50, 1, "mensal", 5);
+  const jun_dez = serieItem(60, 6, "mensal", null);
+
+  const soma = jan_mai.map((v, i) => v + jun_dez[i]);
+  assert.ok(soma.every((v) => v > 0), "nenhum mês fica sem valor");
+  assert.deepEqual(soma, [50, 50, 50, 50, 50, 60, 60, 60, 60, 60, 60, 60]);
+
+  // E nenhum mês recebe os dois.
+  jan_mai.forEach((v, i) => {
+    assert.ok(v === 0 || jun_dez[i] === 0, `mês ${i + 1} contado duas vezes`);
+  });
+
+  assert.equal(
+    soma.reduce((a, b) => a + b, 0),
+    50 * 5 + 60 * 7,
+  );
+});

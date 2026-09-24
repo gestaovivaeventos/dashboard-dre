@@ -221,6 +221,62 @@ test("prompt: exige conversa antes do cartão de despesa NOVA", () => {
   assert.match(p, /não emita cartão na mesma mensagem/);
 });
 
+test("prompt: pergunta pela próxima despesa depois de cada cartão", () => {
+  // A tela avisa a IA do que o gestor fez com o cartão (confirmou/descartou);
+  // sem esta regra ela recebia o aviso e não puxava a próxima despesa.
+  const p = prompt();
+  assert.match(p, /DEPOIS DE CADA CARTÃO/);
+  assert.match(p, /Adicionei ao orçamento/);
+  assert.match(p, /Descartei a sugestão/);
+  assert.match(p, /ENCERRE PERGUNTANDO PELA PRÓXIMA/);
+  assert.match(p, /QUAL é/);
+});
+
+test("prompt: valor que muda no meio do ano vira DOIS cartões", () => {
+  // O cartão tem um valor só; reajuste no meio do ano não cabe nele. A IA
+  // precisa quebrar em trechos com mesFim/mesInicio encaixados.
+  const p = prompt();
+  assert.match(p, /VALOR QUE MUDA NO MEIO DO ANO/);
+  assert.match(p, /DOIS cartões/);
+  assert.match(p, /sem buraco e sem sobreposição/);
+  assert.match(p, /Ponha o período no nome/);
+});
+
+test("prompt: o segundo trecho não é tratado como cartão repetido", () => {
+  const p = prompt({
+    registradas: [
+      {
+        descricao: "Facebook Ads (jan–mai)",
+        valor: 50,
+        periodicidade: "mensal",
+        mesInicio: 1,
+        mesFim: 5,
+        grupoNome: null,
+      },
+    ],
+  });
+  assert.match(p, /NÃO emita cartão repetido/);
+  assert.match(p, /EXCEÇÃO: o segundo trecho/);
+});
+
+test("prompt: duplicidade é levantada como dúvida, nunca como bloqueio", () => {
+  const p = prompt();
+  assert.match(p, /DUPLICIDADE/);
+  assert.match(p, /MESMA COISA ESCRITA DIFERENTE/);
+  assert.match(p, /MESMA FINALIDADE, FERRAMENTAS DIFERENTES/);
+  // A trava contra uma IA obstrutiva: ela pergunta, o gestor decide.
+  assert.match(p, /REGRA DE OURO/);
+  assert.match(p, /REGISTRE sem insistir/);
+  assert.match(p, /Nunca se recuse a emitir o cartão/);
+});
+
+test("prompt: 'para que serve' é obrigatória em TODA despesa", () => {
+  const p = prompt();
+  assert.match(p, /PARA QUE SERVE \/ QUAL O OBJETIVO/);
+  assert.match(p, /OBRIGATÓRIA em TODA despesa/);
+  assert.match(p, /inclusive os marcados \[conferência rápida\]/);
+});
+
 test("prompt: a conferência rápida da base segue curta", () => {
   // A válvula contra entrevista interminável não pode ser fechada junto.
   assert.match(prompt(), /\[conferência rápida\]: basta o gestor confirmar/);
