@@ -17,6 +17,7 @@ import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import { compararNomes, normalizarNomeGrupo, type EscopoGrupo } from "@/lib/orcamento/grupos";
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { resolverGrupos } from "@/lib/orcamento/grupos-xlsx";
 
 // =============================================================================
 // Cadastro dos GRUPOS DE DESPESA em árvore: empresa → setor → categoria →
@@ -320,4 +321,207 @@ export async function replicarGruposDoNo(params: {
 
   revalidatePath(PATH);
   return { ok: true, copiados: linhas.length };
+}
+
+/** Empresa oferecida como origem da cópia (tem algum grupo cadastrado). */
+export interface OrigemCopia {
+  companyId: string;
+  companyName: string;
+  grupos: number;
+}
+
+/**
+ * Empresas que têm grupos cadastrados no ano — as candidatas a origem.
+ *
+ * Listar empresa vazia seria oferecer uma cópia que não copia nada. A empresa
+ * de destino fica de fora da própria lista.
+ */
+export async function listarOrigensDeCopia(
+  destinoCompanyId: string,
+  year: number,
+): Promise<{ items?: OrigemCopia[]; error?: string }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  const { data, error } = await supabase
+    .from("orcamento_grupo_escopo")
+    .select("company_id, grupo_id, companies(name)")
+    .eq("year", year)
+    .neq("company_id", destinoCompanyId);
+  if (error) {
+    if (isSchemaMissing(error.message)) return { items: [] };
+    return { error: error.message };
+  }
+
+  const porEmpresa = new Map<string, { nome: string; grupos: Set<string> }>();
+  ((data ?? []) as Array<Record<string, unknown>>).forEach((r) => {
+    const id = r.company_id as string;
+    const nome = (r.companies as { name?: string } | null)?.name ?? "Empresa";
+    const atual = porEmpresa.get(id) ?? { nome, grupos: new Set<string>() };
+    atual.grupos.add(r.grupo_id as string);
+    porEmpresa.set(id, atual);
+  });
+
+  return {
+    items: Array.from(porEmpresa.entries())
+      .map(([companyId, v]) => ({ companyId, companyName: v.nome, grupos: v.grupos.size }))
+      .sort((a, b) => compararNomes(a.companyName, b.companyName)),
+  };
+}
+
+export interface ResultadoCopia {
+  /** Vínculos (setor × categoria × grupo) criados no destino. */
+  escopos: number;
+  /** Nomes de grupo que não existiam no destino e foram criados. */
+  criados: number;
+  /** O que não deu para copiar, já explicado. */
+  problemas: string[];
+}
+
+/**
+ * Copia os grupos de OUTRA empresa para esta.
+ *
+ * O que se copia é a ESTRUTURA — quais grupos valem em cada (setor, categoria)
+ * —, não registros: o grupo é um nome por empresa, então o destino ganha os
+ * seus próprios, reaproveitando os que já tiver com o mesmo nome.
+ *
+ * O casamento entre empresas é por NOME do setor e por CÓDIGO da categoria, e
+ * reusa `resolverGrupos` — o mesmo resolvedor (testado) da importação por
+ * planilha, porque o problema é idêntico: nomes de um lado, cadastro do outro.
+ * Setor ou categoria que não existe aqui vira uma linha em `problemas`, não um
+ * erro do lote: a maior parte costuma casar.
+ *
+ * ADITIVA: nada do que já existe no destino é apagado, e copiar duas vezes não
+ * duplica.
+ */
+export async function copiarGruposDeEmpresa(params: {
+  origemCompanyId: string;
+  destinoCompanyId: string;
+  year: number;
+}): Promise<{ resultado?: ResultadoCopia; error?: string; needsMigration?: boolean }> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
+  const { origemCompanyId, destinoCompanyId, year } = params;
+  if (!origemCompanyId || !destinoCompanyId) return { error: "Escolha a empresa de origem." };
+  if (origemCompanyId === destinoCompanyId) {
+    return { error: "A origem e o destino são a mesma empresa." };
+  }
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  // ── O que a origem tem, em NOMES (é o que atravessa a fronteira) ─────────
+  const { data: origemRows, error: origemErr } = await supabase
+    .from("orcamento_grupo_escopo")
+    .select("category_code, orcamento_grupos_despesa(name), orcamento_setores(name)")
+    .eq("company_id", origemCompanyId)
+    .eq("year", year);
+  if (origemErr) {
+    if (isSchemaMissing(origemErr.message)) return { needsMigration: true };
+    return { error: origemErr.message };
+  }
+  const linhas = ((origemRows ?? []) as Array<Record<string, unknown>>)
+    .map((r, i) => ({
+      linha: i + 1,
+      setor: (r.orcamento_setores as { name?: string } | null)?.name ?? "",
+      categoria: r.category_code as string,
+      grupo: (r.orcamento_grupos_despesa as { name?: string } | null)?.name ?? "",
+    }))
+    .filter((r) => r.grupo);
+  if (linhas.length === 0) {
+    return {
+      resultado: {
+        escopos: 0,
+        criados: 0,
+        problemas: ["A empresa de origem não tem grupos cadastrados neste ano."],
+      },
+    };
+  }
+
+  // ── Cadastro do DESTINO, para casar ──────────────────────────────────────
+  const cats = await getCategoriaMetodo(destinoCompanyId, year);
+  if (cats.error) return { error: cats.error };
+  const { data: setoresDestino } = await supabase
+    .from("orcamento_setores")
+    .select("id, name")
+    .eq("company_id", destinoCompanyId)
+    .eq("year", year)
+    .eq("active", true);
+
+  const resolucao = resolverGrupos(
+    linhas,
+    (setoresDestino ?? []).map((r) => ({ id: r.id as string, name: r.name as string })),
+    cats.items ?? [],
+  );
+  // A mensagem do resolvedor fala em "linha", que aqui não quer dizer nada: a
+  // origem é uma tabela, não uma planilha. E o mesmo setor ausente aparece uma
+  // vez por escopo — repetir 40 vezes "setor X não existe" não informa mais.
+  const problemas = Array.from(
+    new Set(resolucao.problemas.map((p) => p.replace(/^Linha \d+: /, ""))),
+  );
+
+  if (resolucao.resolvidas.length === 0) {
+    return { resultado: { escopos: 0, criados: 0, problemas } };
+  }
+
+  // ── Catálogo do destino: reaproveita o nome, cria o que falta ────────────
+  const { data: catalogoDestino } = await supabase
+    .from("orcamento_grupos_despesa")
+    .select("id, name")
+    .eq("company_id", destinoCompanyId);
+  const chaveNome = (nome: string) =>
+    normalizarNomeGrupo(nome).toLocaleLowerCase("pt-BR");
+  const porNome = new Map(
+    (catalogoDestino ?? []).map((r) => [chaveNome(r.name as string), r.id as string]),
+  );
+
+  const novos = new Map<string, string>();
+  resolucao.resolvidas.forEach((r) => {
+    const nome = normalizarNomeGrupo(r.grupo);
+    if (!porNome.has(chaveNome(nome)) && !novos.has(chaveNome(nome))) {
+      novos.set(chaveNome(nome), nome);
+    }
+  });
+
+  let criados = 0;
+  if (novos.size > 0) {
+    const { data: inseridos, error } = await supabase
+      .from("orcamento_grupos_despesa")
+      .insert(
+        Array.from(novos.values()).map((name) => ({
+          company_id: destinoCompanyId,
+          name,
+          updated_by: admin.userId,
+        })),
+      )
+      .select("id, name");
+    if (error) return { error: friendlyGrupoError(error.message) };
+    (inseridos ?? []).forEach((r) => porNome.set(chaveNome(r.name as string), r.id as string));
+    criados = inseridos?.length ?? 0;
+  }
+
+  const escopos = resolucao.resolvidas
+    .map((r) => {
+      const grupoId = porNome.get(chaveNome(r.grupo));
+      if (!grupoId) return null;
+      return {
+        grupo_id: grupoId,
+        company_id: destinoCompanyId,
+        year,
+        setor_id: r.setorId,
+        category_code: r.categoryCode,
+        updated_by: admin.userId,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const { error: escErr } = await supabase
+    .from("orcamento_grupo_escopo")
+    .upsert(escopos, { ignoreDuplicates: true });
+  if (escErr) return { error: escErr.message };
+
+  revalidatePath(PATH);
+  return { resultado: { escopos: escopos.length, criados, problemas } };
 }

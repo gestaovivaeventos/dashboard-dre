@@ -4,15 +4,12 @@ import { ArrowLeft } from "lucide-react";
 
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { getIndices } from "@/lib/orcamento/actions/indices";
-import { getCompaniesBudgetConfig } from "@/lib/orcamento/actions/config";
-import { defaultBudgetYear } from "@/lib/orcamento/years";
 import {
   CONFIG_GERAIS_SECOES,
   configGeraisHref,
   isConfigGeralSecao,
 } from "@/lib/orcamento/workspace-tabs";
 import { IndicesManager } from "@/components/orcamento/indices-manager";
-import { GruposArvoreManager } from "@/components/orcamento/grupos-arvore-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -40,29 +37,14 @@ export default async function ConfiguracoesGeraisSecaoPage({
 
   const meta = CONFIG_GERAIS_SECOES.find((s) => s.slug === params.secao)!;
 
-  let body: React.ReactNode = null;
-
-  if (params.secao === "indices") {
-    const { items, error, needsMigration } = await getIndices();
-    body = needsMigration ? (
-      <MigrationNotice migration="20260727150000_orcamento_indices" />
-    ) : error ? (
-      <p className="text-sm text-destructive">{error}</p>
-    ) : (
-      <IndicesManager initialItems={items ?? []} />
-    );
-  } else {
-    // A árvore filtra a empresa por dentro; aqui só se entrega a lista.
-    const { items: empresas } = await getCompaniesBudgetConfig(defaultBudgetYear());
-    body = (
-      <GruposArvoreManager
-        companies={(empresas ?? []).map((c) => ({
-          companyId: c.companyId,
-          companyName: c.companyName,
-        }))}
-      />
-    );
-  }
+  const { items, error, needsMigration } = await getIndices();
+  const body = needsMigration ? (
+    <MigrationNotice migration="20260727150000_orcamento_indices" />
+  ) : error ? (
+    <p className="text-sm text-destructive">{error}</p>
+  ) : (
+    <IndicesManager initialItems={items ?? []} />
+  );
 
   return (
     <div className="space-y-4">
@@ -82,16 +64,6 @@ export default async function ConfiguracoesGeraisSecaoPage({
         <p className="text-sm text-muted-foreground">
           Cada ano é congelado de forma independente — cadastrar um ano novo não altera os
           anteriores, então orçamentos já feitos não mudam.
-        </p>
-      )}
-
-      {params.secao === "grupos" && (
-        <p className="text-sm text-muted-foreground">
-          Escolha a empresa, abra o setor e a categoria, e cadastre ali os grupos que valem naquele
-          ponto — é essa a lista que a IA oferece ao gestor e o subnível que a Prévia abre. O nome
-          vive <strong>uma vez por empresa</strong>: digitar &quot;Publicidade&quot; num segundo
-          setor reaproveita o mesmo grupo, e por isso a Prévia soma os dois setores num subnível só
-          em vez de repetir o nome.
         </p>
       )}
 

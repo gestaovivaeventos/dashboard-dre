@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   Building2,
+  Tags,
   Landmark,
   SlidersHorizontal,
   Users,
@@ -16,6 +17,7 @@ const SECAO_ICON: Record<string, LucideIcon> = {
   "orcar-por-setor": SlidersHorizontal,
   setores: Building2,
   "categoria-metodo": Workflow,
+  "grupos-despesa": Tags,
   "plano-cargos": Users,
   "empresa-encargos": Building2,
   encargos: Landmark,

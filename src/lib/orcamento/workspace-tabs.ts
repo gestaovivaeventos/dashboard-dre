@@ -101,11 +101,6 @@ export const CONFIG_GERAIS_SECOES: readonly ConfigGeralSecao[] = [
     label: "Índices de correção",
     desc: "IPCA, IGP-M, salário mínimo e demais índices por ano, para todas as empresas.",
   },
-  {
-    slug: "grupos",
-    label: "Grupos de despesas",
-    desc: "O nível entre a categoria e a despesa, por empresa, setor e categoria.",
-  },
 ] as const;
 
 export function isConfigGeralSecao(slug: string): boolean {
@@ -148,6 +143,11 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     slug: "categoria-metodo",
     label: "Método por categoria",
     desc: "Por qual método cada categoria de despesa é orçada.",
+  },
+  {
+    slug: "grupos-despesa",
+    label: "Grupos de despesas",
+    desc: "O nível entre a categoria e a despesa, por setor e categoria.",
   },
   {
     slug: "plano-cargos",

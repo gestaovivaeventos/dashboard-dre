@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FolderInput,
   Loader2,
   Plus,
   Search,
@@ -17,13 +18,15 @@ import {
 
 import {
   adicionarGrupoNoNo,
+  copiarGruposDeEmpresa,
   getGruposArvore,
+  listarOrigensDeCopia,
   removerGrupoDoNo,
   replicarGruposDoNo,
   type GruposArvore,
+  type OrigemCopia,
 } from "@/lib/orcamento/actions/grupos-arvore";
 import { metodoLabel } from "@/lib/orcamento/metodos";
-import { YearSelect } from "@/components/orcamento/year-select";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { cn } from "@/lib/utils";
 
@@ -32,10 +35,7 @@ const INPUT_CLS =
 const BTN_GHOST =
   "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors";
 
-interface CompanyOption {
-  companyId: string;
-  companyName: string;
-}
+
 
 /**
  * Cadastro dos grupos de despesa em ÁRVORE: empresa → setor → categoria →
@@ -46,9 +46,16 @@ interface CompanyOption {
  * MESMO registro, e é por isso que a Prévia compila os dois setores num
  * subnível só em vez de mostrar "Publicidade" duas vezes.
  */
-export function GruposArvoreManager({ companies }: { companies: CompanyOption[] }) {
-  const [companyId, setCompanyId] = useState<string>(companies[0]?.companyId ?? "");
-  const [year, setYear] = useState<number>(defaultBudgetYear());
+export function GruposArvoreManager({
+  fixedCompanyId,
+  fixedYear,
+}: {
+  /** Empresa e ano vêm da rota (config da empresa) — sem seletores aqui. */
+  fixedCompanyId: string;
+  fixedYear?: number;
+}) {
+  const companyId = fixedCompanyId;
+  const year = fixedYear ?? defaultBudgetYear();
   const [arvore, setArvore] = useState<GruposArvore | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -65,6 +72,9 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
   // ela é longa de propósito. Estes dois recortes são o que a torna utilizável.
   const [busca, setBusca] = useState("");
   const [importando, setImportando] = useState(false);
+  const [origens, setOrigens] = useState<OrigemCopia[]>([]);
+  const [copiarDe, setCopiarDe] = useState("");
+  const [copiando, setCopiando] = useState(false);
   const [resultado, setResultado] = useState<{
     criados: number;
     escopos: number;
@@ -101,6 +111,40 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
     setAbertos(new Set());
     setNovoEm(null);
   }, [recarregar]);
+
+  // Origens possíveis da cópia: só empresas que TÊM grupos no ano. Oferecer
+  // empresa vazia seria oferecer uma cópia que não copia nada.
+  useEffect(() => {
+    if (!companyId) return;
+    void listarOrigensDeCopia(companyId, year).then((res) => {
+      setOrigens(res.items ?? []);
+    });
+  }, [companyId, year]);
+
+  async function copiar() {
+    if (!copiarDe) return;
+    setCopiando(true);
+    setErro(null);
+    setResultado(null);
+    const res = await copiarGruposDeEmpresa({
+      origemCompanyId: copiarDe,
+      destinoCompanyId: companyId,
+      year,
+    });
+    setCopiando(false);
+    if (res.error) {
+      setErro(res.error);
+      return;
+    }
+    if (res.resultado) {
+      setResultado({
+        criados: res.resultado.criados,
+        escopos: res.resultado.escopos,
+        problemas: res.resultado.problemas,
+      });
+      await recarregar();
+    }
+  }
 
   function alternar(chave: string) {
     setAbertos((prev) => {
@@ -213,24 +257,38 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
     <div className="space-y-4">
       {/* ── Filtros ───────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-4">
-        <div className="w-72 space-y-1.5">
-          <label className="text-sm font-medium">Empresa</label>
-          <select
-            value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          >
-            {companies.map((c) => (
-              <option key={c.companyId} value={c.companyId}>
-                {c.companyName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="w-32 space-y-1.5">
-          <label className="text-sm font-medium">Ano</label>
-          <YearSelect value={year} onChange={setYear} />
-        </div>
+        {origens.length > 0 && (
+          <div className="min-w-[16rem] space-y-1.5">
+            <label className="text-sm font-medium">Copiar de outra empresa</label>
+            <div className="flex items-center gap-2">
+              <select
+                value={copiarDe}
+                onChange={(e) => setCopiarDe(e.target.value)}
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— escolher —</option>
+                {origens.map((o) => (
+                  <option key={o.companyId} value={o.companyId}>
+                    {o.companyName} ({o.grupos})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => void copiar()}
+                disabled={!copiarDe || copiando}
+                title="Traz os grupos daquela empresa para esta, casando setor pelo nome e categoria pelo código"
+                className={BTN_GHOST + " border"}
+              >
+                {copiando ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FolderInput className="h-3.5 w-3.5" />
+                )}
+                Copiar
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2 pb-1">
           {/* O modelo vem com a grade de setores × categorias já preenchida: sem
               isso o admin copia os nomes à mão, e é aí que nasce o erro de
