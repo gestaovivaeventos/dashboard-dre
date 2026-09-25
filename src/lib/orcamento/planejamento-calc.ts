@@ -219,12 +219,21 @@ export function totalItem(
 // concordar: a LISTA do Planejamento, que esconde o card da gêmea, e a PRÉVIA,
 // que não pode orçar uma proposta que a tela não mostra.
 
-/** Nome sem o sufixo " (*)" (e sem caixa), para casar irmãs. */
+/**
+ * Nome sem o sufixo " (*)", sem caixa e SEM ACENTO, para casar irmãs.
+ *
+ * Ignorar acento é seguro aqui porque só uma "(*)" se anexa a uma canônica —
+ * duas canônicas nunca se fundem. Então "Manutencao (*)" encontra
+ * "Manutenção", que é o que se quer, sem risco de juntar duas categorias
+ * diferentes.
+ */
 export function normNomeCategoria(s: string): string {
   return (s ?? "")
     .replace(/\s*\(\*\)\s*$/i, "")
     .trim()
-    .toLocaleLowerCase("pt-BR");
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
 }
 
 /** A categoria é a "gêmea (*)" (subdivisão contábil interna), não a canônica? */
@@ -256,6 +265,62 @@ export function apenasCanonicas<T extends { categoryName: string }>(items: T[]):
   return items.filter(
     (c) => !(ehCategoriaEstrela(c.categoryName) && canonicas.has(normNomeCategoria(c.categoryName))),
   );
+}
+
+/** Uma categoria já unificada: ela representa vários códigos da Omie. */
+export type ComCodigos<T> = T & {
+  /**
+   * TODOS os códigos que esta linha representa — o próprio e as gêmeas "(*)"
+   * que ela absorveu. É por aqui que o realizado soma as duas.
+   */
+  codigos: string[];
+};
+
+/**
+ * Unifica as categorias irmãs: a canônica absorve as "(*)" de mesmo nome.
+ *
+ * É a fonte única da regra "na construção do orçamento é tudo Marketing"
+ * (decisão do dono do projeto em 25/09/2026). A divisão "(*)" é interna à
+ * contabilidade e só importa em outras etapas; aqui ela some da escolha de
+ * método e o realizado dela é somado na canônica.
+ *
+ * Devolve também as ABSORVIDAS, porque quem as ignora precisa poder contá-las:
+ * gêmea com método próprio salvo de antes desta regra deixaria de valer em
+ * silêncio, e sumir com número é pior do que mostrá-lo fora do lugar.
+ *
+ * Gêmea SEM canônica é mantida como categoria normal — ali ela É a categoria.
+ */
+export function unificarGemeas<T extends { categoryCode: string; categoryName: string }>(
+  items: readonly T[],
+): { items: ComCodigos<T>[]; gemeasIgnoradas: T[] } {
+  const canonicasPorNome = new Map<string, T>();
+  items.forEach((c) => {
+    if (!ehCategoriaEstrela(c.categoryName)) {
+      canonicasPorNome.set(normNomeCategoria(c.categoryName), c);
+    }
+  });
+
+  const absorvidasPorCanonica = new Map<string, string[]>();
+  const gemeasIgnoradas: T[] = [];
+  items.forEach((c) => {
+    if (!ehCategoriaEstrela(c.categoryName)) return;
+    const dona = canonicasPorNome.get(normNomeCategoria(c.categoryName));
+    if (!dona) return; // gêmea órfã: continua sendo uma categoria de verdade
+    const lista = absorvidasPorCanonica.get(dona.categoryCode) ?? [];
+    lista.push(c.categoryCode);
+    absorvidasPorCanonica.set(dona.categoryCode, lista);
+    gemeasIgnoradas.push(c);
+  });
+
+  const absorvidos = new Set(gemeasIgnoradas.map((c) => c.categoryCode));
+  const unificados = items
+    .filter((c) => !absorvidos.has(c.categoryCode))
+    .map((c) => ({
+      ...c,
+      codigos: [c.categoryCode, ...(absorvidasPorCanonica.get(c.categoryCode) ?? [])],
+    }));
+
+  return { items: unificados, gemeasIgnoradas };
 }
 
 // ─── Cartão de despesa (o protocolo da entrevista) ───────────────────────────

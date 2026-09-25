@@ -7,7 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { autorizarLeitura } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
+import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import {
   buildSystemPrompt,
   type EntrevistaBaseItem,
@@ -15,7 +15,6 @@ import {
 } from "@/lib/orcamento/entrevista-prompt";
 import { gruposDisponiveis, type EscopoGrupo } from "@/lib/orcamento/grupos";
 import {
-  codigosIrmaos,
   toPeriodicidade,
   type PlanejamentoMensagem,
 } from "@/lib/orcamento/planejamento-calc";
@@ -81,7 +80,7 @@ export async function montarPromptEntrevista(input: MontarPromptInput): Promise<
     return { error: "Você não tem acesso ao orçamento deste setor." };
   }
 
-  const cats = await getCategoriaMetodo(companyId, year);
+  const cats = await getCategoriasOrcamento(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
@@ -183,7 +182,11 @@ export async function montarPromptEntrevista(input: MontarPromptInput): Promise<
   if (input.realizadoCache?.meses && input.realizadoCache.meses.length === 12) {
     realizado = resumirRealizado(input.realizadoCache.meses, mesesFechados(year - 1));
   } else {
-    const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
+    // `cat.codigos` já traz o próprio código e as gêmeas "(*)" absorvidas — a
+    // unificação acontece em `getCategoriaMetodo`. Recalcular com
+    // `codigosIrmaos` sobre `cats.items` não funcionaria mais: a gêmea já foi
+    // filtrada de lá.
+    const irmaos = cat.codigos;
     const mapa = await fetchRealizados(supabase, companyId, year - 1, irmaos);
     realizado = combinarRealizados(mapa, irmaos, year - 1);
   }

@@ -12,7 +12,12 @@ import {
   MARCADOR_DESPESA_ABRE,
   MARCADOR_DESPESA_FECHA,
 } from "./entrevista-prompt";
-import { extrairCartaoDespesa, parseCartaoDespesa, serieItem } from "./planejamento-calc";
+import {
+  extrairCartaoDespesa,
+  parseCartaoDespesa,
+  serieItem,
+  unificarGemeas,
+} from "./planejamento-calc";
 
 const bloco = (json: string) => `${MARCADOR_DESPESA_ABRE}${json}${MARCADOR_DESPESA_FECHA}`;
 
@@ -144,4 +149,71 @@ test("os dois trechos de uma mudança de valor no meio do ano se encaixam", () =
     soma.reduce((a, b) => a + b, 0),
     50 * 5 + 60 * 7,
   );
+});
+
+// ─── Categorias irmãs "(*)" ──────────────────────────────────────────────────
+// "Marketing" e "Marketing (*)" são duas categorias da Omie; a divisão é
+// interna à contabilidade. Na construção do orçamento é tudo Marketing —
+// decisão do dono do projeto em 25/09/2026.
+
+const cat = (categoryCode: string, categoryName: string) => ({ categoryCode, categoryName });
+
+test("a canônica absorve a gêmea e passa a representar os dois códigos", () => {
+  const r = unificarGemeas([cat("1", "Marketing"), cat("2", "Marketing (*)")]);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].categoryCode, "1");
+  assert.deepEqual(r.items[0].codigos, ["1", "2"]);
+  assert.deepEqual(r.gemeasIgnoradas.map((c) => c.categoryCode), ["2"]);
+});
+
+test("gêmea SEM canônica continua sendo uma categoria de verdade", () => {
+  // Ali ela É a categoria do gestor; descartá-la faria a despesa sumir.
+  const r = unificarGemeas([cat("2", "Marketing (*)")]);
+  assert.equal(r.items.length, 1);
+  assert.deepEqual(r.items[0].codigos, ["2"]);
+  assert.equal(r.gemeasIgnoradas.length, 0);
+});
+
+test("categoria sem gêmea representa só o próprio código", () => {
+  const r = unificarGemeas([cat("9", "Pró-labore")]);
+  assert.deepEqual(r.items[0].codigos, ["9"]);
+});
+
+test("absorve várias gêmeas da mesma canônica", () => {
+  const r = unificarGemeas([
+    cat("1", "Marketing"),
+    cat("2", "Marketing (*)"),
+    cat("3", "marketing (*)"),
+  ]);
+  assert.equal(r.items.length, 1);
+  assert.deepEqual(r.items[0].codigos.sort(), ["1", "2", "3"]);
+});
+
+test("não mistura categorias de nomes diferentes", () => {
+  const r = unificarGemeas([
+    cat("1", "Marketing"),
+    cat("2", "Marketing (*)"),
+    cat("3", "Manutenção"),
+    cat("4", "Manutenção (*)"),
+  ]);
+  assert.equal(r.items.length, 2);
+  const marketing = r.items.find((c) => c.categoryName === "Marketing");
+  assert.deepEqual(marketing?.codigos, ["1", "2"]);
+});
+
+test("a ordem de entrada é preservada", () => {
+  const r = unificarGemeas([cat("1", "Zebra"), cat("2", "Abacate"), cat("3", "Zebra (*)")]);
+  assert.deepEqual(r.items.map((c) => c.categoryName), ["Zebra", "Abacate"]);
+});
+
+test("acento e caixa não impedem o casamento", () => {
+  const r = unificarGemeas([cat("1", "Manutenção"), cat("2", "MANUTENCAO (*)")]);
+  assert.equal(r.items.length, 1);
+  assert.deepEqual(r.items[0].codigos, ["1", "2"]);
+});
+
+test("lista vazia não quebra", () => {
+  const r = unificarGemeas([]);
+  assert.deepEqual(r.items, []);
+  assert.deepEqual(r.gemeasIgnoradas, []);
 });

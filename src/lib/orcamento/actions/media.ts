@@ -16,9 +16,10 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { INDICES, type IndiceKey } from "@/lib/orcamento/indices";
+import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import {
+  combinarRealizados,
   fetchRealizados,
-  REALIZADO_VAZIO,
   type MediaRealizado,
 } from "@/lib/orcamento/media-realizado";
 
@@ -146,6 +147,19 @@ async function fetchCategoriasMedia(
   return { codes, setoresPorCodigo };
 }
 
+/**
+ * Código canônico → todos os códigos que ele representa (ele e as gêmeas "(*)").
+ *
+ * A Média lê as categorias direto de `orcamento_categoria_metodo`, que só tem
+ * as que têm método — a gêmea, que não tem, não está lá. Sem este mapa o
+ * realizado de "Marketing (*)" se perdia em silêncio quando só "Marketing"
+ * estava marcado como média.
+ */
+async function mapaDeIrmas(companyId: string, year: number): Promise<Map<string, string[]>> {
+  const cats = await getCategoriasOrcamento(companyId, year);
+  return new Map((cats.items ?? []).map((c) => [c.categoryCode, c.codigos]));
+}
+
 // ─── Leitura ────────────────────────────────────────────────────────────────
 
 export async function getMediaCategorias(
@@ -229,8 +243,11 @@ export async function getMediaCategorias(
     (setoresRows ?? []).map((r) => [r.id as string, r.name as string]),
   );
 
-  // Realizado do ano-base ao vivo (sugestão + detalhe mensal).
-  const realizados = await fetchRealizados(supabase, companyId, baseYear, codes);
+  // Realizado do ano-base ao vivo (sugestão + detalhe mensal), SOMANDO as
+  // gêmeas "(*)": na construção do orçamento é tudo Marketing.
+  const irmas = await mapaDeIrmas(companyId, year);
+  const todosCodigos = Array.from(new Set(codes.flatMap((c) => irmas.get(c) ?? [c])));
+  const realizados = await fetchRealizados(supabase, companyId, baseYear, todosCodigos);
 
   // Uma linha por (categoria × setor atribuído). Com um setor selecionado, é
   // uma linha por categoria; em "Todos os setores", a categoria orçada por dois
@@ -265,7 +282,7 @@ export async function getMediaCategorias(
       baseYear: row?.base_year == null ? null : Number(row.base_year),
       mesesConsiderados: row?.meses_considerados == null ? null : Number(row.meses_considerados),
       calculadoEm: (row?.calculado_em as string) ?? null,
-      realizado: realizados.get(code) ?? REALIZADO_VAZIO,
+      realizado: combinarRealizados(realizados, irmas.get(code) ?? [code], baseYear),
     };
   });
 
@@ -307,8 +324,10 @@ export async function calcularMedia(
   if (!auth.ok) return { error: auth.error };
   const admin = { userId: auth.user.userId };
   const baseYear = year - 1;
-  const realizados = await fetchRealizados(supabase, companyId, baseYear, [categoryCode]);
-  const realizado = realizados.get(categoryCode) ?? REALIZADO_VAZIO;
+  const irmasUma = await mapaDeIrmas(companyId, year);
+  const codigosDaCategoria = irmasUma.get(categoryCode) ?? [categoryCode];
+  const realizados = await fetchRealizados(supabase, companyId, baseYear, codigosDaCategoria);
+  const realizado = combinarRealizados(realizados, codigosDaCategoria, baseYear);
   const calculadoEm = new Date().toISOString();
 
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
@@ -378,7 +397,9 @@ export async function recalcularTodasMedias(
   if (codes.length === 0) return { ok: true, atualizadas: 0 };
 
   const baseYear = year - 1;
-  const realizados = await fetchRealizados(supabase, companyId, baseYear, codes);
+  const irmasTodas = await mapaDeIrmas(companyId, year);
+  const codigosTodos = Array.from(new Set(codes.flatMap((c) => irmasTodas.get(c) ?? [c])));
+  const realizados = await fetchRealizados(supabase, companyId, baseYear, codigosTodos);
   const calculadoEm = new Date().toISOString();
 
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
@@ -390,7 +411,7 @@ export async function recalcularTodasMedias(
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
 
   const rows = codes.map((code) => {
-    const realizado = realizados.get(code) ?? REALIZADO_VAZIO;
+    const realizado = combinarRealizados(realizados, irmasTodas.get(code) ?? [code], baseYear);
     return {
       company_id: companyId,
       year,

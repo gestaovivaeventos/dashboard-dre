@@ -6,11 +6,9 @@ import { autorizarLeitura, setoresDeEscrita } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
-import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
+import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import {
-  apenasCanonicas,
   categoriaTotal,
-  codigosIrmaos,
   toPeriodicidade,
 } from "@/lib/orcamento/planejamento-calc";
 import { fetchRealizados, totalGastoAno } from "@/lib/orcamento/media-realizado";
@@ -152,12 +150,11 @@ export async function getPlanejamentoCategorias(
   if (porSetor && escopo.length === 0) return { items: [] };
 
   // ── Categorias marcadas com o método ──────────────────────────────────────
-  const cats = await getCategoriaMetodo(companyId, year);
+  const cats = await getCategoriasOrcamento(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
-  const doMetodo = apenasCanonicas(
-    (cats.items ?? []).filter((c) => c.metodo === "planejamento_socios"),
-  );
+  // Sem `apenasCanonicas` aqui: `getCategoriaMetodo` já devolve as canônicas.
+  const doMetodo = (cats.items ?? []).filter((c) => c.metodo === "planejamento_socios");
   if (doMetodo.length === 0) return { items: [] };
 
   // ── Quais categorias estão atribuídas a cada setor selecionado ────────────
@@ -247,7 +244,11 @@ export async function getPlanejamentoCategorias(
   const irmaosPorCat = new Map<string, string[]>();
   const todosCodigos = new Set<string>();
   categorias.forEach((c) => {
-    const irmaos = codigosIrmaos(cats.items ?? [], c.categoryCode, c.categoryName);
+    // `cat.codigos` já traz o próprio código e as gêmeas "(*)" absorvidas — a
+    // unificação acontece em `getCategoriaMetodo`. Recalcular com
+    // `codigosIrmaos` sobre `cats.items` não funcionaria mais: a gêmea já foi
+    // filtrada de lá.
+    const irmaos = c.codigos;
     irmaosPorCat.set(c.categoryCode, irmaos);
     irmaos.forEach((code) => todosCodigos.add(code));
   });

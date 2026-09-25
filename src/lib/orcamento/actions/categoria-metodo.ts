@@ -4,9 +4,15 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import {
+  getOrcamentoAdmin,
+  getOrcamentoUser,
+  podeVerEmpresa,
+  SEM_ACESSO,
+} from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isOrcamentoMetodo, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { unificarGemeas } from "@/lib/orcamento/planejamento-calc";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 
 export interface CategoriaMetodoItem {
@@ -15,6 +21,12 @@ export interface CategoriaMetodoItem {
   dreLineCode: string;
   dreLineName: string;
   metodo: OrcamentoMetodo | null;
+  /**
+   * TODOS os códigos da Omie que esta linha representa — o próprio e as gêmeas
+   * "(*)" absorvidas. **Use isto, não `categoryCode`, para buscar realizado**:
+   * é o que faz "Marketing" somar "Marketing (*)".
+   */
+  codigos: string[];
 }
 
 const PATH = "/orcamento/configuracoes/categoria-metodo";
@@ -33,13 +45,41 @@ interface MappingRow {
  * houver. A lista de categorias vem do mapeamento (estrutural, não versionada);
  * só o vínculo categoria→método é por ano.
  */
-export async function getCategoriaMetodo(companyId: string, year: number): Promise<{
+/**
+ * Categorias de DESPESA da empresa, já com as irmãs "(*)" UNIFICADAS.
+ *
+ * A divisão "Marketing" / "Marketing (*)" é interna à contabilidade e só
+ * importa em outras etapas: na construção do orçamento é tudo Marketing
+ * (decisão do dono do projeto em 25/09/2026). A canônica absorve a gêmea, e
+ * `codigos` carrega os dois códigos para o realizado somar.
+ *
+ * Esta é a FONTE de todas as telas de montagem, então unificar aqui fecha a
+ * regra de uma vez — antes ela existia só no Planejamento (`codigosIrmaos`) e
+ * a Média perdia o realizado da gêmea em silêncio.
+ *
+ * `gemeasIgnoradas` são as absorvidas que tinham MÉTODO próprio salvo de antes
+ * da regra: elas deixaram de valer, e a Prévia as reporta em vez de sumir com
+ * o número.
+ */
+export interface CategoriasResult {
   items?: CategoriaMetodoItem[];
+  /** Gêmeas absorvidas que tinham método próprio — para a Prévia avisar. */
+  gemeasIgnoradas?: CategoriaMetodoItem[];
   error?: string;
   needsMigration?: boolean;
-}> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+}
+
+/**
+ * A listagem em si, SEM gate.
+ *
+ * Existe porque quem lê esta lista e quem a EDITA são gente diferente: a tela
+ * "Método por categoria" é admin-only, mas as telas de montagem (média, valor
+ * fixo, planejamento) precisam das mesmas categorias e são do GESTOR. Antes as
+ * duas chamavam `getCategoriaMetodo`, que recusa quem não é admin — um gestor
+ * abrindo o Planejamento tomaria "Acesso restrito" sem motivo. Não apareceu
+ * porque o método está escondido dele enquanto é validado.
+ */
+async function listarCategoriasDespesa(companyId: string, year: number): Promise<CategoriasResult> {
   if (!companyId) return { items: [] };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -103,12 +143,12 @@ export async function getCategoriaMetodo(companyId: string, year: number): Promi
   }
 
   // 4) Só categorias cuja linha DRE é de despesa.
-  const items: CategoriaMetodoItem[] = [];
+  const brutos: Omit<CategoriaMetodoItem, "codigos">[] = [];
   Array.from(effective.values()).forEach((row) => {
     if (!row.dre_account_id) return;
     const account = accountById.get(row.dre_account_id);
     if (!account || account.type !== "despesa") return;
-    items.push({
+    brutos.push({
       categoryCode: row.omie_category_code,
       categoryName: row.omie_category_name,
       dreLineCode: account.code,
@@ -117,13 +157,50 @@ export async function getCategoriaMetodo(companyId: string, year: number): Promi
     });
   });
 
+  const unificado = unificarGemeas(brutos);
+  const items: CategoriaMetodoItem[] = unificado.items;
+
   items.sort(
     (a, b) =>
       a.dreLineCode.localeCompare(b.dreLineCode, undefined, { numeric: true }) ||
       a.categoryName.localeCompare(b.categoryName, "pt-BR"),
   );
 
-  return { items };
+  // Só interessa reportar a gêmea que TINHA método: a sem método foi absorvida
+  // sem nenhum efeito, e listá-la seria ruído.
+  const gemeasIgnoradas: CategoriaMetodoItem[] = unificado.gemeasIgnoradas
+    .filter((c) => c.metodo != null)
+    .map((c) => ({ ...c, codigos: [c.categoryCode] }));
+
+  return { items, gemeasIgnoradas };
+}
+
+/**
+ * Categorias para a tela de CONFIGURAÇÃO (Método por categoria) — admin-only,
+ * porque ali se decide a premissa do orçamento.
+ */
+export async function getCategoriaMetodo(
+  companyId: string,
+  year: number,
+): Promise<CategoriasResult> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: "Acesso restrito a administradores." };
+  return listarCategoriasDespesa(companyId, year);
+}
+
+/**
+ * Categorias para as telas de MONTAGEM (média, valor fixo, planejamento) —
+ * qualquer usuário do módulo que alcance a empresa. Mesma lista, mesmo
+ * unificador de gêmeas; o que muda é só quem pode ver.
+ */
+export async function getCategoriasOrcamento(
+  companyId: string,
+  year: number,
+): Promise<CategoriasResult> {
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
+  if (companyId && !podeVerEmpresa(user, companyId)) return { error: SEM_ACESSO };
+  return listarCategoriasDespesa(companyId, year);
 }
 
 /**

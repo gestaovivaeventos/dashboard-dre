@@ -14,7 +14,7 @@ import {
 import { friendlyGrupoError, isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
-import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
+import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { compararNomes, normalizarNomeGrupo, type EscopoGrupo } from "@/lib/orcamento/grupos";
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { resolverGrupos } from "@/lib/orcamento/grupos-xlsx";
@@ -96,7 +96,7 @@ export async function getGruposArvore(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const cats = await getCategoriaMetodo(companyId, year);
+  const cats = await getCategoriasOrcamento(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   // Todas as categorias de despesa da empresa, em qualquer método.
@@ -441,7 +441,7 @@ export async function copiarGruposDeEmpresa(params: {
   }
 
   // ── Cadastro do DESTINO, para casar ──────────────────────────────────────
-  const cats = await getCategoriaMetodo(destinoCompanyId, year);
+  const cats = await getCategoriasOrcamento(destinoCompanyId, year);
   if (cats.error) return { error: cats.error };
   const { data: setoresDestino } = await supabase
     .from("orcamento_setores")

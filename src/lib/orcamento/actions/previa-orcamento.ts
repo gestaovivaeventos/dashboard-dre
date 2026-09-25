@@ -12,10 +12,10 @@ import {
   type DashboardRow,
 } from "@/lib/dashboard/dre";
 import { projetarMedia } from "@/lib/orcamento/media-calc";
-import { fetchRealizados } from "@/lib/orcamento/media-realizado";
+import { combinarRealizados, fetchRealizados } from "@/lib/orcamento/media-realizado";
 import { projetarValorFixoSerie } from "@/lib/orcamento/valor-fixo-calc";
 import {
-  apenasCanonicas,
+  unificarGemeas,
   categoriaSerie,
   periodicidadeLabel,
   serieItem,
@@ -297,20 +297,30 @@ export async function getPreviaOrcamento(
     if (isSchemaMissing(metodoErr.message)) return { needsMigration: true };
     return { error: metodoErr.message };
   }
-  const metodoCats = (metodoRows ?? []) as (CategoriaMetodoRow & { metodo: string })[];
+  const metodoCatsTodas = (metodoRows ?? []) as (CategoriaMetodoRow & { metodo: string })[];
+
+  // A gêmea "(*)" NÃO vira linha própria quando a canônica de mesmo nome também
+  // é orçada: na construção do orçamento é tudo Marketing, e o realizado da
+  // canônica já soma as duas (ver `unificarGemeas`). Vale para os TRÊS métodos
+  // — até 25/09/2026 só o Planejamento aplicava a regra, e a Média produzia
+  // duas linhas para a mesma despesa.
+  //
+  // A Prévia tem de orçar exatamente o que as telas mostram: linha que ela soma
+  // e a tela não abre é número que ninguém consegue conferir nem editar.
+  const unificadoPrevia = unificarGemeas(
+    metodoCatsTodas.map((c) => ({
+      ...c,
+      categoryCode: c.category_code,
+      categoryName: c.category_name ?? c.category_code,
+    })),
+  );
+  const metodoCats = unificadoPrevia.items;
   const mediaCats = metodoCats.filter((c) => c.metodo === "media");
   const vfCats = metodoCats.filter((c) => c.metodo === "valor_fixo");
-  // A gêmea "(*)" não vira card próprio no Planejamento quando a canônica de
-  // mesmo nome também é planejada (o card é um só, e o realizado dele já soma
-  // as duas). A Prévia tem de orçar exatamente o que a tela mostra, senão soma
-  // uma proposta que ninguém consegue abrir nem editar.
-  const psCatsTodas = metodoCats.filter((c) => c.metodo === "planejamento_socios");
-  const psCats = apenasCanonicas(
-    psCatsTodas.map((c) => ({ ...c, categoryName: c.category_name ?? c.category_code })),
-  );
-  const psGemeasIgnoradas = psCatsTodas.filter(
-    (c) => !psCats.some((k) => k.category_code === c.category_code),
-  );
+  const psCats = metodoCats.filter((c) => c.metodo === "planejamento_socios");
+  // As absorvidas que tinham método próprio: param de contar (senão dobram) e
+  // viram aviso na tela. Sumir com número em silêncio é o que não pode.
+  const gemeasIgnoradas = unificadoPrevia.gemeasIgnoradas;
   if (metodoCats.length > 0) {
     const allCodes = Array.from(new Set(metodoCats.map((c) => c.category_code)));
 
@@ -431,7 +441,9 @@ export async function getPreviaOrcamento(
       // vivo mas sem snapshot aparecia zerada aqui. Usamos o MESMO efetivo.
       const catsEscopo = noEscopo(mediaCats, new Set(snapsByCode.keys()));
       mediaCategorias = catsEscopo.length;
-      const mediaCodes = catsEscopo.map((c) => c.category_code);
+      // Busca TODOS os códigos (o da canônica e os das gêmeas) e combina: é o
+      // mesmo efetivo da tela de Média, que também soma as duas.
+      const mediaCodes = Array.from(new Set(catsEscopo.flatMap((c) => c.codigos)));
       const realizados = await fetchRealizados(supabase, companyId, year - 1, mediaCodes);
       for (const cat of catsEscopo) {
         const snaps = snapsByCode.get(cat.category_code) ?? [];
@@ -450,7 +462,7 @@ export async function getPreviaOrcamento(
           const brutoParcela =
             s?.media_valor != null
               ? Number(s.media_valor)
-              : realizados.get(cat.category_code)?.media ?? null;
+              : combinarRealizados(realizados, cat.codigos, year - 1)?.media ?? null;
           const proj = projetarMedia(brutoParcela, indicePercent(s?.indice_key ?? null));
           if (proj == null) continue;
           projetado += proj;
@@ -655,9 +667,9 @@ export async function getPreviaOrcamento(
         );
       }
 
-      // Despesa gravada numa gêmea "(*)" que o card canônico substituiu: não
-      // entra no orçamento, mas é reportada para o planejamento não sumir calado.
-      for (const cat of psGemeasIgnoradas) {
+      // Proposta gravada numa gêmea "(*)" que a canônica substituiu: não entra
+      // no orçamento, mas é reportada para o número não sumir calado.
+      for (const cat of gemeasIgnoradas.filter((c) => c.metodo === "planejamento_socios")) {
         const meses = categoriaSerie(psByCode.get(cat.category_code) ?? []);
         if (somar(meses) === 0) continue;
         planejamentoGemeaIgnorada.push({

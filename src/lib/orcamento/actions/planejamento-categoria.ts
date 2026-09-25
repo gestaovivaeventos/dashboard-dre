@@ -16,10 +16,9 @@ import {
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
-import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
+import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import {
-  codigosIrmaos,
   normNomeCategoria,
   serieItem,
   toPeriodicidade,
@@ -298,7 +297,7 @@ export async function getPlanejamentoMontagem(
   const escrita = await autorizarEscrita(supabase, companyId, year);
   const escopoEscrita = escrita.ok ? escrita.setores : [];
 
-  const cats = await getCategoriaMetodo(companyId, year);
+  const cats = await getCategoriasOrcamento(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
@@ -395,7 +394,11 @@ export async function getPlanejamentoMontagem(
 
   // Realizado do ano anterior (categoria + irmãs "(*)"), para a tela mostrar o
   // mês a mês e a IA enxergar sazonalidade.
-  const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
+  // `cat.codigos` já traz o próprio código e as gêmeas "(*)" absorvidas — a
+  // unificação acontece em `getCategoriaMetodo`. Recalcular com
+  // `codigosIrmaos` sobre `cats.items` não funcionaria mais: a gêmea já foi
+  // filtrada de lá.
+  const irmaos = cat.codigos;
   const realizados = await fetchRealizados(supabase, companyId, year - 1, irmaos);
   const combinado = combinarRealizados(realizados, irmaos, year - 1);
   const totalAnterior = totalGastoAno(realizados, irmaos);
@@ -546,11 +549,15 @@ export async function semearBasePlanejamento(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const cats = await getCategoriaMetodo(companyId, year);
+  const cats = await getCategoriasOrcamento(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   const cat = (cats.items ?? []).find((c) => c.categoryCode === categoryCode);
   if (!cat) return { error: "Categoria não encontrada." };
-  const irmaos = codigosIrmaos(cats.items ?? [], categoryCode, cat.categoryName);
+  // `cat.codigos` já traz o próprio código e as gêmeas "(*)" absorvidas — a
+  // unificação acontece em `getCategoriaMetodo`. Recalcular com
+  // `codigosIrmaos` sobre `cats.items` não funcionaria mais: a gêmea já foi
+  // filtrada de lá.
+  const irmaos = cat.codigos;
 
   const todos = await fornecedoresDoAnoAnterior(supabase, companyId, year - 1, irmaos);
 
