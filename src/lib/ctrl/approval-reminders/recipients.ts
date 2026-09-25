@@ -139,7 +139,7 @@ async function loadPendingRequests(db: SupabaseClient) {
     .from("ctrl_requests")
     .select(
       `id, request_number, title, amount, due_date, created_at, status, approval_tier,
-       sector_id, created_by, expense_type_id, favorecido,
+       sector_id, created_by, expense_type_id, favorecido, is_rateio,
        ctrl_sectors(name), ctrl_expense_types(name), ctrl_suppliers(name)`,
     )
     .in("status", ["pendente", "pendente_diretor"])
@@ -148,6 +148,58 @@ async function loadPendingRequests(db: SupabaseClient) {
 
   if (error) throw new Error(`Falha ao carregar requisições pendentes: ${error.message}`);
   return (data ?? []) as unknown as Array<Record<string, unknown>>;
+}
+
+/**
+ * "Unidade de aprovação": a etapa + o setor que uma cobrança de aprovação
+ * concreta representa. Requisição de 1 setor → uma unidade (o setor/status da
+ * própria requisição). Requisição RATEADA → uma unidade por PARCELA que ainda
+ * aguarda decisão (ctrl_request_sectors com status 'pendente'/'pendente_diretor').
+ * É isso que faz o lembrete respeitar a aprovação por setor: a parcela já
+ * aprovada some, então o gerente que já fez a parte dele deixa de ser cobrado,
+ * e o gerente/diretor do setor que falta passa a ser cobrado pelo setor certo.
+ */
+interface ApprovalUnit {
+  stage: ApprovalStage;
+  sectorId: string;
+  sectorName: string;
+  amount: number;
+  approvalTier: string | null;
+}
+
+interface RateioPortion {
+  sectorId: string;
+  sectorName: string;
+  amount: number;
+  approvalTier: string | null;
+  status: string;
+}
+
+/** Parcelas por requisição rateada (setor, valor, tier e STATUS por setor). */
+async function loadRateioPortions(
+  db: SupabaseClient,
+  requestIds: string[],
+): Promise<Map<string, RateioPortion[]>> {
+  const map = new Map<string, RateioPortion[]>();
+  if (requestIds.length === 0) return map;
+  const { data, error } = await db
+    .from("ctrl_request_sectors")
+    .select("request_id, sector_id, amount, approval_tier, status, ctrl_sectors(name)")
+    .in("request_id", requestIds);
+  if (error) throw new Error(`Falha ao carregar parcelas do rateio: ${error.message}`);
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const reqId = row.request_id as string;
+    const list = map.get(reqId) ?? [];
+    list.push({
+      sectorId: row.sector_id as string,
+      sectorName: relatedName(row.ctrl_sectors) ?? "Setor nao informado",
+      amount: Number(row.amount ?? 0),
+      approvalTier: (row.approval_tier as string) ?? null,
+      status: (row.status as string) ?? "pendente",
+    });
+    map.set(reqId, list);
+  }
+  return map;
 }
 
 /** Aprovadores por etapa: perfil autoritativo, ativos e com acesso a Compras. */
@@ -236,6 +288,37 @@ export async function buildApprovalReminderPlan(
   const rows = await loadPendingRequests(db);
   if (rows.length === 0) return { targets: [], orphans: [], pendingCount: 0 };
 
+  // Parcelas das requisições rateadas — a aprovação é por setor, então o
+  // lembrete tem de olhar o status DE CADA parcela, não o da requisição-pai.
+  const rateioIds = rows.filter((r) => Boolean(r.is_rateio)).map((r) => r.id as string);
+  const portionsByReq = await loadRateioPortions(db, rateioIds);
+
+  // Traduz uma linha pendente nas unidades de aprovação que ela realmente
+  // representa hoje (ver ApprovalUnit). Rateio → só as parcelas ainda em aberto.
+  const unitsForRow = (row: Record<string, unknown>): ApprovalUnit[] => {
+    if (row.is_rateio) {
+      return (portionsByReq.get(row.id as string) ?? [])
+        .filter((p) => p.status === "pendente" || p.status === "pendente_diretor")
+        .map((p) => ({
+          stage: (p.status === "pendente_diretor" ? "diretor" : "gerente") as ApprovalStage,
+          sectorId: p.sectorId,
+          sectorName: p.sectorName,
+          amount: p.amount,
+          approvalTier: p.approvalTier,
+        }));
+    }
+    const status = row.status as string;
+    return [
+      {
+        stage: (status === "pendente_diretor" ? "diretor" : "gerente") as ApprovalStage,
+        sectorId: row.sector_id as string,
+        sectorName: relatedName(row.ctrl_sectors) ?? "Setor nao informado",
+        amount: Number(row.amount ?? 0),
+        approvalTier: (row.approval_tier as string) ?? null,
+      },
+    ];
+  };
+
   const pool = await loadApproverPool(db);
   const allApprovers = new Map<string, ApproverUser>();
   for (const u of [...pool.gerente, ...pool.diretor]) allApprovers.set(u.id, u);
@@ -289,118 +372,125 @@ export async function buildApprovalReminderPlan(
   const orphans: OrphanPendingRequest[] = [];
 
   for (const row of rows) {
-    const status = row.status as string;
-    const stage: ApprovalStage = status === "pendente_diretor" ? "diretor" : "gerente";
-    const sectorId = row.sector_id as string;
-    const sectorName = relatedName(row.ctrl_sectors) ?? "Setor nao informado";
     const createdBy = (row.created_by as string) ?? null;
     const expenseTypeId = (row.expense_type_id as string) ?? null;
 
-    // 1) Aprovador fixo por regra de negócio (mesma decisão do createRequest e
-    //    do notifyDirectorStage). Quando existe, ele é o único destinatário.
-    let candidateIds: string[];
-    if (stage === "diretor" && createdBy === APPROVAL_ROUTING.directorOnly.requesterId) {
-      candidateIds = [APPROVAL_ROUTING.directorOnly.directorId];
-    } else if (
-      stage === "gerente" &&
-      expenseTypeId === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
-    ) {
-      candidateIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
-    } else if (stage === "diretor") {
-      // Diretor aprova qualquer setor, mas só é NOTIFICADO dos setores dele.
-      // Quem tem override por e-mail (admin responsável por setores específicos)
-      // casa por NOME; os demais, pelos vínculos de user_sectors. Sem setor
-      // cadastrado não há notificação — a requisição vira `orphan`.
-      candidateIds = directorCandidates
-        .filter((u) => {
-          const overrideNames = highlights.get(u.id) ?? null;
-          if (overrideNames) return overrideNames.has(normalizeSectorName(sectorName));
-          return sectorLinks.get(u.id)?.has(sectorId) ?? false;
-        })
-        .map((u) => u.id);
-    } else {
-      // Gerente: filtrado pelo setor da requisição (sem vínculo => recebe tudo,
-      // mesmo fallback do getRequests e do notifyPendingApproval).
-      const base = pool.gerente
-        .filter((u) => {
-          const links = sectorLinks.get(u.id);
-          if (!links || links.size === 0) return true;
-          return links.has(sectorId);
-        })
-        .map((u) => u.id);
-      // Cobertura temporária (APPROVAL_COVERAGE): quem cobre passa a receber a
-      // etapa de gerente dos setores cobertos, mesmo sem perfil de gerente. Não
-      // muda alçada — só notificação (aprovar segue pelo perfil próprio).
-      const covering = Array.from(allApprovers.values())
-        .filter(
-          (u) =>
-            managerCoverageSectorsFor({ email: u.email })?.has(
-              normalizeSectorName(sectorName),
-            ) ?? false,
-        )
-        .map((u) => u.id);
-      candidateIds = Array.from(new Set([...base, ...covering]));
-    }
+    // Cada unidade = uma etapa+setor que ainda depende de aprovação. Numa
+    // requisição de 1 setor há uma; numa rateada, uma por parcela em aberto —
+    // parcela já aprovada não gera unidade, então o aprovador dela sai da lista.
+    for (const unit of unitsForRow(row)) {
+      const { stage, sectorId, sectorName } = unit;
 
-    const forcedDirector = isForcedDirectorRouting({
-      sector_id: sectorId,
-      created_by: createdBy,
-    });
-
-    const request: PendingApprovalRequest = {
-      id: row.id as string,
-      requestNumber: Number(row.request_number ?? 0),
-      title: (row.title as string) ?? "Requisição",
-      category: relatedName(row.ctrl_expense_types) ?? "Não informada",
-      sectorName,
-      supplier:
-        relatedName(row.ctrl_suppliers) ??
-        ((row.favorecido as string)?.trim() || "Não informado"),
-      amount: Number(row.amount ?? 0),
-      dueDate: (row.due_date as string) ?? null,
-      createdAt: (row.created_at as string) ?? "",
-      stage,
-      outOfBudget: (row.approval_tier as string) === "nivel_3" && !forcedDirector,
-      forcedDirector,
-    };
-
-    let assigned = 0;
-    for (const userId of candidateIds) {
-      const user = allApprovers.get(userId);
-      if (!user || !user.email?.trim() || user.active === false) continue;
-
-      // 2) Alçada: se o usuário não poderia aprovar este setor, não é notificado.
-      const allowedSectors = restrictions.get(userId) ?? null;
-      if (allowedSectors && !allowedSectors.has(normalizeSectorName(sectorName))) continue;
-
-      assigned += 1;
-
-      const existing = byUser.get(userId);
-      if (existing) {
-        if (existing.requests.some((r) => r.id === request.id)) continue;
-        existing.requests.push(request);
-        if (existing.stage !== "misto" && existing.stage !== stage) existing.stage = "misto";
+      // 1) Aprovador fixo por regra de negócio (mesma decisão do createRequest e
+      //    do notifyDirectorStage). Quando existe, ele é o único destinatário.
+      let candidateIds: string[];
+      if (stage === "diretor" && createdBy === APPROVAL_ROUTING.directorOnly.requesterId) {
+        candidateIds = [APPROVAL_ROUTING.directorOnly.directorId];
+      } else if (
+        stage === "gerente" &&
+        expenseTypeId === APPROVAL_ROUTING.expenseTypeManager.expenseTypeId
+      ) {
+        candidateIds = [APPROVAL_ROUTING.expenseTypeManager.managerId];
+      } else if (stage === "diretor") {
+        // Diretor aprova qualquer setor, mas só é NOTIFICADO dos setores dele.
+        // Quem tem override por e-mail (admin responsável por setores específicos)
+        // casa por NOME; os demais, pelos vínculos de user_sectors. Sem setor
+        // cadastrado não há notificação — a requisição vira `orphan`.
+        candidateIds = directorCandidates
+          .filter((u) => {
+            const overrideNames = highlights.get(u.id) ?? null;
+            if (overrideNames) return overrideNames.has(normalizeSectorName(sectorName));
+            return sectorLinks.get(u.id)?.has(sectorId) ?? false;
+          })
+          .map((u) => u.id);
       } else {
-        byUser.set(userId, {
-          userId,
-          name: user.name?.trim() || user.email.trim(),
-          email: user.email.trim().toLowerCase(),
+        // Gerente: filtrado pelo setor da requisição (sem vínculo => recebe tudo,
+        // mesmo fallback do getRequests e do notifyPendingApproval).
+        const base = pool.gerente
+          .filter((u) => {
+            const links = sectorLinks.get(u.id);
+            if (!links || links.size === 0) return true;
+            return links.has(sectorId);
+          })
+          .map((u) => u.id);
+        // Cobertura temporária (APPROVAL_COVERAGE): quem cobre passa a receber a
+        // etapa de gerente dos setores cobertos, mesmo sem perfil de gerente. Não
+        // muda alçada — só notificação (aprovar segue pelo perfil próprio).
+        const covering = Array.from(allApprovers.values())
+          .filter(
+            (u) =>
+              managerCoverageSectorsFor({ email: u.email })?.has(
+                normalizeSectorName(sectorName),
+              ) ?? false,
+          )
+          .map((u) => u.id);
+        candidateIds = Array.from(new Set([...base, ...covering]));
+      }
+
+      const forcedDirector = isForcedDirectorRouting({
+        sector_id: sectorId,
+        created_by: createdBy,
+      });
+
+      const request: PendingApprovalRequest = {
+        id: row.id as string,
+        requestNumber: Number(row.request_number ?? 0),
+        title: (row.title as string) ?? "Requisição",
+        category: relatedName(row.ctrl_expense_types) ?? "Não informada",
+        sectorName,
+        supplier:
+          relatedName(row.ctrl_suppliers) ??
+          ((row.favorecido as string)?.trim() || "Não informado"),
+        // No rateio, o valor da unidade é a parcela daquele setor (o que aquele
+        // aprovador de fato decide), não o total da requisição.
+        amount: unit.amount,
+        dueDate: (row.due_date as string) ?? null,
+        createdAt: (row.created_at as string) ?? "",
+        stage,
+        outOfBudget: unit.approvalTier === "nivel_3" && !forcedDirector,
+        forcedDirector,
+      };
+
+      let assigned = 0;
+      for (const userId of candidateIds) {
+        const user = allApprovers.get(userId);
+        if (!user || !user.email?.trim() || user.active === false) continue;
+
+        // 2) Alçada: se o usuário não poderia aprovar este setor, não é notificado.
+        const allowedSectors = restrictions.get(userId) ?? null;
+        if (allowedSectors && !allowedSectors.has(normalizeSectorName(sectorName))) continue;
+
+        assigned += 1;
+
+        const existing = byUser.get(userId);
+        if (existing) {
+          // Mesma requisição vinda de outra parcela do mesmo rateio: não duplica
+          // a linha — o aprovador vê a requisição uma vez (pelo setor dele).
+          if (existing.requests.some((r) => r.id === request.id)) continue;
+          existing.requests.push(request);
+          if (existing.stage !== "misto" && existing.stage !== stage) existing.stage = "misto";
+        } else {
+          byUser.set(userId, {
+            userId,
+            name: user.name?.trim() || user.email.trim(),
+            email: user.email.trim().toLowerCase(),
+            stage,
+            requests: [request],
+          });
+        }
+      }
+
+      // Nenhum aprovador elegível para esta unidade: não há a quem avisar. Vira
+      // alerta operacional (setor sem gerente vinculado, alçada restrita demais,
+      // cadastro inativo…) em vez de sumir silenciosamente.
+      if (assigned === 0) {
+        orphans.push({
+          id: request.id,
+          requestNumber: request.requestNumber,
+          sectorName,
           stage,
-          requests: [request],
         });
       }
-    }
-
-    // Nenhum aprovador elegível: não há a quem avisar. Vira alerta operacional
-    // (setor sem gerente vinculado, alçada restrita demais, cadastro inativo…)
-    // em vez de sumir silenciosamente.
-    if (assigned === 0) {
-      orphans.push({
-        id: request.id,
-        requestNumber: request.requestNumber,
-        sectorName,
-        stage,
-      });
     }
   }
 
