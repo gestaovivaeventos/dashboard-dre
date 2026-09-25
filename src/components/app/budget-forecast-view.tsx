@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   ChevronsRight,
   ChevronsUpDown,
   FileSpreadsheet,
+  FileText,
   Inbox,
   Loader2,
   Search,
@@ -45,6 +46,7 @@ import {
   useSharedCompanyFilterHydration,
 } from "@/lib/dashboard/shared-company-filter";
 import type { Segment, UserRole } from "@/lib/supabase/types";
+import { ForecastReport } from "@/components/app/forecast-report";
 
 type ViewTab = "orcamento" | "realizado" | "projecao" | "comparativo";
 type RealizadoSubView = "consolidado" | "mensal";
@@ -88,6 +90,9 @@ interface BudgetForecastViewProps {
   accumulatedBucket: DashboardPeriodBucket;
   selectedCompanyIds: string[];
   currentMonthIndex: number;
+  // Projeção: mês atual sendo tratado como orçado (checkbox). Vem do servidor,
+  // que já recalculou o split realizado/orçamento com esse critério.
+  projCurrentAsBudget?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
 }
@@ -196,6 +201,7 @@ export function BudgetForecastView({
   accumulatedBucket,
   selectedCompanyIds,
   currentMonthIndex,
+  projCurrentAsBudget = false,
   segments,
   activeSegmentSlug,
 }: BudgetForecastViewProps) {
@@ -252,6 +258,8 @@ export function BudgetForecastView({
   const [drillLoading, setDrillLoading] = useState(false);
   const { showToast } = useToast();
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
   const [exportingDrill, setExportingDrill] = useState(false);
   const [drillSearch, setDrillSearch] = useState("");
   const [drillPage, setDrillPage] = useState(1);
@@ -413,6 +421,11 @@ export function BudgetForecastView({
     }
     const allSelected = companySelection.length === companies.length;
     if (!allSelected) params.set("companyIds", companySelection.join(","));
+    // Projeção: "considerar mês atual como orçado" persiste entre Aplicar e
+    // troca de filtros, mas só faz sentido na própria Projeção.
+    if ((overrides.view ?? view) === "projecao" && projCurrentAsBudget) {
+      params.set("mesAtualOrcado", "1");
+    }
     return params.toString();
   };
 
@@ -435,8 +448,82 @@ export function BudgetForecastView({
     router.push(`${pathname}?${buildQuery({ subView: next })}`);
   };
 
+  // Projeção: liga/desliga "considerar mês atual como orçado". Vai pela URL para
+  // o servidor recalcular o split realizado/orçamento (RPCs distintos).
+  const toggleMesAtualOrcado = (checked: boolean) => {
+    const params = new URLSearchParams(buildQuery({}));
+    if (checked) params.set("mesAtualOrcado", "1");
+    else params.delete("mesAtualOrcado");
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
   const columns = visibleBuckets;
   const totalCols = columns.length + 1;
+
+  // Rótulos do PDF da Projeção. Empresa = nome único ou "Segmento — N empresas".
+  // Ano = ano(s) presentes nos buckets visíveis.
+  const companyLabel = useMemo(() => {
+    if (selectedCompanyIds.length === 1) {
+      return companies.find((c) => c.id === selectedCompanyIds[0])?.name ?? "Consolidado";
+    }
+    const seg = segments.find((s) => s.slug === activeSegmentSlug);
+    return `${seg?.name ?? "Consolidado"} — ${selectedCompanyIds.length} empresas`;
+  }, [selectedCompanyIds, companies, segments, activeSegmentSlug]);
+
+  const yearLabel = useMemo(() => {
+    const years = Array.from(
+      new Set(visibleBuckets.map((b) => b.key.replace("m-", "").split("-")[0])),
+    ).sort();
+    if (years.length === 0) return String(new Date().getFullYear());
+    return years.length === 1 ? years[0] : `${years[0]}–${years[years.length - 1]}`;
+  }, [visibleBuckets]);
+
+  // Exporta a Projeção como PDF em uma página A4 PAISAGEM, capturando o relatório
+  // oculto (ForecastReport) — mesmo caminho html2canvas + jsPDF dos Comparativos
+  // Anuais, porém em paisagem por causa das colunas mensais. Respeita as linhas
+  // abertas/fechadas (usa visibleRows) e o split realizado/orçamento da tela.
+  const handleExportPdf = async () => {
+    if (!reportRef.current || visibleRows.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+      });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const aspect = canvas.height / canvas.width;
+      let w: number;
+      let h: number;
+      if (pw * aspect <= ph) {
+        w = pw;
+        h = pw * aspect;
+      } else {
+        h = ph;
+        w = ph / aspect;
+      }
+      pdf.addImage(imgData, "PNG", (pw - w) / 2, (ph - h) / 2, w, h);
+      const safe = `${companyLabel}_${yearLabel}`.replace(/[^a-zA-Z0-9]+/g, "_");
+      pdf.save(`Forecast_${safe}.pdf`);
+      showToast({ title: "PDF gerado", description: "Projeção em uma página.", variant: "success" });
+    } catch (e) {
+      showToast({
+        title: "Falha ao gerar PDF",
+        description: e instanceof Error ? e.message : "Erro ao gerar o PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   // Exporta a tabela ATUAL (a aba/visão selecionada) para .xlsx, espelhando
   // exatamente as colunas que estão na tela e as linhas visíveis (respeita o
@@ -597,20 +684,38 @@ export function BudgetForecastView({
               {titleByView[view]} | {range.label}
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void exportExcel()}
-            disabled={exporting || rows.length === 0}
-            title="Exportar a tabela atual para Excel"
-          >
-            {exporting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
+          <div className="flex items-center gap-2">
+            {view === "projecao" && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleExportPdf()}
+                disabled={exportingPdf || visibleRows.length === 0}
+                title="Exportar a projeção para PDF (paisagem)"
+              >
+                {exportingPdf ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="mr-2 h-4 w-4" />
+                )}
+                Exportar PDF
+              </Button>
             )}
-            Exportar Excel
-          </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void exportExcel()}
+              disabled={exporting || rows.length === 0}
+              title="Exportar a tabela atual para Excel"
+            >
+              {exporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+              )}
+              Exportar Excel
+            </Button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -808,6 +913,27 @@ export function BudgetForecastView({
           </div>
         </div>
       </div>
+
+      {/* Projeção: considerar o mês atual como orçado */}
+      {view === "projecao" && (
+        <div className="rounded-xl border bg-background px-4 py-3">
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={projCurrentAsBudget}
+              onChange={(e) => toggleMesAtualOrcado(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input accent-amber-600"
+            />
+            <span>
+              <span className="font-medium">Considerar o mês atual como orçado</span>
+              <span className="block text-xs text-muted-foreground">
+                Preenche o mês atual com o valor do orçamento (marcado com{" "}
+                <span className="text-amber-700">(Orc)</span>) em vez do realizado parcial.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Tables per view */}
       <div data-tour="tabela">
@@ -1024,6 +1150,31 @@ export function BudgetForecastView({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Relatório oculto (fora da tela) capturado no PDF da Projeção — sempre em
+          sync com as linhas abertas/fechadas (visibleRows) e o split
+          realizado/orçamento (currentMonthIndex). */}
+      {view === "projecao" && (
+        <div ref={reportRef} style={{ position: "absolute", left: "-99999px", top: 0 }} aria-hidden>
+          <ForecastReport
+            companyLabel={companyLabel}
+            yearLabel={yearLabel}
+            periodLabel={range.label}
+            columns={columns.map((c) => ({ key: c.key, label: c.label }))}
+            accumulatedLabel={accumulatedBucket.label}
+            splitIndex={currentMonthIndex}
+            rows={visibleRows.map((r) => ({
+              id: r.id,
+              code: r.code,
+              name: r.name,
+              level: r.level,
+              is_summary: r.is_summary,
+              valuesByBucket: r.valuesByBucket,
+              accumulatedValue: r.accumulatedValue,
+            }))}
+          />
+        </div>
+      )}
     </div>
   );
 }

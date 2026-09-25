@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { ChevronDown, ChevronRight, Copy, Loader2, Plus, Search, Tags, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  Loader2,
+  Plus,
+  Search,
+  Tags,
+  Upload,
+  X,
+} from "lucide-react";
 
 import {
   adicionarGrupoNoNo,
@@ -49,6 +60,13 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
   // A árvore traz TODAS as categorias de despesa em TODOS os setores, então
   // ela é longa de propósito. Estes dois recortes são o que a torna utilizável.
   const [busca, setBusca] = useState("");
+  const [importando, setImportando] = useState(false);
+  const [resultado, setResultado] = useState<{
+    criados: number;
+    escopos: number;
+    problemas: string[];
+    aviso?: string;
+  } | null>(null);
   const [soComGrupos, setSoComGrupos] = useState(false);
 
   const recarregar = useCallback(async () => {
@@ -104,6 +122,41 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
     });
   }
 
+  async function importar(file: File) {
+    setImportando(true);
+    setErro(null);
+    setResultado(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("companyId", companyId);
+      form.append("year", String(year));
+      const resp = await fetch("/api/orcamento/grupos/import", { method: "POST", body: form });
+      const json = (await resp.json()) as {
+        error?: string;
+        criados?: number;
+        escopos?: number;
+        problemas?: string[];
+        aviso?: string;
+      };
+      if (!resp.ok || json.error) {
+        setErro(json.error ?? "N\u00e3o consegui importar a planilha.");
+        return;
+      }
+      setResultado({
+        criados: json.criados ?? 0,
+        escopos: json.escopos ?? 0,
+        problemas: json.problemas ?? [],
+        aviso: json.aviso,
+      });
+      await recarregar();
+    } catch {
+      setErro("Falha ao enviar o arquivo.");
+    } finally {
+      setImportando(false);
+    }
+  }
+
   function run(acao: () => Promise<{ error?: string }>) {
     setErro(null);
     startTransition(async () => {
@@ -149,6 +202,48 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
           <label className="text-sm font-medium">Ano</label>
           <YearSelect value={year} onChange={setYear} />
         </div>
+        <div className="flex items-center gap-2 pb-1">
+          {/* O modelo vem com a grade de setores × categorias já preenchida: sem
+              isso o admin copia os nomes à mão, e é aí que nasce o erro de
+              digitação que faz a linha não casar. */}
+          <a
+            href={`/api/orcamento/grupos/template?companyId=${encodeURIComponent(
+              companyId,
+            )}&year=${year}`}
+            className={BTN_GHOST + " border"}
+            title="Planilha modelo com os setores e categorias desta empresa"
+          >
+            <Download className="h-3.5 w-3.5" /> Baixar modelo
+          </a>
+          <label
+            className={cn(
+              BTN_GHOST,
+              "cursor-pointer border",
+              importando && "pointer-events-none opacity-50",
+            )}
+            title="Setor | Categoria | Grupo"
+          >
+            {importando ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            Importar planilha
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                // Zera o input: escolher o MESMO arquivo de novo (depois de
+                // corrigi-lo) precisa disparar o evento outra vez.
+                e.target.value = "";
+                if (f) void importar(f);
+              }}
+            />
+          </label>
+        </div>
+
         <div className="min-w-[14rem] flex-1 space-y-1.5">
           <label className="text-sm font-medium">Buscar categoria ou grupo</label>
           <div className="relative">
@@ -181,6 +276,46 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
       </div>
 
       {erro && <p className="text-sm text-destructive">{erro}</p>}
+
+      {resultado && (
+        <div
+          className={cn(
+            "space-y-1 rounded-lg border p-3 text-sm",
+            resultado.problemas.length > 0
+              ? "border-amber-500/40 bg-amber-500/5"
+              : "border-emerald-500/40 bg-emerald-500/5",
+          )}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium">
+              {resultado.aviso ??
+                `${resultado.escopos} v\u00ednculo(s) cadastrado(s)` +
+                  (resultado.criados > 0 ? ` \u00b7 ${resultado.criados} grupo(s) novo(s)` : "")}
+            </p>
+            <button onClick={() => setResultado(null)} className={BTN_GHOST}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {resultado.problemas.length > 0 && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {resultado.problemas.length} linha(s) n\u00e3o entraram. Corrija e importe de novo \u2014 o
+                que j\u00e1 entrou n\u00e3o duplica.
+              </p>
+              <ul className="max-h-40 list-disc space-y-0.5 overflow-auto pl-5 text-xs text-amber-800">
+                {resultado.problemas.slice(0, 50).map((p, i) => (
+                  <li key={i}>{p}</li>
+                ))}
+              </ul>
+              {resultado.problemas.length > 50 && (
+                <p className="text-xs text-muted-foreground">
+                  \u2026 e mais {resultado.problemas.length - 50}.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {carregando && !arvore ? (
         <div className="flex items-center justify-center gap-2 rounded-lg border p-12 text-sm text-muted-foreground">

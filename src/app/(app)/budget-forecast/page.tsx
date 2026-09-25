@@ -293,17 +293,32 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
   const currentMonth = now.getUTCMonth() + 1;
   const currentYear = now.getUTCFullYear();
 
+  // "Considerar o mês atual como orçado" (checkbox da Projeção): quando ligado,
+  // o mês corrente deixa de usar o realizado parcial e passa a usar o valor do
+  // orçamento daquele mês (e ganha o sufixo "(Orc)"). Só faz sentido na
+  // Projeção — é lá que existe o split realizado/orçamento. Vem pela URL para o
+  // servidor recalcular (o realizado e o orçamento são RPCs distintos).
+  const projCurrentAsBudget =
+    view === "projecao" &&
+    (() => {
+      const v = searchParams.mesAtualOrcado;
+      const s = Array.isArray(v) ? v[0] : v;
+      return s === "1" || s === "true";
+    })();
+
   // Compute the FIRST bucket that should be rendered as "Orcamento" in the
-  // Projecao view. O mes atual ja conta como Realizado (o filtro de
-  // realizedBuckets/budgetBuckets usa `<= currentMonth` / `> currentMonth`),
-  // entao o split visual (e o highlight em laranja com sufixo "(Orc)") deve
-  // comecar a partir de `currentMonth + 1`. -1 quando nenhum bucket cai no
-  // orcamento (ex.: estamos olhando um ano inteiro no passado).
+  // Projecao view. Por padrão o mes atual ja conta como Realizado, entao o split
+  // visual (highlight em laranja com sufixo "(Orc)") comeca em `currentMonth + 1`.
+  // Com `projCurrentAsBudget`, o proprio mes atual ja entra como orcamento, entao
+  // o split recua para `currentMonth`. -1 quando nenhum bucket cai no orcamento
+  // (ex.: estamos olhando um ano inteiro no passado).
   const currentMonthIndex = visibleBuckets.findIndex((b) => {
     const [yStr, mStr] = b.key.replace("m-", "").split("-");
     const y = Number(yStr);
     const m = Number(mStr);
-    return y > currentYear || (y === currentYear && m > currentMonth);
+    return projCurrentAsBudget
+      ? y > currentYear || (y === currentYear && m >= currentMonth)
+      : y > currentYear || (y === currentYear && m > currentMonth);
   });
 
   let displayRows: BudgetForecastDisplayRow[] = [];
@@ -553,19 +568,20 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       } satisfies BudgetForecastDisplayRow;
     });
   } else {
-    // Projecao: months <= current = realized, months > current = budget
-    const realizedBuckets = visibleBuckets.filter((b) => {
+    // Projecao: meses realizados usam o realizado; os demais, o orçamento. O
+    // corte depende de `projCurrentAsBudget`: sem ele, o mês atual ainda é
+    // realizado (`<= currentMonth`); com ele, o mês atual já é orçamento
+    // (realizado só `< currentMonth`). budgetBuckets é o complemento.
+    const isRealizedBucket = (b: DashboardPeriodBucket) => {
       const [yStr, mStr] = b.key.replace("m-", "").split("-");
       const y = Number(yStr);
       const m = Number(mStr);
-      return y < currentYear || (y === currentYear && m <= currentMonth);
-    });
-    const budgetBuckets = visibleBuckets.filter((b) => {
-      const [yStr, mStr] = b.key.replace("m-", "").split("-");
-      const y = Number(yStr);
-      const m = Number(mStr);
-      return y > currentYear || (y === currentYear && m > currentMonth);
-    });
+      return projCurrentAsBudget
+        ? y < currentYear || (y === currentYear && m < currentMonth)
+        : y < currentYear || (y === currentYear && m <= currentMonth);
+    };
+    const realizedBuckets = visibleBuckets.filter(isRealizedBucket);
+    const budgetBuckets = visibleBuckets.filter((b) => !isRealizedBucket(b));
 
     const [realizedRowsByBucket, budgetRowsByBucket] = await Promise.all([
       Promise.all(realizedBuckets.map((b) => aggregateRealizedBucket(b))),
@@ -613,6 +629,7 @@ export default async function BudgetForecastPage({ searchParams, params }: Budge
       accumulatedBucket={accumulatedBucket}
       selectedCompanyIds={filter.selectedCompanyIds}
       currentMonthIndex={currentMonthIndex}
+      projCurrentAsBudget={projCurrentAsBudget}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
     />
