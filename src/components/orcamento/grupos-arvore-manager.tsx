@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   ChevronDown,
+  Check,
   ChevronRight,
   Copy,
   Download,
@@ -57,6 +58,9 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
   const [novoEm, setNovoEm] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState("");
+  // Cadastrar grupo é trabalho em lote: o campo fica aberto e o foco volta
+  // para ele depois de cada um, para o admin digitar a lista de uma sentada.
+  const novoInputRef = useRef<HTMLInputElement>(null);
   // A árvore traz TODAS as categorias de despesa em TODOS os setores, então
   // ela é longa de propósito. Estes dois recortes são o que a torna utilizável.
   const [busca, setBusca] = useState("");
@@ -119,6 +123,31 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
         // Buscar pelo nome do grupo também: "onde foi que eu usei Publicidade?"
         c.grupos.some((g) => g.name.toLocaleLowerCase("pt-BR").includes(q))
       );
+    });
+  }
+
+  /**
+   * Grava o grupo no nó. `fechar` distingue os dois botões: "Adicionar" deixa o
+   * campo pronto para o próximo; "Concluir" encerra.
+   *
+   * O nome digitado volta para o campo se a gravação falhar — limpar antes de
+   * saber o resultado faria o admin perder o que escreveu.
+   */
+  function salvarGrupo(setorId: string | null, categoryCode: string, fechar: boolean) {
+    const nome = novoNome.trim();
+    if (!nome) return;
+    setErro(null);
+    setNovoNome("");
+    startTransition(async () => {
+      const res = await adicionarGrupoNoNo({ companyId, year, setorId, categoryCode, nome });
+      if (res?.error) {
+        setErro(res.error);
+        setNovoNome(nome);
+        return;
+      }
+      await recarregar();
+      if (fechar) setNovoEm(null);
+      else novoInputRef.current?.focus();
     });
   }
 
@@ -459,21 +488,20 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
                                   {novoEm === chaveCat ? (
                                     <span className="inline-flex items-center gap-1">
                                       <input
+                                        ref={novoInputRef}
                                         value={novoNome}
                                         onChange={(e) => setNovoNome(e.target.value)}
                                         onKeyDown={(e) => {
                                           if (e.key === "Escape") setNovoEm(null);
-                                          if (e.key === "Enter" && novoNome.trim()) {
-                                            run(() =>
-                                              adicionarGrupoNoNo({
-                                                companyId,
-                                                year,
-                                                setorId: setor.setorId,
-                                                categoryCode: cat.categoryCode,
-                                                nome: novoNome,
-                                              }),
+                                          if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            // Enter = Adicionar: segue aberto para
+                                            // o próximo, que é o uso normal.
+                                            salvarGrupo(
+                                              setor.setorId,
+                                              cat.categoryCode,
+                                              false,
                                             );
-                                            setNovoNome("");
                                           }
                                         }}
                                         list="catalogo-grupos"
@@ -482,10 +510,38 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
                                         className={INPUT_CLS + " w-44"}
                                       />
                                       <button
-                                        onClick={() => setNovoEm(null)}
-                                        className={BTN_GHOST}
+                                        onClick={() =>
+                                          salvarGrupo(setor.setorId, cat.categoryCode, false)
+                                        }
+                                        disabled={isPending || !novoNome.trim()}
+                                        title="Adicionar e continuar (Enter)"
+                                        className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                                       >
-                                        <X className="h-3.5 w-3.5" />
+                                        <Plus className="h-3.5 w-3.5" /> Adicionar
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          novoNome.trim()
+                                            ? salvarGrupo(setor.setorId, cat.categoryCode, true)
+                                            : setNovoEm(null)
+                                        }
+                                        disabled={isPending}
+                                        title={
+                                          novoNome.trim()
+                                            ? "Adicionar este e fechar"
+                                            : "Fechar (Esc)"
+                                        }
+                                        className={BTN_GHOST + " border"}
+                                      >
+                                        {novoNome.trim() ? (
+                                          <>
+                                            <Check className="h-3.5 w-3.5" /> Concluir
+                                          </>
+                                        ) : (
+                                          <>
+                                            <X className="h-3.5 w-3.5" /> Fechar
+                                          </>
+                                        )}
                                       </button>
                                     </span>
                                   ) : (
