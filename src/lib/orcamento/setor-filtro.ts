@@ -18,3 +18,60 @@ export function isTodosSetores(setorId: string | null | undefined): boolean {
 export function setorEspecifico(setorId: string | null | undefined): string | null {
   return setorId && setorId !== SETOR_TODOS ? setorId : null;
 }
+
+// ─── Agrupamento por setor (a visão "Todos os setores") ─────────────────────
+// Ver TODO MUNDO numa tela só, mas com cada setor separado — não um monte
+// indistinguível. Sem isto, o consolidado mostra os colaboradores em sequência
+// e nada diz de quem é cada um.
+
+export interface ComSetor {
+  setorId: string | null;
+}
+
+export interface GrupoDeSetor<T> {
+  setorId: string | null;
+  /** Nome do setor, ou o rótulo do balde quando a linha não tem setor. */
+  nome: string;
+  itens: T[];
+}
+
+/** Linhas sem setor: existem (quadro migrado, empresa que passou a orçar por
+ * setor) e não podem sumir da tela só por não terem dono. */
+export const SEM_SETOR_LABEL = "Sem setor";
+
+/**
+ * Agrupa por setor, em ordem alfabética pt-BR, com "Sem setor" por ÚLTIMO —
+ * mesma convenção do balde "Sem grupo" (ver grupos.ts): é dívida visível, não
+ * um setor de verdade, e misturá-lo na ordem alfabética o faria passar por um.
+ *
+ * Setor que não está no cadastro recebido (inativado depois de alguém ser
+ * alocado nele) mantém as linhas visíveis sob o id, em vez de descartá-las.
+ */
+export function agruparPorSetor<T extends ComSetor>(
+  itens: readonly T[],
+  setores: readonly { id: string; name: string }[],
+): GrupoDeSetor<T>[] {
+  const nomePorId = new Map(setores.map((s) => [s.id, s.name]));
+  const mapa = new Map<string, GrupoDeSetor<T>>();
+
+  itens.forEach((item) => {
+    const id = item.setorId ?? null;
+    const chave = id ?? "__sem_setor__";
+    let bucket = mapa.get(chave);
+    if (!bucket) {
+      bucket = {
+        setorId: id,
+        nome: id ? (nomePorId.get(id) ?? "Setor sem cadastro") : SEM_SETOR_LABEL,
+        itens: [],
+      };
+      mapa.set(chave, bucket);
+    }
+    bucket.itens.push(item);
+  });
+
+  return Array.from(mapa.values()).sort((a, b) => {
+    if (a.setorId === null && b.setorId !== null) return 1;
+    if (b.setorId === null && a.setorId !== null) return -1;
+    return a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" });
+  });
+}

@@ -27,7 +27,12 @@ import {
 } from "@/lib/orcamento/regime-apuracao";
 import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
-import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
+import {
+  SETOR_TODOS,
+  agruparPorSetor,
+  isTodosSetores,
+  setorEspecifico,
+} from "@/lib/orcamento/setor-filtro";
 import {
   MOV_TIPOS,
   VINCULOS,
@@ -302,6 +307,9 @@ export function DespesasPessoalManager({
   // Setor concreto da tela: null quando é quadro único OU "Todos os setores".
   const setorAtual = setorEspecifico(setorId);
   const todosSetores = isTodosSetores(setorId);
+  // 14 colunas fixas + a de Empresa, que só aparece quando habilitada. O
+  // cabeçalho de cada bloco de setor atravessa a tabela inteira.
+  const colunasDoQuadro = setup.usarEmpresaEncargos ? 15 : 14;
   const needsSetor = setup.orcarPorSetor && !setorId;
   // Em "Todos os setores" o quadro é só de leitura: um colaborador novo não
   // teria setor a que pertencer.
@@ -517,22 +525,58 @@ export function DespesasPessoalManager({
                         <th className="px-2 py-1.5" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {items.map((colab) => (
-                        <ColaboradorRow
-                          key={colab.id}
-                          colab={colab}
-                          year={year}
-                          cargoOptions={cargoOptionsForSetor}
-                          empresas={setup.empresas}
-                          mostrarEmpresa={setup.usarEmpresaEncargos}
-                          onError={(msg) => setFeedback({ ok: false, msg })}
-                          onDelete={() => handleDelete(colab)}
-                          isAdmin={isAdmin}
-                          onReativado={() => void loadColabs(companyId, year, setorId)}
-                        />
-                      ))}
-                    </tbody>
+                    {/* Em "Todos os setores" o quadro vem em BLOCOS, um por
+                        setor: ver todo mundo numa tela só é metade do pedido —
+                        sem a separação, as linhas viram uma lista em que nada
+                        diz de quem é cada um. Num setor só, a tabela segue
+                        corrida (o cabeçalho da tela já nomeia o setor). */}
+                    {todosSetores ? (
+                      agruparPorSetor(items, setup.setores).map((bloco) => (
+                        <tbody key={bloco.setorId ?? "__sem__"} className="divide-y">
+                          <tr className="border-y bg-muted/50">
+                            <td colSpan={colunasDoQuadro} className="px-3 py-1.5">
+                              <span className="text-xs font-semibold uppercase tracking-wide">
+                                {bloco.nome}
+                              </span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {bloco.itens.length} colaborador(es)
+                              </span>
+                            </td>
+                          </tr>
+                          {bloco.itens.map((colab) => (
+                            <ColaboradorRow
+                              key={colab.id}
+                              colab={colab}
+                              year={year}
+                              cargoOptions={cargoOptionsForSetor}
+                              empresas={setup.empresas}
+                              mostrarEmpresa={setup.usarEmpresaEncargos}
+                              onError={(msg) => setFeedback({ ok: false, msg })}
+                              onDelete={() => handleDelete(colab)}
+                              isAdmin={isAdmin}
+                              onReativado={() => void loadColabs(companyId, year, setorId)}
+                            />
+                          ))}
+                        </tbody>
+                      ))
+                    ) : (
+                      <tbody className="divide-y">
+                        {items.map((colab) => (
+                          <ColaboradorRow
+                            key={colab.id}
+                            colab={colab}
+                            year={year}
+                            cargoOptions={cargoOptionsForSetor}
+                            empresas={setup.empresas}
+                            mostrarEmpresa={setup.usarEmpresaEncargos}
+                            onError={(msg) => setFeedback({ ok: false, msg })}
+                            onDelete={() => handleDelete(colab)}
+                            isAdmin={isAdmin}
+                            onReativado={() => void loadColabs(companyId, year, setorId)}
+                          />
+                        ))}
+                      </tbody>
+                    )}
                   </table>
                 </div>
               )}
@@ -588,15 +632,41 @@ export function DespesasPessoalManager({
                         <th className="px-2 py-2" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {items.map((colab) => (
-                        <BeneficioRow
-                          key={colab.id}
-                          colab={colab}
-                          onError={(msg) => setFeedback({ ok: false, msg })}
-                        />
-                      ))}
-                    </tbody>
+                    {/* Mesma separação por setor do Quadro: no consolidado,
+                        lista corrida não diz de quem é cada linha. */}
+                    {todosSetores ? (
+                      agruparPorSetor(items, setup.setores).map((bloco) => (
+                        <tbody key={bloco.setorId ?? "__sem__"} className="divide-y">
+                          <tr className="border-y bg-muted/50">
+                            <td colSpan={BENEFICIOS.length + 2} className="px-3 py-1.5">
+                              <span className="text-xs font-semibold uppercase tracking-wide">
+                                {bloco.nome}
+                              </span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {bloco.itens.length} colaborador(es)
+                              </span>
+                            </td>
+                          </tr>
+                          {bloco.itens.map((colab) => (
+                            <BeneficioRow
+                              key={colab.id}
+                              colab={colab}
+                              onError={(msg) => setFeedback({ ok: false, msg })}
+                            />
+                          ))}
+                        </tbody>
+                      ))
+                    ) : (
+                      <tbody className="divide-y">
+                        {items.map((colab) => (
+                          <BeneficioRow
+                            key={colab.id}
+                            colab={colab}
+                            onError={(msg) => setFeedback({ ok: false, msg })}
+                          />
+                        ))}
+                      </tbody>
+                    )}
                   </table>
                 </div>
               )}
