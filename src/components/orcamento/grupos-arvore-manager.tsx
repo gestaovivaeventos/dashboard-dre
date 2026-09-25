@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { ChevronDown, ChevronRight, Copy, Loader2, Plus, Tags, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Loader2, Plus, Search, Tags, X } from "lucide-react";
 
 import {
   adicionarGrupoNoNo,
@@ -10,6 +10,7 @@ import {
   replicarGruposDoNo,
   type GruposArvore,
 } from "@/lib/orcamento/actions/grupos-arvore";
+import { metodoLabel } from "@/lib/orcamento/metodos";
 import { YearSelect } from "@/components/orcamento/year-select";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,10 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
   const [novoEm, setNovoEm] = useState<string | null>(null);
   const [novoNome, setNovoNome] = useState("");
+  // A árvore traz TODAS as categorias de despesa em TODOS os setores, então
+  // ela é longa de propósito. Estes dois recortes são o que a torna utilizável.
+  const [busca, setBusca] = useState("");
+  const [soComGrupos, setSoComGrupos] = useState(false);
 
   const recarregar = useCallback(async () => {
     if (!companyId) {
@@ -81,6 +86,21 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
       if (proxima.has(chave)) proxima.delete(chave);
       else proxima.add(chave);
       return proxima;
+    });
+  }
+
+  /** Categorias do setor depois da busca e do recorte "só com grupos". */
+  function filtrar(categorias: GruposArvore["setores"][number]["categorias"]) {
+    const q = busca.trim().toLocaleLowerCase("pt-BR");
+    return categorias.filter((c) => {
+      if (soComGrupos && c.grupos.length === 0) return false;
+      if (!q) return true;
+      return (
+        c.categoryName.toLocaleLowerCase("pt-BR").includes(q) ||
+        c.categoryCode.toLocaleLowerCase("pt-BR").includes(q) ||
+        // Buscar pelo nome do grupo também: "onde foi que eu usei Publicidade?"
+        c.grupos.some((g) => g.name.toLocaleLowerCase("pt-BR").includes(q))
+      );
     });
   }
 
@@ -129,6 +149,28 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
           <label className="text-sm font-medium">Ano</label>
           <YearSelect value={year} onChange={setYear} />
         </div>
+        <div className="min-w-[14rem] flex-1 space-y-1.5">
+          <label className="text-sm font-medium">Buscar categoria ou grupo</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Nome ou código…"
+              className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+        </div>
+        <label className="flex items-center gap-1.5 pb-2 text-sm">
+          <input
+            type="checkbox"
+            checked={soComGrupos}
+            onChange={(e) => setSoComGrupos(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Só as que já têm grupos
+        </label>
+
         {arvore && arvore.amplos.length > 0 && (
           <p className="ml-auto max-w-sm text-xs text-muted-foreground">
             <strong>{arvore.amplos.length}</strong> grupo(s) do catálogo não estão presos a nenhum
@@ -154,7 +196,11 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
           {arvore.setores.map((setor) => {
             const chaveSetor = setor.setorId ?? "__sem_setor__";
             const abertoSetor = abertos.has(chaveSetor) || !arvore.orcaPorSetor;
-            const totalGrupos = setor.categorias.reduce((a, c) => a + c.grupos.length, 0);
+            const categorias = filtrar(setor.categorias);
+            const totalGrupos = categorias.reduce((a, c) => a + c.grupos.length, 0);
+            // Busca que não casa nada neste setor esconde o setor inteiro — abrir
+            // um nó vazio para descobrir que não tem nada é trabalho à toa.
+            if (categorias.length === 0 && (busca.trim() || soComGrupos)) return null;
             return (
               <div key={chaveSetor}>
                 {arvore.orcaPorSetor && (
@@ -170,19 +216,19 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
                     )}
                     <span className="flex-1 font-semibold">{setor.setorNome}</span>
                     <span className="text-xs text-muted-foreground">
-                      {setor.categorias.length} categoria(s) · {totalGrupos} grupo(s)
+                      {categorias.length} categoria(s) · {totalGrupos} grupo(s)
                     </span>
                   </button>
                 )}
 
                 {abertoSetor && (
                   <div className={cn(arvore.orcaPorSetor && "border-t bg-muted/10")}>
-                    {setor.categorias.length === 0 ? (
+                    {categorias.length === 0 ? (
                       <p className="px-4 py-3 pl-10 text-xs text-muted-foreground">
-                        Nenhuma categoria do Planejamento atribuída a este setor.
+                        Nenhuma categoria de despesa mapeada para esta empresa.
                       </p>
                     ) : (
-                      setor.categorias.map((cat) => {
+                      categorias.map((cat) => {
                         const chaveCat = `${chaveSetor}|${cat.categoryCode}`;
                         const abertaCat = abertos.has(chaveCat);
                         return (
@@ -200,10 +246,30 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
                               ) : (
                                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                               )}
-                              <span className="flex-1 truncate text-sm">{cat.categoryName}</span>
+                              <span className="min-w-0 flex-1 truncate text-sm">
+                                {cat.categoryName}
+                              </span>
+                              {/* Só o Planejamento dos gestores usa grupo. O rótulo
+                                  evita o cadastro que nunca chega à entrevista —
+                                  mas não impede: o método pode mudar depois. */}
                               <span
                                 className={cn(
-                                  "text-xs",
+                                  "shrink-0 rounded-full px-2 py-0.5 text-[10px]",
+                                  cat.metodo === "planejamento_socios"
+                                    ? "bg-emerald-600/10 text-emerald-700"
+                                    : "bg-muted text-muted-foreground",
+                                )}
+                                title={
+                                  cat.metodo === "planejamento_socios"
+                                    ? "Estes grupos chegam à entrevista do gestor."
+                                    : "Hoje esta categoria não é orçada pelo Planejamento dos gestores — os grupos ficam guardados para quando for."
+                                }
+                              >
+                                {cat.metodo ? metodoLabel(cat.metodo) : "sem método"}
+                              </span>
+                              <span
+                                className={cn(
+                                  "shrink-0 text-xs",
                                   cat.grupos.length === 0
                                     ? "text-amber-700"
                                     : "text-muted-foreground",
@@ -313,15 +379,12 @@ export function GruposArvoreManager({ companies }: { companies: CompanyOption[] 
                                               year,
                                               origemSetorId: setor.setorId,
                                               categoryCode: cat.categoryCode,
+                                              // Todo setor tem todas as
+                                              // categorias, então o destino é
+                                              // simplesmente "os outros".
                                               destinoSetorIds: arvore.setores
                                                 .filter(
-                                                  (s) =>
-                                                    s.setorId &&
-                                                    s.setorId !== setor.setorId &&
-                                                    s.categorias.some(
-                                                      (c) =>
-                                                        c.categoryCode === cat.categoryCode,
-                                                    ),
+                                                  (s) => s.setorId && s.setorId !== setor.setorId,
                                                 )
                                                 .map((s) => s.setorId as string),
                                             }),

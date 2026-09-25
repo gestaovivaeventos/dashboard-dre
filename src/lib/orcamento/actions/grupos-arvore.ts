@@ -16,6 +16,7 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriaMetodo } from "@/lib/orcamento/actions/categoria-metodo";
 import { compararNomes, normalizarNomeGrupo, type EscopoGrupo } from "@/lib/orcamento/grupos";
+import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 
 // =============================================================================
 // Cadastro dos GRUPOS DE DESPESA em árvore: empresa → setor → categoria →
@@ -43,6 +44,13 @@ export interface ArvoreGrupo {
 export interface ArvoreCategoria {
   categoryCode: string;
   categoryName: string;
+  /**
+   * Método de orçamento da categoria (null = nenhum escolhido). NÃO filtra a
+   * árvore — é informação: só o Planejamento dos gestores usa grupo hoje, e sem
+   * este rótulo o admin cadastraria grupos que nunca chegam à entrevista sem
+   * entender por quê.
+   */
+  metodo: OrcamentoMetodo | null;
   grupos: ArvoreGrupo[];
 }
 
@@ -65,9 +73,15 @@ export interface GruposArvore {
 /**
  * Monta a árvore do cadastro.
  *
- * Só as categorias orçadas pelo **Planejamento dos gestores** entram: é o único
- * método que usa grupo. Listar as demais encheria a árvore de nós onde nada
- * pode ser cadastrado.
+ * TODO setor recebe TODAS as categorias de despesa da empresa — sem filtrar por
+ * método nem pela atribuição `orcamento_categoria_setores` (decisão do dono do
+ * projeto em 24/09/2026). Os dois filtros existiam e foram tirados de
+ * propósito: o cadastro de grupo é trabalho de estrutura, feito ANTES de se
+ * decidir o método e a distribuição por setor, e a árvore incompleta obrigava a
+ * voltar aqui a cada categoria que mudasse de método ou ganhasse um setor novo.
+ *
+ * Consequência: a árvore fica grande (todas as categorias × todos os setores).
+ * A tela tem busca por isso — não a remova achando que é en+feite.
  */
 export async function getGruposArvore(
   companyId: string,
@@ -84,7 +98,8 @@ export async function getGruposArvore(
   const cats = await getCategoriaMetodo(companyId, year);
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
-  const doMetodo = (cats.items ?? []).filter((c) => c.metodo === "planejamento_socios");
+  // Todas as categorias de despesa da empresa, em qualquer método.
+  const todasCategorias = cats.items ?? [];
 
   const [{ data: catalogoRows, error: catErr }, { data: escopoRows, error: escErr }] =
     await Promise.all([
@@ -122,67 +137,35 @@ export async function getGruposArvore(
 
   const porSetor = await orcaPorSetor(supabase, companyId, year);
 
-  // Setores × categorias: a atribuição vem de `orcamento_categoria_setores`,
-  // a mesma que decide quais cards a tela de montagem mostra. Sem ela, toda
-  // categoria apareceria em todo setor.
+  /** Categorias de um nó, com os grupos presos àquele (setor, categoria). */
+  const categoriasDoSetor = (setorId: string | null): ArvoreCategoria[] =>
+    todasCategorias.map((c) => ({
+      categoryCode: c.categoryCode,
+      categoryName: c.categoryName,
+      metodo: c.metodo,
+      grupos: escopos
+        .filter((e) => e.categoryCode === c.categoryCode && e.setorId === setorId)
+        .map((e) => porId.get(e.grupoId))
+        .filter((g): g is ArvoreGrupo => Boolean(g))
+        .sort((a, b) => compararNomes(a.name, b.name)),
+    }));
+
   let nos: ArvoreSetor[] = [];
   if (porSetor) {
-    const [{ data: setoresRows }, { data: atribRows }] = await Promise.all([
-      supabase
-        .from("orcamento_setores")
-        .select("id, name")
-        .eq("company_id", companyId)
-        .eq("year", year)
-        .eq("active", true)
-        .order("name"),
-      supabase
-        .from("orcamento_categoria_setores")
-        .select("setor_id, category_code")
-        .eq("company_id", companyId)
-        .eq("year", year),
-    ]);
-    const catsPorSetor = new Map<string, Set<string>>();
-    (atribRows ?? []).forEach((r) => {
-      const s = r.setor_id as string;
-      if (!catsPorSetor.has(s)) catsPorSetor.set(s, new Set());
-      catsPorSetor.get(s)!.add(r.category_code as string);
-    });
-
-    nos = (setoresRows ?? []).map((sRow) => {
-      const setorId = sRow.id as string;
-      const permitidas = catsPorSetor.get(setorId) ?? new Set<string>();
-      return {
-        setorId,
-        setorNome: sRow.name as string,
-        categorias: doMetodo
-          .filter((c) => permitidas.has(c.categoryCode))
-          .map((c) => ({
-            categoryCode: c.categoryCode,
-            categoryName: c.categoryName,
-            grupos: escopos
-              .filter((e) => e.categoryCode === c.categoryCode && e.setorId === setorId)
-              .map((e) => porId.get(e.grupoId))
-              .filter((g): g is ArvoreGrupo => Boolean(g))
-              .sort((a, b) => compararNomes(a.name, b.name)),
-          })),
-      };
-    });
+    const { data: setoresRows } = await supabase
+      .from("orcamento_setores")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .eq("year", year)
+      .eq("active", true)
+      .order("name");
+    nos = (setoresRows ?? []).map((sRow) => ({
+      setorId: sRow.id as string,
+      setorNome: sRow.name as string,
+      categorias: categoriasDoSetor(sRow.id as string),
+    }));
   } else {
-    nos = [
-      {
-        setorId: null,
-        setorNome: "",
-        categorias: doMetodo.map((c) => ({
-          categoryCode: c.categoryCode,
-          categoryName: c.categoryName,
-          grupos: escopos
-            .filter((e) => e.categoryCode === c.categoryCode && e.setorId === null)
-            .map((e) => porId.get(e.grupoId))
-            .filter((g): g is ArvoreGrupo => Boolean(g))
-            .sort((a, b) => compararNomes(a.name, b.name)),
-        })),
-      },
-    ];
+    nos = [{ setorId: null, setorNome: "", categorias: categoriasDoSetor(null) }];
   }
 
   return { data: { orcaPorSetor: porSetor, setores: nos, catalogo, amplos } };
