@@ -12,6 +12,7 @@ import {
   SEM_ACESSO_ADMIN,
 } from "@/lib/orcamento/auth";
 import { friendlyGrupoError, isSchemaMissing } from "@/lib/orcamento/errors";
+import { inserirEscoposFaltantes } from "@/lib/orcamento/grupo-escopo";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
@@ -313,14 +314,22 @@ export async function replicarGruposDoNo(params: {
       updated_by: admin.userId,
     })),
   );
-  // Ignora o que já existe no destino: replicar duas vezes não pode falhar.
-  const { error } = await supabase
-    .from("orcamento_grupo_escopo")
-    .upsert(linhas, { ignoreDuplicates: true });
-  if (error) return { error: error.message };
+  // Insere só o que falta. `upsert({ ignoreDuplicates: true })` NÃO funciona
+  // nesta tabela — ver `grupo-escopo.ts`. Era por isso que replicar funcionava
+  // na primeira vez e nunca mais: a partir da segunda, o lote inclui os grupos
+  // já replicados, o 23505 derruba o INSERT inteiro e o grupo NOVO vai junto.
+  const { inseridos, error } = await inserirEscoposFaltantes(
+    supabase,
+    companyId,
+    year,
+    linhas,
+  );
+  if (error) return { error };
 
   revalidatePath(PATH);
-  return { ok: true, copiados: linhas.length };
+  // Quantos entraram DE FATO — antes devolvia o tamanho do lote, contando como
+  // copiado o que já estava lá.
+  return { ok: true, copiados: inseridos };
 }
 
 /** Empresa oferecida como origem da cópia (tem algum grupo cadastrado). */
@@ -517,11 +526,16 @@ export async function copiarGruposDeEmpresa(params: {
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  const { error: escErr } = await supabase
-    .from("orcamento_grupo_escopo")
-    .upsert(escopos, { ignoreDuplicates: true });
-  if (escErr) return { error: escErr.message };
+  // Mesma armadilha do replicar: copiar duas vezes da mesma origem estourava
+  // 23505 no lote inteiro. Ver `grupo-escopo.ts`.
+  const { inseridos, error: escErr } = await inserirEscoposFaltantes(
+    supabase,
+    destinoCompanyId,
+    year,
+    escopos,
+  );
+  if (escErr) return { error: escErr };
 
   revalidatePath(PATH);
-  return { resultado: { escopos: escopos.length, criados, problemas } };
+  return { resultado: { escopos: inseridos, criados, problemas } };
 }

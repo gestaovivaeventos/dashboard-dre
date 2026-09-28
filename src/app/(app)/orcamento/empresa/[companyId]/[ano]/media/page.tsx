@@ -1,14 +1,23 @@
 import { MediaCorrecaoManager } from "@/components/orcamento/media-correcao-manager";
 
+import { getOrcamentoUser } from "@/lib/orcamento/auth";
+import { podeEditarMetodo } from "@/lib/orcamento/metodos";
+
 export const dynamic = "force-dynamic";
 
 // Aba "Média com correção" do workspace. Empresa + ano vêm da rota; o guard
 // admin fica no layout pai.
-export default function WorkspaceMediaPage({
+export default async function WorkspaceMediaPage({
   params,
 }: {
   params: { companyId: string; ano: string };
 }) {
+  // Gerente e gerente sócio leem este método, mas não editam — ver
+  // `podeEditarMetodo`. A tela não é a autorização (as actions repetem a
+  // trava), mas deixar digitar para recusar depois é pior que campo travado.
+  const user = await getOrcamentoUser();
+  const podeEditar = user ? podeEditarMetodo(user.papel, "media") : false;
+
   return (
     <div className="space-y-2">
       <div>
@@ -19,7 +28,11 @@ export default function WorkspaceMediaPage({
           um índice. A média pode ser recalculada e editada.
         </p>
       </div>
-      <MediaCorrecaoManager companyId={params.companyId} year={Number(params.ano)} />
+      <MediaCorrecaoManager
+        companyId={params.companyId}
+        year={Number(params.ano)}
+        podeEditar={podeEditar}
+      />
     </div>
   );
 }

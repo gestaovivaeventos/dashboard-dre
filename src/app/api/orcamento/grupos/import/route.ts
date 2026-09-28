@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { inserirEscoposFaltantes } from "@/lib/orcamento/grupo-escopo";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
@@ -144,16 +145,23 @@ export async function POST(request: Request) {
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  // `ignoreDuplicates` é o que torna reimportar seguro: o escopo que já existe
-  // é ignorado em vez de estourar 23505 e derrubar o lote inteiro.
-  const { error: escErr } = await supabase
-    .from("orcamento_grupo_escopo")
-    .upsert(linhas, { ignoreDuplicates: true });
-  if (escErr) return NextResponse.json({ error: escErr.message }, { status: 400 });
+  // Insere só o que falta — é o que torna reimportar seguro DE VERDADE. O
+  // `upsert({ ignoreDuplicates: true })` que estava aqui não ignorava nada
+  // nesta tabela (sem primary key, chave por índice de expressão): a segunda
+  // importação estourava 23505 e derrubava o arquivo inteiro, inclusive as
+  // linhas novas. Ver `grupo-escopo.ts`.
+  const { inseridos, error: escErr } = await inserirEscoposFaltantes(
+    supabase,
+    companyId,
+    year,
+    linhas,
+  );
+  if (escErr) return NextResponse.json({ error: escErr }, { status: 400 });
 
   return NextResponse.json({
     criados,
-    escopos: linhas.length,
+    // Quantos escopos entraram de fato; reimportar o mesmo arquivo devolve 0.
+    escopos: inseridos,
     problemas,
   });
 }

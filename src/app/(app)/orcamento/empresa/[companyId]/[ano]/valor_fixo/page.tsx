@@ -1,14 +1,23 @@
 import { ValorFixoManager } from "@/components/orcamento/valor-fixo-manager";
 
+import { getOrcamentoUser } from "@/lib/orcamento/auth";
+import { podeEditarMetodo } from "@/lib/orcamento/metodos";
+
 export const dynamic = "force-dynamic";
 
 // Aba "Valor fixo com correção" do workspace. Empresa + ano vêm da rota; o guard
 // admin fica no layout pai.
-export default function WorkspaceValorFixoPage({
+export default async function WorkspaceValorFixoPage({
   params,
 }: {
   params: { companyId: string; ano: string };
 }) {
+  // Gerente e gerente sócio leem este método, mas não editam — ver
+  // `podeEditarMetodo`. A tela não é a autorização (as actions repetem a
+  // trava), mas deixar digitar para recusar depois é pior que campo travado.
+  const user = await getOrcamentoUser();
+  const podeEditar = user ? podeEditarMetodo(user.papel, "valor_fixo") : false;
+
   return (
     <div className="space-y-2">
       <div>
@@ -19,7 +28,11 @@ export default function WorkspaceValorFixoPage({
           com IGP-M e reajuste em julho → 1.000/mês até junho, 1.048/mês de julho em diante.
         </p>
       </div>
-      <ValorFixoManager companyId={params.companyId} year={Number(params.ano)} />
+      <ValorFixoManager
+        companyId={params.companyId}
+        year={Number(params.ano)}
+        podeEditar={podeEditar}
+      />
     </div>
   );
 }

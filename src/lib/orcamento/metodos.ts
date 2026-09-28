@@ -1,3 +1,5 @@
+import type { OrcamentoPapel } from "@/lib/supabase/types";
+
 // Métodos de construção do orçamento ("produtores"). Cada categoria de despesa
 // de uma empresa é orçada por UM método. Módulo puro (client + server).
 
@@ -40,19 +42,47 @@ export function metodoLabel(key: OrcamentoMetodo): string {
 /**
  * Métodos AINDA EM VALIDAÇÃO — visíveis só para administradores.
  *
- * O Planejamento dos gestores foi refeito do zero em 23/09/2026 e está sendo
- * conferido antes de chegar a gerentes e diretores (pedido do dono do projeto).
- * Enquanto o nome estiver aqui, a caixa some do hub e as rotas do método
- * redirecionam quem não é admin.
+ * VAZIO desde 29/09/2026: o Planejamento dos gestores saiu daqui e chegou a
+ * gerentes e diretores (pedido do dono do projeto — ele é justamente o método
+ * feito para o gestor preencher). Quem constrói segue recortado pelos setores
+ * dele; o que saiu foi a trava do MÉTODO, não o escopo.
  *
- * Para liberar: tire a chave deste conjunto. É o único lugar — o hub, a lista e
- * a tela de montagem leem daqui, e nenhum deles repete a regra.
+ * O mecanismo fica de pé para o próximo método em prova: pôr a chave aqui
+ * esconde a caixa do hub e redireciona as rotas. É o único lugar — o hub, a
+ * lista e a tela de montagem leem daqui, e nenhum deles repete a regra.
  */
-export const METODOS_EM_VALIDACAO: ReadonlySet<OrcamentoMetodo> = new Set<OrcamentoMetodo>([
-  "planejamento_socios",
-]);
+export const METODOS_EM_VALIDACAO: ReadonlySet<OrcamentoMetodo> = new Set<OrcamentoMetodo>();
 
 /** O método aparece para este usuário? Admin vê tudo. */
 export function metodoVisivelPara(key: OrcamentoMetodo, isAdmin: boolean): boolean {
   return isAdmin || !METODOS_EM_VALIDACAO.has(key);
+}
+
+/**
+ * Métodos de CORREÇÃO POR ÍNDICE — média do realizado e valor fixo.
+ *
+ * Os dois partem de um número que o gestor não define (o realizado do ano
+ * anterior, o contrato) e são corrigidos por índice. Quem os mantém é a
+ * administração; o gestor lê, para enxergar o conjunto do setor dele, mas não
+ * mexe.
+ */
+const METODOS_POR_INDICE: ReadonlySet<OrcamentoMetodo> = new Set<OrcamentoMetodo>([
+  "media",
+  "valor_fixo",
+]);
+
+/**
+ * Este papel pode EDITAR este método?
+ *
+ * Regra de 29/09/2026: **gerente e gerente sócio não editam nada em Média e
+ * Valor fixo** — nem o valor, nem o índice, nem os contratos. Eles constroem
+ * Pessoal e Planejamento dos gestores, dentro dos setores deles.
+ *
+ * Só responde pelo PAPEL. O recorte por SETOR continua valendo por cima
+ * (`podeEscreverNoSetor`): poder editar o método não é poder editar a linha de
+ * qualquer setor.
+ */
+export function podeEditarMetodo(papel: OrcamentoPapel, metodo: OrcamentoMetodo): boolean {
+  if (!METODOS_POR_INDICE.has(metodo)) return true;
+  return papel !== "construtor" && papel !== "construtor_amplo";
 }

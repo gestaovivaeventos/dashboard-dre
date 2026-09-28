@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Info,
   Loader2,
   RefreshCw,
   Search,
@@ -88,6 +89,7 @@ function MediaRow({
   companyId,
   setorId,
   setores,
+  podeEditar,
   onMoved,
 }: {
   item: MediaCategoriaItem;
@@ -101,6 +103,8 @@ function MediaRow({
   setorId: string | null;
   /** Setores ativos, para o destino do "Mover". */
   setores: OrcamentoSetor[];
+  /** Falso para gerente e gerente sócio: leem a linha, não a alteram. */
+  podeEditar: boolean;
   onMoved: () => void;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
@@ -243,12 +247,18 @@ function MediaRow({
                 setDraft(v);
               }}
               onBlur={persistValor}
-              className={cn(CELL, "w-32", naoSalva && "text-muted-foreground")}
+              disabled={!podeEditar}
+              className={cn(
+                CELL,
+                "w-32",
+                naoSalva && "text-muted-foreground",
+                !podeEditar && "cursor-not-allowed opacity-60",
+              )}
             />
             <button
               type="button"
               onClick={handleRecalcular}
-              disabled={recalcing}
+              disabled={recalcing || !podeEditar}
               title={`Recalcular pela média do realizado de ${baseYear}`}
               className="shrink-0 rounded border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
@@ -283,7 +293,13 @@ function MediaRow({
             onChange={(e) =>
               handleIndice(e.target.value === "" ? null : (e.target.value as IndiceKey))
             }
-            className={cn(INPUT_CLS, "w-44 py-1.5", item.indiceKey == null && "text-muted-foreground")}
+            disabled={!podeEditar}
+            className={cn(
+              INPUT_CLS,
+              "w-44 py-1.5",
+              item.indiceKey == null && "text-muted-foreground",
+              !podeEditar && "cursor-not-allowed opacity-60",
+            )}
           >
             <option value="">— sem correção</option>
             {indices.map((i) => (
@@ -371,9 +387,12 @@ function MediaRow({
 export function MediaCorrecaoManager({
   companyId,
   year,
+  podeEditar = true,
 }: {
   companyId: string;
   year: number;
+  /** Gerente e gerente sócio leem, mas não editam (ver metodos.ts). */
+  podeEditar?: boolean;
 }) {
   // Setor da tela. Cada categoria é orçada por setor, então tudo aqui — o que
   // se lê, o que se grava e o recálculo em lote — é do setor selecionado.
@@ -522,7 +541,7 @@ export function MediaCorrecaoManager({
         <button
           type="button"
           onClick={handleRecalcAll}
-          disabled={loading || recalcAll || !companyId || items.length === 0}
+          disabled={loading || recalcAll || !companyId || items.length === 0 || !podeEditar}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 transition-colors"
         >
           {recalcAll ? (
@@ -551,6 +570,20 @@ export function MediaCorrecaoManager({
           {feedback}
         </div>
       )}
+      {/* Campo travado sem explicação é o mesmo silêncio das telas vazias: a
+          pessoa conclui que está quebrado. A regra vive em `podeEditarMetodo`. */}
+      {!podeEditar && (
+        <div className="flex items-start gap-1.5 rounded-md border px-4 py-2.5 text-sm text-muted-foreground">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Este método é <strong>mantido pela administração</strong>. Você consulta os
+            valores para enxergar o conjunto do seu setor, mas não os altera — o que você
+            constrói é <strong>Despesas com pessoal</strong> e{" "}
+            <strong>Planejamento dos gestores</strong>.
+          </span>
+        </div>
+      )}
+
       {loadError && (
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {loadError}
@@ -606,6 +639,7 @@ export function MediaCorrecaoManager({
                     companyId={companyId}
                     setorId={setorId}
                     setores={setores}
+                    podeEditar={podeEditar}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}
                     onError={setLoadError}

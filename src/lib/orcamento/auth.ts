@@ -76,6 +76,9 @@ export const SEM_ACESSO = "Você não tem acesso a este orçamento.";
 export const SEM_ACESSO_ADMIN = "Acesso restrito a administradores.";
 export const SEM_ACESSO_SETOR =
   "Você só pode alterar o orçamento dos setores vinculados a você.";
+/** Recusa por PAPEL: o método é mantido pela administração (ver metodos.ts). */
+export const SEM_EDICAO_METODO =
+  "Este método é mantido pela administração — você pode consultar, mas não alterar.";
 
 /**
  * Usuário do módulo, ou `null` quando não tem acesso. O papel é resolvido na

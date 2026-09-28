@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 
 import {
   getValorFixoCategorias,
@@ -68,11 +77,13 @@ function CurrencyCell({
   value,
   onChange,
   onBlur,
+  disabled,
   className,
 }: {
   value: string;
   onChange: (v: string) => void;
   onBlur: () => void;
+  disabled?: boolean;
   className?: string;
 }) {
   const [focused, setFocused] = useState(false);
@@ -93,6 +104,7 @@ function CurrencyCell({
       }}
       inputMode="decimal"
       placeholder="R$ 0,00"
+      disabled={disabled}
       className={className}
     />
   );
@@ -109,6 +121,7 @@ function ContratoRow({
   indices,
   budgetYear,
   showRemove,
+  podeEditar = true,
   onField,
   onCommitBase,
   onRemove,
@@ -118,6 +131,8 @@ function ContratoRow({
   indices: IndiceOption[];
   budgetYear: number;
   showRemove: boolean;
+  /** Falso para gerente e gerente sócio: leem o contrato, não o alteram. */
+  podeEditar?: boolean;
   onField: (partial: Partial<LocalContrato>) => void;
   onCommitBase: (parsed: number | null) => void;
   onRemove: () => void;
@@ -164,7 +179,8 @@ function ContratoRow({
             setDraft(v);
           }}
           onBlur={persistBase}
-          className={cn(CELL, "w-32")}
+          disabled={!podeEditar}
+          className={cn(CELL, "w-32", !podeEditar && "cursor-not-allowed opacity-60")}
         />
       </td>
 
@@ -175,7 +191,13 @@ function ContratoRow({
           onChange={(e) =>
             onField({ indiceKey: e.target.value === "" ? null : (e.target.value as IndiceKey) })
           }
-          className={cn(INPUT_CLS, "w-40 py-1.5", contrato.indiceKey == null && "text-muted-foreground")}
+          disabled={!podeEditar}
+          className={cn(
+            INPUT_CLS,
+            "w-40 py-1.5",
+            contrato.indiceKey == null && "text-muted-foreground",
+            !podeEditar && "cursor-not-allowed opacity-60",
+          )}
         >
           <option value="">— sem correção</option>
           {indices.map((i) => (
@@ -198,7 +220,13 @@ function ContratoRow({
         <select
           value={contrato.mesReajuste ?? ""}
           onChange={(e) => onField({ mesReajuste: e.target.value === "" ? null : Number(e.target.value) })}
-          className={cn(INPUT_CLS, "w-36 py-1.5", contrato.mesReajuste == null && "text-muted-foreground")}
+          disabled={!podeEditar}
+          className={cn(
+            INPUT_CLS,
+            "w-36 py-1.5",
+            contrato.mesReajuste == null && "text-muted-foreground",
+            !podeEditar && "cursor-not-allowed opacity-60",
+          )}
         >
           <option value="">— sem reajuste</option>
           {MESES_LONGO.map((m, i) => (
@@ -230,7 +258,7 @@ function ContratoRow({
               )}
             </div>
           </div>
-          {showRemove && (
+          {showRemove && podeEditar && (
             <button
               type="button"
               onClick={onRemove}
@@ -255,6 +283,7 @@ function ValorFixoCategoryGroup({
   budgetYear,
   setorId,
   setores,
+  podeEditar,
   onMoved,
   onError,
 }: {
@@ -266,6 +295,8 @@ function ValorFixoCategoryGroup({
   setorId: string | null;
   /** Setores ativos, para o destino do "Mover". */
   setores: OrcamentoSetor[];
+  /** Falso para gerente e gerente sócio: leem os contratos, não os alteram. */
+  podeEditar: boolean;
   onMoved: () => void;
   onError: (msg: string) => void;
 }) {
@@ -382,7 +413,9 @@ function ValorFixoCategoryGroup({
   // categoria pode reunir contratos de fornecedores diferentes e aprovar o
   // conjunto esconderia o que a diretoria precisa olhar um a um.
 
-  const addBtn = (
+  // Sem edição não há o que oferecer aqui: "+ contrato" e "Mover" são ações de
+  // escrita, e o botão que só leva a uma recusa é pior que botão nenhum.
+  const addBtn = !podeEditar ? null : (
     <div className="mt-1 flex items-center gap-2">
       <button
         type="button"
@@ -514,6 +547,7 @@ function ValorFixoCategoryGroup({
             showRemove
             onField={(partial) => commit(c.key, partial, true)}
             onCommitBase={(parsed) => commit(c.key, { valorBase: parsed }, true)}
+            podeEditar={podeEditar}
             onRemove={() => removeContrato(c)}
           />
         );
@@ -525,7 +559,16 @@ function ValorFixoCategoryGroup({
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
-export function ValorFixoManager({ companyId, year }: { companyId: string; year: number }) {
+export function ValorFixoManager({
+  companyId,
+  year,
+  podeEditar = true,
+}: {
+  companyId: string;
+  year: number;
+  /** Gerente e gerente sócio leem, mas não editam (ver metodos.ts). */
+  podeEditar?: boolean;
+}) {
   // Cada contrato pertence a um setor; a tela trabalha um setor por vez.
   const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
   const [setorId, setSetorId] = useState<string | null>(null);
@@ -652,6 +695,20 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
         </div>
       </div>
 
+      {/* Campo travado sem explicação é o mesmo silêncio das telas vazias: a
+          pessoa conclui que está quebrado. A regra vive em `podeEditarMetodo`. */}
+      {!podeEditar && (
+        <div className="flex items-start gap-1.5 rounded-md border px-4 py-2.5 text-sm text-muted-foreground">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Este método é <strong>mantido pela administração</strong>. Você consulta os
+            valores para enxergar o conjunto do seu setor, mas não os altera — o que você
+            constrói é <strong>Despesas com pessoal</strong> e{" "}
+            <strong>Planejamento dos gestores</strong>.
+          </span>
+        </div>
+      )}
+
       {loadError && (
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {loadError}
@@ -709,6 +766,7 @@ export function ValorFixoManager({ companyId, year }: { companyId: string; year:
                     budgetYear={year}
                     setorId={setorId}
                     setores={setores}
+                    podeEditar={podeEditar}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}
                   />

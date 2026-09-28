@@ -12,8 +12,10 @@ import {
   autorizarLeitura,
   podeEscreverNoSetor,
   SEM_ACESSO_SETOR,
+  SEM_EDICAO_METODO,
 } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
+import { podeEditarMetodo } from "@/lib/orcamento/metodos";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
@@ -324,6 +326,11 @@ export async function calcularMedia(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "media")) return { error: SEM_EDICAO_METODO };
   const admin = { userId: auth.user.userId };
   const baseYear = year - 1;
   const irmasUma = await mapaDeIrmas(companyId, year);
@@ -391,6 +398,11 @@ export async function recalcularTodasMedias(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "media")) return { error: SEM_EDICAO_METODO };
   const admin = { userId: auth.user.userId };
   const cats = await fetchCategoriasMedia(supabase, companyId, year, setorId);
   if (cats.needsMigration) return { needsMigration: true };
@@ -526,6 +538,11 @@ export async function setMediaValor(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "media")) return { error: SEM_EDICAO_METODO };
   const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
@@ -596,6 +613,11 @@ export async function setMediaIndice(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "media")) return { error: SEM_EDICAO_METODO };
   const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.

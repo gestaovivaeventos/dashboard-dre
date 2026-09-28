@@ -12,8 +12,10 @@ import {
   autorizarLeitura,
   podeEscreverNoSetor,
   SEM_ACESSO_SETOR,
+  SEM_EDICAO_METODO,
 } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
+import { podeEditarMetodo } from "@/lib/orcamento/metodos";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { setorParaGravar } from "@/lib/orcamento/setor-gravacao";
@@ -279,6 +281,11 @@ export async function saveValorFixoContrato(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "valor_fixo")) return { error: SEM_EDICAO_METODO };
   const admin = { userId: auth.user.userId };
   const descricao = (contrato.descricao ?? "").trim() || null;
   const patch = {
@@ -401,6 +408,11 @@ export async function removeValorFixoContrato(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+  // GERENTE E GERENTE SÓCIO NÃO EDITAM este método (regra de 29/09/2026): ele
+  // parte de um número que o gestor não define e é mantido pela administração.
+  // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
+  // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
+  if (!podeEditarMetodo(auth.user.papel, "valor_fixo")) return { error: SEM_EDICAO_METODO };
   const { data: atual } = await supabase
     .from("orcamento_valor_fixo_categorias")
     .select("*")
