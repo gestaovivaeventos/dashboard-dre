@@ -901,7 +901,7 @@ export function UsersAdminManager({
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={(o) => !o && closeAll()}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="grid max-h-[85vh] max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Convidar usuário</DialogTitle>
             <DialogDescription>
@@ -934,7 +934,7 @@ export function UsersAdminManager({
 
       {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && closeAll()}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="grid max-h-[85vh] max-w-2xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Editar usuário</DialogTitle>
             <DialogDescription>
@@ -1162,7 +1162,11 @@ function UserForm({
   );
 
   return (
-    <form id="user-form" onSubmit={onSubmit} className="space-y-4">
+    <form
+      id="user-form"
+      onSubmit={onSubmit}
+      className="min-h-0 space-y-4 overflow-y-auto pr-1"
+    >
       {error && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -1541,7 +1545,7 @@ function PillMultiSelect({
             key={opt.id}
             type="button"
             onClick={() => onToggle(opt.id)}
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+            className={`inline-flex max-w-full items-center gap-1 break-words rounded-full border px-2.5 py-1 text-left text-xs font-medium transition-colors ${
               active
                 ? "border-primary bg-primary/10 text-primary"
                 : "hover:bg-muted"
@@ -1625,8 +1629,10 @@ function OrcamentoSetoresPorEmpresaField({
         return (
           <div key={empresa.id} className="rounded-md border p-2.5">
             <div className="mb-1.5 flex items-baseline justify-between gap-2">
-              <span className="text-sm font-medium">{empresa.name}</span>
-              <span className="text-xs text-muted-foreground">
+              {/* `min-w-0` + `break-words`: nome comprido de empresa não pode
+                  empurrar a largura do cartão e criar rolagem horizontal. */}
+              <span className="min-w-0 break-words text-sm font-medium">{empresa.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
                 {marcados.length === 0 ? "nenhum setor" : `${marcados.length} setor(es)`}
               </span>
             </div>
