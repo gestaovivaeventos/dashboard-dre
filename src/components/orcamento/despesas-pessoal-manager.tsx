@@ -42,6 +42,7 @@ import {
   type VinculoKey,
 } from "@/lib/orcamento/vinculos";
 import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
+import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
 import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
 
@@ -125,13 +126,19 @@ function CurrencyCell({
   );
 }
 
-type TabKey = "quadro" | "beneficios" | "colaborador" | "previa";
+type TabKey = "quadro" | "beneficios" | "colaborador" | "previa" | "validacao";
 
 const TABS: readonly { key: TabKey; label: string }[] = [
   { key: "quadro", label: "Quadro" },
   { key: "beneficios", label: "Benefícios" },
   { key: "colaborador", label: "Colaborador" },
   { key: "previa", label: "Prévia" },
+  // A prévia do SETOR — a mesma tela em que a diretoria decide, e que já
+  // existe na montagem do Planejamento. É compartilhada de propósito: o
+  // diretor percorre as mesmas linhas que o gestor montou, em vez de uma tela
+  // consolidada à parte (uma dessas existiu antes e foi removida por duplicar
+  // a Prévia).
+  { key: "validacao", label: "Validação" },
 ] as const;
 
 const EMPTY_SETUP: PessoalSetup = {
@@ -423,7 +430,14 @@ export function DespesasPessoalManager({
             ))}
           </div>
 
-          {tab === "previa" ? (
+          {tab === "validacao" ? (
+            <ValidacaoSetorPainel
+              companyId={companyId}
+              year={year}
+              setorId={setorId}
+              setorNome={setup.setores.find((x) => x.id === setorAtual)?.name ?? ""}
+            />
+          ) : tab === "previa" ? (
             <PreviaPessoal
               companyId={companyId}
               year={year}
@@ -1185,3 +1199,4 @@ function BeneficioRow({
     </tr>
   );
 }
+

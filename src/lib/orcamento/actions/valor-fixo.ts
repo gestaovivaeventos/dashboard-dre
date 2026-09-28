@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
 import { diffCampos } from "@/lib/orcamento/trilha";
 import {
   autorizarEscrita,
@@ -304,14 +305,20 @@ export async function saveValorFixoContrato(
         return { error: SEM_ACESSO_SETOR };
       }
     }
-    // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
-    // era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
-    // companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
-    // (construção → validação → retorno) e a trilha continuam de pé.
-    const patchFinal = patch;
+    // TRAVA DA VALIDAÇÃO: contrato aprovado ou reprovado pela diretoria sai das
+    // mãos do gestor — só admin e diretoria mexem. Decisão vencida não trava.
+    const travado = await travaDaValidacao({
+      companyId,
+      year,
+      alvoTipo: "valor_fixo_contrato",
+      alvoId: contrato.id,
+      atualizadoEm: (atual?.updated_at as string | null) ?? null,
+      papel: auth.user.papel,
+    });
+    if (travado) return { error: travado };
     const { error } = await supabase
       .from("orcamento_valor_fixo_categorias")
-      .update({ ...patchFinal, category_name: categoryName })
+      .update({ ...patch, category_name: categoryName })
       .eq("id", contrato.id)
       .eq("company_id", companyId);
     if (error) {
@@ -405,6 +412,17 @@ export async function removeValorFixoContrato(
       return { error: SEM_ACESSO_SETOR };
     }
   }
+  // TRAVA DA VALIDAÇÃO: contrato decidido pela diretoria não é excluído pelo
+  // gestor — apagar seria a forma mais rápida de burlar a aprovação.
+  const travadoExcluir = await travaDaValidacao({
+    companyId,
+    year,
+    alvoTipo: "valor_fixo_contrato",
+    alvoId: contratoId,
+    atualizadoEm: (atual?.updated_at as string | null) ?? null,
+    papel: auth.user.papel,
+  });
+  if (travadoExcluir) return { error: travadoExcluir };
   // Antes de apagar: depois disto o contrato só existe na trilha.
   await registrarAlteracao({
     companyId,

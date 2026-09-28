@@ -25,6 +25,7 @@ import type { IndiceKey } from "@/lib/orcamento/indices";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
 import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
+import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -620,6 +621,16 @@ export function MediaCorrecaoManager({
               </tbody>
             </table>
           </div>
+
+      {/* A validação da diretoria acontece DENTRO da tela do método, na prévia
+          do setor — o diretor percorre as mesmas linhas que o gestor montou.
+          Componente compartilhado com o Pessoal e com o Planejamento. */}
+      <ValidacaoSetorPainel
+        companyId={companyId}
+        year={year}
+        setorId={setorId}
+        setorNome={setores.find((x) => x.id === setorEspecifico(setorId))?.name ?? ""}
+      />
         </>
       )}
     </div>

@@ -270,6 +270,14 @@ function EnviarParaOrcamento({ companyId, year }: { companyId: string; year: num
             {resultado.linhasGravadas} linha(s) publicada(s) — {formatBRL(resultado.totalAno)} no
             ano.
           </p>
+          {/* Só o aprovado vai para o Budget: total menor sem dizer o que
+              ficou de fora é o tipo de número que leva à decisão errada. */}
+          {resultado.colaboradoresNaoAprovados > 0 && (
+            <p className="text-amber-700 dark:text-amber-500">
+              {resultado.colaboradoresNaoAprovados} colaborador(es) sem o aval da diretoria
+              ficaram de fora. Aprove-os na aba <strong>Validação</strong>.
+            </p>
+          )}
           {resultado.naoMapeados.length > 0 ? (
             <div className="text-muted-foreground">
               <p>

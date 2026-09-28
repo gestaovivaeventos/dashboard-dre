@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Ban, Check, Pencil, Trash2, X } from "lucide-react";
+import { Ban, Check, MessageSquare, Pencil, Trash2, X } from "lucide-react";
 
 import {
   editarDespesa,
@@ -12,6 +12,7 @@ import {
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { agruparPorGrupo } from "@/lib/orcamento/grupos";
 import { PERIODICIDADES, type Periodicidade } from "@/lib/orcamento/planejamento-calc";
+import { ESTADO_LABEL, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { cn } from "@/lib/utils";
 
 const MESES = [
@@ -285,8 +286,16 @@ export function PlanejamentoDespesas({
                       )}
                     >
                       <div className="min-w-0 flex-1">
-                        <div className={cn("truncate text-sm", d.cancelado && "line-through")}>
-                          {d.descricao}
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "truncate text-sm",
+                              (d.cancelado || d.estado === "reprovado") && "line-through",
+                            )}
+                          >
+                            {d.descricao}
+                          </span>
+                          <MarcaEstado estado={d.estado} />
                         </div>
                         <div className="text-[11px] text-muted-foreground">
                           {formatBRL(d.valor)} {d.periodicidade} · a partir de{" "}
@@ -299,6 +308,15 @@ export function PlanejamentoDespesas({
                             ? ` · cancelada: ${d.canceladoMotivo}`
                             : ""}
                         </div>
+                        {/* O pedido do diretor fica NA DESPESA: é aqui que o
+                            gestor vem editar, e ler o motivo em outra tela
+                            significaria ir e voltar a cada item. */}
+                        {d.comentario && (
+                          <p className="mt-0.5 flex items-start gap-1 text-[11px] text-sky-700">
+                            <MessageSquare className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span>{d.comentario}</span>
+                          </p>
+                        )}
                       </div>
                       <span
                         className={cn(
@@ -312,10 +330,15 @@ export function PlanejamentoDespesas({
                         <div className="flex shrink-0 items-center gap-0.5">
                           {d.travado ? (
                             <span
-                              title="Item travado pela diretoria na validação."
+                              title={
+                                d.estado === "aprovado"
+                                  ? "Aprovada pela diretoria. Só um diretor ou o administrador altera."
+                                  : "Reprovada pela diretoria. Só um diretor ou o administrador altera."
+                              }
                               className="inline-flex items-center gap-1 text-[11px] text-amber-700"
                             >
-                              <Ban className="h-3 w-3" /> travado
+                              <Ban className="h-3 w-3" />{" "}
+                              {d.estado === "aprovado" ? "aprovada" : "reprovada"}
                             </span>
                           ) : (
                             <>
@@ -346,5 +369,32 @@ export function PlanejamentoDespesas({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * A marca do estado da validação na linha da despesa.
+ *
+ * Pendente não ganha marca: no começo do orçamento TODA despesa está
+ * pendente, e uma etiqueta em cada linha viraria ruído justamente quando não
+ * há nada a dizer.
+ */
+function MarcaEstado({ estado }: { estado: ValidacaoEstado }) {
+  if (estado === "pendente") return null;
+  const cor =
+    estado === "aprovado"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700"
+      : estado === "reprovado"
+        ? "border-destructive/40 bg-destructive/10 text-destructive"
+        : "border-sky-500/40 bg-sky-500/10 text-sky-700";
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded border px-1 py-px text-[10px] font-medium leading-tight",
+        cor,
+      )}
+    >
+      {ESTADO_LABEL[estado]}
+    </span>
   );
 }

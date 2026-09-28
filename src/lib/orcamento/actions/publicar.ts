@@ -44,6 +44,13 @@ import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 export interface PublicacaoResultado {
   /** Linhas cruas gravadas (conta × mês, sem zeros). */
   linhasGravadas: number;
+  /**
+   * O que a diretoria ainda NÃO aprovou e por isso ficou de fora, para quem
+   * publica poder dizer o que faltou. Publicar menos sem nomear a diferença é
+   * o tipo de número que leva à decisão errada.
+   */
+  itensNaoAprovados: number;
+  totalNaoAprovado: number;
   /** Contas distintas publicadas. */
   contas: number;
   /** Total anual de despesa publicado, para conferir contra a Prévia. */
@@ -77,6 +84,10 @@ export async function publicarOrcamentoNoBudget(
     return { error: previa.error ?? "Não consegui calcular a prévia para publicar." };
   }
 
+  // SÓ O APROVADO vai para o Budget (regra de 25/09/2026). A Prévia devolve as
+  // duas séries; publicar `meses` mandaria para a DRE despesa que a diretoria
+  // ainda não viu — e a tela promete o contrário ao usuário.
+  //
   // Só as FOLHAS de despesa: grupos são a soma dos filhos e as linhas
   // calculadas (4/6/8/11) são fórmulas sobre elas — publicar qualquer das duas
   // dobraria o orçamento.
@@ -98,7 +109,7 @@ export async function publicarOrcamentoNoBudget(
   for (const folha of folhas) {
     const label = rotuloDaConta(folha.code, folha.name);
     mapeamentos.set(label, folha.id);
-    folha.meses.forEach((valor, i) => {
+    folha.mesesAprovados.forEach((valor, i) => {
       const amount = Math.round(valor * 100) / 100;
       if (amount === 0) return;
       totalAno += amount;
@@ -114,7 +125,15 @@ export async function publicarOrcamentoNoBudget(
   }
 
   if (rows.length === 0) {
-    return { error: "Não há valor orçado para publicar nesta empresa neste ano." };
+    // Distingue "ninguém orçou" de "ninguém aprovou": são problemas
+    // diferentes, e mandar o admin procurar orçamento que existe seria pior
+    // do que não dizer nada.
+    return {
+      error:
+        previa.data.resumo.totalDespesa > 0
+          ? "Nada foi aprovado pela diretoria ainda — só o aprovado vai para o Budget. Aprove os itens na prévia do setor, dentro de cada método."
+          : "Não há valor orçado para publicar nesta empresa neste ano.",
+    };
   }
 
   // Substitui a publicação anterior do MÓDULO. Inclui as linhas antigas de
@@ -178,6 +197,10 @@ export async function publicarOrcamentoNoBudget(
   return {
     resultado: {
       linhasGravadas: rows.length,
+      itensNaoAprovados: previa.data.resumo.itensPendentes,
+      totalNaoAprovado:
+        Math.round((previa.data.resumo.totalDespesa - previa.data.resumo.totalDespesaAprovada) * 100) /
+        100,
       contas: mapeamentos.size,
       totalAno: Math.round(totalAno * 100) / 100,
       celulasOrcamento,

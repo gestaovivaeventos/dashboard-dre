@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
 import { diffCampos } from "@/lib/orcamento/trilha";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
@@ -38,10 +39,6 @@ import { calcularPrevia, type PreviaResultado } from "@/lib/orcamento/pessoal-ca
 
 const PATH = "/orcamento/despesas/pessoal";
 
-/** Recusa padrão quando a tela × setor está finalizada pelo gestor. */
-const FINALIZADO_MSG =
-  "Este setor foi finalizado e está fechado para edição. Peça a um administrador para reabrir.";
-
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface Movimentacao {
@@ -54,6 +51,8 @@ export interface Movimentacao {
 export interface Colaborador {
   id: string;
   setorId: string | null;
+  /** `updated_at` da linha — é a comparação que vence a decisão da diretoria. */
+  atualizadoEm?: string | null;
   /** Empresa em que ele é registrado — define o REGIME dos encargos dele.
    * null = a própria empresa do quadro. Não muda o destino do valor. */
   empresaEncargosId: string | null;
@@ -378,7 +377,7 @@ export async function setRegimeApuracao(
 // A cauda são as colunas de benefício: ao acrescentar um item em BENEFICIOS,
 // acrescente a coluna aqui também, senão o valor é gravado mas nunca lido.
 const COLAB_COLS =
-  "id, setor_id, empresa_encargos_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida, cancelado_em, cancelado_motivo, diretoria_travado";
+  "id, setor_id, empresa_encargos_id, nome, vinculo, cargo_atual, salario_atual, mov1_tipo, mov1_data, mov1_cargo, mov1_salario, mov2_tipo, mov2_data, mov2_cargo, mov2_salario, justificativa, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida, cancelado_em, cancelado_motivo, diretoria_travado, updated_at";
 
 /** Lê os valores de benefício de uma linha crua. */
 function readBeneficios(r: Record<string, unknown>): Beneficios {
@@ -426,6 +425,7 @@ export async function getColaboradores(
   const items: Colaborador[] = (data ?? []).map((r) => ({
     id: r.id as string,
     setorId: (r.setor_id as string) ?? null,
+    atualizadoEm: (r.updated_at as string) ?? null,
     empresaEncargosId: (r.empresa_encargos_id as string) ?? null,
     nome: (r.nome as string) ?? null,
     vinculo: r.vinculo as VinculoKey,
@@ -505,15 +505,24 @@ async function autorizarColaborador(
   if (!podeEscreverNoSetor(auth.setores, (linha.setor_id as string | null) ?? null)) {
     return { ok: false, error: SEM_ACESSO_SETOR };
   }
-// A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
-// era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
-// companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
-// (construção → validação → retorno) e a trilha continuam de pé.
-  if (
-    false
-  ) {
-    return { ok: false, error: FINALIZADO_MSG };
-  }
+
+  // TRAVA DA VALIDAÇÃO: colaborador aprovado ou reprovado pela diretoria sai das
+  // mãos do gestor — só admin e diretoria mexem. Vale para os TRÊS caminhos de
+  // escrita (quadro, benefícios e exclusão), que passam todos por aqui.
+  //
+  // A trava deriva do STATUS, nunca de coluna: foi o `diretoria_travado`
+  // escrito e liberado à mão que deixou colaborador preso sem saída pela tela.
+  // Decisão vencida (linha alterada depois dela) não trava.
+  const travado = await travaDaValidacao({
+    companyId: linha.company_id as string,
+    year: Number(linha.year),
+    alvoTipo: "colaborador",
+    alvoId: id,
+    atualizadoEm: (linha.updated_at as string | null) ?? null,
+    papel: auth.user.papel,
+  });
+  if (travado) return { ok: false, error: travado };
+
   return {
     ok: true,
     userId: auth.user.userId,
@@ -587,13 +596,9 @@ export async function updateColaborador(id: string, input: ColaboradorInput) {
     return { error: SEM_ACESSO_SETOR };
   }
   const row = toRow(input, auth.userId);
-  // O CICLO saiu em 24/09/2026, junto com a validação (ambos serão redesenhados).
-  // Aqui a alteração da diretoria marcava `diretoria_travado` — coluna que hoje
-  // ninguém lê. A coluna ficou no banco para o redesenho reaproveitar.
-  const patch = row;
   const { error } = await supabase
     .from("orcamento_pessoal_colaboradores")
-    .update(patch)
+    .update(row)
     .eq("id", id);
   if (error) return { error: error.message };
   // Só registra se algo realmente mudou: salvar sem editar não é alteração.
@@ -678,6 +683,8 @@ export interface PreviaColaboradorDetalhe {
   vinculo: VinculoKey;
   /** Setor do colaborador — rotula o drilldown na visão consolidada. */
   setorId: string | null;
+  /** `updated_at` da linha: é o que vence a aprovação da diretoria. */
+  atualizadoEm: string | null;
   linhas: { key: string; label: string; meses: number[]; totalAno: number }[];
 }
 
@@ -766,6 +773,7 @@ export async function getPrevia(
   const colaboradores: Colaborador[] = (data ?? []).map((r) => ({
     id: r.id as string,
     setorId: (r.setor_id as string) ?? null,
+    atualizadoEm: (r.updated_at as string) ?? null,
     empresaEncargosId: (r.empresa_encargos_id as string) ?? null,
     nome: (r.nome as string) ?? null,
     vinculo: r.vinculo as VinculoKey,
@@ -834,6 +842,7 @@ export async function getPrevia(
           nome: c.nome,
           vinculo: c.vinculo,
           setorId: c.setorId,
+          atualizadoEm: c.atualizadoEm ?? null,
           linhas: individual.linhas
             .filter((l) => l.total !== 0)
             .map((l) => ({ key: l.key, label: l.label, meses: l.meses, totalAno: l.total })),

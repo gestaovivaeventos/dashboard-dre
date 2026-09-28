@@ -29,10 +29,15 @@ function Valor({ v, className }: { v: number; className?: string }) {
 function LinhaDre({
   linha,
   onDrill,
+  aprovado,
 }: {
   linha: PreviaDreLinha;
   onDrill: ((linha: PreviaDreLinha) => void) | null;
+  /** Desenha a parte aprovada em vez do orçado. */
+  aprovado: boolean;
 }) {
+  const meses = aprovado ? linha.mesesAprovados : linha.meses;
+  const totalAno = aprovado ? linha.totalAnoAprovado : linha.totalAno;
   const destaque = linha.isSummary || linha.isCalculado;
   const resultado = linha.code === "11";
   // Fundo OPACO (não translúcido): as colunas fixas ficam por cima das células
@@ -76,14 +81,14 @@ function LinhaDre({
         </span>
       </td>
       {/* 12 meses */}
-      {linha.meses.map((v, m) => (
+      {meses.map((v, m) => (
         <td key={m} className="px-3 py-1.5 text-right">
           <Valor v={v} />
         </td>
       ))}
       {/* Total do ano (coluna fixa à direita) */}
       <td className={cn("sticky right-0 z-10 border-l px-3 py-1.5 text-right", surface)}>
-        <Valor v={linha.totalAno} className="font-semibold" />
+        <Valor v={totalAno} className="font-semibold" />
       </td>
     </tr>
   );
@@ -111,6 +116,11 @@ export function PreviaOrcamentoView({
   const [setorId, setSetorId] = useState<string>(SETOR_TODOS);
   // Linha aberta no drilldown (null = fechado).
   const [drill, setDrill] = useState<PreviaDreLinha | null>(null);
+  // Qual série a tabela desenha: o que o gestor ORÇOU ou o que a diretoria
+  // APROVOU. É um botão e não duas colunas por mês porque a matriz já tem 13
+  // colunas — dobrá-las tornaria a tela ilegível. O par de totais fica sempre
+  // à vista na faixa do topo, que é onde a comparação importa.
+  const [verAprovado, setVerAprovado] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -219,6 +229,12 @@ export function PreviaOrcamentoView({
               {formatBRL(resumo.totalDespesa)}
             </span>
           </span>
+          <span className="text-muted-foreground">
+            Aprovada:{" "}
+            <span className="font-semibold tabular-nums text-emerald-600">
+              {formatBRL(resumo.totalDespesaAprovada)}
+            </span>
+          </span>
           {resumo.pessoalColaboradores > 0 && (
             <span className="text-muted-foreground">
               Pessoal: {resumo.pessoalColaboradores} colaborador(es)
@@ -284,6 +300,29 @@ export function PreviaOrcamentoView({
             {ocultarZeros ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
             {ocultarZeros ? "Mostrar linhas zeradas" : "Ocultar linhas zeradas"}
           </button>
+          {/* Só aparece quando há o que comparar: enquanto a diretoria não
+              decidiu nada, orçado e aprovado são o mesmo número e o botão só
+              acrescentaria uma escolha sem efeito. */}
+          {resumo.totalDespesaAprovada !== resumo.totalDespesa && (
+            <div className="inline-flex overflow-hidden rounded-md border text-sm">
+              {([false, true] as const).map((op) => (
+                <button
+                  key={String(op)}
+                  type="button"
+                  onClick={() => setVerAprovado(op)}
+                  aria-pressed={verAprovado === op}
+                  className={cn(
+                    "px-3 py-1.5",
+                    verAprovado === op
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  {op ? "Aprovado" : "Orçado"}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             onClick={handleExport}
@@ -369,6 +408,25 @@ export function PreviaOrcamentoView({
         </div>
       )}
 
+      {/* Total menor sem dizer o que ficou de fora é o tipo de número que leva
+          à decisão errada — por isso a faixa nomeia a diferença. */}
+      {resumo.itensPendentes > 0 && (
+        <div className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+          <span>
+            <strong className="text-foreground">
+              {formatBRL(resumo.totalDespesa - resumo.totalDespesaAprovada)}
+            </strong>{" "}
+            em <strong className="text-foreground">{resumo.itensPendentes}</strong>{" "}
+            {resumo.itensPendentes === 1 ? "item" : "itens"} ainda sem o aval da diretoria — fora
+            do número aprovado.{" "}
+            {resumo.podeValidar
+              ? "Aprove item a item na prévia do setor, dentro de cada método."
+              : "Só o aprovado compõe o orçamento publicado."}
+          </span>
+        </div>
+      )}
+
       {!resumo.temReceita && (
         <div className="flex items-start gap-1.5 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -404,7 +462,12 @@ export function PreviaOrcamentoView({
           </thead>
           <tbody>
             {linhasVisiveis.map((linha) => (
-              <LinhaDre key={linha.id} linha={linha} onDrill={setDrill} />
+              <LinhaDre
+                key={linha.id}
+                linha={linha}
+                onDrill={setDrill}
+                aprovado={verAprovado}
+              />
             ))}
           </tbody>
         </table>

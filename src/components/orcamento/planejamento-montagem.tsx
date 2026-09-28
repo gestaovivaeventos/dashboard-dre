@@ -281,6 +281,8 @@ export function PlanejamentoMontagem({
             carregando={carregandoPrevia}
             setorNome={detalhe.setorNome}
             year={year}
+            companyId={companyId}
+            onDecidiu={aposMudanca}
           />
         </>
       )}

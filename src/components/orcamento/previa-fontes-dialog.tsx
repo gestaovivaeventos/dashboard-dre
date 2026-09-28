@@ -9,6 +9,7 @@ import type {
   PreviaFonteItem,
 } from "@/lib/orcamento/actions/previa-orcamento";
 import { formatBRL } from "@/lib/orcamento/format";
+import { ESTADO_LABEL, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { cn } from "@/lib/utils";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -159,6 +160,12 @@ function FonteRow({ fonte }: { fonte: PreviaFonte }) {
         ))}
         <td className="px-3 py-2 text-right font-semibold tabular-nums">
           {formatBRL(fonte.totalAno)}
+          {/* Só quando divergem: repetir o mesmo valor em verde vira ruído. */}
+          {fonte.totalAnoAprovado != null && fonte.totalAnoAprovado !== fonte.totalAno && (
+            <span className="block text-[10px] font-normal text-emerald-600">
+              {formatBRL(fonte.totalAnoAprovado)} aprovado
+            </span>
+          )}
         </td>
         <td className="px-2 py-2 text-right">
           <a
@@ -189,9 +196,17 @@ function ItemRow({ item }: { item: PreviaFonteItem }) {
     <tr className="bg-muted/20 text-[11px]">
       <td className="sticky left-0 z-10 bg-card px-3 py-1.5 pl-9">
         <div className="flex flex-col">
-          <span>{item.nome}</span>
+          <span className="flex items-center gap-1.5">
+            <PontoEstado estado={item.estado} />
+            <span className={cn(item.estado === "reprovado" && "line-through opacity-70")}>
+              {item.nome}
+            </span>
+          </span>
           {item.detalhe && (
             <span className="text-[10px] text-muted-foreground">{item.detalhe}</span>
+          )}
+          {item.comentario && (
+            <span className="text-[10px] text-sky-700">{item.comentario}</span>
           )}
         </div>
       </td>
@@ -205,5 +220,31 @@ function ItemRow({ item }: { item: PreviaFonteItem }) {
       </td>
       <td className="px-2 py-1.5" />
     </tr>
+  );
+}
+
+/**
+ * A marca do estado da validação no item do drilldown.
+ *
+ * Pendente não ganha ponto colorido: no começo do orçamento TODO item está
+ * pendente, e um sinal em cada linha viraria ruído justamente quando não há
+ * nada a dizer. O espaço é reservado assim mesmo, para as linhas não dançarem
+ * conforme um item é decidido.
+ */
+function PontoEstado({ estado }: { estado?: ValidacaoEstado }) {
+  const cor =
+    estado === "aprovado"
+      ? "bg-emerald-500"
+      : estado === "reprovado"
+        ? "bg-destructive"
+        : estado === "revisar"
+          ? "bg-sky-500"
+          : null;
+  if (!cor) return <span className="h-1.5 w-1.5 shrink-0" aria-hidden />;
+  return (
+    <span
+      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", cor)}
+      title={ESTADO_LABEL[estado!]}
+    />
   );
 }

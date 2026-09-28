@@ -28,6 +28,15 @@ import { vinculoLabel } from "@/lib/orcamento/vinculos";
 import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
+import {
+  chaveMedia,
+  entraNoNumero,
+  estadoDoItem,
+  podeDecidir,
+  type Validacao,
+  type ValidacaoAlvoTipo,
+  type ValidacaoEstado,
+} from "@/lib/orcamento/validacao-diretoria";
 
 /** Unidade de cada índice (percent × brl), para o valor fixo corrigir certo. */
 const INDICE_UNIT = new Map<string, IndiceUnit>(INDICES.map((i) => [i.key, i.unit]));
@@ -69,6 +78,27 @@ const INDICE_UNIT = new Map<string, IndiceUnit>(INDICES.map((i) => [i.key, i.uni
  */
 export interface PreviaFonteItem {
   nome: string;
+  /**
+   * Alvo da VALIDAÇÃO da diretoria. A Prévia é calculada ao vivo e os itens
+   * dela não tinham identidade; sem isto o ✓ do diretor não teria onde grudar.
+   *
+   * `alvoId` é TEXT porque a média é chaveada por (categoria, setor) — a linha
+   * dela pode nem existir enquanto o gestor não salva. Ver `chaveMedia`.
+   */
+  alvoTipo?: ValidacaoAlvoTipo;
+  alvoId?: string;
+  /**
+   * Setor do item. A decisão da diretoria é gravada com ele porque o contador
+   * do gestor recorta por setor — e a Prévia pode estar em "Todos os setores",
+   * onde o setor da tela não diz de quem é a despesa.
+   */
+  setorId?: string | null;
+  /** `updated_at` do item: é a comparação que vence a decisão do diretor. */
+  atualizadoEm?: string | null;
+  /** Estado efetivo da validação (já considerando decisão vencida). */
+  estado?: ValidacaoEstado;
+  /** O "balãozinho": o que o diretor pediu que o gestor mude. */
+  comentario?: string | null;
   /** Complemento curto (periodicidade, vínculo, índice…). */
   detalhe?: string;
   /**
@@ -83,6 +113,9 @@ export interface PreviaFonteItem {
 }
 
 export interface PreviaFonte {
+  /** Parte aprovada desta origem (soma só dos itens com ✓). */
+  mesesAprovados?: number[];
+  totalAnoAprovado?: number;
   /** Chave do método (metodos.ts) — também é o slug da aba do workspace. */
   metodo: string;
   metodoLabel: string;
@@ -110,6 +143,13 @@ export interface PreviaDreLinha {
   hasChildren: boolean;
   meses: number[];
   totalAno: number;
+  /**
+   * A parte APROVADA pela diretoria. `meses` continua sendo o que o gestor
+   * montou (o orçado); isto é o que já passou — e é este o número que compõe a
+   * Prévia da empresa e o que vai ao Budget.
+   */
+  mesesAprovados: number[];
+  totalAnoAprovado: number;
   /** Origens que compõem esta linha (vazio em linha calculada por fórmula). */
   fontes: PreviaFonte[];
 }
@@ -145,6 +185,16 @@ export interface PreviaOrcamentoData {
     /** Colaboradores dentro do escopo (empresa ou setor). */
     pessoalColaboradores: number;
     totalDespesa: number;
+    /** Só o que a diretoria aprovou — é o número que vai ao Budget. */
+    totalDespesaAprovada: number;
+    /** Quantos itens ainda não têm ✓ (pendentes, reprovados ou a revisar). */
+    itensPendentes: number;
+    /**
+     * Quem lê pode decidir? É a resposta que faz a tela mostrar (ou esconder)
+     * os botões da decisão. Vem daqui, e não de um segundo carregamento, para
+     * a tela nunca oferecer um botão que o servidor vai recusar.
+     */
+    podeValidar: boolean;
     totalReceita: number;
   };
 }
@@ -158,10 +208,13 @@ interface MediaSnapshotRow {
   setor_id: string | null;
   media_valor: number | string | null;
   indice_key: string | null;
+  updated_at?: string | null;
 }
 interface ValorFixoSnapshotRow {
+  id?: string;
   category_code: string;
   setor_id: string | null;
+  updated_at?: string | null;
   valor_base: number | string | null;
   indice_key: string | null;
   mes_reajuste: number | string | null;
@@ -236,6 +289,56 @@ export async function getPreviaOrcamento(
 
   // Acumulador de valores por FOLHA (scoped dre_account_id) × 12 meses.
   const leafByScopedId = new Map<string, number[]>();
+  // Acumulador paralelo: só o que a diretoria aprovou. Roda na MESMA passada
+  // para não calcular a Prévia duas vezes.
+  const leafAprovadoByScopedId = new Map<string, number[]>();
+
+  // Decisões da diretoria, indexadas por alvo. Ausência de tabela (migration
+  // pendente) vira mapa vazio: a Prévia continua respondendo, com tudo
+  // pendente — nunca quebra por causa da validação.
+  const validacoesPorAlvo = new Map<string, Validacao>();
+  {
+    const { data: vRows } = await supabase
+      .from("orcamento_validacoes")
+      .select("alvo_tipo, alvo_id, status, comentario, decidido_em, decidido_por")
+      .eq("company_id", companyId)
+      .eq("year", year);
+    ((vRows ?? []) as Array<Record<string, unknown>>).forEach((r) => {
+      validacoesPorAlvo.set(`${r.alvo_tipo as string}|${r.alvo_id as string}`, {
+        alvoTipo: r.alvo_tipo as ValidacaoAlvoTipo,
+        alvoId: r.alvo_id as string,
+        status: r.status as Validacao["status"],
+        comentario: (r.comentario as string | null) ?? null,
+        decididoEm: r.decidido_em as string,
+        decididoPor: (r.decidido_por as string | null) ?? null,
+      });
+    });
+  }
+
+  /**
+   * Preenche `estado`/`comentario` de cada item e devolve a série APROVADA da
+   * origem — a soma só dos itens com ✓.
+   *
+   * Somar as partes aprovadas equivale a recalcular o método com o subconjunto
+   * porque as partes particionam exatamente o todo: no pessoal isso é garantido
+   * pelo motor (que roda por colaborador e cuja soma reproduz o agregado, como
+   * o próprio `getPrevia` documenta), e nos demais cada item já É uma parcela.
+   * É o que faz os encargos, férias e 13º saírem exatos para quem foi aprovado,
+   * sem rateio por proporção — que erraria, porque RAT/FAP e o teto do INSS não
+   * são lineares no total.
+   */
+  const marcarEAprovar = (itens: PreviaFonteItem[]): number[] => {
+    const aprovado = Array<number>(12).fill(0);
+    itens.forEach((it) => {
+      const chave = it.alvoTipo && it.alvoId ? `${it.alvoTipo}|${it.alvoId}` : null;
+      const v = chave ? validacoesPorAlvo.get(chave) ?? null : null;
+      it.estado = estadoDoItem(v, it.atualizadoEm);
+      it.comentario = v?.comentario ?? null;
+      if (!entraNoNumero(it.estado)) return;
+      for (let m = 0; m < 12; m += 1) aprovado[m] += it.meses[m] ?? 0;
+    });
+    return aprovado;
+  };
   // Origens que compõem cada folha, na mesma ordem em que são somadas — é o
   // que permite o drilldown sem recalcular nada.
   const fontesByScopedId = new Map<string, PreviaFonte[]>();
@@ -398,12 +501,16 @@ export async function getPreviaOrcamento(
         return;
       }
       pushMeses(leafByScopedId, scopedId, meses);
+      const aprovados = marcarEAprovar(itens);
+      pushMeses(leafAprovadoByScopedId, scopedId, aprovados);
       pushFonte(scopedId, {
         metodo,
         metodoLabel: metodoLabel(metodo as OrcamentoMetodo),
         chave,
         meses,
         totalAno: somar(meses),
+        mesesAprovados: aprovados,
+        totalAnoAprovado: somar(aprovados),
         href: workspaceTabHref(companyId, year, metodo),
         itens,
       });
@@ -413,7 +520,7 @@ export async function getPreviaOrcamento(
     if (mediaCats.length > 0) {
       const { data: snapRows, error: snapErr } = await supabase
         .from("orcamento_media_categorias")
-        .select("category_code, setor_id, media_valor, indice_key")
+        .select("category_code, setor_id, media_valor, indice_key, updated_at")
         .eq("company_id", companyId)
         .eq("year", year);
       if (snapErr) {
@@ -456,8 +563,15 @@ export async function getPreviaOrcamento(
         if (filtroSetor && snaps.length === 0 && comLinhaNoAno.has(cat.category_code)) continue;
         const parcelas = snaps.length > 0 ? snaps : [null];
         let projetado = 0;
-        let bruto: number | null = null;
-        let snap: MediaSnapshotRow | null = null;
+        // UM ITEM POR LINHA GRAVADA (categoria × setor) — que é a unidade que o
+        // gestor edita e que a diretoria decide. Agregar as parcelas num item
+        // único (como era até 25/09/2026) dava um ✓ que valia por vários
+        // setores e ficava ancorado no setor da MAIOR parcela: aprovar um
+        // deixava os outros livres para edição, ainda somando no aprovado.
+        //
+        // Sem nenhuma linha (média "viva" do realizado) há um item só, com
+        // setor nulo — ver `travaDaLinhaDeMedia`, que confere as duas chaves.
+        const itensMedia: PreviaFonteItem[] = [];
         for (const s of parcelas) {
           const brutoParcela =
             s?.media_valor != null
@@ -466,41 +580,42 @@ export async function getPreviaOrcamento(
           const proj = projetarMedia(brutoParcela, indicePercent(s?.indice_key ?? null));
           if (proj == null) continue;
           projetado += proj;
-          // Guarda a maior parcela só para o texto do drilldown.
-          if (bruto == null || (brutoParcela ?? 0) > bruto) {
-            bruto = brutoParcela;
-            snap = s;
-          }
+          // O item explica de onde saiu o número (média do realizado do
+          // ano-base + índice aplicado). A média não tem sublinhas.
+          const indiceNome = s?.indice_key
+            ? INDICES.find((i) => i.key === s.indice_key)?.label ?? s.indice_key
+            : null;
+          itensMedia.push({
+            nome: cat.category_name ?? cat.category_code,
+            detalhe:
+              [
+                brutoParcela != null
+                  ? `média ${formatBRLSimples(brutoParcela)}/mês em ${year - 1}`
+                  : null,
+                indiceNome ? `corrigida por ${indiceNome}` : "sem correção",
+              ]
+                .filter(Boolean)
+                .join(" · ") + etiquetaSetor(s?.setor_id),
+            // A média não tem id próprio — a linha pode nem existir enquanto o
+            // gestor não salva. Por isso a chave é (categoria, setor).
+            alvoTipo: "media_linha" as const,
+            alvoId: chaveMedia(cat.category_code, s?.setor_id ?? null),
+            setorId: s?.setor_id ?? null,
+            atualizadoEm: s?.updated_at ?? null,
+            meses: Array<number>(12).fill(proj),
+            totalAno: proj * 12,
+          });
         }
         if (projetado === 0) {
           mediaSemValor += 1;
           continue;
         }
-        // A média não tem sublinhas: o item único explica de onde saiu o
-        // número (média do realizado do ano-base + índice aplicado).
-        const indiceNome = snap?.indice_key
-          ? INDICES.find((i) => i.key === snap.indice_key)?.label ?? snap.indice_key
-          : null;
-        const detalheMedia =
-          [
-            bruto != null ? `média ${formatBRLSimples(bruto)}/mês em ${year - 1}` : null,
-            indiceNome ? `corrigida por ${indiceNome}` : "sem correção",
-          ]
-            .filter(Boolean)
-            .join(" · ") + etiquetaSetor(snap?.setor_id);
         aplicar(
           cat.category_code,
           cat.category_name ?? cat.category_code,
           Array<number>(12).fill(projetado),
           "media",
-          [
-            {
-              nome: cat.category_name ?? cat.category_code,
-              detalhe: detalheMedia,
-              meses: Array<number>(12).fill(projetado),
-              totalAno: projetado * 12,
-            },
-          ],
+          itensMedia,
         );
       }
     }
@@ -509,7 +624,7 @@ export async function getPreviaOrcamento(
     if (vfCats.length > 0) {
       const { data: vfRows, error: vfErr } = await supabase
         .from("orcamento_valor_fixo_categorias")
-        .select("category_code, setor_id, valor_base, indice_key, mes_reajuste, descricao")
+        .select("id, category_code, setor_id, valor_base, indice_key, mes_reajuste, descricao, updated_at")
         .eq("company_id", companyId)
         .eq("year", year);
       if (vfErr) {
@@ -546,6 +661,10 @@ export async function getPreviaOrcamento(
           itensVf.push({
             // Contrato único costuma vir sem descrição — cai no nome da categoria.
             nome: snap.descricao?.trim() || (cat.category_name ?? cat.category_code),
+            alvoTipo: "valor_fixo_contrato" as const,
+            alvoId: snap.id ?? "",
+            setorId: snap.setor_id ?? null,
+            atualizadoEm: snap.updated_at ?? null,
             detalhe:
               [
                 `base ${formatBRLSimples(base)}`,
@@ -580,7 +699,7 @@ export async function getPreviaOrcamento(
       const { data: psRows, error: psErr } = await supabase
         .from("orcamento_planejamento_despesas")
         .select(
-          "category_code, setor_id, descricao, valor, periodicidade, mes_inicio, mes_fim, orcamento_grupos_despesa(name)",
+          "id, category_code, setor_id, descricao, valor, periodicidade, mes_inicio, mes_fim, updated_at, orcamento_grupos_despesa(name)",
         )
         .eq("company_id", companyId)
         .eq("year", year)
@@ -600,6 +719,8 @@ export async function getPreviaOrcamento(
           grupo: string | null;
           /** Setor da despesa — só para rotular o drilldown. */
           setorId: string | null;
+          id: string;
+          atualizadoEm: string | null;
         }[]
       >();
 
@@ -617,6 +738,8 @@ export async function getPreviaOrcamento(
             : "Despesa sem descrição";
         const acumulado = psByCode.get(r.category_code as string) ?? [];
         acumulado.push({
+          id: r.id as string,
+          atualizadoEm: (r.updated_at as string | null) ?? null,
           setorId: setorDaLinha,
           descricao,
           valorMensal: Number.isFinite(valor) && valor > 0 ? valor : 0,
@@ -651,6 +774,10 @@ export async function getPreviaOrcamento(
             return {
               nome: it.descricao,
               grupo: it.grupo,
+              alvoTipo: "planejamento_item" as const,
+              alvoId: it.id,
+              setorId: it.setorId,
+              atualizadoEm: it.atualizadoEm,
               detalhe: `${formatBRLSimples(it.valorMensal)} ${periodicidadeLabel(it.periodicidade)} · a partir de ${MESES_CURTO[it.mesInicio - 1]}${ate}${etiquetaSetor(it.setorId)}`,
               meses: serie,
               totalAno: serie.reduce((a, b) => a + b, 0),
@@ -717,6 +844,7 @@ export async function getPreviaOrcamento(
         continue;
       }
       pushMeses(leafByScopedId, scopedId, linha.meses);
+      // (o aprovado é somado logo abaixo, depois de montar os itens)
       // Abertura: quanto cada colaborador contribui NESTA linha (o salário
       // dele, o INSS dele…). Só quem tem valor na linha entra.
       const itensPessoal: PreviaFonteItem[] = (previaRes.payload.porColaborador ?? [])
@@ -726,18 +854,29 @@ export async function getPreviaOrcamento(
           return {
             nome: colab.nome?.trim() || "Sem nome",
             detalhe: vinculoLabel(colab.vinculo) + etiquetaSetor(colab.setorId),
+            // O MESMO colaborador aparece em várias linhas (Salários, Encargos,
+            // Benefícios). Como a chave é o id dele, um ✓ marca todas de uma
+            // vez: o diretor aprova a PESSOA, não três linhas dela.
+            alvoTipo: "colaborador" as const,
+            alvoId: colab.id,
+            setorId: colab.setorId ?? null,
+            atualizadoEm: colab.atualizadoEm ?? null,
             meses: dele.meses,
             totalAno: dele.totalAno,
           };
         })
         .filter((x): x is PreviaFonteItem => x != null)
         .sort((a, b) => b.totalAno - a.totalAno);
+      const aprovadosPessoal = marcarEAprovar(itensPessoal);
+      pushMeses(leafAprovadoByScopedId, scopedId, aprovadosPessoal);
       pushFonte(scopedId, {
         metodo: "pessoal",
         metodoLabel: metodoLabel("pessoal"),
         chave: linha.label,
         meses: linha.meses,
         totalAno: somar(linha.meses),
+        mesesAprovados: aprovadosPessoal,
+        totalAnoAprovado: somar(aprovadosPessoal),
         href: workspaceTabHref(companyId, year, "pessoal"),
         itens: itensPessoal,
       });
@@ -748,12 +887,23 @@ export async function getPreviaOrcamento(
   // Fórmulas são lineares (só +/-), então avaliar por mês e somar = avaliar
   // sobre o total do ano. Rodamos 12 vezes para ter a coluna de cada mês.
   const perMonthRows: DashboardRow[][] = [];
+  // A árvore do APROVADO roda pelo mesmo motor: as fórmulas das linhas
+  // calculadas (4/6/8/11) precisam ser avaliadas sobre o subconjunto, não
+  // recortadas depois — margem de um orçamento meio aprovado não é a margem
+  // cheia multiplicada por nada.
+  const perMonthRowsAprovado: DashboardRow[][] = [];
   for (let m = 0; m < 12; m += 1) {
     const amounts = new Map<string, number>();
     leafByScopedId.forEach((arr, id) => {
       if (arr[m] !== 0) amounts.set(id, arr[m]);
     });
     perMonthRows.push(buildDashboardRows(scope.coreAccounts, amounts).rows);
+
+    const aprovados = new Map<string, number>();
+    leafAprovadoByScopedId.forEach((arr, id) => {
+      if (arr[m] !== 0) aprovados.set(id, arr[m]);
+    });
+    perMonthRowsAprovado.push(buildDashboardRows(scope.coreAccounts, aprovados).rows);
   }
 
   // ── Fontes por linha ───────────────────────────────────────────────────────
@@ -783,6 +933,7 @@ export async function getPreviaOrcamento(
   const base = perMonthRows[0] ?? [];
   const linhas: PreviaDreLinha[] = base.map((row, i) => {
     const meses = perMonthRows.map((rows) => rows[i]?.value ?? 0);
+    const mesesAprovados = perMonthRowsAprovado.map((rows) => rows[i]?.value ?? 0);
     return {
       id: row.id,
       code: row.code,
@@ -795,14 +946,33 @@ export async function getPreviaOrcamento(
       hasChildren: row.hasChildren,
       meses,
       totalAno: somar(meses),
+      mesesAprovados,
+      totalAnoAprovado: somar(mesesAprovados),
       fontes: row.type === "calculado" ? [] : coletarFontes(row.id),
     };
   });
 
   const temReceita = linhas.some((l) => l.isReceita);
-  const totalDespesa = linhas
-    .filter((l) => l.type === "despesa" && !l.hasChildren)
-    .reduce((s, l) => s + l.totalAno, 0);
+  const folhas = (l: PreviaDreLinha) => l.type === "despesa" && !l.hasChildren;
+  const totalDespesa = linhas.filter(folhas).reduce((s, l) => s + l.totalAno, 0);
+  // O par que a tela mostra lado a lado: o que o gestor montou e o que a
+  // diretoria já aprovou. Um total menor sem dizer o que ficou de fora é o
+  // tipo de número que leva à decisão errada.
+  const totalDespesaAprovada = linhas
+    .filter(folhas)
+    .reduce((s, l) => s + l.totalAnoAprovado, 0);
+  // Sem repetição: o mesmo colaborador aparece em Salários, Encargos e
+  // Benefícios, e tem UM ✓ só — contar por linha triplicaria a pendência.
+  const alvosPendentes = new Set<string>();
+  linhas
+    .filter(folhas)
+    .flatMap((l) => l.fontes.flatMap((f) => f.itens))
+    .forEach((i) => {
+      if (!i.alvoTipo || !i.alvoId) return;
+      if (i.estado == null || i.estado === "aprovado") return;
+      alvosPendentes.add(`${i.alvoTipo}|${i.alvoId}`);
+    });
+  const itensPendentes = alvosPendentes.size;
   const totalReceita = linhas
     .filter((l) => l.isReceita && !l.hasChildren)
     .reduce((s, l) => s + l.totalAno, 0);
@@ -823,6 +993,9 @@ export async function getPreviaOrcamento(
         planejamentoSemValor,
         pessoalColaboradores,
         totalDespesa,
+        totalDespesaAprovada,
+        itensPendentes,
+        podeValidar: podeDecidir(user.papel),
         totalReceita,
       },
     },

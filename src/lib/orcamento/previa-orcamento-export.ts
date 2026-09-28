@@ -48,38 +48,45 @@ export async function downloadPreviaOrcamentoXlsx(
   const header = ["Código", "Linha", ...MESES, "Ano"];
   const primeiroMesIdx = 2; // 1ª coluna de mês (após Código e Linha)
 
-  const aoa: (string | number | null)[][] = [header];
-  for (const l of linhas) {
-    // Indenta o nome pela hierarquia, como na tela, para preservar a leitura.
-    const indent = "  ".repeat(Math.max(0, l.level - 1));
-    aoa.push([
-      l.code,
-      `${indent}${l.name}`,
-      ...l.meses.map((v) => (Number.isFinite(v) ? v : 0)),
-      Number.isFinite(l.totalAno) ? l.totalAno : 0,
-    ]);
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [
-    { wch: 8 }, // Código
-    { wch: 42 }, // Linha
-    ...MESES.map(() => ({ wch: 13 })), // 12 meses
-    { wch: 15 }, // Ano
-  ];
-  // Formato monetário (milhar + 2 casas) em todas as colunas de valor.
-  const ultimaColValor = header.length - 1; // coluna "Ano"
-  for (let r = 1; r < aoa.length; r++) {
-    for (let c = primeiroMesIdx; c <= ultimaColValor; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = ws[addr];
-      if (cell && typeof cell.v === "number") cell.z = "#,##0.00";
+  // Uma aba por série. `aprovado` escolhe qual das duas a Prévia devolve.
+  const montarAba = (aprovado: boolean) => {
+    const aoa: (string | number | null)[][] = [header];
+    for (const l of linhas) {
+      // Indenta o nome pela hierarquia, como na tela, para preservar a leitura.
+      const indent = "  ".repeat(Math.max(0, l.level - 1));
+      const meses = aprovado ? l.mesesAprovados : l.meses;
+      const total = aprovado ? l.totalAnoAprovado : l.totalAno;
+      aoa.push([
+        l.code,
+        `${indent}${l.name}`,
+        ...meses.map((v) => (Number.isFinite(v) ? v : 0)),
+        Number.isFinite(total) ? total : 0,
+      ]);
     }
-  }
-  // Congela o cabeçalho e as duas primeiras colunas ao abrir no Excel — mesma
-  // ideia do sticky da tela.
-  ws["!freeze"] = { xSplit: 2, ySplit: 1 };
 
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [
+      { wch: 8 }, // Código
+      { wch: 42 }, // Linha
+      ...MESES.map(() => ({ wch: 13 })), // 12 meses
+      { wch: 15 }, // Ano
+    ];
+    // Formato monetário (milhar + 2 casas) em todas as colunas de valor.
+    const ultimaColValor = header.length - 1; // coluna "Ano"
+    for (let r = 1; r < aoa.length; r++) {
+      for (let c = primeiroMesIdx; c <= ultimaColValor; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (cell && typeof cell.v === "number") cell.z = "#,##0.00";
+      }
+    }
+    // Congela o cabeçalho e as duas primeiras colunas ao abrir no Excel — mesma
+    // ideia do sticky da tela.
+    ws["!freeze"] = { xSplit: 2, ySplit: 1 };
+    return ws;
+  };
+
+  const ws = montarAba(false);
   const wb = XLSX.utils.book_new();
   // Nome da aba: o Excel corta em 31 caracteres e recusa alguns símbolos, então
   // o setor entra sanitizado e o conjunto é truncado.
@@ -90,6 +97,16 @@ export async function downloadPreviaOrcamentoXlsx(
         .slice(0, 31)
     : "Prévia do orçamento";
   XLSX.utils.book_append_sheet(wb, ws, aba);
+
+  // A 2ª aba com o APROVADO pela diretoria, e só quando as duas séries
+  // divergem: idênticas, ela seria uma cópia; com nada aprovado, uma folha de
+  // zeros. Vai em aba separada em vez de seguir o botão da tela porque o
+  // arquivo na pasta de downloads não diz qual série ele carrega — e a
+  // comparação é justamente o que se quer ver.
+  const divergem = linhas.some((l) => l.totalAnoAprovado !== l.totalAno);
+  if (divergem) {
+    XLSX.utils.book_append_sheet(wb, montarAba(true), "Aprovado");
+  }
 
   const sufixoSetor = meta.setorLabel ? `_${sanitizeFilenamePart(meta.setorLabel)}` : "";
   const filename = `previa_orcamento_${sanitizeFilenamePart(meta.empresaLabel)}${sufixoSetor}_${meta.ano}.xlsx`;

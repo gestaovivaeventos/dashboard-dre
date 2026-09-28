@@ -10,6 +10,12 @@ import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
 import { PREVIA_BUDGET_SOURCE, rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
+import { isSchemaMissing } from "@/lib/orcamento/errors";
+import {
+  entraNoNumero,
+  estadoDoItem,
+  type ValidacaoStatus,
+} from "@/lib/orcamento/validacao-diretoria";
 
 export interface EnvioBudgetResultado {
   /** Linhas cruas gravadas (mês × linha da prévia, sem os zeros). */
@@ -20,6 +26,12 @@ export interface EnvioBudgetResultado {
   celulasOrcamento: number;
   /** Rótulos ainda sem conta da DRE — não entram no orçamento enquanto isso. */
   naoMapeados: string[];
+  /**
+   * Colaboradores que a diretoria ainda não aprovou e por isso ficaram de
+   * fora. Publicar menos sem nomear a diferença é o tipo de número que leva à
+   * decisão errada.
+   */
+  colaboradoresNaoAprovados: number;
 }
 
 /**
@@ -50,7 +62,12 @@ export async function enviarPreviaParaOrcamento(
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   // SETOR_TODOS explícito: o orçamento leva a empresa inteira, todos os setores.
-  const previaRes = await getPrevia(companyId, year, { setorId: SETOR_TODOS });
+  // `detalharColaboradores` porque SÓ O APROVADO vai para o Budget, e o filtro
+  // é por PESSOA — o agregado sozinho não sabe de quem é cada real.
+  const previaRes = await getPrevia(companyId, year, {
+    setorId: SETOR_TODOS,
+    detalharColaboradores: true,
+  });
   if (previaRes.needsMigration) return { needsMigration: true };
   if (previaRes.error || !previaRes.payload) {
     return { error: previaRes.error ?? "Não consegui calcular a prévia." };
@@ -72,7 +89,42 @@ export async function enviarPreviaParaOrcamento(
     amount: number;
     source: string;
   }[] = [];
-  for (const linha of previa.linhas) {
+  // A folha APROVADA, somada pessoa a pessoa. Somar as partes é exato (não
+  // rateio): o motor do pessoal é linear em cada colaborador — inclusive
+  // férias, 13º e a defasagem do caixa —, e é por isso que o drilldown fecha
+  // com o total. Ratear por proporção erraria: RAT/FAP e o teto do INSS não
+  // são lineares no total.
+  const detalhes = previaRes.payload.porColaborador ?? [];
+  const decisoes = await decisoesDeColaboradores(
+    supabase,
+    companyId,
+    year,
+    detalhes.map((c) => c.id),
+  );
+  const aprovados = detalhes.filter((c) =>
+    entraNoNumero(estadoDoItem(decisoes.get(c.id) ?? null, c.atualizadoEm)),
+  );
+
+  // Soma por LINHA da prévia (Salários, Encargos, Benefícios…), preservando os
+  // rótulos do agregado — são eles que viram a conta no Budget.
+  const porLinha = new Map<string, { label: string; meses: number[] }>();
+  previa.linhas.forEach((l) => porLinha.set(l.key, { label: l.label, meses: Array(12).fill(0) }));
+  for (const colab of aprovados) {
+    for (const linha of colab.linhas) {
+      let acc = porLinha.get(linha.key);
+      // Linha que só existe no individual (não deveria acontecer): entra com o
+      // rótulo dele em vez de sumir calada.
+      if (!acc) {
+        acc = { label: linha.label, meses: Array(12).fill(0) };
+        porLinha.set(linha.key, acc);
+      }
+      linha.meses.forEach((v, i) => {
+        acc!.meses[i] += v;
+      });
+    }
+  }
+
+  for (const linha of Array.from(porLinha.values())) {
     const label = rotuloOrcamento(linha.label);
     linha.meses.forEach((valor, indice) => {
       const amount = Math.round(valor * 100) / 100;
@@ -86,6 +138,13 @@ export async function enviarPreviaParaOrcamento(
         source: PREVIA_BUDGET_SOURCE,
       });
     });
+  }
+
+  if (rows.length === 0) {
+    return {
+      error:
+        "Nada foi aprovado pela diretoria ainda — só o aprovado vai para o Budget. Aprove os colaboradores na aba Validação.",
+    };
   }
 
   // Substitui a publicação anterior desta empresa/ano — só as linhas do
@@ -154,9 +213,45 @@ export async function enviarPreviaParaOrcamento(
   return {
     resultado: {
       linhasGravadas: rows.length,
-      totalAno: previa.totalAno,
+      // A soma do que FOI publicado, não o total da prévia: com o filtro do
+      // aprovado os dois divergem, e o banner da tela leria este número como
+      // "quanto entrou no Budget".
+      totalAno: Math.round(rows.reduce((a, r) => a + r.amount, 0) * 100) / 100,
       celulasOrcamento,
       naoMapeados,
+      colaboradoresNaoAprovados: detalhes.length - aprovados.length,
     },
   };
+}
+
+/**
+ * Decisões da diretoria sobre estes colaboradores, por id.
+ *
+ * Tabela ausente (migration pendente) devolve mapa vazio — e aí NADA é
+ * aprovado, o que barra a publicação com a mensagem certa em vez de publicar
+ * um orçamento que ninguém viu.
+ */
+async function decisoesDeColaboradores(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  year: number,
+  ids: string[],
+): Promise<Map<string, { status: ValidacaoStatus; decididoEm: string }>> {
+  const mapa = new Map<string, { status: ValidacaoStatus; decididoEm: string }>();
+  if (ids.length === 0) return mapa;
+  const { data, error } = await supabase
+    .from("orcamento_validacoes")
+    .select("alvo_id, status, decidido_em")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("alvo_tipo", "colaborador")
+    .in("alvo_id", ids);
+  if (error && !isSchemaMissing(error.message)) return mapa;
+  ((data ?? []) as Array<Record<string, unknown>>).forEach((r) => {
+    mapa.set(r.alvo_id as string, {
+      status: r.status as ValidacaoStatus,
+      decididoEm: r.decidido_em as string,
+    });
+  });
+  return mapa;
 }

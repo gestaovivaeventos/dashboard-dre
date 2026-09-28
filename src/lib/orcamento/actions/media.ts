@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { chaveMedia } from "@/lib/orcamento/validacao-diretoria";
 import {
   autorizarEscrita,
   autorizarLeitura,
@@ -454,6 +456,58 @@ export async function recalcularTodasMedias(
 }
 
 /** Edição manual do valor da média (manual = true). null limpa o valor. */
+/**
+ * A linha da média está travada pela diretoria para ESTE usuário?
+ *
+ * A média não tem id próprio na tela — a linha pode nem existir ainda quando
+ * o valor é o "vivo" do realizado —, então o alvo da decisão é a chave
+ * (categoria, setor). Dois caminhos de escrita (valor e índice) usam isto.
+ */
+async function travaDaLinhaDeMedia(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  year: number,
+  categoryCode: string,
+  setorId: string | null,
+  papel: string,
+): Promise<string | null> {
+  let q = supabase
+    .from("orcamento_media_categorias")
+    .select("updated_at")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("category_code", categoryCode);
+  // `.eq(col, null)` vira `eq.null` no PostgREST e não casa com nada.
+  q = setorId ? q.eq("setor_id", setorId) : q.is("setor_id", null);
+  const { data } = await q.maybeSingle();
+  const atualizadoEm = (data?.updated_at as string | null) ?? null;
+
+  const travado = await travaDaValidacao({
+    companyId,
+    year,
+    alvoTipo: "media_linha",
+    alvoId: chaveMedia(categoryCode, setorId),
+    atualizadoEm,
+    papel,
+  });
+  if (travado || !setorId) return travado;
+
+  // A CHAVE SEM SETOR também trava. Enquanto não há linha gravada, a Prévia
+  // mostra a média "viva" do realizado e a ancora em (categoria, ∅) — não há
+  // setor a apontar. A primeira gravação resolve o setor (`setorParaGravar`) e
+  // passaria a procurar (categoria, setor), que não existe: a decisão tomada
+  // sobre a média viva seria contornada em silêncio pela própria gravação que
+  // ela deveria barrar.
+  return travaDaValidacao({
+    companyId,
+    year,
+    alvoTipo: "media_linha",
+    alvoId: chaveMedia(categoryCode, null),
+    atualizadoEm,
+    papel,
+  });
+}
+
 export async function setMediaValor(
   companyId: string,
   year: number,
@@ -472,10 +526,6 @@ export async function setMediaValor(
   const supabase = db() ?? (await createClient());
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
-// A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). O que havia aqui
-// era o gate por campo e a trava da diretoria; as colunas `diretoria_travado` e
-// companhia continuam no banco, sem ninguém lendo ou escrevendo. O ciclo
-// (construção → validação → retorno) e a trilha continuam de pé.
   const admin = { userId: auth.user.userId };
   // O upsert casa por (empresa, ano, categoria, setor): setor NULL nunca
   // encontra a linha anterior e duplicaria a categoria a cada gravação.
@@ -484,6 +534,17 @@ export async function setMediaValor(
   // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum.
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  // TRAVA DA VALIDAÇÃO: linha aprovada ou reprovada pela diretoria sai das mãos
+  // do gestor — só admin e diretoria mexem. Decisão vencida não trava.
+  const travado = await travaDaLinhaDeMedia(
+    supabase,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+    auth.user.papel,
+  );
+  if (travado) return { error: travado };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
@@ -543,6 +604,17 @@ export async function setMediaIndice(
   // O destino só é conhecido aqui: "Todos os setores" cai no balde "Não
   // atribuído", que não pertence a gerente nenhum.
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  // TRAVA DA VALIDAÇÃO: linha aprovada ou reprovada pela diretoria sai das mãos
+  // do gestor — só admin e diretoria mexem. Decisão vencida não trava.
+  const travado = await travaDaLinhaDeMedia(
+    supabase,
+    companyId,
+    year,
+    categoryCode,
+    alvo.id,
+    auth.user.papel,
+  );
+  if (travado) return { error: travado };
   const { error } = await supabase.from("orcamento_media_categorias").upsert(
     {
       company_id: companyId,
@@ -551,9 +623,6 @@ export async function setMediaIndice(
       category_name: categoryName,
       setor_id: alvo.id,
       indice_key: indiceKey,
-      // O CICLO saiu em 24/09/2026, junto com a validação (ambos serão redesenhados).
-      // Aqui a alteração da diretoria marcava `diretoria_travado` — coluna que hoje
-      // ninguém lê. A coluna ficou no banco para o redesenho reaproveitar.
       updated_by: admin.userId,
     },
     { onConflict: "company_id,year,category_code,setor_id" },

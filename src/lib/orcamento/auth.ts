@@ -1,5 +1,6 @@
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
+import { podeDecidir } from "@/lib/orcamento/validacao-diretoria";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -52,6 +53,17 @@ export interface OrcamentoUser {
    * para um cadastro próprio do orçamento.
    */
   ctrlSectorIds: string[];
+}
+
+/**
+ * Este usuário decide (aprova/reprova) itens do orçamento?
+ *
+ * Mesma regra de `podeDecidir` (o módulo puro da validação), aqui sobre o
+ * usuário já carregado — para a página não ter de repetir `user?.papel`
+ * espalhado pelas telas. `null` (fora do módulo) nunca decide.
+ */
+export function podeValidarOrcamento(user: OrcamentoUser | null | undefined): boolean {
+  return user != null && podeDecidir(user.papel);
 }
 
 /** Mensagem única de negativa — as actions devolvem `{ error }`, não exceção. */

@@ -19,6 +19,8 @@ import {
   workspacePreviaHref,
 } from "@/lib/orcamento/workspace-tabs";
 import { statusGeral, type OrcamentoStatusRaw } from "@/lib/orcamento/status";
+import type { ContagemPorMetodo } from "@/lib/orcamento/actions/validacao-diretoria";
+import type { ContagemValidacao } from "@/lib/orcamento/validacao-diretoria";
 import { StatusBadge } from "@/components/orcamento/status-badge";
 
 // Ícone + descrição por método (os rótulos vêm de METODOS, fonte única).
@@ -43,9 +45,11 @@ interface TileProps {
   href?: string;
   /** Marca o módulo ainda não construído. */
   comingSoon?: boolean;
+  /** Rodapé do card: o andamento da validação neste método. */
+  rodape?: React.ReactNode;
 }
 
-function Tile({ icon: Icon, title, desc, href, comingSoon }: TileProps) {
+function Tile({ icon: Icon, title, desc, href, comingSoon, rodape }: TileProps) {
   const inner = (
     <>
       <div className="flex items-start justify-between">
@@ -65,6 +69,7 @@ function Tile({ icon: Icon, title, desc, href, comingSoon }: TileProps) {
         <div className="font-semibold">{title}</div>
         <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
       </div>
+      {rodape}
     </>
   );
 
@@ -101,10 +106,16 @@ export function CompanyHub({
   year,
   status,
   isAdmin = false,
+  validacoes = {},
+  podeValidar = false,
 }: {
   companyId: string;
   year: number;
   status?: OrcamentoStatusRaw;
+  /** Andamento da validação por método, já recortado no setor de quem vê. */
+  validacoes?: ContagemPorMetodo;
+  /** Quem vê é quem decide? Muda o texto do rodapé, não o número. */
+  podeValidar?: boolean;
   /*
    * Não há mais recorte de caixas por papel: com a validação acontecendo DENTRO
    * das telas de método, todo mundo usa as mesmas portas. O que muda por papel
@@ -173,6 +184,11 @@ export function CompanyHub({
               desc={ui.desc}
               href={built ? workspaceTabHref(companyId, year, m.key) : undefined}
               comingSoon={!built}
+              rodape={
+                built ? (
+                  <RodapeValidacao contagem={validacoes[m.key]} podeValidar={podeValidar} />
+                ) : undefined
+              }
             />
           );
         })}
@@ -193,5 +209,69 @@ export function CompanyHub({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * O andamento da validação no rodapé do card.
+ *
+ * Duas leituras da MESMA contagem, e isso é de propósito: o diretor precisa
+ * saber quantas verificações tem pela frente naquele método, e o gestor
+ * quantas voltaram para ele, quantas passaram e quantas caíram. A contagem já
+ * vem recortada no setor de quem pergunta, então cada gerente lê o número do
+ * próprio setor sem a tela saber disso.
+ */
+function RodapeValidacao({
+  contagem,
+  podeValidar,
+}: {
+  contagem?: ContagemValidacao;
+  podeValidar: boolean;
+}) {
+  // Método sem nada orçado não ganha rodapé: "0 a verificar" num card vazio
+  // é ruído, não informação.
+  if (!contagem || contagem.total === 0) return null;
+
+  const partes: { texto: string; classe: string }[] = [];
+  if (podeValidar) {
+    if (contagem.pendentes > 0) {
+      partes.push({
+        texto: `${contagem.pendentes} a verificar`,
+        classe: "text-amber-700 dark:text-amber-500",
+      });
+    }
+  } else if (contagem.revisar > 0) {
+    partes.push({
+      texto: `${contagem.revisar} com pergunta`,
+      classe: "text-sky-700 dark:text-sky-400",
+    });
+  }
+  if (contagem.aprovados > 0) {
+    partes.push({
+      texto: `${contagem.aprovados} aprovada(s)`,
+      classe: "text-emerald-600 dark:text-emerald-400",
+    });
+  }
+  if (contagem.reprovados > 0) {
+    partes.push({ texto: `${contagem.reprovados} reprovada(s)`, classe: "text-destructive" });
+  }
+  // Para o diretor, o 'revisar' entra depois das outras: é fila do gestor, não
+  // dele — mas ele precisa ver que devolveu.
+  if (podeValidar && contagem.revisar > 0) {
+    partes.push({
+      texto: `${contagem.revisar} devolvida(s)`,
+      classe: "text-sky-700 dark:text-sky-400",
+    });
+  }
+  if (partes.length === 0) return null;
+
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t pt-2 text-[11px] font-medium">
+      {partes.map((p) => (
+        <span key={p.texto} className={p.classe}>
+          {p.texto}
+        </span>
+      ))}
+    </p>
   );
 }

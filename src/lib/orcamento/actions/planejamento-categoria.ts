@@ -18,6 +18,7 @@ import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
+import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
 import {
   normNomeCategoria,
   serieItem,
@@ -38,6 +39,17 @@ import {
 } from "@/lib/orcamento/grupos";
 import { getPreviaOrcamento } from "@/lib/orcamento/actions/previa-orcamento";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import {
+  contarEstados,
+  entraNoNumero,
+  estadoDoItem,
+  gestorPodeEditar,
+  podeDecidir,
+  type ContagemValidacao,
+  type ValidacaoAlvoTipo,
+  type ValidacaoEstado,
+  type ValidacaoStatus,
+} from "@/lib/orcamento/validacao-diretoria";
 
 // =============================================================================
 // Planejamento dos gestores — MONTAGEM de uma categoria.
@@ -87,7 +99,15 @@ export interface PlanejamentoDespesaLinha {
   totalAno: number;
   cancelado: boolean;
   canceladoMotivo: string | null;
+  /**
+   * Fechada para o gestor porque a diretoria já decidiu (aprovou ou
+   * reprovou). É DERIVADO do status — a coluna `diretoria_travado` continua no
+   * banco e ninguém a lê. Ver src/lib/orcamento/validacao-diretoria.ts.
+   */
   travado: boolean;
+  estado: ValidacaoEstado;
+  /** O que o diretor pediu que mude — só no 'revisar'. */
+  comentario: string | null;
 }
 
 export interface PlanejamentoSetorDaCategoria {
@@ -143,13 +163,18 @@ function linhaBase(r: Record<string, unknown>): PlanejamentoBaseLinha {
   };
 }
 
-function linhaDespesa(r: Record<string, unknown>): PlanejamentoDespesaLinha {
+function linhaDespesa(
+  r: Record<string, unknown>,
+  decisao: { status: ValidacaoStatus; comentario: string | null; decididoEm: string } | null,
+  papel: string,
+): PlanejamentoDespesaLinha {
   const grupo = r.orcamento_grupos_despesa as { name?: string } | null | undefined;
   const valor = Number(r.valor) || 0;
   const mesInicio = Math.min(12, Math.max(1, Number(r.mes_inicio) || 1));
   const mesFim = r.mes_fim == null ? null : Math.min(12, Math.max(1, Number(r.mes_fim)));
   const periodicidade = toPeriodicidade(r.periodicidade);
   const meses = serieItem(valor, mesInicio, periodicidade, mesFim);
+  const estado = estadoDoItem(decisao, (r.updated_at as string | null) ?? null);
   return {
     id: r.id as string,
     descricao: (r.descricao as string) ?? "",
@@ -165,7 +190,10 @@ function linhaDespesa(r: Record<string, unknown>): PlanejamentoDespesaLinha {
     totalAno: meses.reduce((a, b) => a + b, 0),
     cancelado: r.cancelado === true,
     canceladoMotivo: (r.cancelado_motivo as string | null) ?? null,
-    travado: r.diretoria_travado === true,
+    // Quem decide nunca se trava: é ele quem mexe no que já foi decidido.
+    travado: !podeDecidir(papel) && !gestorPodeEditar(estado),
+    estado,
+    comentario: decisao?.comentario ?? null,
   };
 }
 
@@ -379,7 +407,7 @@ export async function getPlanejamentoMontagem(
     supabase
       .from("orcamento_planejamento_despesas")
       .select(
-        "id, descricao, grupo_id, valor, periodicidade, mes_inicio, mes_fim, fornecedor, origem, cancelado, cancelado_motivo, diretoria_travado, created_at, orcamento_grupos_despesa(name)",
+        "id, descricao, grupo_id, valor, periodicidade, mes_inicio, mes_fim, fornecedor, origem, cancelado, cancelado_motivo, updated_at, created_at, orcamento_grupos_despesa(name)",
       )
       .eq("company_id", companyId)
       .eq("year", year)
@@ -390,6 +418,32 @@ export async function getPlanejamentoMontagem(
   if (despErr) {
     if (isSchemaMissing(despErr.message)) return { needsMigration: true };
     return { error: despErr.message };
+  }
+
+  // Decisões da diretoria sobre estas despesas. Tabela ausente (migration
+  // pendente) vira mapa vazio: a tela abre com tudo pendente, nunca quebra.
+  const decisoes = new Map<
+    string,
+    { status: ValidacaoStatus; comentario: string | null; decididoEm: string }
+  >();
+  {
+    const ids = (despRows ?? []).map((r) => (r as Record<string, unknown>).id as string);
+    if (ids.length > 0) {
+      const { data: vRows } = await supabase
+        .from("orcamento_validacoes")
+        .select("alvo_id, status, comentario, decidido_em")
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("alvo_tipo", "planejamento_item")
+        .in("alvo_id", ids);
+      ((vRows ?? []) as Array<Record<string, unknown>>).forEach((v) => {
+        decisoes.set(v.alvo_id as string, {
+          status: v.status as ValidacaoStatus,
+          comentario: (v.comentario as string | null) ?? null,
+          decididoEm: v.decidido_em as string,
+        });
+      });
+    }
   }
 
   // Realizado do ano anterior (categoria + irmãs "(*)"), para a tela mostrar o
@@ -426,7 +480,10 @@ export async function getPlanejamentoMontagem(
       contextoAdmin: (entrevRow?.contexto_admin as string | null) ?? "",
       conversa,
       justificativa: (entrevRow?.justificativa as string | null) ?? "",
-      despesas: (despRows ?? []).map((r) => linhaDespesa(r as Record<string, unknown>)),
+      despesas: (despRows ?? []).map((r) => {
+        const row = r as Record<string, unknown>;
+        return linhaDespesa(row, decisoes.get(row.id as string) ?? null, auth.user.papel);
+      }),
       realizadoAnterior:
         totalAnterior > 0 || combinado.media != null
           ? { total: totalAnterior, media: combinado.media, meses: combinado.meses }
@@ -924,16 +981,26 @@ export async function editarDespesa(
 
   const { data: atual } = await supabase
     .from("orcamento_planejamento_despesas")
-    .select("setor_id, category_code, descricao, valor")
+    .select("setor_id, category_code, descricao, valor, updated_at")
     .eq("id", despesaId)
     .maybeSingle();
   if (!atual) return { error: "Despesa não encontrada." };
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). Aqui havia a
-  // trava da diretoria sobre a despesa; a coluna `diretoria_travado` continua no
-  // banco, sem ninguém lendo nem escrevendo. O ciclo e a trilha ficaram.
+  // TRAVA DA VALIDAÇÃO: despesa aprovada ou reprovada pela diretoria sai das
+  // mãos do gestor — só admin e diretoria mexem. Deriva do status, não da
+  // coluna `diretoria_travado` (que segue no banco sem ninguém ler). Decisão
+  // vencida (despesa alterada depois dela) não trava.
+  const travado = await travaDaValidacao({
+    companyId,
+    year,
+    alvoTipo: "planejamento_item",
+    alvoId: despesaId,
+    atualizadoEm: (atual.updated_at as string | null) ?? null,
+    papel: auth.user.papel,
+  });
+  if (travado) return { error: travado };
 
   const { error } = await supabase
     .from("orcamento_planejamento_despesas")
@@ -983,16 +1050,26 @@ export async function removerDespesa(
 
   const { data: atual } = await supabase
     .from("orcamento_planejamento_despesas")
-    .select("setor_id, descricao, valor")
+    .select("setor_id, descricao, valor, updated_at")
     .eq("id", despesaId)
     .maybeSingle();
   if (!atual) return { error: "Despesa não encontrada." };
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
-  // A VALIDAÇÃO SAIU DO SISTEMA em 24/09/2026 (será redesenhada). Aqui havia a
-  // trava da diretoria sobre a despesa; a coluna `diretoria_travado` continua no
-  // banco, sem ninguém lendo nem escrevendo. O ciclo e a trilha ficaram.
+  // TRAVA DA VALIDAÇÃO: despesa aprovada ou reprovada pela diretoria sai das
+  // mãos do gestor — só admin e diretoria mexem. Deriva do status, não da
+  // coluna `diretoria_travado` (que segue no banco sem ninguém ler). Decisão
+  // vencida (despesa alterada depois dela) não trava.
+  const travado = await travaDaValidacao({
+    companyId,
+    year,
+    alvoTipo: "planejamento_item",
+    alvoId: despesaId,
+    atualizadoEm: (atual.updated_at as string | null) ?? null,
+    papel: auth.user.papel,
+  });
+  if (travado) return { error: travado };
 
   const { error } = await supabase
     .from("orcamento_planejamento_despesas")
@@ -1020,12 +1097,32 @@ export async function removerDespesa(
 
 // ─── Prévia do setor (a faixa que se preenche durante a entrevista) ──────────
 
+/** Uma despesa da prévia do setor — a unidade que a diretoria decide. */
+export interface PreviaSetorItem {
+  nome: string;
+  detalhe: string | null;
+  total: number;
+  /**
+   * Identidade da decisão. Ausente só se o método não souber identificar o
+   * item; a tela esconde os botões nesse caso, em vez de gravar num alvo
+   * inventado que ninguém conseguiria destravar depois.
+   */
+  alvoTipo?: ValidacaoAlvoTipo;
+  alvoId?: string;
+  setorId: string | null;
+  estado: ValidacaoEstado;
+  /** O que o diretor pediu que mude — só no 'revisar'. */
+  comentario: string | null;
+}
+
 export interface PreviaSetorGrupo {
   /** Nome do grupo, ou "Sem grupo" no balde. */
   nome: string;
   grupoId: string | null;
   total: number;
-  itens: { nome: string; detalhe: string | null; total: number }[];
+  /** Só a parte aprovada pela diretoria. */
+  totalAprovado: number;
+  itens: PreviaSetorItem[];
 }
 
 export interface PreviaSetorCategoria {
@@ -1033,6 +1130,8 @@ export interface PreviaSetorCategoria {
   metodo: string;
   metodoLabel: string;
   total: number;
+  /** Só a parte aprovada — é esta que compõe a Prévia da empresa. */
+  totalAprovado: number;
   /** Vazio quando o método não tem despesa item a item (ex.: média). */
   grupos: PreviaSetorGrupo[];
   /** A categoria da tela aberta — a tela a destaca. */
@@ -1042,6 +1141,15 @@ export interface PreviaSetorCategoria {
 export interface PreviaSetorResumo {
   categorias: PreviaSetorCategoria[];
   total: number;
+  totalAprovado: number;
+  /**
+   * Quantos itens em cada estado NESTE setor, já sem repetição: o mesmo
+   * colaborador aparece em várias linhas da DRE (salário, encargos,
+   * benefícios) e contaria três vezes.
+   */
+  contagem: ContagemValidacao;
+  /** Quem está vendo decide? A tela só mostra os botões quando sim. */
+  podeValidar: boolean;
 }
 
 /**
@@ -1071,6 +1179,8 @@ export async function getPreviaSetor(
   if (res.error || !res.data) return { error: res.error ?? "Não consegui calcular a prévia." };
 
   const categorias: PreviaSetorCategoria[] = [];
+  const vistos = new Set<string>();
+  const paraContar: { estado: ValidacaoEstado }[] = [];
   for (const linha of res.data.linhas) {
     // SÓ AS FOLHAS. `coletarFontes` (em previa-orcamento.ts) acumula as fontes
     // dos filhos em cada linha-resumo de propósito, para o drilldown de um
@@ -1081,6 +1191,14 @@ export async function getPreviaSetor(
     if (linha.hasChildren || linha.isCalculado) continue;
     for (const fonte of linha.fontes) {
       if (fonte.totalAno === 0 && fonte.itens.length === 0) continue;
+      fonte.itens.forEach((i) => {
+        // Dedupe: o mesmo colaborador aparece em várias linhas da DRE, e o ✓
+        // dele é um só — contar por linha triplicaria o número do cabeçalho.
+        const chaveItem = i.alvoTipo && i.alvoId ? `${i.alvoTipo}|${i.alvoId}` : null;
+        if (!chaveItem || vistos.has(chaveItem)) return;
+        vistos.add(chaveItem);
+        paraContar.push({ estado: i.estado ?? "pendente" });
+      });
       const grupos = agruparPorGrupo(
         fonte.itens.map((i) => ({
           grupoId: i.grupo ?? null,
@@ -1088,6 +1206,11 @@ export async function getPreviaSetor(
           nome: i.nome,
           detalhe: i.detalhe ?? null,
           total: i.totalAno,
+          alvoTipo: i.alvoTipo,
+          alvoId: i.alvoId,
+          setorId: i.setorId ?? setorId,
+          estado: i.estado ?? ("pendente" as ValidacaoEstado),
+          comentario: i.comentario ?? null,
         })),
       ).map((g) => ({
         // `agruparPorGrupo` chaveia por id; aqui o "id" é o próprio nome do
@@ -1097,7 +1220,17 @@ export async function getPreviaSetor(
         nome: g.nome,
         grupoId: g.grupoId,
         total: g.itens.reduce((a, i) => a + i.total, 0),
-        itens: g.itens.map((i) => ({ nome: i.nome, detalhe: i.detalhe, total: i.total })),
+        totalAprovado: g.itens.reduce((a, i) => a + (entraNoNumero(i.estado) ? i.total : 0), 0),
+        itens: g.itens.map((i) => ({
+          nome: i.nome,
+          detalhe: i.detalhe,
+          total: i.total,
+          alvoTipo: i.alvoTipo,
+          alvoId: i.alvoId,
+          setorId: i.setorId,
+          estado: i.estado,
+          comentario: i.comentario,
+        })),
       }));
 
       categorias.push({
@@ -1105,6 +1238,7 @@ export async function getPreviaSetor(
         metodo: fonte.metodo,
         metodoLabel: fonte.metodoLabel,
         total: fonte.totalAno,
+        totalAprovado: fonte.totalAnoAprovado ?? 0,
         grupos,
         atual: fonte.metodo === "planejamento_socios" && fonte.chave === categoriaAtual,
       });
@@ -1118,6 +1252,12 @@ export async function getPreviaSetor(
   });
 
   return {
-    data: { categorias, total: categorias.reduce((a, c) => a + c.total, 0) },
+    data: {
+      categorias,
+      total: categorias.reduce((a, c) => a + c.total, 0),
+      totalAprovado: categorias.reduce((a, c) => a + c.totalAprovado, 0),
+      contagem: contarEstados(paraContar.map((i) => i.estado)),
+      podeValidar: res.data.resumo.podeValidar,
+    },
   };
 }
