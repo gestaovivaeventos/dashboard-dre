@@ -25,7 +25,14 @@ const INPUT_CLS =
  * por empresa, uma de cada vez. Cada card mostra um selo ÚNICO de andamento
  * (Não iniciado / Em andamento / Concluído).
  */
-export function OrcamentoPainel({ companies }: { companies: Company[] }) {
+export function OrcamentoPainel({
+  companies,
+  isAdmin = false,
+}: {
+  companies: Company[];
+  /** Muda só o texto do estado vazio — admin alcança todas as empresas. */
+  isAdmin?: boolean;
+}) {
   const [year, setYear] = useState<number>(defaultBudgetYear());
   const [search, setSearch] = useState("");
   const [statuses, setStatuses] = useState<Record<string, OrcamentoStatusRaw>>({});
@@ -48,9 +55,25 @@ export function OrcamentoPainel({ companies }: { companies: Company[] }) {
   }, [companies, search]);
 
   if (companies.length === 0) {
+    // Para quem NÃO é admin, a lista vazia quase nunca é "não há empresa": é o
+    // vínculo de unidades do usuário que está vazio. Dizer "nenhuma empresa
+    // ativa" faz a pessoa procurar defeito no cadastro de empresas, que ela
+    // nem enxerga — o mesmo tipo de silêncio do recorte por setor.
     return (
       <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-        Nenhuma empresa ativa encontrada.
+        {isAdmin ? (
+          "Nenhuma empresa ativa encontrada."
+        ) : (
+          <>
+            <span className="block font-medium text-foreground">
+              Nenhuma unidade vinculada ao seu usuário.
+            </span>
+            <span className="mt-1 block">
+              Você tem acesso ao módulo Orçamento, mas ele mostra apenas as unidades
+              marcadas para você. Um administrador resolve na tela de Usuários.
+            </span>
+          </>
+        )}
       </div>
     );
   }

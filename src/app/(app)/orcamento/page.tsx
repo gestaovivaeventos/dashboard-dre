@@ -43,7 +43,7 @@ export default async function OrcamentoPainelPage() {
       ) : error ? (
         <p className="text-sm text-destructive">{error}</p>
       ) : (
-        <OrcamentoPainel companies={companies} />
+        <OrcamentoPainel companies={companies} isAdmin={user.isAdmin} />
       )}
     </div>
   );

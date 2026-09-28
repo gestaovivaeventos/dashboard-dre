@@ -1338,6 +1338,23 @@ function UserForm({
               nenhum setor, ele aprova requisições de todos os setores.
             </p>
           )}
+          {/* O MESMO campo tem leitura OPOSTA nos dois módulos, e já confundiu:
+              no Compras, diretor sem setor recebe tudo; no Orçamento, sem setor
+              ele não consegue montar nada (lê e valida a empresa inteira, mas o
+              escopo de ESCRITA fica vazio). Para gerente, vazio significa não
+              enxergar nada. Sem esta linha, o admin marca o módulo e a pessoa
+              abre a tela em branco. */}
+          {form.can_orcamento && (
+            <p className="text-xs text-amber-700 dark:text-amber-500">
+              No <strong>Orçamento</strong> este campo tem outro efeito:{" "}
+              {form.profile === "diretor"
+                ? "sem setor, o diretor lê e valida a empresa inteira, mas não consegue montar o orçamento de nenhum setor."
+                : "sem setor, a pessoa abre as telas do orçamento VAZIAS — é o setor que define o que ela enxerga."}{" "}
+              O vínculo só vale depois que o setor do Compras for ligado ao setor
+              do orçamento, em <strong>Configuração › Setores</strong> de cada
+              empresa e ano.
+            </p>
+          )}
         </div>
       )}
 
