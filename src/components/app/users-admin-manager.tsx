@@ -40,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatBrasiliaDateTime } from "@/lib/auth/access-log";
 import {
   isOrcamentoEligibleProfile,
   type OrcamentoSetoresPorEmpresa,
@@ -102,6 +103,13 @@ interface Props {
    * existem no Compras — metade desta base está assim.
    */
   orcamentoSetores: Record<string, string[]>;
+  /**
+   * Último login por usuário (log de acesso, `auth_access_last_login`). Fica
+   * fora de UserItem porque a lista é recarregada por /api/users depois de
+   * cada edição e o valor sumiria. `null` = log indisponível (migration ainda
+   * não aplicada): a coluna mostra "—" em vez de um "Nunca" enganoso.
+   */
+  lastLogins: Record<string, string> | null;
 }
 
 const PROFILES: Array<{
@@ -273,6 +281,7 @@ export function UsersAdminManager({
   companies,
   sectors,
   orcamentoSetores,
+  lastLogins,
 }: Props) {
   const [users, setUsers] = useState(initialUsers);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -762,6 +771,7 @@ export function UsersAdminManager({
                 ]}
               />
             </TableHead>
+            <TableHead className="whitespace-nowrap">Último acesso</TableHead>
             <TableHead>
               <HeaderFilter
                 value={filterStatus}
@@ -857,6 +867,13 @@ export function UsersAdminManager({
                       .filter(Boolean)
                       .join(", ")}
               </TableCell>
+              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                {lastLogins === null
+                  ? "—"
+                  : lastLogins[u.id]
+                  ? formatBrasiliaDateTime(lastLogins[u.id])
+                  : "Nunca"}
+              </TableCell>
               <TableCell>
                 <Badge
                   variant={u.active ? "default" : "outline"}
@@ -879,7 +896,7 @@ export function UsersAdminManager({
           ))}
           {filteredUsers.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+              <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
                 {users.length === 0
                   ? "Nenhum usuário cadastrado."
                   : "Nenhum usuário encontrado com os filtros aplicados."}

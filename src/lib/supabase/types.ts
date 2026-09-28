@@ -390,3 +390,22 @@ export interface CtrlNotification {
   is_read: boolean;
   created_at: string;
 }
+
+// ─── Log de acesso (auth_access_log) ─────────────────────────────────────────
+// Gravado só pelo gatilho em auth.sessions (migration 20260930120000). O app
+// apenas lê: não há permissão de INSERT/UPDATE/DELETE para nenhum role do app.
+export type AuthAccessEvent = "login" | "logout";
+
+export interface AuthAccessLogRow {
+  id: number;
+  user_id: string | null;
+  /** Cópia do e-mail no momento do evento (sobrevive à exclusão do usuário). */
+  email: string | null;
+  event: AuthAccessEvent;
+  session_id: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  aal: string | null;
+  source: "trigger" | "backfill";
+  occurred_at: string;
+}

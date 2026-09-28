@@ -24,6 +24,7 @@ import {
   PieChart,
   Plug,
   Receipt,
+  ShieldCheck,
   Sliders,
   Sparkles,
   Target,
@@ -398,6 +399,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { key: "pf-users", title: "Usuarios", icon: Users, scope: "global", href: "/usuarios", dreRoles: ["admin"] },
       { key: "pf-relatorios-bi", title: "Relatorios BI", icon: Mail, scope: "global", href: "/admin/relatorios-bi", dreRoles: ["admin"] },
+      // Log de acesso (compliance): entradas e sessões encerradas, gravadas por
+      // gatilho no banco. Admin-only, como toda rota /admin* em access.ts.
+      { key: "pf-acessos", title: "Acessos", icon: ShieldCheck, scope: "global", href: "/admin/acessos", dreRoles: ["admin"] },
       // Painel Administrador: reune gestao de empresas, Omie, orcamento, status,
       // planilhas e historico por segmento. Segment-scoped (precisa do segmentId
       // para criar empresa no segmento e para o painel FEE/VVR). Admin-only.

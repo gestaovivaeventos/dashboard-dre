@@ -44,6 +44,21 @@ export default async function UsuariosPage() {
   // Modulo Orcamento: mesma ideia (ver @/lib/auth/orcamento).
   const orcamentoUserIds = await fetchOrcamentoGrantUserIds(adminClient);
 
+  // Último acesso: uma consulta para a lista inteira (view agregada no banco).
+  // Com erro (migration do log ainda não aplicada) a coluna mostra "—".
+  let lastLogins: Record<string, string> | null = null;
+  {
+    const { data, error } = await adminClient
+      .from("auth_access_last_login")
+      .select("user_id, last_login_at");
+    if (!error) {
+      lastLogins = {};
+      for (const row of (data ?? []) as Array<{ user_id: string; last_login_at: string }>) {
+        lastLogins[row.user_id] = row.last_login_at;
+      }
+    }
+  }
+
   const companyById = new Map((companies ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorById = new Map((sectors ?? []).map((s) => [s.id as string, s.name as string]));
 
@@ -135,6 +150,7 @@ export default async function UsuariosPage() {
       initialUsers={usersData}
       companies={(companies ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
       orcamentoSetores={orcamentoSetoresPorEmpresa}
+      lastLogins={lastLogins}
       sectors={(sectors ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))}
     />
   );
