@@ -1661,6 +1661,50 @@ async function applyApprovalStep(
 
   // status === "pendente" → etapa do gerente.
   const managerIsFinal = isManagerFinalSector(req.sector_id);
+
+  // Diretor/CSC/Admin é SUPER-APROVADOR: aprovar na etapa do gerente conclui a
+  // requisição de uma vez (gerente + diretor), exatamente como o approveRateio já
+  // faz por parcela. Sem isto, um diretor que aprovava uma requisição FORA do
+  // orçamento a empurrava para `pendente_diretor` — a própria etapa que ele
+  // acabou de cumprir — e a decisão dele ficava registrada como aprovação de
+  // gerente. A aprovação do diretor é sempre a final.
+  const isDirector = ctx.ctrlRoles.some((r) => ["diretor", "csc", "admin"].includes(r));
+  if (isDirector) {
+    const { error } = await supabase
+      .from("ctrl_requests")
+      .update({ status: "aprovado", approved_by: ctx.id, approved_at: now, updated_at: now })
+      .eq("id", req.id);
+    if (error) return { error: error.message };
+
+    // Só houve etapa de diretor a concluir quando a requisição estava fora do
+    // orçamento e o setor não dispensa o diretor; senão foi aprovação final comum.
+    const concluiuEtapaDiretor = (req.approval_tier as string) === "nivel_3" && !managerIsFinal;
+    await supabase.from("ctrl_history").insert({
+      request_id: req.id,
+      user_id: ctx.id,
+      action: "aprovado",
+      comment:
+        comment?.trim() ||
+        (concluiuEtapaDiretor
+          ? `Aprovação final pelo Diretor ${ctx.name ?? ctx.email} (gerente + diretor)`
+          : `Aprovada pelo Diretor ${ctx.name ?? ctx.email}`),
+      metadata: {
+        approver_roles: ctx.ctrlRoles,
+        stage: "diretor",
+        ...(concluiuEtapaDiretor ? { manager_stage_concluded_by_director: true } : {}),
+      },
+    });
+    await notifyRequester({
+      userId: req.created_by,
+      requestId: req.id,
+      requestNumber: req.request_number,
+      title: "Requisição Aprovada",
+      message: `Sua requisição #${req.request_number} foi aprovada por ${ctx.name ?? ctx.email}.`,
+      type: "aprovacao",
+    });
+    return { ok: true, finalized: true };
+  }
+
   if ((req.approval_tier as string) === "nivel_3" && !managerIsFinal) {
     // Fora do orçamento: gerente aprovou, encaminha ao diretor.
     const { error } = await supabase

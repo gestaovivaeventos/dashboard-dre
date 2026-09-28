@@ -616,7 +616,7 @@ export const MANUAL_SECTIONS: ManualSection[] = [
       {
         kind: "p",
         text:
-          "Você também pode concluir a etapa gerencial de uma requisição parada. Se ela estiver fora do orçamento, a aprovação a leva para a etapa do diretor — será preciso aprovar novamente para concluir.",
+          "A sua aprovação é sempre a final: ao aprovar uma requisição parada na etapa gerencial, você conclui a etapa do gerente e a do diretor de uma vez — mesmo fora do orçamento. Não é preciso aprovar duas vezes.",
       },
       {
         kind: "p",

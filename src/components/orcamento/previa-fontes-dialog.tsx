@@ -34,9 +34,16 @@ function Valor({ v }: { v: number }) {
 export function PreviaFontesDialog({
   linha,
   onClose,
+  aprovado = false,
 }: {
   linha: PreviaDreLinha;
   onClose: () => void;
+  /**
+   * A tela está no modo APROVADO. O detalhe TEM de seguir: listando os valores
+   * orçados enquanto a tabela mostra o aprovado, o item reprovado aparecia com
+   * o valor cheio e o leitor concluía, com razão, que ele estava sendo contado.
+   */
+  aprovado?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -46,10 +53,13 @@ export function PreviaFontesDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const somaFontes = linha.fontes.reduce((acc, f) => acc + f.totalAno, 0);
+  const somaFontes = linha.fontes.reduce(
+    (acc, f) => acc + (aprovado ? f.totalAnoAprovado ?? 0 : f.totalAno),
+    0,
+  );
   // A linha pode ter valor sem origem listável. Mostrar a diferença evita a
   // leitura errada de que a lista explica o total inteiro.
-  const diferenca = linha.totalAno - somaFontes;
+  const diferenca = (aprovado ? linha.totalAnoAprovado : linha.totalAno) - somaFontes;
 
   return (
     <div
@@ -72,7 +82,7 @@ export function PreviaFontesDialog({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {linha.fontes.length} origem(ns) · total do ano{" "}
               <span className="font-medium tabular-nums text-foreground">
-                {formatBRL(linha.totalAno)}
+                {formatBRL(aprovado ? linha.totalAnoAprovado : linha.totalAno)}
               </span>
             </p>
           </div>
@@ -104,7 +114,11 @@ export function PreviaFontesDialog({
             </thead>
             <tbody className="divide-y">
               {linha.fontes.map((fonte, idx) => (
-                <FonteRow key={fonte.metodo + "|" + fonte.chave + "|" + idx} fonte={fonte} />
+                <FonteRow
+                  key={fonte.metodo + "|" + fonte.chave + "|" + idx}
+                  fonte={fonte}
+                  aprovado={aprovado}
+                />
               ))}
             </tbody>
           </table>
@@ -123,9 +137,11 @@ export function PreviaFontesDialog({
   );
 }
 
-function FonteRow({ fonte }: { fonte: PreviaFonte }) {
+function FonteRow({ fonte, aprovado }: { fonte: PreviaFonte; aprovado: boolean }) {
   const [aberto, setAberto] = useState(false);
   const podeAbrir = fonte.itens.length > 0;
+  const meses = aprovado ? fonte.mesesAprovados ?? Array<number>(12).fill(0) : fonte.meses;
+  const totalAno = aprovado ? fonte.totalAnoAprovado ?? 0 : fonte.totalAno;
 
   return (
     <Fragment>
@@ -153,13 +169,13 @@ function FonteRow({ fonte }: { fonte: PreviaFonte }) {
             </div>
           </div>
         </td>
-        {fonte.meses.map((v, m) => (
+        {meses.map((v, m) => (
           <td key={m} className="px-2 py-2 text-right">
             <Valor v={v} />
           </td>
         ))}
         <td className="px-3 py-2 text-right font-semibold tabular-nums">
-          {formatBRL(fonte.totalAno)}
+          {formatBRL(totalAno)}
           {/* Só quando divergem: repetir o mesmo valor em verde vira ruído. */}
           {fonte.totalAnoAprovado != null && fonte.totalAnoAprovado !== fonte.totalAno && (
             <span className="block text-[10px] font-normal text-emerald-600">
@@ -184,14 +200,21 @@ function FonteRow({ fonte }: { fonte: PreviaFonte }) {
 
       {aberto &&
         fonte.itens.map((item, idx) => (
-          <ItemRow key={item.nome + "|" + idx} item={item} />
+          <ItemRow key={item.nome + "|" + idx} item={item} aprovado={aprovado} />
         ))}
     </Fragment>
   );
 }
 
 /** 3º nível: o que compõe uma origem — o item planejado, o contrato, a pessoa. */
-function ItemRow({ item }: { item: PreviaFonteItem }) {
+function ItemRow({ item, aprovado }: { item: PreviaFonteItem; aprovado: boolean }) {
+  // No modo APROVADO, item que não entrou no número aparece ZERADO — ele
+  // continua listado (some-lo esconderia o que ficou de fora), mas com o valor
+  // que ele de fato contribui ali: nenhum. Era exatamente o contrário disso
+  // que fazia a despesa reprovada parecer contada.
+  const entra = !aprovado || item.estado === "aprovado";
+  const meses = entra ? item.meses : Array<number>(12).fill(0);
+  const totalAno = entra ? item.totalAno : 0;
   return (
     <tr className="bg-muted/20 text-[11px]">
       <td className="sticky left-0 z-10 bg-card px-3 py-1.5 pl-9">
@@ -210,13 +233,19 @@ function ItemRow({ item }: { item: PreviaFonteItem }) {
           )}
         </div>
       </td>
-      {item.meses.map((v, m) => (
+      {meses.map((v, m) => (
         <td key={m} className="px-2 py-1.5 text-right text-muted-foreground">
           <Valor v={v} />
         </td>
       ))}
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-        {formatBRL(item.totalAno)}
+      <td
+        className={cn(
+          "px-3 py-1.5 text-right tabular-nums text-muted-foreground",
+          !entra && "line-through opacity-60",
+        )}
+        title={!entra ? "Fora do número aprovado" : undefined}
+      >
+        {formatBRL(entra ? totalAno : item.totalAno)}
       </td>
       <td className="px-2 py-1.5" />
     </tr>

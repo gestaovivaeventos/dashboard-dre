@@ -1,7 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, TriangleAlert, Eye, EyeOff, Info, Download, ListTree } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Columns3,
+  Download,
+  Eye,
+  EyeOff,
+  Info,
+  ListTree,
+  Loader2,
+  TriangleAlert,
+} from "lucide-react";
 
 import {
   getPreviaOrcamento,
@@ -9,6 +22,12 @@ import {
   type PreviaDreLinha,
 } from "@/lib/orcamento/actions/previa-orcamento";
 import { downloadPreviaOrcamentoXlsx } from "@/lib/orcamento/previa-orcamento-export";
+import {
+  alternarFechada,
+  comparar as compararValores,
+  linhasVisiveis as filtrarVisiveis,
+  todasFechaveis,
+} from "@/lib/orcamento/previa-comparativo";
 import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores";
 import { SETOR_TODOS, isTodosSetores } from "@/lib/orcamento/setor-filtro";
 import { PreviaFontesDialog } from "@/components/orcamento/previa-fontes-dialog";
@@ -16,6 +35,29 @@ import { formatBRL } from "@/lib/orcamento/format";
 import { cn } from "@/lib/utils";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+/** Alterna um mês no conjunto dos abertos (modo comparar). */
+function alternarMes(abertos: ReadonlySet<number>, mes: number): Set<number> {
+  const proxima = new Set(abertos);
+  if (proxima.has(mes)) proxima.delete(mes);
+  else proxima.add(mes);
+  return proxima;
+}
+
+/** Célula de percentual: "—" quando não há base de comparação. */
+function Percentual({ v }: { v: number | null }) {
+  if (v == null) return <span className="tabular-nums text-muted-foreground/40">—</span>;
+  return (
+    <span
+      className={cn(
+        "tabular-nums",
+        v >= 100 ? "text-emerald-600" : v === 0 ? "text-muted-foreground/60" : "text-amber-600",
+      )}
+    >
+      {v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
+    </span>
+  );
+}
 
 /** Célula de valor: zero fica apagado, para a estrutura respirar. */
 function Valor({ v, className }: { v: number; className?: string }) {
@@ -30,11 +72,21 @@ function LinhaDre({
   linha,
   onDrill,
   aprovado,
+  comparar,
+  mesesAbertos,
+  fechada,
+  onAlternar,
 }: {
   linha: PreviaDreLinha;
   onDrill: ((linha: PreviaDreLinha) => void) | null;
   /** Desenha a parte aprovada em vez do orçado. */
   aprovado: boolean;
+  /** Modo comparação: mês clicado abre em orçado/aprovado/Δ/%. */
+  comparar: boolean;
+  mesesAbertos: ReadonlySet<number>;
+  fechada: boolean;
+  /** Ausente quando a linha não tem filhos (nada a abrir). */
+  onAlternar?: () => void;
 }) {
   const meses = aprovado ? linha.mesesAprovados : linha.meses;
   const totalAno = aprovado ? linha.totalAnoAprovado : linha.totalAno;
@@ -66,6 +118,27 @@ function LinhaDre({
       {/* Nome (coluna fixa à esquerda) */}
       <td className={cn("sticky left-0 z-10 whitespace-nowrap border-r px-3 py-1.5", surface)}>
         <span style={{ paddingLeft: `${Math.max(0, linha.level - 1) * 14}px` }} className="flex items-center gap-1.5">
+          {/* Mesmo gesto da DRE: o triângulo fecha o ramo inteiro. Linha sem
+              filhos reserva o espaço, para os códigos não dançarem. */}
+          {onAlternar ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAlternar();
+              }}
+              title={fechada ? "Abrir" : "Fechar"}
+              className="-ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {fechada ? (
+                <ChevronRight className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+            </button>
+          ) : (
+            <span className="w-3.5 shrink-0" />
+          )}
           <span className="text-[11px] text-muted-foreground tabular-nums">{linha.code}</span>
           <span className={cn(linha.isReceita && linha.totalAno === 0 && "text-muted-foreground")}>
             {linha.name}
@@ -80,15 +153,52 @@ function LinhaDre({
           )}
         </span>
       </td>
-      {/* 12 meses */}
-      {meses.map((v, m) => (
-        <td key={m} className="px-3 py-1.5 text-right">
-          <Valor v={v} />
-        </td>
-      ))}
+      {/* 12 meses — no modo comparar, o mês aberto vira quatro colunas. */}
+      {meses.map((v, m) => {
+        if (!comparar || !mesesAbertos.has(m)) {
+          return (
+            <td key={m} className="px-3 py-1.5 text-right">
+              <Valor v={v} />
+            </td>
+          );
+        }
+        const c = compararValores(linha.meses[m] ?? 0, linha.mesesAprovados[m] ?? 0);
+        return (
+          <Fragment key={m}>
+            <td className="border-l px-2 py-1.5 text-right">
+              <Valor v={c.orcado} />
+            </td>
+            <td className="px-2 py-1.5 text-right">
+              <span className={cn(c.aprovado !== 0 && "text-emerald-600")}>
+                <Valor v={c.aprovado} />
+              </span>
+            </td>
+            <td className="px-2 py-1.5 text-right">
+              <span className={cn(c.diferenca !== 0 && "text-destructive")}>
+                <Valor v={c.diferenca} />
+              </span>
+            </td>
+            <td className="px-2 py-1.5 text-right text-[11px]">
+              <Percentual v={c.percentual} />
+            </td>
+          </Fragment>
+        );
+      })}
       {/* Total do ano (coluna fixa à direita) */}
       <td className={cn("sticky right-0 z-10 border-l px-3 py-1.5 text-right", surface)}>
         <Valor v={totalAno} className="font-semibold" />
+        {/* No modo comparar o ano também mostra o par, empilhado — quatro
+            colunas aqui estourariam a largura da coluna fixa. */}
+        {comparar && linha.totalAnoAprovado !== linha.totalAno && (
+          <span className="mt-0.5 flex items-center justify-end gap-1.5 text-[11px] font-normal">
+            <span className="text-emerald-600 tabular-nums">
+              {formatBRL(linha.totalAnoAprovado)}
+            </span>
+            <Percentual
+              v={compararValores(linha.totalAno, linha.totalAnoAprovado).percentual}
+            />
+          </span>
+        )}
       </td>
     </tr>
   );
@@ -121,6 +231,15 @@ export function PreviaOrcamentoView({
   // colunas — dobrá-las tornaria a tela ilegível. O par de totais fica sempre
   // à vista na faixa do topo, que é onde a comparação importa.
   const [verAprovado, setVerAprovado] = useState(false);
+  // Linhas de grupo FECHADAS (mesmo gesto da DRE). Guardamos o que está
+  // fechado, não o que está aberto: a tela nasce toda aberta, e assim uma
+  // conta nova aparece por padrão em vez de nascer escondida.
+  const [fechadas, setFechadas] = useState<ReadonlySet<string>>(new Set());
+  // Meses abertos no modo COMPARAR: cada um vira quatro colunas (orçado,
+  // aprovado, diferença e %). Doze meses × quatro não cabem na tela — por
+  // isso é por clique, um mês de cada vez, como você pediu.
+  const [mesesAbertos, setMesesAbertos] = useState<ReadonlySet<number>>(new Set());
+  const [comparar, setComparar] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -160,7 +279,10 @@ export function PreviaOrcamentoView({
 
   const setorAtual = setores.find((x) => x.id === setorId) ?? null;
 
-  const linhasVisiveis = useMemo(() => {
+  // O que a EXPORTAÇÃO leva: respeita só o filtro de zeradas, nunca o
+  // abre/fecha. Excel não tem linha escondida — exportar só o que está
+  // expandido entregaria uma planilha que não soma.
+  const linhasParaExportar = useMemo(() => {
     if (!data) return [];
     if (!ocultarZeros) return data.linhas;
     // Esconde folhas zeradas, mas mantém as totalizadoras/calculadas (a espinha
@@ -170,13 +292,18 @@ export function PreviaOrcamentoView({
     );
   }, [data, ocultarZeros]);
 
+  const linhasVisiveis = useMemo(
+    () => filtrarVisiveis(linhasParaExportar, fechadas),
+    [linhasParaExportar, fechadas],
+  );
+
   // Exporta o que está na tela (respeita o filtro de linhas zeradas), na mesma
   // ordem. O import do xlsx é dinâmico, então nada pesa no bundle da rota.
   async function handleExport() {
-    if (exportando || linhasVisiveis.length === 0) return;
+    if (exportando || linhasParaExportar.length === 0) return;
     setExportando(true);
     try {
-      await downloadPreviaOrcamentoXlsx(linhasVisiveis, {
+      await downloadPreviaOrcamentoXlsx(linhasParaExportar, {
         empresaLabel: empresaLabel ?? companyId,
         ano: year,
         setorLabel: setorAtual?.name ?? null,
@@ -300,6 +427,27 @@ export function PreviaOrcamentoView({
             {ocultarZeros ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
             {ocultarZeros ? "Mostrar linhas zeradas" : "Ocultar linhas zeradas"}
           </button>
+          {/* Abrir/fechar a árvore inteira, como na DRE. */}
+          <button
+            type="button"
+            onClick={() =>
+              setFechadas((prev) =>
+                prev.size > 0 ? new Set<string>() : todasFechaveis(linhasParaExportar),
+              )
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {fechadas.size > 0 ? (
+              <>
+                <ChevronsUpDown className="h-4 w-4" /> Abrir tudo
+              </>
+            ) : (
+              <>
+                <ChevronsDownUp className="h-4 w-4" /> Fechar grupos
+              </>
+            )}
+          </button>
+
           {/* Só aparece quando há o que comparar: enquanto a diretoria não
               decidiu nada, orçado e aprovado são o mesmo número e o botão só
               acrescentaria uma escolha sem efeito. */}
@@ -323,10 +471,32 @@ export function PreviaOrcamentoView({
               ))}
             </div>
           )}
+
+          {/* COMPARAR: o par lado a lado, mês a mês. Doze meses × quatro
+              colunas não cabem na tela, então o mês abre por clique no
+              cabeçalho — um de cada vez, ou vários se a tela couber. */}
+          {resumo.totalDespesaAprovada !== resumo.totalDespesa && (
+            <button
+              type="button"
+              onClick={() => {
+                setComparar((v) => !v);
+                setMesesAbertos(new Set());
+              }}
+              title="Abrir orçado × aprovado por mês, com a diferença e o %"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm",
+                comparar
+                  ? "border-foreground bg-foreground text-background"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Columns3 className="h-4 w-4" /> Comparar
+            </button>
+          )}
           <button
             type="button"
             onClick={handleExport}
-            disabled={exportando || linhasVisiveis.length === 0}
+            disabled={exportando || linhasParaExportar.length === 0}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
           >
             {exportando ? (
@@ -435,6 +605,17 @@ export function PreviaOrcamentoView({
         </div>
       )}
 
+      {comparar && mesesAbertos.size === 0 && (
+        <div className="flex items-start gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600 dark:text-sky-500" />
+          <span>
+            Clique no <strong className="text-foreground">nome de um mês</strong> no cabeçalho
+            para abrir <strong className="text-foreground">orçado × aprovado</strong>, a diferença
+            e o percentual daquele mês. Dá para abrir mais de um.
+          </span>
+        </div>
+      )}
+
       {/* Tabela DRE — rolagem própria (x e y) para congelar o cabeçalho no topo
           e a 1ª/última coluna nas laterais. Só `overflow-x` não seguraria o
           `sticky top`, porque o eixo vertical continuaria rolando com a página. */}
@@ -450,11 +631,48 @@ export function PreviaOrcamentoView({
               <th className="sticky left-0 top-0 z-30 border-b border-r bg-muted px-3 py-2 text-left font-medium">
                 Linha
               </th>
-              {MESES.map((m) => (
-                <th key={m} className="sticky top-0 z-20 border-b bg-muted px-3 py-2 text-right font-medium">
-                  {m}
-                </th>
-              ))}
+              {MESES.map((m, idx) =>
+                comparar && mesesAbertos.has(idx) ? (
+                  // Mês aberto: quatro colunas no lugar de uma.
+                  <th
+                    key={m}
+                    colSpan={4}
+                    className="sticky top-0 z-20 cursor-pointer border-b border-l bg-muted px-3 py-2 text-center font-medium hover:bg-muted/70"
+                    onClick={() => setMesesAbertos((prev) => alternarMes(prev, idx))}
+                    title="Fechar o detalhe deste mês"
+                  >
+                    <span className="flex items-center justify-center gap-1">
+                      <ChevronDown className="h-3 w-3" />
+                      {m}
+                    </span>
+                    <span className="mt-0.5 flex justify-between gap-3 text-[10px] font-normal normal-case tracking-normal">
+                      <span className="w-20 text-right">orçado</span>
+                      <span className="w-20 text-right">aprovado</span>
+                      <span className="w-20 text-right">Δ</span>
+                      <span className="w-14 text-right">%</span>
+                    </span>
+                  </th>
+                ) : (
+                  <th
+                    key={m}
+                    onClick={comparar ? () => setMesesAbertos((prev) => alternarMes(prev, idx)) : undefined}
+                    title={comparar ? "Abrir orçado × aprovado deste mês" : undefined}
+                    className={cn(
+                      "sticky top-0 z-20 border-b bg-muted px-3 py-2 text-right font-medium",
+                      comparar && "cursor-pointer hover:bg-muted/70",
+                    )}
+                  >
+                    {comparar ? (
+                      <span className="flex items-center justify-end gap-1">
+                        <ChevronRight className="h-3 w-3" />
+                        {m}
+                      </span>
+                    ) : (
+                      m
+                    )}
+                  </th>
+                ),
+              )}
               <th className="sticky right-0 top-0 z-30 border-b border-l bg-muted px-3 py-2 text-right font-medium">
                 Ano
               </th>
@@ -467,13 +685,27 @@ export function PreviaOrcamentoView({
                 linha={linha}
                 onDrill={setDrill}
                 aprovado={verAprovado}
+                comparar={comparar}
+                mesesAbertos={mesesAbertos}
+                fechada={fechadas.has(linha.id)}
+                onAlternar={
+                  linha.hasChildren
+                    ? () => setFechadas((prev) => alternarFechada(prev, linha.id))
+                    : undefined
+                }
               />
             ))}
           </tbody>
         </table>
       </div>
 
-      {drill && <PreviaFontesDialog linha={drill} onClose={() => setDrill(null)} />}
+      {drill && (
+        <PreviaFontesDialog
+          linha={drill}
+          onClose={() => setDrill(null)}
+          aprovado={verAprovado}
+        />
+      )}
     </div>
   );
 }
