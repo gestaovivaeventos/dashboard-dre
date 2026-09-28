@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Ban, Check, MessageSquare, Pencil, Trash2, X } from "lucide-react";
+import { Check, MessageSquare, Pencil, Trash2, X } from "lucide-react";
 
 import {
   editarDespesa,
@@ -295,7 +295,15 @@ export function PlanejamentoDespesas({
                           >
                             {d.descricao}
                           </span>
-                          <MarcaEstado estado={d.estado} />
+                          {/* UMA marca por linha. Quando a pílula da direita
+                              aparece (gestor com a despesa já decidida), esta
+                              seria a segunda dizendo o mesmo — duas pílulas
+                              verdes lado a lado parecem defeito. Sobra para
+                              quem MANTÉM os botões: admin, diretoria e o estado
+                              'Revisar', que não trava. */}
+                          {!(podeEscrever && !d.cancelado && d.travado) && (
+                            <MarcaEstado estado={d.estado} />
+                          )}
                         </div>
                         <div className="text-[11px] text-muted-foreground">
                           {formatBRL(d.valor)} {d.periodicidade} · a partir de{" "}
@@ -329,15 +337,23 @@ export function PlanejamentoDespesas({
                       {podeEscrever && !d.cancelado && (
                         <div className="flex shrink-0 items-center gap-0.5">
                           {d.travado ? (
+                            /* Verde e vermelho, o mesmo par de cores do resto do
+                               módulo. Antes os dois estados saíam em âmbar com
+                               ícone de proibido — "aprovada" com cara de bloqueio,
+                               e as duas decisões indistinguíveis de relance. */
                             <span
                               title={
                                 d.estado === "aprovado"
                                   ? "Aprovada pela diretoria. Só um diretor ou o administrador altera."
                                   : "Reprovada pela diretoria. Só um diretor ou o administrador altera."
                               }
-                              className="inline-flex items-center gap-1 text-[11px] text-amber-700"
+                              className={cn(
+                                "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+                                d.estado === "aprovado"
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                  : "border-destructive/40 bg-destructive/10 text-destructive",
+                              )}
                             >
-                              <Ban className="h-3 w-3" />{" "}
                               {d.estado === "aprovado" ? "aprovada" : "reprovada"}
                             </span>
                           ) : (

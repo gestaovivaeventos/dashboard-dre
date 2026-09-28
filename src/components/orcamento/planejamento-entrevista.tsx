@@ -10,6 +10,7 @@ import {
 import { reiniciarEntrevista } from "@/lib/orcamento/actions/planejamento-entrevista";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import {
+  assinaturaConversa,
   extrairCartaoDespesa,
   PERIODICIDADES,
   totalItem,
@@ -77,18 +78,42 @@ export function PlanejamentoEntrevista({
   const [cartao, setCartao] = useState<CartaoDespesa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [salvandoCartao, setSalvandoCartao] = useState(false);
-  const fimRef = useRef<HTMLDivElement>(null);
+  const rolagemRef = useRef<HTMLDivElement>(null);
+  const assinaturaRef = useRef(assinaturaConversa(conversa));
 
-  // Ressincroniza quando o pai recarrega (troca de setor, por exemplo).
+  // Ressincroniza quando o pai recarrega (troca de setor, por exemplo) — mas
+  // SÓ quando a conversa MUDOU DE CONTEÚDO.
+  //
+  // O pai recarrega o detalhe inteiro a cada ação da tela (confirmar despesa,
+  // decidir na prévia do setor…) e devolve um array novo com o mesmo conteúdo.
+  // Comparando por identidade, este efeito rodava à toa: trocava `mensagens`
+  // por um array idêntico, o que disparava o auto-scroll abaixo e puxava a
+  // PÁGINA para o chat — o diretor aprovava uma despesa na prévia, lá embaixo,
+  // e a tela subia. De quebra, zerava o cartão que a IA tivesse acabado de
+  // propor.
+  const assinatura = assinaturaConversa(conversa);
   useEffect(() => {
+    if (assinaturaRef.current === assinatura) return;
+    assinaturaRef.current = assinatura;
     setMensagens(conversa);
     setCartao(null);
     setPodeFechar(false);
     setParcial("");
-  }, [conversa]);
+    // `conversa` fora das deps de propósito: a assinatura JÁ a representa, e
+    // incluí-la traria de volta a comparação por identidade que causou o bug.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assinatura]);
 
+  // Rola SÓ O CONTÊINER do chat, nunca a página.
+  //
+  // `scrollIntoView` rola TODOS os ancestrais roláveis, inclusive o documento
+  // — era o que fazia a página pular para o chat quando o auto-scroll
+  // disparava. Mexendo no `scrollTop` do próprio contendor, a posição da
+  // página fica onde o usuário deixou, aconteça o que acontecer aqui dentro.
   useEffect(() => {
-    fimRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = rolagemRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [mensagens, parcial, cartao]);
 
   async function enviar(conteudo: string, modo: "entrevista" | "fechamento" = "entrevista") {
@@ -238,7 +263,10 @@ export function PlanejamentoEntrevista({
         </div>
       )}
 
-      <div className="max-h-[28rem] min-h-[16rem] space-y-3 overflow-y-auto px-4 py-3">
+      <div
+        ref={rolagemRef}
+        className="max-h-[28rem] min-h-[16rem] space-y-3 overflow-y-auto px-4 py-3"
+      >
         {vazia && !streaming ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 py-8 text-center">
             <Sparkles className="h-6 w-6 text-emerald-600" />
@@ -297,8 +325,7 @@ export function PlanejamentoEntrevista({
             onConfirmar={confirmarCartao}
           />
         )}
-
-        <div ref={fimRef} />
+
       </div>
 
       {erro && <div className="bg-destructive/10 px-4 py-2 text-xs text-destructive">{erro}</div>}

@@ -13,6 +13,7 @@ import {
   MARCADOR_DESPESA_FECHA,
 } from "./entrevista-prompt";
 import {
+  assinaturaConversa,
   extrairCartaoDespesa,
   parseCartaoDespesa,
   serieItem,
@@ -216,4 +217,49 @@ test("lista vazia não quebra", () => {
   const r = unificarGemeas([]);
   assert.deepEqual(r.items, []);
   assert.deepEqual(r.gemeasIgnoradas, []);
+});
+
+// ─── Assinatura da conversa ─────────────────────────────────────────────────
+// O pai da entrevista recarrega o detalhe inteiro a cada ação da tela e devolve
+// um ARRAY NOVO com o mesmo conteúdo. Comparar por identidade fazia o chat
+// ressincronizar à toa, e o auto-scroll dele puxava a PÁGINA — o diretor
+// aprovava uma despesa na prévia, lá embaixo, e a tela subia para o chat.
+
+test("assinatura: mesmo conteúdo em array novo dá a MESMA assinatura", () => {
+  const a = [
+    { role: "assistant" as const, content: "Vamos começar?" },
+    { role: "user" as const, content: "vamos" },
+  ];
+  const b = a.map((m) => ({ ...m }));
+  assert.notEqual(a, b); // identidades diferentes...
+  assert.equal(assinaturaConversa(a), assinaturaConversa(b)); // ...conteúdo igual
+});
+
+test("assinatura: mensagem nova muda a assinatura", () => {
+  const a = [{ role: "user" as const, content: "oi" }];
+  const b = [...a, { role: "assistant" as const, content: "olá" }];
+  assert.notEqual(assinaturaConversa(a), assinaturaConversa(b));
+});
+
+test("assinatura: mesmo texto com papel diferente não colide", () => {
+  assert.notEqual(
+    assinaturaConversa([{ role: "user", content: "ok" }]),
+    assinaturaConversa([{ role: "assistant", content: "ok" }]),
+  );
+});
+
+test("assinatura: conteúdo que PARECE separador não colide", () => {
+  // Uma conversa não pode ser confundida com outra só porque o gestor digitou
+  // vírgula, aspas ou colchete — é por isso que a assinatura é JSON.
+  assert.notEqual(
+    assinaturaConversa([{ role: "user", content: 'a","user","b' }]),
+    assinaturaConversa([
+      { role: "user", content: "a" },
+      { role: "user", content: "b" },
+    ]),
+  );
+});
+
+test("assinatura: conversa vazia é estável", () => {
+  assert.equal(assinaturaConversa([]), assinaturaConversa([]));
 });

@@ -62,6 +62,26 @@ export interface PlanejamentoMensagem {
   content: string;
 }
 
+/**
+ * Assinatura do CONTEÚDO de uma conversa — muda quando a conversa muda, e só
+ * então.
+ *
+ * Existe porque o pai da entrevista recarrega o detalhe inteiro a cada ação na
+ * tela (confirmar despesa, decidir na prévia do setor…) e devolve um ARRAY
+ * NOVO com o mesmo conteúdo. Ressincronizar por identidade fazia o chat
+ * reconstruir o estado à toa e o auto-scroll puxar a página para ele — o
+ * diretor aprovava uma despesa lá embaixo e a tela subia para o chat.
+ *
+ * `JSON.stringify` em vez de juntar com separador: qualquer caractere que
+ * se escolhesse como separador pode aparecer no texto digitado, e assim
+ * duas conversas diferentes colidiriam.
+ */
+export function assinaturaConversa(
+  mensagens: readonly PlanejamentoMensagem[],
+): string {
+  return JSON.stringify(mensagens.map((m) => [m.role, m.content]));
+}
+
 // ─── Marcador de fim da entrevista (streaming) ───────────────────────────────
 // No modo streaming a IA responde em texto corrido; quando não há mais o que
 // perguntar, ela acrescenta esta linha no FIM. O marcador é interno (nunca
