@@ -349,3 +349,49 @@ test("prompt: mês a mês do realizado entra no cabeçalho", () => {
   const r = realizado([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120], 65);
   assert.match(prompt({ realizado: r }), /mês a mês/);
 });
+
+// ─── Provocações mais afiadas (29/09/2026) ──────────────────────────────────
+// O prompt já trazia as quatro perguntas; o que faltava era elas DISPARAREM e
+// não aceitarem resposta vaga. Pedido do dono do projeto: "não tire nada dele,
+// mas quero deixar ele bem inteligente".
+
+test("prompt: cada provocação diz o que é uma RESPOSTA BOA", () => {
+  const p = prompt();
+  assert.match(p, /RESPOSTA BOA/);
+  // KPI com indicadores que existem de verdade, em vez de "melhorar o marketing".
+  assert.match(p, /custo por lead|ticket médio|turnover/);
+});
+
+test("prompt: a pergunta de impacto ANCORA no número do ano anterior", () => {
+  // "Qual foi o impacto?" no ar não faz ninguém pensar; citar o gasto real faz.
+  const p = prompt();
+  assert.match(p, /ANCORE NO NÚMERO/);
+});
+
+test("prompt: a barra sobe com o tamanho do item", () => {
+  // Proporcionalidade preservada: pequena segue com uma pergunta; a de peso
+  // exige duas provocações além da finalidade.
+  const p = prompt();
+  assert.match(p, /A BARRA SOBE COM O TAMANHO/);
+  assert.match(p, /DUAS provocações respondidas além da finalidade/);
+});
+
+test("prompt: repergunta UMA vez e aceita, em vez de interrogar", () => {
+  const p = prompt();
+  assert.match(p, /UMA REPERGUNTA, NO MÁXIMO/);
+});
+
+test("prompt: 'sem indicador' é resposta aceitável, não erro", () => {
+  // Despesa sem KPI é um fato útil para a diretoria. Insistir empurraria o
+  // gestor a inventar indicador.
+  const p = prompt();
+  assert.match(p, /despesa sem[\s\S]{0,40}indicador é um fato útil/);
+});
+
+test("prompt: a IA PERGUNTA, não dá veredito sobre o conjunto", () => {
+  // Guarda-corpo da reversão de 09/09/2026: a rodada "IA analítica" foi
+  // desfeita porque ela comentava e criticava o conjunto do orçamento.
+  const p = prompt();
+  assert.match(p, /VOCÊ PERGUNTA, NÃO JULGA/);
+  assert.match(p, /nunca proponha corte por conta própria/);
+});
