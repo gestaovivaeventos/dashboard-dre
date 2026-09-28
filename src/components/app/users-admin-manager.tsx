@@ -94,7 +94,14 @@ interface SimpleOption {
 interface Props {
   initialUsers: UserItem[];
   companies: SimpleOption[];
+  /** Setores do COMPRAS (`ctrl_sectors`) — alçada, Aprovações, lembrete. */
   sectors: SimpleOption[];
+  /**
+   * Setores do ORÇAMENTO por empresa, pelo NOME. Cadastro diferente do de
+   * cima: o orçamento tem os próprios setores por empresa × ano, e nem todos
+   * existem no Compras — metade desta base está assim.
+   */
+  orcamentoSetores: Record<string, string[]>;
 }
 
 const PROFILES: Array<{
@@ -261,7 +268,12 @@ function userToForm(u: UserItem): FormState {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
+export function UsersAdminManager({
+  initialUsers,
+  companies,
+  sectors,
+  orcamentoSetores,
+}: Props) {
   const [users, setUsers] = useState(initialUsers);
   const [inviteOpen, setInviteOpen] = useState(false);
   // Diálogo das regras nominais do código. `null` = fechado; string vazia =
@@ -902,6 +914,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
             includesEmail
             companies={companies}
             sectors={sectors}
+            orcamentoSetores={orcamentoSetores}
             onChange={updateField}
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
@@ -936,6 +949,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
             includesEmail={false}
             companies={companies}
             sectors={sectors}
+            orcamentoSetores={orcamentoSetores}
             onChange={updateField}
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
@@ -1107,6 +1121,7 @@ function UserForm({
   includesEmail,
   companies,
   sectors,
+  orcamentoSetores,
   onChange,
   onToggleSector,
   onToggleCompany,
@@ -1117,6 +1132,7 @@ function UserForm({
   includesEmail: boolean;
   companies: SimpleOption[];
   sectors: SimpleOption[];
+  orcamentoSetores: Record<string, string[]>;
   onChange: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   onToggleSector: (id: string) => void;
   onToggleCompany: (id: string) => void;
@@ -1419,7 +1435,7 @@ function UserForm({
           <Label>Setores do Orçamento, por unidade</Label>
           <OrcamentoSetoresPorEmpresaField
             companies={companies}
-            sectors={sectors}
+            setoresPorEmpresa={orcamentoSetores}
             companyIds={form.company_ids}
             value={form.orcamento_setores}
             onChange={(next) => onChange("orcamento_setores", next)}
@@ -1551,27 +1567,33 @@ function PillMultiSelect({
  * segunda lista. `user_company_access` é o que `podeVerEmpresa` lê, então
  * oferecer aqui uma empresa fora dali produziria setor num lugar que a pessoa
  * nem abre.
+ *
+ * Os setores oferecidos são os do ORÇAMENTO daquela empresa, não os do
+ * Compras: o orçamento tem cadastro próprio (empresa × ano) e nem todo setor
+ * dele existe como setor de compras — oferecer a lista do Compras deixava
+ * metade dos setores desta base inatingível.
  */
 function OrcamentoSetoresPorEmpresaField({
   companies,
-  sectors,
+  setoresPorEmpresa,
   companyIds,
   value,
   onChange,
 }: {
   companies: SimpleOption[];
-  sectors: SimpleOption[];
+  /** Empresa → nomes dos setores do ORÇAMENTO dela (qualquer ano). */
+  setoresPorEmpresa: Record<string, string[]>;
   companyIds: string[];
   value: OrcamentoSetoresPorEmpresa;
   onChange: (next: OrcamentoSetoresPorEmpresa) => void;
 }) {
   const selecionadas = companies.filter((c) => companyIds.includes(c.id));
 
-  function toggle(companyId: string, sectorId: string) {
+  function toggle(companyId: string, nome: string) {
     const atual = value[companyId] ?? [];
-    const proxima = atual.includes(sectorId)
-      ? atual.filter((id) => id !== sectorId)
-      : [...atual, sectorId];
+    const proxima = atual.includes(nome)
+      ? atual.filter((n) => n !== nome)
+      : [...atual, nome];
     const next = { ...value };
     // Empresa sem setor sai do mapa em vez de ficar com lista vazia: o que vai
     // para o banco é uma linha por (usuário, empresa, setor), e chave vazia
@@ -1590,29 +1612,29 @@ function OrcamentoSetoresPorEmpresaField({
     );
   }
 
-  if (sectors.length === 0) {
-    return <p className="text-xs text-muted-foreground">Nenhum setor cadastrado.</p>;
-  }
-
   return (
     <div className="space-y-2">
       {selecionadas.map((empresa) => {
         const marcados = value[empresa.id] ?? [];
+        // Opções = os setores do ORÇAMENTO desta empresa. A chave do
+        // PillMultiSelect é o próprio nome, porque é o nome que se grava.
+        const opcoes = (setoresPorEmpresa[empresa.id] ?? []).map((nome) => ({
+          id: nome,
+          name: nome,
+        }));
         return (
           <div key={empresa.id} className="rounded-md border p-2.5">
             <div className="mb-1.5 flex items-baseline justify-between gap-2">
               <span className="text-sm font-medium">{empresa.name}</span>
               <span className="text-xs text-muted-foreground">
-                {marcados.length === 0
-                  ? "nenhum setor"
-                  : `${marcados.length} setor(es)`}
+                {marcados.length === 0 ? "nenhum setor" : `${marcados.length} setor(es)`}
               </span>
             </div>
             <PillMultiSelect
-              options={sectors}
+              options={opcoes}
               selected={marcados}
-              onToggle={(sectorId) => toggle(empresa.id, sectorId)}
-              emptyMessage="Nenhum setor cadastrado."
+              onToggle={(nome) => toggle(empresa.id, nome)}
+              emptyMessage="Esta unidade ainda não tem setores no orçamento — cadastre em Configuração › Setores dela."
             />
           </div>
         );

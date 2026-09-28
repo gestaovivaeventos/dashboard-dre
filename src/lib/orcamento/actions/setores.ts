@@ -14,6 +14,7 @@ import {
 } from "@/lib/orcamento/auth";
 import { friendlySetorError, isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { chaveSetorNome } from "@/lib/orcamento/setor-atribuicao";
 
 export interface OrcamentoSetor {
   id: string;
@@ -149,11 +150,36 @@ export async function renameSetor(id: string, name: string) {
   if (!clean) return { error: "Informe o nome do setor." };
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+
+  // O nome ANTES da troca: a atribuição de setor dos usuários casa por nome
+  // (`orcamento_user_setores`), então renomear sem carregá-la junto tiraria o
+  // escopo de todo mundo daquele setor em silêncio — sem erro, sem aviso, e
+  // com as telas do orçamento abrindo vazias no dia seguinte.
+  const { data: antes } = await supabase
+    .from("orcamento_setores")
+    .select("company_id, name")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("orcamento_setores")
     .update({ name: clean, updated_by: admin.userId })
     .eq("id", id);
   if (error) return { error: friendlySetorError(error.message) };
+
+  const nomeAntigo = (antes?.name as string | null) ?? null;
+  if (nomeAntigo && chaveSetorNome(nomeAntigo) !== chaveSetorNome(clean)) {
+    // Best-effort, como a trilha: o setor JÁ foi renomeado, e derrubar a ação
+    // aqui deixaria o cadastro pior do que segui-la. O mesmo setor em OUTROS
+    // anos mantém o nome antigo (o rename é de uma linha), e a atribuição é
+    // uma só por empresa — por isso a atualização é por empresa, não por ano.
+    await supabase
+      .from("orcamento_user_setores")
+      .update({ setor_nome: clean })
+      .eq("company_id", antes?.company_id as string)
+      .ilike("setor_nome", nomeAntigo);
+  }
+
   revalidatePath(PATH);
   return { ok: true as const };
 }

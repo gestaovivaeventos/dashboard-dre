@@ -209,20 +209,22 @@ export function SetoresManager({ companies, fixedCompanyId, fixedYear }: Props) 
         </div>
       )}
 
-      {/* Setores ATIVOS sem a ponte com o Compras. É por `ctrl_sector_id` que
-          o módulo sabe quais setores um gerente alcança (user_sectors aponta
-          para ctrl_sectors, não para este cadastro). Sem o vínculo o setor
-          orça normalmente, mas o gerente abre a tela VAZIA — sem erro nenhum,
-          o que parece defeito do sistema. Por isso o aviso é explícito. */}
+      {/* O vínculo com o Compras DEIXOU de decidir quem enxerga o quê
+          (29/09/2026): o escopo das pessoas passou a ser a atribuição por
+          empresa da tela de Usuários, que casa pelo NOME do setor daqui. O que
+          sobrou para o vínculo é o departamento da Omie — ver
+          `departamentoDoSetor`, usado na semeadura da base do Planejamento.
+          Por isso o aviso mudou de tom: é informativo, não mais bloqueio. */}
       {!loading && companyId && items.some((s) => s.active && !s.ctrlSectorId) && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
+        <div className="rounded-md border px-4 py-2.5 text-sm text-muted-foreground">
           <strong className="text-foreground">
             {items.filter((s) => s.active && !s.ctrlSectorId).length} setor(es) sem vínculo
             com o Compras.
           </strong>{" "}
-          O vínculo é o que define quem é o <strong>dono</strong> de cada setor: sem ele, o
-          gerente responsável não enxerga nada ao abrir o orçamento — nem recebe erro. Use a
-          coluna <strong>Setor no Compras</strong> abaixo para ligar cada um.
+          Eles funcionam normalmente — quem responde por cada setor é definido na tela de{" "}
+          <strong>Usuários</strong>, por unidade. O vínculo serve para a{" "}
+          <strong>semeadura da base pela Omie</strong> filtrar por departamento; sem ele, a
+          base vem sem esse recorte.
         </div>
       )}
 

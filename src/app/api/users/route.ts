@@ -57,11 +57,11 @@ export async function GET() {
   {
     const { data } = await adminClient
       .from("orcamento_user_setores")
-      .select("user_id, company_id, ctrl_sector_id");
+      .select("user_id, company_id, setor_nome");
     for (const row of (data ?? []) as Array<Record<string, unknown>>) {
       const uid = row.user_id as string;
       const mapa = orcamentoSetores.get(uid) ?? {};
-      (mapa[row.company_id as string] ??= []).push(row.ctrl_sector_id as string);
+      (mapa[row.company_id as string] ??= []).push(row.setor_nome as string);
       orcamentoSetores.set(uid, mapa);
     }
   }

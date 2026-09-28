@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { UsersAdminManager } from "@/components/app/users-admin-manager";
 import { fetchCaixaGrantUserIds } from "@/lib/auth/caixa";
 import { fetchOrcamentoGrantUserIds } from "@/lib/auth/orcamento";
+import { nomesUnicos } from "@/lib/orcamento/setor-atribuicao";
 import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -72,12 +73,33 @@ export default async function UsuariosPage() {
   {
     const { data } = await adminClient
       .from("orcamento_user_setores")
-      .select("user_id, company_id, ctrl_sector_id");
+      .select("user_id, company_id, setor_nome");
     for (const row of (data ?? []) as Array<Record<string, unknown>>) {
       const uid = row.user_id as string;
       const mapa = orcamentoSetores.get(uid) ?? {};
-      (mapa[row.company_id as string] ??= []).push(row.ctrl_sector_id as string);
+      (mapa[row.company_id as string] ??= []).push(row.setor_nome as string);
       orcamentoSetores.set(uid, mapa);
+    }
+  }
+
+  // Setores do ORÇAMENTO por empresa, para o seletor da tela. De TODOS os anos,
+  // deduplicados por nome: a atribuição é year-agnostic (casa por nome), e o
+  // mesmo setor aparece uma vez por ano clonado.
+  const orcamentoSetoresPorEmpresa: Record<string, string[]> = {};
+  {
+    const { data } = await adminClient
+      .from("orcamento_setores")
+      .select("company_id, name, active");
+    const porEmpresa = new Map<string, string[]>();
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      if (row.active === false) continue;
+      const cid = row.company_id as string;
+      porEmpresa.set(cid, [...(porEmpresa.get(cid) ?? []), (row.name as string) ?? ""]);
+    }
+    for (const [cid, nomes] of Array.from(porEmpresa.entries())) {
+      orcamentoSetoresPorEmpresa[cid] = nomesUnicos(nomes).sort((a: string, b: string) =>
+        a.localeCompare(b, "pt-BR", { sensitivity: "base" }),
+      );
     }
   }
 
@@ -112,6 +134,7 @@ export default async function UsuariosPage() {
     <UsersAdminManager
       initialUsers={usersData}
       companies={(companies ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
+      orcamentoSetores={orcamentoSetoresPorEmpresa}
       sectors={(sectors ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))}
     />
   );

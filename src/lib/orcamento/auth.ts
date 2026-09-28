@@ -1,6 +1,7 @@
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import { podeDecidir } from "@/lib/orcamento/validacao-diretoria";
+import { setoresDoAnoAtribuidos } from "@/lib/orcamento/setor-atribuicao";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -16,9 +17,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *   2. alcança ESTA empresa?       → `podeVerEmpresa()` / `assertEmpresa()`
  *   3. alcança ESTE setor?         → `setoresDeLeitura()` / `setoresDeEscrita()`
  *
- * O escopo não é um cadastro novo: empresa vem de `user_company_access` e setor
- * de `user_sectors` (o cadastro do COMPRAS), atravessando para o orçamento pela
- * ponte `orcamento_setores.ctrl_sector_id`.
+ * O escopo: empresa vem de `user_company_access` (as "Unidades" da tela de
+ * Usuários) e setor de `orcamento_user_setores`, a atribuição POR EMPRESA do
+ * próprio módulo, que casa pelo NOME do setor do orçamento. **Não é
+ * `user_sectors`**, que é do Compras e não tem empresa.
  *
  * ── Quem faz o quê ─────────────────────────────────────────────────────────
  *  - `admin`            → tudo, todas as empresas, inclusive a configuração, em
@@ -126,9 +128,10 @@ export function podeEditarEmpresa(user: OrcamentoUser, companyId: string): boole
  * quando alcança TODOS (admin, validador e Gerente Sócio na leitura).
  *
  * Lista VAZIA é diferente de `null`: significa "nenhum setor" — é o que
- * acontece com um gerente cujos setores não têm a ponte `ctrl_sector_id`
- * preenchida. A tela de Setores avisa sobre isso; aqui a consequência é ver
- * nada, nunca ver tudo. Falhar para o lado de esconder é deliberado.
+ * acontece com um gerente sem setor atribuído NESTA empresa, ou cujo setor
+ * ainda não existe neste ano. A consequência é ver nada, nunca ver tudo:
+ * falhar para o lado de esconder é deliberado, e `escopo.ts` é quem explica
+ * qual dos casos aconteceu.
  */
 export async function setoresDeLeitura(
   supabase: SupabaseClient,
@@ -163,11 +166,14 @@ export async function setoresDeEscrita(
 /**
  * Setores que o usuário alcança NESTA empresa × ano.
  *
- * A atribuição é POR EMPRESA (`orcamento_user_setores`, 29/09/2026) e guarda
- * o setor no vocabulário do Compras; a ponte `orcamento_setores.ctrl_sector_id`
- * resolve o ano. Duas consultas em paralelo e a interseção em memória —
- * PostgREST não faz subconsulta em `in`, e um join aqui obrigaria a expor a
- * tabela de atribuição como embed.
+ * A atribuição é POR EMPRESA (`orcamento_user_setores`) e guarda o NOME do
+ * setor do orçamento — não o id da linha (que é por ano) nem o setor do
+ * Compras (cuja ponte é opcional e se perde no clone entre anos). Ver
+ * `setor-atribuicao.ts`, que é quem casa os nomes.
+ *
+ * Duas consultas em paralelo e a interseção em memória — PostgREST não faz
+ * subconsulta em `in`, e um join aqui obrigaria a expor a tabela de
+ * atribuição como embed.
  *
  * **NÃO use `user_sectors` aqui.** Aquilo é o recorte do COMPRAS (alçada de
  * aprovação, tela de Aprovações, lembrete diário) e não tem empresa: usá-lo
@@ -183,12 +189,12 @@ async function resolverSetoresDoUsuario(
   const [atribuidos, doAno] = await Promise.all([
     supabase
       .from("orcamento_user_setores")
-      .select("ctrl_sector_id")
+      .select("setor_nome")
       .eq("user_id", user.userId)
       .eq("company_id", companyId),
     supabase
       .from("orcamento_setores")
-      .select("id, ctrl_sector_id")
+      .select("id, name")
       .eq("company_id", companyId)
       .eq("year", year),
   ]);
@@ -198,16 +204,15 @@ async function resolverSetoresDoUsuario(
   // explica o que houve, e `escopo.ts` distingue os motivos.
   if (atribuidos.error || doAno.error) return [];
 
-  const meus = new Set(
+  return setoresDoAnoAtribuidos(
     ((atribuidos.data ?? []) as Array<Record<string, unknown>>).map(
-      (r) => r.ctrl_sector_id as string,
+      (r) => r.setor_nome as string,
     ),
+    ((doAno.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      id: r.id as string,
+      name: (r.name as string) ?? "",
+    })),
   );
-  if (meus.size === 0) return [];
-
-  return ((doAno.data ?? []) as Array<Record<string, unknown>>)
-    .filter((r) => r.ctrl_sector_id != null && meus.has(r.ctrl_sector_id as string))
-    .map((r) => r.id as string);
 }
 
 /**

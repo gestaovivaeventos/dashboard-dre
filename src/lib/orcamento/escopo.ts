@@ -5,7 +5,7 @@ import type { OrcamentoPapel } from "@/lib/supabase/types";
 //
 // O módulo recorta tudo por setor, e o recorte é uma corrente de três elos:
 //
-//   orcamento_user_setores (empresa × setor) → orcamento_setores.ctrl_sector_id
+//   orcamento_user_setores (empresa × nome do setor) → orcamento_setores do ano
 //
 // Quebrando qualquer elo, o escopo de leitura vira `[]` e as consultas viram
 // `.in("setor_id", [])` — que casa com NADA e não devolve erro nenhum. O
@@ -26,8 +26,6 @@ export type EscopoMotivo =
   | "sem_setor_no_usuario"
   /** A empresa não tem setor ativo neste ano — conserta-se em Configuração. */
   | "empresa_sem_setor"
-  /** Os setores da empresa existem, mas nenhum está ligado ao Compras. */
-  | "ponte_vazia"
   /** Está tudo cadastrado; esta pessoa é que não responde por setor nenhum. */
   | "fora_da_responsabilidade"
   /** A empresa orça só por categoria — o orçamento dela é do administrador. */
@@ -63,8 +61,6 @@ export interface EscopoFatos {
   setoresAtribuidos: number;
   /** Setores ATIVOS desta empresa no ano. */
   setoresDaEmpresa: number;
-  /** Destes, quantos têm `ctrl_sector_id` preenchido (a ponte). */
-  setoresComPonte: number;
   /** Quantos o usuário de fato alcança — o escopo que as consultas usam. */
   setoresAlcancados: number;
 }
@@ -151,26 +147,16 @@ export function diagnosticarEscopo(f: EscopoFatos): EscopoDiagnostico {
     };
   }
 
-  if (f.setoresComPonte === 0) {
-    return {
-      motivo: "ponte_vazia",
-      gravidade,
-      titulo: "Os setores desta empresa não estão ligados ao Compras",
-      detalhe: `${abertura}: é o vínculo com o setor do Compras que diz quem responde por cada setor, e nenhum dos ${f.setoresDaEmpresa} setores desta empresa tem esse vínculo.`,
-      acaoAdmin: "setores",
-    };
-  }
-
   // Tudo cadastrado, e ainda assim ela não alcança nada: os setores desta
   // empresa simplesmente são de outras pessoas. Não é defeito — e por isso
   // esta é a única mensagem que não manda ninguém consertar nada.
-  // Tudo cadastrado dos dois lados e ainda assim vazio: os setores que ela tem
-  // nesta empresa não são os que o orçamento desta empresa usa neste ano.
+  // Tem setor atribuído e a empresa tem setores, mas os nomes não casam: o
+  // caso típico é o setor dela ainda não ter sido clonado para ESTE ano.
   return {
     motivo: "fora_da_responsabilidade",
     gravidade,
-    titulo: "Seus setores não coincidem com os do orçamento desta empresa",
-    detalhe: `${abertura}. Os setores marcados para você aqui não são os que esta empresa orça neste ano — se algum deveria ser seu, ele precisa entrar no seu usuário.`,
-    acaoAdmin: "usuarios",
+    titulo: "Seus setores não existem no orçamento deste ano",
+    detalhe: `${abertura}. Os setores marcados para você nesta empresa não estão entre os que ela orça em ${f.setoresDaEmpresa === 1 ? "1 setor cadastrado" : `${f.setoresDaEmpresa} setores cadastrados`} neste ano — normalmente porque o setor ainda não foi criado (ou copiado do ano anterior) aqui.`,
+    acaoAdmin: "setores",
   };
 }

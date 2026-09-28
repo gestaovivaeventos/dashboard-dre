@@ -6,6 +6,7 @@ import { getOrcamentoUser, podeVerEmpresa } from "@/lib/orcamento/auth";
 import { orcaPorSetor } from "@/lib/orcamento/setor-gravacao";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { diagnosticarEscopo, type EscopoDiagnostico } from "@/lib/orcamento/escopo";
+import { setoresDoAnoAtribuidos } from "@/lib/orcamento/setor-atribuicao";
 
 /**
  * Junta os fatos do escopo desta empresa × ano e devolve o diagnóstico.
@@ -37,14 +38,14 @@ export async function diagnosticarEscopoDaEmpresa(
   const [{ data: setores }, { data: atribuidos }, porSetor] = await Promise.all([
     supabase
       .from("orcamento_setores")
-      .select("id, ctrl_sector_id, active")
+      .select("id, name, ctrl_sector_id, active")
       .eq("company_id", companyId)
       .eq("year", year),
     // A atribuição é POR EMPRESA: ter o setor em outra não conta aqui, e é
     // justamente essa diferença que o aviso precisa saber explicar.
     supabase
       .from("orcamento_user_setores")
-      .select("ctrl_sector_id")
+      .select("setor_nome")
       .eq("user_id", user.userId)
       .eq("company_id", companyId),
     orcaPorSetor(supabase, companyId, year),
@@ -53,20 +54,21 @@ export async function diagnosticarEscopoDaEmpresa(
   const ativos = ((setores ?? []) as Array<Record<string, unknown>>).filter(
     (s) => s.active !== false,
   );
-  const doUsuario = new Set(
-    ((atribuidos ?? []) as Array<Record<string, unknown>>).map((r) => r.ctrl_sector_id as string),
+  const nomesAtribuidos = ((atribuidos ?? []) as Array<Record<string, unknown>>).map(
+    (r) => r.setor_nome as string,
+  );
+  const alcancados = setoresDoAnoAtribuidos(
+    nomesAtribuidos,
+    ativos.map((s) => ({ id: s.id as string, name: (s.name as string) ?? "" })),
   );
 
   return {
     diagnostico: diagnosticarEscopo({
       papel: user.papel,
       orcaPorSetor: porSetor,
-      setoresAtribuidos: doUsuario.size,
+      setoresAtribuidos: nomesAtribuidos.length,
       setoresDaEmpresa: ativos.length,
-      setoresComPonte: ativos.filter((s) => s.ctrl_sector_id != null).length,
-      setoresAlcancados: ativos.filter(
-        (s) => s.ctrl_sector_id != null && doUsuario.has(s.ctrl_sector_id as string),
-      ).length,
+      setoresAlcancados: alcancados.length,
     }),
   };
 }

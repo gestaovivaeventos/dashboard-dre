@@ -16,7 +16,6 @@ const ok: EscopoFatos = {
   orcaPorSetor: true,
   setoresAtribuidos: 2,
   setoresDaEmpresa: 5,
-  setoresComPonte: 5,
   setoresAlcancados: 2,
 };
 
@@ -51,34 +50,33 @@ test("empresa sem setor no ano manda para Configuração › Setores", () => {
   const d = diagnosticarEscopo({
     ...ok,
     setoresDaEmpresa: 0,
-    setoresComPonte: 0,
     setoresAlcancados: 0,
   });
   assert.equal(d.motivo, "empresa_sem_setor");
   assert.equal(d.acaoAdmin, "setores");
 });
 
-test("ponte vazia com o Compras manda para Configuração › Setores", () => {
-  const d = diagnosticarEscopo({ ...ok, setoresComPonte: 0, setoresAlcancados: 0 });
-  assert.equal(d.motivo, "ponte_vazia");
-  assert.equal(d.acaoAdmin, "setores");
-  // O número entra na frase: "nenhum dos 5" é o que faz o admin procurar.
-  assert.match(d.detalhe, /5 setores/);
+test("setor sem ponte com o Compras NÃO bloqueia mais", () => {
+  // A ponte deixou de decidir escopo em 29/09/2026 — ela só serve ao
+  // departamento da Omie. Setor do orçamento sem vínculo é atribuível e
+  // alcançável como qualquer outro, que era o ponto da mudança.
+  assert.equal(diagnosticarEscopo(ok).motivo, "ok");
 });
 
-test("tudo cadastrado e ainda assim vazio = os setores são de outra pessoa", () => {
-  // O único motivo que NÃO é defeito de cadastro — e por isso não promete
-  // conserto, só diz a quem pedir.
+test("atribuído, mas o setor não existe NESTE ano", () => {
+  // Caso típico depois da virada do ano: o setor dela ainda não foi criado nem
+  // copiado para o ano novo. O conserto é no cadastro de Setores, não no
+  // usuário — mandar para a tela errada é pior do que não avisar.
   const d = diagnosticarEscopo({ ...ok, setoresAlcancados: 0 });
   assert.equal(d.motivo, "fora_da_responsabilidade");
+  assert.equal(d.acaoAdmin, "setores");
 });
 
 test("todo motivo com conserto tem a frase do conserto", () => {
   // É o que garante que a tela nunca diga "está vazio" sem dizer a quem pedir.
   const quebrados: EscopoFatos[] = [
     { ...ok, setoresAtribuidos: 0, setoresAlcancados: 0 },
-    { ...ok, setoresDaEmpresa: 0, setoresComPonte: 0, setoresAlcancados: 0 },
-    { ...ok, setoresComPonte: 0, setoresAlcancados: 0 },
+    { ...ok, setoresDaEmpresa: 0, setoresAlcancados: 0 },
     { ...ok, setoresAlcancados: 0 },
   ];
   for (const f of quebrados) {
@@ -113,7 +111,6 @@ test("o cadastro do usuário vem antes do da empresa", () => {
     ...ok,
     setoresAtribuidos: 0,
     setoresDaEmpresa: 0,
-    setoresComPonte: 0,
     setoresAlcancados: 0,
   });
   assert.equal(d.motivo, "sem_setor_no_usuario");

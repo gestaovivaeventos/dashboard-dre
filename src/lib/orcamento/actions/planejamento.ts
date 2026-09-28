@@ -28,8 +28,8 @@ import { fetchRealizados, totalGastoAno } from "@/lib/orcamento/media-realizado"
 //
 //  - O escopo de leitura é o do MÓDULO, não desta tela: `autorizarLeitura`
 //    devolve `setores = null` para quem alcança todos (admin, diretoria,
-//    Gerente Sócio) e a lista dos setores vinculados para o Gerente. Um gerente
-//    sem a ponte `ctrl_sector_id` preenchida vê NADA, nunca tudo — falhar
+//    Gerente Sócio) e a lista dos setores atribuídos para o Gerente. Um gerente
+//    sem setor atribuído NESTA empresa vê NADA, nunca tudo — falhar
 //    escondendo é deliberado (ver auth.ts).
 // =============================================================================
 

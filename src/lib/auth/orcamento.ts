@@ -1,5 +1,6 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { OrcamentoPapel, UserProfileType } from "@/lib/supabase/types";
+import { nomesUnicos } from "@/lib/orcamento/setor-atribuicao";
 
 /**
  * Módulo "Orçamento" — planejamento orçamentário (empresa × ano × categoria ×
@@ -236,7 +237,13 @@ export async function fetchOrcamentoGrantUserIds(
 // COMPRAS e não tem empresa — usá-lo aqui devolvia o mesmo setor em todas as
 // empresas que a pessoa alcança, que é o que este cadastro veio desfazer.
 
-/** Mapa empresa → setores do Compras atribuídos ali. É o formato da tela. */
+/**
+ * Mapa empresa → NOMES dos setores do orçamento atribuídos ali.
+ *
+ * Nomes, e não ids: `orcamento_setores` é por empresa × ANO, e o nome é a
+ * identidade que atravessa anos (é por ela que `cloneSetores` copia). Ver
+ * `@/lib/orcamento/setor-atribuicao`.
+ */
 export type OrcamentoSetoresPorEmpresa = Record<string, string[]>;
 
 /**
@@ -248,13 +255,13 @@ export async function fetchOrcamentoSetores(
 ): Promise<OrcamentoSetoresPorEmpresa> {
   const { data } = await adminClient
     .from("orcamento_user_setores")
-    .select("company_id, ctrl_sector_id")
+    .select("company_id, setor_nome")
     .eq("user_id", userId);
 
   const mapa: OrcamentoSetoresPorEmpresa = {};
   for (const row of (data ?? []) as Array<Record<string, unknown>>) {
     const empresa = row.company_id as string;
-    (mapa[empresa] ??= []).push(row.ctrl_sector_id as string);
+    (mapa[empresa] ??= []).push(row.setor_nome as string);
   }
   return mapa;
 }
@@ -284,18 +291,19 @@ export async function setOrcamentoSetores(
   const linhas: Array<{
     user_id: string;
     company_id: string;
-    ctrl_sector_id: string;
+    setor_nome: string;
     created_by: string | null;
   }> = [];
   for (const [companyId, setores] of Object.entries(porEmpresa)) {
-    // Set: a tela pode mandar repetido, e o índice único recusaria o lote
-    // inteiro por causa de uma linha duplicada.
-    for (const ctrlSectorId of Array.from(new Set(setores))) {
-      if (!companyId || !ctrlSectorId) continue;
+    // `nomesUnicos` e não um Set cru: o índice único compara
+    // `lower(btrim(nome))`, então "Marketing" e "marketing " recusariam o lote
+    // inteiro por duplicidade se fossem tratados como nomes diferentes.
+    for (const nome of nomesUnicos(setores)) {
+      if (!companyId) continue;
       linhas.push({
         user_id: userId,
         company_id: companyId,
-        ctrl_sector_id: ctrlSectorId,
+        setor_nome: nome,
         created_by: autorId,
       });
     }
