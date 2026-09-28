@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 
 import { resolveAppUrl } from "@/lib/app-url";
 import { setCaixaGrant } from "@/lib/auth/caixa";
-import { setOrcamentoGrant } from "@/lib/auth/orcamento";
+import {
+  setOrcamentoGrant,
+  setOrcamentoSetores,
+  type OrcamentoSetoresPorEmpresa,
+} from "@/lib/auth/orcamento";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -45,6 +49,7 @@ export async function POST(request: Request) {
     can_contratos?: boolean;
     can_caixa?: boolean;
     can_orcamento?: boolean;
+    orcamento_setores?: OrcamentoSetoresPorEmpresa;
     sector_ids?: string[];
     company_ids?: string[];
   };
@@ -176,6 +181,15 @@ export async function POST(request: Request) {
 
   // Módulo Orçamento (linha em user_module_roles — ver @/lib/auth/orcamento)
   if (body.can_orcamento) {
+    if (body.orcamento_setores) {
+      const { error } = await setOrcamentoSetores(
+        adminClient,
+        newUserId,
+        body.orcamento_setores,
+        profile.id,
+      );
+      if (error) return NextResponse.json({ error }, { status: 400 });
+    }
     const { error } = await setOrcamentoGrant(adminClient, newUserId, true);
     if (error) return NextResponse.json({ error }, { status: 400 });
   }

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { setCaixaGrant } from "@/lib/auth/caixa";
-import { setOrcamentoGrant } from "@/lib/auth/orcamento";
+import {
+  setOrcamentoGrant,
+  setOrcamentoSetores,
+  type OrcamentoSetoresPorEmpresa,
+} from "@/lib/auth/orcamento";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -52,6 +56,8 @@ export async function PATCH(request: Request, { params }: Params) {
     can_caixa?: boolean;
     /** Módulo Orçamento (user_module_roles, não coluna de users). */
     can_orcamento?: boolean;
+    /** Setores do Orçamento por empresa — o recorte é por empresa desde 29/09. */
+    orcamento_setores?: OrcamentoSetoresPorEmpresa;
     active?: boolean;
     /** Lista de IDs de setores. [] = limpa vínculos. undefined = não altera. */
     sector_ids?: string[];
@@ -143,6 +149,23 @@ export async function PATCH(request: Request, { params }: Params) {
   // módulo: o papel (construtor × validador) vem do perfil do usuário.
   if (body.can_orcamento !== undefined) {
     const { error } = await setOrcamentoGrant(adminClient, params.userId, body.can_orcamento);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+  }
+
+  // Os setores do Orçamento são POR EMPRESA e vivem em tabela própria — não
+  // confundir com `user_sectors` (Compras), sincronizado logo abaixo. Tirar o
+  // módulo limpa a atribuição junto: escopo de um módulo que a pessoa não tem
+  // é cadastro invisível, e voltaria a valer sozinho numa reconcessão.
+  if (body.can_orcamento === false) {
+    const { error } = await setOrcamentoSetores(adminClient, params.userId, {}, profile.id);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+  } else if (body.orcamento_setores !== undefined) {
+    const { error } = await setOrcamentoSetores(
+      adminClient,
+      params.userId,
+      body.orcamento_setores,
+      profile.id,
+    );
     if (error) return NextResponse.json({ error }, { status: 400 });
   }
 

@@ -229,3 +229,79 @@ export async function fetchOrcamentoGrantUserIds(
     .eq("module", ORCAMENTO_MODULE);
   return new Set((data ?? []).map((row) => row.user_id as string));
 }
+
+// ─── Setores do Orçamento, POR EMPRESA ───────────────────────────────────────
+// Desde 29/09/2026 o recorte de setor do módulo é por empresa
+// (`orcamento_user_setores`). Não confundir com `user_sectors`, que é do
+// COMPRAS e não tem empresa — usá-lo aqui devolvia o mesmo setor em todas as
+// empresas que a pessoa alcança, que é o que este cadastro veio desfazer.
+
+/** Mapa empresa → setores do Compras atribuídos ali. É o formato da tela. */
+export type OrcamentoSetoresPorEmpresa = Record<string, string[]>;
+
+/**
+ * Lê a atribuição inteira de um usuário, agrupada por empresa.
+ */
+export async function fetchOrcamentoSetores(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+): Promise<OrcamentoSetoresPorEmpresa> {
+  const { data } = await adminClient
+    .from("orcamento_user_setores")
+    .select("company_id, ctrl_sector_id")
+    .eq("user_id", userId);
+
+  const mapa: OrcamentoSetoresPorEmpresa = {};
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const empresa = row.company_id as string;
+    (mapa[empresa] ??= []).push(row.ctrl_sector_id as string);
+  }
+  return mapa;
+}
+
+/**
+ * Grava a atribuição inteira de um usuário: o mapa recebido passa a ser a
+ * verdade, e o que não estiver nele é apagado.
+ *
+ * Substituir tudo (em vez de somar) é o que faz DESMARCAR funcionar — com
+ * upsert puro, tirar um setor da tela não tiraria nada do banco, e o escopo
+ * ficaria maior do que a tela mostra. Empresa que sai do cadastro de unidades
+ * do usuário também some daqui, porque a tela nunca mais a ofereceria e a
+ * linha viraria escopo invisível.
+ */
+export async function setOrcamentoSetores(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+  porEmpresa: OrcamentoSetoresPorEmpresa,
+  autorId: string | null,
+): Promise<{ error: string | null }> {
+  const { error: delError } = await adminClient
+    .from("orcamento_user_setores")
+    .delete()
+    .eq("user_id", userId);
+  if (delError) return { error: delError.message };
+
+  const linhas: Array<{
+    user_id: string;
+    company_id: string;
+    ctrl_sector_id: string;
+    created_by: string | null;
+  }> = [];
+  for (const [companyId, setores] of Object.entries(porEmpresa)) {
+    // Set: a tela pode mandar repetido, e o índice único recusaria o lote
+    // inteiro por causa de uma linha duplicada.
+    for (const ctrlSectorId of Array.from(new Set(setores))) {
+      if (!companyId || !ctrlSectorId) continue;
+      linhas.push({
+        user_id: userId,
+        company_id: companyId,
+        ctrl_sector_id: ctrlSectorId,
+        created_by: autorId,
+      });
+    }
+  }
+  if (linhas.length === 0) return { error: null };
+
+  const { error } = await adminClient.from("orcamento_user_setores").insert(linhas);
+  return { error: error?.message ?? null };
+}

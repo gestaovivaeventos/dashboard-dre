@@ -14,7 +14,7 @@ import { ACAO_ADMIN_TEXTO, diagnosticarEscopo, type EscopoFatos } from "./escopo
 const ok: EscopoFatos = {
   papel: "construtor",
   orcaPorSetor: true,
-  ctrlSetoresDoUsuario: 2,
+  setoresAtribuidos: 2,
   setoresDaEmpresa: 5,
   setoresComPonte: 5,
   setoresAlcancados: 2,
@@ -32,10 +32,19 @@ test("admin nunca cai em escopo vazio — ele não é recortado", () => {
 
 // ─── Cada elo quebrado aponta para o seu conserto ────────────────────────────
 
-test("usuário sem setor marcado manda para a tela de Usuários", () => {
-  const d = diagnosticarEscopo({ ...ok, ctrlSetoresDoUsuario: 0, setoresAlcancados: 0 });
+test("sem setor atribuído NESTA empresa manda para a tela de Usuários", () => {
+  const d = diagnosticarEscopo({ ...ok, setoresAtribuidos: 0, setoresAlcancados: 0 });
   assert.equal(d.motivo, "sem_setor_no_usuario");
   assert.equal(d.acaoAdmin, "usuarios");
+});
+
+test("o aviso diz que a atribuição é POR EMPRESA", () => {
+  // Sem isso a pessoa conclui que está sem setor em lugar nenhum e vai
+  // conferir o Compras, onde o setor dela está lá — e o chamado vira
+  // "o sistema perdeu meu setor".
+  const d = diagnosticarEscopo({ ...ok, setoresAtribuidos: 0, setoresAlcancados: 0 });
+  assert.equal(d.motivo, "sem_setor_no_usuario");
+  assert.match(d.detalhe, /POR EMPRESA/);
 });
 
 test("empresa sem setor no ano manda para Configuração › Setores", () => {
@@ -67,7 +76,7 @@ test("tudo cadastrado e ainda assim vazio = os setores são de outra pessoa", ()
 test("todo motivo com conserto tem a frase do conserto", () => {
   // É o que garante que a tela nunca diga "está vazio" sem dizer a quem pedir.
   const quebrados: EscopoFatos[] = [
-    { ...ok, ctrlSetoresDoUsuario: 0, setoresAlcancados: 0 },
+    { ...ok, setoresAtribuidos: 0, setoresAlcancados: 0 },
     { ...ok, setoresDaEmpresa: 0, setoresComPonte: 0, setoresAlcancados: 0 },
     { ...ok, setoresComPonte: 0, setoresAlcancados: 0 },
     { ...ok, setoresAlcancados: 0 },
@@ -92,7 +101,7 @@ test("a empresa sem recorte vem ANTES do cadastro do usuário", () => {
   const d = diagnosticarEscopo({
     ...ok,
     orcaPorSetor: false,
-    ctrlSetoresDoUsuario: 0,
+    setoresAtribuidos: 0,
     setoresAlcancados: 0,
   });
   assert.equal(d.motivo, "empresa_sem_recorte");
@@ -102,7 +111,7 @@ test("o cadastro do usuário vem antes do da empresa", () => {
   // Os dois quebrados: o aviso nomeia o elo mais próximo dele primeiro.
   const d = diagnosticarEscopo({
     ...ok,
-    ctrlSetoresDoUsuario: 0,
+    setoresAtribuidos: 0,
     setoresDaEmpresa: 0,
     setoresComPonte: 0,
     setoresAlcancados: 0,

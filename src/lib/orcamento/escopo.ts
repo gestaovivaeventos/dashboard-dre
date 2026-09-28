@@ -5,7 +5,7 @@ import type { OrcamentoPapel } from "@/lib/supabase/types";
 //
 // O módulo recorta tudo por setor, e o recorte é uma corrente de três elos:
 //
-//   user_sectors (Compras) → ctrl_sectors → orcamento_setores.ctrl_sector_id
+//   orcamento_user_setores (empresa × setor) → orcamento_setores.ctrl_sector_id
 //
 // Quebrando qualquer elo, o escopo de leitura vira `[]` e as consultas viram
 // `.in("setor_id", [])` — que casa com NADA e não devolve erro nenhum. O
@@ -22,7 +22,7 @@ import type { OrcamentoPapel } from "@/lib/supabase/types";
 export type EscopoMotivo =
   /** Alcança setor (ou não precisa de setor): nada a dizer. */
   | "ok"
-  /** O usuário não tem NENHUM setor marcado — conserta-se em Usuários. */
+  /** Nenhum setor atribuído a ele NESTA empresa — conserta-se em Usuários. */
   | "sem_setor_no_usuario"
   /** A empresa não tem setor ativo neste ano — conserta-se em Configuração. */
   | "empresa_sem_setor"
@@ -56,8 +56,11 @@ export interface EscopoFatos {
   papel: OrcamentoPapel;
   /** `orcamento_company_config.orcar_por_setor` desta empresa × ano. */
   orcaPorSetor: boolean;
-  /** Quantos setores do Compras estão marcados para o usuário (user_sectors). */
-  ctrlSetoresDoUsuario: number;
+  /**
+   * Quantos setores estão atribuídos ao usuário NESTA empresa
+   * (`orcamento_user_setores`). Zero é o caso mais comum de tela vazia.
+   */
+  setoresAtribuidos: number;
   /** Setores ATIVOS desta empresa no ano. */
   setoresDaEmpresa: number;
   /** Destes, quantos têm `ctrl_sector_id` preenchido (a ponte). */
@@ -128,12 +131,12 @@ export function diagnosticarEscopo(f: EscopoFatos): EscopoDiagnostico {
     };
   }
 
-  if (f.ctrlSetoresDoUsuario === 0) {
+  if (f.setoresAtribuidos === 0) {
     return {
       motivo: "sem_setor_no_usuario",
       gravidade,
-      titulo: "Seu usuário não tem setor marcado",
-      detalhe: `${abertura}, porque o recorte do módulo é por setor e nenhum está vinculado a você.`,
+      titulo: "Você não tem setor nesta empresa",
+      detalhe: `${abertura}: a atribuição de setor do orçamento é POR EMPRESA, e nenhum setor desta foi marcado para você. Ter o setor em outra empresa (ou no Compras) não vale aqui.`,
       acaoAdmin: "usuarios",
     };
   }
@@ -161,11 +164,13 @@ export function diagnosticarEscopo(f: EscopoFatos): EscopoDiagnostico {
   // Tudo cadastrado, e ainda assim ela não alcança nada: os setores desta
   // empresa simplesmente são de outras pessoas. Não é defeito — e por isso
   // esta é a única mensagem que não manda ninguém consertar nada.
+  // Tudo cadastrado dos dois lados e ainda assim vazio: os setores que ela tem
+  // nesta empresa não são os que o orçamento desta empresa usa neste ano.
   return {
     motivo: "fora_da_responsabilidade",
     gravidade,
-    titulo: "Nenhum setor desta empresa está sob sua responsabilidade",
-    detalhe: `${abertura}. Os setores desta empresa estão vinculados a outras pessoas — se algum deveria ser seu, ele precisa entrar no seu usuário.`,
+    titulo: "Seus setores não coincidem com os do orçamento desta empresa",
+    detalhe: `${abertura}. Os setores marcados para você aqui não são os que esta empresa orça neste ano — se algum deveria ser seu, ele precisa entrar no seu usuário.`,
     acaoAdmin: "usuarios",
   };
 }

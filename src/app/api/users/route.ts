@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { fetchCaixaGrantUserIds } from "@/lib/auth/caixa";
-import { fetchOrcamentoGrantUserIds } from "@/lib/auth/orcamento";
+import {
+  fetchOrcamentoGrantUserIds,
+  type OrcamentoSetoresPorEmpresa,
+} from "@/lib/auth/orcamento";
 import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -47,6 +50,21 @@ export async function GET() {
   const caixaUserIds = await fetchCaixaGrantUserIds(adminClient);
   // Modulo Orcamento: idem (ver @/lib/auth/orcamento).
   const orcamentoUserIds = await fetchOrcamentoGrantUserIds(adminClient);
+  // Setores do Orcamento, que sao POR EMPRESA. Uma consulta para a lista
+  // inteira: o formulario precisa do mapa ja preenchido ao abrir a edicao, e
+  // buscar por usuario faria N requisicoes so para desenhar a tela.
+  const orcamentoSetores = new Map<string, OrcamentoSetoresPorEmpresa>();
+  {
+    const { data } = await adminClient
+      .from("orcamento_user_setores")
+      .select("user_id, company_id, ctrl_sector_id");
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const uid = row.user_id as string;
+      const mapa = orcamentoSetores.get(uid) ?? {};
+      (mapa[row.company_id as string] ??= []).push(row.ctrl_sector_id as string);
+      orcamentoSetores.set(uid, mapa);
+    }
+  }
 
   const companyNames = new Map((companiesData ?? []).map((c) => [c.id as string, c.name as string]));
   const sectorNames = new Map((sectorsData ?? []).map((s) => [s.id as string, s.name as string]));
@@ -96,6 +114,7 @@ export async function GET() {
     // Admin enxerga o Orcamento sem a linha (mesmo modelo).
     can_orcamento:
       orcamentoUserIds.has(item.id as string) || item.profile === "admin",
+    orcamento_setores: orcamentoSetores.get(item.id as string) ?? {},
     active: Boolean(item.active),
     created_at: item.created_at as string,
     // Legacy fields for backwards compatibility with the existing UI:

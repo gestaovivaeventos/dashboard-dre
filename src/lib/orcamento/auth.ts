@@ -48,9 +48,12 @@ export interface OrcamentoUser {
   /** Empresas de `user_company_access`; "todas" para admin. */
   companyIds: string[] | "todas";
   /**
-   * Setores do COMPRAS vinculados ao usuário (`user_sectors`). É a chave da
-   * ponte: `orcamento_setores.ctrl_sector_id` aponta para `ctrl_sectors`, não
-   * para um cadastro próprio do orçamento.
+   * Setores do COMPRAS vinculados ao usuário (`user_sectors`).
+   *
+   * **Não é o escopo do Orçamento** desde 29/09/2026: aquele é por empresa e
+   * mora em `orcamento_user_setores` (ver `resolverSetoresDoUsuario`). Este
+   * campo continua aqui porque a sessão o carrega para o Compras; usá-lo para
+   * recortar orçamento devolve o mesmo setor em todas as empresas.
    */
   ctrlSectorIds: string[];
 }
@@ -158,8 +161,18 @@ export async function setoresDeEscrita(
 }
 
 /**
- * A ponte, numa consulta: `user_sectors` (Compras) → `orcamento_setores` da
- * empresa × ano, por `ctrl_sector_id`.
+ * Setores que o usuário alcança NESTA empresa × ano.
+ *
+ * A atribuição é POR EMPRESA (`orcamento_user_setores`, 29/09/2026) e guarda
+ * o setor no vocabulário do Compras; a ponte `orcamento_setores.ctrl_sector_id`
+ * resolve o ano. Duas consultas em paralelo e a interseção em memória —
+ * PostgREST não faz subconsulta em `in`, e um join aqui obrigaria a expor a
+ * tabela de atribuição como embed.
+ *
+ * **NÃO use `user_sectors` aqui.** Aquilo é o recorte do COMPRAS (alçada de
+ * aprovação, tela de Aprovações, lembrete diário) e não tem empresa: usá-lo
+ * dava o mesmo setor em todas as empresas que a pessoa alcança, que é
+ * exatamente o que esta tabela veio desfazer.
  */
 async function resolverSetoresDoUsuario(
   supabase: SupabaseClient,
@@ -167,15 +180,34 @@ async function resolverSetoresDoUsuario(
   companyId: string,
   year: number,
 ): Promise<string[]> {
-  if (user.ctrlSectorIds.length === 0) return [];
-  const { data, error } = await supabase
-    .from("orcamento_setores")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .in("ctrl_sector_id", user.ctrlSectorIds);
-  if (error || !data) return [];
-  return data.map((r) => r.id as string);
+  const [atribuidos, doAno] = await Promise.all([
+    supabase
+      .from("orcamento_user_setores")
+      .select("ctrl_sector_id")
+      .eq("user_id", user.userId)
+      .eq("company_id", companyId),
+    supabase
+      .from("orcamento_setores")
+      .select("id, ctrl_sector_id")
+      .eq("company_id", companyId)
+      .eq("year", year),
+  ]);
+
+  // Tabela ausente (migration pendente) ou erro: devolve VAZIO, nunca tudo.
+  // Falhar para o lado de esconder é deliberado — o aviso de escopo vazio
+  // explica o que houve, e `escopo.ts` distingue os motivos.
+  if (atribuidos.error || doAno.error) return [];
+
+  const meus = new Set(
+    ((atribuidos.data ?? []) as Array<Record<string, unknown>>).map(
+      (r) => r.ctrl_sector_id as string,
+    ),
+  );
+  if (meus.size === 0) return [];
+
+  return ((doAno.data ?? []) as Array<Record<string, unknown>>)
+    .filter((r) => r.ctrl_sector_id != null && meus.has(r.ctrl_sector_id as string))
+    .map((r) => r.id as string);
 }
 
 /**

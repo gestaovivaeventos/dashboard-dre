@@ -34,25 +34,34 @@ export async function diagnosticarEscopoDaEmpresa(
 
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
 
-  const [{ data: setores }, porSetor] = await Promise.all([
+  const [{ data: setores }, { data: atribuidos }, porSetor] = await Promise.all([
     supabase
       .from("orcamento_setores")
       .select("id, ctrl_sector_id, active")
       .eq("company_id", companyId)
       .eq("year", year),
+    // A atribuição é POR EMPRESA: ter o setor em outra não conta aqui, e é
+    // justamente essa diferença que o aviso precisa saber explicar.
+    supabase
+      .from("orcamento_user_setores")
+      .select("ctrl_sector_id")
+      .eq("user_id", user.userId)
+      .eq("company_id", companyId),
     orcaPorSetor(supabase, companyId, year),
   ]);
 
   const ativos = ((setores ?? []) as Array<Record<string, unknown>>).filter(
     (s) => s.active !== false,
   );
-  const doUsuario = new Set(user.ctrlSectorIds);
+  const doUsuario = new Set(
+    ((atribuidos ?? []) as Array<Record<string, unknown>>).map((r) => r.ctrl_sector_id as string),
+  );
 
   return {
     diagnostico: diagnosticarEscopo({
       papel: user.papel,
       orcaPorSetor: porSetor,
-      ctrlSetoresDoUsuario: user.ctrlSectorIds.length,
+      setoresAtribuidos: doUsuario.size,
       setoresDaEmpresa: ativos.length,
       setoresComPonte: ativos.filter((s) => s.ctrl_sector_id != null).length,
       setoresAlcancados: ativos.filter(

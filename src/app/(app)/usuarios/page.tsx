@@ -66,6 +66,21 @@ export default async function UsuariosPage() {
     userSectors.set(uid, list);
   });
 
+  // Uma consulta para a lista inteira: a tela abre com o mapa pronto, e buscar
+  // por usuário faria N requisições só para desenhar o formulário.
+  const orcamentoSetores = new Map<string, Record<string, string[]>>();
+  {
+    const { data } = await adminClient
+      .from("orcamento_user_setores")
+      .select("user_id, company_id, ctrl_sector_id");
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const uid = row.user_id as string;
+      const mapa = orcamentoSetores.get(uid) ?? {};
+      (mapa[row.company_id as string] ??= []).push(row.ctrl_sector_id as string);
+      orcamentoSetores.set(uid, mapa);
+    }
+  }
+
   const usersData = (users ?? []).map((item) => ({
     id: item.id as string,
     email: item.email as string,
@@ -85,6 +100,9 @@ export default async function UsuariosPage() {
     can_caixa: caixaUserIds.has(item.id as string) || item.profile === "admin",
     can_orcamento:
       orcamentoUserIds.has(item.id as string) || item.profile === "admin",
+    // Setores do Orçamento são POR EMPRESA (migration 20260929120000) — e por
+    // isso não cabem em `sector_ids`, que é o recorte do Compras.
+    orcamento_setores: orcamentoSetores.get(item.id as string) ?? {},
     active: Boolean(item.active),
     company_ids: userCompanies.get(item.id as string) ?? [],
     sector_ids: userSectors.get(item.id as string) ?? [],

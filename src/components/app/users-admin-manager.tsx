@@ -40,7 +40,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { isOrcamentoEligibleProfile } from "@/lib/auth/orcamento";
+import {
+  isOrcamentoEligibleProfile,
+  type OrcamentoSetoresPorEmpresa,
+} from "@/lib/auth/orcamento";
 import {
   describeUserExceptions,
   findOrphanExceptionRules,
@@ -76,6 +79,8 @@ interface UserItem {
   can_contratos: boolean;
   can_caixa: boolean;
   can_orcamento: boolean;
+  /** Setores do Orçamento POR EMPRESA (empresa → setores do Compras). */
+  orcamento_setores: OrcamentoSetoresPorEmpresa;
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
@@ -202,6 +207,12 @@ interface FormState {
   can_contratos: boolean;
   can_caixa: boolean;
   can_orcamento: boolean;
+  /**
+   * Setores do Orçamento, POR EMPRESA. Separado de `sector_ids` de propósito:
+   * aquele é o recorte do COMPRAS e não tem empresa (ver a migration
+   * 20260929120000).
+   */
+  orcamento_setores: OrcamentoSetoresPorEmpresa;
   sector_ids: string[];
   company_ids: string[];
 }
@@ -220,6 +231,7 @@ const emptyForm: FormState = {
   can_contratos: false,
   can_caixa: false,
   can_orcamento: false,
+  orcamento_setores: {},
   sector_ids: [],
   company_ids: [],
 };
@@ -239,6 +251,9 @@ function userToForm(u: UserItem): FormState {
     can_contratos: u.can_contratos,
     can_caixa: u.can_caixa,
     can_orcamento: u.can_orcamento,
+    orcamento_setores: Object.fromEntries(
+      Object.entries(u.orcamento_setores ?? {}).map(([c, ids]) => [c, [...ids]]),
+    ),
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
   };
@@ -474,6 +489,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_contratos: boolean;
         can_caixa: boolean;
         can_orcamento: boolean;
+        orcamento_setores?: OrcamentoSetoresPorEmpresa;
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
@@ -495,6 +511,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_contratos: u.can_contratos,
         can_caixa: u.can_caixa,
         can_orcamento: u.can_orcamento,
+        orcamento_setores: u.orcamento_setores ?? {},
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
@@ -557,6 +574,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_contratos: form.can_contratos,
         can_caixa: form.can_caixa,
         can_orcamento: form.can_orcamento,
+        orcamento_setores: form.orcamento_setores,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -597,6 +615,7 @@ export function UsersAdminManager({ initialUsers, companies, sectors }: Props) {
         can_contratos: form.can_contratos,
         can_caixa: form.can_caixa,
         can_orcamento: form.can_orcamento,
+        orcamento_setores: form.orcamento_setores,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
       }),
@@ -1105,8 +1124,14 @@ function UserForm({
 }) {
   const showSectors = profileShowsSectors(form.profile);
   const sectorsRequired = profileNeedsSectors(form.profile);
+  // O Orçamento também se recorta por empresa (`podeVerEmpresa` lê
+  // `user_company_access`), então o seletor precisa aparecer com ele marcado
+  // mesmo sem Financeiro — um Gerente de Compras + Orçamento ficava sem
+  // caminho para receber empresa nenhuma, e o painel do módulo abria vazio.
   const showCompanies =
-    form.can_financeiro && form.profile !== "admin" && form.profile !== "validador_contrato";
+    (form.can_financeiro || form.can_orcamento) &&
+    form.profile !== "admin" &&
+    form.profile !== "validador_contrato";
   const isValidator = form.profile === "validador_contrato";
   // Visão Financeira e CSC são só-Financeiro: não escolhem Compras/Case. Mas a
   // Validação de Contratos é um módulo independente, então a seção continua
@@ -1297,6 +1322,19 @@ function UserForm({
               ? "Este perfil é fixo no Financeiro (sem Compras e sem Case). A Validação de Contratos e o Caixa são módulos à parte e podem ser liberados."
               : "Plataforma (Conexões, Usuários, Inteligência) é automática pra admin."}
           </p>
+          {/* O botão Orçamento some para perfil não elegível, e sumir calado faz
+              quem administra concluir que o módulo não existe — foi exatamente o
+              que aconteceu em 28/09/2026. O motivo é real (marcar o módulo para
+              um solicitante não daria acesso nenhum, ver `resolveOrcamentoPapel`),
+              mas precisa estar escrito. */}
+          {!isOrcamentoEligibleProfile(form.profile) && (
+            <p className="text-xs text-muted-foreground">
+              <strong>Orçamento</strong> não aparece acima porque o módulo não faz efeito
+              neste perfil: quem constrói e valida orçamento é{" "}
+              <strong>Diretor</strong>, <strong>Gerente Sócio</strong> ou{" "}
+              <strong>Gerente</strong>. Troque o perfil para liberá-lo.
+            </p>
+          )}
           {form.can_caixa && (
             <p className="text-xs text-muted-foreground">
               O módulo <strong>Caixa</strong> mostra o saldo das contas correntes de{" "}
@@ -1338,21 +1376,14 @@ function UserForm({
               nenhum setor, ele aprova requisições de todos os setores.
             </p>
           )}
-          {/* O MESMO campo tem leitura OPOSTA nos dois módulos, e já confundiu:
-              no Compras, diretor sem setor recebe tudo; no Orçamento, sem setor
-              ele não consegue montar nada (lê e valida a empresa inteira, mas o
-              escopo de ESCRITA fica vazio). Para gerente, vazio significa não
-              enxergar nada. Sem esta linha, o admin marca o módulo e a pessoa
-              abre a tela em branco. */}
+          {/* Até 29/09/2026 este campo também recortava o Orçamento, com
+              significado OPOSTO ao do Compras — e sem empresa, o que dava o
+              mesmo setor em todas elas. O Orçamento passou a ter cadastro
+              próprio, por empresa, logo abaixo das Unidades. */}
           {form.can_orcamento && (
-            <p className="text-xs text-amber-700 dark:text-amber-500">
-              No <strong>Orçamento</strong> este campo tem outro efeito:{" "}
-              {form.profile === "diretor"
-                ? "sem setor, o diretor lê e valida a empresa inteira, mas não consegue montar o orçamento de nenhum setor."
-                : "sem setor, a pessoa abre as telas do orçamento VAZIAS — é o setor que define o que ela enxerga."}{" "}
-              O vínculo só vale depois que o setor do Compras for ligado ao setor
-              do orçamento, em <strong>Configuração › Setores</strong> de cada
-              empresa e ano.
+            <p className="text-xs text-muted-foreground">
+              Este campo é do <strong>Compras</strong>. Os setores do{" "}
+              <strong>Orçamento</strong> são escolhidos por unidade, mais abaixo.
             </p>
           )}
         </div>
@@ -1361,7 +1392,8 @@ function UserForm({
       {showCompanies && (
         <div className="space-y-1.5">
           <Label>
-            Unidades (acesso ao Financeiro) <span className="text-destructive">*</span>
+            {form.can_financeiro ? "Unidades (acesso ao Financeiro)" : "Unidades"}{" "}
+            <span className="text-destructive">*</span>
           </Label>
           <PillMultiSelect
             options={companies}
@@ -1369,13 +1401,44 @@ function UserForm({
             onToggle={onToggleCompany}
             emptyMessage="Nenhuma empresa cadastrada."
           />
+          {form.can_orcamento && (
+            <p className="text-xs text-muted-foreground">
+              O <strong>Orçamento</strong> também se recorta por unidade: a pessoa só
+              alcança o orçamento das marcadas aqui.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Setor do orçamento é POR EMPRESA (migration 20260929120000). Vem depois
+          das Unidades de propósito: ele oferece exatamente as que foram marcadas
+          ali, e lido de cima para baixo o formulário conta a história certa —
+          módulo, depois empresas, depois os setores de cada uma. */}
+      {form.can_orcamento && (
+        <div className="space-y-1.5">
+          <Label>Setores do Orçamento, por unidade</Label>
+          <OrcamentoSetoresPorEmpresaField
+            companies={companies}
+            sectors={sectors}
+            companyIds={form.company_ids}
+            value={form.orcamento_setores}
+            onChange={(next) => onChange("orcamento_setores", next)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Quem constrói (Gerente) enxerga <strong>só estes setores</strong>; Gerente
+            Sócio e Diretor leem a unidade inteira, mas editam apenas estes. Sem setor
+            numa unidade, as telas do orçamento dela abrem vazias.
+          </p>
         </div>
       )}
 
       {form.profile === "admin" && (
         <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
           Admin vê <strong>todas as unidades</strong> e tem acesso ao módulo Plataforma
-          (Conexões, Usuários, Inteligência) automaticamente.
+          (Conexões, Usuários, Inteligência) automaticamente — inclusive{" "}
+          <strong>Orçamento</strong>, <strong>Caixa</strong> e{" "}
+          <strong>Validação de Contratos</strong>. Por isso &ldquo;Módulos visíveis&rdquo;
+          não aparece neste perfil: não há o que marcar.
         </p>
       )}
       {isValidator && (
@@ -1471,6 +1534,87 @@ function PillMultiSelect({
             {active && <Check className="h-3 w-3" />}
             {opt.name}
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Setores do Orçamento, uma linha por EMPRESA.
+ *
+ * O recorte do módulo é por empresa desde 29/09/2026: a mesma pessoa pode
+ * responder por Marketing na Sirena e por nada na Feat. Por isso a atribuição
+ * não cabe no campo "Setores" de cima, que é do Compras e não tem empresa.
+ *
+ * As empresas oferecidas são as UNIDADES já marcadas no formulário — não uma
+ * segunda lista. `user_company_access` é o que `podeVerEmpresa` lê, então
+ * oferecer aqui uma empresa fora dali produziria setor num lugar que a pessoa
+ * nem abre.
+ */
+function OrcamentoSetoresPorEmpresaField({
+  companies,
+  sectors,
+  companyIds,
+  value,
+  onChange,
+}: {
+  companies: SimpleOption[];
+  sectors: SimpleOption[];
+  companyIds: string[];
+  value: OrcamentoSetoresPorEmpresa;
+  onChange: (next: OrcamentoSetoresPorEmpresa) => void;
+}) {
+  const selecionadas = companies.filter((c) => companyIds.includes(c.id));
+
+  function toggle(companyId: string, sectorId: string) {
+    const atual = value[companyId] ?? [];
+    const proxima = atual.includes(sectorId)
+      ? atual.filter((id) => id !== sectorId)
+      : [...atual, sectorId];
+    const next = { ...value };
+    // Empresa sem setor sai do mapa em vez de ficar com lista vazia: o que vai
+    // para o banco é uma linha por (usuário, empresa, setor), e chave vazia
+    // seria só ruído no payload.
+    if (proxima.length === 0) delete next[companyId];
+    else next[companyId] = proxima;
+    onChange(next);
+  }
+
+  if (selecionadas.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Marque as <strong>unidades</strong> acima primeiro — os setores do orçamento são
+        escolhidos dentro de cada uma.
+      </p>
+    );
+  }
+
+  if (sectors.length === 0) {
+    return <p className="text-xs text-muted-foreground">Nenhum setor cadastrado.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {selecionadas.map((empresa) => {
+        const marcados = value[empresa.id] ?? [];
+        return (
+          <div key={empresa.id} className="rounded-md border p-2.5">
+            <div className="mb-1.5 flex items-baseline justify-between gap-2">
+              <span className="text-sm font-medium">{empresa.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {marcados.length === 0
+                  ? "nenhum setor"
+                  : `${marcados.length} setor(es)`}
+              </span>
+            </div>
+            <PillMultiSelect
+              options={sectors}
+              selected={marcados}
+              onToggle={(sectorId) => toggle(empresa.id, sectorId)}
+              emptyMessage="Nenhum setor cadastrado."
+            />
+          </div>
         );
       })}
     </div>
