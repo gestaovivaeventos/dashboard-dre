@@ -69,6 +69,46 @@ export async function findProjetoByNome(
   return fallbackInativo;
 }
 
+const PROJETO_NOME_MAX = 70;
+
+// Devolve o nCodProj do projeto com esse nome, criando-o na Omie quando não
+// existe. O nome é cortado no limite da Omie ANTES da busca: senão um nome
+// longo nunca casaria com o projeto já criado (truncado) e cada lançamento
+// criaria um projeto novo.
+export async function ensureProjetoByNome(
+  appKey: string,
+  appSecret: string,
+  nome: string,
+): Promise<number> {
+  const nomeOmie = nome.replace(/\s+/g, " ").trim().slice(0, PROJETO_NOME_MAX).trim();
+  if (!nomeOmie) throw new Error("Nome do projeto vazio.");
+
+  const existente = await findProjetoByNome(appKey, appSecret, nomeOmie);
+  if (existente) return existente;
+
+  // codInt determinístico pelo nome: dois lançamentos simultâneos do mesmo
+  // fundo colidem no codInt em vez de gerar dois projetos homônimos.
+  const { createHash } = await import("node:crypto");
+  const codInt = `CASE-${createHash("sha1").update(normalizeNome(nomeOmie)).digest("hex").slice(0, 15)}`;
+  try {
+    const { data } = await omieCall(PROJETOS_URL, "IncluirProjeto", appKey, appSecret, {
+      codInt,
+      nome: nomeOmie,
+      inativo: "N",
+    });
+    const codigo = Number(data.codigo ?? 0);
+    if (codigo) return codigo;
+  } catch (e) {
+    // Perdeu a corrida (ou o codInt já existe): o projeto está lá, relê.
+    const criado = await findProjetoByNome(appKey, appSecret, nomeOmie);
+    if (criado) return criado;
+    throw e;
+  }
+  const criado = await findProjetoByNome(appKey, appSecret, nomeOmie);
+  if (!criado) throw new Error(`Omie não devolveu o código do projeto "${nomeOmie}".`);
+  return criado;
+}
+
 // Procura um título de NF de produto (id_origem 'NFEP') do fornecedor (por CNPJ)
 // com valor igual, ainda em aberto. SÓ casa com NFEP — títulos de previsão
 // recorrente (RPTP), manuais (MANP) etc. NÃO contam como "faturado em compras"

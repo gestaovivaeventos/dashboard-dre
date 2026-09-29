@@ -553,7 +553,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
                   <Field label="CEP" value={cCep} onChange={setCCep} />
                 </div>
                 <p className="text-xs text-ink-muted">
-                  No Omie, o cliente é cadastrado como <strong>pessoa física do responsável legal</strong> (razão social = nome completo, documento = CPF) e o Fundo/Razão social vira o <strong>nome fantasia</strong>. Informe o CNPJ só se o contratante tiver um.
+                  No Omie, o cliente é cadastrado como <strong>pessoa física do responsável legal</strong> (razão social = nome completo, documento = CPF) e o Fundo/Razão social vira o <strong>nome fantasia</strong> e o <strong>projeto</strong> de todos os lançamentos do contrato. Informe o CNPJ só se o contratante tiver um.
                 </p>
               </>
             )}

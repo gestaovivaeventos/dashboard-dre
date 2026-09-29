@@ -17,6 +17,8 @@ export interface ContaReceberPayload {
   observacao?: string;
   numero_documento?: string;
   numero_parcela?: string;
+  /** Código numérico do projeto Omie (nCodProj). */
+  codigo_projeto?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   distribuicao?: any[];
 }
