@@ -365,22 +365,29 @@ export function DespesasPessoalManager({
     <div className="space-y-5">
       {/* Regime de apuração + setor (empresa e ano ficam no cabeçalho do workspace) */}
       <div className="flex flex-wrap items-end gap-3">
-        {/* Regime de apuração — distribui o 13º (caixa: nov/dez; competência: 1/12). */}
-        <div className="w-48 space-y-1.5">
-          <label className="text-sm font-medium">Regime de apuração</label>
-          <select
-            value={setup.regimeApuracao}
-            onChange={(e) => void handleRegimeChange(e.target.value)}
-            disabled={loading || savingRegime || !companyId || needsMigration}
-            className={INPUT_CLS}
-          >
-            {REGIMES_APURACAO.map((r) => (
-              <option key={r.key} value={r.key}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Regime de apuração — distribui o 13º (caixa: nov/dez; competência: 1/12).
+            SÓ PARA ADMIN: é uma PREMISSA do orçamento, do mesmo naipe do plano de
+            cargos e dos encargos, e `setRegimeApuracao` já recusa quem não é
+            admin — deixar o seletor à vista era oferecer um controle que só
+            levaria a uma recusa, e ainda por cima muda o número da empresa
+            inteira. O gestor constrói o quadro; ele não redefine o regime. */}
+        {isAdmin && (
+          <div className="w-48 space-y-1.5">
+            <label className="text-sm font-medium">Regime de apuração</label>
+            <select
+              value={setup.regimeApuracao}
+              onChange={(e) => void handleRegimeChange(e.target.value)}
+              disabled={loading || savingRegime || !companyId || needsMigration}
+              className={INPUT_CLS}
+            >
+              {REGIMES_APURACAO.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {setup.orcarPorSetor && setup.setores.length > 0 && (
           <div className="w-56 space-y-1.5">
             <label className="text-sm font-medium">Setor</label>
