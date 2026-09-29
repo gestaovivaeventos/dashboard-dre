@@ -144,9 +144,12 @@ type TabKey = "quadro" | "beneficios" | "colaborador" | "previa";
 // PRÓPRIA LINHA de cada colaborador (mesmo gesto do Planejamento dos gestores)
 // e a prévia do setor desceu para baixo do quadro. Decidir num lugar e ver o
 // efeito noutro obrigava a trocar de aba a cada ✓.
-const TABS: readonly { key: TabKey; label: string }[] = [
+const TABS: readonly { key: TabKey; label: string; adminOnly?: boolean }[] = [
   { key: "quadro", label: "Quadro" },
-  { key: "beneficios", label: "Benefícios" },
+  // Benefícios é PREMISSA, como o regime de apuração e o check "Agrupar" (que
+  // já era admin-only dentro dela): o gestor monta o quadro, não define quanto
+  // vale o vale-transporte da empresa.
+  { key: "beneficios", label: "Benefícios", adminOnly: true },
   { key: "colaborador", label: "Colaborador" },
   { key: "previa", label: "Prévia" },
 ] as const;
@@ -444,7 +447,7 @@ export function DespesasPessoalManager({
         <>
           {/* Abas: Quadro (azul) | Benefícios (verde) | Colaborador | Prévia */}
           <div className="flex gap-1 border-b">
-            {TABS.map((t) => (
+            {TABS.filter((t) => !t.adminOnly || isAdmin).map((t) => (
               <button
                 key={t.key}
                 type="button"
@@ -475,7 +478,11 @@ export function DespesasPessoalManager({
               setorId={setorId}
               escopoLabel={escopoLabel}
             />
-          ) : tab === "quadro" ? (
+          ) : tab === "quadro" || !isAdmin ? (
+            /* `|| !isAdmin`: esconder o botão da aba não é a única defesa — o
+               estado poderia apontar para Benefícios (troca de perfil, estado
+               antigo) e a tabela renderizaria assim mesmo. Quem não é admin
+               sempre cai no Quadro. */
             <>
               {cargoOptionsForSetor.length === 0 && (
                 <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-muted-foreground">
@@ -629,8 +636,8 @@ export function DespesasPessoalManager({
             /* Aba Benefícios (parte verde) — valores mensais por colaborador */
             <>
               <p className="text-sm text-muted-foreground">
-                Valores <strong>mensais</strong> por colaborador. O admin pré-preenche e o gestor
-                ajusta — cada alteração é salva automaticamente. Adicione/remova pessoas na aba{" "}
+                Valores <strong>mensais</strong> por colaborador, definidos pelo{" "}
+                <strong>administrador</strong> — cada alteração é salva automaticamente. Adicione/remova pessoas na aba{" "}
                 <strong>Quadro</strong>. <em>Seguro de vida</em> só se aplica a colaboradores com
                 vínculo <strong>Estágio</strong>. O check <strong>Agrupar</strong> no topo de cada
                 coluna decide se o benefício soma na linha “Benefícios” da prévia ou vira uma linha
