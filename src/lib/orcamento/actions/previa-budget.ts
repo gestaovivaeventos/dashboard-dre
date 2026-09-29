@@ -143,7 +143,7 @@ export async function enviarPreviaParaOrcamento(
   if (rows.length === 0) {
     return {
       error:
-        "Nada foi aprovado pela diretoria ainda — só o aprovado vai para o Budget. Aprove os colaboradores na aba Validação.",
+        "Nada foi aprovado pela diretoria ainda — só o aprovado vai para o Budget. A diretoria aprova na própria linha de cada colaborador, no quadro.",
     };
   }
 
