@@ -111,6 +111,13 @@ export interface CargoOption {
   label: string;
   salario: number;
   setorId: string | null;
+  /**
+   * Benefícios que o plano define para este nível. Escolher o cargo os copia
+   * para o colaborador, como já faz com o salário — `null` num benefício é
+   * "o plano não diz" e preserva o que estiver na aba Benefícios.
+   * A regra está em `cargo-beneficios.ts` (pura e testada).
+   */
+  beneficios: Beneficios;
 }
 
 export interface SetorOption {
@@ -280,24 +287,45 @@ export async function getPessoalSetup(companyId: string, year: number): Promise<
   const cargoOptions: CargoOption[] = [];
   const cargoIds = (cargos ?? []).map((c) => c.id as string);
   if (cargoIds.length > 0) {
-    const { data: niveis, error: nivErr } = await supabase
+    // Com os benefícios do nível: escolher o cargo copia o pacote junto com o
+    // salário. Antes da migration `20260929140000` as colunas não existem e o
+    // select inteiro falharia com 42703 — aí cai na lista de sempre, em vez de
+    // derrubar a tela de Pessoal por causa de um recurso acessório.
+    let niveis: Record<string, unknown>[] = [];
+    const comBeneficios = await supabase
       .from("orcamento_cargo_niveis")
-      .select("cargo_id, name, salario")
+      .select(
+        "cargo_id, name, salario, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida",
+      )
       .in("cargo_id", cargoIds);
-    if (nivErr) return { error: nivErr.message };
+    if (!comBeneficios.error) {
+      niveis = (comBeneficios.data ?? []) as unknown as Record<string, unknown>[];
+    } else if (isSchemaMissing(comBeneficios.error.message)) {
+      const sem = await supabase
+        .from("orcamento_cargo_niveis")
+        .select("cargo_id, name, salario")
+        .in("cargo_id", cargoIds);
+      if (sem.error) return { error: sem.error.message };
+      niveis = (sem.data ?? []) as unknown as Record<string, unknown>[];
+    } else {
+      return { error: comBeneficios.error.message };
+    }
     const cargoById = new Map(
       (cargos ?? []).map((c) => [
         c.id as string,
         { name: c.name as string, setorId: (c.setor_id as string) ?? null },
       ]),
     );
-    for (const n of niveis ?? []) {
+    for (const n of niveis) {
       const cargo = cargoById.get(n.cargo_id as string);
       if (!cargo) continue;
       cargoOptions.push({
         label: `${cargo.name} — ${n.name as string}`,
         salario: Number(n.salario),
         setorId: cargo.setorId,
+        // `readBeneficios` é o mesmo leitor da linha do colaborador: as colunas
+        // do nível espelham 1:1 as dele.
+        beneficios: readBeneficios(n as Record<string, unknown>),
       });
     }
     cargoOptions.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));

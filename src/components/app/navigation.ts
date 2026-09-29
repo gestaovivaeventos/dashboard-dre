@@ -14,6 +14,7 @@ import {
   FileText,
   GitCompare,
   GitMerge,
+  IdCard,
   Inbox,
   Landmark,
   LayoutDashboard,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/auth/bi-validation";
 import { CAIXA_NAV_KEY_REAL, CAIXA_REAL_PATH } from "@/lib/auth/caixa";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
+import { DP_NAV_KEY_OVERVIEW, DP_PATH } from "@/lib/auth/dp";
 import {
   VB_NAV_KEY_OMIE,
   VB_NAV_KEY_OVERVIEW,
@@ -254,6 +256,12 @@ export interface NavItem {
   /** Item só do papel admin do Orçamento (Configurações gerais). */
   orcamentoAdminOnly?: boolean;
   /**
+   * Item do módulo Departamento Pessoal (sigiloso) — visível só para quem tem a
+   * concessão (ver @/lib/auth/dp). Independe de dreRoles/ctrlRoles; admin não
+   * herda.
+   */
+  dpAccess?: boolean;
+  /**
    * Item visível a QUALQUER usuário logado (ex.: Chamados/Suporte). Ignora
    * dreRoles/ctrlRoles e as whitelists de franqueado/CSC.
    */
@@ -269,6 +277,7 @@ export type NavGroupId =
   | "viagens"
   | "contratos"
   | "vb"
+  | "dp"
   | "plataforma"
   | "suporte";
 
@@ -390,6 +399,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: VB_NAV_KEY_OMIE, title: "Omie", icon: Inbox, scope: "global", href: VB_OMIE_PATH, vbAccess: true, vbGestorOnly: true },
       // Extrato mensal por e-mail aos credores: acompanhamento e envio manual.
       { key: VB_NAV_KEY_REPORTS, title: "Relatórios mensais", icon: Mail, scope: "global", href: VB_REPORTS_PATH, vbAccess: true, vbGestorOnly: true },
+    ],
+  },
+  {
+    // Módulo Departamento Pessoal (sigiloso). Concedido em user_module_roles
+    // (module='dp'); admin não enxerga sem a linha — ver @/lib/auth/dp.
+    id: "dp",
+    label: "DEPARTAMENTO PESSOAL",
+    items: [
+      { key: DP_NAV_KEY_OVERVIEW, title: "Visão geral", icon: IdCard, scope: "global", href: DP_PATH, dpAccess: true },
     ],
   },
   {

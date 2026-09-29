@@ -5,6 +5,7 @@ import { canAccessPathByProfile, defaultLandingFor } from "@/lib/auth/access";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { canAccessOrcamento } from "@/lib/auth/orcamento";
+import { hasDpGrant } from "@/lib/auth/dp";
 import { hasVbGrant } from "@/lib/auth/vb";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { UserProfileType } from "@/lib/supabase/types";
@@ -130,6 +131,8 @@ export async function updateSession(request: NextRequest) {
       userProfile === "admin";
     // Módulo VB (Viva Bank): só a concessão. Sem override de admin.
     const canVb = hasVbGrant(profileData?.user_module_roles);
+    // Módulo Departamento Pessoal (sigiloso): só a concessão, como o VB.
+    const canDp = hasDpGrant(profileData?.user_module_roles);
     // Modulo Caixa: concessao OU admin (modelo do Case/Contratos).
     const canCaixa =
       hasCaixaGrant(profileData?.user_module_roles) || userProfile === "admin";
@@ -160,6 +163,7 @@ export async function updateSession(request: NextRequest) {
         canVb,
         canCaixa,
         canOrcamento,
+        canDp,
       )
     ) {
       const url = request.nextUrl.clone();
@@ -173,6 +177,7 @@ export async function updateSession(request: NextRequest) {
         canVb,
         canCaixa,
         canOrcamento,
+        canDp,
       );
       supabaseResponse = NextResponse.redirect(url);
     }

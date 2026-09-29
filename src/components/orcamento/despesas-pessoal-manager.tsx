@@ -38,6 +38,10 @@ import {
   type RegimeApuracao,
 } from "@/lib/orcamento/regime-apuracao";
 import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
+import {
+  beneficiosAoEscolherCargo,
+  beneficiosQueMudam,
+} from "@/lib/orcamento/cargo-beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import {
   SETOR_TODOS,
@@ -216,6 +220,11 @@ export function DespesasPessoalManager({
       return;
     }
     setItems(res.items ?? []);
+  }
+
+  /** Reflete na tela os benefícios que a escolha do cargo acabou de gravar. */
+  function aplicarBeneficiosDoPlano(id: string, beneficios: Beneficios) {
+    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, beneficios } : c)));
   }
 
   async function init(cid: string, y: number) {
@@ -602,6 +611,7 @@ export function DespesasPessoalManager({
                               onDelete={() => handleDelete(colab)}
                               isAdmin={isAdmin}
                               onReativado={() => void loadColabs(companyId, year, setorId)}
+                              onBeneficiosDoPlano={aplicarBeneficiosDoPlano}
                               onDecidiu={registrarDecisao}
                             />
                           ))}
@@ -623,6 +633,7 @@ export function DespesasPessoalManager({
                             onDelete={() => handleDelete(colab)}
                             isAdmin={isAdmin}
                             onReativado={() => void loadColabs(companyId, year, setorId)}
+                            onBeneficiosDoPlano={aplicarBeneficiosDoPlano}
                             onDecidiu={registrarDecisao}
                           />
                         ))}
@@ -818,6 +829,12 @@ interface RowProps {
   /** Admin: mostra o botão que limpa as marcas da diretoria. */
   isAdmin: boolean;
   onReativado: () => void;
+  /**
+   * Os benefícios do nível já foram gravados: reflete na aba Benefícios sem
+   * recarregar. Patch local de propósito — um refetch aqui correria com o
+   * `commit` do cargo, que ainda está gravando, e poderia reverter a célula.
+   */
+  onBeneficiosDoPlano: (id: string, beneficios: Beneficios) => void;
   /** Decisão da diretoria nesta linha — recarrega o quadro e move a prévia. */
   onDecidiu: (d: DecisaoAplicada) => void;
 }
@@ -834,6 +851,7 @@ function ColaboradorRow({
   onDelete,
   isAdmin,
   onReativado,
+  onBeneficiosDoPlano,
   onDecidiu,
 }: RowProps) {
 
@@ -871,6 +889,28 @@ function ColaboradorRow({
   }
 
   const cargoValue = (v: string) => (cargoOptions.some((o) => o.label === v) ? v : "");
+
+  /**
+   * Escolher o cargo traz do plano o salário E os benefícios do nível.
+   *
+   * Os dois vão por caminhos diferentes porque a "parte verde" não passa pelo
+   * upsert do quadro: o salário vai no `commit` da linha, os benefícios numa
+   * ação própria — a mesma da aba Benefícios, com a trilha e a trava da
+   * diretoria que ela já tem. Só grava quando há o que mudar; senão todo
+   * clique em cargo reescreveria 7 colunas à toa e poluiria a trilha.
+   */
+  async function cargoAtualChange(label: string) {
+    const opt = cargoOptions.find((o) => o.label === label);
+    commit({
+      cargoAtual: label,
+      salarioAtual: opt ? numberToInput(opt.salario) : draftRef.current.salarioAtual,
+    });
+    if (!opt || beneficiosQueMudam(colab.beneficios, opt.beneficios).length === 0) return;
+    const beneficios = beneficiosAoEscolherCargo(colab.beneficios, opt.beneficios);
+    const res = await updateColaboradorBeneficios(colab.id, beneficios);
+    if (res?.error) onError(res.error);
+    else onBeneficiosDoPlano(colab.id, beneficios);
+  }
 
   function movCargoChange(field: "mov1" | "mov2", label: string) {
     const opt = cargoOptions.find((o) => o.label === label);
@@ -1004,14 +1044,7 @@ function ColaboradorRow({
         ) : (
           <select
             value={cargoValue(draft.cargoAtual)}
-            onChange={(e) => {
-              const label = e.target.value;
-              const opt = cargoOptions.find((o) => o.label === label);
-              commit({
-                cargoAtual: label,
-                salarioAtual: opt ? numberToInput(opt.salario) : draftRef.current.salarioAtual,
-              });
-            }}
+            onChange={(e) => void cargoAtualChange(e.target.value)}
             className={cn(CELL, "min-w-[11rem]")}
           >
             <option value="">— cargo —</option>

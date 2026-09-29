@@ -4,6 +4,7 @@ import { defaultLandingFor } from "@/lib/auth/access";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { canAccessOrcamento } from "@/lib/auth/orcamento";
+import { hasDpGrant } from "@/lib/auth/dp";
 import { hasVbGrant } from "@/lib/auth/vb";
 import { createClient } from "@/lib/supabase/server";
 import type { UserProfileType } from "@/lib/supabase/types";
@@ -63,6 +64,7 @@ export default async function RootRouter() {
     hasCaixaGrant(profileRow.user_module_roles) || userProfile === "admin";
   // Módulo Orçamento: concessão + perfil elegível, ou admin.
   const canOrcamento = canAccessOrcamento(userProfile, profileRow.user_module_roles);
+  const canDp = hasDpGrant(profileRow.user_module_roles);
 
   redirect(
     defaultLandingFor(
@@ -78,6 +80,7 @@ export default async function RootRouter() {
       canVb,
       canCaixa,
       canOrcamento,
+      canDp,
     ),
   );
 }

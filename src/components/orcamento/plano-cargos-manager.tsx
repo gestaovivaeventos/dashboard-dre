@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import {
   Ban,
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Loader2,
   Pencil,
@@ -28,6 +30,12 @@ import {
   type CargoWithNiveis,
 } from "@/lib/orcamento/actions/cargos";
 import { getSetores } from "@/lib/orcamento/actions/setores";
+import { BENEFICIOS, type BeneficioKey, type Beneficios } from "@/lib/orcamento/beneficios";
+import {
+  beneficiosVazios,
+  quantosDefinidos,
+  somaBeneficios,
+} from "@/lib/orcamento/cargo-beneficios";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import { defaultBudgetYear } from "@/lib/orcamento/years";
 import { YearSelect } from "@/components/orcamento/year-select";
@@ -49,9 +57,38 @@ interface Company {
 interface NivelDraft {
   name: string;
   salario: string;
+  /** Campo VAZIO = o plano não define este benefício (≠ de "0", que é "não
+   * recebe"). O que o plano não define segue vindo da aba Benefícios. */
+  beneficios: Record<BeneficioKey, string>;
 }
 
-const EMPTY_DRAFT: NivelDraft = { name: "", salario: "" };
+function beneficiosVaziosInput(): Record<BeneficioKey, string> {
+  const out = {} as Record<BeneficioKey, string>;
+  for (const b of BENEFICIOS) out[b.key] = "";
+  return out;
+}
+
+const EMPTY_DRAFT: NivelDraft = {
+  name: "",
+  salario: "",
+  beneficios: beneficiosVaziosInput(),
+};
+
+function beneficiosParaInput(b: Beneficios): Record<BeneficioKey, string> {
+  const out = {} as Record<BeneficioKey, string>;
+  for (const meta of BENEFICIOS) out[meta.key] = numberToInput(b[meta.key]);
+  return out;
+}
+
+/** Lê os campos de benefício do rascunho. Vazio → null (o plano não diz). */
+function lerBeneficiosDraft(d: NivelDraft): Beneficios {
+  const out = beneficiosVazios();
+  for (const meta of BENEFICIOS) {
+    const v = parseBrNumber(d.beneficios[meta.key]);
+    out[meta.key] = v == null || Number.isNaN(v) ? null : v;
+  }
+  return out;
+}
 
 /** Interpreta o input de salário. Retorna number válido ou null (inválido/vazio). */
 function readSalario(input: string): number | null {
@@ -97,6 +134,10 @@ export function PlanoCargosManager({
   // Edição de nível.
   const [editingNivelId, setEditingNivelId] = useState<string | null>(null);
   const [editNivel, setEditNivel] = useState<NivelDraft>(EMPTY_DRAFT);
+  // Os campos de benefício do formulário de "novo nível" ficam fechados: a
+  // maioria dos planos define só o salário, e 7 campos sempre abertos
+  // empurrariam o botão de adicionar para fora da vista.
+  const [beneficiosAbertos, setBeneficiosAbertos] = useState<Record<string, boolean>>({});
 
   async function reload(id: string, y: number, sid: string | null) {
     if (!id) {
@@ -252,6 +293,16 @@ export function PlanoCargosManager({
     }));
   }
 
+  function setDraftBeneficio(cargoId: string, key: BeneficioKey, value: string) {
+    setNivelDrafts((prev) => {
+      const atual = prev[cargoId] ?? EMPTY_DRAFT;
+      return {
+        ...prev,
+        [cargoId]: { ...atual, beneficios: { ...atual.beneficios, [key]: value } },
+      };
+    });
+  }
+
   // ── Cargo ──
   function handleAddCargo() {
     const name = newCargoName.trim();
@@ -285,14 +336,20 @@ export function PlanoCargosManager({
       setFeedback({ ok: false, msg: "Informe um salário válido para o nível." });
       return;
     }
-    run(() => createNivel(cargoId, name, salario), "Nível adicionado.", () =>
-      setDraft(cargoId, { name: "", salario: "" }),
+    run(
+      () => createNivel(cargoId, name, salario, lerBeneficiosDraft(draft)),
+      "Nível adicionado.",
+      () => setDraft(cargoId, { name: "", salario: "", beneficios: beneficiosVaziosInput() }),
     );
   }
 
   function startEditNivel(nivel: CargoNivel) {
     setEditingNivelId(nivel.id);
-    setEditNivel({ name: nivel.name, salario: numberToInput(nivel.salario) });
+    setEditNivel({
+      name: nivel.name,
+      salario: numberToInput(nivel.salario),
+      beneficios: beneficiosParaInput(nivel.beneficios),
+    });
     setFeedback(null);
   }
 
@@ -307,8 +364,10 @@ export function PlanoCargosManager({
       setFeedback({ ok: false, msg: "Informe um salário válido para o nível." });
       return;
     }
-    run(() => updateNivel(id, name, salario), "Nível atualizado.", () =>
-      setEditingNivelId(null),
+    run(
+      () => updateNivel(id, name, salario, lerBeneficiosDraft(editNivel)),
+      "Nível atualizado.",
+      () => setEditingNivelId(null),
     );
   }
 
@@ -606,96 +665,137 @@ export function PlanoCargosManager({
                           <tr>
                             <th className="px-3 py-2 font-medium">Nível</th>
                             <th className="px-3 py-2 font-medium">Salário-base</th>
+                            <th className="px-3 py-2 font-medium">Benefícios</th>
                             <th className="px-3 py-2 text-right font-medium">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {cargo.niveis.map((nivel) => {
                             const isEditing = editingNivelId === nivel.id;
+                            const definidos = quantosDefinidos(nivel.beneficios);
                             return (
-                              <tr key={nivel.id}>
-                                {isEditing ? (
-                                  <>
-                                    <td className="px-3 py-2">
-                                      <input
-                                        value={editNivel.name}
-                                        onChange={(e) =>
-                                          setEditNivel((v) => ({ ...v, name: e.target.value }))
-                                        }
+                              <Fragment key={nivel.id}>
+                                <tr>
+                                  {isEditing ? (
+                                    <>
+                                      <td className="px-3 py-2">
+                                        <input
+                                          value={editNivel.name}
+                                          onChange={(e) =>
+                                            setEditNivel((v) => ({ ...v, name: e.target.value }))
+                                          }
+                                          disabled={isPending}
+                                          className={INPUT_CLS + " max-w-[10rem]"}
+                                        />
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <input
+                                          value={editNivel.salario}
+                                          onChange={(e) =>
+                                            setEditNivel((v) => ({ ...v, salario: e.target.value }))
+                                          }
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") handleSaveNivel(nivel.id);
+                                            if (e.key === "Escape") setEditingNivelId(null);
+                                          }}
+                                          inputMode="decimal"
+                                          placeholder="0,00"
+                                          disabled={isPending}
+                                          className={INPUT_CLS + " max-w-[10rem]"}
+                                        />
+                                      </td>
+                                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                                        edite abaixo
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <button
+                                            onClick={() => handleSaveNivel(nivel.id)}
+                                            disabled={isPending}
+                                            className={BTN_GHOST + " text-green-700"}
+                                          >
+                                            <Check className="h-4 w-4" /> Salvar
+                                          </button>
+                                          <button
+                                            onClick={() => setEditingNivelId(null)}
+                                            disabled={isPending}
+                                            className={BTN_GHOST}
+                                          >
+                                            <X className="h-4 w-4" /> Cancelar
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td className="px-3 py-2.5 font-medium">{nivel.name}</td>
+                                      <td className="px-3 py-2.5 tabular-nums">
+                                        {formatBRL(nivel.salario)}
+                                        {nivel.salarioOriginal != null && (
+                                          <span
+                                            className="ml-2 text-xs font-normal text-muted-foreground"
+                                            title="Salário-base antes do reajuste"
+                                          >
+                                            base {formatBRL(nivel.salarioOriginal)}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2.5 tabular-nums">
+                                        {definidos === 0 ? (
+                                          <span
+                                            className="text-muted-foreground"
+                                            title="O plano não define benefícios para este nível — continuam vindo da aba Benefícios, colaborador a colaborador."
+                                          >
+                                            —
+                                          </span>
+                                        ) : (
+                                          <span title={resumoBeneficios(nivel.beneficios)}>
+                                            {formatBRL(somaBeneficios(nivel.beneficios))}
+                                            <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                              {definidos} de {BENEFICIOS.length}
+                                            </span>
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <button
+                                            onClick={() => startEditNivel(nivel)}
+                                            disabled={isPending}
+                                            className={BTN_GHOST}
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" /> Editar
+                                          </button>
+                                          <button
+                                            onClick={() => handleDeleteNivel(nivel)}
+                                            disabled={isPending}
+                                            className={BTN_GHOST + " hover:text-destructive"}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" /> Excluir
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </>
+                                  )}
+                                </tr>
+                                {isEditing && (
+                                  <tr className="bg-muted/10">
+                                    <td colSpan={4} className="px-3 pb-3 pt-1">
+                                      <BeneficiosFields
+                                        values={editNivel.beneficios}
                                         disabled={isPending}
-                                        className={INPUT_CLS + " max-w-[10rem]"}
+                                        onChange={(key, value) =>
+                                          setEditNivel((v) => ({
+                                            ...v,
+                                            beneficios: { ...v.beneficios, [key]: value },
+                                          }))
+                                        }
+                                        onEnter={() => handleSaveNivel(nivel.id)}
                                       />
                                     </td>
-                                    <td className="px-3 py-2">
-                                      <input
-                                        value={editNivel.salario}
-                                        onChange={(e) =>
-                                          setEditNivel((v) => ({ ...v, salario: e.target.value }))
-                                        }
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") handleSaveNivel(nivel.id);
-                                          if (e.key === "Escape") setEditingNivelId(null);
-                                        }}
-                                        inputMode="decimal"
-                                        placeholder="0,00"
-                                        disabled={isPending}
-                                        className={INPUT_CLS + " max-w-[10rem]"}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <div className="flex items-center justify-end gap-1">
-                                        <button
-                                          onClick={() => handleSaveNivel(nivel.id)}
-                                          disabled={isPending}
-                                          className={BTN_GHOST + " text-green-700"}
-                                        >
-                                          <Check className="h-4 w-4" /> Salvar
-                                        </button>
-                                        <button
-                                          onClick={() => setEditingNivelId(null)}
-                                          disabled={isPending}
-                                          className={BTN_GHOST}
-                                        >
-                                          <X className="h-4 w-4" /> Cancelar
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td className="px-3 py-2.5 font-medium">{nivel.name}</td>
-                                    <td className="px-3 py-2.5 tabular-nums">
-                                      {formatBRL(nivel.salario)}
-                                      {nivel.salarioOriginal != null && (
-                                        <span
-                                          className="ml-2 text-xs font-normal text-muted-foreground"
-                                          title="Salário-base antes do reajuste"
-                                        >
-                                          base {formatBRL(nivel.salarioOriginal)}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <div className="flex items-center justify-end gap-1">
-                                        <button
-                                          onClick={() => startEditNivel(nivel)}
-                                          disabled={isPending}
-                                          className={BTN_GHOST}
-                                        >
-                                          <Pencil className="h-3.5 w-3.5" /> Editar
-                                        </button>
-                                        <button
-                                          onClick={() => handleDeleteNivel(nivel)}
-                                          disabled={isPending}
-                                          className={BTN_GHOST + " hover:text-destructive"}
-                                        >
-                                          <Trash2 className="h-3.5 w-3.5" /> Excluir
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </>
+                                  </tr>
                                 )}
-                              </tr>
+                              </Fragment>
                             );
                           })}
                         </tbody>
@@ -704,36 +804,62 @@ export function PlanoCargosManager({
                   )}
 
                   {/* Adicionar nível */}
-                  <div className="flex flex-wrap items-end gap-2">
-                    <div className="w-40 space-y-1">
-                      <label className="text-xs text-muted-foreground">Novo nível</label>
-                      <input
-                        value={draft.name}
-                        onChange={(e) => setDraft(cargo.id, { name: e.target.value })}
-                        placeholder="Ex.: Pleno"
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="w-40 space-y-1">
+                        <label className="text-xs text-muted-foreground">Novo nível</label>
+                        <input
+                          value={draft.name}
+                          onChange={(e) => setDraft(cargo.id, { name: e.target.value })}
+                          placeholder="Ex.: Pleno"
+                          disabled={isPending}
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <div className="w-40 space-y-1">
+                        <label className="text-xs text-muted-foreground">Salário-base (R$)</label>
+                        <input
+                          value={draft.salario}
+                          onChange={(e) => setDraft(cargo.id, { salario: e.target.value })}
+                          onKeyDown={(e) => e.key === "Enter" && handleAddNivel(cargo.id)}
+                          placeholder="0,00"
+                          inputMode="decimal"
+                          disabled={isPending}
+                          className={INPUT_CLS}
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleAddNivel(cargo.id)}
+                        disabled={isPending || !draft.name.trim()}
+                        className={BTN_GHOST + " border"}
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Adicionar nível
+                      </button>
+                      <button
+                        onClick={() =>
+                          setBeneficiosAbertos((prev) => ({ ...prev, [cargo.id]: !prev[cargo.id] }))
+                        }
                         disabled={isPending}
-                        className={INPUT_CLS}
-                      />
+                        className={BTN_GHOST}
+                      >
+                        {beneficiosAbertos[cargo.id] ? (
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        )}
+                        Benefícios (opcional)
+                      </button>
                     </div>
-                    <div className="w-40 space-y-1">
-                      <label className="text-xs text-muted-foreground">Salário-base (R$)</label>
-                      <input
-                        value={draft.salario}
-                        onChange={(e) => setDraft(cargo.id, { salario: e.target.value })}
-                        onKeyDown={(e) => e.key === "Enter" && handleAddNivel(cargo.id)}
-                        placeholder="0,00"
-                        inputMode="decimal"
-                        disabled={isPending}
-                        className={INPUT_CLS}
-                      />
-                    </div>
-                    <button
-                      onClick={() => handleAddNivel(cargo.id)}
-                      disabled={isPending || !draft.name.trim()}
-                      className={BTN_GHOST + " border"}
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Adicionar nível
-                    </button>
+                    {beneficiosAbertos[cargo.id] && (
+                      <div className="rounded-md border bg-muted/10 p-3">
+                        <BeneficiosFields
+                          values={draft.beneficios}
+                          disabled={isPending}
+                          onChange={(key, value) => setDraftBeneficio(cargo.id, key, value)}
+                          onEnter={() => handleAddNivel(cargo.id)}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -741,6 +867,65 @@ export function PlanoCargosManager({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Texto do balão com o que o plano define, um benefício por linha. */
+function resumoBeneficios(beneficios: Beneficios): string {
+  return BENEFICIOS.filter((b) => beneficios[b.key] != null)
+    .map((b) => `${b.label}: ${formatBRL(beneficios[b.key] ?? 0)}`)
+    .join("\n");
+}
+
+/**
+ * Os 7 campos de benefício de um nível.
+ *
+ * Campo VAZIO não é zero: vazio é "o plano não define este benefício", e o
+ * valor segue sendo digitado colaborador a colaborador na aba Benefícios do
+ * quadro de pessoal. Zero é "este nível não recebe" — e, sendo uma definição,
+ * sobrescreve o que estiver lá. A distinção é o que impede que escolher um
+ * cargo apague um cadastro que ninguém mandou apagar; está travada por teste
+ * em `cargo-beneficios.test.ts`.
+ */
+function BeneficiosFields({
+  values,
+  disabled,
+  onChange,
+  onEnter,
+}: {
+  values: Record<BeneficioKey, string>;
+  disabled: boolean;
+  onChange: (key: BeneficioKey, value: string) => void;
+  onEnter?: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Valores <strong>mensais</strong>, copiados para o colaborador quando este cargo for
+        escolhido no quadro de pessoal. Deixe em branco o que o plano não define — esses
+        continuam sendo preenchidos na aba <strong>Benefícios</strong>, pessoa a pessoa.
+      </p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        {BENEFICIOS.map((b) => (
+          <div key={b.key} className="space-y-1">
+            <label className="block text-[11px] leading-tight text-muted-foreground">
+              {b.label}
+            </label>
+            <input
+              value={values[b.key]}
+              onChange={(e) => onChange(b.key, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && onEnter) onEnter();
+              }}
+              inputMode="decimal"
+              placeholder="—"
+              disabled={disabled}
+              className={INPUT_CLS + " px-2 py-1.5 text-sm"}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

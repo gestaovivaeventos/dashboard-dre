@@ -3,6 +3,7 @@ import {
   canAccessBiValidationByProfile,
 } from "@/lib/auth/bi-validation";
 import { isCaixaPath } from "@/lib/auth/caixa";
+import { isDpPath } from "@/lib/auth/dp";
 import { isOrcamentoConfigPath, isOrcamentoPath } from "@/lib/auth/orcamento";
 import { isVbPath } from "@/lib/auth/vb";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
@@ -24,6 +25,7 @@ export function defaultLandingFor(
   canVb: boolean = false,
   canCaixa: boolean = false,
   canOrcamento: boolean = false,
+  canDp: boolean = false,
 ): string {
   // TODO perfil pousa na tela inicial. Ela é o cockpit comum do Control Hub:
   // saudação, indicadores e notícias econômicas para todos, e as seções
@@ -41,6 +43,7 @@ export function defaultLandingFor(
     canVb ||
     canCaixa ||
     canOrcamento ||
+    canDp ||
     profile === "admin"
   ) {
     return "/home";
@@ -120,6 +123,11 @@ export function canAccessPathByProfile(
    * actions do módulo resolvem por `getOrcamentoUser`.
    */
   canOrcamento: boolean = false,
+  /**
+   * Módulo Departamento Pessoal (sigiloso). Só a concessão em
+   * user_module_roles libera; admin NÃO passa por cima — ver @/lib/auth/dp.
+   */
+  canDp: boolean = false,
 ): boolean {
   // Tela inicial (cockpit): liberada para TODOS os perfis, sem depender de
   // módulo. O que cada um VÊ lá dentro é decidido por perfil na própria tela
@@ -173,6 +181,10 @@ export function canAccessPathByProfile(
   // do bloco franqueado/CSC (a whitelist negaria a rota) e antes de "Admin:
   // tudo" — admin sem a linha não vê o módulo, de propósito.
   if (isVbPath(pathname)) return canVb;
+
+  // Módulo Departamento Pessoal (sigiloso): mesma regra e mesma posição do VB —
+  // antes da whitelist franqueado/CSC e, sobretudo, antes de "Admin: tudo".
+  if (isDpPath(pathname)) return canDp;
 
   // Módulo Caixa: concessão explícita OU admin. Como o Contratos, precisa vir
   // ANTES do bloco franqueado/CSC — a whitelist deles negaria a rota mesmo com

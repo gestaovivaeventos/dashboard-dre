@@ -37,6 +37,8 @@ interface NavLinksProps {
    * mesma mecânica de vbRole/vbGestorOnly.
    */
   orcamentoPapel?: OrcamentoPapel | null;
+  /** Módulo Departamento Pessoal (grupo DP, sigiloso). Só a concessão; admin não herda. */
+  canDp?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   collapsed?: boolean;
@@ -236,6 +238,7 @@ interface BuildInput {
   vbRole?: VbRole | null;
   canCaixa?: boolean;
   orcamentoPapel?: OrcamentoPapel | null;
+  canDp?: boolean;
   segments: Segment[];
   activeSegmentSlug: string | null;
   isFranqueado?: boolean;
@@ -282,6 +285,7 @@ function buildGroups({
   vbRole,
   canCaixa,
   orcamentoPapel,
+  canDp,
   segments,
   activeSegmentSlug,
   isFranqueado,
@@ -302,7 +306,7 @@ function buildGroups({
     const items: RenderItem[] = [];
 
     for (const item of group.items) {
-      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null, Boolean(canCaixa), orcamentoPapel ?? null)) continue;
+      if (!isItemVisible(item, dreRole, ctrlSet, Boolean(canCase), Boolean(canViagens), Boolean(canViagensAprovar), Boolean(canContratos), isFranqueado, isCsc, canBiValidation, ctrlFullView, vbRole ?? null, Boolean(canCaixa), orcamentoPapel ?? null, Boolean(canDp))) continue;
 
       const href = resolveHref(item, slug);
       if (!href) continue;
@@ -334,6 +338,7 @@ function isItemVisible(
   vbRole: VbRole | null = null,
   canCaixa: boolean = false,
   orcamentoPapel: OrcamentoPapel | null = null,
+  canDp: boolean = false,
 ): boolean {
   // Item aberto a qualquer usuário logado (ex.: Chamados/Suporte). Vem antes de
   // tudo — ignora dreRole/ctrlRole e as whitelists de franqueado/CSC.
@@ -347,6 +352,10 @@ function isItemVisible(
   // VB (Viva Bank): módulo próprio, concedido por usuário. Não passa por
   // dreRole/ctrlRole nem pelas whitelists de franqueado/CSC; admin não herda.
   if (item.vbAccess) return vbRole !== null && (!item.vbGestorOnly || vbRole === "gestor");
+
+  // Departamento Pessoal (sigiloso): só a concessão, como o VB. Decidido antes
+  // das whitelists de franqueado/CSC; admin não herda.
+  if (item.dpAccess) return canDp;
 
   // Caixa: módulo próprio, concedido por usuário (ou admin). Como o Contratos,
   // é decidido ANTES de FRANQUEADO_NAV_KEYS/CSC_NAV_KEYS — o módulo é liberável
@@ -396,7 +405,8 @@ function isItemVisible(
     !item.contratosAccess &&
     !item.vbAccess &&
     !item.caixaAccess &&
-    !item.orcamentoAccess
+    !item.orcamentoAccess &&
+    !item.dpAccess
   )
     return false;
   return dreOk || ctrlOk || caseOk || viagensOk;

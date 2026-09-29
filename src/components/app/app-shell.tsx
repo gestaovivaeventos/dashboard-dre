@@ -37,6 +37,8 @@ interface AppShellProps {
   canCaixa?: boolean;
   /** Papel no módulo Orçamento — grupo ORÇAMENTO no menu; null sem acesso. */
   orcamentoPapel?: OrcamentoPapel | null;
+  /** Módulo Departamento Pessoal (sigiloso) — grupo DP no menu. Só a concessão. */
+  canDp?: boolean;
   segments: Segment[];
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
@@ -78,6 +80,7 @@ export function AppShell({
   vbRole,
   canCaixa,
   orcamentoPapel,
+  canDp,
   segments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
@@ -146,6 +149,7 @@ export function AppShell({
         vbRole,
         canCaixa,
         orcamentoPapel,
+        canDp,
         segments,
         activeSegmentSlug,
         contractsOnly,
@@ -164,6 +168,7 @@ export function AppShell({
       vbRole,
       canCaixa,
       orcamentoPapel,
+      canDp,
       segments,
       activeSegmentSlug,
       contractsOnly,
@@ -185,6 +190,7 @@ export function AppShell({
       vbRole={vbRole}
       canCaixa={canCaixa}
       orcamentoPapel={orcamentoPapel}
+      canDp={canDp}
       segments={segments}
       activeSegmentSlug={activeSegmentSlug}
       collapsed={!mobile && collapsed}

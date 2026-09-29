@@ -5,6 +5,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasContratosGrant } from "@/lib/auth/contratos";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { resolveOrcamentoPapel } from "@/lib/auth/orcamento";
+import { hasDpGrant } from "@/lib/auth/dp";
 import { resolveVbRole } from "@/lib/auth/vb";
 import { hasSeenTour } from "@/lib/tour/seen";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
@@ -62,6 +63,10 @@ export function hasVbAccess(ctx: SessionContext): boolean {
 
 export function isVbGestor(ctx: SessionContext): boolean {
   return ctx.modules?.vb?.role === "gestor";
+}
+
+export function hasDpAccess(ctx: SessionContext): boolean {
+  return Boolean(ctx.modules?.dp);
 }
 
 export function hasCaixaAccess(ctx: SessionContext): boolean {
@@ -181,6 +186,10 @@ async function loadSessionContext(): Promise<SessionContext> {
   // de admin, de propósito — ver @/lib/auth/vb.
   const vbRole = resolveVbRole(moduleRoleRows);
 
+  // Módulo Departamento Pessoal (sigiloso): só a concessão, como o VB. Sem
+  // override de admin, de propósito — ver @/lib/auth/dp.
+  const canDp = hasDpGrant(moduleRoleRows);
+
   // Módulo Caixa: concessão em user_module_roles OU admin (modelo do Case e do
   // Contratos, não o do VB) — ver @/lib/auth/caixa.
   const canCaixa = hasCaixaGrant(moduleRoleRows) || isAdminUser;
@@ -222,6 +231,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     vb_role: vbRole,
     can_caixa: canCaixa,
     orcamento_papel: orcamentoPapel,
+    can_dp: canDp,
     // Tour guiado de boas-vindas: linha em user_module_roles (module='tour'),
     // pelo mesmo motivo do módulo Contratos — sem coluna nova, sem migration.
     tour_seen: hasSeenTour(moduleRoleRows),
@@ -245,6 +255,7 @@ async function loadSessionContext(): Promise<SessionContext> {
     vb: vbRole ? { role: vbRole } : null,
     caixa: canCaixa ? {} : null,
     orcamento: orcamentoPapel ? { papel: orcamentoPapel } : null,
+    dp: canDp ? {} : null,
   };
 
   return { supabase, user, profile, modules };

@@ -71,6 +71,11 @@ export interface ModuleAccess {
    * é resolvido nas actions (`getOrcamentoUser`).
    */
   orcamento: { papel: OrcamentoPapel } | null;
+  /**
+   * Módulo Departamento Pessoal (sigiloso). Concessão em user_module_roles
+   * (module='dp') — ver `@/lib/auth/dp`. Admin NÃO recebe automaticamente.
+   */
+  dp: Record<string, never> | null;
 }
 
 // ─── Perfil unificado (novo modelo) ──────────────────────────────────────────
@@ -141,6 +146,12 @@ export interface UnifiedProfile {
    * `@/lib/auth/orcamento`. Admin entra sem a concessão.
    */
   orcamento_papel: OrcamentoPapel | null;
+  /**
+   * Visibilidade do módulo Departamento Pessoal (sigiloso). Vem de
+   * `user_module_roles` (module='dp'), não de coluna de `users` — ver
+   * `@/lib/auth/dp`. Admin NÃO enxerga sem a linha.
+   */
+  can_dp: boolean;
   /**
    * Já viu o tour guiado de boas-vindas. Como `can_contratos`, NÃO é coluna de
    * `users`: é derivada da linha em `user_module_roles` (module='tour') — ver

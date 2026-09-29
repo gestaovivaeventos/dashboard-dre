@@ -7,6 +7,8 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { BENEFICIOS, type Beneficios } from "@/lib/orcamento/beneficios";
+import { normalizarBeneficios } from "@/lib/orcamento/cargo-beneficios";
 
 export interface CargoNivel {
   id: string;
@@ -15,6 +17,15 @@ export interface CargoNivel {
   salario: number;
   /** Salário-base antes do reajuste. null = nenhum reajuste aplicado. */
   salarioOriginal: number | null;
+  /**
+   * Benefícios do nível — COPIADOS para o colaborador ao escolher o cargo,
+   * como o salário. `null` num benefício = o plano não define, nada é
+   * pré-preenchido; é diferente de 0, que é "não recebe".
+   *
+   * O reajuste percentual do plano NUNCA os alcança: ele é de salário, e
+   * vale-transporte não sobe por dissídio da mesma forma.
+   */
+  beneficios: Beneficios;
 }
 
 export interface CargoWithNiveis {
@@ -26,11 +37,71 @@ export interface CargoWithNiveis {
 
 const PATH = "/orcamento/configuracoes/plano-cargos";
 
+// Literal, e não montado a partir de BENEFICIOS: o client tipado do Supabase
+// analisa o `select` em tempo de COMPILAÇÃO e não entende template literal.
+// Acrescentar benefício novo = uma entrada aqui também; esquecer não quebra
+// nada, o valor do plano só nunca chega ao colaborador — em silêncio. Quem
+// cobra é `cargo-beneficios.test.ts`, que lê esta constante.
+const NIVEL_COLS =
+  "id, cargo_id, name, salario, salario_original, vale_transporte, beneficio_gasolina, beneficio_alimentacao, refeicoes_empresa, assistencia_medica, auxilio_home_office, seguro_vida";
+
+/** Lê os benefícios de uma linha de nível. Ausente ou nulo → `null`. */
+function lerBeneficios(row: Record<string, unknown>): Beneficios {
+  const out = {} as Beneficios;
+  for (const b of BENEFICIOS) {
+    const v = row[b.key];
+    out[b.key] = v == null ? null : Number(v);
+  }
+  return out;
+}
+
+/**
+ * Níveis de um conjunto de cargos, com os benefícios.
+ *
+ * Cai para a lista sem benefícios quando as colunas ainda não existem
+ * (42703, antes da migration `20260929140000`). Sem isso o `select` inteiro
+ * falha e a tela do Plano de Cargos morre por causa de um recurso que ela
+ * nem precisa ter: o plano continua servindo para salário, que é o que ele
+ * sempre fez. A degradação é silenciosa de propósito — não há nada que o
+ * usuário possa fazer a respeito, e a tela não some.
+ */
+async function lerNiveis(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  cargoIds: string[],
+): Promise<{ rows?: Record<string, unknown>[]; error?: string }> {
+  const comBeneficios = await supabase
+    .from("orcamento_cargo_niveis")
+    .select(NIVEL_COLS)
+    .in("cargo_id", cargoIds)
+    .order("salario", { ascending: true })
+    .order("name");
+  if (!comBeneficios.error) {
+    return { rows: (comBeneficios.data ?? []) as unknown as Record<string, unknown>[] };
+  }
+  if (!isSchemaMissing(comBeneficios.error.message)) {
+    return { error: comBeneficios.error.message };
+  }
+
+  const sem = await supabase
+    .from("orcamento_cargo_niveis")
+    .select("id, cargo_id, name, salario, salario_original")
+    .in("cargo_id", cargoIds)
+    .order("salario", { ascending: true })
+    .order("name");
+  if (sem.error) return { error: sem.error.message };
+  return { rows: (sem.data ?? []) as unknown as Record<string, unknown>[] };
+}
+
 function db() {
   return createAdminClientIfAvailable();
 }
 
 function friendlyCargoError(message: string, label: "cargo" | "nível"): string {
+  // Colunas de benefício ainda não aplicadas: a leitura degrada sozinha
+  // (ver `lerNiveis`), mas a GRAVAÇÃO não tem como — avisa o que falta.
+  if (isSchemaMissing(message)) {
+    return "O banco ainda não tem os campos de benefício do plano de cargos. Aplique a migration 20260929140000 e tente de novo.";
+  }
   if (/duplicate key|unique/i.test(message)) {
     return label === "cargo"
       ? "Já existe um cargo com esse nome nesta empresa."
@@ -78,13 +149,8 @@ export async function getCargos(
   const cargoIds = (cargos ?? []).map((c) => c.id as string);
   let niveisByCargoId = new Map<string, CargoNivel[]>();
   if (cargoIds.length > 0) {
-    const { data: niveis, error: niveisError } = await supabase
-      .from("orcamento_cargo_niveis")
-      .select("id, cargo_id, name, salario, salario_original")
-      .in("cargo_id", cargoIds)
-      .order("salario", { ascending: true })
-      .order("name");
-    if (niveisError) return { error: niveisError.message };
+    const { rows: niveis, error: niveisError } = await lerNiveis(supabase, cargoIds);
+    if (niveisError) return { error: niveisError };
     niveisByCargoId = (niveis ?? []).reduce((map, n) => {
       const cargoId = n.cargo_id as string;
       const list = map.get(cargoId) ?? [];
@@ -93,6 +159,7 @@ export async function getCargos(
         name: n.name as string,
         salario: Number(n.salario),
         salarioOriginal: n.salario_original == null ? null : Number(n.salario_original),
+        beneficios: lerBeneficios(n as Record<string, unknown>),
       });
       map.set(cargoId, list);
       return map;
@@ -306,7 +373,12 @@ function validateSalario(salario: number | null): string | null {
   return null;
 }
 
-export async function createNivel(cargoId: string, name: string, salario: number | null) {
+export async function createNivel(
+  cargoId: string,
+  name: string,
+  salario: number | null,
+  beneficios?: Partial<Beneficios> | null,
+) {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   if (!cargoId) return { error: "Cargo inválido." };
@@ -321,6 +393,7 @@ export async function createNivel(cargoId: string, name: string, salario: number
     cargo_id: cargoId,
     name: clean,
     ...camposSalario(salario as number, percent),
+    ...normalizarBeneficios(beneficios),
     updated_by: admin.userId,
   });
   if (error) return { error: friendlyCargoError(error.message, "nível") };
@@ -328,7 +401,12 @@ export async function createNivel(cargoId: string, name: string, salario: number
   return { ok: true as const };
 }
 
-export async function updateNivel(id: string, name: string, salario: number | null) {
+export async function updateNivel(
+  id: string,
+  name: string,
+  salario: number | null,
+  beneficios?: Partial<Beneficios> | null,
+) {
   const admin = await getOrcamentoAdmin();
   if (!admin) return { error: "Acesso restrito a administradores." };
   const clean = name.trim();
@@ -349,6 +427,7 @@ export async function updateNivel(id: string, name: string, salario: number | nu
     .update({
       name: clean,
       ...camposSalario(salario as number, percent),
+      ...normalizarBeneficios(beneficios),
       updated_by: admin.userId,
     })
     .eq("id", id);
@@ -448,20 +527,23 @@ export async function cloneCargos(companyId: string, fromYear: number, toYear: n
   }
   if (toCopy.length === 0) return { ok: true as const, copied: 0 };
 
-  // Níveis dos cargos de origem, para replicar sob os novos cargos.
+  // Níveis dos cargos de origem, para replicar sob os novos cargos — com os
+  // benefícios: clonar o plano sem eles entregaria um ano com salário e sem
+  // pacote, e o admin refaria à mão o que o ano anterior já dizia.
   const sourceIds = toCopy.map((c) => c.srcId);
-  const { data: niveis, error: nivError } = await supabase
-    .from("orcamento_cargo_niveis")
-    .select("cargo_id, name, salario")
-    .in("cargo_id", sourceIds);
-  if (nivError) return { error: nivError.message };
+  const { rows: niveis, error: nivError } = await lerNiveis(supabase, sourceIds);
+  if (nivError) return { error: nivError };
   const niveisBySource = (niveis ?? []).reduce((map, n) => {
     const cid = n.cargo_id as string;
     const list = map.get(cid) ?? [];
-    list.push({ name: n.name as string, salario: Number(n.salario) });
+    list.push({
+      name: n.name as string,
+      salario: Number(n.salario),
+      beneficios: lerBeneficios(n as Record<string, unknown>),
+    });
     map.set(cid, list);
     return map;
-  }, new Map<string, { name: string; salario: number }[]>());
+  }, new Map<string, { name: string; salario: number; beneficios: Beneficios }[]>());
 
   // Insere os cargos novos e recupera seus ids (com setor) para pendurar níveis.
   const { data: inserted, error: insError } = await supabase
@@ -485,12 +567,18 @@ export async function cloneCargos(companyId: string, fromYear: number, toYear: n
       c.id as string,
     ]),
   );
-  const nivelRows: { cargo_id: string; name: string; salario: number; updated_by: string }[] = [];
+  const nivelRows: Record<string, unknown>[] = [];
   toCopy.forEach((c) => {
     const newId = newIdByKey.get(keyOf(c.destSetor, c.name));
     if (!newId) return;
     for (const n of niveisBySource.get(c.srcId) ?? []) {
-      nivelRows.push({ cargo_id: newId, name: n.name, salario: n.salario, updated_by: admin.userId });
+      nivelRows.push({
+        cargo_id: newId,
+        name: n.name,
+        salario: n.salario,
+        ...n.beneficios,
+        updated_by: admin.userId,
+      });
     }
   });
   if (nivelRows.length > 0) {
