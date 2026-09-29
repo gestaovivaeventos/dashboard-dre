@@ -253,7 +253,9 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
     resp_legal: contratante.respLegal,
     cpf_resp_legal: contratante.cpfResp,
   });
-  if (signatureIssues.length > 0) return { error: clientSignatureMessage(signatureIssues) };
+  if (signatureIssues.length > 0) {
+    return { error: clientSignatureMessage(signatureIssues, normalizePdfCliente(c.pdf_cliente) ? "contrato" : "cadastro") };
+  }
   if (c.testemunha_1_email?.trim() && !isPersonName(c.testemunha_1_nome)) {
     return { error: `A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas). Corrija "${c.testemunha_1_nome ?? ""}" em "Editar dados".` };
   }

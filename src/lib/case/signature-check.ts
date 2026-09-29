@@ -43,6 +43,8 @@ export function clientSignatureIssues(c: SignatureClientData): string[] {
   return issues;
 }
 
-export function clientSignatureMessage(issues: string[]): string {
-  return `Antes de enviar para assinatura, complete o cadastro do cliente: ${issues.join("; ")}.`;
+/** `origem: "contrato"` quando quem assina vem dos dados próprios do contrato (não do cadastro). */
+export function clientSignatureMessage(issues: string[], origem: "cadastro" | "contrato" = "cadastro"): string {
+  const onde = origem === "contrato" ? "os dados do contratante no contrato (Editar dados)" : "o cadastro do cliente";
+  return `Antes de enviar para assinatura, complete ${onde}: ${issues.join("; ")}.`;
 }

@@ -125,6 +125,16 @@ export function ContratoWorkspace({ detail, bands, fornecedorBands, isApprover }
             Contrato #{detail.contract_number} — {detail.atracoes.length > 0 ? detail.atracoes.map((a) => a.band_name).join(", ") : detail.event_name ?? detail.band.name}
           </h1>
           <p className="text-sm text-ink-muted">Cliente: {detail.client.name} · {detail.event_name ?? "evento"} · {dateBR(detail.event_date)}</p>
+          <p className="text-sm text-ink-muted">
+            Assina pelo contratante: <span className="text-ink-primary">{detail.contratante.respLegal || "—"}</span>
+            {" · "}
+            <span className="text-ink-primary">{detail.contratante.email || "sem e-mail"}</span>
+            {detail.contratante.proprio && (
+              <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                dados do contrato: {detail.contratante.fundo}
+              </span>
+            )}
+          </p>
         </div>
         <div className="text-right">
           <div className="text-xs text-ink-muted">Venda</div>
@@ -174,10 +184,16 @@ function ClienteTab({ detail, signed, isApprover, onChange }: { detail: Contract
   }
   async function gerarEnviar() {
     setSignatureError(null);
-    const issues = clientSignatureIssues(detail.client);
+    // Quem assina é o contratante do contrato — o cadastro só quando não há dados próprios.
+    const { contratante } = detail;
+    const issues = clientSignatureIssues(
+      contratante.proprio
+        ? { resp_legal: contratante.respLegal, cpf_resp_legal: contratante.cpfResp, email: contratante.email }
+        : detail.client,
+    );
     if (issues.length > 0) {
-      setSignatureError(clientSignatureMessage(issues));
-      setEditingCadastro(true);
+      setSignatureError(clientSignatureMessage(issues, contratante.proprio ? "contrato" : "cadastro"));
+      if (!contratante.proprio) setEditingCadastro(true);
       return;
     }
     setBusy(true);
