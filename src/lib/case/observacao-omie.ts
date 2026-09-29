@@ -3,6 +3,9 @@
 // identificação (nº, fundo, evento, atrações — obrigatórios), o cronograma de
 // recebimento, o que sai para atrações/fornecedores, as comissões e o BV que
 // fica com a Case. Puro: recebe os dados já carregados.
+//
+// A Omie APAGA o travessão (—) da observação e mostra quebra de linha como "|":
+// só hífen comum aqui, e uma informação por linha.
 
 import { fmtBRL, fmtDate } from "@/lib/case/format";
 
@@ -57,7 +60,7 @@ function porVencimento(a: ObsTitulo, b: ObsTitulo) {
 function agruparPagar(titulos: ObsTitulo[]) {
   const grupos = new Map<string, { nome: string; tipo: string | null; total: number; parcelas: ObsTitulo[] }>();
   for (const t of titulos) {
-    const nome = t.parceiro?.trim() || "—";
+    const nome = t.parceiro?.trim() || "-";
     const chave = `${t.fornecedor_tipo ?? "atracao"}|${nome}`;
     const g = grupos.get(chave) ?? { nome, tipo: t.fornecedor_tipo ?? null, total: 0, parcelas: [] };
     g.total = round2(g.total + Number(t.valor));
@@ -74,13 +77,16 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
   const linhas: string[] = [];
 
   linhas.push(
-    `Contrato Case nº ${c.contract_number} — parcela ${titulo.parcela_numero}/${titulo.parcela_total} (${LEG_RECEBER[titulo.leg] ?? titulo.leg})`,
+    `Contrato Case nº ${c.contract_number} - parcela ${titulo.parcela_numero}/${titulo.parcela_total} (${LEG_RECEBER[titulo.leg] ?? titulo.leg})`,
   );
-  linhas.push(`Fundo: ${c.fundo.trim() || "—"}`);
-  const quando = [fmtDate(c.event_date) || "data a definir", c.show_time?.trim() ? `às ${c.show_time.trim()}` : ""].filter(Boolean).join(" ");
+  linhas.push(`Fundo: ${c.fundo.trim() || "-"}`);
   const onde = [c.local_name, c.local_city].map((s) => s?.trim()).filter(Boolean).join(", ");
-  linhas.push(`Evento: ${c.event_name?.trim() || "—"} — ${quando}${onde ? ` — ${onde}` : ""}`);
-  linhas.push(`Atrações: ${c.atracoes.length > 0 ? c.atracoes.join(", ") : "—"}`);
+  linhas.push(`Evento: ${c.event_name?.trim() || "-"}`);
+  linhas.push(`Data do evento: ${fmtDate(c.event_date) || "a definir"}`);
+  // Horário é texto livre (às vezes a programação inteira), por isso linha própria.
+  if (c.show_time?.trim()) linhas.push(`Horário: ${c.show_time.trim()}`);
+  if (onde) linhas.push(`Local: ${onde}`);
+  linhas.push(`Atrações: ${c.atracoes.length > 0 ? c.atracoes.join(", ") : "-"}`);
 
   const extras = [
     c.valor_rider > 0 ? `rider ${fmtBRL(c.valor_rider)}` : "",
@@ -110,7 +116,7 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
     linhas.push("");
     linhas.push("PAGAMENTOS:");
     for (const g of pagamentos) {
-      const rotulo = g.tipo ? `${TIPO_PAGAR[g.tipo] ?? g.tipo} — ${g.nome}` : `Atração ${g.nome}`;
+      const rotulo = g.tipo ? `${TIPO_PAGAR[g.tipo] ?? g.tipo} - ${g.nome}` : `Atração ${g.nome}`;
       linhas.push(`- ${rotulo}: ${fmtBRL(g.total)}${parcelasTexto(g.parcelas)}`);
     }
   }
@@ -121,9 +127,9 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
     linhas.push("");
     linhas.push("COMISSÕES / BV:");
     for (const g of comissoes) {
-      linhas.push(`- ${TIPO_PAGAR[g.tipo ?? ""] ?? g.tipo} — ${g.nome}: ${fmtBRL(g.total)}${parcelasTexto(g.parcelas)}`);
+      linhas.push(`- ${TIPO_PAGAR[g.tipo ?? ""] ?? g.tipo} - ${g.nome}: ${fmtBRL(g.total)}${parcelasTexto(g.parcelas)}`);
     }
-    linhas.push(`- BV Case (recebido − saídas): ${fmtBRL(round2(totalReceber - totalPagar))}`);
+    linhas.push(`- BV Case (recebido - saídas): ${fmtBRL(round2(totalReceber - totalPagar))}`);
   }
 
   return linhas.join("\n");

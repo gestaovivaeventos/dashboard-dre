@@ -24,9 +24,9 @@ const base: ObsContrato = {
 
 test("traz sempre nº do contrato, fundo, data do evento e atrações", () => {
   const obs = buildObservacaoReceber(base, receber1);
-  assert.match(obs, /Contrato Case nº 42 — parcela 1\/2/);
+  assert.match(obs, /Contrato Case nº 42 - parcela 1\/2/);
   assert.match(obs, /Fundo: Formatura Medicina UFMG 2026/);
-  assert.match(obs, /12\/12\/2026 às 23h/);
+  assert.match(obs, /Data do evento: 12\/12\/2026\nHorário: 23h\nLocal: Salão Terrazzo, Belo Horizonte\/MG/);
   assert.match(obs, /Atrações: Banda X, DJ Y/);
 });
 
@@ -55,12 +55,16 @@ test("separa pagamentos de comissões e apura o BV como recebido − saídas", (
   };
   const obs = buildObservacaoReceber(c, receber1);
   assert.match(obs, /PAGAMENTOS:\n- Atração Banda X: R\$ 6\.000,00 \(01\/12\/2026 R\$ 3\.000,00; 13\/12\/2026 R\$ 3\.000,00\)/);
-  assert.match(obs, /- Comissão Comercial - Externa — Minas Fest: R\$ 500,00 venc\. 13\/12\/2026/);
-  assert.match(obs, /BV Case \(recebido − saídas\): R\$ 3\.500,00/);
+  assert.match(obs, /- Comissão Comercial - Externa - Minas Fest: R\$ 500,00 venc\. 13\/12\/2026/);
+  assert.match(obs, /BV Case \(recebido - saídas\): R\$ 3\.500,00/);
   assert.doesNotMatch(obs.split("COMISSÕES")[0], /Minas Fest/);
 });
 
 test("evento sem data não quebra a linha", () => {
   const obs = buildObservacaoReceber({ ...base, event_date: null, show_time: null, local_name: null, local_city: null }, receber1);
-  assert.match(obs, /Evento: Baile de Gala — data a definir\n/);
+  assert.match(obs, /Evento: Baile de Gala\nData do evento: a definir\nAtrações/);
+});
+
+test("sem travessão: a Omie apaga o caractere", () => {
+  assert.doesNotMatch(buildObservacaoReceber(base, receber1), /—|−/);
 });
