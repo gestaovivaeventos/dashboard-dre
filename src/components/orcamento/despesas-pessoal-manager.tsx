@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { decidirItem } from "@/lib/orcamento/actions/validacao-diretoria";
 import { ESTADO_LABEL } from "@/lib/orcamento/validacao-diretoria";
+import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 
 import {
   createColaborador,
@@ -184,6 +185,11 @@ export function DespesasPessoalManager({
   const [savingRegime, setSavingRegime] = useState(false);
   const [savingAgrupar, setSavingAgrupar] = useState<BeneficioKey | null>(null);
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  // Última decisão tomada NA LINHA. A prévia abaixo é um componente irmão: sem
+  // este repasse ela ficava parada até alguém sair e voltar da tela. O `seq`
+  // existe porque aprovar → desfazer → aprovar produz decisões de conteúdo
+  // idêntico, e as três precisam valer.
+  const [decisao, setDecisao] = useState<(DecisaoAplicada & { seq: number }) | null>(null);
 
   // ── Validação da diretoria ───────────────────────────────────────────────
   // A validação acontece AQUI, na tela de quem constrói: o diretor escolhe o
@@ -324,6 +330,12 @@ export function DespesasPessoalManager({
   }
 
   // Setor concreto da tela: null quando é quadro único OU "Todos os setores".
+  function registrarDecisao(d: DecisaoAplicada) {
+    setDecisao((antes) => ({ ...d, seq: (antes?.seq ?? 0) + 1 }));
+    // O quadro também muda: a linha ganha a marca e trava (ou destrava).
+    void loadColabs(companyId, year, setorId);
+  }
+
   const setorAtual = setorEspecifico(setorId);
   const todosSetores = isTodosSetores(setorId);
   // 14 colunas fixas + a de Empresa, que só aparece quando habilitada. O
@@ -576,6 +588,7 @@ export function DespesasPessoalManager({
                               onDelete={() => handleDelete(colab)}
                               isAdmin={isAdmin}
                               onReativado={() => void loadColabs(companyId, year, setorId)}
+                              onDecidiu={registrarDecisao}
                             />
                           ))}
                         </tbody>
@@ -596,6 +609,7 @@ export function DespesasPessoalManager({
                             onDelete={() => handleDelete(colab)}
                             isAdmin={isAdmin}
                             onReativado={() => void loadColabs(companyId, year, setorId)}
+                            onDecidiu={registrarDecisao}
                           />
                         ))}
                       </tbody>
@@ -706,6 +720,7 @@ export function DespesasPessoalManager({
               year={year}
               setorId={setorId}
               setorNome={setup.setores.find((x) => x.id === setorAtual)?.name ?? ""}
+              decisaoExterna={decisao ?? undefined}
             />
           )}
         </>
@@ -789,6 +804,8 @@ interface RowProps {
   /** Admin: mostra o botão que limpa as marcas da diretoria. */
   isAdmin: boolean;
   onReativado: () => void;
+  /** Decisão da diretoria nesta linha — recarrega o quadro e move a prévia. */
+  onDecidiu: (d: DecisaoAplicada) => void;
 }
 
 function ColaboradorRow({
@@ -803,6 +820,7 @@ function ColaboradorRow({
   onDelete,
   isAdmin,
   onReativado,
+  onDecidiu,
 }: RowProps) {
 
   const [draft, setDraft] = useState<RowDraft>(() => toDraft(colab));
@@ -1134,7 +1152,7 @@ function ColaboradorRow({
             year={year}
             podeValidar={podeValidar}
             onError={onError}
-            onDecidiu={onReativado}
+            onDecidiu={onDecidiu}
           />
           {saving ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -1268,7 +1286,8 @@ function DecisaoColaborador({
   year: number;
   podeValidar: boolean;
   onError: (msg: string) => void;
-  onDecidiu: () => void;
+  /** Avisa QUAL foi a decisão, para a prévia abaixo antecipá-la sem refetch. */
+  onDecidiu: (d: DecisaoAplicada) => void;
 }) {
   const [salvando, setSalvando] = useState(false);
   const [pedindo, setPedindo] = useState(false);
@@ -1293,7 +1312,12 @@ function DecisaoColaborador({
     }
     setPedindo(false);
     setTexto("");
-    onDecidiu();
+    onDecidiu({
+      alvoTipo: "colaborador",
+      alvoId: colab.id,
+      estado: status,
+      comentario: comentario ?? null,
+    });
   }
 
   if (!podeValidar) {

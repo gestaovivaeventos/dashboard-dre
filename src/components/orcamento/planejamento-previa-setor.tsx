@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, MessageSquare, Undo2, X } from "lucide-react";
 
 import type {
@@ -8,6 +8,10 @@ import type {
   PreviaSetorResumo,
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { decidirItem, limparDecisao } from "@/lib/orcamento/actions/validacao-diretoria";
+import {
+  aplicarDecisao,
+  type DecisaoAplicada,
+} from "@/lib/orcamento/previa-setor-decisao";
 import { ESTADO_LABEL, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { formatBRL } from "@/lib/orcamento/format";
 import {
@@ -39,7 +43,7 @@ import { cn } from "@/lib/utils";
  * src/lib/orcamento/grupos.ts, que é quem ordena.
  */
 export function PlanejamentoPreviaSetor({
-  resumo,
+  resumo: resumoDoServidor,
   carregando,
   setorNome,
   year,
@@ -54,6 +58,21 @@ export function PlanejamentoPreviaSetor({
   /** Recarrega a prévia depois de uma decisão. */
   onDecidiu?: () => void;
 }) {
+  // CÓPIA LOCAL do resumo, para a decisão aparecer no clique.
+  //
+  // O servidor continua sendo a verdade — `onDecidiu` recarrega e o valor de
+  // lá sobrescreve este. Mas esperar o round-trip fazia a tela parecer travada
+  // no gesto mais repetido da validação, e o diretor clicava de novo achando
+  // que não tinha pegado.
+  const [resumo, setResumo] = useState(resumoDoServidor);
+  useEffect(() => {
+    setResumo(resumoDoServidor);
+  }, [resumoDoServidor]);
+
+  /** Antecipa o efeito da decisão na tela; o refetch confirma. */
+  const antecipar = (d: DecisaoAplicada) =>
+    setResumo((atual) => (atual ? aplicarDecisao(atual, d) : atual));
+
   const [abertas, setAbertas] = useState<Set<string>>(new Set());
   const [revisando, setRevisando] = useState<PreviaSetorItem | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -73,6 +92,12 @@ export function PlanejamentoPreviaSetor({
   function decidir(item: PreviaSetorItem, status: "aprovado" | "reprovado", comentario?: string) {
     if (!item.alvoTipo || !item.alvoId) return;
     setErro(null);
+    antecipar({
+      alvoTipo: item.alvoTipo,
+      alvoId: item.alvoId,
+      estado: status,
+      comentario: comentario ?? null,
+    });
     iniciar(async () => {
       const res = await decidirItem({
         companyId,
@@ -84,14 +109,23 @@ export function PlanejamentoPreviaSetor({
         status,
         comentario,
       });
+      // Recusa: recarrega para desfazer o que foi antecipado — a tela não pode
+      // ficar mostrando uma decisão que o servidor não gravou.
       if (res.error) setErro(res.error);
-      else onDecidiu?.();
+      onDecidiu?.();
     });
   }
 
   function pedirRevisao(item: PreviaSetorItem, comentario: string) {
     if (!item.alvoTipo || !item.alvoId) return;
     setErro(null);
+    antecipar({
+      alvoTipo: item.alvoTipo,
+      alvoId: item.alvoId,
+      estado: "revisar",
+      comentario,
+    });
+    setRevisando(null);
     iniciar(async () => {
       const res = await decidirItem({
         companyId,
@@ -103,18 +137,20 @@ export function PlanejamentoPreviaSetor({
         status: "revisar",
         comentario,
       });
-      if (res.error) {
-        setErro(res.error);
-      } else {
-        setRevisando(null);
-        onDecidiu?.();
-      }
+      if (res.error) setErro(res.error);
+      onDecidiu?.();
     });
   }
 
   function desfazer(item: PreviaSetorItem) {
     if (!item.alvoTipo || !item.alvoId) return;
     setErro(null);
+    antecipar({
+      alvoTipo: item.alvoTipo,
+      alvoId: item.alvoId,
+      estado: "pendente",
+      comentario: null,
+    });
     iniciar(async () => {
       const res = await limparDecisao({
         companyId,
@@ -123,7 +159,7 @@ export function PlanejamentoPreviaSetor({
         alvoId: item.alvoId!,
       });
       if (res.error) setErro(res.error);
-      else onDecidiu?.();
+      onDecidiu?.();
     });
   }
 

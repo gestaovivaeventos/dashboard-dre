@@ -8,6 +8,7 @@ import {
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { PlanejamentoPreviaSetor } from "@/components/orcamento/planejamento-previa-setor";
+import { aplicarDecisao, type DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 
 /**
  * A prévia do SETOR como painel avulso — a porta da validação dentro de cada
@@ -30,18 +31,30 @@ export function ValidacaoSetorPainel({
   year,
   setorId,
   setorNome = "",
+  decisaoExterna,
 }: {
   companyId: string;
   year: number;
   /** Aceita o sentinela "todos os setores"; é normalizado aqui. */
   setorId: string | null;
   setorNome?: string;
+  /**
+   * Decisão tomada FORA deste painel — no Pessoal ela acontece na linha do
+   * colaborador, que é um componente irmão. Sem isto a prévia abaixo ficava
+   * parada até alguém sair e voltar da tela.
+   *
+   * `seq` é o que dispara: duas decisões idênticas seguidas (aprovar, desfazer,
+   * aprovar) têm o mesmo conteúdo e precisam valer as duas.
+   */
+  decisaoExterna?: DecisaoAplicada & { seq: number };
 }) {
   const [resumo, setResumo] = useState<PreviaSetorResumo | null>(null);
   const [carregando, setCarregando] = useState(true);
 
   const recarregar = useCallback(async () => {
-    setCarregando(true);
+    // NÃO acende `carregando` aqui: ele nasce `true` e cai na primeira carga.
+    // Reacendê-lo a cada ✓ faria a prévia piscar "Calculando…" por cima de um
+    // resumo que já está correto na tela (a decisão foi antecipada).
     const res = await getPreviaSetor(companyId, year, setorEspecifico(setorId), "");
     setCarregando(false);
     if (res.data) setResumo(res.data);
@@ -50,6 +63,17 @@ export function ValidacaoSetorPainel({
   useEffect(() => {
     void recarregar();
   }, [recarregar]);
+
+  // Decisão de fora: antecipa na tela e confirma com o servidor em seguida.
+  const seq = decisaoExterna?.seq ?? 0;
+  useEffect(() => {
+    if (!decisaoExterna || seq === 0) return;
+    setResumo((atual) => (atual ? aplicarDecisao(atual, decisaoExterna) : atual));
+    void recarregar();
+    // Só `seq` nas deps: o objeto é recriado a cada render do pai e reentraria
+    // em laço. A sequência é quem diz que houve decisão NOVA.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seq]);
 
   return (
     <PlanejamentoPreviaSetor
