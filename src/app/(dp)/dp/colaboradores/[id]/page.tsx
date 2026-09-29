@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
+import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { getDpUser } from "@/lib/dp/auth";
 import { MOTIVO_SEM_EMPRESA } from "@/lib/dp/empresa";
-import { getDpColaborador } from "@/lib/dp/queries";
+import { DpNaoInstaladoError, getDpColaborador } from "@/lib/dp/queries";
 import { formatBRL } from "@/lib/orcamento/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -28,7 +29,13 @@ export default async function DpColaboradorPage({ params }: { params: { id: stri
   if (!user) redirect("/");
   if (!UUID.test(params.id)) notFound();
 
-  const c = await getDpColaborador(createAdminClient(), params.id);
+  let c;
+  try {
+    c = await getDpColaborador(createAdminClient(), params.id);
+  } catch (error) {
+    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
+    throw error;
+  }
   if (!c) notFound();
 
   const end = c.endereco;

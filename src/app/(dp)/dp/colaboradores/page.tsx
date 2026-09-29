@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 
 import { DpColaboradoresClient } from "@/components/dp/colaboradores-client";
+import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { getDpUser } from "@/lib/dp/auth";
-import { listDpColaboradores } from "@/lib/dp/queries";
+import { DpNaoInstaladoError, listDpColaboradores } from "@/lib/dp/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,13 @@ export const dynamic = "force-dynamic";
 export default async function DpColaboradoresPage() {
   const user = await getDpUser();
   if (!user) redirect("/");
-  const rows = await listDpColaboradores(createAdminClient());
+  let rows;
+  try {
+    rows = await listDpColaboradores(createAdminClient());
+  } catch (error) {
+    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
+    throw error;
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">

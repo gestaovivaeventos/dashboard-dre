@@ -18,6 +18,26 @@ import type { DpEndereco } from "@/lib/dp/solides/parse";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+/**
+ * As tabelas do DP ainda não existem no banco (migration 20260929160000 não
+ * aplicada). As páginas pegam este erro e explicam o que falta — em produção o
+ * Next esconde a mensagem de erro de Server Component, e a pessoa só veria um
+ * código sem saber o que fazer.
+ */
+export class DpNaoInstaladoError extends Error {
+  constructor() {
+    super("As tabelas do Departamento Pessoal ainda não foram criadas no banco.");
+    this.name = "DpNaoInstaladoError";
+  }
+}
+
+function check(error: { code?: string; message: string } | null, what: string): void {
+  if (!error) return;
+  // PGRST205: tabela fora do schema cache do PostgREST; 42P01: tabela inexistente.
+  if (error.code === "PGRST205" || error.code === "42P01") throw new DpNaoInstaladoError();
+  throw new Error(`${what}: ${error.message}`);
+}
+
 export interface DpCompanyRef {
   id: string;
   name: string;
@@ -77,7 +97,7 @@ export async function listDpCompanies(db: AdminClient): Promise<DpCompanyRef[]> 
 
 export async function listDpRegras(db: AdminClient): Promise<Array<DpEmpresaRegra & { solidesNome: string }>> {
   const { data, error } = await db.from("dp_empresa_regras").select("origem, solides_id, solides_nome, company_id");
-  if (error) throw new Error(`dp_empresa_regras: ${error.message}`);
+  check(error, "dp_empresa_regras");
   return (data ?? []).map((r) => ({
     origem: r.origem as DpRegraOrigem,
     solidesId: Number(r.solides_id),
@@ -123,7 +143,7 @@ export async function listDpColaboradores(db: AdminClient): Promise<DpColaborado
     db.from("dp_colaboradores").select(LIST_COLUMNS).order("nome"),
     contexto(db),
   ]);
-  if (error) throw new Error(`dp_colaboradores: ${error.message}`);
+  check(error, "dp_colaboradores");
   return (data ?? []).map((r) => toRow(r, ctx.idx, ctx.names));
 }
 
@@ -136,7 +156,7 @@ export async function getDpColaborador(db: AdminClient, id: string): Promise<DpC
       .maybeSingle(),
     contexto(db),
   ]);
-  if (error) throw new Error(`dp_colaboradores: ${error.message}`);
+  check(error, "dp_colaboradores");
   if (!data) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = data as any;
@@ -156,7 +176,7 @@ export async function lastDpSyncRun(db: AdminClient): Promise<DpSyncRun | null> 
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(`dp_sync_runs: ${error.message}`);
+  check(error, "dp_sync_runs");
   if (!data) return null;
   return {
     id: data.id,

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { DpSyncPanel } from "@/components/dp/sync-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDpUser } from "@/lib/dp/auth";
-import { lastDpSyncRun, listDpColaboradores } from "@/lib/dp/queries";
+import { DpNaoInstaladoError, lastDpSyncRun, listDpColaboradores } from "@/lib/dp/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,14 @@ export default async function DpOverviewPage() {
 
   // Admin client depois do gate — ver @/lib/dp/queries.
   const db = createAdminClient();
-  const [rows, lastRun] = await Promise.all([listDpColaboradores(db), lastDpSyncRun(db)]);
+  let loaded;
+  try {
+    loaded = await Promise.all([listDpColaboradores(db), lastDpSyncRun(db)]);
+  } catch (error) {
+    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
+    throw error;
+  }
+  const [rows, lastRun] = loaded;
 
   const ativos = rows.filter((r) => r.ativo);
   const semEmpresa = ativos.filter((r) => !r.companyName).length;

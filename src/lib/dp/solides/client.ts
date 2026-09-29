@@ -31,15 +31,22 @@ export class SolidesError extends Error {
 
 function token(): string {
   const t = process.env.SOLIDES_API_TOKEN?.trim();
-  if (!t) throw new SolidesError("SOLIDES_API_TOKEN não configurado.");
+  if (!t) {
+    throw new SolidesError(
+      "Token da Sólides não configurado no servidor: cadastre SOLIDES_API_TOKEN nas variáveis de ambiente da Vercel e faça um novo deploy.",
+    );
+  }
   return t;
 }
 
 async function get<T>(path: string, attempt = 1): Promise<T> {
+  // Fora do try: falta de configuração não é "Sólides indisponível" e não
+  // melhora tentando de novo.
+  const auth = `Token token=${token()}`;
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
-      headers: { Accept: "application/json", Authorization: `Token token=${token()}` },
+      headers: { Accept: "application/json", Authorization: auth },
       cache: "no-store",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

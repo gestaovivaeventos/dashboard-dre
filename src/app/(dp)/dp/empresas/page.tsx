@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 
 import { DpEmpresasClient } from "@/components/dp/empresas-client";
+import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { getDpUser } from "@/lib/dp/auth";
 import { origensParaMapear } from "@/lib/dp/empresa";
-import { listDpColaboradores, listDpCompanies, listDpRegras } from "@/lib/dp/queries";
+import { DpNaoInstaladoError, listDpColaboradores, listDpCompanies, listDpRegras } from "@/lib/dp/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,14 @@ export default async function DpEmpresasPage() {
   const user = await getDpUser();
   if (!user) redirect("/");
   const db = createAdminClient();
-  const [rows, regras, companies] = await Promise.all([listDpColaboradores(db), listDpRegras(db), listDpCompanies(db)]);
+  let loaded;
+  try {
+    loaded = await Promise.all([listDpColaboradores(db), listDpRegras(db), listDpCompanies(db)]);
+  } catch (error) {
+    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
+    throw error;
+  }
+  const [rows, regras, companies] = loaded;
   const origens = origensParaMapear(rows, regras);
   const semNada = rows.filter((r) => r.ativo && r.empresa.companyId === null && r.unidadeId === null && r.departamentoId === null);
 
