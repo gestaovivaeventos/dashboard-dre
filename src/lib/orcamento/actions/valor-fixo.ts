@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
+import { podeDecidir, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { diffCampos } from "@/lib/orcamento/trilha";
 import {
   autorizarEscrita,
@@ -37,6 +39,17 @@ export interface ValorFixoContrato {
   indiceKey: IndiceKey | null;
   /** Mês (1..12) em que o reajuste passa a valer. null = sem reajuste no ano. */
   mesReajuste: number | null;
+  /**
+   * Decisão da diretoria sobre ESTE contrato — o alvo é o próprio `id`, o
+   * mesmo que a Prévia usa. A decisão é por contrato, não por categoria: uma
+   * categoria pode ter vários, e aprovar a categoria inteira aprovaria de
+   * carona um contrato que o diretor não olhou.
+   */
+  estado: ValidacaoEstado;
+  /** O que o diretor pediu que mude — só no 'revisar'. */
+  comentario: string | null;
+  /** Fechado para o construtor (aprovado ou reprovado). DERIVA do status. */
+  travado: boolean;
 }
 
 /** Uma categoria orçada por valor fixo, com seus N contratos. */
@@ -68,6 +81,8 @@ export interface IndiceOption {
 export interface ValorFixoSetup {
   items: ValorFixoItem[];
   indices: IndiceOption[];
+  /** Quem está vendo decide? A tela só mostra os botões quando sim. */
+  podeValidar: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -149,7 +164,7 @@ export async function getValorFixoCategorias(
   /** Setor da tela: os contratos listados são os deste setor. */
   setorId: string | null = null,
 ): Promise<{ setup?: ValorFixoSetup; error?: string; needsMigration?: boolean }> {
-  if (!companyId) return { setup: { items: [], indices: [] } };
+  if (!companyId) return { setup: { items: [], indices: [], podeValidar: false } };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
@@ -176,13 +191,15 @@ export async function getValorFixoCategorias(
   if (cats.needsMigration) return { needsMigration: true };
   if (cats.error) return { error: cats.error };
   const codes = Array.from(cats.codes.keys());
-  if (codes.length === 0) return { setup: { items: [], indices } };
+  if (codes.length === 0) {
+    return { setup: { items: [], indices, podeValidar: podeDecidir(auth.user.papel) } };
+  }
 
   // Contratos salvos (N por categoria). Ordena por created_at/id para a lista
   // ficar estável entre recargas.
   let savedQuery = supabase
     .from("orcamento_valor_fixo_categorias")
-    .select("id, category_code, descricao, valor_base, indice_key, mes_reajuste")
+    .select("id, category_code, descricao, valor_base, indice_key, mes_reajuste, updated_at")
     .eq("company_id", companyId)
     .eq("year", year);
   // "Todos os setores" não filtra — o literal iria para uma coluna uuid.
@@ -198,6 +215,14 @@ export async function getValorFixoCategorias(
     return { error: savedError.message };
   }
 
+  const decisoes = await lerDecisoes(
+    supabase,
+    companyId,
+    year,
+    "valor_fixo_contrato",
+    ((saved ?? []) as ContratoRow[]).map((r) => r.id),
+  );
+
   const contratosByCode = new Map<string, ValorFixoContrato[]>();
   for (const raw of (saved ?? []) as ContratoRow[]) {
     const code = raw.category_code;
@@ -208,6 +233,11 @@ export async function getValorFixoCategorias(
       valorBase: raw.valor_base == null ? null : Number(raw.valor_base),
       indiceKey: isIndiceKey(raw.indice_key) ? (raw.indice_key as IndiceKey) : null,
       mesReajuste: raw.mes_reajuste == null ? null : Number(raw.mes_reajuste),
+      ...estadoDaLinha(
+        decisoes.get(raw.id),
+        (raw as unknown as { updated_at?: string | null }).updated_at ?? null,
+        auth.user.papel,
+      ),
     });
   }
 
@@ -219,7 +249,7 @@ export async function getValorFixoCategorias(
 
   items.sort((a, b) => a.categoryName.localeCompare(b.categoryName, "pt-BR"));
 
-  return { setup: { items, indices } };
+  return { setup: { items, indices, podeValidar: podeDecidir(auth.user.papel) } };
 }
 
 // ─── Edição ───────────────────────────────────────────────────────────────────

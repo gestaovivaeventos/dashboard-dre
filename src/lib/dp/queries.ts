@@ -1,0 +1,174 @@
+import "server-only";
+
+import type { createAdminClient } from "@/lib/supabase/admin";
+import {
+  indexarRegras,
+  resolverEmpresa,
+  type DpEmpresaRegra,
+  type DpEmpresaResolvida,
+  type DpRegraOrigem,
+} from "@/lib/dp/empresa";
+import type { DpEndereco } from "@/lib/dp/solides/parse";
+
+// Leituras das telas do DP. Todas com o admin client DEPOIS de getDpUser():
+// mesmo enquadramento do Caixa — quem tem o módulo vê o grupo inteiro, e o
+// embed/lookup de `companies` sob a RLS do usuário depende de vínculo por
+// empresa, que não é a regra daqui. A RLS de dp_* (dp_has_access) segue como
+// segunda linha para qualquer leitura com o client do usuário.
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+export interface DpCompanyRef {
+  id: string;
+  name: string;
+}
+
+export interface DpColaboradorRow {
+  id: string;
+  solidesId: number;
+  nome: string;
+  cpf: string | null;
+  email: string | null;
+  unidadeId: number | null;
+  unidadeNome: string | null;
+  departamentoId: number | null;
+  departamentoNome: string | null;
+  cargoNome: string | null;
+  tipoContrato: string | null;
+  dataAdmissao: string | null;
+  dataDesligamento: string | null;
+  gestorNome: string | null;
+  ativo: boolean;
+  desligadoDetectadoEm: string | null;
+  empresa: DpEmpresaResolvida;
+  companyName: string | null;
+}
+
+export interface DpColaboradorFichaRow extends DpColaboradorRow {
+  salario: number | null;
+  endereco: DpEndereco | null;
+  fichaSincronizadaEm: string | null;
+  sincronizadoEm: string;
+}
+
+export interface DpSyncRun {
+  id: string;
+  trigger: "cron" | "manual";
+  status: "running" | "ok" | "erro";
+  startedAt: string;
+  finishedAt: string | null;
+  lista: number | null;
+  fichasErro: number;
+  novos: number;
+  desligados: number;
+  reativados: number;
+  erro: string | null;
+}
+
+const LIST_COLUMNS =
+  "id, solides_id, nome, cpf, email, unidade_id, unidade_nome, departamento_id, departamento_nome, cargo_nome, " +
+  "tipo_contrato, data_admissao, data_desligamento, gestor_nome, ativo, desligado_detectado_em";
+
+export async function listDpCompanies(db: AdminClient): Promise<DpCompanyRef[]> {
+  const { data, error } = await db.from("companies").select("id, name").eq("active", true).order("name");
+  if (error) throw new Error(`companies: ${error.message}`);
+  return (data ?? []) as DpCompanyRef[];
+}
+
+export async function listDpRegras(db: AdminClient): Promise<Array<DpEmpresaRegra & { solidesNome: string }>> {
+  const { data, error } = await db.from("dp_empresa_regras").select("origem, solides_id, solides_nome, company_id");
+  if (error) throw new Error(`dp_empresa_regras: ${error.message}`);
+  return (data ?? []).map((r) => ({
+    origem: r.origem as DpRegraOrigem,
+    solidesId: Number(r.solides_id),
+    solidesNome: String(r.solides_nome),
+    companyId: String(r.company_id),
+  }));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toRow(r: any, idx: ReturnType<typeof indexarRegras>, names: Map<string, string>): DpColaboradorRow {
+  const unidadeId = r.unidade_id === null ? null : Number(r.unidade_id);
+  const departamentoId = r.departamento_id === null ? null : Number(r.departamento_id);
+  const empresa = resolverEmpresa({ unidadeId, departamentoId }, idx);
+  return {
+    id: r.id,
+    solidesId: Number(r.solides_id),
+    nome: r.nome,
+    cpf: r.cpf,
+    email: r.email,
+    unidadeId,
+    unidadeNome: r.unidade_nome,
+    departamentoId,
+    departamentoNome: r.departamento_nome,
+    cargoNome: r.cargo_nome,
+    tipoContrato: r.tipo_contrato,
+    dataAdmissao: r.data_admissao,
+    dataDesligamento: r.data_desligamento,
+    gestorNome: r.gestor_nome,
+    ativo: Boolean(r.ativo),
+    desligadoDetectadoEm: r.desligado_detectado_em,
+    empresa,
+    companyName: empresa.companyId ? names.get(empresa.companyId) ?? null : null,
+  };
+}
+
+async function contexto(db: AdminClient) {
+  const [regras, companies] = await Promise.all([listDpRegras(db), listDpCompanies(db)]);
+  return { idx: indexarRegras(regras), names: new Map(companies.map((c) => [c.id, c.name])) };
+}
+
+export async function listDpColaboradores(db: AdminClient): Promise<DpColaboradorRow[]> {
+  const [{ data, error }, ctx] = await Promise.all([
+    db.from("dp_colaboradores").select(LIST_COLUMNS).order("nome"),
+    contexto(db),
+  ]);
+  if (error) throw new Error(`dp_colaboradores: ${error.message}`);
+  return (data ?? []).map((r) => toRow(r, ctx.idx, ctx.names));
+}
+
+export async function getDpColaborador(db: AdminClient, id: string): Promise<DpColaboradorFichaRow | null> {
+  const [{ data, error }, ctx] = await Promise.all([
+    db
+      .from("dp_colaboradores")
+      .select(`${LIST_COLUMNS}, salario, endereco, ficha_sincronizada_em, sincronizado_em`)
+      .eq("id", id)
+      .maybeSingle(),
+    contexto(db),
+  ]);
+  if (error) throw new Error(`dp_colaboradores: ${error.message}`);
+  if (!data) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = data as any;
+  return {
+    ...toRow(r, ctx.idx, ctx.names),
+    salario: r.salario === null ? null : Number(r.salario),
+    endereco: r.endereco ?? null,
+    fichaSincronizadaEm: r.ficha_sincronizada_em,
+    sincronizadoEm: r.sincronizado_em,
+  };
+}
+
+export async function lastDpSyncRun(db: AdminClient): Promise<DpSyncRun | null> {
+  const { data, error } = await db
+    .from("dp_sync_runs")
+    .select("id, trigger, status, started_at, finished_at, colaboradores_lista, fichas_erro, novos, desligados, reativados, erro")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`dp_sync_runs: ${error.message}`);
+  if (!data) return null;
+  return {
+    id: data.id,
+    trigger: data.trigger,
+    status: data.status,
+    startedAt: data.started_at,
+    finishedAt: data.finished_at,
+    lista: data.colaboradores_lista,
+    fichasErro: data.fichas_erro,
+    novos: data.novos,
+    desligados: data.desligados,
+    reativados: data.reativados,
+    erro: data.erro,
+  };
+}

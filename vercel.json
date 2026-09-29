@@ -46,6 +46,10 @@
     {
       "path": "/api/cron/caixa-saldos",
       "schedule": "30 15 * * *"
+    },
+    {
+      "path": "/api/cron/dp-solides",
+      "schedule": "0 8 * * *"
     }
   ]
 }

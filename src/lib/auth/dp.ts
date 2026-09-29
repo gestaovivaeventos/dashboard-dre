@@ -32,6 +32,10 @@ export const DP_PATH = "/dp";
 
 /** Chaves dos itens do grupo DP no menu lateral. */
 export const DP_NAV_KEY_OVERVIEW = "dp-overview";
+export const DP_NAV_KEY_COLABORADORES = "dp-colaboradores";
+export const DP_COLABORADORES_PATH = "/dp/colaboradores";
+export const DP_NAV_KEY_EMPRESAS = "dp-empresas";
+export const DP_EMPRESAS_PATH = "/dp/empresas";
 
 /**
  * Há concessão do módulo? Aceita o select enxuto do middleware e da root page

@@ -27,6 +27,9 @@ import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores
 import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
+import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
+import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
+import type { ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -125,6 +128,13 @@ function ContratoRow({
   onField,
   onCommitBase,
   onRemove,
+  decisao,
+  companyId,
+  setorId,
+  rotulo,
+  podeValidar,
+  onDecidiu,
+  onError,
 }: {
   firstCell: React.ReactNode;
   contrato: LocalContrato;
@@ -136,6 +146,22 @@ function ContratoRow({
   onField: (partial: Partial<LocalContrato>) => void;
   onCommitBase: (parsed: number | null) => void;
   onRemove: () => void;
+  /**
+   * Decisão da diretoria sobre ESTE contrato. `null` no contrato ainda não
+   * gravado — sem id não há alvo, e decidir sobre algo que não existe
+   * gravaria um órfão que a Prévia nunca leria.
+   *
+   * Vem do ITEM do servidor, não do estado local da linha: o rascunho local
+   * existe para a digitação não ser atropelada, e a decisão precisa do
+   * contrário — aparecer assim que o recarregamento chega.
+   */
+  decisao: { alvoId: string; estado: ValidacaoEstado; comentario: string | null } | null;
+  companyId: string;
+  setorId: string | null;
+  rotulo: string;
+  podeValidar: boolean;
+  onDecidiu: (d: DecisaoAplicada) => void;
+  onError: (msg: string) => void;
 }) {
   const [draft, setDraft] = useState(numberToInput(contrato.valorBase));
   const dirtyRef = useRef(false);
@@ -270,6 +296,30 @@ function ContratoRow({
           )}
         </div>
       </td>
+
+      {/* Decisão da diretoria, na PRÓPRIA LINHA do contrato — mesmo gesto do
+          Pessoal. Por CONTRATO e não por categoria: uma categoria pode ter
+          vários, e aprovar a categoria levaria de carona um que o diretor não
+          olhou. */}
+      <td className="px-3 py-2">
+        <div className="flex items-center justify-end gap-1">
+          {decisao && (
+            <DecisaoLinha
+              companyId={companyId}
+              year={budgetYear}
+              alvoTipo="valor_fixo_contrato"
+              alvoId={decisao.alvoId}
+              setorId={setorId}
+              rotulo={rotulo}
+              estado={decisao.estado}
+              comentario={decisao.comentario}
+              podeValidar={podeValidar}
+              onError={onError}
+              onDecidiu={onDecidiu}
+            />
+          )}
+        </div>
+      </td>
     </tr>
   );
 }
@@ -286,6 +336,8 @@ function ValorFixoCategoryGroup({
   podeEditar,
   onMoved,
   onError,
+  podeValidar,
+  onDecidiu,
 }: {
   item: ValorFixoItem;
   indices: IndiceOption[];
@@ -299,8 +351,22 @@ function ValorFixoCategoryGroup({
   podeEditar: boolean;
   onMoved: () => void;
   onError: (msg: string) => void;
+  podeValidar: boolean;
+  onDecidiu: (d: DecisaoAplicada) => void;
 }) {
   const [contratos, setContratos] = useState<LocalContrato[]>(() => seedContratos(item));
+
+  // A decisão vem do ITEM (servidor), não do rascunho local: o rascunho existe
+  // para a digitação não ser atropelada por um reload, e a decisão precisa
+  // exatamente do contrário — aparecer assim que o reload chega. Como o `key`
+  // desta linha é estável, `seedContratos` não roda de novo e um estado
+  // guardado ali ficaria congelado.
+  const decisaoPorId = new Map(
+    item.contratos.map((c) => [
+      c.id,
+      { alvoId: c.id, estado: c.estado, comentario: c.comentario },
+    ]),
+  );
   const [expanded, setExpanded] = useState(false);
 
   // Espelho síncrono do estado, para os saves lerem sempre o valor mais recente.
@@ -441,7 +507,7 @@ function ValorFixoCategoryGroup({
 
   const detailRow = expanded && (
     <tr className="bg-muted/20">
-      <td colSpan={5} className="px-3 pb-3 pt-1">
+      <td colSpan={6} className="px-3 pb-3 pt-1">
         <div className="rounded-md border bg-background p-3">
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             Orçamento mês a mês {budgetYear}
@@ -490,6 +556,13 @@ function ValorFixoCategoryGroup({
           onField={(partial) => commit(c.key, partial, true)}
           onCommitBase={(parsed) => commit(c.key, { valorBase: parsed }, true)}
           onRemove={() => {}}
+          decisao={c.id ? decisaoPorId.get(c.id) ?? null : null}
+          companyId={companyId}
+          setorId={setorEspecifico(setorId)}
+          rotulo={item.categoryName}
+          podeValidar={podeValidar}
+          onDecidiu={onDecidiu}
+          onError={onError}
         />
         {detailRow}
       </>
@@ -506,7 +579,7 @@ function ValorFixoCategoryGroup({
             <div className="pl-5">{addBtn}</div>
           </div>
         </td>
-        <td colSpan={3} className="px-3 py-2 text-xs text-muted-foreground">
+        <td colSpan={4} className="px-3 py-2 text-xs text-muted-foreground">
           {contratos.length} contratos nesta categoria — o orçado é a soma deles.
         </td>
         <td className="px-3 py-2 text-right">
@@ -549,6 +622,13 @@ function ValorFixoCategoryGroup({
             onCommitBase={(parsed) => commit(c.key, { valorBase: parsed }, true)}
             podeEditar={podeEditar}
             onRemove={() => removeContrato(c)}
+            decisao={c.id ? decisaoPorId.get(c.id) ?? null : null}
+            companyId={companyId}
+            setorId={setorEspecifico(setorId)}
+            rotulo={(c.descricao || "").trim() || item.categoryName}
+            podeValidar={podeValidar}
+            onDecidiu={onDecidiu}
+            onError={onError}
           />
         );
       })}
@@ -580,6 +660,11 @@ export function ValorFixoManager({
   // barra de validação, o visto por CONTRATO e o "pedir ajuste".
   const [needsMigration, setNeedsMigration] = useState(false);
   const [search, setSearch] = useState("");
+  const [podeValidar, setPodeValidar] = useState(false);
+  // Última decisão tomada NESTA tela, para a prévia abaixo antecipá-la. O
+  // `seq` é o gatilho, não o conteúdo: aprovar, desfazer e aprovar de novo
+  // produz decisões idênticas e as três precisam valer.
+  const [decisao, setDecisao] = useState<(DecisaoAplicada & { seq: number }) | null>(null);
 
   /** Primeiro setor com contrato de valor fixo; senão, o primeiro da lista. */
   async function primeiroSetorComConteudo(ids: string[]): Promise<string | null> {
@@ -613,6 +698,14 @@ export function ValorFixoManager({
     }
     setItems(res.setup.items);
     setIndices(res.setup.indices);
+    setPodeValidar(res.setup.podeValidar);
+  }
+
+  function registrarDecisao(d: DecisaoAplicada) {
+    setDecisao((antes) => ({ ...d, seq: (antes?.seq ?? 0) + 1 }));
+    // A tabela também muda: a linha ganha a marca do estado. A prévia abaixo
+    // se move sozinha pelo `decisaoExterna`.
+    void reload(companyId, year, setorId);
   }
 
   useEffect(() => {
@@ -754,6 +847,7 @@ export function ValorFixoManager({
                   <th className="px-3 py-2.5 font-medium">Correção</th>
                   <th className="px-3 py-2.5 font-medium">Mês do reajuste</th>
                   <th className="px-3 py-2.5 text-right font-medium">Orçado {year}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Validação</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -767,13 +861,15 @@ export function ValorFixoManager({
                     setorId={setorId}
                     setores={setores}
                     podeEditar={podeEditar}
+                    podeValidar={podeValidar}
+                    onDecidiu={registrarDecisao}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}
                   />
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>
@@ -790,6 +886,8 @@ export function ValorFixoManager({
         year={year}
         setorId={setorId}
         setorNome={setores.find((x) => x.id === setorEspecifico(setorId))?.name ?? ""}
+        decisaoExterna={decisao ?? undefined}
+        metodoContagem="valor_fixo"
       />
         </>
       )}

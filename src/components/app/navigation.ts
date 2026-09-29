@@ -40,7 +40,14 @@ import {
 } from "@/lib/auth/bi-validation";
 import { CAIXA_NAV_KEY_REAL, CAIXA_REAL_PATH } from "@/lib/auth/caixa";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
-import { DP_NAV_KEY_OVERVIEW, DP_PATH } from "@/lib/auth/dp";
+import {
+  DP_COLABORADORES_PATH,
+  DP_EMPRESAS_PATH,
+  DP_NAV_KEY_COLABORADORES,
+  DP_NAV_KEY_EMPRESAS,
+  DP_NAV_KEY_OVERVIEW,
+  DP_PATH,
+} from "@/lib/auth/dp";
 import {
   VB_NAV_KEY_OMIE,
   VB_NAV_KEY_OVERVIEW,
@@ -408,6 +415,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "DEPARTAMENTO PESSOAL",
     items: [
       { key: DP_NAV_KEY_OVERVIEW, title: "Visão geral", icon: IdCard, scope: "global", href: DP_PATH, dpAccess: true },
+      { key: DP_NAV_KEY_COLABORADORES, title: "Colaboradores", icon: Users, scope: "global", href: DP_COLABORADORES_PATH, dpAccess: true },
+      // De-para unidade/departamento da Sólides → empresa do Control Hub.
+      { key: DP_NAV_KEY_EMPRESAS, title: "Empresas (de-para)", icon: GitMerge, scope: "global", href: DP_EMPRESAS_PATH, dpAccess: true },
     ],
   },
   {

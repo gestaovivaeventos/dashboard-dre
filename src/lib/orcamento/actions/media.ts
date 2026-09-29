@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
+import { podeDecidir, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { chaveMedia } from "@/lib/orcamento/validacao-diretoria";
 import {
   autorizarEscrita,
@@ -53,6 +55,20 @@ export interface MediaCategoriaItem {
   calculadoEm: string | null;
   /** Realizado do ano-base recalculado ao vivo (para sugestão e detalhe). */
   realizado: MediaRealizado;
+  /**
+   * Alvo da decisão desta linha — calculado AQUI, e não na tela, porque a
+   * regra tem uma pegadinha: a média sem linha gravada é ancorada em
+   * (categoria, ∅), e a primeira gravação é que resolve o setor. Montar a
+   * chave no cliente faria a decisão cair num alvo que a Prévia não lê, e ela
+   * sumiria de lá sem erro nenhum. Ver `travaDaLinhaDeMedia`.
+   */
+  alvoId: string;
+  /** Decisão da diretoria sobre esta linha. */
+  estado: ValidacaoEstado;
+  /** O que o diretor pediu que mude — só no 'revisar'. */
+  comentario: string | null;
+  /** Fechada para o construtor (aprovada ou reprovada). DERIVA do status. */
+  travado: boolean;
 }
 
 /** Índice de correção disponível, com o valor (%) do ano do orçamento. */
@@ -69,6 +85,8 @@ export interface MediaSetup {
   baseYear: number;
   /** Índices percentuais disponíveis para correção, com o valor do ano. */
   indices: IndiceOption[];
+  /** Quem está vendo decide? A tela só mostra ✓ / ✗ / comentario quando sim. */
+  podeValidar: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -173,7 +191,7 @@ export async function getMediaCategorias(
   setorId: string | null = null,
 ): Promise<{ setup?: MediaSetup; error?: string; needsMigration?: boolean }> {
   if (!companyId) {
-    return { setup: { items: [], baseYear: year - 1, indices: [] } };
+    return { setup: { items: [], baseYear: year - 1, indices: [], podeValidar: false } };
   }
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -204,7 +222,7 @@ export async function getMediaCategorias(
   if (cats.error) return { error: cats.error };
   const codes = Array.from(cats.codes.keys());
   if (codes.length === 0) {
-    return { setup: { items: [], baseYear, indices } };
+    return { setup: { items: [], baseYear, indices, podeValidar: podeDecidir(auth.user.papel) } };
   }
 
   // Snapshots salvos. A chave é (categoria, setor): a mesma categoria pode ter
@@ -212,7 +230,9 @@ export async function getMediaCategorias(
   // mostrarem o mesmo valor.
   const { data: saved, error: savedError } = await supabase
     .from("orcamento_media_categorias")
-    .select("category_code, setor_id, media_valor, manual, indice_key, base_year, meses_considerados, calculado_em")
+    .select(
+      "category_code, setor_id, media_valor, manual, indice_key, base_year, meses_considerados, calculado_em, updated_at",
+    )
     .eq("company_id", companyId)
     .eq("year", year);
   if (savedError) {
@@ -272,10 +292,36 @@ export async function getMediaCategorias(
     }
   }
 
-  const items: MediaCategoriaItem[] = pares.map(({ code, setorId: sid }) => {
+  // O alvo da decisão é o MESMO que a Prévia usa: (categoria, setor DA LINHA
+  // GRAVADA) — e (categoria, ∅) enquanto não há linha, porque a média "viva"
+  // do realizado não tem setor a apontar. Montar essa chave na tela faria a
+  // decisão cair num alvo que a Prévia não lê, e ela sumiria de lá sem erro.
+  const linhas = pares.map(({ code, setorId: sid }) => {
     const row = porSetor ? savedByKey.get(chave(code, sid)) : savedByCode.get(code);
+    return {
+      code,
+      sid,
+      row,
+      alvoId: chaveMedia(code, row ? ((row.setor_id as string) ?? null) : null),
+    };
+  });
+  const decisoes = await lerDecisoes(
+    supabase,
+    companyId,
+    year,
+    "media_linha",
+    linhas.map((l) => l.alvoId),
+  );
+
+  const items: MediaCategoriaItem[] = linhas.map(({ code, sid, row, alvoId }) => {
     const indiceKey = isIndiceKey(row?.indice_key) ? (row!.indice_key as IndiceKey) : null;
     return {
+      alvoId,
+      ...estadoDaLinha(
+        decisoes.get(alvoId),
+        (row?.updated_at as string | null) ?? null,
+        auth.user.papel,
+      ),
       categoryCode: code,
       categoryName: cats.codes.get(code) ?? code,
       setorId: sid,
@@ -305,7 +351,9 @@ export async function getMediaCategorias(
       ? items
       : items.filter((i) => i.setorId !== null && auth.setores!.includes(i.setorId));
 
-  return { setup: { items: visiveis, baseYear, indices } };
+  return {
+    setup: { items: visiveis, baseYear, indices, podeValidar: podeDecidir(auth.user.papel) },
+  };
 }
 
 // ─── Cálculo / edição ─────────────────────────────────────────────────────────
@@ -382,6 +430,13 @@ export async function calcularMedia(
       mesesConsiderados: realizado.mesesConsiderados,
       calculadoEm,
       realizado,
+      // A linha acabou de ser gravada, e a EDIÇÃO VENCE A DECISÃO: qualquer
+      // decisão anterior sobre ela voltou a ser pendente. O alvo usa o setor
+      // REALMENTE gravado (`alvo.id`), não o da tela.
+      alvoId: chaveMedia(categoryCode, alvo.id),
+      estado: "pendente" as const,
+      comentario: null,
+      travado: false,
     },
   };
 }

@@ -27,6 +27,8 @@ import { getSetores, type OrcamentoSetor } from "@/lib/orcamento/actions/setores
 import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
+import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
+import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 import { cn } from "@/lib/utils";
 
 const INPUT_CLS =
@@ -91,6 +93,8 @@ function MediaRow({
   setores,
   podeEditar,
   onMoved,
+  podeValidar,
+  onDecidiu,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
@@ -106,6 +110,10 @@ function MediaRow({
   /** Falso para gerente e gerente sócio: leem a linha, não a alteram. */
   podeEditar: boolean;
   onMoved: () => void;
+  /** Quem vê decide? Mostra os botões na linha; senão, só a marca do estado. */
+  podeValidar: boolean;
+  /** Avisa QUAL foi a decisão, para a prévia abaixo se mover no clique. */
+  onDecidiu: (d: DecisaoAplicada) => void;
 }) {
   // Média efetiva usada para exibir e projetar: o snapshot salvo, ou a sugestão
   // ao vivo do realizado enquanto nada foi salvo.
@@ -123,6 +131,13 @@ function MediaRow({
   }, [item.mediaValor, item.realizado.media]);
 
   const naoSalva = item.mediaValor == null && item.realizado.media != null;
+
+  // A trava por LINHA (decisão da diretoria) soma-se à trava por PAPEL. Hoje
+  // ela nunca dispara aqui — quem edita média é admin ou diretoria, e esses
+  // nunca se travam —, mas o dia em que a média abrir para o gerente, a trava
+  // vem junto em vez de virar erro ao salvar. A action já barra de qualquer
+  // forma (`travaDaLinhaDeMedia`).
+  const editavel = podeEditar && !item.travado;
 
   function persistValor() {
     if (!dirtyRef.current) return;
@@ -247,18 +262,18 @@ function MediaRow({
                 setDraft(v);
               }}
               onBlur={persistValor}
-              disabled={!podeEditar}
+              disabled={!editavel}
               className={cn(
                 CELL,
                 "w-32",
                 naoSalva && "text-muted-foreground",
-                !podeEditar && "cursor-not-allowed opacity-60",
+                !editavel && "cursor-not-allowed opacity-60",
               )}
             />
             <button
               type="button"
               onClick={handleRecalcular}
-              disabled={recalcing || !podeEditar}
+              disabled={recalcing || !editavel}
               title={`Recalcular pela média do realizado de ${baseYear}`}
               className="shrink-0 rounded border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
@@ -293,12 +308,12 @@ function MediaRow({
             onChange={(e) =>
               handleIndice(e.target.value === "" ? null : (e.target.value as IndiceKey))
             }
-            disabled={!podeEditar}
+            disabled={!editavel}
             className={cn(
               INPUT_CLS,
               "w-44 py-1.5",
               item.indiceKey == null && "text-muted-foreground",
-              !podeEditar && "cursor-not-allowed opacity-60",
+              !editavel && "cursor-not-allowed opacity-60",
             )}
           >
             <option value="">— sem correção</option>
@@ -326,12 +341,34 @@ function MediaRow({
             </div>
           )}
         </td>
+
+        {/* Decisão da diretoria, na PRÓPRIA LINHA — mesmo gesto do Pessoal e do
+            Planejamento. O alvo vem do SERVIDOR (`item.alvoId`): a média sem
+            linha gravada é ancorada em (categoria, ∅), e montar essa chave aqui
+            faria a decisão cair num alvo que a Prévia não lê. */}
+        <td className="px-3 py-2">
+          <div className="flex items-center justify-end gap-1">
+            <DecisaoLinha
+              companyId={companyId}
+              year={budgetYear}
+              alvoTipo="media_linha"
+              alvoId={item.alvoId}
+              setorId={item.setorId}
+              rotulo={item.categoryName}
+              estado={item.estado}
+              comentario={item.comentario}
+              podeValidar={podeValidar}
+              onError={onError}
+              onDecidiu={onDecidiu}
+            />
+          </div>
+        </td>
       </tr>
 
       {/* Detalhe: realizado mês a mês do ano-base */}
       {expanded && (
         <tr className="bg-muted/20">
-          <td colSpan={4} className="px-3 pb-3 pt-1">
+          <td colSpan={5} className="px-3 pb-3 pt-1">
             <div className="rounded-md border bg-background p-3">
               <p className="mb-2 text-xs font-medium text-muted-foreground">
                 Realizado {baseYear} (Omie) — mês fechado zerado entra como 0; o mês em curso e os
@@ -410,6 +447,11 @@ export function MediaCorrecaoManager({
   // pendurado no estado que vinha de `getRevisoes`.
   const [recalcAll, setRecalcAll] = useState(false);
   const [search, setSearch] = useState("");
+  const [podeValidar, setPodeValidar] = useState(false);
+  // Última decisão tomada NESTA tela, para a prévia abaixo antecipá-la. O
+  // `seq` é o gatilho, não o conteúdo: aprovar, desfazer e aprovar de novo
+  // produz decisões idênticas e as três precisam valer.
+  const [decisao, setDecisao] = useState<(DecisaoAplicada & { seq: number }) | null>(null);
   const [, startTransition] = useTransition();
 
   /** Primeiro setor com alguma categoria por média; senão, o primeiro da lista. */
@@ -445,6 +487,14 @@ export function MediaCorrecaoManager({
     setItems(res.setup.items);
     setIndices(res.setup.indices);
     setBaseYear(res.setup.baseYear);
+    setPodeValidar(res.setup.podeValidar);
+  }
+
+  function registrarDecisao(d: DecisaoAplicada) {
+    setDecisao((antes) => ({ ...d, seq: (antes?.seq ?? 0) + 1 }));
+    // A tabela também muda: a linha ganha a marca (e a trava, para quem
+    // constrói). A prévia abaixo se move sozinha pelo `decisaoExterna`.
+    void reload(companyId, year, setorId);
   }
 
   // Empresa/ano mudou: recarrega a lista de setores e cai no primeiro deles.
@@ -626,6 +676,7 @@ export function MediaCorrecaoManager({
                   <th className="px-3 py-2.5 font-medium">Média {baseYear}</th>
                   <th className="px-3 py-2.5 font-medium">Correção</th>
                   <th className="px-3 py-2.5 text-right font-medium">Projeção mensal {year}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Validação</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -640,6 +691,8 @@ export function MediaCorrecaoManager({
                     setorId={setorId}
                     setores={setores}
                     podeEditar={podeEditar}
+                    podeValidar={podeValidar}
+                    onDecidiu={registrarDecisao}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}
                     onError={setLoadError}
@@ -647,7 +700,7 @@ export function MediaCorrecaoManager({
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       Nenhuma categoria encontrada para “{search}”.
                     </td>
                   </tr>
@@ -664,6 +717,8 @@ export function MediaCorrecaoManager({
         year={year}
         setorId={setorId}
         setorNome={setores.find((x) => x.id === setorEspecifico(setorId))?.name ?? ""}
+        decisaoExterna={decisao ?? undefined}
+        metodoContagem="media"
       />
         </>
       )}

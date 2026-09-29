@@ -1,18 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, MessageSquare, RotateCcw, Trash2, UserPlus, X } from "lucide-react";
+import { Loader2, RotateCcw, Trash2, UserPlus } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { decidirItem } from "@/lib/orcamento/actions/validacao-diretoria";
-import { ESTADO_LABEL } from "@/lib/orcamento/validacao-diretoria";
 import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 
 import {
@@ -59,6 +49,7 @@ import {
 } from "@/lib/orcamento/vinculos";
 import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
+import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
 import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
 
@@ -1194,10 +1185,15 @@ function ColaboradorRow({
           {/* Decisão da diretoria, na PRÓPRIA LINHA — mesmo gesto do
               Planejamento dos gestores. Um ✓ aprova a pessoa inteira: salário,
               encargos e benefícios, porque o motor é linear por colaborador. */}
-          <DecisaoColaborador
-            colab={colab}
+          <DecisaoLinha
             companyId={companyId}
             year={year}
+            alvoTipo="colaborador"
+            alvoId={colab.id}
+            setorId={colab.setorId}
+            rotulo={colab.nome?.trim() || colab.cargoAtual?.trim() || "Colaborador"}
+            estado={colab.estado}
+            comentario={colab.comentario}
             podeValidar={podeValidar}
             onError={onError}
             onDecidiu={onDecidiu}
@@ -1307,193 +1303,5 @@ function BeneficioRow({
         {saving && <Loader2 className="mx-auto h-4 w-4 animate-spin text-muted-foreground" />}
       </td>
     </tr>
-  );
-}
-
-/**
- * A decisão da diretoria NA LINHA do colaborador — ✓ aprovar, ✗ reprovar e 💬
- * pedir revisão, o mesmo gesto do Planejamento dos gestores.
- *
- * Um ✓ aprova a PESSOA inteira: salário, encargos, férias, 13º e benefícios.
- * Isso é exato, não rateio, porque o motor do pessoal roda por colaborador e a
- * soma das partes reproduz o agregado (ver `previa-budget.ts`).
- *
- * Quem não decide vê só a marca do estado — é como ele descobre por que a
- * linha ficou travada, em vez de digitar e levar erro ao salvar.
- */
-function DecisaoColaborador({
-  colab,
-  companyId,
-  year,
-  podeValidar,
-  onError,
-  onDecidiu,
-}: {
-  colab: Colaborador;
-  companyId: string;
-  year: number;
-  podeValidar: boolean;
-  onError: (msg: string) => void;
-  /** Avisa QUAL foi a decisão, para a prévia abaixo antecipá-la sem refetch. */
-  onDecidiu: (d: DecisaoAplicada) => void;
-}) {
-  const [salvando, setSalvando] = useState(false);
-  const [pedindo, setPedindo] = useState(false);
-  const [texto, setTexto] = useState("");
-
-  async function decidir(status: "aprovado" | "reprovado" | "revisar", comentario?: string) {
-    setSalvando(true);
-    const res = await decidirItem({
-      companyId,
-      year,
-      alvoTipo: "colaborador",
-      alvoId: colab.id,
-      setorId: colab.setorId,
-      alvoRotulo: colab.nome?.trim() || colab.cargoAtual?.trim() || "Colaborador",
-      status,
-      comentario,
-    });
-    setSalvando(false);
-    if (res.error) {
-      onError(res.error);
-      return;
-    }
-    setPedindo(false);
-    setTexto("");
-    onDecidiu({
-      alvoTipo: "colaborador",
-      alvoId: colab.id,
-      estado: status,
-      comentario: comentario ?? null,
-    });
-  }
-
-  if (!podeValidar) {
-    // Sem decisão não há o que mostrar: no começo do orçamento TODA linha está
-    // pendente, e uma marca em cada uma viraria ruído.
-    if (colab.estado === "pendente") return null;
-    return (
-      <span
-        title={colab.comentario ?? ESTADO_LABEL[colab.estado]}
-        className={cn(
-          "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
-          colab.estado === "aprovado" &&
-            "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-          colab.estado === "reprovado" && "border-destructive/40 bg-destructive/10 text-destructive",
-          colab.estado === "revisar" && "border-sky-500/40 bg-sky-500/10 text-sky-700",
-        )}
-      >
-        {colab.estado === "revisar" ? "revisar" : colab.estado}
-      </span>
-    );
-  }
-
-  return (
-    <>
-      <span className="flex shrink-0 items-center gap-0.5">
-        <BotaoDecisaoColab
-          titulo="Aprovar"
-          ativo={colab.estado === "aprovado"}
-          classeAtiva="bg-emerald-500 text-white"
-          classeHover="hover:bg-emerald-500/15 hover:text-emerald-700"
-          disabled={salvando}
-          onClick={() => void decidir("aprovado")}
-        >
-          <Check className="h-3.5 w-3.5" />
-        </BotaoDecisaoColab>
-        <BotaoDecisaoColab
-          titulo="Reprovar"
-          ativo={colab.estado === "reprovado"}
-          classeAtiva="bg-destructive text-white"
-          classeHover="hover:bg-destructive/15 hover:text-destructive"
-          disabled={salvando}
-          onClick={() => void decidir("reprovado")}
-        >
-          <X className="h-3.5 w-3.5" />
-        </BotaoDecisaoColab>
-        <BotaoDecisaoColab
-          titulo={colab.comentario ? `Revisar: ${colab.comentario}` : "Pedir revisão"}
-          ativo={colab.estado === "revisar"}
-          classeAtiva="bg-sky-500 text-white"
-          classeHover="hover:bg-sky-500/15 hover:text-sky-700"
-          disabled={salvando}
-          onClick={() => setPedindo(true)}
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </BotaoDecisaoColab>
-      </span>
-
-      <Dialog open={pedindo} onOpenChange={(o) => !o && setPedindo(false)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Pedir revisão</DialogTitle>
-            <DialogDescription>
-              {colab.nome?.trim() || "Colaborador"} — o gestor volta a poder editar esta linha e vê
-              o seu comentário.
-            </DialogDescription>
-          </DialogHeader>
-          <textarea
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            rows={4}
-            autoFocus
-            placeholder="O que precisa mudar?"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          />
-          <DialogFooter>
-            <button
-              type="button"
-              onClick={() => setPedindo(false)}
-              className="rounded-md border px-3 py-1.5 text-sm"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={salvando || texto.trim() === ""}
-              onClick={() => void decidir("revisar", texto)}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-            >
-              Enviar ao gestor
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function BotaoDecisaoColab({
-  titulo,
-  ativo,
-  classeAtiva,
-  classeHover,
-  disabled,
-  onClick,
-  children,
-}: {
-  titulo: string;
-  ativo: boolean;
-  classeAtiva: string;
-  classeHover: string;
-  disabled: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={titulo}
-      aria-label={titulo}
-      aria-pressed={ativo}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-6 w-6 items-center justify-center rounded border transition-colors disabled:opacity-40",
-        ativo ? `${classeAtiva} border-transparent` : `border-transparent text-muted-foreground ${classeHover}`,
-      )}
-    >
-      {children}
-    </button>
   );
 }
