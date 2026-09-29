@@ -15,6 +15,7 @@ import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew, pushBandToOmie } from "@/lib/case/resolve-cadastros";
 import { loadContractForAtracao, recomputeContractTitles, type ContractForAtracao } from "@/lib/case/titles";
 import { validarSchedule } from "@/lib/case/parcelas";
+import { normalizePdfCliente, pdfClienteData } from "@/lib/case/pdf-cliente";
 import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandInput, CaseClientInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
@@ -36,6 +37,7 @@ function clienteFields(input: Etapa1Input, valorArtista: number, verbaRiderCamar
   const margem = valorAtracao - valorArtista - verbaRiderCamarim;
   return {
     event_name: input.event_name,
+    pdf_cliente: normalizePdfCliente(input.pdf_cliente),
     atracao_nome: input.atracao_nome,
     event_date: input.event_date,
     show_time: input.show_time,
@@ -244,10 +246,12 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
 
   // Cadastro incompleto é recusado pela ClickSign com erro técnico — barra antes
   // de gerar títulos e PDF, dizendo o que cadastrar.
+  // Quem assina é o contratante do PDF (o cadastro, salvo quando o contrato traz dados próprios).
+  const contratante = pdfClienteData(c.case_clients, c.pdf_cliente);
   const signatureIssues = clientSignatureIssues({
-    email: c.case_clients?.email,
-    resp_legal: c.case_clients?.resp_legal,
-    cpf_resp_legal: c.case_clients?.cpf_resp_legal,
+    email: contratante.email,
+    resp_legal: contratante.respLegal,
+    cpf_resp_legal: contratante.cpfResp,
   });
   if (signatureIssues.length > 0) return { error: clientSignatureMessage(signatureIssues) };
   if (c.testemunha_1_email?.trim() && !isPersonName(c.testemunha_1_nome)) {
@@ -290,18 +294,9 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const artistaNomes = ((atrs ?? []) as any[]).map((a) => a.case_bands?.name).filter(Boolean).join(", ");
 
-  const client = c.case_clients;
   const pdfData: ContractPdfData = {
     contractNumber: c.contract_number,
-    cliente: {
-      fundo: client?.name ?? "",
-      cnpj: client?.cnpj_cpf ?? null,
-      respLegal: client?.resp_legal ?? null,
-      cpfResp: client?.cpf_resp_legal ?? null,
-      endereco: client?.endereco ?? null,
-      cidadeEstado: client?.cidade_estado ?? null,
-      cep: client?.cep ?? null,
-    },
+    cliente: contratante,
     objeto: {
       // O nome digitado no contrato manda: é o que o cliente assinou, e ele é
       // preenchido antes de a atração virar cadastro.
@@ -358,7 +353,7 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
 /** Aprovação concedida: manda à ClickSign e registra quem aprovou. */
 async function approveAndSend(db: DB, userId: string, prepared: PreparedContract): Promise<SignatureResult> {
   const { c, salePdf, artistaNomes } = prepared;
-  const client = c.case_clients;
+  const contratante = pdfClienteData(c.case_clients, c.pdf_cliente);
 
   if (!clicksignEnabled()) {
     return { error: "A assinatura ClickSign não está configurada — o contrato não foi enviado." };
@@ -367,7 +362,7 @@ async function approveAndSend(db: DB, userId: string, prepared: PreparedContract
   // Ordem: cliente + testemunha assinam juntos (grupo 1); o contratado (CS
   // Agência, que é o próprio aprovador) só é chamado depois (grupo 2).
   const signers: ClickSignSigner[] = [
-    { name: client.resp_legal.trim(), email: client.email, cpf: client.cpf_resp_legal, signAs: "contractor", group: 1 },
+    { name: (contratante.respLegal ?? "").trim(), email: contratante.email ?? "", cpf: contratante.cpfResp, signAs: "contractor", group: 1 },
   ];
   if (c.testemunha_1_email?.trim()) {
     signers.push({ name: c.testemunha_1_nome ?? "Testemunha", email: c.testemunha_1_email, cpf: c.testemunha_1_cpf ?? null, signAs: "witness", group: 1 });

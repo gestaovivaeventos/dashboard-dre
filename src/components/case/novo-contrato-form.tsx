@@ -11,7 +11,7 @@ import { extractArtistContract, extractContractFromText } from "@/lib/case/actio
 import { BandCadastroFields, artistOcrToBandPatch, emptyBandCadastro, bandCadastroToInput, type BandCadastro } from "@/components/case/band-cadastro-fields";
 import { validatePix } from "@/lib/case/pix";
 import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
-import type { CaseBandRow, CaseClientRow, CaseParcelaInput, Etapa1Input } from "@/lib/case/types";
+import type { CaseBandRow, CaseClientRow, CaseParcelaInput, CasePdfCliente, Etapa1Input } from "@/lib/case/types";
 import type { ContractEditData } from "@/lib/case/queries";
 
 const INPUT_CLS =
@@ -115,6 +115,30 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
     setCEndereco(c.endereco ?? "");
     setCCidadeEstado(c.cidade_estado ?? "");
     setCCep(c.cep ?? "");
+  }
+
+  // Contratante no PDF: marcado = o do cadastro; desmarcado = dados próprios, só no PDF.
+  const [pdfMesmo, setPdfMesmo] = useState(!edit?.pdf_cliente);
+  const [pdfCli, setPdfCli] = useState<CasePdfCliente>(
+    edit?.pdf_cliente ?? { name: "", cnpj_cpf: null, resp_legal: null, cpf_resp_legal: null, email: null, endereco: null, cidade_estado: null, cep: null },
+  );
+  const setPdfCampo = (campo: keyof CasePdfCliente) => (v: string) => setPdfCli((p) => ({ ...p, [campo]: v }));
+
+  // Ao desmarcar, parte do cadastro atual: quase sempre muda só um ou dois campos.
+  function togglePdfMesmo(mesmo: boolean) {
+    setPdfMesmo(mesmo);
+    if (mesmo || pdfCli.name.trim()) return;
+    const sel = clientMode === "existing" ? clients.find((c) => c.id === clientId) : null;
+    setPdfCli({
+      name: cName || sel?.name || "",
+      cnpj_cpf: cDoc || sel?.cnpj_cpf || null,
+      resp_legal: cRespLegal || sel?.resp_legal || null,
+      cpf_resp_legal: cCpfResp || sel?.cpf_resp_legal || null,
+      email: cEmail || sel?.email || null,
+      endereco: cEndereco || sel?.endereco || null,
+      cidade_estado: cCidadeEstado || sel?.cidade_estado || null,
+      cep: cCep || sel?.cep || null,
+    });
   }
 
   // Evento / objeto
@@ -342,6 +366,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
               cpf_resp_legal: cCpfResp.trim() || null, endereco: cEndereco.trim() || null,
               cidade_estado: cCidadeEstado.trim() || null, cep: cCep.trim() || null,
             },
+      pdf_cliente: pdfMesmo ? null : pdfCli,
       event_name: eventName.trim() || null,
       atracao_nome: atracaoNome.trim() || null,
       event_date: eventDate || null,
@@ -400,8 +425,11 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
       if (onlyDigits(cCpfResp).length !== 11) return setError("Informe o CPF do responsável legal (11 dígitos) — obrigatório para cadastrar o cliente.");
     }
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
+    if (!pdfMesmo && !pdfCli.name.trim()) return setError("Informe o Fundo / Razão social que vai no contrato (PDF), ou marque para usar os dados do cadastro.");
     if (enviar) {
-      const issues = clientSignatureIssues({ email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp });
+      const issues = clientSignatureIssues(
+        pdfMesmo ? { email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp } : { email: pdfCli.email, resp_legal: pdfCli.resp_legal, cpf_resp_legal: pdfCli.cpf_resp_legal },
+      );
       if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues)); }
       if (test1Email.trim() && !isPersonName(test1Nome)) return setError("A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas).");
       if (test1Email.trim() && test1Cpf.trim() && !isValidCpf(test1Cpf)) return setError("O CPF da testemunha é inválido.");
@@ -555,6 +583,28 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
                 <p className="text-xs text-ink-muted">
                   No Omie, o cliente é cadastrado como <strong>pessoa física do responsável legal</strong> (razão social = nome completo, documento = CPF) e o Fundo/Razão social vira o <strong>nome fantasia</strong> e o <strong>projeto</strong> de todos os lançamentos do contrato. Informe o CNPJ só se o contratante tiver um.
                 </p>
+              </>
+            )}
+          </div>
+
+          <div className={SECTION_CLS}>
+            <h2 className="text-sm font-semibold text-ink-primary">Contratante no contrato (PDF)</h2>
+            <CheckField label="Usar os mesmos dados do cadastro do cliente" checked={pdfMesmo} onChange={togglePdfMesmo} />
+            {!pdfMesmo && (
+              <>
+                <p className="text-xs text-ink-muted">
+                  Estes dados vão no PDF e definem <strong>quem assina</strong> na ClickSign (o responsável legal, pelo e-mail abaixo). Omie e projeto continuam usando o cadastro do cliente acima.
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Fundo / Razão social *" value={pdfCli.name} onChange={setPdfCampo("name")} />
+                  <Field label="CNPJ / CPF" value={pdfCli.cnpj_cpf ?? ""} onChange={setPdfCampo("cnpj_cpf")} />
+                  <Field label="Responsável legal (assina) *" value={pdfCli.resp_legal ?? ""} onChange={setPdfCampo("resp_legal")} />
+                  <Field label="CPF do responsável *" value={pdfCli.cpf_resp_legal ?? ""} onChange={setPdfCampo("cpf_resp_legal")} />
+                  <Field label="E-mail (para assinatura) *" value={pdfCli.email ?? ""} onChange={setPdfCampo("email")} />
+                  <Field label="Endereço" value={pdfCli.endereco ?? ""} onChange={setPdfCampo("endereco")} />
+                  <Field label="Cidade / Estado" value={pdfCli.cidade_estado ?? ""} onChange={setPdfCampo("cidade_estado")} />
+                  <Field label="CEP" value={pdfCli.cep ?? ""} onChange={setPdfCampo("cep")} />
+                </div>
               </>
             )}
           </div>

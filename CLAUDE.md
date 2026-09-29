@@ -121,6 +121,10 @@ Todo título de um contrato de show (a pagar e a receber) vai para a Omie com `c
 
 A **observação de cada conta a RECEBER** descreve o contrato inteiro (`buildObservacaoReceber`, `src/lib/case/observacao-omie.ts`, puro e testado): nº do contrato, fundo, evento/data/local e atrações (obrigatórios, pedido do dono do projeto), cronograma de recebimento, pagamentos por atração/fornecedor, comissões e o BV Case (recebido − saídas, mesma conta do `lancarBvContract`; omitido se não há saída nenhuma). É uma **fotografia do momento do lançamento**: saída cadastrada depois não atualiza a observação já enviada. O a pagar mantém a observação curta.
 
+### Case — contratante do PDF diferente do cadastro
+
+`case_contracts.pdf_cliente` (jsonb, migration `20260929120000`): quando preenchido, o PDF do contrato mostra ESSES dados do contratante (fundo, doc, responsável, CPF, endereço, cidade, CEP) em vez do cadastro do cliente. `NULL` = mesmos dados do cadastro (a caixa "Usar os mesmos dados" marcada no formulário). **Quem assina na ClickSign segue esses dados** (responsável legal + CPF + e-mail do bloco do PDF, decisão de 29/09/2026), e a validação de assinatura (`signature-check.ts`) roda sobre eles. Omie, projeto e observação do a receber continuam lendo `case_clients`. Os dados próprios substituem o cadastro **por inteiro** (`pdfClienteData` em `src/lib/case/pdf-cliente.ts`, puro e testado): campo em branco sai em branco, senão o PDF juntaria o nome de um contratante com o CNPJ de outro.
+
 ### Case — BV artístico (`kind = 'bv_artistico'`)
 
 Segunda modalidade de `case_contracts` (coluna `kind`, migration `20260917180000`): comissão que a Case recebe **do artista que indicou**. Não tem cliente, contrato de venda, ClickSign, aprovação nem conta a pagar — o **único efeito no Omie é uma conta a RECEBER** contra o cadastro do artista, categoria de serviços/BV (`codigo_categoria_servicos`), com o contrato anexado ao primeiro título. Por isso `client_id` virou nulo, com CHECK por tipo: show exige cliente, BV exige `band_id`.
