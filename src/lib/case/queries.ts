@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractKind, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput } from "@/lib/case/types";
+import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractKind, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput, CasePdfCliente } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = SupabaseClient<any>;
@@ -299,6 +299,7 @@ export interface ContractEditData {
   contract_number: number;
   client_id: string;
   signed_at: string | null;
+  pdf_cliente: CasePdfCliente | null;
   event_name: string | null;
   atracao_nome: string | null;
   event_date: string | null;
@@ -349,6 +350,7 @@ export async function getContractForEdit(id: string): Promise<ContractEditData |
     contract_number: cc.contract_number,
     client_id: cc.client_id,
     signed_at: cc.signed_at,
+    pdf_cliente: cc.pdf_cliente ?? null,
     event_name: cc.event_name,
     atracao_nome: cc.atracao_nome,
     event_date: cc.event_date,

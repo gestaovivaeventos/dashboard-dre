@@ -15,6 +15,7 @@ import { launchContractToOmie } from "@/lib/case/actions/contract-launch";
 import { resolveClient, resolveBand, ensureOmieRegistration, requireBankableIfNew, pushBandToOmie } from "@/lib/case/resolve-cadastros";
 import { loadContractForAtracao, recomputeContractTitles, type ContractForAtracao } from "@/lib/case/titles";
 import { validarSchedule } from "@/lib/case/parcelas";
+import { normalizePdfCliente, pdfClienteData } from "@/lib/case/pdf-cliente";
 import { clientSignatureIssues, clientSignatureMessage, isPersonName, isValidCpf } from "@/lib/case/signature-check";
 import type { CaseBandInput, CaseClientInput, Etapa1Input, Etapa2Input, FornecedorInput } from "@/lib/case/types";
 
@@ -36,6 +37,7 @@ function clienteFields(input: Etapa1Input, valorArtista: number, verbaRiderCamar
   const margem = valorAtracao - valorArtista - verbaRiderCamarim;
   return {
     event_name: input.event_name,
+    pdf_cliente: normalizePdfCliente(input.pdf_cliente),
     atracao_nome: input.atracao_nome,
     event_date: input.event_date,
     show_time: input.show_time,
@@ -293,15 +295,7 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
   const client = c.case_clients;
   const pdfData: ContractPdfData = {
     contractNumber: c.contract_number,
-    cliente: {
-      fundo: client?.name ?? "",
-      cnpj: client?.cnpj_cpf ?? null,
-      respLegal: client?.resp_legal ?? null,
-      cpfResp: client?.cpf_resp_legal ?? null,
-      endereco: client?.endereco ?? null,
-      cidadeEstado: client?.cidade_estado ?? null,
-      cep: client?.cep ?? null,
-    },
+    cliente: pdfClienteData(client, c.pdf_cliente),
     objeto: {
       // O nome digitado no contrato manda: é o que o cliente assinou, e ele é
       // preenchido antes de a atração virar cadastro.

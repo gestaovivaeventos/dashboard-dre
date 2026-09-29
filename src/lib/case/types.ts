@@ -109,12 +109,25 @@ export interface CreateContractInput extends CaseContractExtras {
   parcelas_receber_servicos: CaseParcelaInput[];
 }
 
+/** Contratante como aparece no PDF quando difere do cadastro (usado só no PDF). */
+export interface CasePdfCliente {
+  name: string;
+  cnpj_cpf: string | null;
+  resp_legal: string | null;
+  cpf_resp_legal: string | null;
+  endereco: string | null;
+  cidade_estado: string | null;
+  cep: string | null;
+}
+
 /** Etapa 1 — produção do contrato com o cliente (sem dados de pagamento ao artista). */
 export interface Etapa1Input extends CaseContractExtras {
   idempotency_key?: string | null;
   /** Quando presente, atualiza um contrato existente (edição do rascunho). */
   contract_id?: string | null;
   client: CaseClientInput;
+  /** null = o PDF usa o cadastro do cliente. */
+  pdf_cliente?: CasePdfCliente | null;
   /** A atração/artista fica na aba Contrato Atração — opcional no salvamento do cliente. */
   band?: CaseBandInput | null;
   event_name: string | null;
