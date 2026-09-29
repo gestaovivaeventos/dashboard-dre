@@ -9,6 +9,7 @@ import {
 import { setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { PlanejamentoPreviaSetor } from "@/components/orcamento/planejamento-previa-setor";
 import { aplicarDecisao, type DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
+import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 
 /**
  * A prévia do SETOR como painel avulso — a porta da validação dentro de cada
@@ -32,6 +33,7 @@ export function ValidacaoSetorPainel({
   setorId,
   setorNome = "",
   decisaoExterna,
+  metodoContagem,
 }: {
   companyId: string;
   year: number;
@@ -47,6 +49,11 @@ export function ValidacaoSetorPainel({
    * aprovar) têm o mesmo conteúdo e precisam valer as duas.
    */
   decisaoExterna?: DecisaoAplicada & { seq: number };
+  /**
+   * Método da tela que abriu o painel — recorta a faixa de números nele. A
+   * LISTA segue mostrando o setor inteiro, que é o desenho.
+   */
+  metodoContagem?: OrcamentoMetodo;
 }) {
   const [resumo, setResumo] = useState<PreviaSetorResumo | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -83,6 +90,7 @@ export function ValidacaoSetorPainel({
       year={year}
       companyId={companyId}
       onDecidiu={recarregar}
+      metodoContagem={metodoContagem}
     />
   );
 }

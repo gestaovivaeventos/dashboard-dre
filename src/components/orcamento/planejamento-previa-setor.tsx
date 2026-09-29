@@ -22,6 +22,13 @@ import {
   type DecisaoAplicada,
 } from "@/lib/orcamento/previa-setor-decisao";
 import { ESTADO_LABEL, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
+import {
+  contarPorMetodo,
+  ROTULO_POR_METODO,
+  sufixo,
+  type ContagemRotulo,
+} from "@/lib/orcamento/previa-setor-contagem";
+import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { formatBRL } from "@/lib/orcamento/format";
 import {
   Dialog,
@@ -58,6 +65,7 @@ export function PlanejamentoPreviaSetor({
   year,
   companyId,
   onDecidiu,
+  metodoContagem,
 }: {
   resumo: PreviaSetorResumo | null;
   carregando: boolean;
@@ -66,6 +74,15 @@ export function PlanejamentoPreviaSetor({
   companyId: string;
   /** Recarrega a prévia depois de uma decisão. */
   onDecidiu?: () => void;
+  /**
+   * Método da TELA que abriu este painel. Recorta a faixa de números — a
+   * LISTA continua sendo o setor inteiro, de propósito.
+   *
+   * Sem isso a faixa somava os quatro métodos e era lida como "o que falta
+   * nesta tela": no Pessoal ela dizia "10 aprovadas" quando 3 eram
+   * colaboradores e 7 eram despesas do Planejamento.
+   */
+  metodoContagem?: OrcamentoMetodo;
 }) {
   // CÓPIA LOCAL do resumo, para a decisão aparecer no clique.
   //
@@ -97,6 +114,15 @@ export function PlanejamentoPreviaSetor({
   }
 
   const podeValidar = resumo?.podeValidar === true;
+
+  // Deriva das CATEGORIAS, que é a mesma estrutura que `aplicarDecisao`
+  // mantém — assim o número se move no clique junto com os totais, sem um
+  // segundo caminho para divergir. Sem recorte, cai no setor inteiro (o que
+  // `resumo.contagem` já trazia).
+  const contagem = metodoContagem
+    ? contarPorMetodo(resumo?.categorias ?? [], metodoContagem)
+    : (resumo?.contagem ?? { pendentes: 0, aprovados: 0, reprovados: 0, revisar: 0, total: 0 });
+  const rotulo = metodoContagem ? ROTULO_POR_METODO[metodoContagem] : undefined;
 
   function decidir(item: PreviaSetorItem, status: "aprovado" | "reprovado", comentario?: string) {
     if (!item.alvoTipo || !item.alvoId) return;
@@ -210,8 +236,8 @@ export function PlanejamentoPreviaSetor({
         </p>
       )}
 
-      {resumo && resumo.contagem.total > 0 && (
-        <FaixaContagem contagem={resumo.contagem} podeValidar={podeValidar} />
+      {resumo && contagem.total > 0 && (
+        <FaixaContagem contagem={contagem} rotulo={rotulo} podeValidar={podeValidar} />
       )}
 
       {erro && (
@@ -333,20 +359,29 @@ export function PlanejamentoPreviaSetor({
  * O que falta, em números. O diretor lê "quantas tenho de verificar"; o gestor
  * lê "quantas voltaram para mim, quantas passaram e quantas caíram". É a mesma
  * contagem dos cards dos métodos, aqui recortada no setor.
+ *
+ * Com `rotulo`, o número é só do método da tela e o texto DIZ isso ("6
+ * colaboradores a verificar"). O substantivo não é enfeite: a lista abaixo
+ * continua sendo o setor inteiro, então um número menor sem dizer do que ele
+ * fala é exatamente o tipo de número que leva à conclusão errada.
  */
 function FaixaContagem({
   contagem,
+  rotulo,
   podeValidar,
 }: {
   contagem: { pendentes: number; aprovados: number; reprovados: number; revisar: number };
+  rotulo?: ContagemRotulo;
   podeValidar: boolean;
 }) {
   const partes: { texto: string; classe: string }[] = [];
+  const nome = rotulo ? ` ${rotulo.plural}` : "";
+  const g = sufixo(rotulo);
   if (contagem.pendentes > 0) {
     partes.push({
       texto: podeValidar
-        ? `${contagem.pendentes} a verificar`
-        : `${contagem.pendentes} aguardando o diretor`,
+        ? `${contagem.pendentes}${nome} a verificar`
+        : `${contagem.pendentes}${nome} aguardando o diretor`,
       classe: "text-amber-700",
     });
   }
@@ -354,10 +389,10 @@ function FaixaContagem({
     partes.push({ texto: `${contagem.revisar} a revisar`, classe: "text-sky-700" });
   }
   if (contagem.aprovados > 0) {
-    partes.push({ texto: `${contagem.aprovados} aprovadas`, classe: "text-emerald-600" });
+    partes.push({ texto: `${contagem.aprovados} aprovad${g}`, classe: "text-emerald-600" });
   }
   if (contagem.reprovados > 0) {
-    partes.push({ texto: `${contagem.reprovados} reprovadas`, classe: "text-destructive" });
+    partes.push({ texto: `${contagem.reprovados} reprovad${g}`, classe: "text-destructive" });
   }
   if (partes.length === 0) return null;
 

@@ -746,6 +746,7 @@ export function DespesasPessoalManager({
               setorId={setorId}
               setorNome={setup.setores.find((x) => x.id === setorAtual)?.name ?? ""}
               decisaoExterna={decisao ?? undefined}
+              metodoContagem="pessoal"
             />
           )}
         </>
