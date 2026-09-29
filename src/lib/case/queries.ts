@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizePdfCliente, pdfClienteData } from "@/lib/case/pdf-cliente";
 import type { CaseAtracaoRow, CaseBandRow, CaseClientRow, CaseContractKind, CaseContractStatus, CaseFornecedorRow, CaseLegKind, CaseParcelaInput, CasePdfCliente } from "@/lib/case/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,6 +105,8 @@ export interface ContractDetail {
   id: string;
   contract_number: number;
   status: CaseContractStatus;
+  /** Quem vai no PDF e assina na ClickSign; `proprio` = dados do contrato, não do cadastro. */
+  contratante: { fundo: string; respLegal: string | null; email: string | null; proprio: boolean };
   event_name: string | null;
   event_date: string | null;
   show_time: string | null;
@@ -164,7 +167,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       `id, contract_number, status, event_name, event_date, show_time, passagem_som,
        local_name, local_city, valor_atracao_cliente, valor_rider, valor_camarim, valor_extras,
        valor_artista, valor_custodia, valor_margem, valor_servicos, valor_rider_camarim, receber_schedule,
-       attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id,
+       attachment_path, sale_contract_path, sign_url, signed_at, bv_lancado_valor, bv_lancado_at, sent_for_signature_at, clicksign_status, band_id, pdf_cliente,
        approval_requested_at, approved_at, requester:users!case_contracts_approval_requested_by_fkey(name, email),
        case_clients(id, name, cnpj_cpf, pessoa_fisica, email, phone, resp_legal, cpf_resp_legal, endereco, cidade_estado, cep),
        case_bands(name, cnpj_cpf)`,
@@ -221,10 +224,17 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cc = c as any;
+  const contratante = pdfClienteData(cc.case_clients, cc.pdf_cliente);
   return {
     id: cc.id,
     contract_number: cc.contract_number,
     status: cc.status,
+    contratante: {
+      fundo: contratante.fundo,
+      respLegal: contratante.respLegal,
+      email: contratante.email,
+      proprio: normalizePdfCliente(cc.pdf_cliente) !== null,
+    },
     event_name: cc.event_name,
     event_date: cc.event_date,
     show_time: cc.show_time,

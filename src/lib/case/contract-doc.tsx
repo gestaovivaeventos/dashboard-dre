@@ -599,6 +599,7 @@ export function ContractDoc({ data }: { data: ContractPdfData }) {
             <View style={s.signLine}>
               <Text style={s.signRole}>CONTRATANTE</Text>
             </View>
+            {data.cliente.respLegal ? <Text style={s.signSub}>{data.cliente.respLegal}</Text> : null}
             <Text style={s.signSub}>{data.cliente.fundo}</Text>
           </View>
         </View>

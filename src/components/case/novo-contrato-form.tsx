@@ -538,7 +538,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
                   onChange={selectClient}
                   placeholder="Buscar e selecionar o cliente…"
                 />
-                {!edit && selectedClientIncomplete && (
+                {!edit && pdfMesmo && selectedClientIncomplete && (
                   <div className="space-y-3 rounded-md border border-amber-500/50 bg-amber-500/5 p-3">
                     <p className="text-xs text-amber-700 dark:text-amber-300">
                       O cadastro deste cliente está incompleto para a assinatura. Quem assina é o <strong>responsável legal</strong> (pessoa física) — preencha abaixo; o cadastro do cliente é atualizado ao salvar.
@@ -556,7 +556,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <Field label="Fundo / Razão social" value={cName} onChange={setCName} />
                       <Field label="CNPJ / CPF" value={cDoc} onChange={setCDoc} />
-                      <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                      <Field label={pdfMesmo ? "E-mail (para assinatura)" : "E-mail do cliente (cadastro Omie)"} value={cEmail} onChange={setCEmail} />
                       <Field label="Telefone" value={cPhone} onChange={setCPhone} />
                       <Field label="Responsável legal" value={cRespLegal} onChange={setCRespLegal} />
                       <Field label="CPF do responsável" value={cCpfResp} onChange={setCCpfResp} />
@@ -574,7 +574,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
                   <Field label="CNPJ (opcional)" value={cDoc} onChange={setCDoc} />
                   <Field label="Responsável legal — nome completo *" value={cRespLegal} onChange={setCRespLegal} />
                   <Field label="CPF do responsável *" value={cCpfResp} onChange={setCCpfResp} />
-                  <Field label="E-mail (para assinatura)" value={cEmail} onChange={setCEmail} />
+                  <Field label={pdfMesmo ? "E-mail (para assinatura)" : "E-mail do cliente (cadastro Omie)"} value={cEmail} onChange={setCEmail} />
                   <Field label="Telefone" value={cPhone} onChange={setCPhone} />
                   <Field label="Endereço" value={cEndereco} onChange={setCEndereco} />
                   <Field label="Cidade / Estado" value={cCidadeEstado} onChange={setCCidadeEstado} />
