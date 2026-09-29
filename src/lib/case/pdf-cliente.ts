@@ -1,7 +1,7 @@
-// Dados do contratante que vão no PDF do contrato. Por padrão são os do
-// cadastro do cliente (o mesmo que vai à Omie); o contrato pode trazer outros
-// (`case_contracts.pdf_cliente`), usados SÓ no PDF — Omie, projeto, observação
-// e assinatura continuam lendo o cadastro.
+// Dados do contratante que vão no PDF do contrato — e, por consequência, de
+// quem assina na ClickSign. Por padrão são os do cadastro do cliente (o mesmo
+// que vai à Omie); o contrato pode trazer outros (`case_contracts.pdf_cliente`).
+// Omie, projeto e observação continuam lendo o cadastro.
 
 import type { CasePdfCliente } from "@/lib/case/types";
 
@@ -10,6 +10,7 @@ interface ClienteCadastro {
   cnpj_cpf?: string | null;
   resp_legal?: string | null;
   cpf_resp_legal?: string | null;
+  email?: string | null;
   endereco?: string | null;
   cidade_estado?: string | null;
   cep?: string | null;
@@ -20,6 +21,8 @@ export interface PdfClienteData {
   cnpj: string | null;
   respLegal: string | null;
   cpfResp: string | null;
+  /** E-mail de quem assina (o responsável legal acima). */
+  email: string | null;
   endereco: string | null;
   cidadeEstado: string | null;
   cep: string | null;
@@ -35,6 +38,7 @@ export function normalizePdfCliente(v: CasePdfCliente | null | undefined): CaseP
     cnpj_cpf: limpo(v.cnpj_cpf),
     resp_legal: limpo(v.resp_legal),
     cpf_resp_legal: limpo(v.cpf_resp_legal),
+    email: limpo(v.email),
     endereco: limpo(v.endereco),
     cidade_estado: limpo(v.cidade_estado),
     cep: limpo(v.cep),
@@ -54,6 +58,7 @@ export function pdfClienteData(cadastro: ClienteCadastro | null | undefined, pro
     cnpj: src.cnpj_cpf ?? null,
     respLegal: src.resp_legal ?? null,
     cpfResp: src.cpf_resp_legal ?? null,
+    email: src.email ?? null,
     endereco: src.endereco ?? null,
     cidadeEstado: src.cidade_estado ?? null,
     cep: src.cep ?? null,

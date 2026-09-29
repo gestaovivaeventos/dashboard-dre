@@ -123,7 +123,7 @@ A **observação de cada conta a RECEBER** descreve o contrato inteiro (`buildOb
 
 ### Case — contratante do PDF diferente do cadastro
 
-`case_contracts.pdf_cliente` (jsonb, migration `20260929120000`): quando preenchido, o PDF do contrato mostra ESSES dados do contratante (fundo, doc, responsável, CPF, endereço, cidade, CEP) em vez do cadastro do cliente. `NULL` = mesmos dados do cadastro (a caixa "Usar os mesmos dados" marcada no formulário). Vale **só no PDF** — Omie, projeto, observação do a receber e o signatário da ClickSign continuam lendo `case_clients`. Os dados próprios substituem o cadastro **por inteiro** (`pdfClienteData` em `src/lib/case/pdf-cliente.ts`, puro e testado): campo em branco sai em branco, senão o PDF juntaria o nome de um contratante com o CNPJ de outro.
+`case_contracts.pdf_cliente` (jsonb, migration `20260929120000`): quando preenchido, o PDF do contrato mostra ESSES dados do contratante (fundo, doc, responsável, CPF, endereço, cidade, CEP) em vez do cadastro do cliente. `NULL` = mesmos dados do cadastro (a caixa "Usar os mesmos dados" marcada no formulário). **Quem assina na ClickSign segue esses dados** (responsável legal + CPF + e-mail do bloco do PDF, decisão de 29/09/2026), e a validação de assinatura (`signature-check.ts`) roda sobre eles. Omie, projeto e observação do a receber continuam lendo `case_clients`. Os dados próprios substituem o cadastro **por inteiro** (`pdfClienteData` em `src/lib/case/pdf-cliente.ts`, puro e testado): campo em branco sai em branco, senão o PDF juntaria o nome de um contratante com o CNPJ de outro.
 
 ### Case — BV artístico (`kind = 'bv_artistico'`)
 

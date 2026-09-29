@@ -109,12 +109,17 @@ export interface CreateContractInput extends CaseContractExtras {
   parcelas_receber_servicos: CaseParcelaInput[];
 }
 
-/** Contratante como aparece no PDF quando difere do cadastro (usado só no PDF). */
+/**
+ * Contratante como aparece no PDF quando difere do cadastro. Quem assina na
+ * ClickSign é o responsável daqui (resp_legal + CPF + e-mail); Omie continua
+ * no cadastro.
+ */
 export interface CasePdfCliente {
   name: string;
   cnpj_cpf: string | null;
   resp_legal: string | null;
   cpf_resp_legal: string | null;
+  email?: string | null;
   endereco: string | null;
   cidade_estado: string | null;
   cep: string | null;

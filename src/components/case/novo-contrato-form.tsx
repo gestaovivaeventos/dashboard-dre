@@ -120,7 +120,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
   // Contratante no PDF: marcado = o do cadastro; desmarcado = dados próprios, só no PDF.
   const [pdfMesmo, setPdfMesmo] = useState(!edit?.pdf_cliente);
   const [pdfCli, setPdfCli] = useState<CasePdfCliente>(
-    edit?.pdf_cliente ?? { name: "", cnpj_cpf: null, resp_legal: null, cpf_resp_legal: null, endereco: null, cidade_estado: null, cep: null },
+    edit?.pdf_cliente ?? { name: "", cnpj_cpf: null, resp_legal: null, cpf_resp_legal: null, email: null, endereco: null, cidade_estado: null, cep: null },
   );
   const setPdfCampo = (campo: keyof CasePdfCliente) => (v: string) => setPdfCli((p) => ({ ...p, [campo]: v }));
 
@@ -134,6 +134,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
       cnpj_cpf: cDoc || sel?.cnpj_cpf || null,
       resp_legal: cRespLegal || sel?.resp_legal || null,
       cpf_resp_legal: cCpfResp || sel?.cpf_resp_legal || null,
+      email: cEmail || sel?.email || null,
       endereco: cEndereco || sel?.endereco || null,
       cidade_estado: cCidadeEstado || sel?.cidade_estado || null,
       cep: cCep || sel?.cep || null,
@@ -426,7 +427,9 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
     if (valAtracao <= 0) return setError("Informe o valor do contrato cobrado do cliente (aba Contrato Cliente).");
     if (!pdfMesmo && !pdfCli.name.trim()) return setError("Informe o Fundo / Razão social que vai no contrato (PDF), ou marque para usar os dados do cadastro.");
     if (enviar) {
-      const issues = clientSignatureIssues({ email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp });
+      const issues = clientSignatureIssues(
+        pdfMesmo ? { email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp } : { email: pdfCli.email, resp_legal: pdfCli.resp_legal, cpf_resp_legal: pdfCli.cpf_resp_legal },
+      );
       if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues)); }
       if (test1Email.trim() && !isPersonName(test1Nome)) return setError("A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas).");
       if (test1Email.trim() && test1Cpf.trim() && !isValidCpf(test1Cpf)) return setError("O CPF da testemunha é inválido.");
@@ -590,13 +593,14 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
             {!pdfMesmo && (
               <>
                 <p className="text-xs text-ink-muted">
-                  Estes dados aparecem <strong>só no PDF do contrato</strong>. Omie, projeto e assinatura continuam usando o cadastro do cliente acima.
+                  Estes dados vão no PDF e definem <strong>quem assina</strong> na ClickSign (o responsável legal, pelo e-mail abaixo). Omie e projeto continuam usando o cadastro do cliente acima.
                 </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Fundo / Razão social *" value={pdfCli.name} onChange={setPdfCampo("name")} />
                   <Field label="CNPJ / CPF" value={pdfCli.cnpj_cpf ?? ""} onChange={setPdfCampo("cnpj_cpf")} />
-                  <Field label="Responsável legal" value={pdfCli.resp_legal ?? ""} onChange={setPdfCampo("resp_legal")} />
-                  <Field label="CPF do responsável" value={pdfCli.cpf_resp_legal ?? ""} onChange={setPdfCampo("cpf_resp_legal")} />
+                  <Field label="Responsável legal (assina) *" value={pdfCli.resp_legal ?? ""} onChange={setPdfCampo("resp_legal")} />
+                  <Field label="CPF do responsável *" value={pdfCli.cpf_resp_legal ?? ""} onChange={setPdfCampo("cpf_resp_legal")} />
+                  <Field label="E-mail (para assinatura) *" value={pdfCli.email ?? ""} onChange={setPdfCampo("email")} />
                   <Field label="Endereço" value={pdfCli.endereco ?? ""} onChange={setPdfCampo("endereco")} />
                   <Field label="Cidade / Estado" value={pdfCli.cidade_estado ?? ""} onChange={setPdfCampo("cidade_estado")} />
                   <Field label="CEP" value={pdfCli.cep ?? ""} onChange={setPdfCampo("cep")} />

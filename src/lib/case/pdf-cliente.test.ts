@@ -35,5 +35,14 @@ test("dados próprios sem nome contam como 'mesmos dados'", () => {
 
 test("normaliza espaços e vazios", () => {
   const n = normalizePdfCliente({ name: " X ", cnpj_cpf: " ", resp_legal: " Y ", cpf_resp_legal: null, endereco: null, cidade_estado: null, cep: null });
-  assert.deepEqual(n, { name: "X", cnpj_cpf: null, resp_legal: "Y", cpf_resp_legal: null, endereco: null, cidade_estado: null, cep: null });
+  assert.deepEqual(n, { name: "X", cnpj_cpf: null, resp_legal: "Y", cpf_resp_legal: null, email: null, endereco: null, cidade_estado: null, cep: null });
+});
+
+test("quem assina segue o contratante do PDF, não o cadastro", () => {
+  const cad = { ...cadastro, email: "ana@cadastro.com" };
+  assert.equal(pdfClienteData(cad, null).email, "ana@cadastro.com");
+  const d = pdfClienteData(cad, { name: "Fundo X", resp_legal: "Bruno Lima", cpf_resp_legal: "99988877766", email: "bruno@fundo.com" });
+  assert.deepEqual([d.respLegal, d.cpfResp, d.email], ["Bruno Lima", "99988877766", "bruno@fundo.com"]);
+  // Sem e-mail próprio não herda o do cadastro: a validação da assinatura barra.
+  assert.equal(pdfClienteData(cad, { name: "Fundo X", resp_legal: "Bruno Lima" }).email, null);
 });
