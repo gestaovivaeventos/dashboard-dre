@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, RotateCcw, Trash2, UserPlus } from "lucide-react";
+import { Check, Loader2, MessageSquare, RotateCcw, Trash2, UserPlus, X } from "lucide-react";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { decidirItem } from "@/lib/orcamento/actions/validacao-diretoria";
+import { ESTADO_LABEL } from "@/lib/orcamento/validacao-diretoria";
 
 import {
   createColaborador,
@@ -126,19 +137,17 @@ function CurrencyCell({
   );
 }
 
-type TabKey = "quadro" | "beneficios" | "colaborador" | "previa" | "validacao";
+type TabKey = "quadro" | "beneficios" | "colaborador" | "previa";
 
+// A aba "Validação" saiu em 29/09/2026: a decisão da diretoria foi para a
+// PRÓPRIA LINHA de cada colaborador (mesmo gesto do Planejamento dos gestores)
+// e a prévia do setor desceu para baixo do quadro. Decidir num lugar e ver o
+// efeito noutro obrigava a trocar de aba a cada ✓.
 const TABS: readonly { key: TabKey; label: string }[] = [
   { key: "quadro", label: "Quadro" },
   { key: "beneficios", label: "Benefícios" },
   { key: "colaborador", label: "Colaborador" },
   { key: "previa", label: "Prévia" },
-  // A prévia do SETOR — a mesma tela em que a diretoria decide, e que já
-  // existe na montagem do Planejamento. É compartilhada de propósito: o
-  // diretor percorre as mesmas linhas que o gestor montou, em vez de uma tela
-  // consolidada à parte (uma dessas existiu antes e foi removida por duplicar
-  // a Prévia).
-  { key: "validacao", label: "Validação" },
 ] as const;
 
 const EMPTY_SETUP: PessoalSetup = {
@@ -155,9 +164,12 @@ export function DespesasPessoalManager({
   companyId,
   year,
   isAdmin = false,
+  podeValidar = false,
 }: {
   companyId: string;
   year: number;
+  /** Quem vê decide? Mostra ✓ / ✗ / comentário na linha de cada colaborador. */
+  podeValidar?: boolean;
   /** Admin desfaz cancelamento da diretoria; o gestor só vê. */
   isAdmin?: boolean;
 }) {
@@ -430,14 +442,7 @@ export function DespesasPessoalManager({
             ))}
           </div>
 
-          {tab === "validacao" ? (
-            <ValidacaoSetorPainel
-              companyId={companyId}
-              year={year}
-              setorId={setorId}
-              setorNome={setup.setores.find((x) => x.id === setorAtual)?.name ?? ""}
-            />
-          ) : tab === "previa" ? (
+          {tab === "previa" ? (
             <PreviaPessoal
               companyId={companyId}
               year={year}
@@ -561,6 +566,8 @@ export function DespesasPessoalManager({
                             <ColaboradorRow
                               key={colab.id}
                               colab={colab}
+                              companyId={companyId}
+                              podeValidar={podeValidar}
                               year={year}
                               cargoOptions={cargoOptionsForSetor}
                               empresas={setup.empresas}
@@ -579,6 +586,8 @@ export function DespesasPessoalManager({
                           <ColaboradorRow
                             key={colab.id}
                             colab={colab}
+                            companyId={companyId}
+                            podeValidar={podeValidar}
                             year={year}
                             cargoOptions={cargoOptionsForSetor}
                             empresas={setup.empresas}
@@ -686,6 +695,19 @@ export function DespesasPessoalManager({
               )}
             </>
           )}
+
+          {/* A PRÉVIA DO SETOR, logo abaixo do quadro. Fica aqui e não numa
+              aba porque o ✓ de cada linha mexe nela: decidir num lugar e ver
+              o efeito noutro obrigava a trocar de aba a cada aprovação. É o
+              mesmo componente da montagem do Planejamento. */}
+          {(tab === "quadro" || tab === "beneficios") && (
+            <ValidacaoSetorPainel
+              companyId={companyId}
+              year={year}
+              setorId={setorId}
+              setorNome={setup.setores.find((x) => x.id === setorAtual)?.name ?? ""}
+            />
+          )}
         </>
       )}
 
@@ -755,7 +777,10 @@ function draftToInput(d: RowDraft, setorId: string | null, year: number): Colabo
 
 interface RowProps {
   colab: Colaborador;
+  companyId: string;
   year: number;
+  /** Quem vê decide? Mostra os botões ✓ / ✗ / comentário na linha. */
+  podeValidar: boolean;
   cargoOptions: CargoOption[];
   empresas: EmpresaEncargosOption[];
   mostrarEmpresa: boolean;
@@ -768,6 +793,8 @@ interface RowProps {
 
 function ColaboradorRow({
   colab,
+  companyId,
+  podeValidar,
   year,
   cargoOptions,
   empresas,
@@ -856,7 +883,9 @@ function ColaboradorRow({
   // não exclusão) e o TRAVADO não aceita edição — sem isto o gestor digitaria e
   // levaria erro só ao salvar, o que parece defeito.
   const cancelado = Boolean(colab.canceladoEm);
-  const travado = colab.diretoriaTravado;
+  // DERIVA da decisão da diretoria (aprovado/reprovado), não da coluna morta
+  // `diretoria_travado` — ver validacao-diretoria.ts.
+  const travado = colab.travado;
   const bloqueado = cancelado || travado;
 
   return (
@@ -864,7 +893,9 @@ function ColaboradorRow({
       className={cn(
         "align-top hover:bg-muted/20",
         cancelado && "bg-muted/30 opacity-60 [&_input]:line-through [&_select]:line-through",
-        travado && !cancelado && "bg-amber-500/5",
+        travado && !cancelado && colab.estado === "aprovado" && "bg-emerald-500/[0.04]",
+        travado && !cancelado && colab.estado === "reprovado" && "bg-destructive/[0.04]",
+        colab.estado === "revisar" && !cancelado && "bg-sky-500/[0.05]",
         // Campos travados enquanto a marca da diretoria existir — mas NUNCA
         // os botões: era isso que impedia até de excluir a linha, deixando o
         // colaborador cancelado sem nenhum caminho de saída pela tela.
@@ -879,7 +910,9 @@ function ColaboradorRow({
         cancelado
           ? `Cancelado pela diretoria${colab.canceladoMotivo ? `: ${colab.canceladoMotivo}` : ""}`
           : travado
-            ? "Alterado pela diretoria"
+            ? colab.estado === "aprovado"
+              ? "Aprovado pela diretoria. Só um diretor ou o administrador altera."
+              : "Reprovado pela diretoria. Só um diretor ou o administrador altera."
             : undefined
       }
     >
@@ -1092,6 +1125,17 @@ function ColaboradorRow({
       {/* Ações */}
       <td className="px-1.5 py-1 text-center">
         <div className="flex items-center justify-center gap-1">
+          {/* Decisão da diretoria, na PRÓPRIA LINHA — mesmo gesto do
+              Planejamento dos gestores. Um ✓ aprova a pessoa inteira: salário,
+              encargos e benefícios, porque o motor é linear por colaborador. */}
+          <DecisaoColaborador
+            colab={colab}
+            companyId={companyId}
+            year={year}
+            podeValidar={podeValidar}
+            onError={onError}
+            onDecidiu={onReativado}
+          />
           {saving ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : (
@@ -1200,3 +1244,184 @@ function BeneficioRow({
   );
 }
 
+/**
+ * A decisão da diretoria NA LINHA do colaborador — ✓ aprovar, ✗ reprovar e 💬
+ * pedir revisão, o mesmo gesto do Planejamento dos gestores.
+ *
+ * Um ✓ aprova a PESSOA inteira: salário, encargos, férias, 13º e benefícios.
+ * Isso é exato, não rateio, porque o motor do pessoal roda por colaborador e a
+ * soma das partes reproduz o agregado (ver `previa-budget.ts`).
+ *
+ * Quem não decide vê só a marca do estado — é como ele descobre por que a
+ * linha ficou travada, em vez de digitar e levar erro ao salvar.
+ */
+function DecisaoColaborador({
+  colab,
+  companyId,
+  year,
+  podeValidar,
+  onError,
+  onDecidiu,
+}: {
+  colab: Colaborador;
+  companyId: string;
+  year: number;
+  podeValidar: boolean;
+  onError: (msg: string) => void;
+  onDecidiu: () => void;
+}) {
+  const [salvando, setSalvando] = useState(false);
+  const [pedindo, setPedindo] = useState(false);
+  const [texto, setTexto] = useState("");
+
+  async function decidir(status: "aprovado" | "reprovado" | "revisar", comentario?: string) {
+    setSalvando(true);
+    const res = await decidirItem({
+      companyId,
+      year,
+      alvoTipo: "colaborador",
+      alvoId: colab.id,
+      setorId: colab.setorId,
+      alvoRotulo: colab.nome?.trim() || colab.cargoAtual?.trim() || "Colaborador",
+      status,
+      comentario,
+    });
+    setSalvando(false);
+    if (res.error) {
+      onError(res.error);
+      return;
+    }
+    setPedindo(false);
+    setTexto("");
+    onDecidiu();
+  }
+
+  if (!podeValidar) {
+    // Sem decisão não há o que mostrar: no começo do orçamento TODA linha está
+    // pendente, e uma marca em cada uma viraria ruído.
+    if (colab.estado === "pendente") return null;
+    return (
+      <span
+        title={colab.comentario ?? ESTADO_LABEL[colab.estado]}
+        className={cn(
+          "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+          colab.estado === "aprovado" &&
+            "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+          colab.estado === "reprovado" && "border-destructive/40 bg-destructive/10 text-destructive",
+          colab.estado === "revisar" && "border-sky-500/40 bg-sky-500/10 text-sky-700",
+        )}
+      >
+        {colab.estado === "revisar" ? "revisar" : colab.estado}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <span className="flex shrink-0 items-center gap-0.5">
+        <BotaoDecisaoColab
+          titulo="Aprovar"
+          ativo={colab.estado === "aprovado"}
+          classeAtiva="bg-emerald-500 text-white"
+          classeHover="hover:bg-emerald-500/15 hover:text-emerald-700"
+          disabled={salvando}
+          onClick={() => void decidir("aprovado")}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </BotaoDecisaoColab>
+        <BotaoDecisaoColab
+          titulo="Reprovar"
+          ativo={colab.estado === "reprovado"}
+          classeAtiva="bg-destructive text-white"
+          classeHover="hover:bg-destructive/15 hover:text-destructive"
+          disabled={salvando}
+          onClick={() => void decidir("reprovado")}
+        >
+          <X className="h-3.5 w-3.5" />
+        </BotaoDecisaoColab>
+        <BotaoDecisaoColab
+          titulo={colab.comentario ? `Revisar: ${colab.comentario}` : "Pedir revisão"}
+          ativo={colab.estado === "revisar"}
+          classeAtiva="bg-sky-500 text-white"
+          classeHover="hover:bg-sky-500/15 hover:text-sky-700"
+          disabled={salvando}
+          onClick={() => setPedindo(true)}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </BotaoDecisaoColab>
+      </span>
+
+      <Dialog open={pedindo} onOpenChange={(o) => !o && setPedindo(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pedir revisão</DialogTitle>
+            <DialogDescription>
+              {colab.nome?.trim() || "Colaborador"} — o gestor volta a poder editar esta linha e vê
+              o seu comentário.
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            rows={4}
+            autoFocus
+            placeholder="O que precisa mudar?"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setPedindo(false)}
+              className="rounded-md border px-3 py-1.5 text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={salvando || texto.trim() === ""}
+              onClick={() => void decidir("revisar", texto)}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+            >
+              Enviar ao gestor
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function BotaoDecisaoColab({
+  titulo,
+  ativo,
+  classeAtiva,
+  classeHover,
+  disabled,
+  onClick,
+  children,
+}: {
+  titulo: string;
+  ativo: boolean;
+  classeAtiva: string;
+  classeHover: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={titulo}
+      aria-label={titulo}
+      aria-pressed={ativo}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-6 w-6 items-center justify-center rounded border transition-colors disabled:opacity-40",
+        ativo ? `${classeAtiva} border-transparent` : `border-transparent text-muted-foreground ${classeHover}`,
+      )}
+    >
+      {children}
+    </button>
+  );
+}

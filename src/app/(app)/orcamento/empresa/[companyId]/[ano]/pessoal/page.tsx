@@ -1,5 +1,5 @@
 import { DespesasPessoalManager } from "@/components/orcamento/despesas-pessoal-manager";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoAdmin, podeValidarOrcamento, getOrcamentoUser } from "@/lib/orcamento/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +12,8 @@ export default async function WorkspacePessoalPage({
 }) {
   // Só o admin desfaz um cancelamento da diretoria (ver `reativarColaborador`).
   const isAdmin = Boolean(await getOrcamentoAdmin());
+  // A diretoria decide NA LINHA de cada colaborador, como no Planejamento.
+  const podeValidar = podeValidarOrcamento(await getOrcamentoUser());
 
   return (
     <div className="space-y-2">
@@ -27,6 +29,7 @@ export default async function WorkspacePessoalPage({
         companyId={params.companyId}
         year={Number(params.ano)}
         isAdmin={isAdmin}
+        podeValidar={podeValidar}
       />
     </div>
   );

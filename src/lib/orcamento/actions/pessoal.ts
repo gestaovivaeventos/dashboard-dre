@@ -6,6 +6,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import {
+  estadoDoItem,
+  gestorPodeEditar,
+  podeDecidir,
+  type ValidacaoEstado,
+  type ValidacaoStatus,
+} from "@/lib/orcamento/validacao-diretoria";
 import { diffCampos } from "@/lib/orcamento/trilha";
 import type { OrcamentoPapel } from "@/lib/supabase/types";
 import {
@@ -73,6 +80,16 @@ export interface Colaborador {
   canceladoMotivo: string | null;
   /** Alterado pela diretoria e travado para o construtor (ver validacao.ts). */
   diretoriaTravado: boolean;
+  /**
+   * Decisão da diretoria sobre ESTE colaborador. Um ✓ aprova a pessoa inteira
+   * — salário, encargos, benefícios — porque o motor do pessoal é linear por
+   * colaborador. Ver `validacao-diretoria.ts`.
+   */
+  estado: ValidacaoEstado;
+  /** O que o diretor pediu que mude — só no 'revisar'. */
+  comentario: string | null;
+  /** Fechado para o gestor (aprovado ou reprovado). DERIVA do status. */
+  travado: boolean;
 }
 
 export interface ColaboradorInput {
@@ -422,6 +439,32 @@ export async function getColaboradores(
     return { error: error.message };
   }
 
+  // Decisões da diretoria sobre estes colaboradores. Tabela ausente (migration
+  // pendente) vira mapa vazio: a tela abre com tudo pendente, nunca quebra.
+  const decisoes = new Map<
+    string,
+    { status: ValidacaoStatus; comentario: string | null; decididoEm: string }
+  >();
+  {
+    const ids = (data ?? []).map((r) => (r as Record<string, unknown>).id as string);
+    if (ids.length > 0) {
+      const { data: vRows } = await supabase
+        .from("orcamento_validacoes")
+        .select("alvo_id, status, comentario, decidido_em")
+        .eq("company_id", companyId)
+        .eq("year", year)
+        .eq("alvo_tipo", "colaborador")
+        .in("alvo_id", ids);
+      ((vRows ?? []) as Array<Record<string, unknown>>).forEach((v) => {
+        decisoes.set(v.alvo_id as string, {
+          status: v.status as ValidacaoStatus,
+          comentario: (v.comentario as string | null) ?? null,
+          decididoEm: v.decidido_em as string,
+        });
+      });
+    }
+  }
+
   const items: Colaborador[] = (data ?? []).map((r) => ({
     id: r.id as string,
     setorId: (r.setor_id as string) ?? null,
@@ -438,6 +481,7 @@ export async function getColaboradores(
     canceladoEm: (r.cancelado_em as string) ?? null,
     canceladoMotivo: (r.cancelado_motivo as string) ?? null,
     diretoriaTravado: Boolean(r.diretoria_travado),
+    ...decisaoDo(r, decisoes.get(r.id as string) ?? null, auth.user.papel),
   }));
   return { items };
 }
@@ -786,6 +830,14 @@ export async function getPrevia(
     canceladoEm: (r.cancelado_em as string) ?? null,
     canceladoMotivo: (r.cancelado_motivo as string) ?? null,
     diretoriaTravado: Boolean(r.diretoria_travado),
+    // ESTE caminho alimenta o MOTOR da prévia, que não olha decisão: ele
+    // calcula o custo de cada pessoa, e quem filtra o aprovado é
+    // `previa-budget.ts`, que resolve as decisões por conta própria. Os três
+    // campos vão neutros de propósito — carregá-los aqui seria uma consulta a
+    // mais para um dado que ninguém lê neste caminho.
+    estado: "pendente" as const,
+    comentario: null,
+    travado: false,
   }));
 
   const enc = await getEncargos(companyId, year);
@@ -954,4 +1006,23 @@ export async function reativarColaborador(id: string) {
 
   revalidatePath(PATH);
   return { ok: true as const };
+}
+
+/**
+ * Traduz a decisão da diretoria para os três campos que a linha usa.
+ *
+ * A trava DERIVA do status — não há coluna. Quem decide (admin, diretoria)
+ * nunca se trava: é ele quem mexe no que já foi decidido.
+ */
+function decisaoDo(
+  linha: Record<string, unknown>,
+  decisao: { status: ValidacaoStatus; comentario: string | null; decididoEm: string } | null,
+  papel: string,
+): { estado: ValidacaoEstado; comentario: string | null; travado: boolean } {
+  const estado = estadoDoItem(decisao, (linha.updated_at as string | null) ?? null);
+  return {
+    estado,
+    comentario: decisao?.comentario ?? null,
+    travado: !podeDecidir(papel) && !gestorPodeEditar(estado),
+  };
 }

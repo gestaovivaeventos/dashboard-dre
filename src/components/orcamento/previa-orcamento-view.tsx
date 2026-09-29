@@ -427,27 +427,6 @@ export function PreviaOrcamentoView({
             {ocultarZeros ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
             {ocultarZeros ? "Mostrar linhas zeradas" : "Ocultar linhas zeradas"}
           </button>
-          {/* Abrir/fechar a árvore inteira, como na DRE. */}
-          <button
-            type="button"
-            onClick={() =>
-              setFechadas((prev) =>
-                prev.size > 0 ? new Set<string>() : todasFechaveis(linhasParaExportar),
-              )
-            }
-            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {fechadas.size > 0 ? (
-              <>
-                <ChevronsUpDown className="h-4 w-4" /> Abrir tudo
-              </>
-            ) : (
-              <>
-                <ChevronsDownUp className="h-4 w-4" /> Fechar grupos
-              </>
-            )}
-          </button>
-
           {/* Só aparece quando há o que comparar: enquanto a diretoria não
               decidiu nada, orçado e aprovado são o mesmo número e o botão só
               acrescentaria uma escolha sem efeito. */}
@@ -615,6 +594,36 @@ export function PreviaOrcamentoView({
           </span>
         </div>
       )}
+
+      {/* Abrir/fechar a árvore inteira. Fica COLADO na tabela, não na faixa de
+          controles lá em cima: é a tabela que ele mexe, e a faixa de cima já
+          tem o seletor de setor, o filtro de zeradas, o Comparar e o export. */}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() =>
+            setFechadas((prev) =>
+              prev.size > 0 ? new Set<string>() : todasFechaveis(linhasParaExportar),
+            )
+          }
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {fechadas.size > 0 ? (
+            <>
+              <ChevronsUpDown className="h-4 w-4" /> Abrir tudo
+            </>
+          ) : (
+            <>
+              <ChevronsDownUp className="h-4 w-4" /> Fechar tudo
+            </>
+          )}
+        </button>
+        {fechadas.size > 0 && (
+          <span className="text-xs text-muted-foreground">
+            {fechadas.size} grupo(s) fechado(s)
+          </span>
+        )}
+      </div>
 
       {/* Tabela DRE — rolagem própria (x e y) para congelar o cabeçalho no topo
           e a 1ª/última coluna nas laterais. Só `overflow-x` não seguraria o
