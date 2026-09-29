@@ -184,10 +184,16 @@ function ClienteTab({ detail, signed, isApprover, onChange }: { detail: Contract
   }
   async function gerarEnviar() {
     setSignatureError(null);
-    const issues = clientSignatureIssues(detail.client);
+    // Quem assina é o contratante do contrato — o cadastro só quando não há dados próprios.
+    const { contratante } = detail;
+    const issues = clientSignatureIssues(
+      contratante.proprio
+        ? { resp_legal: contratante.respLegal, cpf_resp_legal: contratante.cpfResp, email: contratante.email }
+        : detail.client,
+    );
     if (issues.length > 0) {
-      setSignatureError(clientSignatureMessage(issues));
-      setEditingCadastro(true);
+      setSignatureError(clientSignatureMessage(issues, contratante.proprio ? "contrato" : "cadastro"));
+      if (!contratante.proprio) setEditingCadastro(true);
       return;
     }
     setBusy(true);

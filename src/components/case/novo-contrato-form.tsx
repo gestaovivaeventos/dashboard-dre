@@ -430,7 +430,7 @@ export function NovoContratoForm({ clients, bands, edit, isApprover = false }: {
       const issues = clientSignatureIssues(
         pdfMesmo ? { email: cEmail, resp_legal: cRespLegal, cpf_resp_legal: cCpfResp } : { email: pdfCli.email, resp_legal: pdfCli.resp_legal, cpf_resp_legal: pdfCli.cpf_resp_legal },
       );
-      if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues)); }
+      if (issues.length > 0) { setTab("cliente"); return setError(clientSignatureMessage(issues, pdfMesmo ? "cadastro" : "contrato")); }
       if (test1Email.trim() && !isPersonName(test1Nome)) return setError("A testemunha precisa de nome e sobrenome de pessoa física (sem números ou siglas).");
       if (test1Email.trim() && test1Cpf.trim() && !isValidCpf(test1Cpf)) return setError("O CPF da testemunha é inválido.");
     }

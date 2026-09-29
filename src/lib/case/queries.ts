@@ -106,7 +106,7 @@ export interface ContractDetail {
   contract_number: number;
   status: CaseContractStatus;
   /** Quem vai no PDF e assina na ClickSign; `proprio` = dados do contrato, não do cadastro. */
-  contratante: { fundo: string; respLegal: string | null; email: string | null; proprio: boolean };
+  contratante: { fundo: string; respLegal: string | null; cpfResp: string | null; email: string | null; proprio: boolean };
   event_name: string | null;
   event_date: string | null;
   show_time: string | null;
@@ -232,6 +232,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     contratante: {
       fundo: contratante.fundo,
       respLegal: contratante.respLegal,
+      cpfResp: contratante.cpfResp,
       email: contratante.email,
       proprio: normalizePdfCliente(cc.pdf_cliente) !== null,
     },
