@@ -124,6 +124,9 @@ export const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   "gpt-4o-mini": { input: 0.15, output: 0.6, cachedInput: 0.075 },
   "gpt-4o": { input: 2.5, output: 10.0, cachedInput: 1.25 },
   "gpt-5-mini": { input: 0.25, output: 2.0, cachedInput: 0.025 },
+  // Ditado da entrevista do Orçamento (@/lib/ai/transcricao). O input é quase
+  // todo token de ÁUDIO, então vale o preço de áudio (~US$ 0,003 por minuto).
+  "gpt-4o-mini-transcribe": { input: 3.0, output: 5.0 },
   // Valores de referência (ajuste na tela conforme a tabela do DeepSeek):
   "deepseek-chat": { input: 0.14, output: 0.28, cachedInput: 0.014 },
   "deepseek-reasoner": { input: 0.55, output: 2.19, cachedInput: 0.14 },

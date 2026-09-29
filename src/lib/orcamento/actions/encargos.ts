@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
+import { getOrcamentoAdmin, getOrcamentoUser, podeVerEmpresa, SEM_ACESSO } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { ENCARGOS, encargosPadrao, type EncargoValues } from "@/lib/orcamento/encargos";
@@ -98,9 +98,17 @@ export async function getEncargos(
   companyId: string,
   year: number,
 ): Promise<{ values?: EncargoValues; error?: string; needsMigration?: boolean }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // LER é de qualquer usuário do módulo que alcance a empresa — ESCREVER
+  // (`setEncargos`/`resetEncargos`) segue admin-only.
+  //
+  // Era admin-only aqui também, e isso quebrava o pessoal inteiro para gestor:
+  // `getPrevia` (o motor) chama esta função, então ela devolvia erro, a prévia
+  // do pessoal falhava e as despesas com pessoal SUMIAM de toda prévia sem
+  // aviso. A alíquota não é segredo: é a premissa do número que ele mesmo monta.
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
   if (!companyId) return { error: "Selecione uma empresa." };
+  if (!podeVerEmpresa(user, companyId)) return { error: SEM_ACESSO };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const supabase = db() ?? (await createClient());
@@ -139,8 +147,12 @@ export async function getEncargosPorEmpresa(
   companyIds: string[],
   year: number,
 ): Promise<{ values?: Record<string, EncargoValues>; error?: string }> {
-  const admin = await getOrcamentoAdmin();
-  if (!admin) return { error: "Acesso restrito a administradores." };
+  // Leitura, como `getEncargos`: qualquer usuário do módulo. Aqui são as
+  // OUTRAS empresas em que colaboradores do quadro estão registrados — o
+  // gestor não precisa alcançá-las para que o encargo delas entre no cálculo,
+  // e exigir isso faria o número dele mudar conforme o acesso de quem abre.
+  const user = await getOrcamentoUser();
+  if (!user) return { error: SEM_ACESSO };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
   const ids = Array.from(new Set(companyIds.filter(Boolean)));

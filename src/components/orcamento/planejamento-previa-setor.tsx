@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Check, ChevronDown, ChevronRight, Loader2, MessageSquare, Undo2, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  MessageSquare,
+  TriangleAlert,
+  Undo2,
+  X,
+} from "lucide-react";
 
 import type {
   PreviaSetorItem,
@@ -188,6 +197,18 @@ export function PlanejamentoPreviaSetor({
           </div>
         </div>
       </header>
+
+      {/* A folha é quase sempre a maior linha do orçamento: se ela não entrou,
+          o total abaixo está menor e a pessoa precisa saber POR QUÊ. */}
+      {resumo?.pessoalIndisponivel && (
+        <p className="flex items-start gap-1.5 border-b border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-xs text-muted-foreground">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+          <span>
+            As <strong className="text-foreground">despesas com pessoal</strong> não entraram
+            neste total: {resumo.pessoalIndisponivel}
+          </span>
+        </p>
+      )}
 
       {resumo && resumo.contagem.total > 0 && (
         <FaixaContagem contagem={resumo.contagem} podeValidar={podeValidar} />

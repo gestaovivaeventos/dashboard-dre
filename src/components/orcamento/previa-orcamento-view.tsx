@@ -494,6 +494,18 @@ export function PreviaOrcamentoView({
         </div>
       )}
 
+      {/* A folha é quase sempre a maior linha: se ela não entrou, o total está
+          menor e isso precisa gritar, não sumir. */}
+      {resumo.pessoalIndisponivel && (
+        <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+          <span className="text-muted-foreground">
+            As <strong className="text-foreground">despesas com pessoal</strong> não entraram
+            nesta prévia: {resumo.pessoalIndisponivel}
+          </span>
+        </div>
+      )}
+
       {/* Avisos de valores que não caíram na DRE */}
       {(pessoalNaoClassificado.length > 0 ||
         categoriasNaoMapeadas.length > 0 ||

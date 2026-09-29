@@ -184,6 +184,12 @@ export interface PreviaOrcamentoData {
     planejamentoSemValor: number;
     /** Colaboradores dentro do escopo (empresa ou setor). */
     pessoalColaboradores: number;
+    /**
+     * Motivo de as despesas com PESSOAL não terem entrado nesta prévia, ou
+     * `null` quando entraram. A folha é quase sempre a maior linha do
+     * orçamento: somí-la como zero sem dizer nada já aconteceu.
+     */
+    pessoalIndisponivel: string | null;
     totalDespesa: number;
     /** Só o que a diretoria aprovou — é o número que vai ao Budget. */
     totalDespesaAprovada: number;
@@ -818,6 +824,12 @@ export async function getPreviaOrcamento(
     detalharColaboradores: true,
   });
   if (previaRes.needsMigration) return { needsMigration: true };
+  // O ERRO DO PESSOAL NÃO PODE SUMIR. Ele era engolido aqui: a prévia seguia
+  // sem a folha inteira, com um total menor e nenhuma explicação — exatamente
+  // o tipo de número que leva à decisão errada. Falhar a Prévia inteira
+  // também não serve (o resto dela está correto e é útil), então o motivo
+  // sobe até a tela, que o mostra em faixa.
+  const pessoalIndisponivel = previaRes.error ?? null;
   const pessoalColaboradores = previaRes.payload?.totalColaboradores ?? 0;
   if (previaRes.payload && previaRes.payload.totalColaboradores > 0) {
     // Mapeamento rótulo → conta (as "Linhas do Orçamento").
@@ -992,6 +1004,7 @@ export async function getPreviaOrcamento(
         planejamentoCategorias,
         planejamentoSemValor,
         pessoalColaboradores,
+        pessoalIndisponivel,
         totalDespesa,
         totalDespesaAprovada,
         itensPendentes,

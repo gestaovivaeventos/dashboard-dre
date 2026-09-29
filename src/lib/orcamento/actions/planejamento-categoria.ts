@@ -1150,6 +1150,12 @@ export interface PreviaSetorResumo {
   contagem: ContagemValidacao;
   /** Quem está vendo decide? A tela só mostra os botões quando sim. */
   podeValidar: boolean;
+  /**
+   * Motivo de o PESSOAL não estar nesta prévia, ou `null`. Sem isto a folha
+   * sumia da tela de Despesas com pessoal sem uma palavra — e ela é quase
+   * sempre a maior linha do orçamento.
+   */
+  pessoalIndisponivel: string | null;
 }
 
 /**
@@ -1258,6 +1264,7 @@ export async function getPreviaSetor(
       totalAprovado: categorias.reduce((a, c) => a + c.totalAprovado, 0),
       contagem: contarEstados(paraContar.map((i) => i.estado)),
       podeValidar: res.data.resumo.podeValidar,
+      pessoalIndisponivel: res.data.resumo.pessoalIndisponivel,
     },
   };
 }

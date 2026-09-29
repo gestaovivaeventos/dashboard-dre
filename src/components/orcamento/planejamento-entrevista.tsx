@@ -8,6 +8,8 @@ import {
   type PlanejamentoGrupoOption,
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { reiniciarEntrevista } from "@/lib/orcamento/actions/planejamento-entrevista";
+import { anexarTranscricao } from "@/lib/ai/transcricao";
+import { BotaoDitado } from "@/components/orcamento/botao-ditado";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import {
   assinaturaConversa,
@@ -79,6 +81,7 @@ export function PlanejamentoEntrevista({
   const [erro, setErro] = useState<string | null>(null);
   const [salvandoCartao, setSalvandoCartao] = useState(false);
   const rolagemRef = useRef<HTMLDivElement>(null);
+  const caixaRef = useRef<HTMLTextAreaElement>(null);
   const assinaturaRef = useRef(assinaturaConversa(conversa));
 
   // Ressincroniza quando o pai recarrega (troca de setor, por exemplo) — mas
@@ -325,7 +328,8 @@ export function PlanejamentoEntrevista({
             onConfirmar={confirmarCartao}
           />
         )}
-
+
+
       </div>
 
       {erro && <div className="bg-destructive/10 px-4 py-2 text-xs text-destructive">{erro}</div>}
@@ -339,6 +343,7 @@ export function PlanejamentoEntrevista({
 
       <div className="flex items-end gap-2 border-t px-4 py-3">
         <textarea
+          ref={caixaRef}
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
           onKeyDown={(e) => {
@@ -351,6 +356,19 @@ export function PlanejamentoEntrevista({
           placeholder={podeEscrever ? "Responda aqui…" : "Você não pode editar este setor."}
           disabled={streaming || !podeEscrever || vazia}
           className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+        />
+        {/* O ditado PREENCHE a caixa, não envia: o gestor confere números e
+            nomes antes — um valor mal ouvido iria direto para o cartão. */}
+        <BotaoDitado
+          companyId={companyId}
+          categoria={categoryName}
+          grupos={grupos.map((g) => g.name)}
+          disabled={streaming || !podeEscrever || vazia}
+          onErro={setErro}
+          onTexto={(novo) => {
+            setTexto((atual) => anexarTranscricao(atual, novo));
+            requestAnimationFrame(() => caixaRef.current?.focus());
+          }}
         />
         <button
           onClick={() => texto.trim() && void enviar(texto)}
