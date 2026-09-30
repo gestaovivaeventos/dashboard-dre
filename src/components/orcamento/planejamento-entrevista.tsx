@@ -9,6 +9,7 @@ import {
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { reiniciarEntrevista } from "@/lib/orcamento/actions/planejamento-entrevista";
 import { anexarTranscricao } from "@/lib/ai/transcricao";
+import { partirNegrito } from "@/lib/ai/negrito";
 import { BotaoDitado } from "@/components/orcamento/botao-ditado";
 import { formatBRL, numberToInput, parseBrNumber } from "@/lib/orcamento/format";
 import {
@@ -295,14 +296,14 @@ export function PlanejamentoEntrevista({
                   : "bg-muted text-foreground",
               )}
             >
-              {m.content}
+              <TextoIA>{m.content}</TextoIA>
             </div>
           ))
         )}
 
         {streaming && parcial && (
           <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm">
-            {parcial}
+            <TextoIA>{parcial}</TextoIA>
           </div>
         )}
         {streaming && !parcial && (
@@ -337,7 +338,9 @@ export function PlanejamentoEntrevista({
       {justificativa && (
         <div className="border-t bg-muted/20 px-4 py-3">
           <div className="text-xs font-semibold">Justificativa do orçamento</div>
-          <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{justificativa}</p>
+          <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+            <TextoIA>{justificativa}</TextoIA>
+          </p>
         </div>
       )}
 
@@ -558,5 +561,26 @@ function CartaoDespesaForm({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Texto da IA com o `**negrito**` dela aplicado — e os asteriscos fora da tela.
+ *
+ * Fica aqui, e não num componente compartilhado, porque os três únicos lugares
+ * que mostram texto do modelo são desta tela: a bolha, o texto que chega no
+ * streaming e a justificativa do fechamento. A regra em si é pura e testada
+ * (`@/lib/ai/negrito`); aqui só se pinta.
+ *
+ * Vale para a mensagem do usuário também, de propósito: é a mesma bolha, e
+ * quem digita asterisco duplo numa resposta quis destacar algo.
+ */
+function TextoIA({ children }: { children: string | null | undefined }) {
+  return (
+    <>
+      {partirNegrito(children).map((t, i) =>
+        t.negrito ? <strong key={i}>{t.texto}</strong> : <span key={i}>{t.texto}</span>,
+      )}
+    </>
   );
 }

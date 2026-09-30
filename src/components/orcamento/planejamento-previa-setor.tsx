@@ -30,6 +30,7 @@ import {
 } from "@/lib/orcamento/previa-setor-contagem";
 import type { OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { formatBRL } from "@/lib/orcamento/format";
+import { textoParcelasDeMeses } from "@/lib/orcamento/parcelas";
 import {
   Dialog,
   DialogContent,
@@ -437,6 +438,9 @@ function LinhaItem({
   // inventado criaria uma trava que ninguém conseguiria desfazer pela tela.
   const decidivel = podeValidar && Boolean(item.alvoTipo && item.alvoId);
   const decidido = item.estado !== "pendente";
+  // "12 parcelas · jan–dez". O valor do ano não distingue um contrato anual de
+  // doze mensalidades, nem mostra que a pessoa entra em maio.
+  const parcelas = textoParcelasDeMeses(item.meses);
 
   return (
     <li className="group flex items-start justify-between gap-2 py-0.5 text-[11px] text-muted-foreground">
@@ -455,6 +459,16 @@ function LinhaItem({
           >
             {item.nome}
           </span>
+          {parcelas && (
+            <span
+              className={cn(
+                "block text-[10px] text-muted-foreground/70",
+                item.estado === "reprovado" && "opacity-70",
+              )}
+            >
+              {parcelas}
+            </span>
+          )}
           {item.comentario && (
             <span className="mt-0.5 block text-sky-700">
               <MessageSquare className="mr-1 inline h-3 w-3 align-[-2px]" />

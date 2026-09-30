@@ -182,3 +182,21 @@ test("não muta o resumo recebido", () => {
   assert.equal(antes.totalAprovado, 0);
   assert.equal(antes.categorias[0].grupos[0].itens[0].estado, "pendente");
 });
+
+test("decidir NÃO apaga os meses do item", () => {
+  // A linha mostra "12 parcelas · jan–dez" a partir de `meses`. Como
+  // `aplicarDecisao` reconstrói o item a cada clique, perder o campo faria a
+  // legenda sumir no ✓ e voltar sozinha no refetch seguinte — piscando.
+  const base = resumoBase();
+  base.categorias[0].grupos[0].itens[0] = {
+    ...base.categorias[0].grupos[0].itens[0],
+    meses: Array<number>(12).fill(1000),
+  };
+  const r = aplicarDecisao(base, {
+    alvoTipo: "colaborador",
+    alvoId: "ana",
+    estado: "aprovado",
+    comentario: null,
+  });
+  assert.deepEqual(r.categorias[0].grupos[0].itens[0].meses, Array<number>(12).fill(1000));
+});

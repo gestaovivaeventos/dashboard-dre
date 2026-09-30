@@ -1113,6 +1113,17 @@ export interface PreviaSetorItem {
   estado: ValidacaoEstado;
   /** O que o diretor pediu que mude — só no 'revisar'. */
   comentario: string | null;
+  /**
+   * Os 12 meses da despesa, para a linha dizer em quantas parcelas e entre que
+   * meses ela cai (`parcelas.ts`). O valor do ano sozinho não distingue um
+   * contrato anual de doze mensalidades, nem mostra que a pessoa entra em maio
+   * — e é disso que quem valida precisa.
+   *
+   * Vai o array cru, e não o texto pronto, porque a atualização otimista
+   * (`aplicarDecisao`) reconstrói o item a cada clique: texto derivado no
+   * servidor congelaria, o array não.
+   */
+  meses?: number[];
 }
 
 export interface PreviaSetorGrupo {
@@ -1217,6 +1228,7 @@ export async function getPreviaSetor(
           setorId: i.setorId ?? setorId,
           estado: i.estado ?? ("pendente" as ValidacaoEstado),
           comentario: i.comentario ?? null,
+          meses: i.meses,
         })),
       ).map((g) => ({
         // `agruparPorGrupo` chaveia por id; aqui o "id" é o próprio nome do
@@ -1236,6 +1248,7 @@ export async function getPreviaSetor(
           setorId: i.setorId,
           estado: i.estado,
           comentario: i.comentario,
+          meses: i.meses,
         })),
       }));
 
