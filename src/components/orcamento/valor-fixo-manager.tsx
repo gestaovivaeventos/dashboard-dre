@@ -28,6 +28,9 @@ import { SETOR_TODOS, setorEspecifico } from "@/lib/orcamento/setor-filtro";
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
 import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
+import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
+import { getFinalizacoes } from "@/lib/orcamento/actions/finalizacao";
+import { finalizacaoDe, indexarFinalizacoes, type Finalizacao } from "@/lib/orcamento/finalizacao";
 import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 import type { ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { cn } from "@/lib/utils";
@@ -333,11 +336,14 @@ function ValorFixoCategoryGroup({
   budgetYear,
   setorId,
   setores,
-  podeEditar,
+  podeEditar: podeEditarProp,
   onMoved,
   onError,
   podeValidar,
   onDecidiu,
+  isAdmin,
+  finalizacao,
+  onFinalizou,
 }: {
   item: ValorFixoItem;
   indices: IndiceOption[];
@@ -353,6 +359,10 @@ function ValorFixoCategoryGroup({
   onError: (msg: string) => void;
   podeValidar: boolean;
   onDecidiu: (d: DecisaoAplicada) => void;
+  isAdmin: boolean;
+  /** Fatia da CATEGORIA, fechada ou não. */
+  finalizacao: Finalizacao | null;
+  onFinalizou: () => void;
 }) {
   const [contratos, setContratos] = useState<LocalContrato[]>(() => seedContratos(item));
 
@@ -481,6 +491,24 @@ function ValorFixoCategoryGroup({
 
   // Sem edição não há o que oferecer aqui: "+ contrato" e "Mover" são ações de
   // escrita, e o botão que só leva a uma recusa é pior que botão nenhum.
+  // A FINALIZAÇÃO fecha a categoria inteira para todo mundo — inclusive admin.
+  const podeEditar = podeEditarProp && finalizacao == null;
+
+  const botaoFinalizar = (
+    <BotaoFinalizar
+      companyId={companyId}
+      year={budgetYear}
+      metodo="valor_fixo"
+      categoryCode={item.categoryCode}
+      setorId={setorEspecifico(setorId)}
+      rotulo={item.categoryName}
+      finalizacao={finalizacao}
+      isAdmin={isAdmin}
+      onMudou={onFinalizou}
+      compacto
+    />
+  );
+
   const addBtn = !podeEditar ? null : (
     <div className="mt-1 flex items-center gap-2">
       <button
@@ -543,6 +571,7 @@ function ValorFixoCategoryGroup({
       <div className="space-y-0.5">
         {chevron}
         <div className="pl-5">{addBtn}</div>
+        <div className="pl-5">{botaoFinalizar}</div>
       </div>
     );
     return (
@@ -576,6 +605,7 @@ function ValorFixoCategoryGroup({
         <td className="px-3 py-2">
           <div className="space-y-0.5">
             {chevron}
+            <div className="pl-5">{botaoFinalizar}</div>
             <div className="pl-5">{addBtn}</div>
           </div>
         </td>
@@ -643,11 +673,14 @@ export function ValorFixoManager({
   companyId,
   year,
   podeEditar = true,
+  isAdmin = false,
 }: {
   companyId: string;
   year: number;
   /** Gerente e gerente sócio leem, mas não editam (ver metodos.ts). */
   podeEditar?: boolean;
+  /** Só o admin finaliza e reabre o orçamento. */
+  isAdmin?: boolean;
 }) {
   // Cada contrato pertence a um setor; a tela trabalha um setor por vez.
   const [setores, setSetores] = useState<OrcamentoSetor[]>([]);
@@ -665,6 +698,8 @@ export function ValorFixoManager({
   // `seq` é o gatilho, não o conteúdo: aprovar, desfazer e aprovar de novo
   // produz decisões idênticas e as três precisam valer.
   const [decisao, setDecisao] = useState<(DecisaoAplicada & { seq: number }) | null>(null);
+  const [finalizacoes, setFinalizacoes] = useState<Finalizacao[]>([]);
+  const indiceFinalizacoes = indexarFinalizacoes(finalizacoes);
 
   /** Primeiro setor com contrato de valor fixo; senão, o primeiro da lista. */
   async function primeiroSetorComConteudo(ids: string[]): Promise<string | null> {
@@ -699,6 +734,8 @@ export function ValorFixoManager({
     setItems(res.setup.items);
     setIndices(res.setup.indices);
     setPodeValidar(res.setup.podeValidar);
+    const fin = await getFinalizacoes(id, y);
+    setFinalizacoes(fin.items);
   }
 
   function registrarDecisao(d: DecisaoAplicada) {
@@ -862,6 +899,13 @@ export function ValorFixoManager({
                     setores={setores}
                     podeEditar={podeEditar}
                     podeValidar={podeValidar}
+                    isAdmin={isAdmin}
+                    finalizacao={finalizacaoDe(indiceFinalizacoes, {
+                      metodo: "valor_fixo",
+                      categoryCode: item.categoryCode,
+                      setorId: setorEspecifico(setorId),
+                    })}
+                    onFinalizou={() => void reload(companyId, year, setorId)}
                     onDecidiu={registrarDecisao}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onError={setLoadError}

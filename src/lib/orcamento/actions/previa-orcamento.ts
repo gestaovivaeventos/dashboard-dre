@@ -26,6 +26,7 @@ import { getPrevia } from "@/lib/orcamento/actions/pessoal";
 import { rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { vinculoLabel } from "@/lib/orcamento/vinculos";
 import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { CATEGORIA_METODO_INTEIRO } from "@/lib/orcamento/finalizacao";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { INDICES, type IndiceKey, type IndiceUnit } from "@/lib/orcamento/indices";
 import {
@@ -121,6 +122,13 @@ export interface PreviaFonte {
   metodoLabel: string;
   /** Nome da categoria, ou o rótulo da linha no caso do pessoal. */
   chave: string;
+  /**
+   * Código da categoria da Omie — a âncora estável da fatia que se FINALIZA.
+   * `chave` é o NOME, que muda no cadastro e no pessoal nem é categoria (é o
+   * rótulo da linha da DRE); recortar por ele daria fatia errada em silêncio.
+   * Vazio no pessoal: lá a fatia é o quadro do setor inteiro.
+   */
+  categoryCode: string;
   meses: number[];
   totalAno: number;
   /** Rota da tela de origem, para abrir em nova aba. */
@@ -513,6 +521,7 @@ export async function getPreviaOrcamento(
         metodo,
         metodoLabel: metodoLabel(metodo as OrcamentoMetodo),
         chave,
+        categoryCode: code,
         meses,
         totalAno: somar(meses),
         mesesAprovados: aprovados,
@@ -885,6 +894,10 @@ export async function getPreviaOrcamento(
         metodo: "pessoal",
         metodoLabel: metodoLabel("pessoal"),
         chave: linha.label,
+        // Vazio: no pessoal a fatia finalizável é o quadro do SETOR inteiro —
+        // salários, encargos e benefícios saem juntos, porque o motor é linear
+        // por colaborador e fechar uma linha só publicaria pedaço de gente.
+        categoryCode: CATEGORIA_METODO_INTEIRO,
         meses: linha.meses,
         totalAno: somar(linha.meses),
         mesesAprovados: aprovadosPessoal,

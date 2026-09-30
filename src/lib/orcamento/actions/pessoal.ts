@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { travaDeFinalizacao } from "@/lib/orcamento/actions/finalizacao";
+import { CATEGORIA_METODO_INTEIRO } from "@/lib/orcamento/finalizacao";
 import {
   estadoDoItem,
   gestorPodeEditar,
@@ -578,6 +580,19 @@ async function autorizarColaborador(
     return { ok: false, error: SEM_ACESSO_SETOR };
   }
 
+  // TRAVA DA FINALIZAÇÃO, antes de tudo: com o quadro do setor fechado, nem
+  // admin nem diretoria escrevem — o valor já está no Budget do Financeiro, e
+  // reabrir é o único caminho de volta. No pessoal a fatia é o SETOR INTEIRO
+  // (salários, encargos e benefícios saem juntos).
+  const fechado = await travaDeFinalizacao({
+    companyId: linha.company_id as string,
+    year: Number(linha.year),
+    metodo: "pessoal",
+    categoryCode: CATEGORIA_METODO_INTEIRO,
+    setorId: (linha.setor_id as string | null) ?? null,
+  });
+  if (fechado) return { ok: false, error: fechado };
+
   // TRAVA DA VALIDAÇÃO: colaborador aprovado ou reprovado pela diretoria sai das
   // mãos do gestor — só admin e diretoria mexem. Vale para os TRÊS caminhos de
   // escrita (quadro, benefícios e exclusão), que passam todos por aqui.
@@ -620,6 +635,16 @@ export async function createColaborador(
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
   const admin = { userId: auth.user.userId };
+  // Este caminho NÃO passa por `autorizarColaborador` (ainda não há linha),
+  // então a trava da finalização vem explicitamente aqui.
+  const fechado = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "pessoal",
+    categoryCode: CATEGORIA_METODO_INTEIRO,
+    setorId: input.setorId ?? null,
+  });
+  if (fechado) return { error: fechado };
   // Colaborador nasce num setor: o construtor só cadastra nos setores dele.
   if (!podeEscreverNoSetor(auth.setores, input.setorId ?? null)) {
     return { error: SEM_ACESSO_SETOR };

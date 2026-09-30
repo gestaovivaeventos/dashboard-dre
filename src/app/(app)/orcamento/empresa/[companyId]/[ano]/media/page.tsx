@@ -17,6 +17,8 @@ export default async function WorkspaceMediaPage({
   // trava), mas deixar digitar para recusar depois é pior que campo travado.
   const user = await getOrcamentoUser();
   const podeEditar = user ? podeEditarMetodo(user.papel, "media") : false;
+  // Só o admin finaliza e reabre o orçamento.
+  const isAdmin = user?.papel === "admin";
 
   return (
     <div className="space-y-2">
@@ -32,6 +34,7 @@ export default async function WorkspaceMediaPage({
         companyId={params.companyId}
         year={Number(params.ano)}
         podeEditar={podeEditar}
+        isAdmin={isAdmin}
       />
     </div>
   );

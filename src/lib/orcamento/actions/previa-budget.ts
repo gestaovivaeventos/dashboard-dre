@@ -7,6 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin, SEM_ACESSO_ADMIN } from "@/lib/orcamento/auth";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import { chavesFinalizadas } from "@/lib/orcamento/actions/finalizacao";
 import { reprocessBudgetEntriesForCompany } from "@/lib/budget/reprocess";
 import { PREVIA_BUDGET_SOURCE, rotuloOrcamento } from "@/lib/orcamento/previa-budget-labels";
 import { getPrevia } from "@/lib/orcamento/actions/pessoal";
@@ -49,6 +50,18 @@ export interface EnvioBudgetResultado {
  * Rótulo ainda não mapeado não vira orçamento — volta na lista `naoMapeados`
  * para ser ligado em Mapeamento → Linhas do Orçamento.
  */
+/**
+ * SUPERADA pelo "Finalizar Orçamento" (30/09/2026).
+ *
+ * A publicação do módulo passou a ser por FATIA (método × categoria × setor),
+ * cada uma com a sua `source` própria — e o `reprocess` do Financeiro SOMA
+ * todas as sources. Esta action grava com `source='pessoal'`, que não colide
+ * com as fatias: chamá-la hoje somaria a folha DUAS vezes no Budget.
+ *
+ * Fica sem tela e com o guarda abaixo. `publicar.ts` (que publicava a empresa
+ * inteira) foi removido pelo mesmo motivo, e tinha a agravante de apagar e
+ * republicar tudo — o que zeraria as finalizações a cada clique.
+ */
 export async function enviarPreviaParaOrcamento(
   companyId: string,
   year: number,
@@ -60,6 +73,16 @@ export async function enviarPreviaParaOrcamento(
   if (!admin) return { error: SEM_ACESSO_ADMIN };
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  // GUARDA: com qualquer fatia já finalizada, publicar por aqui somaria a folha
+  // duas vezes no Budget (as sources são diferentes e o reprocess soma todas).
+  if ((await chavesFinalizadas(companyId, year)).length > 0) {
+    return {
+      error:
+        "Este orçamento já tem partes finalizadas. A publicação no Budget agora é pelo botão " +
+        "\"Finalizar orçamento\" em cada tela e categoria.",
+    };
+  }
 
   // SETOR_TODOS explícito: o orçamento leva a empresa inteira, todos os setores.
   // `detalharColaboradores` porque SÓ O APROVADO vai para o Budget, e o filtro

@@ -267,6 +267,58 @@ export function BudgetForecastView({
   const [drillTotal, setDrillTotal] = useState(0);
   const [drillTotalValue, setDrillTotalValue] = useState(0);
 
+  // ── Abertura do ORÇADO ────────────────────────────────────────────────────
+  // O Budget soma por conta, então o nome da despesa se perde no caminho. Esta
+  // abertura vem de `orcamento_budget_detalhe`, gravada quando o administrador
+  // FINALIZA uma categoria no módulo Orçamento. Conta sem nada finalizado
+  // aparece vazia — e a tela diz isso, em vez de parecer quebrada.
+  const [orcado, setOrcado] = useState<{
+    open: boolean;
+    contaNome: string;
+    periodo: string;
+    itens: { nome: string; valor: number }[];
+    total: number;
+    carregando: boolean;
+  }>({ open: false, contaNome: "", periodo: "", itens: [], total: 0, carregando: false });
+
+  const abrirOrcado = async (
+    row: BudgetForecastDisplayRow,
+    bucket: DashboardPeriodBucket,
+  ) => {
+    const ano = Number(bucket.dateFrom.slice(0, 4));
+    const mesDe = Number(bucket.dateFrom.slice(5, 7));
+    const mesAte = Number(bucket.dateTo.slice(5, 7));
+    setOrcado({
+      open: true,
+      contaNome: `${row.code} - ${row.name}`,
+      periodo: bucket.label,
+      itens: [],
+      total: 0,
+      carregando: true,
+    });
+    const params = new URLSearchParams({
+      accountId: row.id,
+      year: String(ano),
+      monthFrom: String(mesDe),
+      monthTo: String(mesAte),
+      companyIds: selectedCompanyIds.join(","),
+    });
+    try {
+      const r = await fetch(`/api/orcamento/budget-detalhe?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const j = (await r.json()) as { itens?: { nome: string; valor: number }[]; total?: number };
+      setOrcado((p) => ({
+        ...p,
+        itens: j.itens ?? [],
+        total: j.total ?? 0,
+        carregando: false,
+      }));
+    } catch {
+      setOrcado((p) => ({ ...p, carregando: false }));
+    }
+  };
+
   const byParent = useMemo(() => {
     const map = new Map<string | null, BudgetForecastDisplayRow[]>();
     rows.forEach((row) => {
@@ -982,6 +1034,7 @@ export function BudgetForecastView({
           highlightSplitIndex={view === "projecao" ? currentMonthIndex : -1}
           onSelectAccount={setSelectedAccountId}
           onDrilldownRealized={(row, bucket) => void openDrilldown(row, bucket, 1, "")}
+          onDrilldownOrcado={(row, bucket) => void abrirOrcado(row, bucket)}
           enableDrilldown={view === "projecao"}
           isProjecao={view === "projecao"}
         />
@@ -1055,6 +1108,56 @@ export function BudgetForecastView({
           </p>
         ) : null}
       </div>
+
+      {/* Abertura do ORÇADO — o que foi finalizado no módulo Orçamento. */}
+      <Sheet open={orcado.open} onOpenChange={(open) => setOrcado((p) => ({ ...p, open }))}>
+        <SheetContent className="left-auto right-0 max-w-2xl border-l border-r-0 p-5">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold">Orçado</h3>
+                <p className="truncate text-sm text-muted-foreground">
+                  {orcado.contaNome} · {orcado.periodo}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setOrcado((p) => ({ ...p, open: false }))}
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Voltar
+              </Button>
+            </div>
+
+            {orcado.carregando ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>
+            ) : orcado.itens.length === 0 ? (
+              <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Nada finalizado nesta conta e período. A abertura por despesa aparece depois que um
+                administrador usa <strong>Finalizar orçamento</strong> no módulo Orçamento; valor
+                vindo de planilha não tem abertura.
+              </p>
+            ) : (
+              <>
+                <ul className="divide-y rounded-lg border">
+                  {orcado.itens.map((i) => (
+                    <li key={i.nome} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
+                      <span className="min-w-0 truncate">{i.nome}</span>
+                      <span className="shrink-0 tabular-nums">{formatCurrency(i.valor)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex items-baseline justify-between px-3 text-sm font-semibold">
+                  <span>{orcado.itens.length} despesa(s)</span>
+                  <span className="tabular-nums">{formatCurrency(orcado.total)}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Drilldown Sheet */}
       <Sheet open={drilldown.open} onOpenChange={(open) => setDrilldown((previous) => ({ ...previous, open }))}>
@@ -1189,6 +1292,7 @@ function MonthlyTable({
   highlightSplitIndex,
   onSelectAccount,
   onDrilldownRealized,
+  onDrilldownOrcado,
   enableDrilldown,
   isProjecao,
 }: {
@@ -1201,6 +1305,8 @@ function MonthlyTable({
   highlightSplitIndex: number;
   onSelectAccount: (id: string) => void;
   onDrilldownRealized: (row: BudgetForecastDisplayRow, bucket: DashboardPeriodBucket) => void;
+  /** Abre a abertura do ORÇADO (nomes das despesas finalizadas) numa conta. */
+  onDrilldownOrcado?: (row: BudgetForecastDisplayRow, bucket: DashboardPeriodBucket) => void;
   enableDrilldown: boolean;
   isProjecao: boolean;
 }) {
@@ -1266,6 +1372,11 @@ function MonthlyTable({
                 const value = row.valuesByBucket[column.key] ?? 0;
                 // Drilldown is allowed only for realized (not summary, not budget col)
                 const canDrill = enableDrilldown && !row.is_summary && (!isProjecao || !isBudgetCol);
+                // Célula de ORÇADO: abre o que foi finalizado (nomes das
+                // despesas). Só em conta-folha e com valor — linha-resumo soma
+                // os filhos e abriria a mesma despesa várias vezes.
+                const canDrillOrcado =
+                  !canDrill && Boolean(onDrilldownOrcado) && !row.is_summary && value !== 0;
                 return (
                   <div
                     key={`${row.id}-${column.key}`}
@@ -1276,6 +1387,15 @@ function MonthlyTable({
                         type="button"
                         className="w-full text-right hover:underline"
                         onClick={() => onDrilldownRealized(row, column)}
+                      >
+                        {formatCurrency(value)}
+                      </button>
+                    ) : canDrillOrcado ? (
+                      <button
+                        type="button"
+                        title="Ver o que foi orçado nesta conta"
+                        className="w-full text-right hover:underline"
+                        onClick={() => onDrilldownOrcado?.(row, column)}
                       >
                         {formatCurrency(value)}
                       </button>

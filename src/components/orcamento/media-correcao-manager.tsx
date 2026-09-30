@@ -28,6 +28,9 @@ import { SETOR_TODOS, isTodosSetores, setorEspecifico } from "@/lib/orcamento/se
 import { MoverSetorButton } from "@/components/orcamento/mover-setor-button";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
 import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
+import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
+import { getFinalizacoes } from "@/lib/orcamento/actions/finalizacao";
+import { finalizacaoDe, indexarFinalizacoes, type Finalizacao } from "@/lib/orcamento/finalizacao";
 import type { DecisaoAplicada } from "@/lib/orcamento/previa-setor-decisao";
 import { cn } from "@/lib/utils";
 
@@ -95,6 +98,9 @@ function MediaRow({
   onMoved,
   podeValidar,
   onDecidiu,
+  isAdmin,
+  finalizacao,
+  onFinalizou,
 }: {
   item: MediaCategoriaItem;
   indices: IndiceOption[];
@@ -112,6 +118,11 @@ function MediaRow({
   onMoved: () => void;
   /** Quem vê decide? Mostra os botões na linha; senão, só a marca do estado. */
   podeValidar: boolean;
+  /** Só o admin finaliza/reabre. */
+  isAdmin: boolean;
+  /** A fatia desta categoria já está fechada? */
+  finalizacao: Finalizacao | null;
+  onFinalizou: () => void;
   /** Avisa QUAL foi a decisão, para a prévia abaixo se mover no clique. */
   onDecidiu: (d: DecisaoAplicada) => void;
 }) {
@@ -137,7 +148,9 @@ function MediaRow({
   // nunca se travam —, mas o dia em que a média abrir para o gerente, a trava
   // vem junto em vez de virar erro ao salvar. A action já barra de qualquer
   // forma (`travaDaLinhaDeMedia`).
-  const editavel = podeEditar && !item.travado;
+  // A FINALIZAÇÃO trava por cima de tudo, e sem exceção: nem admin edita fatia
+  // fechada — reabrir é o caminho, e aí o fecho fica visível na tela.
+  const editavel = podeEditar && !item.travado && finalizacao == null;
 
   function persistValor() {
     if (!dirtyRef.current) return;
@@ -347,7 +360,19 @@ function MediaRow({
             linha gravada é ancorada em (categoria, ∅), e montar essa chave aqui
             faria a decisão cair num alvo que a Prévia não lê. */}
         <td className="px-3 py-2">
-          <div className="flex items-center justify-end gap-1">
+          <div className="flex items-center justify-end gap-2">
+            <BotaoFinalizar
+              companyId={companyId}
+              year={budgetYear}
+              metodo="media"
+              categoryCode={item.categoryCode}
+              setorId={item.setorId}
+              rotulo={item.categoryName}
+              finalizacao={finalizacao}
+              isAdmin={isAdmin}
+              onMudou={onFinalizou}
+              compacto
+            />
             <DecisaoLinha
               companyId={companyId}
               year={budgetYear}
@@ -425,11 +450,14 @@ export function MediaCorrecaoManager({
   companyId,
   year,
   podeEditar = true,
+  isAdmin = false,
 }: {
   companyId: string;
   year: number;
   /** Gerente e gerente sócio leem, mas não editam (ver metodos.ts). */
   podeEditar?: boolean;
+  /** Só o admin finaliza e reabre o orçamento. */
+  isAdmin?: boolean;
 }) {
   // Setor da tela. Cada categoria é orçada por setor, então tudo aqui — o que
   // se lê, o que se grava e o recálculo em lote — é do setor selecionado.
@@ -452,6 +480,8 @@ export function MediaCorrecaoManager({
   // `seq` é o gatilho, não o conteúdo: aprovar, desfazer e aprovar de novo
   // produz decisões idênticas e as três precisam valer.
   const [decisao, setDecisao] = useState<(DecisaoAplicada & { seq: number }) | null>(null);
+  const [finalizacoes, setFinalizacoes] = useState<Finalizacao[]>([]);
+  const indiceFinalizacoes = indexarFinalizacoes(finalizacoes);
   const [, startTransition] = useTransition();
 
   /** Primeiro setor com alguma categoria por média; senão, o primeiro da lista. */
@@ -488,6 +518,8 @@ export function MediaCorrecaoManager({
     setIndices(res.setup.indices);
     setBaseYear(res.setup.baseYear);
     setPodeValidar(res.setup.podeValidar);
+    const fin = await getFinalizacoes(id, y);
+    setFinalizacoes(fin.items);
   }
 
   function registrarDecisao(d: DecisaoAplicada) {
@@ -692,6 +724,13 @@ export function MediaCorrecaoManager({
                     setores={setores}
                     podeEditar={podeEditar}
                     podeValidar={podeValidar}
+                    isAdmin={isAdmin}
+                    finalizacao={finalizacaoDe(indiceFinalizacoes, {
+                      metodo: "media",
+                      categoryCode: item.categoryCode,
+                      setorId: item.setorId,
+                    })}
+                    onFinalizou={() => void reload(companyId, year, setorId)}
                     onDecidiu={registrarDecisao}
                     onMoved={() => void reload(companyId, year, setorId)}
                     onPatch={patchItem}

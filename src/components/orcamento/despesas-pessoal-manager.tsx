@@ -50,6 +50,14 @@ import {
 import { PreviaPessoal } from "@/components/orcamento/previa-pessoal";
 import { ValidacaoSetorPainel } from "@/components/orcamento/validacao-setor-painel";
 import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
+import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
+import { getFinalizacoes } from "@/lib/orcamento/actions/finalizacao";
+import {
+  CATEGORIA_METODO_INTEIRO,
+  finalizacaoDe,
+  indexarFinalizacoes,
+  type Finalizacao,
+} from "@/lib/orcamento/finalizacao";
 import { ColaboradorDetalhe } from "@/components/orcamento/colaborador-detalhe";
 import { cn } from "@/lib/utils";
 
@@ -176,6 +184,7 @@ export function DespesasPessoalManager({
   const [setorId, setSetorId] = useState<string | null>(null);
   const [setup, setSetup] = useState<PessoalSetup>(EMPTY_SETUP);
   const [items, setItems] = useState<Colaborador[]>([]);
+  const [finalizacoes, setFinalizacoes] = useState<Finalizacao[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -211,6 +220,8 @@ export function DespesasPessoalManager({
       return;
     }
     setItems(res.items ?? []);
+    const fin = await getFinalizacoes(cid, y);
+    setFinalizacoes(fin.items);
   }
 
   /** Reflete na tela os benefícios que a escolha do cargo acabou de gravar. */
@@ -513,6 +524,30 @@ export function DespesasPessoalManager({
                   Adicionar colaborador
                 </button>
               </div>
+
+              {/* FINALIZAR — no pessoal a fatia é o SETOR INTEIRO: salários,
+                  encargos e benefícios vão juntos ao Budget, porque o motor é
+                  linear por colaborador e fechar uma linha só publicaria pedaço
+                  de gente. Em "Todos os setores" não há fatia a fechar. */}
+              {!todosSetores && (
+                <div className="flex justify-end">
+                  <BotaoFinalizar
+                    companyId={companyId}
+                    year={year}
+                    metodo="pessoal"
+                    categoryCode={CATEGORIA_METODO_INTEIRO}
+                    setorId={setorAtual}
+                    rotulo={`Despesas com pessoal — ${escopoLabel}`}
+                    finalizacao={finalizacaoDe(indexarFinalizacoes(finalizacoes), {
+                      metodo: "pessoal",
+                      categoryCode: CATEGORIA_METODO_INTEIRO,
+                      setorId: setorAtual,
+                    })}
+                    isAdmin={isAdmin}
+                    onMudou={() => void loadColabs(companyId, year, setorId)}
+                  />
+                </div>
+              )}
 
               {items.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">

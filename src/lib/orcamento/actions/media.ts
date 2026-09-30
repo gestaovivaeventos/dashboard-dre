@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { chavesFinalizadas, travaDeFinalizacao } from "@/lib/orcamento/actions/finalizacao";
+import { chaveFinalizacao } from "@/lib/orcamento/finalizacao";
 import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
 import { podeDecidir, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { chaveMedia } from "@/lib/orcamento/validacao-diretoria";
@@ -379,6 +381,8 @@ export async function calcularMedia(
   // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
   // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
   if (!podeEditarMetodo(auth.user.papel, "media")) return { error: SEM_EDICAO_METODO };
+  const fechado = await travaDeFinalizacao({ companyId, year, metodo: "media", categoryCode, setorId });
+  if (fechado) return { error: fechado };
   const admin = { userId: auth.user.userId };
   const baseYear = year - 1;
   const irmasUma = await mapaDeIrmas(companyId, year);
@@ -446,7 +450,14 @@ export async function recalcularTodasMedias(
   companyId: string,
   year: number,
   setorId: string | null = null,
-): Promise<{ ok?: true; atualizadas?: number; error?: string; needsMigration?: boolean }> {
+): Promise<{
+  ok?: true;
+  atualizadas?: number;
+  /** Categorias puladas por já estarem finalizadas. */
+  puladas?: number;
+  error?: string;
+  needsMigration?: boolean;
+}> {
   if (!companyId) return { error: "Selecione uma empresa." };
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
 
@@ -479,7 +490,20 @@ export async function recalcularTodasMedias(
   // atribuído", que não pertence a gerente nenhum.
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
 
-  const rows = codes.map((code) => {
+  // Categoria já FINALIZADA fica de fora, e o lote segue: derrubar tudo por
+  // causa de uma fechada seria pior, e recalcular por cima publicaria número
+  // diferente do que o Budget já recebeu.
+  const fechadas = new Set(await chavesFinalizadas(companyId, year));
+  const abertos = codes.filter(
+    (code) =>
+      !fechadas.has(chaveFinalizacao({ metodo: "media", categoryCode: code, setorId: alvo.id })),
+  );
+  const puladas = codes.length - abertos.length;
+  if (abertos.length === 0) {
+    return { error: "Todas as categorias por média deste setor já foram finalizadas." };
+  }
+
+  const rows = abertos.map((code) => {
     const realizado = combinarRealizados(realizados, irmasTodas.get(code) ?? [code], baseYear);
     return {
       company_id: companyId,
@@ -519,7 +543,7 @@ export async function recalcularTodasMedias(
     autorPapel: auth.user.papel,
   });
   revalidatePath(PATH);
-  return { ok: true, atualizadas: rows.length };
+  return { ok: true, atualizadas: rows.length, puladas };
 }
 
 /** Edição manual do valor da média (manual = true). null limpa o valor. */
@@ -538,6 +562,11 @@ async function travaDaLinhaDeMedia(
   setorId: string | null,
   papel: string,
 ): Promise<string | null> {
+  // A FINALIZAÇÃO vem primeiro e não tem exceção: nem admin nem diretoria
+  // passam por cima de uma fatia fechada — reabrir é o caminho.
+  const fechado = await travaDeFinalizacao({ companyId, year, metodo: "media", categoryCode, setorId });
+  if (fechado) return fechado;
+
   let q = supabase
     .from("orcamento_media_categorias")
     .select("updated_at")

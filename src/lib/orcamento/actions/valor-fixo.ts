@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
+import { travaDeFinalizacao } from "@/lib/orcamento/actions/finalizacao";
 import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
 import { podeDecidir, type ValidacaoEstado } from "@/lib/orcamento/validacao-diretoria";
 import { diffCampos } from "@/lib/orcamento/trilha";
@@ -316,6 +317,15 @@ export async function saveValorFixoContrato(
   // Eles continuam LENDO a tela — precisam do conjunto do setor — e construindo
   // Pessoal e Planejamento. Ver `podeEditarMetodo` em metodos.ts.
   if (!podeEditarMetodo(auth.user.papel, "valor_fixo")) return { error: SEM_EDICAO_METODO };
+  // FINALIZADO não aceita escrita de ninguém — nem admin. Reabrir é o caminho.
+  const fechado = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "valor_fixo",
+    categoryCode,
+    setorId,
+  });
+  if (fechado) return { error: fechado };
   const admin = { userId: auth.user.userId };
   const descricao = (contrato.descricao ?? "").trim() || null;
   const patch = {
@@ -454,6 +464,16 @@ export async function removeValorFixoContrato(
       return { error: SEM_ACESSO_SETOR };
     }
   }
+  // A fatia FINALIZADA não perde contrato: o valor dele já está no Budget, e
+  // apagar aqui deixaria o Financeiro com um número sem origem.
+  const fechadoExcluir = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "valor_fixo",
+    categoryCode: (atual?.category_code as string) ?? "",
+    setorId: (atual?.setor_id as string | null) ?? null,
+  });
+  if (fechadoExcluir) return { error: fechadoExcluir };
   // TRAVA DA VALIDAÇÃO: contrato decidido pela diretoria não é excluído pelo
   // gestor — apagar seria a forma mais rápida de burlar a aprovação.
   const travadoExcluir = await travaDaValidacao({

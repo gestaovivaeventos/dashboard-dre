@@ -12,6 +12,9 @@ import {
   type PreviaSetorResumo,
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { formatBRL } from "@/lib/orcamento/format";
+import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
+import { getFinalizacoes } from "@/lib/orcamento/actions/finalizacao";
+import { finalizacaoDe, indexarFinalizacoes, type Finalizacao } from "@/lib/orcamento/finalizacao";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { PlanejamentoBaseEditor } from "@/components/orcamento/planejamento-base-editor";
 import { PlanejamentoDespesas } from "@/components/orcamento/planejamento-despesas";
@@ -44,6 +47,7 @@ export function PlanejamentoMontagem({
   const setorDaUrl = params.get("setor");
 
   const [detalhe, setDetalhe] = useState<PlanejamentoMontagemDetalhe | null>(null);
+  const [finalizacoes, setFinalizacoes] = useState<Finalizacao[]>([]);
   const [previa, setPrevia] = useState<PreviaSetorResumo | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [carregandoPrevia, setCarregandoPrevia] = useState(false);
@@ -65,6 +69,8 @@ export function PlanejamentoMontagem({
     setErro(null);
     setDetalhe(res.data);
     setCarregando(false);
+    // A fatia fechada trava a montagem inteira desta categoria neste setor.
+    void getFinalizacoes(companyId, year).then((f) => setFinalizacoes(f.items));
     return res.data;
   }, [companyId, year, categoryCode, setorDaUrl]);
 
@@ -138,14 +144,36 @@ export function PlanejamentoMontagem({
             {detalhe.setorNome ? ` · ${detalhe.setorNome}` : ""}
           </p>
         </div>
-        {detalhe.realizadoAnterior && (
-          <div className="text-right">
-            <div className="text-xs text-muted-foreground">Gasto em {year - 1}</div>
-            <div className="font-semibold tabular-nums">
-              {formatBRL(detalhe.realizadoAnterior.total)}
+        <div className="flex items-start gap-4">
+          {detalhe.realizadoAnterior && (
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground">Gasto em {year - 1}</div>
+              <div className="font-semibold tabular-nums">
+                {formatBRL(detalhe.realizadoAnterior.total)}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {/* FINALIZAR esta categoria neste setor: trava a edição e manda o
+              aprovado para o Budget do Financeiro. Sem setor resolvido não há
+              fatia a fechar. */}
+          {!precisaEscolherSetor && (
+            <BotaoFinalizar
+              companyId={companyId}
+              year={year}
+              metodo="planejamento_socios"
+              categoryCode={categoryCode}
+              setorId={detalhe.setorId}
+              rotulo={detalhe.categoryName}
+              finalizacao={finalizacaoDe(indexarFinalizacoes(finalizacoes), {
+                metodo: "planejamento_socios",
+                categoryCode,
+                setorId: detalhe.setorId,
+              })}
+              isAdmin={detalhe.isAdmin}
+              onMudou={() => void recarregar()}
+            />
+          )}
+        </div>
       </div>
 
       {/* ── Grupos disponíveis ─────────────────────────────────────────────── */}

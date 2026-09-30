@@ -39,6 +39,7 @@ import {
 } from "@/lib/orcamento/grupos";
 import { getPreviaOrcamento } from "@/lib/orcamento/actions/previa-orcamento";
 import { SETOR_TODOS } from "@/lib/orcamento/setor-filtro";
+import { travaDeFinalizacao } from "@/lib/orcamento/actions/finalizacao";
 import {
   contarEstados,
   entraNoNumero,
@@ -919,6 +920,16 @@ export async function adicionarDespesa(
 
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, auth.user.userId);
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
+  // Categoria FINALIZADA não recebe despesa nova: o total dela já foi para o
+  // Budget, e uma linha a mais deixaria a tela e o Financeiro divergentes.
+  const fechado = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "planejamento_socios",
+    categoryCode,
+    setorId: alvo.id,
+  });
+  if (fechado) return { error: fechado };
 
   const { data, error } = await supabase
     .from("orcamento_planejamento_despesas")
@@ -988,6 +999,15 @@ export async function editarDespesa(
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }
+  // FINALIZADA: nem admin nem diretoria editam — o valor já está no Budget.
+  const fechadoEditar = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "planejamento_socios",
+    categoryCode: (atual.category_code as string) ?? "",
+    setorId: (atual.setor_id as string | null) ?? null,
+  });
+  if (fechadoEditar) return { error: fechadoEditar };
   // TRAVA DA VALIDAÇÃO: despesa aprovada ou reprovada pela diretoria sai das
   // mãos do gestor — só admin e diretoria mexem. Deriva do status, não da
   // coluna `diretoria_travado` (que segue no banco sem ninguém ler). Decisão
@@ -1050,10 +1070,18 @@ export async function removerDespesa(
 
   const { data: atual } = await supabase
     .from("orcamento_planejamento_despesas")
-    .select("setor_id, descricao, valor, updated_at")
+    .select("setor_id, category_code, descricao, valor, updated_at")
     .eq("id", despesaId)
     .maybeSingle();
   if (!atual) return { error: "Despesa não encontrada." };
+  const fechadoRemover = await travaDeFinalizacao({
+    companyId,
+    year,
+    metodo: "planejamento_socios",
+    categoryCode: (atual.category_code as string) ?? "",
+    setorId: (atual.setor_id as string | null) ?? null,
+  });
+  if (fechadoRemover) return { error: fechadoRemover };
   if (!podeEscreverNoSetor(auth.setores, (atual.setor_id as string | null) ?? null)) {
     return { error: SEM_ACESSO_SETOR };
   }

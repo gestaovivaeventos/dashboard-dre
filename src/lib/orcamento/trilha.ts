@@ -38,7 +38,10 @@ export type AlvoTipo =
   | "valor_fixo_contrato"
   | "media_linha"
   | "categoria_setor"
-  | "ciclo";
+  | "ciclo"
+  /** A fatia FINALIZADA (método × categoria × setor). O `alvoId` é a `source`
+   *  determinística da fatia, a mesma que identifica a publicação no Budget. */
+  | "finalizacao";
 
 export type TrilhaAcao =
   | "criou"
@@ -55,6 +58,7 @@ export type TrilhaAcao =
   | "atendeu"
   | "entregou_setor"
   | "desfez_entrega"
+  | "finalizou"
   | "enviou_validacao"
   | "concluiu_validacao"
   | "reenviou"
@@ -82,6 +86,7 @@ export const ACAO_LABEL: Record<TrilhaAcao, string> = {
   enviou_validacao: "enviou para validação",
   concluiu_validacao: "concluiu a validação",
   reenviou: "reenviou para validação",
+  finalizou: "finalizou e publicou no Budget",
   concluiu: "concluiu o orçamento",
   publicou: "publicou no Budget e Forecast",
   reabriu: "reabriu o orçamento",
@@ -93,6 +98,7 @@ export const ALVO_LABEL: Record<AlvoTipo, string> = {
   valor_fixo_contrato: "contrato",
   media_linha: "linha por média",
   categoria_setor: "categoria",
+  finalizacao: "fatia finalizada",
   ciclo: "ciclo",
 };
 
