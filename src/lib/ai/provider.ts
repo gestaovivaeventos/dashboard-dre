@@ -774,3 +774,74 @@ export async function generateJsonFromDocumentNative(
       JSON.stringify(last ?? {}).slice(0, 300),
   );
 }
+
+/**
+ * Transcreve áudio pela API NATIVA do Gemini.
+ *
+ * Mesmo caminho da leitura de documento acima, e pelo mesmo motivo: não existe
+ * `/v1/audio/transcriptions` do lado do Google — a camada de compatibilidade
+ * OpenAI dele cobre chat e embeddings, não áudio. O áudio vai em `inline_data`
+ * exatamente como o PDF vai.
+ *
+ * **O raciocínio vai DESLIGADO** (`thinkingBudget: 0`), e isso não é economia:
+ * medido contra a API real em 29/09/2026, com o raciocínio ligado o modelo
+ * transcreveu um tom puro de 2 segundos como "Eu não quero" — inventou fala
+ * onde não havia. Desligado, respondeu o sentinela de silêncio corretamente.
+ * Numa transcrição que o gestor cola no orçamento, alucinar palavra é o pior
+ * defeito possível. De quebra, a chamada caiu de 478 para 88 tokens.
+ *
+ * Devolve o texto CRU — quem chama limpa com `limparTranscricao`.
+ */
+export async function transcreverAudioNative(
+  resolved: ResolvedAiProvider,
+  opts: {
+    prompt: string;
+    data: Buffer;
+    mediaType: string;
+    modelName: string;
+    timeoutMs?: number;
+  },
+): Promise<{ texto: string; payload: unknown }> {
+  const url = `${geminiNativeBase(resolved.baseURL)}/models/${opts.modelName}:generateContent`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": resolved.apiKey },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: opts.prompt },
+            { inline_data: { mime_type: opts.mediaType, data: opts.data.toString("base64") } },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+        thinkingConfig: { thinkingBudget: 0 },
+        // Teto folgado: 5 minutos de fala corrida passam de mil tokens.
+        maxOutputTokens: 4096,
+      },
+    }),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 55_000),
+  });
+
+  const bruto = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${bruto.slice(0, 300)}`);
+
+  let payload: GeminiPayload;
+  try {
+    payload = JSON.parse(bruto) as GeminiPayload;
+  } catch {
+    throw new Error(`resposta ilegível: ${bruto.slice(0, 200)}`);
+  }
+  if (payload.error?.message) throw new Error(payload.error.message);
+
+  // As partes marcadas com `thought` não são resposta (não devem aparecer com
+  // o raciocínio desligado, mas descartá-las mantém o texto limpo se voltar).
+  const texto = (payload.candidates?.[0]?.content?.parts ?? [])
+    .filter((p) => p.thought !== true && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("")
+    .trim();
+  return { texto, payload };
+}

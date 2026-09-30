@@ -1,12 +1,22 @@
 import { NextRequest } from "next/server";
 
-import { resolveAiProvider, logAiUsage } from "@/lib/ai/provider";
+import {
+  resolveAiProvider,
+  logAiUsage,
+  transcreverAudioNative,
+  type ResolvedAiProvider,
+} from "@/lib/ai/provider";
 import {
   TRANSCRICAO_MAX_BYTES,
   TRANSCRICAO_MODELO,
+  TRANSCRICAO_MODELO_GEMINI,
   extensaoDoAudio,
+  limparTranscricao,
+  mimeParaGemini,
   montarDicaTranscricao,
+  montarPromptGemini,
   usoDaTranscricao,
+  usoGemini,
 } from "@/lib/ai/transcricao";
 import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
 
@@ -15,9 +25,11 @@ import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
 // texto (ele só entra no transcript quando o gestor clica em Enviar, pela rota
 // do chat).
 //
-// Sempre OpenAI, qualquer que seja o provedor ativo: Gemini/DeepSeek não têm o
-// endpoint de transcrição compatível. A chave é a do painel de IA (ou
-// OPENAI_API_KEY), resolvida pelo mesmo `resolveAiProvider`.
+// Transcreve no GEMINI, pela API nativa (`generateContent` com o áudio em
+// inline_data) — não existe `/v1/audio/transcriptions` do lado do Google, e a
+// camada de compatibilidade OpenAI dele cobre chat e embeddings, não áudio.
+// A OpenAI fica como plano B, e o recuo é REGISTRADO em ai_usage_log.
+// As chaves são as do painel de IA, resolvidas por `resolveAiProvider`.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -67,12 +79,73 @@ export async function POST(req: NextRequest): Promise<Response> {
     grupos,
   });
 
+  // ── 1) GEMINI, pela API nativa ────────────────────────────────────────────
+  // O transcritor padrão desde 29/09/2026. Modelo FIXO (`TRANSCRICAO_MODELO_GEMINI`),
+  // não o do painel: o do painel é escolhido para texto/visão e pode ser trocado
+  // por um que não ouça.
+  const buffer = Buffer.from(await audio.arrayBuffer());
+  const prompt = montarPromptGemini(dica);
+
+  let motivoRecuo: string | null = null;
+  let gemini: ResolvedAiProvider | null = null;
+  try {
+    gemini = await resolveAiProvider({ forceProvider: "gemini" });
+  } catch {
+    gemini = null; // sem chave cadastrada — cai no plano B
+  }
+
+  /** Registro do que o GEMINI consumiu (ou do motivo de ele ter falhado). */
+  const registrarGemini = (usage: ReturnType<typeof usoGemini>, erro?: string) =>
+    logAiUsage({
+      module: "orcamento",
+      providerName: "gemini",
+      modelName: TRANSCRICAO_MODELO_GEMINI,
+      usage,
+      modelPrices: gemini?.modelPrices ?? {},
+      usdBrlRate: gemini?.usdBrlRate ?? 0,
+      companyId,
+      userId: user.userId,
+      success: !erro,
+      errorMessage: erro ?? null,
+    });
+
+  if (gemini) {
+    try {
+      const { texto: cru, payload } = await transcreverAudioNative(gemini, {
+        prompt,
+        data: buffer,
+        mediaType: mimeParaGemini(audio.type),
+        modelName: TRANSCRICAO_MODELO_GEMINI,
+      });
+      await registrarGemini(usoGemini(payload));
+      const texto = limparTranscricao(cru);
+      if (!texto) {
+        return json(200, {
+          texto: "",
+          aviso: "Não entendi nada na gravação. Fale mais perto do microfone.",
+        });
+      }
+      return json(200, { texto });
+    } catch (e) {
+      motivoRecuo = e instanceof Error ? e.message : String(e);
+      console.warn(`[transcrever] Gemini falhou, recuando para a OpenAI: ${motivoRecuo}`);
+      await registrarGemini(null, motivoRecuo);
+    }
+  }
+
+  // ── 2) OpenAI, plano B ────────────────────────────────────────────────────
+  // O recuo NUNCA é silencioso: a falha do Gemini já foi registrada acima com o
+  // motivo, então o painel de IA mostra que ele não transcreveu. O ditado parar
+  // no meio de uma entrevista é pior do que gastar na OpenAI — mas ninguém pode
+  // descobrir meses depois que o Gemini nunca funcionou.
   let resolved;
   try {
     resolved = await resolveAiProvider({ forceProvider: "openai" });
   } catch {
     return json(503, {
-      error: "O ditado precisa de uma chave da OpenAI. Peça ao administrador para cadastrá-la em Painel › IA.",
+      error: gemini
+        ? "O ditado falhou no Gemini e não há chave da OpenAI para tentar de novo. Avise o administrador."
+        : "O ditado precisa de uma chave do Gemini ou da OpenAI. Peça ao administrador para cadastrá-la em Painel › IA.",
     });
   }
 
@@ -95,7 +168,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       companyId,
       userId: user.userId,
       success: !erro,
-      errorMessage: erro ?? null,
+      // Sucesso AQUI ainda é um recuo: sem dizer isso, o painel mostraria uso
+      // normal da OpenAI e ninguém perceberia que o Gemini parou de transcrever.
+      errorMessage: erro ?? (motivoRecuo ? `plano B apos falha do Gemini: ${motivoRecuo}` : null),
     });
 
   try {
