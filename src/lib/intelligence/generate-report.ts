@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { opcoesSdk } from "@/lib/ai/parametros-chat";
 import { generateText } from "ai";
 
 import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
@@ -188,7 +189,8 @@ export async function generateReport(input: GenerateReportInput): Promise<Genera
       model: resolved.provider.chat(resolved.modelName),
       system: segmentPrompt,
       prompt: `Dados financeiros de "${companyName}" — ${periodLabel}:\n\n${JSON.stringify(fullContextRows, null, 2)}`,
-      maxOutputTokens: 4000,
+      // Ver `opcoesSdk`: gpt-5+/Luna recusam o teto vindo do SDK.
+      ...opcoesSdk(resolved.modelName, { maxOutputTokens: 4000 }),
     });
     await logResolvedUsage(resolved, "relatorio_mensal", usage);
 

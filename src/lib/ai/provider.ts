@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { corrigirCorpoPelaResposta, parametrosChat } from "@/lib/ai/parametros-chat";
 
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/encryption";
@@ -505,35 +506,59 @@ export async function generateJsonViaChat(
     }
   };
 
+  // O nome do teto de tokens muda com a família do modelo (`max_tokens` nas
+  // antigas e no DeepSeek/Gemini; `max_completion_tokens` na o-series, gpt-5+ e
+  // Luna), e os modelos de raciocínio recusam `temperature`. `parametrosChat` dá
+  // o palpite pelo nome; a correção pela RESPOSTA, abaixo, cobre o modelo novo
+  // que o palpite não conhece — foi o que quebrou ao trocar para `gpt-6-luna`.
+  // Fica FORA do `doCall` para a correção valer nas retentativas seguintes, em
+  // vez de errar de novo a cada uma.
+  let variaveis = parametrosChat(model, {
+    teto: opts.maxTokens ?? 8192,
+    temperatura: opts.temperature ?? 0.2,
+  });
+
   const doCall = async (
     controller: AbortController,
     thinking?: { type: "disabled" },
   ): Promise<ChatPayload> => {
-    const res = await fetch(resolved.chatCompletionsUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resolved.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemContent },
-          {
-            role: "user",
-            content: opts.prompt + "\n\nResponda APENAS com um único objeto JSON válido, sem texto fora do JSON.",
-          },
-        ],
-        temperature: opts.temperature ?? 0.2,
-        max_tokens: opts.maxTokens ?? 8192,
-        response_format: { type: "json_object" },
-        ...(thinking ? { thinking } : {}),
-      }),
-      signal: controller.signal,
+    const corpo = () => ({
+      model,
+      messages: [
+        { role: "system", content: systemContent },
+        {
+          role: "user",
+          content:
+            opts.prompt +
+            "\n\nResponda APENAS com um único objeto JSON válido, sem texto fora do JSON.",
+        },
+      ],
+      ...variaveis,
+      response_format: { type: "json_object" },
+      ...(thinking ? { thinking } : {}),
     });
+    const chamar = () =>
+      fetch(resolved.chatCompletionsUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resolved.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(corpo()),
+        signal: controller.signal,
+      });
+
+    let res = await chamar();
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+      const ajustado = corrigirCorpoPelaResposta(variaveis, body);
+      if (!ajustado) throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+      variaveis = ajustado;
+      res = await chamar();
+      if (!res.ok) {
+        const body2 = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${body2.slice(0, 300)}`);
+      }
     }
     return (await res.json()) as ChatPayload;
   };

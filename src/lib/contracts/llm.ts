@@ -7,6 +7,7 @@
 // "Indeterminado" (assinado, mas sem atribuição segura de parte).
 
 import { parseLlmJson } from './llm-json'
+import { aceitaTemperatura } from "@/lib/ai/parametros-chat";
 import type { ContractExtraction } from './types'
 import { resolveAiProvider, logResolvedUsage } from '@/lib/ai/provider'
 
@@ -216,7 +217,8 @@ export async function extractContractDataWithLlm(
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: buildPrompt(text) }],
-          temperature: 0,
+          // Modelo de raciocínio recusa `temperature` — ver `parametrosChat`.
+          ...(aceitaTemperatura(model) ? { temperature: 0 } : {}),
           response_format: { type: 'json_object' },
         }),
         signal: controller.signal,

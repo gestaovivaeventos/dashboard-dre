@@ -1,4 +1,5 @@
 import { generateObject } from "ai";
+import { opcoesSdk } from "@/lib/ai/parametros-chat";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
@@ -108,8 +109,13 @@ export async function analyzeOnePage(
         schema: OnePageAnalysisSchema,
         system: ONE_PAGE_SYSTEM_PROMPT,
         prompt,
-        temperature: opts.temperature,
-        maxOutputTokens: opts.maxOutputTokens,
+        // As famílias novas da OpenAI (gpt-5+, Luna) recusam os dois: o SDK
+        // manda `max_tokens` para modelo que ele não conhece, e `temperature`
+        // é recusada à parte. Ver `opcoesSdk`.
+        ...opcoesSdk(modelName, {
+          temperature: opts.temperature,
+          maxOutputTokens: opts.maxOutputTokens,
+        }),
       });
       return { object, usage };
     }

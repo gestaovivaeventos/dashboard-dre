@@ -1,4 +1,5 @@
 import { generateObject } from "ai";
+import { opcoesSdk } from "@/lib/ai/parametros-chat";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 
@@ -250,8 +251,11 @@ DE NEGOCIO INFORMADO PELA CONTROLADORIA (CSC)"):
         schema: OnePageReportSchema,
         system: systemPrompt,
         prompt,
-        temperature: opts.temperature,
-        maxOutputTokens: opts.maxOutputTokens,
+        // Ver `opcoesSdk`: gpt-5+/Luna recusam teto e temperature pelo SDK.
+        ...opcoesSdk(modelName, {
+          temperature: opts.temperature,
+          maxOutputTokens: opts.maxOutputTokens,
+        }),
       });
       return { object, usage };
     }

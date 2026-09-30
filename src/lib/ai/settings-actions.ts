@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { corrigirCorpoPelaResposta, parametrosChat } from "@/lib/ai/parametros-chat";
 
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -759,17 +760,33 @@ export async function testProviderConnection(input: {
   const timer = setTimeout(() => controller.abort(), 20000);
   const started = Date.now();
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "Responda apenas: ok" }],
-        max_tokens: 5,
-        temperature: 0,
-      }),
-      signal: controller.signal,
-    });
+    // O nome do teto de tokens (e a aceitação de `temperature`) muda conforme a
+    // família do modelo. `parametrosChat` dá o palpite; se a API recusar, a
+    // segunda tentativa usa o que ela mesma indicou — é o que faz o teste passar
+    // com um modelo novo que o código não conhece.
+    let corpo: Record<string, unknown> = {
+      model,
+      messages: [{ role: "user", content: "Responda apenas: ok" }],
+      ...parametrosChat(model, { teto: 5, temperatura: 0 }),
+    };
+    const chamar = () =>
+      fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+        signal: controller.signal,
+      });
+
+    let res = await chamar();
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const ajustado = corrigirCorpoPelaResposta(corpo, body);
+      if (!ajustado) {
+        return { error: `HTTP ${res.status}: ${body.slice(0, 200) || res.statusText}` };
+      }
+      corpo = ajustado;
+      res = await chamar();
+    }
     const latencyMs = Date.now() - started;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
