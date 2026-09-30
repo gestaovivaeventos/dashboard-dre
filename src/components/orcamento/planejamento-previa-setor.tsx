@@ -459,16 +459,6 @@ function LinhaItem({
           >
             {item.nome}
           </span>
-          {parcelas && (
-            <span
-              className={cn(
-                "block text-[10px] text-muted-foreground/70",
-                item.estado === "reprovado" && "opacity-70",
-              )}
-            >
-              {parcelas}
-            </span>
-          )}
           {item.comentario && (
             <span className="mt-0.5 block text-sky-700">
               <MessageSquare className="mr-1 inline h-3 w-3 align-[-2px]" />
@@ -479,6 +469,12 @@ function LinhaItem({
       </span>
 
       <span className="flex shrink-0 items-center gap-1">
+        {/* Antes do valor, e não embaixo do nome: é leitura DO NÚMERO — "R$ 665,00
+            em 7 parcelas" — e fica na mesma varredura vertical de quem confere
+            a coluna de valores. */}
+        {parcelas && (
+          <span className="mr-1 text-[10px] text-muted-foreground/70">{parcelas}</span>
+        )}
         <span className="tabular-nums">{formatBRL(item.total)}</span>
         {decidivel && (
           <span className="flex items-center gap-0.5">
