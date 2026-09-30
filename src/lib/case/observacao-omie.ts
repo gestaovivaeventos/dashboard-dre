@@ -15,8 +15,12 @@ export interface ObsTitulo {
   parcela_total: number;
   vencimento: string;
   valor: number;
-  /** Nome de quem recebe o pagamento (atração/fornecedor); só a pagar. */
+  /** Nome de quem recebe o pagamento (cadastro do favorecido); só a pagar. */
   parceiro?: string | null;
+  /** Nome artístico da atração, quando difere do favorecido; só a pagar. */
+  atracao?: string | null;
+  /** id da atração/fornecedor do contrato: agrupa as parcelas de um mesmo favorecido. */
+  entidade?: string | null;
   /** rider_camarim | comissao_externa | comissao_rider; ausente = atração. */
   fornecedor_tipo?: string | null;
 }
@@ -58,11 +62,11 @@ function porVencimento(a: ObsTitulo, b: ObsTitulo) {
 
 /** Soma por parceiro+tipo, preservando a ordem da primeira aparição. */
 function agruparPagar(titulos: ObsTitulo[]) {
-  const grupos = new Map<string, { nome: string; tipo: string | null; total: number; parcelas: ObsTitulo[] }>();
+  const grupos = new Map<string, { nome: string; tipo: string | null; atracao: string | null; total: number; parcelas: ObsTitulo[] }>();
   for (const t of titulos) {
     const nome = t.parceiro?.trim() || "-";
-    const chave = `${t.fornecedor_tipo ?? "atracao"}|${nome}`;
-    const g = grupos.get(chave) ?? { nome, tipo: t.fornecedor_tipo ?? null, total: 0, parcelas: [] };
+    const chave = t.entidade ?? `${t.fornecedor_tipo ?? "atracao"}|${nome}`;
+    const g = grupos.get(chave) ?? { nome, tipo: t.fornecedor_tipo ?? null, atracao: t.atracao?.trim() || null, total: 0, parcelas: [] };
     g.total = round2(g.total + Number(t.valor));
     g.parcelas.push(t);
     grupos.set(chave, g);
@@ -70,15 +74,18 @@ function agruparPagar(titulos: ObsTitulo[]) {
   return Array.from(grupos.values());
 }
 
+/** "Banda Lucky (favorecido: FORMULA 7 LTDA)" quando o nome artístico difere do cadastro. */
+function rotuloAtracao(atracao: string | null | undefined, favorecido: string): string {
+  const a = atracao?.trim();
+  return a && a.toLowerCase() !== favorecido.toLowerCase() ? `${a} (favorecido: ${favorecido})` : favorecido;
+}
+
 const parcelasTexto = (ps: ObsTitulo[]) =>
   ps.length > 1 ? ` (${[...ps].sort(porVencimento).map((p) => `${fmtDate(p.vencimento)} ${fmtBRL(p.valor)}`).join("; ")})` : ` venc. ${fmtDate(ps[0].vencimento)}`;
 
-export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): string {
+/** Identificação do contrato — igual no a receber e no a pagar. */
+function linhasContrato(c: ObsContrato): string[] {
   const linhas: string[] = [];
-
-  linhas.push(
-    `Contrato Case nº ${c.contract_number} - parcela ${titulo.parcela_numero}/${titulo.parcela_total} (${LEG_RECEBER[titulo.leg] ?? titulo.leg})`,
-  );
   linhas.push(`Fundo: ${c.fundo.trim() || "-"}`);
   const onde = [c.local_name, c.local_city].map((s) => s?.trim()).filter(Boolean).join(", ");
   linhas.push(`Evento: ${c.event_name?.trim() || "-"}`);
@@ -87,6 +94,16 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
   if (c.show_time?.trim()) linhas.push(`Horário: ${c.show_time.trim()}`);
   if (onde) linhas.push(`Local: ${onde}`);
   linhas.push(`Atrações: ${c.atracoes.length > 0 ? c.atracoes.join(", ") : "-"}`);
+  return linhas;
+}
+
+export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): string {
+  const linhas: string[] = [];
+
+  linhas.push(
+    `Contrato Case nº ${c.contract_number} - parcela ${titulo.parcela_numero}/${titulo.parcela_total} (${LEG_RECEBER[titulo.leg] ?? titulo.leg})`,
+  );
+  linhas.push(...linhasContrato(c));
 
   const extras = [
     c.valor_rider > 0 ? `rider ${fmtBRL(c.valor_rider)}` : "",
@@ -116,7 +133,7 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
     linhas.push("");
     linhas.push("PAGAMENTOS:");
     for (const g of pagamentos) {
-      const rotulo = g.tipo ? `${TIPO_PAGAR[g.tipo] ?? g.tipo} - ${g.nome}` : `Atração ${g.nome}`;
+      const rotulo = g.tipo ? `${TIPO_PAGAR[g.tipo] ?? g.tipo} - ${g.nome}` : `Atração ${rotuloAtracao(g.atracao, g.nome)}`;
       linhas.push(`- ${rotulo}: ${fmtBRL(g.total)}${parcelasTexto(g.parcelas)}`);
     }
   }
@@ -132,5 +149,34 @@ export function buildObservacaoReceber(c: ObsContrato, titulo: ObsTitulo): strin
     linhas.push(`- BV Case (recebido - saídas): ${fmtBRL(round2(totalReceber - totalPagar))}`);
   }
 
+  return linhas.join("\n");
+}
+
+/**
+ * Observação de um título A PAGAR: quem recebe (atração pelo nome artístico +
+ * favorecido, ou o tipo do fornecedor), a identificação do contrato e o
+ * cronograma completo deste favorecido. Não traz o que o cliente paga nem o
+ * BV — é o documento do pagamento, não do contrato.
+ */
+export function buildObservacaoPagar(c: ObsContrato, titulo: ObsTitulo): string {
+  const favorecido = titulo.parceiro?.trim() || "-";
+  const linhas: string[] = [];
+  linhas.push(`Contrato Case nº ${c.contract_number} - pagamento ${titulo.parcela_numero}/${titulo.parcela_total}`);
+  linhas.push(
+    titulo.fornecedor_tipo
+      ? `${TIPO_PAGAR[titulo.fornecedor_tipo] ?? titulo.fornecedor_tipo}: ${favorecido}`
+      : `Atração: ${rotuloAtracao(titulo.atracao, favorecido)}`,
+  );
+  linhas.push(...linhasContrato(c));
+
+  const mesmos = c.titulos
+    .filter((t) => t.leg === "pagar_custodia" && (titulo.entidade ? t.entidade === titulo.entidade : t.parceiro === titulo.parceiro))
+    .sort(porVencimento);
+  if (mesmos.length > 0) {
+    const total = round2(mesmos.reduce((a, t) => a + Number(t.valor), 0));
+    linhas.push("");
+    linhas.push(`PAGAMENTOS A ESTE FAVORECIDO (total ${fmtBRL(total)}):`);
+    for (const t of mesmos) linhas.push(`- ${t.parcela_numero}/${t.parcela_total}: ${fmtBRL(t.valor)} venc. ${fmtDate(t.vencimento)}`);
+  }
   return linhas.join("\n");
 }

@@ -290,11 +290,11 @@ async function prepareForSignature(db: DB, userId: string, contractId: string): 
   // informado na aba Cliente; artistas podem ser vinculados depois (aba Atração).
   const { data: atrs } = await db
     .from("case_contract_atracoes")
-    .select("case_bands(name)")
+    .select("nome_atracao, case_bands(name)")
     .eq("contract_id", contractId)
     .order("created_at");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const artistaNomes = ((atrs ?? []) as any[]).map((a) => a.case_bands?.name).filter(Boolean).join(", ");
+  const artistaNomes = ((atrs ?? []) as any[]).map((a) => a.nome_atracao || a.case_bands?.name).filter(Boolean).join(", ");
 
   const pdfData: ContractPdfData = {
     contractNumber: c.contract_number,
@@ -568,6 +568,7 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true; war
   const row = {
     contract_id: contract.id,
     band_id: bandId,
+    nome_atracao: input.nome_atracao?.trim() || null,
     attachment_path: input.attachment_path ?? null,
     valor_artista: valorArtista,
     pagar_schedule: valorArtista > 0 ? parcelas : null,
@@ -587,7 +588,7 @@ export async function salvarAtracao(input: Etapa2Input): Promise<{ ok: true; war
 
   await db.from("case_history").insert({
     contract_id: contract.id, user_id: ctx.id, action: "etapa2",
-    comment: `Atração ${input.band.name} salva — R$ ${valorArtista.toFixed(2)} (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
+    comment: `Atração ${input.nome_atracao?.trim() || input.band.name} salva — R$ ${valorArtista.toFixed(2)} (total às atrações: R$ ${rec.totalArtista.toFixed(2)}).`,
   });
 
   // Contrato assinado → despesa lança imediatamente no Omie (custódia).

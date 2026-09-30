@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildObservacaoReceber, type ObsContrato, type ObsTitulo } from "./observacao-omie";
+import { buildObservacaoPagar, buildObservacaoReceber, type ObsContrato, type ObsTitulo } from "./observacao-omie";
 
 const receber1: ObsTitulo = { leg: "receber_custodia", parcela_numero: 1, parcela_total: 2, vencimento: "2026-10-01", valor: 5000 };
 const receber2: ObsTitulo = { leg: "receber_custodia", parcela_numero: 2, parcela_total: 2, vencimento: "2026-11-01", valor: 5000 };
@@ -67,4 +67,26 @@ test("evento sem data não quebra a linha", () => {
 
 test("sem travessão: a Omie apaga o caractere", () => {
   assert.doesNotMatch(buildObservacaoReceber(base, receber1), /—|−/);
+});
+
+test("a pagar: nome da atração + favorecido, contrato e o cronograma só deste favorecido", () => {
+  const p1: ObsTitulo = { leg: "pagar_custodia", parcela_numero: 1, parcela_total: 2, vencimento: "2026-12-01", valor: 3000, parceiro: "FORMULA 7 LTDA", atracao: "Banda Lucky", entidade: "a1" };
+  const p2: ObsTitulo = { ...p1, parcela_numero: 2, vencimento: "2026-12-13" };
+  const outro: ObsTitulo = { leg: "pagar_custodia", parcela_numero: 1, parcela_total: 1, vencimento: "2026-12-13", valor: 500, parceiro: "Minas Fest", fornecedor_tipo: "comissao_externa", entidade: "f1" };
+  const c: ObsContrato = { ...base, titulos: [receber1, receber2, p1, p2, outro] };
+
+  const obs = buildObservacaoPagar(c, p1);
+  assert.match(obs, /^Contrato Case nº 42 - pagamento 1\/2\nAtração: Banda Lucky \(favorecido: FORMULA 7 LTDA\)\nFundo: /);
+  assert.match(obs, /Data do evento: 12\/12\/2026/);
+  assert.match(obs, /PAGAMENTOS A ESTE FAVORECIDO \(total R\$ 6\.000,00\):\n- 1\/2: R\$ 3\.000,00 venc\. 01\/12\/2026\n- 2\/2/);
+  assert.doesNotMatch(obs, /Minas Fest|RECEBIMENTOS|BV Case/);
+
+  assert.match(buildObservacaoPagar(c, outro), /\nComissão Comercial - Externa: Minas Fest\n/);
+  // No a receber, a atração aparece pelo nome artístico.
+  assert.match(buildObservacaoReceber(c, receber1), /- Atração Banda Lucky \(favorecido: FORMULA 7 LTDA\): R\$ 6\.000,00/);
+});
+
+test("a pagar sem nome artístico usa o cadastro, sem repetir", () => {
+  const p: ObsTitulo = { leg: "pagar_custodia", parcela_numero: 1, parcela_total: 1, vencimento: "2026-12-01", valor: 100, parceiro: "LABANDA", entidade: "a2" };
+  assert.match(buildObservacaoPagar({ ...base, titulos: [p] }, p), /\nAtração: LABANDA\n/);
 });

@@ -17,7 +17,7 @@ import { incluirContaPagar, ensureProjetoByNome, toOmieDate } from "@/lib/omie/c
 import { incluirContaReceber, alterarContaReceberCategorias, consultarContaReceberCategorias } from "@/lib/omie/contareceber";
 import { incluirAnexoContaPagar, incluirAnexoContaReceber } from "@/lib/omie/anexo";
 import { ensureContractTitles } from "@/lib/case/titles";
-import { buildObservacaoReceber, type ObsContrato } from "@/lib/case/observacao-omie";
+import { buildObservacaoPagar, buildObservacaoReceber, type ObsContrato, type ObsTitulo } from "@/lib/case/observacao-omie";
 import type { CaseLegKind } from "@/lib/case/types";
 
 const ATTACHMENT_BUCKET = "case-attachments";
@@ -59,17 +59,12 @@ interface BandInfo {
 interface AtracaoInfo {
   id: string;
   attachment_path: string | null;
+  /** Nome artístico no contrato (só atrações); null = nome do cadastro. */
+  nome_atracao?: string | null;
   band: BandInfo;
   /** Só fornecedores: rider_camarim | comissao_externa | comissao_rider. */
   tipo?: string;
 }
-
-const SERVICO_LABEL: Record<string, string> = {
-  margem: "Comissão/BV",
-  rider: "Rider",
-  camarim: "Camarim",
-  extras: "Extras",
-};
 
 async function markContractError(db: DB, contractId: string, message: string): Promise<LaunchResult> {
   await db.from("case_contracts").update({ status: "erro", updated_at: new Date().toISOString() }).eq("id", contractId);
@@ -145,7 +140,7 @@ export async function launchContractToOmie(
     db.from("case_clients").select("*").eq("id", contract.client_id).single(),
     db
       .from("case_contract_atracoes")
-      .select("id, attachment_path, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
+      .select("id, nome_atracao, attachment_path, case_bands(id, name, cnpj_cpf, email, phone, banco, agencia, conta_corrente, titular_banco, doc_titular, chave_pix, omie_codigo)")
       .eq("contract_id", contractId)
       .order("created_at"),
     db
@@ -160,7 +155,7 @@ export async function launchContractToOmie(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const atracoes: AtracaoInfo[] = ((atracoesData ?? []) as any[])
     .filter((a) => a.case_bands)
-    .map((a) => ({ id: a.id, attachment_path: a.attachment_path, band: a.case_bands }));
+    .map((a) => ({ id: a.id, nome_atracao: a.nome_atracao ?? null, attachment_path: a.attachment_path, band: a.case_bands }));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fornecedores: AtracaoInfo[] = ((fornecedoresData ?? []) as any[])
     .filter((f) => f.case_bands)
@@ -298,7 +293,22 @@ export async function launchContractToOmie(
     .from("case_titles")
     .select("leg, parcela_numero, parcela_total, vencimento, valor, atracao_id, fornecedor_id")
     .eq("contract_id", contractId);
-  const nomesAtracoes = atracoes.map((a) => a.band.name);
+  const nomesAtracoes = atracoes.map((a) => a.nome_atracao || a.band.name);
+  const toObs = (t: Pick<TitleRow, "leg" | "parcela_numero" | "parcela_total" | "vencimento" | "valor" | "atracao_id" | "fornecedor_id">): ObsTitulo => {
+    const forn = t.fornecedor_id ? fornecedorById.get(t.fornecedor_id) : undefined;
+    const atr = forn ? undefined : (t.atracao_id ? atracaoById.get(t.atracao_id) : undefined) ?? primeiraAtracao ?? undefined;
+    return {
+      leg: t.leg,
+      parcela_numero: t.parcela_numero,
+      parcela_total: t.parcela_total,
+      vencimento: t.vencimento,
+      valor: Number(t.valor),
+      parceiro: (forn ?? atr)?.band.name ?? null,
+      atracao: atr?.nome_atracao ?? null,
+      entidade: forn?.id ?? atr?.id ?? null,
+      fornecedor_tipo: forn?.tipo ?? null,
+    };
+  };
   const obsContrato: ObsContrato = {
     contract_number: Number(contract.contract_number),
     fundo: client.name,
@@ -312,20 +322,7 @@ export async function launchContractToOmie(
     valor_rider: Number(contract.valor_rider) || 0,
     valor_camarim: Number(contract.valor_camarim) || 0,
     valor_extras: Number(contract.valor_extras) || 0,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    titulos: ((todosTitulos ?? []) as any[]).map((t) => {
-      const forn = t.fornecedor_id ? fornecedorById.get(t.fornecedor_id) : undefined;
-      const atr = t.atracao_id ? atracaoById.get(t.atracao_id) : undefined;
-      return {
-        leg: t.leg,
-        parcela_numero: t.parcela_numero,
-        parcela_total: t.parcela_total,
-        vencimento: t.vencimento,
-        valor: Number(t.valor),
-        parceiro: forn?.band.name ?? (atr ?? primeiraAtracao)?.band.name ?? null,
-        fornecedor_tipo: forn?.tipo ?? null,
-      };
-    }),
+    titulos: ((todosTitulos ?? []) as TitleRow[]).map(toObs),
   };
   const anexadoPorChave = new Set<string>();
   let anyOk = false;
@@ -358,9 +355,6 @@ export async function launchContractToOmie(
     }
     const codigoParceiro = isPagar ? bandCodigoByEntidade.get(entidade!.id)! : clientCodigo!;
     const venc = toOmieDate(t.vencimento);
-    const itemLabel = t.title_item ? ` - ${SERVICO_LABEL[t.title_item] ?? t.title_item}` : "";
-    const parceiroNome = isPagar ? entidade!.band.name : (primeiraAtracao?.band.name ?? "atrações");
-    const observacao = `Contrato Case ${parceiroNome} x ${client.name}${itemLabel} (parcela ${t.parcela_numero}/${t.parcela_total})`;
     // Limites do Omie: codigo_lancamento_integracao ≤ 60 (títulos antigos podem
     // ter código longo — cai para o id do título, único e estável) e
     // numero_documento ≤ 20 (usa rótulo curto com o nº do contrato).
@@ -381,7 +375,7 @@ export async function launchContractToOmie(
           distribuicao: [],
           id_conta_corrente: idContaCorrente,
           codigo_projeto: codigoProjeto,
-          observacao,
+          observacao: buildObservacaoPagar(obsContrato, toObs(t)),
           numero_documento: numeroDocumento,
         });
         omieCodigo = codigoLancamentoOmie;
@@ -397,7 +391,7 @@ export async function launchContractToOmie(
           id_conta_corrente: idContaCorrente,
           numero_documento: numeroDocumento,
           numero_parcela: `${t.parcela_numero}/${t.parcela_total}`,
-          observacao: buildObservacaoReceber(obsContrato, t),
+          observacao: buildObservacaoReceber(obsContrato, toObs(t)),
           codigo_projeto: codigoProjeto,
         });
         omieCodigo = codigoLancamentoOmie;

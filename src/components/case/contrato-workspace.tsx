@@ -122,7 +122,7 @@ export function ContratoWorkspace({ detail, bands, fornecedorBands, isApprover }
         <div>
           <button onClick={() => router.push("/case/contratos")} className="text-sm text-ink-muted hover:text-ink-primary">← Contratos</button>
           <h1 className="mt-1 text-xl font-semibold text-ink-primary">
-            Contrato #{detail.contract_number} — {detail.atracoes.length > 0 ? detail.atracoes.map((a) => a.band_name).join(", ") : detail.event_name ?? detail.band.name}
+            Contrato #{detail.contract_number} — {detail.atracoes.length > 0 ? detail.atracoes.map((a) => a.nome_atracao || a.band_name).join(", ") : detail.event_name ?? detail.band.name}
           </h1>
           <p className="text-sm text-ink-muted">Cliente: {detail.client.name} · {detail.event_name ?? "evento"} · {dateBR(detail.event_date)}</p>
           <p className="text-sm text-ink-muted">
@@ -492,7 +492,8 @@ function AtracaoTab({ detail, bands, fornecedorBands, onChange }: { detail: Cont
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/70 px-3 py-2">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-ink-primary">
-                      {a.band_name}
+                      {a.nome_atracao || a.band_name}
+                      {a.nome_atracao && a.nome_atracao !== a.band_name && <span className="ml-2 text-xs text-ink-muted">favorecido: {a.band_name}</span>}
                       {a.band_cnpj_cpf && <span className="ml-2 text-xs text-ink-muted">{a.band_cnpj_cpf}</span>}
                     </div>
                     <div className="text-xs text-ink-muted">
@@ -875,6 +876,7 @@ function AtracaoForm({
 }) {
   const [bandMode, setBandMode] = useState<"existing" | "new">(atracao || bands.length ? "existing" : "new");
   const [bandId, setBandId] = useState<string>(atracao?.band_id ?? "");
+  const [nomeAtracao, setNomeAtracao] = useState(atracao?.nome_atracao ?? "");
   const [band, setBand] = useState<BandCadastro>(emptyBandCadastro());
   const patchBand = (p: Partial<BandCadastro>) => setBand((v) => ({ ...v, ...p }));
   // Cadastro já existente pode ser corrigido aqui (o caso comum é faltar dado
@@ -1012,6 +1014,7 @@ function AtracaoForm({
       contract_id: detail.id,
       atracao_id: atracao?.id ?? null,
       band: buildBandInput(),
+      nome_atracao: nomeAtracao.trim() || null,
       valor_artista: valArtista > 0 ? valArtista : undefined,
       parcelas_pagar: valArtista > 0 ? parcelas.filter((p) => p.vencimento && parseBRL(p.valorStr) > 0).map((p) => ({ vencimento: p.vencimento, valor: parseBRL(p.valorStr) })) : undefined,
       attachment_path: attachmentPath,
@@ -1025,11 +1028,16 @@ function AtracaoForm({
   return (
     <section className="space-y-3 rounded-lg border border-amber-500/40 bg-surface-1 p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-ink-primary">{atracao ? `Editar atração — ${atracao.band_name}` : "Nova atração"}</h2>
+        <h2 className="text-sm font-semibold text-ink-primary">{atracao ? `Editar atração — ${atracao.nome_atracao || atracao.band_name}` : "Nova atração"}</h2>
         <div className="flex gap-1 text-xs">
           <button type="button" onClick={() => setBandMode("existing")} disabled={!bands.length} className={`rounded px-2 py-1 ${bandMode === "existing" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"} disabled:opacity-40`}>Selecionar</button>
           <button type="button" onClick={() => setBandMode("new")} className={`rounded px-2 py-1 ${bandMode === "new" ? "bg-amber-600 text-white" : "text-ink-muted hover:bg-surface-2"}`}>+ Novo</button>
         </div>
+      </div>
+      <div>
+        <label className={LABEL_CLS}>Nome da atração (como aparece no evento)</label>
+        <input value={nomeAtracao} onChange={(e) => setNomeAtracao(e.target.value)} placeholder="Ex.: Banda Lucky (vazio = nome do cadastro)" className={INPUT_CLS} />
+        <p className="mt-1 text-xs text-ink-muted">O cadastro abaixo é quem recebe o pagamento (pode ser a empresa da banda). Este nome vai na observação do contas a pagar na Omie.</p>
       </div>
       {bandMode === "existing" ? (
         <div className="space-y-2">

@@ -185,7 +185,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
       .order("parcela_numero"),
     db
       .from("case_contract_atracoes")
-      .select("id, band_id, attachment_path, valor_artista, pagar_schedule, case_bands(name, cnpj_cpf)")
+      .select("id, band_id, nome_atracao, attachment_path, valor_artista, pagar_schedule, case_bands(name, cnpj_cpf)")
       .eq("contract_id", id)
       .order("created_at"),
     db
@@ -200,6 +200,7 @@ export async function getContractDetail(id: string): Promise<ContractDetail | nu
     id: a.id,
     band_id: a.band_id,
     band_name: a.case_bands?.name ?? "—",
+    nome_atracao: a.nome_atracao ?? null,
     band_cnpj_cpf: a.case_bands?.cnpj_cpf ?? null,
     attachment_path: a.attachment_path,
     valor_artista: Number(a.valor_artista),

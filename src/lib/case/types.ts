@@ -167,6 +167,12 @@ export interface Etapa2Input {
   atracao_id?: string | null;
   /** Identidade do artista/atração (seleção ou cadastro na própria aba). */
   band: CaseBandInput;
+  /**
+   * Nome artístico da atração neste contrato. O cadastro (`band`) é o
+   * favorecido do pagamento — muitas vezes a empresa (ex.: "FORMULA 7 LTDA"),
+   * não o nome da atração. Vazio = usa o nome do cadastro.
+   */
+  nome_atracao?: string | null;
   /** Contrato do artista (fonte do OCR), já no bucket. */
   attachment_path?: string | null;
   /** Pagamento — opcional: dá pra salvar só banda+anexo e informar valor depois. */
@@ -179,6 +185,8 @@ export interface CaseAtracaoRow {
   id: string;
   band_id: string;
   band_name: string;
+  /** Nome artístico neste contrato; null = mesmo do cadastro. */
+  nome_atracao: string | null;
   band_cnpj_cpf: string | null;
   attachment_path: string | null;
   valor_artista: number;
