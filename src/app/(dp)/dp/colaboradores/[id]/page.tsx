@@ -7,7 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTimeBR, formatDayBR } from "@/lib/ctrl/datetime";
 import { getDpUser } from "@/lib/dp/auth";
 import { MOTIVO_SEM_EMPRESA } from "@/lib/dp/empresa";
-import { DpNaoInstaladoError, getDpColaborador } from "@/lib/dp/queries";
+import { descreverEvento } from "@/lib/dp/historico";
+import {
+  DpNaoInstaladoError,
+  getDpColaborador,
+  listDpAcessos,
+  listDpEventosDoColaborador,
+  registrarAcessoFicha,
+} from "@/lib/dp/queries";
 import { formatBRL } from "@/lib/orcamento/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -29,14 +36,23 @@ export default async function DpColaboradorPage({ params }: { params: { id: stri
   if (!user) redirect("/");
   if (!UUID.test(params.id)) notFound();
 
+  const db = createAdminClient();
   let c;
   try {
-    c = await getDpColaborador(createAdminClient(), params.id);
+    c = await getDpColaborador(db, params.id);
   } catch (error) {
     if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
     throw error;
   }
   if (!c) notFound();
+
+  // A ficha mostra salário, CPF e endereço: toda abertura fica registrada, ANTES
+  // de ler os acessos — assim a própria visita aparece na lista.
+  await registrarAcessoFicha(db, user.id, c.id);
+  const [eventos, acessos] = await Promise.all([
+    listDpEventosDoColaborador(db, c.solidesId),
+    listDpAcessos(db, c.id),
+  ]);
 
   const end = c.endereco;
   const enderecoLinhas = end
@@ -116,6 +132,52 @@ export default async function DpColaboradorPage({ params }: { params: { id: stri
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Histórico de movimentações</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          {eventos === null ? (
+            <p className="text-ink-muted">Histórico ainda não instalado no banco (migration 20261001160000).</p>
+          ) : eventos.length === 0 ? (
+            <p className="text-ink-muted">Nenhuma mudança percebida desde que o histórico começou a ser registrado.</p>
+          ) : (
+            <ul className="space-y-1">
+              {eventos.map((e) => (
+                <li key={e.id} className="flex flex-wrap gap-x-3">
+                  <span className="w-32 shrink-0 tabular-nums text-ink-muted">{formatDateTimeBR(e.detectadoEm)}</span>
+                  <span className="text-ink-primary">{descreverEvento({ tipo: e.tipo, campo: e.campo, valor_anterior: e.valorAnterior, valor_novo: e.valorNovo })}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-ink-muted">
+            A data é a de quando a sincronização diária percebeu a mudança na Sólides, não a data em que ela passou a valer.
+            Mudanças anteriores a 01/10/2026 não foram registradas.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Quem abriu esta ficha</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          {acessos === null ? (
+            <p className="text-ink-muted">Registro de acessos ainda não instalado no banco (migration 20261001160000).</p>
+          ) : (
+            <ul className="space-y-1">
+              {acessos.map((a, i) => (
+                <li key={`${a.createdAt}-${i}`} className="flex flex-wrap gap-x-3">
+                  <span className="w-32 shrink-0 tabular-nums text-ink-muted">{formatDateTimeBR(a.createdAt)}</span>
+                  <span className="text-ink-primary">{a.userName || a.userEmail || "Usuário removido"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <p className="text-xs text-ink-muted">
         Dados bancários, documentos e filiação ficam só na Sólides. Ficha lida da Sólides em{" "}

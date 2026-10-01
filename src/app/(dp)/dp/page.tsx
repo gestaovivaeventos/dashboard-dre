@@ -4,8 +4,10 @@ import { redirect } from "next/navigation";
 import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { DpSyncPanel } from "@/components/dp/sync-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { getDpUser } from "@/lib/dp/auth";
-import { DpNaoInstaladoError, lastDpSyncRun, listDpColaboradores } from "@/lib/dp/queries";
+import { descreverEvento } from "@/lib/dp/historico";
+import { DpNaoInstaladoError, lastDpSyncRun, listDpColaboradores, listDpEventosRecentes } from "@/lib/dp/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +21,13 @@ export default async function DpOverviewPage() {
   const db = createAdminClient();
   let loaded;
   try {
-    loaded = await Promise.all([listDpColaboradores(db), lastDpSyncRun(db)]);
+    const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    loaded = await Promise.all([listDpColaboradores(db), lastDpSyncRun(db), listDpEventosRecentes(db, desde)]);
   } catch (error) {
     if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
     throw error;
   }
-  const [rows, lastRun] = loaded;
+  const [rows, lastRun, eventos] = loaded;
 
   const ativos = rows.filter((r) => r.ativo);
   const semEmpresa = ativos.filter((r) => !r.companyName).length;
@@ -78,6 +81,38 @@ export default async function DpOverviewPage() {
           </CardContent>
         </Card>
       )}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Movimentações dos últimos 30 dias</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          {eventos === null ? (
+            <p className="text-ink-muted">Histórico ainda não instalado no banco (migration 20261001160000).</p>
+          ) : eventos.length === 0 ? (
+            <p className="text-ink-muted">
+              Nenhuma movimentação percebida. O histórico registra o que muda na Sólides a partir de 01/10/2026.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {eventos.map((e) => (
+                <li key={e.id} className="flex flex-wrap gap-x-3">
+                  <span className="w-32 shrink-0 tabular-nums text-ink-muted">{formatDateTimeBR(e.detectadoEm)}</span>
+                  {e.colaboradorId ? (
+                    <Link href={`/dp/colaboradores/${e.colaboradorId}`} className="font-medium text-ink-primary hover:underline">
+                      {e.nome}
+                    </Link>
+                  ) : (
+                    <span className="font-medium text-ink-primary">{e.nome ?? "—"}</span>
+                  )}
+                  <span className="text-ink-muted">
+                    {descreverEvento({ tipo: e.tipo, campo: e.campo, valor_anterior: e.valorAnterior, valor_novo: e.valorNovo })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

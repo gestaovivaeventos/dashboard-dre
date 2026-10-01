@@ -242,7 +242,7 @@ export function ViagemEntrevista({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">
           <Sparkles className="h-4 w-4 text-muted-foreground" />
-          Montar conversando
+          Agente de viagem
         </h3>
         {mensagens.length > 0 && podeEscrever && (
           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => void recomecar()}>
@@ -253,11 +253,18 @@ export function ViagemEntrevista({
       </div>
 
       {vazia && (
-        <p className="text-xs text-muted-foreground">
-          Descreva a viagem como você a explicaria a um colega — para que serve, para onde, quando e
-          quem vai. A IA levanta o roteiro e propõe o preenchimento; o <strong>custo</strong> é
-          calculado pelo sistema, não por ela.
-        </p>
+        <div className="space-y-1.5 text-xs text-muted-foreground">
+          <p>
+            Diga só o essencial: <strong>para onde</strong>, <strong>quantos dias</strong>,{" "}
+            <strong>quantas pessoas</strong>, se <strong>dividem quarto</strong>, se{" "}
+            <strong>voltam direto</strong> — e a data da ida.
+          </p>
+          <p>
+            O resto é trabalho do agente: ele pesquisa passagem e hotel na web, compara as formas de
+            ir, confere se não vale juntar com outra viagem já orçada e preenche os campos. O{" "}
+            <strong>custo final</strong> é recalculado pelo sistema ao salvar.
+          </p>
+        </div>
       )}
 
       {/* ── A conversa ── */}
@@ -333,7 +340,7 @@ export function ViagemEntrevista({
           )}
 
           <p className="text-xs text-muted-foreground">
-            Isto só preenche o formulário acima. O custo aparece depois de “Salvar e calcular”.
+            Isto preenche os campos do roteiro. O custo aparece depois de “Salvar e calcular”.
           </p>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => void aplicar(cartao)} disabled={streaming}>
@@ -371,7 +378,7 @@ export function ViagemEntrevista({
             disabled={streaming}
             placeholder={
               mensagens.length === 0
-                ? "Ex.: preciso levar duas pessoas a Curitiba e Florianópolis em maio para treinar as equipes novas"
+                ? "Ex.: duas pessoas a Curitiba, 3 dias, dividindo quarto, voltando direto, saindo em 4 de maio — treinar a equipe da unidade nova"
                 : "Responda aqui…"
             }
             className="min-h-[2.5rem] flex-1 resize-y rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"

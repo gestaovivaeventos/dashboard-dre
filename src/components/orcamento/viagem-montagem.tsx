@@ -5,6 +5,8 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Info,
   Loader2,
   Plus,
@@ -159,6 +161,8 @@ export function ViagemMontagem({
   const [previa, setPrevia] = useState<PreviaSetorResumo | null>(null);
   const [carregandoPrevia, setCarregandoPrevia] = useState(false);
   const [conversa, setConversa] = useState<MensagemViagem[]>([]);
+  // O formulário nasce FECHADO: quem preenche é a IA.
+  const [formAberto, setFormAberto] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [resultadoBusca, setResultadoBusca] = useState<{
     aplicados: string[];
@@ -419,6 +423,32 @@ export function ViagemMontagem({
             onConversaMudou={() => void carregarConversa()}
           />
 
+          {/* ── O FORMULÁRIO: resultado da conversa, não trabalho do usuário ──
+              Recolhido por padrão (01/10/2026, pedido do dono do projeto): a IA é
+              que preenche estes campos, e um formulário de ~40 campos aberto na
+              frente convida a digitar — exatamente o que o agente veio evitar.
+              Fica a um clique porque corrigir uma linha tem de ser possível; o que
+              não pode é ele parecer o caminho principal. */}
+          <div className="rounded-lg border">
+            <button
+              type="button"
+              onClick={() => setFormAberto((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm"
+            >
+              <span>
+                <span className="font-semibold">Campos do roteiro</span>{" "}
+                <span className="text-muted-foreground">
+                  — preenchidos pela IA. Abra só se quiser ajustar algo à mão.
+                </span>
+              </span>
+              {formAberto ? (
+                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+            </button>
+            {formAberto && (
+              <div className="space-y-4 border-t p-3">
           <section className="space-y-3 rounded-lg border p-4">
             <h3 className="text-sm font-semibold">A viagem</h3>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -817,6 +847,9 @@ export function ViagemMontagem({
               </div>
             ))}
           </section>
+              </div>
+            )}
+          </div>
 
           {/* ── Ações ── */}
           {editavel && (

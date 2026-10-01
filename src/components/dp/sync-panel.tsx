@@ -26,6 +26,7 @@ export function DpSyncPanel({ lastRun }: { lastRun: DpSyncRun | null }) {
           title: "Cadastro atualizado",
           description:
             `${d.lista} colaboradores ativos na Sólides · ${d.novos} novo(s) · ${d.desligados} desligado(s)` +
+            (d.eventos ? ` · ${d.eventos} movimentação(ões) no histórico` : "") +
             (d.fichasErro ? ` · ${d.fichasErro} ficha(s) com erro` : ""),
           variant: "success",
         });

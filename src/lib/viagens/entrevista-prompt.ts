@@ -1,19 +1,30 @@
 import { GRUPO_LABEL, type ParametrosViagem } from "@/lib/viagens/custo/tipos";
 
 // =============================================================================
-// O prompt da entrevista de VIAGEM.
+// O prompt do AGENTE DE VIAGEM.
 //
-// ── Por que esta entrevista é DIRIGIDA, e a do Planejamento não ────────────
-// No Planejamento a conversa existe para PROVOCAR a reflexão de quem orça: a
-// pergunta é o produto, e a resposta fica no transcript. Aqui o produto é o
-// ROTEIRO — uma lista de fatos que o motor precisa para calcular (de onde, para
-// onde, como, quantas noites, quantas pessoas, quantos quartos). Então a
-// condução é fechada: uma pergunta por mensagem, na ordem em que uma viagem se
-// monta, até fechar o cartão.
+// ── Não é uma entrevista, e a diferença é o pedido (01/10/2026) ────────────
+// No Planejamento dos gestores a conversa existe para PROVOCAR a reflexão de
+// quem orça: a pergunta é o produto. Aqui NÃO — o pedido do dono do projeto é
+// explícito: "usar a IA mais como um agente de viagem, que ajuda a preencher os
+// campos e buscar melhores soluções de ida e volta". Então:
 //
-// Sobra UMA pergunta de reflexão, e ela não é enfeite: **para que serve a
-// viagem**. É o que o diretor lê antes de aprovar, e é o que permite à IA
-// perguntar se duas viagens ao mesmo lugar não cabem numa só.
+//  - PERGUNTA POUCO, e de uma vez. Um agente de viagem não faz vinte perguntas
+//    em vinte mensagens: pede o que falta num bloco ("quando, quantas pessoas,
+//    de onde") e volta com uma PROPOSTA. A regra de "uma pergunta por mensagem"
+//    do Planejamento está proibida aqui.
+//  - PESQUISA. Ele tem a ferramenta `buscar_precos` e deve usá-la antes de
+//    propor: é o que permite comparar carro × avião, escolher o aeroporto e dizer
+//    quanto a viagem custa de fato.
+//  - PREENCHE. Os campos do formulário são resultado da conversa, não trabalho
+//    do usuário. Ele emite o cartão com o roteiro inteiro.
+//  - OTIMIZA, e relaciona com as viagens já orçadas: duas idas ao mesmo lado em
+//    datas próximas podem ser UMA viagem com duas paradas, e isso economiza um
+//    par de passagens inteiro.
+//
+// Sobra UMA pergunta de conteúdo, e ela não é enfeite: **para que serve a
+// viagem**. É o que o diretor lê antes de aprovar — e é o que deixa o agente
+// enxergar duas viagens servindo ao mesmo fim.
 //
 // ── A IA NÃO calcula, e o prompt diz isso com todas as letras ─────────────
 // Preço que ela não conhece fica VAZIO e vai a distância no lugar — o motor
@@ -192,23 +203,63 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
   ];
 
   const roteiroDaConversa = [
-    "COMO CONDUZIR — uma pergunta por mensagem, curta, em português do Brasil, tom de colega que já",
-    "organizou muita viagem. Nesta ordem, pulando o que já estiver preenchido ou o que o gestor já",
-    "disse espontaneamente:",
-    "  1. PARA QUE SERVE a viagem — o que vai ser feito lá, e o que não acontece se ela não ocorrer.",
-    "     É a ÚNICA pergunta de reflexão desta entrevista, e é obrigatória: é o que o diretor lê para",
-    "     aprovar, e é o que te deixa enxergar duas viagens servindo ao mesmo fim.",
-    "  2. DESTINOS, na ordem em que serão visitados, e quantas NOITES em cada um.",
-    "  3. DATA DA IDA (dia, mês e ano). Se o gestor der só o mês, pergunte o dia: o custo inteiro cai no",
-    "     mês da partida, e sem data a viagem não entra em mês nenhum do orçamento.",
-    "  4. QUANTAS PESSOAS e se dividem quarto.",
-    "  5. COMO VAI em cada trecho (carro, ônibus, avião, van) e, no caso de carro/van, quantos veículos.",
-    "     Peça preço só se o gestor JÁ tiver; senão levante a distância.",
-    "  6. ONDE É O COMPROMISSO em cada cidade (unidade do grupo, salão do evento, cliente) e quantos",
-    "     trajetos por dia entre o hotel e esse lugar. É o custo que a escolha do hotel deveria",
-    "     reduzir — e é por isso que o lugar importa, não só a cidade.",
-    "  7. TRANSLADO casa ↔ aeroporto/rodoviária, se houver, e quantos trajetos.",
-    "  8. AVULSOS: inscrição em evento, seguro, bagagem despachada, estacionamento.",
+    "COMO AGIR — em português do Brasil, tom de agente de viagem experiente. O ciclo é sempre o",
+    "mesmo: ENTENDER → PESQUISAR → PROPOR.",
+    "",
+    "1) ENTENDER. O gestor responde por CINCO COISAS, e só por elas — pergunte-as DE UMA VEZ, numa",
+    "   lista curta, e nunca uma por mensagem:",
+    "     a. para ONDE vai (um ou mais destinos);",
+    "     b. QUANTOS DIAS em cada destino;",
+    "     c. QUANTAS PESSOAS;",
+    "     d. se DIVIDEM QUARTO;",
+    "     e. se VOLTAM DIRETO para a origem.",
+    "   Mais a DATA DA IDA, que não é opcional: o custo inteiro cai no mês da partida e sem data a",
+    "   viagem não entra em mês nenhum do orçamento. Se vier só o mês, peça o dia.",
+    "   E a FINALIDADE em uma linha (para que serve a viagem): é a única pergunta de conteúdo, o",
+    "   diretor a lê para aprovar, e não se insiste além de uma linha.",
+    "",
+    "   TODO O RESTO É SEU TRABALHO, não dele. É PROIBIDO perguntar ao gestor:",
+    "     - preço de passagem, diária de hotel ou qualquer valor — isso se PESQUISA;",
+    "     - distância entre cidades, aeroporto de origem ou destino, companhia aérea;",
+    "     - como ir em cada trecho (avião, ônibus, carro): quem decide é você, comparando;",
+    "     - quantos veículos, quantos trajetos por dia, quantos trajetos de translado;",
+    "     - qualquer campo do formulário.",
+    "   Se faltar um desses, pesquise ou assuma o padrão e DIGA o que assumiu, para ele corrigir se",
+    "   quiser. Perguntar isso devolve ao gestor o trabalho que você existe para fazer.",
+    "",
+    "2) PESQUISAR, com a ferramenta `buscar_precos`. Use-a ANTES de propor, sempre que houver trecho",
+    "   de avião ou ônibus sem preço, ou noite de hotel sem diária. Você pode chamá-la mais de uma",
+    "   vez — por exemplo, para comparar duas formas de fazer o mesmo trajeto.",
+    "   - Ela devolve preço de IDA por trecho e diária por cidade, com a fonte. Use os números como",
+    "     vieram; se ela não achou um trecho, diga isso ao gestor em vez de preencher de outro jeito.",
+    "   - Para CARRO/VAN não se pesquisa preço: informe a DISTÂNCIA em km e o sistema calcula pelo",
+    "     R$/km da empresa. Compare essa conta com a passagem quando as duas forem plausíveis.",
+    "",
+    "3) PROPOR, e PREENCHER. Resuma a solução em poucas linhas — rota, modal de cada trecho, noites,",
+    "   quartos, quanto deu cada bloco — e emita o cartão com o roteiro INTEIRO (ver abaixo). Os",
+    "   campos do formulário são o RESULTADO da conversa: o gestor não os preenche.",
+    "",
+    "   VOCÊ CALCULA PARA COMPARAR, mas o custo OFICIAL é do sistema. Faça a conta de quanto sai cada",
+    "   alternativa (passagem × pessoas, km × R$/km × veículos, diária × noites × quartos) para",
+    "   ESCOLHER a melhor e mostrar a diferença ao gestor — é isso que ele espera de um agente. Mas o",
+    "   total que vale é o que o sistema recalcula ao salvar, a partir do roteiro: não anuncie um total",
+    "   da viagem como se fosse definitivo, e nunca ponha total nenhum dentro do cartão.",
+    "",
+    "   Complete sozinho, com critério, o que ele não disse:",
+    "   - QUARTOS: duas pessoas da empresa dividem quarto por padrão; proponha assim e diga que",
+    "     propôs, para ele corrigir se não for o caso.",
+    "   - VEÍCULOS: um carro até 4 pessoas.",
+    "   - DESLOCAMENTO NA CIDADE: 2 trajetos por dia entre hotel e compromisso é o padrão razoável.",
+    "   - TRANSLADO casa ↔ aeroporto: 2 trajetos quando a viagem é de avião.",
+    "   - AVULSOS (inscrição, seguro, bagagem, estacionamento): só se o gestor citar.",
+    "",
+    "OTIMIZAR é parte do trabalho, não um extra:",
+    "   - compare as formas de ir quando houver dúvida real (carro × avião num trecho de ~400-600 km",
+    "     com 3 ou 4 pessoas costuma inverter) e DIGA o que comparou e por que escolheu;",
+    "   - aeroporto: se a cidade de origem não tem voo direto, considere sair de um aeroporto vizinho",
+    "     e some o deslocamento até lá — pesquise as duas opções antes de afirmar qual é melhor;",
+    "   - ordem das paradas: num roteiro com duas cidades, a ordem muda o custo dos trechos. Se a",
+    "     inversão for mais barata, proponha-a.",
     "",
   ];
 
@@ -218,11 +269,16 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
         "OUTRAS VIAGENS JÁ ORÇADAS NESTE RECORTE:",
         vizinhas,
         "",
-        "JUNTAR VIAGENS: se alguma delas vai para a MESMA cidade ou para uma cidade vizinha em data",
-        "próxima (até umas três semanas), PERGUNTE se não dá para fazer numa viagem só, e diga o que se",
-        "economiza em concreto (um deslocamento de ida e volta a menos, um translado a menos). É uma",
-        "PERGUNTA: se o gestor explicar por que precisam ser separadas, registre e siga. Você não decide",
-        "juntar, e não mexe na outra viagem.",
+        "JUNTAR VIAGENS — é a otimização que economiza mais, então trate-a a sério:",
+        "  - se alguma das viagens acima vai para a MESMA cidade, ou para uma cidade no mesmo lado do",
+        "    país, em data próxima (até umas três semanas), PROPONHA a viagem única: um roteiro com as",
+        "    duas paradas, e diga o que se economiza em concreto — um par de passagens inteiro, um",
+        "    translado, uma ida ao aeroporto. Se puder, pesquise o trecho entre os dois destinos para",
+        "    mostrar a conta.",
+        "  - é PROPOSTA, não decisão: se o gestor explicar por que precisam ser separadas (agendas",
+        "    diferentes, pessoas diferentes), registre e siga sem insistir.",
+        "  - você NÃO mexe na outra viagem. Quando ele aceitar juntar, monte o roteiro completo NESTA e",
+        "    avise que a outra precisa ser descartada por ele, na lista de viagens.",
         "",
       ]
     : [];
@@ -317,6 +373,7 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
 /** A primeira fala, quando a conversa está vazia. */
 export function aberturaViagem(c: ViagemContexto): string {
   return c.roteiroAtual.length > 0
-    ? "Retome a montagem desta viagem: confirme em uma frase o que já está no roteiro e pergunte o que falta."
-    : "Comece a entrevista: cumprimente em uma linha e faça a primeira pergunta.";
+    ? "Retome esta viagem: confirme em uma frase o que já está no roteiro e peça, de uma vez, o que ainda falta."
+    : "Comece: em uma linha, diga que vai montar a viagem, e peça de uma vez as cinco coisas (destinos, " +
+      "dias em cada um, quantas pessoas, se dividem quarto, se voltam direto) mais a data da ida e a finalidade.";
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { buscarFicha, listarColaboradores } from "@/lib/dp/solides/client";
+import { eventosDaSincronizacao, type DpSnapshot } from "@/lib/dp/historico";
 import { parseDetail, parseListItem, type DpColaboradorFicha } from "@/lib/dp/solides/parse";
 
 // ============================================================================
@@ -35,7 +36,41 @@ export interface DpSyncResult {
   novos: number;
   desligados: number;
   reativados: number;
+  /** Movimentações gravadas no histórico nesta execução. */
+  eventos: number;
   erro: string | null;
+}
+
+/** Colunas que o histórico compara (ver @/lib/dp/historico). */
+// String literal ÚNICA: o client tipado do Supabase analisa o select em tempo
+// de compilação e não entende concatenação.
+const SNAPSHOT_COLUMNS =
+  "solides_id, ativo, nome, cpf, email, unidade_id, unidade_nome, departamento_id, departamento_nome, cargo_id, cargo_nome, tipo_contrato, data_admissao, gestor_solides_id, gestor_nome, solides_atualizado_em, salario, data_desligamento, endereco";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toSnapshot(r: any): DpSnapshot {
+  const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return {
+    solides_id: Number(r.solides_id),
+    ativo: Boolean(r.ativo),
+    nome: r.nome,
+    cpf: r.cpf,
+    email: r.email,
+    unidade_id: n(r.unidade_id),
+    unidade_nome: r.unidade_nome,
+    departamento_id: n(r.departamento_id),
+    departamento_nome: r.departamento_nome,
+    cargo_id: n(r.cargo_id),
+    cargo_nome: r.cargo_nome,
+    tipo_contrato: r.tipo_contrato,
+    data_admissao: r.data_admissao,
+    gestor_solides_id: n(r.gestor_solides_id),
+    gestor_nome: r.gestor_nome,
+    solides_atualizado_em: r.solides_atualizado_em,
+    salario: n(r.salario),
+    data_desligamento: r.data_desligamento,
+    endereco: r.endereco ?? null,
+  };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -65,7 +100,7 @@ export async function runDpSolidesSync(
   opts: { trigger: "cron" | "manual"; userId?: string | null },
 ): Promise<DpSyncResult> {
   const empty: Omit<DpSyncResult, "ok" | "runId" | "erro"> = {
-    lista: 0, fichasOk: 0, fichasErro: 0, novos: 0, desligados: 0, reativados: 0,
+    lista: 0, fichasOk: 0, fichasErro: 0, novos: 0, desligados: 0, reativados: 0, eventos: 0,
   };
 
   const lockSince = new Date(Date.now() - RUNNING_LOCK_MINUTES * 60_000).toISOString();
@@ -110,9 +145,10 @@ export async function runDpSolidesSync(
 
     const { data: existentes, error: exErr } = await admin
       .from("dp_colaboradores")
-      .select("solides_id, ativo");
+      .select(SNAPSHOT_COLUMNS);
     if (exErr) throw new Error(`dp_colaboradores select: ${exErr.message}`);
-    const antes = new Map((existentes ?? []).map((r) => [Number(r.solides_id), Boolean(r.ativo)]));
+    const snapshots = new Map((existentes ?? []).map((r) => [Number(r.solides_id), toSnapshot(r)]));
+    const antes = new Map(Array.from(snapshots).map(([id, s]) => [id, s.ativo]));
     const ativosAntes = Array.from(antes.values()).filter(Boolean).length;
 
     if (ativosAntes > 0 && lista.length < ativosAntes * MIN_FRACAO_LISTA) {
@@ -149,7 +185,7 @@ export async function runDpSolidesSync(
     // Sumiu da lista = desligado. A ficha costuma continuar acessível e é de lá
     // que vem a data de desligamento; se não vier, a data de detecção basta.
     const sumiram = Array.from(antes).filter(([id, ativo]) => ativo && !naLista.has(id)).map(([id]) => id);
-    await mapLimit(sumiram, FICHA_CONCURRENCY, async (id) => {
+    const fichasSumiram = await mapLimit(sumiram, FICHA_CONCURRENCY, async (id) => {
       const ficha = await fichaOuNull(id);
       const { error } = await admin
         .from("dp_colaboradores")
@@ -161,9 +197,31 @@ export async function runDpSolidesSync(
         })
         .eq("solides_id", id);
       if (error) throw new Error(`dp_colaboradores desligar: ${error.message}`);
+      return { solidesId: id, ficha };
     });
 
+    // Histórico: comparado com o que estava gravado ANTES desta execução. A
+    // gravação vem depois do espelho de propósito — o espelho é o que a tela
+    // precisa; se o histórico falhar, a execução diz isso em vez de calar.
+    const eventos = eventosDaSincronizacao({ antes: snapshots, lista, fichas, sumiram: fichasSumiram });
+    const avisos: string[] = [];
+    let eventosGravados = 0;
+    for (let i = 0; i < eventos.length; i += 500) {
+      const lote = eventos.slice(i, i + 500).map((e) => ({ ...e, run_id: runId, detectado_em: agora }));
+      const { error } = await admin.from("dp_colaborador_eventos").insert(lote);
+      if (error) {
+        avisos.push(
+          error.code === "PGRST205" || error.code === "42P01"
+            ? "Histórico de movimentações ainda não instalado (migration 20261001160000); o cadastro foi atualizado."
+            : `${eventos.length - eventosGravados} movimentação(ões) NÃO entraram no histórico: ${error.message}`,
+        );
+        break;
+      }
+      eventosGravados += lote.length;
+    }
+
     const fichasErro = fichas.filter((f) => f === null).length;
+    if (fichasErro > 0) avisos.unshift(`${fichasErro} ficha(s) não puderam ser lidas; os dados anteriores delas foram mantidos.`);
     return finish({
       ok: true,
       lista: lista.length,
@@ -172,7 +230,8 @@ export async function runDpSolidesSync(
       novos,
       desligados: sumiram.length,
       reativados,
-      erro: fichasErro > 0 ? `${fichasErro} ficha(s) não puderam ser lidas; os dados anteriores delas foram mantidos.` : null,
+      eventos: eventosGravados,
+      erro: avisos.length > 0 ? avisos.join(" ") : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

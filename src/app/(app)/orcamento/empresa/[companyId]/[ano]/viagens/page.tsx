@@ -25,9 +25,9 @@ export default async function WorkspaceViagensPage({
       <div>
         <h2 className="text-xl font-bold tracking-tight">Viagens</h2>
         <p className="text-sm text-muted-foreground">
-          Monte o roteiro — trechos, noites, quartos e deslocamento — e o sistema calcula o custo a
-          partir dele. O valor não é digitado: sai dos parâmetros da empresa, e tudo o que for
-          estimado aparece dito na tela da viagem.
+          Diga para onde, quantos dias, quantas pessoas e se dividem quarto — o agente de viagem
+          pesquisa passagem e hotel, compara as formas de ir e monta o roteiro. O custo é calculado
+          pelo sistema a partir dele, nunca digitado, e tudo o que for estimado aparece dito.
         </p>
       </div>
       <ViagensLista companyId={params.companyId} year={Number(params.ano)} />

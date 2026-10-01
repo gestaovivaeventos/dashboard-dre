@@ -71,13 +71,75 @@ test("as três coisas que mais mudam o custo estão no prompt", () => {
   assert.match(p, /conta os DIAS \(noites \+ 1\)/);
 });
 
-test("a finalidade é a única pergunta de reflexão, e é obrigatória", () => {
-  // A entrevista é dirigida (levanta fatos), mas o diretor precisa do "para
-  // que serve" para aprovar — e é o que deixa ver duas viagens com o mesmo fim.
+test("o gestor responde por CINCO coisas, mais data e finalidade", () => {
+  // Pedido de 01/10/2026: "o usuário basicamente só fala pra onde vai, quantos
+  // dias, quantas pessoas, se dividem quarto, se voltam direto". Todo o resto é
+  // trabalho do agente.
   const p = prompt();
-  assert.match(p, /PARA QUE SERVE a viagem/);
-  assert.match(p, /ÚNICA pergunta de reflexão/);
-  assert.match(p, /obrigatória/);
+  assert.match(p, /CINCO COISAS, e só por elas/);
+  assert.match(p, /para ONDE vai/);
+  assert.match(p, /QUANTOS DIAS em cada destino/);
+  assert.match(p, /QUANTAS PESSOAS/);
+  assert.match(p, /DIVIDEM QUARTO/);
+  assert.match(p, /VOLTAM DIRETO para a origem/);
+  // A data não está na lista do pedido, mas é inescapável: sem ela a viagem não
+  // cai em mês nenhum do orçamento. Vai no mesmo bloco, justificada.
+  assert.match(p, /DATA DA IDA, que não é opcional/);
+  assert.match(p, /é a única pergunta de conteúdo/);
+});
+
+test("é PROIBIDO devolver ao gestor o trabalho do agente", () => {
+  // Cada item desta lista é uma pergunta que a primeira versão fazia e que
+  // transformava a IA em formulário — o oposto do pedido.
+  const p = prompt();
+  assert.match(p, /É PROIBIDO perguntar ao gestor/);
+  for (const proibido of [
+    /preço de passagem, diária de hotel/,
+    /distância entre cidades, aeroporto/,
+    /como ir em cada trecho/,
+    /quantos veículos, quantos trajetos/,
+    /qualquer campo do formulário/,
+  ]) {
+    assert.match(p, proibido);
+  }
+  assert.match(p, /devolve ao gestor o trabalho que você existe para fazer/);
+});
+
+test("o agente CALCULA para comparar, mas o total oficial é do sistema", () => {
+  // Sem esta distinção ele ou se recusa a comparar (e não otimiza nada) ou
+  // anuncia um total que o motor vai contradizer ao salvar.
+  const p = prompt();
+  assert.match(p, /VOCÊ CALCULA PARA COMPARAR/);
+  assert.match(p, /o custo OFICIAL é do sistema/);
+  assert.match(p, /nunca ponha total nenhum dentro do cartão/);
+});
+
+test("é AGENTE, não entrevistador: pergunta de uma vez e preenche sozinho", () => {
+  // Pedido de 01/10/2026. A regra do Planejamento ("uma pergunta por mensagem")
+  // está explicitamente proibida aqui — ela transforma a IA em formulário, que é
+  // justamente o que o usuário quer evitar.
+  const p = prompt();
+  assert.match(p, /ENTENDER → PESQUISAR → PROPOR/);
+  assert.match(p, /nunca uma por mensagem/);
+  assert.match(p, /são o RESULTADO da conversa: o gestor não os preenche/);
+});
+
+test("o agente tem de PESQUISAR antes de propor, e preencher o resto", () => {
+  const p = prompt();
+  assert.match(p, /ferramenta `buscar_precos`/);
+  assert.match(p, /Use-a ANTES de propor/);
+  // Completa sozinho o que o gestor não disse — dizendo que completou.
+  assert.match(p, /dividem quarto por padrão/);
+  assert.match(p, /um carro até 4 pessoas/);
+  assert.match(p, /2 trajetos por dia/);
+});
+
+test("OTIMIZAR é parte do trabalho — comparar modal, aeroporto e ordem", () => {
+  const p = prompt();
+  assert.match(p, /OTIMIZAR é parte do trabalho/);
+  assert.match(p, /carro × avião/);
+  assert.match(p, /aeroporto vizinho/);
+  assert.match(p, /ordem muda o custo/);
 });
 
 test("a IA PERGUNTA, não dá veredito nem corta por conta própria", () => {
@@ -104,7 +166,7 @@ test("sem outra viagem no recorte, o bloco de juntar NEM APARECE", () => {
   assert.equal(/OUTRAS VIAGENS JÁ ORÇADAS/.test(p), false);
 });
 
-test("com outra viagem, a IA é instruída a PERGUNTAR se dá para juntar", () => {
+test("com outra viagem, o agente PROPÕE juntar, com a economia concreta", () => {
   const p = prompt({
     vizinhas: [
       { titulo: "Treinamento Curitiba", cidades: ["Curitiba"], dataIda: "2027-05-20", pessoas: 1 },
@@ -113,8 +175,11 @@ test("com outra viagem, a IA é instruída a PERGUNTAR se dá para juntar", () =
   assert.match(p, /JUNTAR VIAGENS/);
   assert.match(p, /Treinamento Curitiba/);
   assert.match(p, /20 de maio de 2027/);
-  assert.match(p, /É uma\nPERGUNTA|É uma PERGUNTA/);
-  assert.match(p, /não mexe na outra viagem/);
+  // Virou PROPOSTA (01/10/2026): é a otimização que economiza mais.
+  assert.match(p, /PROPONHA a viagem única/);
+  assert.match(p, /é PROPOSTA, não decisão/);
+  assert.match(p, /NÃO mexe na outra viagem/);
+  assert.match(p, /precisa ser descartada por ele/);
 });
 
 // ─── O contexto que o prompt carrega ────────────────────────────────────────

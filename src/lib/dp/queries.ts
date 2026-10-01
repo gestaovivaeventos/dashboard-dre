@@ -8,6 +8,7 @@ import {
   type DpEmpresaResolvida,
   type DpRegraOrigem,
 } from "@/lib/dp/empresa";
+import type { DpCampoRastreado, DpEventoTipo } from "@/lib/dp/historico";
 import type { DpEndereco } from "@/lib/dp/solides/parse";
 
 // Leituras das telas do DP. Todas com o admin client DEPOIS de getDpUser():
@@ -191,4 +192,102 @@ export async function lastDpSyncRun(db: AdminClient): Promise<DpSyncRun | null> 
     reativados: data.reativados,
     erro: data.erro,
   };
+}
+
+// ── Histórico e acessos (migration 20261001160000) ──────────────────────────
+// Recurso acessório: tabela ausente vira `null` ("não instalado") em vez de
+// derrubar a ficha ou a Visão geral, que funcionam sem ele.
+
+export interface DpEventoRow {
+  id: string;
+  solidesId: number;
+  tipo: DpEventoTipo;
+  campo: DpCampoRastreado | null;
+  valorAnterior: unknown;
+  valorNovo: unknown;
+  detectadoEm: string;
+}
+
+export interface DpEventoRecente extends DpEventoRow {
+  colaboradorId: string | null;
+  nome: string | null;
+}
+
+export interface DpAcessoRow {
+  createdAt: string;
+  userName: string | null;
+  userEmail: string | null;
+}
+
+function ausente(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST205" || error?.code === "42P01";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toEvento(r: any): DpEventoRow {
+  return {
+    id: r.id,
+    solidesId: Number(r.solides_id),
+    tipo: r.tipo,
+    campo: r.campo,
+    valorAnterior: r.valor_anterior,
+    valorNovo: r.valor_novo,
+    detectadoEm: r.detectado_em,
+  };
+}
+
+const EVENTO_COLUMNS = "id, solides_id, tipo, campo, valor_anterior, valor_novo, detectado_em";
+
+export async function listDpEventosDoColaborador(db: AdminClient, solidesId: number): Promise<DpEventoRow[] | null> {
+  const { data, error } = await db
+    .from("dp_colaborador_eventos")
+    .select(EVENTO_COLUMNS)
+    .eq("solides_id", solidesId)
+    .order("detectado_em", { ascending: false })
+    .limit(200);
+  if (ausente(error)) return null;
+  check(error, "dp_colaborador_eventos");
+  return (data ?? []).map(toEvento);
+}
+
+export async function listDpEventosRecentes(db: AdminClient, desdeIso: string, limit = 50): Promise<DpEventoRecente[] | null> {
+  const { data, error } = await db
+    .from("dp_colaborador_eventos")
+    .select(`${EVENTO_COLUMNS}, dp_colaboradores(id, nome)`)
+    .gte("detectado_em", desdeIso)
+    .order("detectado_em", { ascending: false })
+    .limit(limit);
+  if (ausente(error)) return null;
+  check(error, "dp_colaborador_eventos");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []).map((r: any) => {
+    const colab = Array.isArray(r.dp_colaboradores) ? r.dp_colaboradores[0] : r.dp_colaboradores;
+    return { ...toEvento(r), colaboradorId: colab?.id ?? null, nome: colab?.nome ?? null };
+  });
+}
+
+export async function listDpAcessos(db: AdminClient, colaboradorId: string, limit = 20): Promise<DpAcessoRow[] | null> {
+  const { data, error } = await db
+    .from("dp_acessos")
+    .select("created_at, users(name, email)")
+    .eq("colaborador_id", colaboradorId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (ausente(error)) return null;
+  check(error, "dp_acessos");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []).map((r: any) => {
+    const u = Array.isArray(r.users) ? r.users[0] : r.users;
+    return { createdAt: r.created_at, userName: u?.name ?? null, userEmail: u?.email ?? null };
+  });
+}
+
+/**
+ * Registra a abertura de uma ficha. Melhor esforço: falhar aqui não impede a
+ * leitura (a ficha é de quem tem a concessão; travar a tela por causa do
+ * registro tiraria o DP do ar a cada instabilidade), mas o erro vai ao log.
+ */
+export async function registrarAcessoFicha(db: AdminClient, userId: string, colaboradorId: string): Promise<void> {
+  const { error } = await db.from("dp_acessos").insert({ user_id: userId, colaborador_id: colaboradorId, acao: "ficha" });
+  if (error && !ausente(error)) console.error("[dp] registrar acesso falhou:", error.message);
 }
