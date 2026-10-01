@@ -97,6 +97,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   corpo.append("language", "pt");
   corpo.append("response_format", "json");
   corpo.append("prompt", dica);
+  // Determinístico: o endpoint aceita e o default não é garantido. Num
+  // ditado, duas transcrições diferentes do mesmo áudio seriam pior que uma
+  // errada — a pessoa não saberia qual acreditar.
+  corpo.append("temperature", "0");
 
   const base = resolved.baseURL ?? "https://api.openai.com/v1";
   const registrar = (usage: ReturnType<typeof usoDaTranscricao>, erro?: string) =>

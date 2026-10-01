@@ -68,9 +68,26 @@ export function escolherFormatoGravacao(suporta: (mime: string) => boolean): str
 }
 
 /**
- * Texto de contexto que acompanha o áudio. O transcritor usa isso para acertar
- * a grafia de nomes próprios (categoria, grupos, fornecedores), que é onde ele
- * mais erra sem ajuda. Não é instrução — é vocabulário.
+ * O que acompanha o áudio no campo `prompt` da API.
+ *
+ * ── Por que ele começa MANDANDO transcrever literalmente ───────────────────
+ * `gpt-4o-mini-transcribe` não é um ASR puro como o `whisper-1`: é um modelo de
+ * linguagem ouvindo. O `prompt` funciona como INSTRUÇÃO para ele, não só como
+ * vocabulário — e, sem instrução, ele se sente livre para "arrumar" o que
+ * ouviu. Medido contra a API em 01/10/2026, com a dica anterior (que só
+ * descrevia o contexto): "quinze mil duzentos e cinquenta e sete reais e
+ * quarenta e três centavos" virou **"Ficou R$ 15.257,43."**. Com a instrução
+ * abaixo, o mesmo áudio voltou como foi falado.
+ *
+ * Num ditado que alimenta cartão de despesa, reescrever é o pior defeito
+ * possível: quando o modelo erra uma sílaba, ele não devolve algo estranho que
+ * o gestor notaria — devolve uma frase plausível.
+ *
+ * ── O vocabulário continua, e é o resto da função ──────────────────────────
+ * Categoria, setor e grupos entram como TERMOS que podem aparecer, que é onde
+ * um transcritor mais erra (nome próprio, nome de fornecedor). O teste mostrou
+ * que isso NÃO puxa o conteúdo: uma frase fora de contexto ("o cachorro do
+ * vizinho latiu a noite inteira") voltou intacta com a dica de orçamento.
  */
 export function montarDicaTranscricao(termos: {
   categoria?: string | null;
@@ -78,21 +95,32 @@ export function montarDicaTranscricao(termos: {
   grupos?: readonly string[] | null;
 }): string {
   const limpar = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
-  const partes: string[] = [
-    "Conversa sobre o orçamento anual de uma empresa brasileira, com valores em reais (R$), meses e periodicidades (mensal, trimestral, anual).",
-  ];
+
+  const instrucao =
+    "Transcreva PALAVRA POR PALAVRA, exatamente como foi falado. " +
+    "Não corrija a gramática, não complete frases, não remova repetições nem hesitações, " +
+    "não troque palavras por sinônimos e não acrescente nada que não foi dito. " +
+    "Se não entender um trecho, escreva o que ouviu — nunca o que faria sentido.";
+
+  const vocabulario: string[] = [];
   const categoria = limpar(termos.categoria);
   const setor = limpar(termos.setor);
-  if (categoria) partes.push(`Categoria: ${categoria}.`);
-  if (setor) partes.push(`Setor: ${setor}.`);
+  if (categoria) vocabulario.push(categoria);
+  if (setor) vocabulario.push(setor);
+  for (const g of termos.grupos ?? []) {
+    const v = limpar(g);
+    if (v) vocabulario.push(v);
+  }
+  const termosUnicos = Array.from(new Set(vocabulario)).slice(0, 30);
 
-  const grupos = Array.from(
-    new Set((termos.grupos ?? []).map(limpar).filter((g) => g.length > 0)),
-  ).slice(0, 30);
-  if (grupos.length) partes.push(`Termos: ${grupos.join(", ")}.`);
-
+  const partes = [instrucao];
+  if (termosUnicos.length) {
+    // "podem aparecer", não "o assunto é": o primeiro ajuda a grafar nome
+    // próprio; o segundo convidaria o modelo a encaixar a fala no tema.
+    partes.push(`Termos que podem aparecer: ${termosUnicos.join(", ")}.`);
+  }
   // O campo vem do cliente; o teto impede usá-lo como carga arbitrária.
-  return partes.join(" ").slice(0, 800);
+  return partes.join(" ").slice(0, 1200);
 }
 
 export interface UsoTranscricao {
