@@ -333,30 +333,16 @@ export async function getViagensSetup(
     }));
   }
 
-  // Categorias cujo método é `viagens` nesta empresa × ano.
-  const { data: metodoRows, error: metodoErr } = await supabase
-    .from("orcamento_categoria_metodo")
-    .select("category_code, category_name")
-    .eq("company_id", companyId)
-    .eq("year", year)
-    .eq("metodo", METODO);
-  if (metodoErr) {
-    if (isSchemaMissing(metodoErr.message)) return { ...VAZIO, needsMigration: true };
-    return { ...VAZIO, error: metodoErr.message };
-  }
-  const categorias: ViagemCategoriaOption[] = (metodoRows ?? []).map((r) => ({
-    categoryCode: r.category_code as string,
-    categoryName: (r.category_name as string) ?? (r.category_code as string),
-  }));
-  // O nome gravado no vínculo pode estar velho; o cadastro atual manda.
+  // ── Nomes de categoria, para a seção Finalizar rotular as fatias ──
+  // NÃO se filtra por `metodo = 'viagens'` aqui: desde 01/10/2026 a viagem entra
+  // na conta pelo de-para tipo → categoria, e essa conta pode ser orçada pelo
+  // PLANEJAMENTO ao mesmo tempo (os dois somam). Filtrando pela marcação, a fatia
+  // de uma categoria compartilhada apareceria rotulada só pelo código.
   const cats = await getCategoriasOrcamento(companyId, year);
-  const nomePorCodigo = new Map(
-    (cats.items ?? []).map((c) => [c.categoryCode, c.categoryName] as const),
-  );
-  for (const c of categorias) {
-    const atual = nomePorCodigo.get(c.categoryCode);
-    if (atual) c.categoryName = atual;
-  }
+  const categorias: ViagemCategoriaOption[] = (cats.items ?? []).map((c) => ({
+    categoryCode: c.categoryCode,
+    categoryName: c.categoryName,
+  }));
 
   const { params, padrao } = await lerParametros(supabase, companyId, year);
   const tipos = await lerTipos(supabase, companyId, year);

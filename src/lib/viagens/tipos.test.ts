@@ -16,7 +16,7 @@ import {
   categoriasDoDePara,
   desalinhadas,
   ordenarTipos,
-  tiposForaDoMetodo,
+  tiposQueDobram,
   tiposOferecidos,
   tiposSemCategoria,
   type TipoViagem,
@@ -133,11 +133,45 @@ test("categoriasDoDePara lista só as dos tipos ATIVOS, sem repetir", () => {
   assert.deepEqual(cats, ["2.01.91", "2.01.98"], "a inativa 2.01.94 fica fora, e não há repetida");
 });
 
-test("tipo apontando para categoria NÃO orçada por Viagens é acusado", () => {
-  // Os dois cadastros convivem: o de-para diz onde a viagem cai, a marcação de
-  // método é o que faz a Prévia ler aquela categoria por esta via. Um tipo fora
-  // do método produz viagem que não entra em número nenhum.
-  const fora = tiposForaDoMetodo(TIPOS, ["2.01.98"]);
-  assert.deepEqual(fora.map((t) => t.nome), ["Consultoria"]);
-  assert.deepEqual(tiposForaDoMetodo(TIPOS, ["2.01.98", "2.01.91"]), []);
+test("tipo em categoria de MÉDIA ou VALOR FIXO é acusado — ali viagem dobra", () => {
+  // Aqueles métodos afirmam ser o total da categoria: a média do realizado do ano
+  // anterior já contém a viagem daquele ano.
+  const dobram = tiposQueDobram(
+    TIPOS,
+    new Map([
+      ["2.01.98", "media"],
+      ["2.01.91", "planejamento_socios"],
+    ]),
+  );
+  assert.deepEqual(dobram.map((d) => d.tipo.nome), ["Treinamento"]);
+  assert.equal(dobram[0].metodo, "media");
+});
+
+test("tipo em categoria de PLANEJAMENTO não é acusado — eles SOMAM", () => {
+  // É o pedido: categoria orçada pelo Planejamento e por Viagens tem os dois
+  // valores somados, não substituídos.
+  const dobram = tiposQueDobram(
+    TIPOS,
+    new Map([
+      ["2.01.98", "planejamento_socios"],
+      ["2.01.91", "planejamento_socios"],
+    ]),
+  );
+  assert.deepEqual(dobram, []);
+});
+
+test("categoria sem método declarado não dobra nada", () => {
+  assert.deepEqual(tiposQueDobram(TIPOS, new Map()), []);
+});
+
+test("tipo INATIVO ou sem categoria fica fora da conta do conflito", () => {
+  const dobram = tiposQueDobram(
+    TIPOS,
+    new Map([
+      ["2.01.94", "media"],
+      ["2.01.98", "media"],
+    ]),
+  );
+  // 2.01.94 é do tipo inativo (t4); só o ativo é acusado.
+  assert.deepEqual(dobram.map((d) => d.tipo.nome), ["Treinamento"]);
 });

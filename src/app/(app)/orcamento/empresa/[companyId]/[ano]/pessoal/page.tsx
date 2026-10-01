@@ -1,4 +1,5 @@
 import { DespesasPessoalManager } from "@/components/orcamento/despesas-pessoal-manager";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 import { getOrcamentoAdmin, podeValidarOrcamento, getOrcamentoUser } from "@/lib/orcamento/auth";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,11 @@ export default async function WorkspacePessoalPage({
 }: {
   params: { companyId: string; ano: string };
 }) {
+  // Método em validação OU escondido nesta empresa (Configurações gerais ›
+  // Telas por empresa). Esconder a caixa no hub não é defesa: o link direto
+  // continua funcionando.
+  await guardMetodoDaEmpresa("pessoal", params.companyId, Number(params.ano));
+
   // Só o admin desfaz um cancelamento da diretoria (ver `reativarColaborador`).
   const isAdmin = Boolean(await getOrcamentoAdmin());
   // A diretoria decide NA LINHA de cada colaborador, como no Planejamento.

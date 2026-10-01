@@ -10,6 +10,7 @@ import {
   isConfigGeralSecao,
 } from "@/lib/orcamento/workspace-tabs";
 import { IndicesManager } from "@/components/orcamento/indices-manager";
+import { MetodosEmpresaManager } from "@/components/orcamento/metodos-empresa-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -37,14 +38,21 @@ export default async function ConfiguracoesGeraisSecaoPage({
 
   const meta = CONFIG_GERAIS_SECOES.find((s) => s.slug === params.secao)!;
 
-  const { items, error, needsMigration } = await getIndices();
-  const body = needsMigration ? (
-    <MigrationNotice migration="20260727150000_orcamento_indices" />
-  ) : error ? (
-    <p className="text-sm text-destructive">{error}</p>
-  ) : (
-    <IndicesManager initialItems={items ?? []} />
-  );
+  let body: React.ReactNode;
+  if (params.secao === "telas-por-empresa") {
+    // O manager carrega os próprios dados (empresas + o que está oculto + a
+    // contagem do que já foi orçado), então esta rota não pré-busca nada.
+    body = <MetodosEmpresaManager />;
+  } else {
+    const { items, error, needsMigration } = await getIndices();
+    body = needsMigration ? (
+      <MigrationNotice migration="20260727150000_orcamento_indices" />
+    ) : error ? (
+      <p className="text-sm text-destructive">{error}</p>
+    ) : (
+      <IndicesManager initialItems={items ?? []} />
+    );
+  }
 
   return (
     <div className="space-y-4">

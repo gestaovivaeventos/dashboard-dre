@@ -191,8 +191,8 @@ export interface PreviaOrcamentoData {
     valorFixoSemValor: number;
     planejamentoCategorias: number;
     planejamentoSemValor: number;
+    /** Quantas CONTAS receberam viagem (a categoria vem da própria viagem). */
     viagensCategorias: number;
-    viagensSemValor: number;
     /** Colaboradores dentro do escopo (empresa ou setor). */
     pessoalColaboradores: number;
     /**
@@ -257,6 +257,10 @@ function formatBRLSimples(v: number): string {
 
 function db() {
   return createAdminClientIfAvailable();
+}
+
+function texto(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
 }
 
 /** Soma um vetor de 12 meses inteiro no acumulador. */
@@ -408,7 +412,6 @@ export async function getPreviaOrcamento(
   let planejamentoCategorias = 0;
   let planejamentoSemValor = 0;
   let viagensCategorias = 0;
-  let viagensSemValor = 0;
   const { data: metodoRows, error: metodoErr } = await supabase
     .from("orcamento_categoria_metodo")
     .select("category_code, category_name, metodo")
@@ -429,6 +432,34 @@ export async function getPreviaOrcamento(
   //
   // A Prévia tem de orçar exatamente o que as telas mostram: linha que ela soma
   // e a tela não abre é número que ninguém consegue conferir nem editar.
+  // ── VIAGENS: carregadas ANTES, porque a categoria delas NÃO vem da marcação
+  // de método ──
+  // A categoria de uma viagem vem do de-para tipo → categoria (cadastro do
+  // admin), gravada como retrato em cada viagem. Então viagens é ADITIVA: ela
+  // soma na conta onde cai, por cima do que o Planejamento (ou nada) já pôs ali.
+  // Era o contrário até 01/10/2026 — o bloco só lia categorias marcadas como
+  // `viagens`, e marcar a categoria assim fazia as despesas do Planejamento dela
+  // DESAPARECEREM da Prévia em silêncio (eram carregadas e nunca usadas).
+  //
+  // Os códigos entram em `allCodes` logo abaixo: sem isso a conta da viagem não
+  // estaria no mapeamento categoria→conta e a viagem viraria órfã.
+  const { data: viagemRows, error: viagemErr } = await supabase
+    .from("orcamento_viagens")
+    .select("id, category_code, setor_id, titulo, data_ida, pessoas, meses, updated_at")
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("status", "enviada");
+  // Migration pendente não derruba a Prévia: sem viagem, o resto continua.
+  if (viagemErr && !isSchemaMissing(viagemErr.message)) return { error: viagemErr.message };
+  const viagensLinhas = ((viagemRows ?? []) as Array<Record<string, unknown>>).filter((r) => {
+    // A viagem é de UM setor: filtrando, só entra a dele.
+    if (filtroSetor && ((r.setor_id as string | null) ?? null) !== filtroSetor) return false;
+    return !!texto(r.category_code);
+  });
+  const codigosDeViagem = Array.from(
+    new Set(viagensLinhas.map((r) => texto(r.category_code))),
+  );
+
   const unificadoPrevia = unificarGemeas(
     metodoCatsTodas.map((c) => ({
       ...c,
@@ -440,12 +471,13 @@ export async function getPreviaOrcamento(
   const mediaCats = metodoCats.filter((c) => c.metodo === "media");
   const vfCats = metodoCats.filter((c) => c.metodo === "valor_fixo");
   const psCats = metodoCats.filter((c) => c.metodo === "planejamento_socios");
-  const viagensCats = metodoCats.filter((c) => c.metodo === "viagens");
   // As absorvidas que tinham método próprio: param de contar (senão dobram) e
   // viram aviso na tela. Sumir com número em silêncio é o que não pode.
   const gemeasIgnoradas = unificadoPrevia.gemeasIgnoradas;
-  if (metodoCats.length > 0) {
-    const allCodes = Array.from(new Set(metodoCats.map((c) => c.category_code)));
+  if (metodoCats.length > 0 || codigosDeViagem.length > 0) {
+    const allCodes = Array.from(
+      new Set([...metodoCats.map((c) => c.category_code), ...codigosDeViagem]),
+    );
 
     // Categorias atribuídas ao setor filtrado. Serve de escopo para as
     // categorias que ainda não têm linha gravada (a média viva, por exemplo):
@@ -828,48 +860,38 @@ export async function getPreviaOrcamento(
       }
     }
 
-    // ── VIAGENS ───────────────────────────────────────────────────────────────
-    // Cada viagem ENVIADA é um item do drilldown; rascunho não entra — ainda não
-    // é orçamento, e um roteiro pela metade somando no total da empresa seria
-    // pior do que nada.
+    // ── VIAGENS (aditivo) ────────────────────────────────────────────────────
+    // Cada viagem ENVIADA é um item; rascunho não entra — ainda não é orçamento.
     //
-    // O valor vem do RETRATO gravado (`meses`), nunca de um recálculo aqui. É o
-    // que mantém a Prévia, a tela da viagem e o que o diretor aprovou dizendo o
-    // MESMO número — e a razão de o custo ser calculado na gravação.
-    if (viagensCats.length > 0) {
-      const { data: vRows, error: vErr } = await supabase
-        .from("orcamento_viagens")
-        .select("id, category_code, setor_id, titulo, data_ida, pessoas, meses, updated_at")
-        .eq("company_id", companyId)
-        .eq("year", year)
-        .eq("status", "enviada");
-      // Migration ainda não aplicada: não derruba a Prévia, essas categorias só
-      // contam como "sem valor" (mesma tolerância dos outros métodos).
-      if (vErr && !isSchemaMissing(vErr.message)) return { error: vErr.message };
-
+    // A categoria vem do RETRATO gravado em cada viagem (resolvido pelo de-para
+    // tipo → categoria), NÃO da marcação de método. É o que torna o método
+    // aditivo: a mesma categoria pode ser orçada pelo Planejamento e receber
+    // viagens, e os dois SOMAM — `aplicar` empurra numa conta que `pushMeses` já
+    // acumula, e as duas fontes convivem no drilldown.
+    //
+    // O que NÃO pode somar é viagens com média ou valor fixo: aqueles métodos
+    // afirmam ser o valor inteiro da categoria (a média do realizado do ano
+    // anterior já contém a viagem daquele ano), então somar dobraria. Quem avisa
+    // é a tela do de-para (`viagensConflitaCom`); aqui a Prévia não recusa nada,
+    // para não esconder número — ela soma o que está cadastrado.
+    if (viagensLinhas.length > 0) {
       const viagensByCode = new Map<string, PreviaFonteItem[]>();
-      for (const r of (vRows ?? []) as Array<Record<string, unknown>>) {
-        const setorDaViagem = (r.setor_id as string | null) ?? null;
-        // A viagem é de UM setor: filtrando, só entra a dele.
-        if (filtroSetor && setorDaViagem !== filtroSetor) continue;
+      for (const r of viagensLinhas) {
         const meses = mesesDoRetrato(r.meses);
         const total = somar(meses);
         if (total === 0) continue;
 
+        const setorDaViagem = (r.setor_id as string | null) ?? null;
         const pessoas = Number(r.pessoas);
         const quantas = Number.isFinite(pessoas) ? Math.max(1, Math.round(pessoas)) : 1;
         const data = typeof r.data_ida === "string" ? r.data_ida : "";
         const mes = /^\d{4}-(\d{2})-\d{2}$/.exec(data)?.[1];
         const quando = mes ? ` · ${MESES_CURTO[Number(mes) - 1]}` : "";
-        const titulo =
-          typeof r.titulo === "string" && r.titulo.trim() !== ""
-            ? r.titulo.trim()
-            : "Viagem sem título";
 
-        const code = (r.category_code as string) ?? "";
+        const code = texto(r.category_code);
         const lista = viagensByCode.get(code) ?? [];
         lista.push({
-          nome: titulo,
+          nome: texto(r.titulo) || "Viagem sem título",
           alvoTipo: "viagem",
           alvoId: r.id as string,
           setorId: setorDaViagem,
@@ -881,22 +903,19 @@ export async function getPreviaOrcamento(
         viagensByCode.set(code, lista);
       }
 
-      const viagensEscopo = noEscopo(viagensCats, new Set(viagensByCode.keys()));
-      viagensCategorias = viagensEscopo.length;
-      for (const cat of viagensEscopo) {
-        const itens = (viagensByCode.get(cat.category_code) ?? []).sort(
-          (a, b) => b.totalAno - a.totalAno,
-        );
-        if (itens.length === 0) {
-          viagensSemValor += 1;
-          continue;
-        }
+      viagensCategorias = viagensByCode.size;
+      for (const [code, itens] of Array.from(viagensByCode.entries())) {
+        itens.sort((a, b) => b.totalAno - a.totalAno);
         // A série da categoria é a soma das viagens dela, mês a mês.
         const meses = Array<number>(12).fill(0);
         for (const it of itens) {
           for (let m = 0; m < 12; m += 1) meses[m] += it.meses[m] ?? 0;
         }
-        aplicar(cat.category_code, cat.category_name ?? cat.category_code, meses, "viagens", itens);
+        // O nome vem do cadastro de categorias; o vínculo de método pode nem
+        // existir para esta conta, e o código sozinho não diz nada a ninguém.
+        const nome =
+          metodoCatsTodas.find((c) => c.category_code === code)?.category_name ?? code;
+        aplicar(code, nome, meses, "viagens", itens);
       }
     }
   }
@@ -1095,7 +1114,6 @@ export async function getPreviaOrcamento(
         planejamentoCategorias,
         planejamentoSemValor,
         viagensCategorias,
-        viagensSemValor,
         pessoalColaboradores,
         pessoalIndisponivel,
         totalDespesa,

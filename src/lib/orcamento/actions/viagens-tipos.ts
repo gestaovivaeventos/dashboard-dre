@@ -11,9 +11,10 @@ import {
 } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
+import { metodoLabel, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { textoDaLinha as texto } from "@/lib/viagens/colunas";
-import { desalinhadas, tiposForaDoMetodo, type TipoViagem } from "@/lib/viagens/tipos";
+import { desalinhadas, tiposQueDobram, type TipoViagem } from "@/lib/viagens/tipos";
 
 // =============================================================================
 // O de-para TIPO DE VIAGEM → categoria da DRE.
@@ -38,8 +39,12 @@ function db() {
 export interface TipoViagemLinha extends TipoViagem {
   /** Nome da categoria no cadastro, para a tela não mostrar só o código. */
   categoryName: string | null;
-  /** A categoria está marcada com o método `viagens`? */
-  noMetodo: boolean;
+  /**
+   * Método declarado da categoria apontada, se houver. Viagens é ADITIVA: ela
+   * soma na conta onde cai. Com `planejamento_socios` os dois somam (pedido); com
+   * `media`/`valor_fixo` dobraria, e a tela avisa.
+   */
+  metodoDaCategoria: string | null;
   /** Quantas viagens deste tipo já foram orçadas (em qualquer categoria). */
   viagens: number;
 }
@@ -48,8 +53,8 @@ export interface TiposViagemSetup {
   items: TipoViagemLinha[];
   /** Categorias de despesa da empresa, para o seletor do de-para. */
   categorias: Array<{ categoryCode: string; categoryName: string; metodo: string | null }>;
-  /** Tipos ativos apontando para categoria que NÃO é orçada por Viagens. */
-  foraDoMetodo: string[];
+  /** Tipos cuja categoria já é PROJETADA por outro método — somar ali dobraria. */
+  conflitos: Array<{ tipo: string; metodo: string }>;
   /** Viagens que ficaram com o mapeamento ANTIGO (ver `desalinhadas`). */
   desalinhadas: Array<{ id: string; titulo: string; tipoNome: string }>;
   isAdmin: boolean;
@@ -60,7 +65,7 @@ export interface TiposViagemSetup {
 const VAZIO: TiposViagemSetup = {
   items: [],
   categorias: [],
-  foraDoMetodo: [],
+  conflitos: [],
   desalinhadas: [],
   isAdmin: false,
 };
@@ -116,10 +121,6 @@ export async function getTiposViagem(
       (r) => [r.category_code as string, r.metodo as string] as const,
     ),
   );
-  const categoriasViagens = Array.from(metodoPorCodigo.entries())
-    .filter(([, m]) => m === "viagens")
-    .map(([c]) => c);
-
   const nomePorCodigo = new Map(
     (cats.items ?? []).map((c) => [c.categoryCode, c.categoryName] as const),
   );
@@ -139,7 +140,7 @@ export async function getTiposViagem(
   const items: TipoViagemLinha[] = tipos.map((t) => ({
     ...t,
     categoryName: t.categoryCode ? nomePorCodigo.get(t.categoryCode) ?? null : null,
-    noMetodo: !!t.categoryCode && metodoPorCodigo.get(t.categoryCode) === "viagens",
+    metodoDaCategoria: t.categoryCode ? metodoPorCodigo.get(t.categoryCode) ?? null : null,
     viagens: porTipo.get(t.id) ?? 0,
   }));
 
@@ -150,7 +151,10 @@ export async function getTiposViagem(
       categoryName: c.categoryName,
       metodo: metodoPorCodigo.get(c.categoryCode) ?? null,
     })),
-    foraDoMetodo: tiposForaDoMetodo(tipos, categoriasViagens).map((t) => t.nome),
+    conflitos: tiposQueDobram(tipos, metodoPorCodigo).map((c) => ({
+      tipo: c.tipo.nome,
+      metodo: metodoLabel(c.metodo as OrcamentoMetodo),
+    })),
     desalinhadas: desalinhadas(viagens, tipos).map((d) => ({
       id: d.id,
       titulo: d.titulo,

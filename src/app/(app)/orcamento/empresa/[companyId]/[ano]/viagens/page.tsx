@@ -1,8 +1,4 @@
-import { redirect } from "next/navigation";
-
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
-import { metodoVisivelPara } from "@/lib/orcamento/metodos";
-import { workspaceHubHref } from "@/lib/orcamento/workspace-tabs";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 import { ViagensLista } from "@/components/orcamento/viagens-lista";
 
 export const dynamic = "force-dynamic";
@@ -20,12 +16,9 @@ export default async function WorkspaceViagensPage({
 }: {
   params: { companyId: string; ano: string };
 }) {
-  // O hub já esconde a caixa de um método em validação; isto fecha a porta de
-  // quem chega pela URL. Hoje METODOS_EM_VALIDACAO está vazio.
-  const isAdmin = Boolean(await getOrcamentoAdmin());
-  if (!metodoVisivelPara("viagens", isAdmin)) {
-    redirect(workspaceHubHref(params.companyId, Number(params.ano)));
-  }
+  // Método em validação OU escondido nesta empresa: o hub já não oferece a
+  // caixa, e isto fecha a porta de quem chega pela URL.
+  await guardMetodoDaEmpresa("viagens", params.companyId, Number(params.ano));
 
   return (
     <div className="space-y-4">

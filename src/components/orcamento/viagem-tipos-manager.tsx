@@ -165,14 +165,14 @@ export function ViagemTiposManager({
         </div>
       )}
 
-      {(setup?.foraDoMetodo.length ?? 0) > 0 && (
+      {(setup?.conflitos.length ?? 0) > 0 && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          <p className="font-medium">
-            Categoria apontada mas não orçada por Viagens: {setup!.foraDoMetodo.join(", ")}
-          </p>
+          <p className="font-medium">Atenção: somar viagem aqui DOBRA o valor</p>
           <p className="mt-1 text-muted-foreground">
-            A Prévia só lê uma categoria pelo método marcado nela, então essas viagens não entrariam
-            em número nenhum. Marque a categoria como <strong>Viagens</strong> em{" "}
+            {setup!.conflitos.map((c) => `${c.tipo} (categoria orçada por ${c.metodo})`).join("; ")}.
+            Esses métodos afirmam ser o valor <strong>inteiro</strong> da categoria — a média do
+            realizado do ano anterior já contém a viagem daquele ano. Aponte o tipo para outra
+            categoria, ou mude o método dela em{" "}
             <Link
               href={workspaceConfigSecaoHref(companyId, year, "categoria-metodo")}
               className="font-medium underline underline-offset-2"
@@ -285,9 +285,18 @@ export function ViagemTiposManager({
                         </option>
                       ))}
                     </select>
-                    {t.categoryCode && !t.noMetodo && (
-                      <p className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-500">
-                        esta categoria não está marcada como Viagens
+                    {t.categoryCode && t.metodoDaCategoria && (
+                      <p
+                        className={cn(
+                          "mt-0.5 text-[11px]",
+                          t.metodoDaCategoria === "media" || t.metodoDaCategoria === "valor_fixo"
+                            ? "text-amber-700 dark:text-amber-500"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {t.metodoDaCategoria === "media" || t.metodoDaCategoria === "valor_fixo"
+                          ? "a categoria já é projetada por outro método — somar viagem dobra"
+                          : "soma com o que o outro método já orça nesta categoria"}
                       </p>
                     )}
                   </td>

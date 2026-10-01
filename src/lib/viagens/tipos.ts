@@ -14,6 +14,8 @@
 // Módulo PURO e testado.
 // =============================================================================
 
+import { viagensConflitaCom } from "@/lib/orcamento/metodos";
+
 export interface TipoViagem {
   id: string;
   nome: string;
@@ -114,16 +116,7 @@ export function desalinhadas(
   return out;
 }
 
-/**
- * Categorias que o de-para alcança — o conjunto que precisa estar marcado com o
- * método `viagens` em "Método por categoria".
- *
- * Os dois cadastros convivem de propósito: o de-para diz onde a viagem cai, e a
- * marcação de método é o que faz a Prévia LER aquela categoria por esta via (e o
- * que garante o invariante do módulo — uma categoria é orçada por UM método). Um
- * tipo apontando para categoria não marcada produz viagem que não entra em número
- * nenhum, então a tela de de-para confere isto e avisa.
- */
+/** Categorias que o de-para alcança — as contas que vão receber viagem. */
 export function categoriasDoDePara(tipos: readonly TipoViagem[]): string[] {
   const set = new Set<string>();
   for (const t of tipos) {
@@ -132,13 +125,28 @@ export function categoriasDoDePara(tipos: readonly TipoViagem[]): string[] {
   return Array.from(set).sort();
 }
 
-/** Tipos ativos apontando para categoria que NÃO é orçada por Viagens. */
-export function tiposForaDoMetodo(
+/**
+ * Tipos apontando para categoria onde somar viagem DOBRARIA o dinheiro.
+ *
+ * Viagens é um método ADITIVO: ela soma na conta onde cai, por cima do que já
+ * houver. Isso é seguro contra o Planejamento dos gestores (os dois enumeram
+ * itens discretos, e o pedido de 01/10/2026 é justamente que somem), mas NÃO
+ * contra média e valor fixo: aqueles afirmam ser o valor inteiro da categoria —
+ * a média do realizado do ano anterior já contém a viagem daquele ano.
+ *
+ * A marcação de método em "Método por categoria" **não é mais exigida** para a
+ * viagem entrar na Prévia (a categoria vem do retrato de cada viagem). O que
+ * esta função procura é só o conflito que dobra.
+ */
+export function tiposQueDobram(
   tipos: readonly TipoViagem[],
-  categoriasComMetodoViagens: readonly string[],
-): TipoViagem[] {
-  const ok = new Set(categoriasComMetodoViagens);
-  return ordenarTipos(
-    tipos.filter((t) => t.ativo && !!t.categoryCode && !ok.has(t.categoryCode)),
-  );
+  metodoPorCategoria: ReadonlyMap<string, string | null>,
+): Array<{ tipo: TipoViagem; metodo: string }> {
+  const out: Array<{ tipo: TipoViagem; metodo: string }> = [];
+  for (const t of ordenarTipos(tipos)) {
+    if (!t.ativo || !t.categoryCode) continue;
+    const metodo = metodoPorCategoria.get(t.categoryCode) ?? null;
+    if (metodo && viagensConflitaCom(metodo)) out.push({ tipo: t, metodo });
+  }
+  return out;
 }

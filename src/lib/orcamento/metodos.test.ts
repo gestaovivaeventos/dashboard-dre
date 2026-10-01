@@ -12,8 +12,10 @@ import {
   METODOS,
   METODOS_EM_VALIDACAO,
   isOrcamentoMetodo,
+  metodoEhProjecao,
   metodoVisivelPara,
   podeEditarMetodo,
+  viagensConflitaCom,
 } from "./metodos";
 import { WORKSPACE_TABS } from "./workspace-tabs";
 import { isMetodoFinalizavel } from "./finalizacao";
@@ -100,4 +102,39 @@ test("viagens é um método de verdade: finalizável e com rótulo de contagem",
   assert.ok(isMetodoFinalizavel("viagens"));
   assert.equal(ROTULO_POR_METODO.viagens?.plural, "viagens");
   assert.equal(sufixo(ROTULO_POR_METODO.viagens), "as", "viagens aprovadAS");
+});
+
+// ─── Somar na mesma categoria ───────────────────────────────────────────────
+// A pergunta que esta regra responde: dois métodos podem orçar a MESMA categoria
+// e os valores somarem? Errar para o lado permissivo dobra dinheiro em silêncio;
+// errar para o restritivo faz o valor de um dos métodos desaparecer da Prévia.
+
+test("média e valor fixo PROJETAM: são o total da categoria", () => {
+  assert.equal(metodoEhProjecao("media"), true);
+  assert.equal(metodoEhProjecao("valor_fixo"), true);
+});
+
+test("planejamento, viagens e pessoal ENUMERAM: podem conviver", () => {
+  for (const m of ["planejamento_socios", "viagens", "pessoal"] as const) {
+    assert.equal(metodoEhProjecao(m), false, m);
+  }
+});
+
+test("Planejamento + Viagens na mesma categoria NÃO conflita — elas somam", () => {
+  // É o pedido de 01/10/2026: categoria orçada pelos dois tem o valor somado.
+  assert.equal(viagensConflitaCom("planejamento_socios"), false);
+  assert.equal(viagensConflitaCom("pessoal"), false);
+});
+
+test("Média ou Valor fixo + Viagens CONFLITA — dobraria", () => {
+  // A média do realizado do ano anterior já contém a viagem daquele ano.
+  assert.equal(viagensConflitaCom("media"), true);
+  assert.equal(viagensConflitaCom("valor_fixo"), true);
+});
+
+test("categoria SEM método declarado não conflita", () => {
+  // Ela só recebe o que as viagens trouxerem; não há nada com que dobrar.
+  assert.equal(viagensConflitaCom(null), false);
+  assert.equal(viagensConflitaCom(undefined), false);
+  assert.equal(viagensConflitaCom(""), false);
 });

@@ -2,6 +2,7 @@ import { CompanyHub } from "@/components/orcamento/company-hub";
 import { getOrcamentoStatus } from "@/lib/orcamento/actions/status";
 import { contarValidacoesPorMetodo } from "@/lib/orcamento/actions/validacao-diretoria";
 import { getOrcamentoUser, podeValidarOrcamento } from "@/lib/orcamento/auth";
+import { getMetodosOcultos } from "@/lib/orcamento/actions/metodos-empresa";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,13 @@ export default async function OrcamentoEmpresaHubPage({
   // a action): o gerente vê o número do setor dele, a diretoria e o admin veem
   // o da empresa. É por isso que o mesmo card diz coisas diferentes para cada
   // um — e é o comportamento pedido.
-  const [{ statuses }, user, validacoes] = await Promise.all([
+  const [{ statuses }, user, validacoes, ocultos] = await Promise.all([
     getOrcamentoStatus(year),
     getOrcamentoUser(),
     contarValidacoesPorMetodo(params.companyId, year),
+    // Quais telas esta empresa oferece (Configurações gerais › Telas por
+    // empresa). Lista de exclusões: vazia = tudo aparece.
+    getMetodosOcultos(params.companyId),
   ]);
 
   return (
@@ -33,6 +37,7 @@ export default async function OrcamentoEmpresaHubPage({
       isAdmin={Boolean(user?.isAdmin)}
       validacoes={validacoes.contagens ?? {}}
       podeValidar={podeValidarOrcamento(user)}
+      metodosOcultos={ocultos.ocultos}
     />
   );
 }

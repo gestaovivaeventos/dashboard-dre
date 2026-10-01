@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, Percent, Tags, type LucideIcon } from "lucide-react";
+import { ArrowRight, LayoutGrid, Percent, Tags, type LucideIcon } from "lucide-react";
 
 import { CONFIG_GERAIS_SECOES, configGeraisSecaoHref } from "@/lib/orcamento/workspace-tabs";
 
 // Ícone por seção (rótulo/descrição vêm de CONFIG_GERAIS_SECOES, fonte única).
 const SECAO_ICON: Record<string, LucideIcon> = {
+  "telas-por-empresa": LayoutGrid,
   indices: Percent,
   grupos: Tags,
 };

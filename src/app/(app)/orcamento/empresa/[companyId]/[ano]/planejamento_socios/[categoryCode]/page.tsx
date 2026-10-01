@@ -1,10 +1,6 @@
 import { Suspense } from "react";
 
-import { redirect } from "next/navigation";
-
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
-import { metodoVisivelPara } from "@/lib/orcamento/metodos";
-import { workspaceHubHref } from "@/lib/orcamento/workspace-tabs";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 import { PlanejamentoMontagem } from "@/components/orcamento/planejamento-montagem";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +20,9 @@ export default async function WorkspacePlanejamentoCategoriaPage({
 }: {
   params: { companyId: string; ano: string; categoryCode: string };
 }) {
-  // Mesmo gate da lista (ver METODOS_EM_VALIDACAO em metodos.ts).
-  const isAdmin = Boolean(await getOrcamentoAdmin());
-  if (!metodoVisivelPara("planejamento_socios", isAdmin)) {
-    redirect(workspaceHubHref(params.companyId, Number(params.ano)));
-  }
+  // Mesmo gate da lista: método em validação OU escondido nesta empresa. Esta
+  // rota precisa dele por conta própria — chega-se a ela por link direto.
+  await guardMetodoDaEmpresa("planejamento_socios", params.companyId, Number(params.ano));
 
   return (
     <Suspense fallback={null}>

@@ -1,8 +1,4 @@
-import { redirect } from "next/navigation";
-
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
-import { metodoVisivelPara } from "@/lib/orcamento/metodos";
-import { workspaceHubHref } from "@/lib/orcamento/workspace-tabs";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 import { ViagemMontagem } from "@/components/orcamento/viagem-montagem";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +17,10 @@ export default async function WorkspaceViagemPage({
 }: {
   params: { companyId: string; ano: string; viagemId: string };
 }) {
-  const isAdmin = Boolean(await getOrcamentoAdmin());
-  if (!metodoVisivelPara("viagens", isAdmin)) {
-    redirect(workspaceHubHref(params.companyId, Number(params.ano)));
-  }
+  // Método em validação OU escondido nesta empresa (Configurações gerais ›
+  // Telas por empresa). Esconder a caixa no hub não é defesa: o link direto
+  // continua funcionando.
+  await guardMetodoDaEmpresa("viagens", params.companyId, Number(params.ano));
 
   return (
     <ViagemMontagem

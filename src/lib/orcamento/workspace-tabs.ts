@@ -110,6 +110,11 @@ export interface ConfigGeralSecao {
 
 export const CONFIG_GERAIS_SECOES: readonly ConfigGeralSecao[] = [
   {
+    slug: "telas-por-empresa",
+    label: "Telas por empresa",
+    desc: "Quais métodos de orçamento aparecem em cada empresa.",
+  },
+  {
     slug: "indices",
     label: "Índices de correção",
     desc: "IPCA, IGP-M, salário mínimo e demais índices por ano, para todas as empresas.",

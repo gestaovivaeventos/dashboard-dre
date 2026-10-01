@@ -1,8 +1,4 @@
-import { redirect } from "next/navigation";
-
-import { getOrcamentoAdmin } from "@/lib/orcamento/auth";
-import { metodoVisivelPara } from "@/lib/orcamento/metodos";
-import { workspaceHubHref } from "@/lib/orcamento/workspace-tabs";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 import { PlanejamentoLista } from "@/components/orcamento/planejamento-lista";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +16,9 @@ export default async function WorkspacePlanejamentoPage({
 }: {
   params: { companyId: string; ano: string };
 }) {
-  // EM VALIDAÇÃO: o método só aparece para administradores enquanto estiver em
-  // METODOS_EM_VALIDACAO (metodos.ts). O hub já esconde a caixa; isto fecha a
-  // porta de quem chega pela URL.
-  const isAdmin = Boolean(await getOrcamentoAdmin());
-  if (!metodoVisivelPara("planejamento_socios", isAdmin)) {
-    redirect(workspaceHubHref(params.companyId, Number(params.ano)));
-  }
+  // Método em validação OU escondido nesta empresa: o hub já não oferece a
+  // caixa, e isto fecha a porta de quem chega pela URL.
+  await guardMetodoDaEmpresa("planejamento_socios", params.companyId, Number(params.ano));
 
   return (
     <div className="space-y-4">

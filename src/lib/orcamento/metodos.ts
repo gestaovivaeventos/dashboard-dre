@@ -86,3 +86,44 @@ export function podeEditarMetodo(papel: OrcamentoPapel, metodo: OrcamentoMetodo)
   if (!METODOS_POR_INDICE.has(metodo)) return true;
   return papel !== "construtor" && papel !== "construtor_amplo";
 }
+
+// =============================================================================
+// Métodos que PROJETAM × métodos que ENUMERAM
+//
+// É a distinção que decide se dois métodos podem somar na MESMA categoria.
+//
+//  - PROJEÇÃO (média, valor fixo): o método responde pelo valor INTEIRO da
+//    categoria. A média parte do realizado do ano anterior — que já contém tudo
+//    o que se gastou ali, viagem inclusive — e o valor fixo parte do contrato.
+//    Somar outra coisa em cima conta o mesmo dinheiro duas vezes.
+//
+//  - ENUMERAÇÃO (planejamento dos gestores, viagens, pessoal): o método lista
+//    ITENS discretos — esta despesa, esta viagem, esta pessoa. Dois métodos que
+//    enumeram podem conviver na mesma categoria, e o total é a soma dos itens de
+//    cada um. Nada é contado duas vezes porque nenhum deles afirma ser o total.
+//
+// Daí a regra prática: **Planejamento + Viagens na mesma categoria SOMAM**
+// (pedido do dono do projeto em 01/10/2026); **Média ou Valor fixo + Viagens
+// DOBRARIAM**, e por isso a tela do de-para avisa em vez de deixar passar.
+// =============================================================================
+
+const METODOS_PROJECAO: ReadonlySet<OrcamentoMetodo> = new Set<OrcamentoMetodo>([
+  "media",
+  "valor_fixo",
+]);
+
+/** Este método afirma ser o valor INTEIRO da categoria? */
+export function metodoEhProjecao(metodo: OrcamentoMetodo | string): boolean {
+  return METODOS_PROJECAO.has(metodo as OrcamentoMetodo);
+}
+
+/**
+ * Pôr viagens numa categoria cujo método declarado é `metodoDaCategoria` conta
+ * dinheiro duas vezes?
+ *
+ * `null` (categoria sem método declarado) não conflita: ela só recebe o que as
+ * viagens trouxerem.
+ */
+export function viagensConflitaCom(metodoDaCategoria: string | null | undefined): boolean {
+  return !!metodoDaCategoria && metodoEhProjecao(metodoDaCategoria);
+}

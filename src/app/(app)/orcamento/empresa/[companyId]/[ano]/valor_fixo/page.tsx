@@ -1,4 +1,5 @@
 import { ValorFixoManager } from "@/components/orcamento/valor-fixo-manager";
+import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
 
 import { getOrcamentoUser } from "@/lib/orcamento/auth";
 import { podeEditarMetodo } from "@/lib/orcamento/metodos";
@@ -12,6 +13,11 @@ export default async function WorkspaceValorFixoPage({
 }: {
   params: { companyId: string; ano: string };
 }) {
+  // Método em validação OU escondido nesta empresa (Configurações gerais ›
+  // Telas por empresa). Esconder a caixa no hub não é defesa: o link direto
+  // continua funcionando.
+  await guardMetodoDaEmpresa("valor_fixo", params.companyId, Number(params.ano));
+
   // Gerente e gerente sócio leem este método, mas não editam — ver
   // `podeEditarMetodo`. A tela não é a autorização (as actions repetem a
   // trava), mas deixar digitar para recusar depois é pior que campo travado.

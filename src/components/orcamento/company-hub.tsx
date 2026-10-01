@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { METODOS, metodoVisivelPara, type OrcamentoMetodo } from "@/lib/orcamento/metodos";
+import { metodoVisivelNaEmpresa } from "@/lib/orcamento/metodos-visiveis";
 import {
   isWorkspaceTabBuilt,
   workspaceTabHref,
@@ -112,6 +113,7 @@ export function CompanyHub({
   isAdmin = false,
   validacoes = {},
   podeValidar = false,
+  metodosOcultos = [],
 }: {
   companyId: string;
   year: number;
@@ -133,11 +135,24 @@ export function CompanyHub({
    * só não oferecer um caminho que terminaria em redirect.
    */
   isAdmin?: boolean;
+  /**
+   * Métodos ESCONDIDOS nesta empresa (Configurações gerais › Telas por empresa).
+   * Lista de exclusões: vazia = tudo aparece.
+   */
+  metodosOcultos?: string[];
 }) {
   // Só os métodos com tela (os de VE ficam de fora do hub), menos os que ainda
   // estão em validação e só o admin enxerga (METODOS_EM_VALIDACAO). Quem decide
   // se a caixa linka ou fica "em breve" é `isWorkspaceTabBuilt`.
-  const metodos = METODOS.filter((m) => !m.ve && metodoVisivelPara(m.key, Boolean(isAdmin)));
+  const ocultos = new Set<string>(metodosOcultos ?? []);
+  const metodos = METODOS.filter(
+    (m) =>
+      !m.ve &&
+      metodoVisivelPara(m.key, Boolean(isAdmin)) &&
+      // Esconder aqui é só não OFERECER: nada é excluído, e o que já estiver
+      // orçado segue na Prévia (a configuração recusa esconder nesse caso).
+      metodoVisivelNaEmpresa(m.key, ocultos),
+  );
 
   return (
     <div className="space-y-4">
