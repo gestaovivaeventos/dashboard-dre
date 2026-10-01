@@ -247,10 +247,9 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
           <p className="font-medium">Esta empresa ainda não tem parâmetros de viagem para {year}.</p>
           <p className="mt-1 text-muted-foreground">
-            As estimativas estão usando os padrões do sistema (R$ {setup.parametros.rsPorKm
-              .toFixed(2)
-              .replace(".", ",")}
-            /km, diária de R$ {setup.parametros.hotelDiariaPadrao.toFixed(2).replace(".", ",")}).{" "}
+            A alimentação e o km de carro próprio estão usando os padrões do sistema (R${" "}
+            {setup.parametros.diariaAlimentacao.toFixed(2).replace(".", ",")}/dia e R${" "}
+            {setup.parametros.rsPorKm.toFixed(2).replace(".", ",")}/km).{" "}
             <Link
               href={workspaceConfigSecaoHref(companyId, year, "viagem-parametros")}
               className="font-medium underline underline-offset-2"

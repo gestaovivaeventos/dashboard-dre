@@ -1104,16 +1104,10 @@ export async function salvarParametrosViagem(
     {
       company_id: companyId,
       year,
+      // Só os DOIS parâmetros que a empresa define. As outras colunas da tabela
+      // continuam lá com o default delas, sem leitor — ver ParametrosViagem.
       rs_por_km: positivo(params.rsPorKm, PARAMETROS_PADRAO.rsPorKm),
-      preco_combustivel_litro: positivo(
-        params.precoCombustivelLitro,
-        PARAMETROS_PADRAO.precoCombustivelLitro,
-      ),
-      consumo_km_litro: positivo(params.consumoKmLitro, PARAMETROS_PADRAO.consumoKmLitro),
-      tarifa_onibus_km: positivo(params.tarifaOnibusKm, PARAMETROS_PADRAO.tarifaOnibusKm),
       diaria_alimentacao: positivo(params.diariaAlimentacao, PARAMETROS_PADRAO.diariaAlimentacao),
-      hotel_diaria_padrao: positivo(params.hotelDiariaPadrao, PARAMETROS_PADRAO.hotelDiariaPadrao),
-      aviao_por_km_pessoa: positivo(params.aviaoPorKmPessoa, PARAMETROS_PADRAO.aviaoPorKmPessoa),
       updated_at: new Date().toISOString(),
       updated_by: admin.userId,
     },

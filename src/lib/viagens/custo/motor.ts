@@ -95,14 +95,18 @@ function custoDoTrecho(
   }
 
   const km = positivo(trecho.distanciaKm);
-  if (km === 0) {
-    acc.premissas.push(
-      `Trecho ${rota} (${modal}) entrou com custo ZERO: sem preço informado e sem distância.`,
-    );
-    return { valor: 0, descricao: `${modal} ${rota}: sem preço e sem distância` };
-  }
 
+  // ── CARRO e VAN: o km é o driver real do custo ──
+  // Combustível e desgaste são proporcionais à distância, e o R$/km é um valor que
+  // a EMPRESA define (reembolso ao motorista) — não um preço de mercado sazonal.
+  // É o único modal com estimativa, e é por isso que ele tem parâmetro.
   if (trecho.modal === "carro" || trecho.modal === "van") {
+    if (km === 0) {
+      acc.premissas.push(
+        `Trecho ${rota} (${modal}) entrou com custo ZERO: sem preço informado e sem distância.`,
+      );
+      return { valor: 0, descricao: `${modal} ${rota}: sem preço e sem distância` };
+    }
     // Por VEÍCULO, não por pessoa — rodar com 1 ou 4 pessoas custa o mesmo.
     const veiculos = Math.max(1, Math.round(positivo(trecho.veiculos) || 1));
     const v = km * params.rsPorKm * veiculos;
@@ -115,25 +119,23 @@ function custoDoTrecho(
     };
   }
 
-  if (trecho.modal === "onibus") {
-    const v = km * params.tarifaOnibusKm * pessoas;
-    acc.premissas.push(`Trecho ${rota}: passagem de ônibus estimada por quilometragem.`);
-    return {
-      valor: v,
-      descricao: `${modal} ${rota}: ${km} km × ${brl(params.tarifaOnibusKm)}/km × ${pessoas} pessoa(s)`,
-    };
-  }
-
-  // Avião e "outro" sem preço: a estimativa por km é GROSSEIRA e vai dito.
-  const v = km * params.aviaoPorKmPessoa * pessoas;
+  // ── Avião, ônibus e "outro" SEM preço: custo ZERO e premissa alta ──
+  // Não existe R$/km para passagem, e isso é decisão (01/10/2026): o preço de
+  // passagem tem sazonalidade enorme, e um valor por km não distingue janeiro de
+  // julho nem rota concorrida de rota sem concorrência. Ele sairia plausível e
+  // ninguém o reconstruiria.
+  //
+  // Preço de passagem vem de COTAÇÃO ou de BUSCA (`precos/`), e quando não há
+  // nenhuma das duas o trecho entra em zero DITO — que é o que faz alguém ir
+  // cotar, em vez de aprovar um número inventado.
   acc.premissas.push(
-    `Trecho ${rota}: passagem aérea ESTIMADA por quilometragem, sem cotação. ` +
-      `Confira antes de aprovar.`,
+    `Trecho ${rota} (${modal}): SEM PREÇO, entrou como ZERO. Passagem não tem ` +
+      `estimativa por quilometragem — o preço tem sazonalidade grande, e um valor ` +
+      `por km sairia plausível sem ninguém conseguir conferi-lo. Use "Buscar ` +
+      `preços" ou informe a cotação.` +
+      (km > 0 ? " A distância informada NÃO é usada neste modal." : ""),
   );
-  return {
-    valor: v,
-    descricao: `${modal} ${rota}: ${km} km × ${brl(params.aviaoPorKmPessoa)}/km × ${pessoas} pessoa(s) (estimado)`,
-  };
+  return { valor: 0, descricao: `${modal} ${rota}: sem preço cotado` };
 }
 
 function lancarTrecho(
@@ -150,27 +152,29 @@ function lancarTrecho(
   }
 }
 
-function lancarEstadia(
-  acc: Acumulador,
-  parada: ParadaViagem,
-  quartos: number,
-  params: ParametrosViagem,
-) {
+// `params` saiu da assinatura: hospedagem não tem mais diária padrão, então a
+// estadia não depende de parâmetro nenhum.
+function lancarEstadia(acc: Acumulador, parada: ParadaViagem, quartos: number) {
   const noites = Math.max(0, Math.round(num(parada.noites)));
   if (noites === 0) return;
 
-  const diaria = positivo(parada.diariaHotel) || params.hotelDiariaPadrao;
-  if (!positivo(parada.diariaHotel)) {
+  // Hotel também não tem valor arbitrado: diária de hotel é preço de mercado, e
+  // varia por cidade e por data como a passagem. Sem diária informada o custo é
+  // ZERO dito, e a busca é o caminho para preenchê-la.
+  const diaria = positivo(parada.diariaHotel);
+  if (diaria === 0) {
     acc.premissas.push(
-      `Hospedagem em ${parada.cidade}: diária padrão de ${brl(params.hotelDiariaPadrao)}, sem hotel escolhido.`,
+      `Hospedagem em ${parada.cidade}: SEM DIÁRIA informada — use "Buscar preços" ou ` +
+        `informe o valor. ${noites} noite(s) entraram como ZERO.`,
+    );
+  } else {
+    lancar(
+      acc,
+      "hospedagem",
+      `${parada.cidade}: ${noites} noite(s) × ${brl(diaria)} × ${quartos} quarto(s)`,
+      noites * diaria * quartos,
     );
   }
-  lancar(
-    acc,
-    "hospedagem",
-    `${parada.cidade}: ${noites} noite(s) × ${brl(diaria)} × ${quartos} quarto(s)`,
-    noites * diaria * quartos,
-  );
 
   const local = parada.transporteLocal;
   if (local && positivo(local.custoPorTrajeto) > 0 && positivo(local.trajetosPorDia) > 0) {
@@ -228,7 +232,7 @@ export function calcularViagem(spec: ViagemSpec, params: ParametrosViagem): Resu
   }
 
   // ── Estadia e deslocamento local em cada parada ──
-  for (const parada of paradas) lancarEstadia(acc, parada, quartos, params);
+  for (const parada of paradas) lancarEstadia(acc, parada, quartos);
 
   // ── Alimentação ──
   lancar(

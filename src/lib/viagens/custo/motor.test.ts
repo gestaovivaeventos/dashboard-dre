@@ -13,12 +13,7 @@ import type { ParametrosViagem, ViagemSpec } from "./tipos";
 
 const P: ParametrosViagem = {
   rsPorKm: 2,
-  precoCombustivelLitro: 6,
-  consumoKmLitro: 10,
-  tarifaOnibusKm: 0.5,
   diariaAlimentacao: 100,
-  hotelDiariaPadrao: 200,
-  aviaoPorKmPessoa: 1,
 };
 
 /** Viagem simples: JF → São Paulo de carro, 1 noite, 2 pessoas. */
@@ -32,6 +27,9 @@ function simples(over: Partial<ViagemSpec> = {}): ViagemSpec {
       {
         cidade: "São Paulo",
         noites: 1,
+        // A diária vai explícita: desde 01/10/2026 não existe diária PADRÃO —
+        // hotel é preço de mercado, e sem valor informado a hospedagem é ZERO.
+        diariaHotel: 200,
         chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "carro", distanciaKm: 500 },
       },
     ],
@@ -71,22 +69,73 @@ test("CARRO custa por veículo, não por pessoa", () => {
   assert.equal(grupo(dois, "passagem")?.total, grupo(quatro, "passagem")?.total);
 });
 
-test("ÔNIBUS custa por pessoa", () => {
+test("ÔNIBUS com preço cotado escala por pessoa", () => {
   const spec = simples({
     paradas: [
       {
         cidade: "São Paulo",
         noites: 1,
-        chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "onibus", distanciaKm: 500 },
+        diariaHotel: 200,
+        chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "onibus", precoPorPessoa: 250 },
       },
     ],
-    volta: { de: "São Paulo", para: "Juiz de Fora", modal: "onibus", distanciaKm: 500 },
+    volta: { de: "São Paulo", para: "Juiz de Fora", modal: "onibus", precoPorPessoa: 250 },
   });
   const dois = calcularViagem({ ...spec, pessoas: 2 }, P);
   const quatro = calcularViagem({ ...spec, pessoas: 4 }, P);
-  // 500 km × 0,50 × 2 pessoas × 2 trechos = 1.000 → dobra com 4 pessoas.
   assert.equal(grupo(dois, "passagem")?.total, 1000);
   assert.equal(grupo(quatro, "passagem")?.total, 2000);
+});
+
+test("PASSAGEM sem preço é ZERO, mesmo com a distância informada", () => {
+  // Decisão de 01/10/2026: não existe R$/km de passagem. O preço tem sazonalidade
+  // grande e um valor por km não distingue janeiro de julho — sairia plausível e
+  // ninguém o reconstruiria. Zero DITO é o que faz alguém ir cotar.
+  for (const modal of ["onibus", "aviao", "outro"] as const) {
+    const r = calcularViagem(
+      simples({
+        paradas: [
+          {
+            cidade: "São Paulo",
+            noites: 1,
+            diariaHotel: 200,
+            chegada: { de: "Juiz de Fora", para: "São Paulo", modal, distanciaKm: 500 },
+          },
+        ],
+        volta: null,
+      }),
+      P,
+    );
+    assert.equal(grupo(r, "passagem"), undefined, `${modal} não podia produzir valor`);
+    assert.ok(
+      r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)),
+      `${modal} sem premissa`,
+    );
+    assert.ok(
+      r.premissas.some((p) => /distância informada NÃO é usada/.test(p)),
+      `${modal}: a premissa tem de dizer que o km foi ignorado`,
+    );
+  }
+});
+
+test("só CARRO e VAN estimam por km — é onde o km é o driver do custo", () => {
+  for (const modal of ["carro", "van"] as const) {
+    const r = calcularViagem(
+      simples({
+        paradas: [
+          {
+            cidade: "São Paulo",
+            noites: 1,
+            diariaHotel: 200,
+            chegada: { de: "Juiz de Fora", para: "São Paulo", modal, distanciaKm: 500 },
+          },
+        ],
+        volta: null,
+      }),
+      P,
+    );
+    assert.equal(grupo(r, "passagem")?.total, 1000, modal);
+  }
 });
 
 test("QUARTO INDIVIDUAL dobra a hospedagem — e é por isso que é campo", () => {
@@ -114,19 +163,21 @@ test("MULTI-DESTINO soma os trechos na ordem do roteiro", () => {
         {
           cidade: "Curitiba",
           noites: 2,
+          diariaHotel: 200,
           chegada: { de: "Juiz de Fora", para: "Curitiba", modal: "aviao", precoPorPessoa: 800 },
         },
         {
           cidade: "Florianópolis",
           noites: 1,
-          chegada: { de: "Curitiba", para: "Florianópolis", modal: "onibus", distanciaKm: 300 },
+          diariaHotel: 200,
+          chegada: { de: "Curitiba", para: "Florianópolis", modal: "onibus", precoPorPessoa: 150 },
         },
       ],
       volta: { de: "Florianópolis", para: "Juiz de Fora", modal: "aviao", precoPorPessoa: 900 },
     },
     P,
   );
-  // 800×2 + (300×0,5×2) + 900×2 = 1600 + 300 + 1800 = 3700
+  // 800×2 + 150×2 + 900×2 = 1600 + 300 + 1800 = 3700
   assert.equal(grupo(r, "passagem")?.total, 3700);
   // 2 noites + 1 noite, 1 quarto.
   assert.equal(r.noites, 3);
@@ -165,12 +216,32 @@ test("preço informado VENCE a estimativa por km", () => {
 
 test("o que foi ARBITRADO vira premissa visível", () => {
   const r = calcularViagem(simples(), P);
-  // Diária padrão e quilometragem foram arbitradas — o diretor precisa saber.
-  assert.ok(r.premissas.some((p) => /diária padrão/i.test(p)));
+  // A quilometragem do carro é o único arbítrio que sobrou — o diretor vê.
   assert.ok(r.premissas.some((p) => /quilometragem/i.test(p)));
 });
 
-test("passagem aérea sem cotação avisa que é estimativa grosseira", () => {
+test("NÃO existe mais diária de hotel padrão — sem valor, hospedagem é ZERO", () => {
+  // Diária de hotel é preço de mercado e varia por cidade e por data, como a
+  // passagem. Um padrão arbitrado produziria número que ninguém confere.
+  const r = calcularViagem(
+    simples({
+      paradas: [
+        {
+          cidade: "São Paulo",
+          noites: 3,
+          chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "carro", distanciaKm: 500 },
+        },
+      ],
+      volta: null,
+    }),
+    P,
+  );
+  assert.equal(grupo(r, "hospedagem"), undefined);
+  assert.ok(r.premissas.some((p) => /SEM DIÁRIA informada/.test(p)));
+  assert.ok(r.premissas.some((p) => /Buscar preços/.test(p)));
+});
+
+test("passagem aérea sem cotação NÃO é estimada — entra zero e avisa", () => {
   const r = calcularViagem(
     simples({
       paradas: [
@@ -184,11 +255,12 @@ test("passagem aérea sem cotação avisa que é estimativa grosseira", () => {
     }),
     P,
   );
-  assert.ok(r.premissas.some((p) => /ESTIMADA por quilometragem/i.test(p)));
-  assert.ok(r.premissas.some((p) => /Confira antes de aprovar/i.test(p)));
+  assert.ok(r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)));
+  assert.ok(r.premissas.some((p) => /Buscar preços/.test(p)));
+  assert.equal(grupo(r, "passagem"), undefined);
 });
 
-test("trecho sem preço E sem distância não some — vira premissa de custo zero", () => {
+test("carro sem preço E sem distância não some — vira premissa de custo zero", () => {
   // Sumir em silêncio daria um orçamento barato demais sem ninguém perceber.
   const r = calcularViagem(
     simples({
@@ -196,7 +268,8 @@ test("trecho sem preço E sem distância não some — vira premissa de custo ze
         {
           cidade: "São Paulo",
           noites: 1,
-          chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "aviao" },
+          diariaHotel: 200,
+          chegada: { de: "Juiz de Fora", para: "São Paulo", modal: "carro" },
         },
       ],
       volta: null,
@@ -204,6 +277,7 @@ test("trecho sem preço E sem distância não some — vira premissa de custo ze
     P,
   );
   assert.ok(r.premissas.some((p) => /custo ZERO/i.test(p)));
+  assert.ok(r.premissas.some((p) => /sem distância/i.test(p)));
 });
 
 test("transporte local conta os DIAS, não as noites", () => {

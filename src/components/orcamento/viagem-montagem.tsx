@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Info, Loader2, Plus, Send, Trash2, Undo2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Info,
+  Loader2,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 
 import {
   enviarViagem,
@@ -19,6 +29,8 @@ import {
 } from "@/lib/orcamento/actions/planejamento-categoria";
 import { getConversaViagem } from "@/lib/orcamento/actions/viagens-entrevista";
 import { aplicarCartao, type CartaoViagem, type MensagemViagem } from "@/lib/viagens/cartao";
+import { buscarPrecosDaViagem } from "@/lib/orcamento/actions/viagens-precos";
+import { aplicarPrecos } from "@/lib/viagens/precos/aplicar";
 import { formatBRL } from "@/lib/orcamento/format";
 import { workspaceTabHref } from "@/lib/orcamento/workspace-tabs";
 import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
@@ -147,6 +159,13 @@ export function ViagemMontagem({
   const [previa, setPrevia] = useState<PreviaSetorResumo | null>(null);
   const [carregandoPrevia, setCarregandoPrevia] = useState(false);
   const [conversa, setConversa] = useState<MensagemViagem[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [resultadoBusca, setResultadoBusca] = useState<{
+    aplicados: string[];
+    ignorados: string[];
+    fontes: string[];
+    quando: string | null;
+  } | null>(null);
 
   const carregarConversa = useCallback(async () => {
     const res = await getConversaViagem(companyId, year, viagemId);
@@ -234,6 +253,46 @@ export function ViagemMontagem({
     }
     await carregar();
     void carregarPrevia();
+  }
+
+  /**
+   * Pesquisa os preços na web e preenche o que está VAZIO.
+   *
+   * Não grava: mexe no rascunho, como o cartão da IA. Preço que a pessoa digitou
+   * nunca é sobrescrito (`aplicarPrecos`) — quem digitou quase sempre tem a
+   * cotação na mão, e trocá-la pelo menor preço da web rebaixaria o orçamento com
+   * aparência de pesquisa.
+   */
+  async function buscarPrecos() {
+    if (!rascunho) return;
+    setBuscando(true);
+    setErro(null);
+    setResultadoBusca(null);
+    const res = await buscarPrecosDaViagem(companyId, year, viagemId);
+    setBuscando(false);
+    if (res.error) {
+      setErro(res.error);
+      return;
+    }
+    if (res.nadaACotar) {
+      setResultadoBusca({
+        aplicados: [],
+        ignorados: ["O roteiro não tem trecho de avião/ônibus a cotar nem noite sem diária."],
+        fontes: [],
+        quando: res.quando ?? null,
+      });
+      return;
+    }
+    if (!res.proposta) return;
+    const r = aplicarPrecos(rascunho, res.proposta);
+    setRascunho(r.roteiro);
+    if (r.aplicados.length > 0) setSujo(true);
+    setResultadoBusca({
+      aplicados: r.aplicados,
+      ignorados: r.ignorados,
+      fontes: res.fontes ?? [],
+      quando: res.quando ?? null,
+    });
   }
 
   async function reabrir() {
@@ -766,6 +825,19 @@ export function ViagemMontagem({
                 {salvando && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
                 Salvar e calcular
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => void buscarPrecos()}
+                disabled={salvando || buscando}
+                title="Pesquisa passagem e hotel na web e preenche o que estiver vazio"
+              >
+                {buscando ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="mr-1.5 h-4 w-4" />
+                )}
+                Buscar preços
+              </Button>
               {viagem.status === "rascunho" ? (
                 <Button variant="outline" onClick={() => void enviar()} disabled={salvando}>
                   <Send className="mr-1.5 h-4 w-4" />
@@ -781,6 +853,58 @@ export function ViagemMontagem({
                 <span className="text-xs text-amber-700 dark:text-amber-500">
                   Há mudanças não salvas — o custo abaixo é o do último cálculo.
                 </span>
+              )}
+            </div>
+          )}
+          {/* ── O que a busca trouxe ──
+              Mostrar o que FICOU DE FORA é metade do valor disto: busca que
+              "não fez nada" sem dizer o motivo faz a pessoa clicar de novo. */}
+          {resultadoBusca && (
+            <div className="space-y-2 rounded-lg border border-sky-500/40 bg-sky-500/5 p-3 text-xs">
+              <p className="font-semibold text-sky-700 dark:text-sky-400">
+                Preços pesquisados{resultadoBusca.quando ? ` para ${resultadoBusca.quando}` : ""}
+              </p>
+              {resultadoBusca.aplicados.length > 0 ? (
+                <ul className="space-y-0.5">
+                  {resultadoBusca.aplicados.map((a, i) => (
+                    <li key={i}>• {a}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground">Nada foi preenchido.</p>
+              )}
+              {resultadoBusca.ignorados.length > 0 && (
+                <div className="text-muted-foreground">
+                  <p className="font-medium">Não preenchido:</p>
+                  <ul className="space-y-0.5">
+                    {resultadoBusca.ignorados.map((x, i) => (
+                      <li key={i}>• {x}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-muted-foreground">
+                <strong>É referência, não cotação.</strong> Para uma viagem do ano que vem a tarifa
+                ainda não foi publicada em lugar nenhum — o que se achou é o menor preço de hoje para
+                a rota naquele mês. Confira antes de enviar, e salve para recalcular.
+              </p>
+              {resultadoBusca.fontes.length > 0 && (
+                <p className="break-all text-muted-foreground">
+                  Fontes:{" "}
+                  {resultadoBusca.fontes.map((f, i) => (
+                    <span key={f}>
+                      {i > 0 ? " · " : ""}
+                      <a
+                        href={f}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2"
+                      >
+                        {new URL(f).hostname}
+                      </a>
+                    </span>
+                  ))}
+                </p>
               )}
             </div>
           )}

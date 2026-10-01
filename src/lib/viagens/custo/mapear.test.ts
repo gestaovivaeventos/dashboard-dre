@@ -103,9 +103,12 @@ test("o número em STRING soma, não concatena", () => {
   const spec = specDaViagem(VIAGEM, PARADAS);
   const r = calcularViagem(spec, PARAMETROS_PADRAO);
   assert.ok(Number.isFinite(r.total));
-  // 800×2 (aéreo) + 300km×0,42×2 (ônibus) + 900×2 (volta) = 1600 + 252 + 1800
+  // 800×2 (aéreo informado) + 900×2 (volta informada) = 1600 + 1800 = 3400.
+  // O trecho de ônibus da 2a parada tem SÓ distância, e passagem não se estima por
+  // km (01/10/2026): ele entra zero, dito em premissa.
   const passagem = r.grupos.find((g) => g.grupo === "passagem");
-  assert.equal(passagem?.total, 3652);
+  assert.equal(passagem?.total, 3400);
+  assert.ok(r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)));
 });
 
 test("viagem SEM volta não inventa trecho de retorno", () => {
@@ -121,8 +124,8 @@ test("translado incompleto não vira meia linha", () => {
 
 test("parâmetros: linha ausente cai no padrão, linha parcial completa o resto", () => {
   assert.deepEqual(parametrosDaLinha(null), PARAMETROS_PADRAO);
-  const p = parametrosDaLinha({ hotel_diaria_padrao: "400", diaria_alimentacao: null });
-  assert.equal(p.hotelDiariaPadrao, 400);
+  const p = parametrosDaLinha({ rs_por_km: "2.50", diaria_alimentacao: null });
+  assert.equal(p.rsPorKm, 2.5);
   assert.equal(p.diariaAlimentacao, PARAMETROS_PADRAO.diariaAlimentacao);
 });
 

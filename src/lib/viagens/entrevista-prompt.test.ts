@@ -47,8 +47,10 @@ test("o prompt proíbe a IA de CALCULAR ou inventar valor", () => {
   // plausível e ninguém o confere.
   const p = prompt();
   assert.match(p, /NÃO calcula/);
-  assert.match(p, /Nunca escreva um valor que/i);
-  assert.match(p, /deixe o campo VAZIO e informe a DISTÂNCIA/i);
+  assert.match(p, /NUNCA escreva um valor de passagem ou de hotel que você supôs/);
+  assert.match(p, /Zero DITO é melhor do que um número inventado/);
+  assert.match(p, /deixe o campo VAZIO/i);
+  assert.match(p, /não há estimativa possível/i);
 });
 
 test("o prompt proíbe total/custo dentro do cartão", () => {
@@ -149,10 +151,13 @@ test("parâmetro padrão é AVISADO como padrão", () => {
   assert.equal(/ainda não cadastrou parâmetros/.test(prompt()), false);
 });
 
-test("os parâmetros vigentes vão no prompt, em reais", () => {
-  const l = listaParametros({ ...PARAMETROS_PADRAO, rsPorKm: 1.8, hotelDiariaPadrao: 250 });
+test("só os DOIS parâmetros vão no prompt, e ele nega os outros", () => {
+  const l = listaParametros({ rsPorKm: 1.8, diariaAlimentacao: 80 });
   assert.match(l, /R\$ 1,80 por km, POR VEÍCULO/);
-  assert.match(l, /R\$ 250,00 por quarto por noite/);
+  assert.match(l, /R\$ 80,00 por pessoa por DIA/);
+  assert.match(l, /não têm parâmetro/);
+  assert.match(l, /NUNCA invente um valor/);
+  assert.equal(/por quarto por noite/.test(l), false, "não existe diária padrão de hotel");
 });
 
 test("as listas auxiliares devolvem vazio quando não há nada", () => {

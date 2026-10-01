@@ -119,20 +119,33 @@ export interface ViagemSpec {
   outros?: Array<{ descricao: string; valor: number }>;
 }
 
-/** Parâmetros do admin — o que ancora a estimativa. */
+/**
+ * Os parâmetros da estimativa — DOIS, e só dois.
+ *
+ * ── Por que não há R$/km de avião nem de ônibus (01/10/2026) ───────────────
+ * Havia, e era um default ruim: passagem aérea tem sazonalidade enorme, e um
+ * R$/km não distingue janeiro de julho, nem rota concorrida de rota sem
+ * concorrência. Um número assim sai plausível e ninguém consegue reconstruí-lo —
+ * exatamente o defeito que este motor existe para evitar.
+ *
+ * Preço de mercado passou a vir de BUSCA (`src/lib/viagens/precos/`), que é
+ * referência de verdade: a rota, o mês, a fonte. Trecho sem preço e sem busca
+ * entra com custo ZERO e premissa alta, em vez de um valor inventado.
+ *
+ * Ficam só os dois que a EMPRESA define, e que não são preço de mercado:
+ *
+ *  - `diariaAlimentacao`: política da empresa, não cotação;
+ *  - `rsPorKm`: carro PRÓPRIO — aqui o km é o driver real do custo (combustível e
+ *    desgaste são proporcionais à distância) e a empresa tem o valor dela.
+ *
+ * As colunas dos parâmetros removidos continuam na tabela, sem leitor — mesma
+ * convenção das outras colunas mortas do módulo. Não as recrie no cálculo.
+ */
 export interface ParametrosViagem {
-  /** R$ por km rodado (reembolso ao motorista). */
+  /** Carro/van próprios: R$ por km, POR VEÍCULO (não por pessoa). */
   rsPorKm: number;
-  precoCombustivelLitro: number;
-  consumoKmLitro: number;
-  /** R$ por km de passagem de ônibus, por pessoa. */
-  tarifaOnibusKm: number;
-  /** Diária de alimentação por pessoa. */
+  /** Alimentação por pessoa por DIA. Política da empresa. */
   diariaAlimentacao: number;
-  /** Diária de hotel por quarto, quando a cidade não tem valor próprio. */
-  hotelDiariaPadrao: number;
-  /** Custo médio de um voo por pessoa, por km — só quando nada foi informado. */
-  aviaoPorKmPessoa: number;
 }
 
 export interface LinhaCusto {

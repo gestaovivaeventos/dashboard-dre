@@ -16,12 +16,7 @@ import type { ModalTrecho, ParadaViagem, TrechoViagem } from "./tipos";
 /** Defaults — valem quando a empresa/ano ainda não tem parâmetros gravados. */
 export const PARAMETROS_PADRAO: ParametrosViagem = {
   rsPorKm: 1.8,
-  precoCombustivelLitro: 6.2,
-  consumoKmLitro: 11,
-  tarifaOnibusKm: 0.42,
   diariaAlimentacao: 80,
-  hotelDiariaPadrao: 250,
-  aviaoPorKmPessoa: 0.9,
 };
 
 const MODAIS: readonly ModalTrecho[] = ["carro", "onibus", "aviao", "van", "outro"];
@@ -43,14 +38,10 @@ function texto(v: unknown): string {
 
 export function parametrosDaLinha(row: Record<string, unknown> | null | undefined): ParametrosViagem {
   if (!row) return { ...PARAMETROS_PADRAO };
+  // As outras colunas da tabela continuam lá e NÃO são lidas (ver ParametrosViagem).
   return {
     rsPorKm: n(row.rs_por_km) ?? PARAMETROS_PADRAO.rsPorKm,
-    precoCombustivelLitro: n(row.preco_combustivel_litro) ?? PARAMETROS_PADRAO.precoCombustivelLitro,
-    consumoKmLitro: n(row.consumo_km_litro) ?? PARAMETROS_PADRAO.consumoKmLitro,
-    tarifaOnibusKm: n(row.tarifa_onibus_km) ?? PARAMETROS_PADRAO.tarifaOnibusKm,
     diariaAlimentacao: n(row.diaria_alimentacao) ?? PARAMETROS_PADRAO.diariaAlimentacao,
-    hotelDiariaPadrao: n(row.hotel_diaria_padrao) ?? PARAMETROS_PADRAO.hotelDiariaPadrao,
-    aviaoPorKmPessoa: n(row.aviao_por_km_pessoa) ?? PARAMETROS_PADRAO.aviaoPorKmPessoa,
   };
 }
 

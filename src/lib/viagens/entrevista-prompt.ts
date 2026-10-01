@@ -94,11 +94,11 @@ function brl(n: number): string {
  */
 export function listaParametros(p: ParametrosViagem): string {
   return [
-    `- carro/van: ${brl(p.rsPorKm)} por km, POR VEÍCULO (não por pessoa)`,
-    `- ônibus: ${brl(p.tarifaOnibusKm)} por km, por pessoa`,
-    `- avião sem cotação: ${brl(p.aviaoPorKmPessoa)} por km por pessoa — estimativa grosseira`,
-    `- hotel sem diária informada: ${brl(p.hotelDiariaPadrao)} por quarto por noite`,
+    `- carro/van próprios: ${brl(p.rsPorKm)} por km, POR VEÍCULO (não por pessoa)`,
     `- alimentação: ${brl(p.diariaAlimentacao)} por pessoa por DIA (noites + 1)`,
+    "- passagem (avião, ônibus) e HOTEL não têm parâmetro: são preço de mercado, com",
+    "  sazonalidade grande. Sem cotação do gestor nem busca, o trecho ou a hospedagem",
+    "  entra como ZERO e o sistema marca a premissa — NUNCA invente um valor.",
   ].join("\n");
 }
 
@@ -160,9 +160,13 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
     "do roteiro, com os parâmetros da empresa. O seu trabalho é levantar os FATOS do roteiro.",
     "",
     "- Preço que o gestor JÁ TEM (cotação, passagem comprada, diária combinada com o hotel): registre.",
-    "- Preço que ninguém tem: deixe o campo VAZIO e informe a DISTÂNCIA em km no lugar. O motor estima",
-    "  e MARCA a linha como estimativa, que é o que o diretor precisa ver. Nunca escreva um valor que",
-    "  você mesmo supôs: ele sai plausível e ninguém o confere.",
+    "- Preço que ninguém tem: deixe o campo VAZIO. Para CARRO/VAN, informe a DISTÂNCIA em km — ali o",
+    "  motor estima pelo R$/km da empresa, porque o km é o driver real do custo. Para AVIÃO e ÔNIBUS",
+    "  não há estimativa possível (sazonalidade), e o sistema entra com ZERO marcando a premissa.",
+    "  Diga ao gestor que a tela tem o botão \"Buscar preços\", que consulta preços reais na web, ou",
+    "  que ele pode informar a cotação que tenha. O mesmo vale para a diária do hotel.",
+    "- NUNCA escreva um valor de passagem ou de hotel que você supôs: ele sai plausível e ninguém o",
+    "  confere. Zero DITO é melhor do que um número inventado.",
     "- Distância rodoviária aproximada entre cidades você PODE informar, dizendo que é aproximada.",
     "  Se não tiver ideia, pergunte ao gestor em vez de arredondar no escuro.",
     "- Se o gestor perguntar de onde vem um valor, explique pelo parâmetro. Estes são os vigentes:",

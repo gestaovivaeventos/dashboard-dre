@@ -34,46 +34,16 @@ interface Campo {
 
 const CAMPOS: readonly Campo[] = [
   {
-    chave: "rsPorKm",
-    label: "Carro e van — R$ por km",
-    ajuda: "Por VEÍCULO, não por pessoa. Inclui combustível e desgaste.",
-    passo: "0.01",
-  },
-  {
-    chave: "tarifaOnibusKm",
-    label: "Ônibus — R$ por km",
-    ajuda: "Por pessoa.",
-    passo: "0.0001",
-  },
-  {
-    chave: "aviaoPorKmPessoa",
-    label: "Avião sem cotação — R$ por km",
-    ajuda: "Por pessoa. Só entra quando ninguém informou preço, e o sistema marca a linha como estimativa.",
-    passo: "0.0001",
-  },
-  {
-    chave: "hotelDiariaPadrao",
-    label: "Diária de hotel padrão",
-    ajuda: "Por QUARTO por noite, quando o hotel ainda não foi escolhido.",
-    passo: "0.01",
-  },
-  {
     chave: "diariaAlimentacao",
     label: "Alimentação por dia",
-    ajuda: "Por pessoa por DIA (noites + 1: o dia da volta também se come).",
+    ajuda: "Por pessoa por DIA (noites + 1: o dia da volta também se come). É política da empresa, não cotação.",
     passo: "0.01",
   },
   {
-    chave: "precoCombustivelLitro",
-    label: "Combustível — R$ por litro",
-    ajuda: "Referência de cadastro. O cálculo usa o R$ por km acima.",
+    chave: "rsPorKm",
+    label: "Carro próprio — R$ por km",
+    ajuda: "Por VEÍCULO, não por pessoa. Inclui combustível e desgaste — aqui o km é o driver real do custo.",
     passo: "0.01",
-  },
-  {
-    chave: "consumoKmLitro",
-    label: "Consumo — km por litro",
-    ajuda: "Referência de cadastro, para conferir o R$ por km.",
-    passo: "0.1",
   },
 ];
 
