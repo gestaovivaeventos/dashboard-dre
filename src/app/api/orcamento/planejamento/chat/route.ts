@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { opcoesSdk } from "@/lib/ai/parametros-chat";
 import { streamText } from "ai";
 
 import { resolveAiProvider, logResolvedUsage } from "@/lib/ai/provider";
@@ -23,13 +24,14 @@ import { extrairCartaoDespesa, type PlanejamentoMensagem } from "@/lib/orcamento
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Mesmo roteamento do módulo: força Gemini (texto) com fallback ao provedor ativo.
+// Segue o PROVEDOR ATIVO do painel, como o resto do sistema (30/09/2026).
+//
+// Até aqui esta rota FORÇAVA o Gemini, com o ativo só como fallback — e por
+// isso a entrevista continuava no `gemini-3.6-flash` mesmo com outro provedor
+// configurado, o que só aparecia olhando `ai_usage_log`. Uma tela que ignora o
+// painel é uma tela que ninguém consegue reconfigurar.
 async function resolverProvedor() {
-  try {
-    return await resolveAiProvider({ forceProvider: "gemini", capability: "text" });
-  } catch {
-    return await resolveAiProvider({ capability: "text" });
-  }
+  return resolveAiProvider({ capability: "text" });
 }
 
 interface ChatBody {
@@ -104,7 +106,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     model: resolved.provider.chat(resolved.modelName),
     system: prep.system,
     messages: prep.messages,
-    temperature: 0.4,
+    // Temperatura um pouco alta porque a entrevista PERGUNTA — respostas
+    // idênticas a cada rodada soariam de formulário. Mas as famílias novas da
+    // OpenAI recusam o parâmetro: ver `opcoesSdk`.
+    ...opcoesSdk(resolved.modelName, { temperature: 0.4 }),
     onFinish: async ({ text, usage }) => {
       // Guarda a mensagem SEM os marcadores: o transcript é o que a diretoria
       // lê na validação, e [[DESPESA]]{…} ali seria ruído.
