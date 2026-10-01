@@ -208,13 +208,13 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
   const providerRows = useMemo(() => mergeProviderRows(data), [data]);
 
   // Roteamento efetivo por módulo (qual IA cada um usa DE FATO). A maioria segue
-  // o provedor ativo; alguns são FIXOS. O Orçamento (Planejamento dos gestores) é
-  // fixado no Google Gemini — mas cai para o provedor ativo se o Gemini estiver
-  // sem chave ou desabilitado, então mostramos o provedor REAL em uso.
+  // o provedor ativo; os fixos estão listados abaixo com o motivo.
+  //
+  // O Planejamento dos gestores forçava o Gemini até 30/09/2026 e passou a
+  // seguir o ativo — esta tabela continuou dizendo "fixo no Gemini" depois da
+  // troca, e foi assim que o painel passou a mentir sobre o próprio sistema.
+  // **Ao mudar o provedor de um módulo, mude a linha dele aqui junto.**
   const ativoLabel = data.providers.find((p) => p.provider === data.activeProvider)?.label ?? data.activeProvider;
-  const gemini = data.providers.find((p) => p.provider === "gemini");
-  const geminiPronto = Boolean(gemini && gemini.enabled && (gemini.hasKey || gemini.hasEnvKey));
-  const orcamentoLabel = geminiPronto ? gemini?.label ?? "Google Gemini" : ativoLabel;
   const ocrLabel = data.ocrProvider
     ? data.providers.find((p) => p.provider === data.ocrProvider)?.label ?? data.ocrProvider
     : "OpenAI (visão)";
@@ -558,13 +558,13 @@ export function AiAdminClient({ initial, embedded = false }: { initial: AiPanelD
           />
           <ModuloIaRow
             modulo="Orçamento — Planejamento dos gestores"
-            ia={orcamentoLabel}
-            nota={
-              geminiPronto
-                ? "Fixo no Google Gemini (texto). Cai para o provedor ativo apenas se o Gemini falhar."
-                : "Deveria usar o Google Gemini, mas ele está sem chave ou desabilitado — está caindo para o provedor ativo. Configure o Gemini abaixo."
-            }
-            alerta={!geminiPronto}
+            ia={ativoLabel}
+            nota="Segue o provedor ativo (geral)."
+          />
+          <ModuloIaRow
+            modulo="Orçamento — ditado por voz (microfone da entrevista)"
+            ia="OpenAI"
+            nota="Transcrição de áudio é fixa na OpenAI, com modelo próprio — o modelo de texto do painel não ouve."
           />
           <ModuloIaRow
             modulo="Leitura de documentos (OCR) — notas, boletos, contratos"
