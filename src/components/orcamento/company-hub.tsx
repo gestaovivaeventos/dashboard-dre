@@ -5,6 +5,7 @@ import {
   Coins,
   Handshake,
   LineChart,
+  Plane,
   SlidersHorizontal,
   TrendingUp,
   Users,
@@ -32,8 +33,11 @@ const METODO_UI: Record<OrcamentoMetodo, { icon: LucideIcon; desc: string }> = {
     icon: Handshake,
     desc: "Entrevista com o gestor, item a item, nas categorias definidas por ele.",
   },
+  viagens: {
+    icon: Plane,
+    desc: "Roteiros de viagem, com o custo calculado pelo sistema a partir do trajeto.",
+  },
   // VE não aparecem no hub padrão (telas construídas depois).
-  viagens_ve: { icon: Coins, desc: "" },
   marketing_ve: { icon: Coins, desc: "" },
   endomarketing_ve: { icon: Coins, desc: "" },
 };
@@ -130,8 +134,9 @@ export function CompanyHub({
    */
   isAdmin?: boolean;
 }) {
-  // Só os 4 métodos de despesa (VE ficam de fora do hub padrão), menos os que
-  // ainda estão em validação e só o admin enxerga (METODOS_EM_VALIDACAO).
+  // Só os métodos com tela (os de VE ficam de fora do hub), menos os que ainda
+  // estão em validação e só o admin enxerga (METODOS_EM_VALIDACAO). Quem decide
+  // se a caixa linka ou fica "em breve" é `isWorkspaceTabBuilt`.
   const metodos = METODOS.filter((m) => !m.ve && metodoVisivelPara(m.key, Boolean(isAdmin)));
 
   return (

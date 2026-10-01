@@ -39,6 +39,7 @@ const METODO_DO_ALVO: Record<ValidacaoAlvoTipo, OrcamentoMetodo> = {
   media_linha: "media",
   valor_fixo_contrato: "valor_fixo",
   planejamento_item: "planejamento_socios",
+  viagem: "viagens",
 };
 
 export interface DecidirInput {

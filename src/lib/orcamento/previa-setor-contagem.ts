@@ -73,6 +73,7 @@ export const ROTULO_POR_METODO: Partial<Record<OrcamentoMetodo, ContagemRotulo>>
   media: { plural: "categorias", genero: "f" },
   valor_fixo: { plural: "contratos", genero: "m" },
   planejamento_socios: { plural: "despesas", genero: "f" },
+  viagens: { plural: "viagens", genero: "f" },
 };
 
 /** Sufixo do particípio: "aprovad" + `os` / `as`. */

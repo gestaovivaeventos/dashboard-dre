@@ -31,7 +31,15 @@ export type ValidacaoAlvoTipo =
   | "colaborador"
   | "media_linha"
   | "valor_fixo_contrato"
-  | "planejamento_item";
+  | "planejamento_item"
+  /**
+   * A VIAGEM inteira — não cada custo dela. Pedido explícito do dono do
+   * projeto: o diretor aprova ou reprova a viagem olhando a abertura por grupo
+   * (passagem, hotel, alimentação), e não faria sentido aprovar a passagem e
+   * reprovar o hotel da mesma ida. Mesmo enquadramento do colaborador no
+   * Pessoal, que também é decidido por inteiro.
+   */
+  | "viagem";
 
 /** Uma decisão, como ela é lida. */
 export interface Validacao {

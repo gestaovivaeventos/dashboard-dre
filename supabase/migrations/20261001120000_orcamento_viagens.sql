@@ -156,11 +156,12 @@ CREATE TABLE IF NOT EXISTS public.orcamento_viagem_conversas (
 );
 
 -- ── Endereços conhecidos: o cadastro que se preenche sozinho ────────────────
--- A IA busca o endereço na web e PROPÕE; o solicitante confirma; o sistema
--- guarda. A segunda viagem à mesma cidade reusa em vez de buscar de novo — o
--- que resolve consistência, não só conveniência: sem isto, duas viagens ao
--- mesmo lugar poderiam ser orçadas contra endereços diferentes e o custo de
--- translado divergiria sem ninguém entender por quê.
+-- A IA PROPÕE o endereço (do que ela sabe — não há busca na web ligada); o
+-- solicitante confirma, e é a confirmação que grava. A segunda viagem à mesma
+-- cidade reusa em vez de perguntar de novo — o que resolve consistência, não só
+-- conveniência: sem isto, duas viagens ao mesmo lugar poderiam ser orçadas
+-- contra endereços diferentes e o custo de deslocamento divergiria sem ninguém
+-- entender por quê.
 CREATE TABLE IF NOT EXISTS public.orcamento_viagem_enderecos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,

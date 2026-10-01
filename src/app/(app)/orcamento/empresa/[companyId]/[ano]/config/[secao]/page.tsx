@@ -10,6 +10,7 @@ import { GruposArvoreManager } from "@/components/orcamento/grupos-arvore-manage
 import { PlanoCargosManager } from "@/components/orcamento/plano-cargos-manager";
 import { EmpresaEncargosManager } from "@/components/orcamento/empresa-encargos-manager";
 import { EncargosManager } from "@/components/orcamento/encargos-manager";
+import { ViagemParametrosManager } from "@/components/orcamento/viagem-parametros-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,10 @@ export default async function OrcamentoConfigSecaoPage({
   // "Copiar de outra empresa", que o próprio manager carrega.
   if (secao === "grupos-despesa") {
     body = <GruposArvoreManager key={key} fixedCompanyId={companyId} fixedYear={year} />;
+  } else if (secao === "viagem-parametros") {
+    // O manager carrega os próprios valores (a action já devolve o padrão quando
+    // a empresa não tem linha), então esta rota não precisa pré-buscar nada.
+    body = <ViagemParametrosManager key={key} companyId={companyId} year={year} />;
   } else if (secao === "encargos") {
     const { items, error, needsMigration } = await getEncargosCompanies(year);
     body = needsMigration ? (

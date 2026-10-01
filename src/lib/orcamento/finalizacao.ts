@@ -19,6 +19,7 @@ export const METODOS_FINALIZAVEIS: readonly OrcamentoMetodo[] = [
   "media",
   "valor_fixo",
   "planejamento_socios",
+  "viagens",
 ] as const;
 
 export function isMetodoFinalizavel(v: unknown): v is OrcamentoMetodo {

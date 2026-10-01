@@ -8,7 +8,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { METODOS_EM_VALIDACAO, metodoVisivelPara, podeEditarMetodo } from "./metodos";
+import {
+  METODOS,
+  METODOS_EM_VALIDACAO,
+  isOrcamentoMetodo,
+  metodoVisivelPara,
+  podeEditarMetodo,
+} from "./metodos";
+import { WORKSPACE_TABS } from "./workspace-tabs";
+import { isMetodoFinalizavel } from "./finalizacao";
+import { ROTULO_POR_METODO, sufixo } from "./previa-setor-contagem";
 
 test("gerente e gerente sócio NÃO editam média nem valor fixo", () => {
   // Regra de 29/09/2026: os dois métodos partem de um número que o gestor não
@@ -53,4 +62,42 @@ test("o mecanismo de 'em validação' continua de pé para o próximo método", 
   // Vazio hoje, mas a função tem de continuar respondendo à chave.
   assert.equal(metodoVisivelPara("media", true), true);
   assert.equal(metodoVisivelPara("media", false), true);
+});
+
+// ─── A fiação do método ──────────────────────────────────────────────────────
+// O slug da aba do workspace É a chave do método (o hub linka por
+// `workspaceTabHref(m.key)`), e a Prévia monta o `href` da fonte do mesmo jeito.
+// Um método sem aba vira caixa que leva a 404; uma aba sem método vira tela que
+// o hub nunca oferece. Nenhum dos dois quebra o build — este teste é quem cobra.
+
+test("todo método NÃO-VE tem aba no workspace, e toda aba é um método", () => {
+  const slugs = new Set(WORKSPACE_TABS.map((t) => t.slug));
+  for (const m of METODOS.filter((x) => !x.ve)) {
+    assert.ok(slugs.has(m.key), `método ${m.key} sem aba no workspace`);
+  }
+  for (const t of WORKSPACE_TABS) {
+    assert.ok(isOrcamentoMetodo(t.slug), `aba ${t.slug} não é um método`);
+  }
+});
+
+test("os métodos de VE seguem SEM tela, de propósito", () => {
+  // Eles existem como chave atribuível a uma categoria, mas não têm tela: marcar
+  // uma categoria com um deles hoje a deixa sem caminho de preenchimento. Viagens
+  // saiu desse grupo em 01/10/2026; marketing e endomarketing continuam nele.
+  const slugs = new Set(WORKSPACE_TABS.map((t) => t.slug));
+  for (const m of METODOS.filter((x) => x.ve)) {
+    assert.equal(slugs.has(m.key), false, m.key);
+  }
+  assert.deepEqual(
+    METODOS.filter((x) => x.ve).map((x) => x.key),
+    ["marketing_ve", "endomarketing_ve"],
+  );
+});
+
+test("viagens é um método de verdade: finalizável e com rótulo de contagem", () => {
+  // Os dois pontos que fazem um método "existir" para a diretoria: a fatia que o
+  // admin fecha e o nome que a faixa da prévia do setor usa para contar.
+  assert.ok(isMetodoFinalizavel("viagens"));
+  assert.equal(ROTULO_POR_METODO.viagens?.plural, "viagens");
+  assert.equal(sufixo(ROTULO_POR_METODO.viagens), "as", "viagens aprovadAS");
 });

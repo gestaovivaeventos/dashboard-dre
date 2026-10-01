@@ -8,7 +8,7 @@ export type OrcamentoMetodo =
   | "media"
   | "valor_fixo"
   | "planejamento_socios"
-  | "viagens_ve"
+  | "viagens"
   | "marketing_ve"
   | "endomarketing_ve";
 
@@ -24,7 +24,7 @@ export const METODOS: readonly MetodoMeta[] = [
   { key: "media", label: "Média com correção de índices", ve: false },
   { key: "valor_fixo", label: "Valor fixo com correção de índices", ve: false },
   { key: "planejamento_socios", label: "Planejamento dos gestores", ve: false },
-  { key: "viagens_ve", label: "Viagens (VE)", ve: true },
+  { key: "viagens", label: "Viagens", ve: false },
   { key: "marketing_ve", label: "Campanhas de marketing (VE)", ve: true },
   { key: "endomarketing_ve", label: "Endomarketing (VE)", ve: true },
 ] as const;

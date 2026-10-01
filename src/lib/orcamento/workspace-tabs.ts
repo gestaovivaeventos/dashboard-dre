@@ -28,6 +28,7 @@ export const WORKSPACE_TABS: readonly WorkspaceTab[] = [
   // slug = chave do método (metodos.ts): o hub linka via workspaceTabHref(m.key).
   { slug: "valor_fixo", label: "Valor fixo com correção", group: "montagem" },
   { slug: "planejamento_socios", label: "Planejamento dos gestores", group: "montagem" },
+  { slug: "viagens", label: "Viagens", group: "montagem" },
 ] as const;
 
 /** Primeira aba — destino padrão ao abrir o orçamento de uma empresa. */
@@ -75,6 +76,18 @@ export function planejamentoCategoriaHref(
 
 // A rota do RETORNO da diretoria saiu com a validação em 24/09/2026 (será
 // redesenhada). O ciclo e a trilha ficaram — o que não existe mais é a tela.
+
+/**
+ * URL da tela de uma VIAGEM.
+ *
+ * O id é uuid e vem de `criarViagem` — não existe segmento "nova": a viagem é
+ * gravada ANTES de abrir, porque a tela precisa de uma linha para pendurar as
+ * paradas e a conversa com a IA. Um "nova" aqui colidiria com o uuid e
+ * obrigaria a tela a existir em dois estados.
+ */
+export function viagemHref(companyId: string, year: number, viagemId: string): string {
+  return `/orcamento/empresa/${companyId}/${year}/viagens/${viagemId}`;
+}
 
 /**
  * URL da Prévia do orçamento — a DRE da empresa preenchida com os valores
@@ -163,6 +176,11 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     slug: "encargos",
     label: "Encargos sobre a folha",
     desc: "INSS, RAT×FAP, terceiros e FGTS sobre a folha.",
+  },
+  {
+    slug: "viagem-parametros",
+    label: "Parâmetros de viagem",
+    desc: "R$ por km, diária de hotel e alimentação que ancoram a estimativa.",
   },
 ] as const;
 

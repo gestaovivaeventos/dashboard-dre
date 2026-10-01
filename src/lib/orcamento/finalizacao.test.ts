@@ -124,11 +124,12 @@ test("contagem por método para o hub", () => {
   assert.deepEqual(contarFinalizadasPorMetodo([]), {});
 });
 
-test("só os quatro métodos são finalizáveis", () => {
-  for (const m of ["pessoal", "media", "valor_fixo", "planejamento_socios"]) {
+test("só os métodos com tela são finalizáveis", () => {
+  for (const m of ["pessoal", "media", "valor_fixo", "planejamento_socios", "viagens"]) {
     assert.ok(isMetodoFinalizavel(m), m);
   }
-  for (const m of ["viagens_ve", "marketing_ve", "", null, 7]) {
+  // Os métodos de VE seguem sem tela: finalizar um deles publicaria vazio.
+  for (const m of ["marketing_ve", "endomarketing_ve", "", null, 7]) {
     assert.equal(isMetodoFinalizavel(m), false, String(m));
   }
 });

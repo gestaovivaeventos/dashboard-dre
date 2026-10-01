@@ -38,6 +38,7 @@ export type AlvoTipo =
   | "valor_fixo_contrato"
   | "media_linha"
   | "categoria_setor"
+  | "viagem"
   | "ciclo"
   /** A fatia FINALIZADA (método × categoria × setor). O `alvoId` é a `source`
    *  determinística da fatia, a mesma que identifica a publicação no Budget. */
@@ -98,6 +99,7 @@ export const ALVO_LABEL: Record<AlvoTipo, string> = {
   valor_fixo_contrato: "contrato",
   media_linha: "linha por média",
   categoria_setor: "categoria",
+  viagem: "viagem",
   finalizacao: "fatia finalizada",
   ciclo: "ciclo",
 };
