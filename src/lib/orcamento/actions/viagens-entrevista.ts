@@ -428,12 +428,23 @@ export async function montarPromptViagem(params: {
   // gestor, e "2.01.98" não diz nada a ninguém.
   const code = texto(r.category_code);
   const categoryName =
-    (cats.items ?? []).find((c) => c.categoryCode === code)?.categoryName || code;
+    (cats.items ?? []).find((c) => c.categoryCode === code)?.categoryName || code || "não definida";
+
+  // O TIPO é a língua da conversa; a categoria é consequência dele.
+  const { data: tipoRow } = r.tipo_id
+    ? await supabase
+        .from("orcamento_viagem_tipos")
+        .select("nome")
+        .eq("id", r.tipo_id as string)
+        .maybeSingle()
+    : { data: null };
+  const tipoNome = texto((tipoRow as Record<string, unknown> | null)?.nome);
 
   const contexto: ViagemContexto = {
     companyName: texto((companyRes.data as Record<string, unknown> | null)?.name) || "a empresa",
     setorNome: texto((setorRes.data as Record<string, unknown> | null)?.name),
     categoryName,
+    tipoNome,
     year,
     titulo: texto(r.titulo) || "Viagem sem título",
     roteiroAtual,

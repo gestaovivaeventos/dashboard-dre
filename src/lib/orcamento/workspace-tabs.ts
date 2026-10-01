@@ -178,6 +178,11 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     desc: "INSS, RAT×FAP, terceiros e FGTS sobre a folha.",
   },
   {
+    slug: "viagem-tipos",
+    label: "Tipos de viagem",
+    desc: "De-para tipo de viagem → categoria da DRE. É o que destrava o cadastro de viagens.",
+  },
+  {
     slug: "viagem-parametros",
     label: "Parâmetros de viagem",
     desc: "R$ por km, diária de hotel e alimentação que ancoram a estimativa.",

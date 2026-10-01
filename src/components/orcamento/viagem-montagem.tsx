@@ -110,6 +110,7 @@ function paradaVazia(): ParadaInput {
 function inputDaViagem(v: ViagemDetalhe): ViagemInput {
   return {
     titulo: v.titulo,
+    tipoId: v.tipoId,
     finalidade: v.finalidade,
     origem: v.origem,
     dataIda: v.dataIda,
@@ -370,6 +371,34 @@ export function ViagemMontagem({
                   onChange={(e) => mexer({ titulo: e.target.value })}
                   className="h-9"
                 />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Tipo da viagem</Label>
+                <select
+                  value={rascunho.tipoId ?? ""}
+                  disabled={!editavel}
+                  onChange={(e) => mexer({ tipoId: e.target.value || null })}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+                >
+                  <option value="">Escolha…</option>
+                  {viagem.tiposDisponiveis.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nome}
+                    </option>
+                  ))}
+                  {/* O tipo gravado pode não estar mais na lista (desativado ou
+                      desmapeado pelo admin). Mostrá-lo evita que salvar troque o
+                      tipo da viagem em silêncio por causa de um <select> vazio. */}
+                  {viagem.tipoId &&
+                    !viagem.tiposDisponiveis.some((t) => t.id === viagem.tipoId) && (
+                      <option value={viagem.tipoId}>
+                        {viagem.tipoNome ?? "tipo atual"} (fora do cadastro)
+                      </option>
+                    )}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Decide a conta da DRE. Trocar o tipo e salvar reclassifica esta viagem.
+                </p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Cidade de origem</Label>

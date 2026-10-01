@@ -80,7 +80,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
 
   const [novoAberto, setNovoAberto] = useState(false);
   const [novoTitulo, setNovoTitulo] = useState("");
-  const [novaCategoria, setNovaCategoria] = useState("");
+  const [novoTipo, setNovoTipo] = useState("");
   const [criando, setCriando] = useState(false);
 
   const [finalizacoes, setFinalizacoes] = useState<Finalizacao[]>([]);
@@ -136,15 +136,15 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
       setErro("Dê um título à viagem.");
       return;
     }
-    if (!novaCategoria) {
-      setErro("Escolha a categoria de despesa da viagem.");
+    if (!novoTipo) {
+      setErro("Escolha o tipo da viagem.");
       return;
     }
     setCriando(true);
     setErro(null);
     const res = await criarViagem(companyId, year, {
       titulo: novoTitulo.trim(),
-      categoryCode: novaCategoria,
+      tipoId: novoTipo,
       setorId: setorEscolhido,
     });
     setCriando(false);
@@ -179,6 +179,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
 
   const setores = setup?.setores ?? [];
   const categorias = setup?.categorias ?? [];
+  const tipos = setup?.tipos ?? [];
   const viagens = setup?.viagens ?? [];
   const totalEnviado = viagens
     .filter((v) => v.status === "enviada")
@@ -242,7 +243,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
           O admin precisa SABER disso: o custo de toda viagem da empresa sai
           destes números, e o aviso é o único lugar onde a tela conta de onde
           eles vêm. Para quem não é admin não há o que fazer, então não há aviso. */}
-      {!carregando && setup?.parametrosPadrao && setup?.isAdmin && categorias.length > 0 && (
+      {!carregando && setup?.parametrosPadrao && setup?.isAdmin && tipos.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
           <p className="font-medium">Esta empresa ainda não tem parâmetros de viagem para {year}.</p>
           <p className="mt-1 text-muted-foreground">
@@ -261,18 +262,26 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
         </div>
       )}
 
-      {/* ── Nenhuma categoria usa o método ── */}
-      {!carregando && categorias.length === 0 && (
+      {/* ── Sem TIPO cadastrado não há como criar viagem ──
+          O tipo é o que resolve a categoria da DRE: oferecer o cadastro sem ele
+          produziria viagem que não entra em conta nenhuma. O aviso nomeia o
+          cadastro que falta, em vez de deixar a tela só sem botão. */}
+      {!carregando && tipos.length === 0 && (
         <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-          <p className="font-semibold">Nenhuma categoria está sendo orçada por Viagens.</p>
+          <p className="font-semibold">
+            {(setup?.tiposSemMapeamento ?? 0) > 0
+              ? "Os tipos de viagem cadastrados ainda não têm categoria mapeada."
+              : "Nenhum tipo de viagem cadastrado nesta empresa."}
+          </p>
           <p className="mt-1 text-muted-foreground">
-            Uma viagem precisa cair numa categoria de despesa da Omie para entrar na DRE. Marque as
-            categorias de viagem com este método em{" "}
+            A viagem entra na DRE pelo <strong>tipo</strong> (consultoria, treinamento, visita a
+            cliente…), e cada tipo aponta para uma categoria de despesa. Enquanto o de-para não
+            existir, não há como orçar viagem.{" "}
             <Link
-              href={workspaceConfigSecaoHref(companyId, year, "categoria-metodo")}
+              href={workspaceConfigSecaoHref(companyId, year, "viagem-tipos")}
               className="font-medium underline underline-offset-2"
             >
-              Configuração › Método por categoria
+              Configuração › Tipos de viagem
             </Link>
             .
           </p>
@@ -280,7 +289,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
       )}
 
       {/* ── Nova viagem ── */}
-      {categorias.length > 0 && podeEscreverNoRecorte && (
+      {tipos.length > 0 && podeEscreverNoRecorte && (
         <div className="rounded-lg border p-4">
           {!novoAberto ? (
             <Button size="sm" onClick={() => setNovoAberto(true)}>
@@ -303,22 +312,26 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="viagem-categoria" className="text-xs">
-                    Categoria de despesa
+                  <Label htmlFor="viagem-tipo" className="text-xs">
+                    Tipo da viagem
                   </Label>
                   <select
-                    id="viagem-categoria"
-                    value={novaCategoria}
-                    onChange={(e) => setNovaCategoria(e.target.value)}
+                    id="viagem-tipo"
+                    value={novoTipo}
+                    onChange={(e) => setNovoTipo(e.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   >
                     <option value="">Escolha…</option>
-                    {categorias.map((c) => (
-                      <option key={c.categoryCode} value={c.categoryCode}>
-                        {c.categoryName}
+                    {tipos.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome}
                       </option>
                     ))}
                   </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    O tipo decide em que conta da DRE a viagem entra — o de-para é mantido na
+                    configuração da empresa.
+                  </p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -332,7 +345,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
                   onClick={() => {
                     setNovoAberto(false);
                     setNovoTitulo("");
-                    setNovaCategoria("");
+                    setNovoTipo("");
                   }}
                 >
                   Cancelar
@@ -350,7 +363,7 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
           Carregando as viagens…
         </div>
       ) : viagens.length === 0 ? (
-        categorias.length > 0 && (
+        tipos.length > 0 && (
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             <Plane className="mx-auto mb-2 h-6 w-6 opacity-50" />
             Nenhuma viagem orçada {setorEscolhido ? "neste setor" : "nesta empresa"} ainda.
@@ -382,11 +395,10 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
                       >
                         {v.titulo}
                       </Link>
-                      {v.setorNome && !setorEscolhido && (
-                        <span className="ml-1.5 text-xs text-muted-foreground">
-                          · {v.setorNome}
-                        </span>
-                      )}
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        {v.tipoNome ?? "sem tipo"}
+                        {v.setorNome && !setorEscolhido ? ` · ${v.setorNome}` : ""}
+                      </span>
                       {v.comentario && (
                         <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-500">
                           {v.comentario}

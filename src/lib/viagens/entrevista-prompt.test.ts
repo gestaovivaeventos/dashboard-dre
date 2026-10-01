@@ -23,6 +23,7 @@ const BASE: BuildPromptViagemInput = {
     companyName: "Viva Eventos",
     setorNome: "Consultoria",
     categoryName: "Viagens e Estadias",
+    tipoNome: "Consultoria",
     year: 2027,
     titulo: "Implantação em Curitiba",
     roteiroAtual: [],

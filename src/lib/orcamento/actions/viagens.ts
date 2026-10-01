@@ -39,6 +39,7 @@ import {
   numDaLinha as num,
   textoDaLinha as texto,
 } from "@/lib/viagens/colunas";
+import { categoriaDoTipo, tiposOferecidos, type TipoViagem } from "@/lib/viagens/tipos";
 import type { ModalTrecho, ParametrosViagem } from "@/lib/viagens/custo/tipos";
 
 // =============================================================================
@@ -96,6 +97,8 @@ export interface ParadaInput {
 
 export interface ViagemInput {
   titulo: string;
+  /** Tipo da viagem — é ele que resolve a categoria da DRE pelo de-para. */
+  tipoId?: string | null;
   finalidade?: string | null;
   origem: string;
   dataIda?: string | null;
@@ -134,6 +137,9 @@ export interface ViagemResumo {
   noites: number;
   custoTotal: number;
   status: "rascunho" | "enviada";
+  tipoId: string | null;
+  tipoNome: string | null;
+  /** Categoria em que a viagem FOI orçada (retrato resolvido na gravação). */
   categoryCode: string;
   setorId: string | null;
   setorNome: string | null;
@@ -165,6 +171,8 @@ export interface ViagemDetalhe extends ViagemResumo {
   meses: number[];
   /** Quem abriu decide (aprova/reprova)? Sai do mesmo setup da lista. */
   podeValidar: boolean;
+  /** Tipos que a tela pode oferecer — já filtrados pelo de-para. */
+  tiposDisponiveis: Array<{ id: string; nome: string }>;
 }
 
 export interface ViagemSetorOption {
@@ -181,6 +189,14 @@ export interface ViagemCategoriaOption {
 export interface ViagensSetup {
   orcaPorSetor: boolean;
   setores: ViagemSetorOption[];
+  /**
+   * Tipos que o cadastro pode oferecer — já filtrados: tipo sem categoria
+   * mapeada ou inativo fica de fora (ver `tiposOferecidos`). Oferecer um tipo não
+   * mapeado produziria viagem que não entra em conta nenhuma da DRE.
+   */
+  tipos: Array<{ id: string; nome: string; categoryCode: string }>;
+  /** Tipos cadastrados mas sem categoria — só para o aviso ao admin. */
+  tiposSemMapeamento: number;
   categorias: ViagemCategoriaOption[];
   viagens: ViagemResumo[];
   parametros: ParametrosViagem;
@@ -196,6 +212,8 @@ export interface ViagensSetup {
 const VAZIO: ViagensSetup = {
   orcaPorSetor: false,
   setores: [],
+  tipos: [],
+  tiposSemMapeamento: 0,
   categorias: [],
   viagens: [],
   parametros: PARAMETROS_PADRAO,
@@ -222,6 +240,30 @@ async function lerParametros(
     .maybeSingle();
   if (error || !data) return { params: PARAMETROS_PADRAO, padrao: true };
   return { params: parametrosDaLinha(data as Record<string, unknown>), padrao: false };
+}
+
+/**
+ * Os tipos da empresa × ano.
+ *
+ * Fonte ÚNICA para as três coisas que dependem dela: oferecer o tipo na tela,
+ * resolver a categoria ao gravar e rotular a viagem na lista. Resolvendo em
+ * lugares diferentes, a tela ofereceria um tipo que a gravação recusa.
+ */
+async function lerTipos(supabase: Supa, companyId: string, year: number): Promise<TipoViagem[]> {
+  const { data, error } = await supabase
+    .from("orcamento_viagem_tipos")
+    .select("id, nome, category_code, ativo")
+    .eq("company_id", companyId)
+    .eq("year", year);
+  // Migration pendente não derruba a tela: sem tipo, a lista avisa e não deixa
+  // criar viagem — melhor do que criar uma que não cai em conta nenhuma.
+  if (error) return [];
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: r.id as string,
+    nome: texto(r.nome),
+    categoryCode: texto(r.category_code) || null,
+    ativo: r.ativo !== false,
+  }));
 }
 
 function premissasDoRetrato(v: unknown): string[] {
@@ -317,6 +359,9 @@ export async function getViagensSetup(
   }
 
   const { params, padrao } = await lerParametros(supabase, companyId, year);
+  const tipos = await lerTipos(supabase, companyId, year);
+  const oferecidos = tiposOferecidos(tipos);
+  const nomeDoTipo = new Map(tipos.map((t) => [t.id, t.nome] as const));
 
   let q = supabase
     .from("orcamento_viagens")
@@ -396,6 +441,8 @@ export async function getViagensSetup(
       categoryCode: (r.category_code as string) ?? "",
       setorId: sId,
       setorNome: sId ? setorNome.get(sId) ?? null : null,
+      tipoId: (r.tipo_id as string | null) ?? null,
+      tipoNome: r.tipo_id ? nomeDoTipo.get(r.tipo_id as string) ?? null : null,
       estado: linha.estado,
       comentario: linha.comentario,
       travado: linha.travado,
@@ -408,6 +455,12 @@ export async function getViagensSetup(
   return {
     orcaPorSetor: porSetor,
     setores,
+    tipos: oferecidos.map((t) => ({
+      id: t.id,
+      nome: t.nome,
+      categoryCode: t.categoryCode as string,
+    })),
+    tiposSemMapeamento: tipos.filter((t) => t.ativo && !t.categoryCode).length,
     categorias,
     viagens,
     parametros: params,
@@ -499,6 +552,7 @@ export async function getViagemDetalhe(
       grupos: gruposDoRetrato(r.grupos),
       meses: mesesDoRetrato(r.meses),
       podeValidar: setup.podeValidar,
+      tiposDisponiveis: setup.tipos.map((t) => ({ id: t.id, nome: t.nome })),
     },
   };
 }
@@ -552,7 +606,7 @@ export async function salvarViagem(
 
   const { data: atual, error: lerErr } = await supabase
     .from("orcamento_viagens")
-    .select("id, setor_id, category_code, titulo, custo_total, updated_at")
+    .select("id, setor_id, category_code, titulo, custo_total, tipo_id, updated_at")
     .eq("id", viagemId)
     .eq("company_id", companyId)
     .eq("year", year)
@@ -566,14 +620,38 @@ export async function salvarViagem(
   const setorDaViagem = (atual.setor_id as string | null) ?? null;
   if (!podeEscreverNoSetor(auth.setores, setorDaViagem)) return { error: SEM_ACESSO_SETOR };
 
-  const fechado = await travaDeFinalizacao({
-    companyId,
-    year,
-    metodo: METODO,
-    categoryCode: (atual.category_code as string) ?? "",
-    setorId: setorDaViagem,
-  });
-  if (fechado) return { error: fechado };
+  // ── A CATEGORIA: resolvida pelo de-para a cada gravação ──
+  // O tipo da tela vence o gravado (o gestor pode trocá-lo); sem tipo na tela,
+  // vale o da viagem. Gravar RENOVA o retrato da categoria — é assim que uma
+  // viagem passa a usar um de-para remapeado, e é ato explícito (ver
+  // `desalinhadas` em tipos.ts): remapear sozinho não reclassifica nada.
+  const tipos = await lerTipos(supabase, companyId, year);
+  const tipoId = texto(input.tipoId) || ((atual.tipo_id as string | null) ?? "");
+  const categoryCode = categoriaDoTipo(tipos, tipoId);
+  if (!tipoId) return { error: "Escolha o tipo da viagem." };
+  if (!categoryCode) {
+    const nome = tipos.find((t) => t.id === tipoId)?.nome;
+    return {
+      error: `O tipo ${nome ? `"${nome}"` : "escolhido"} não tem categoria de despesa mapeada. Peça a um administrador para mapeá-lo, ou escolha outro tipo.`,
+    };
+  }
+
+  // As travas valem sobre a categoria de ORIGEM e a de DESTINO: trocar o tipo não
+  // pode ser caminho para escapar de uma fatia fechada nem de uma decisão.
+  const codigosParaTravar = Array.from(
+    new Set([(atual.category_code as string) ?? "", categoryCode]),
+  );
+  for (const code of codigosParaTravar) {
+    if (!code) continue;
+    const fechado = await travaDeFinalizacao({
+      companyId,
+      year,
+      metodo: METODO,
+      categoryCode: code,
+      setorId: setorDaViagem,
+    });
+    if (fechado) return { error: fechado };
+  }
 
   const travado = await travaDaValidacao({
     companyId,
@@ -613,6 +691,8 @@ export async function salvarViagem(
 
   const cabecalho = {
     titulo: texto(input.titulo),
+    tipo_id: tipoId,
+    category_code: categoryCode,
     finalidade: texto(input.finalidade) || null,
     origem: texto(input.origem),
     data_ida: input.dataIda || null,
@@ -682,7 +762,7 @@ export async function salvarViagem(
   await registrarAlteracao({
     companyId,
     year,
-    categoryCode: (atual.category_code as string | null) ?? null,
+    categoryCode,
     setorId: setorDaViagem,
     metodo: METODO,
     alvoTipo: "viagem",
@@ -709,15 +789,27 @@ export async function salvarViagem(
 export async function criarViagem(
   companyId: string,
   year: number,
-  input: { titulo: string; categoryCode: string; setorId: string | null; origem?: string },
+  input: { titulo: string; tipoId: string; setorId: string | null; origem?: string },
 ): Promise<{ id?: string; error?: string; needsMigration?: boolean }> {
   if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
   if (!texto(input.titulo)) return { error: "Dê um título à viagem." };
-  if (!texto(input.categoryCode)) return { error: "Escolha a categoria de despesa da viagem." };
+  if (!texto(input.tipoId)) return { error: "Escolha o tipo da viagem." };
 
   const supabase = (db() ?? (await createClient())) as Supa;
   const auth = await autorizarEscrita(supabase, companyId, year);
   if (!auth.ok) return { error: auth.error };
+
+  // A CATEGORIA vem do de-para, nunca da tela: quem cadastra a viagem fala em
+  // tipo, e qual conta da DRE isso é não é decisão dele.
+  const tipos = await lerTipos(supabase, companyId, year);
+  const categoryCode = categoriaDoTipo(tipos, input.tipoId);
+  if (!categoryCode) {
+    return {
+      error:
+        "Esse tipo de viagem ainda não tem categoria de despesa mapeada. " +
+        "Peça a um administrador para mapeá-lo em Configuração › Tipos de viagem.",
+    };
+  }
 
   const alvo = await setorParaGravar(supabase, companyId, year, input.setorId, auth.user.userId);
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { error: SEM_ACESSO_SETOR };
@@ -726,7 +818,7 @@ export async function criarViagem(
     companyId,
     year,
     metodo: METODO,
-    categoryCode: texto(input.categoryCode),
+    categoryCode,
     setorId: alvo.id,
   });
   if (fechado) return { error: fechado };
@@ -737,7 +829,8 @@ export async function criarViagem(
       company_id: companyId,
       year,
       setor_id: alvo.id,
-      category_code: texto(input.categoryCode),
+      tipo_id: texto(input.tipoId),
+      category_code: categoryCode,
       titulo: texto(input.titulo),
       origem: texto(input.origem),
       created_by: auth.user.userId,
@@ -753,7 +846,7 @@ export async function criarViagem(
   await registrarAlteracao({
     companyId,
     year,
-    categoryCode: texto(input.categoryCode),
+    categoryCode,
     setorId: alvo.id,
     metodo: METODO,
     alvoTipo: "viagem",
@@ -873,6 +966,13 @@ export async function enviarViagem(
   });
   if (fechado) return { error: fechado };
 
+  if (!atual.category_code) {
+    return {
+      error:
+        "Esta viagem ainda não tem categoria: escolha o tipo e salve antes de enviar. " +
+        "Sem categoria ela não entra em nenhuma conta da DRE.",
+    };
+  }
   if (!atual.data_ida) {
     return {
       error: "Informe a data de ida: sem ela a viagem não cai em nenhum mês do orçamento.",

@@ -16,7 +16,7 @@ import type { ModalTrecho } from "@/lib/viagens/custo/tipos";
 // =============================================================================
 
 export const VIAGEM_COLS =
-  "id, titulo, finalidade, origem, data_ida, pessoas, pessoas_por_quarto, translado_custo_trajeto, translado_trajetos, volta_modal, volta_distancia_km, volta_preco_pessoa, volta_preco_total, volta_pedagios, volta_veiculos, outros, custo_total, meses, grupos, premissas, parametros, calculado_em, status, category_code, setor_id, updated_at";
+  "id, titulo, finalidade, origem, data_ida, pessoas, pessoas_por_quarto, tipo_id, translado_custo_trajeto, translado_trajetos, volta_modal, volta_distancia_km, volta_preco_pessoa, volta_preco_total, volta_pedagios, volta_veiculos, outros, custo_total, meses, grupos, premissas, parametros, calculado_em, status, category_code, setor_id, updated_at";
 
 export const PARADA_COLS =
   "id, ordem, cidade, noites, chegada_de, chegada_modal, chegada_distancia_km, chegada_preco_pessoa, chegada_preco_total, chegada_pedagios, chegada_veiculos, diaria_hotel, local_trajetos_dia, local_custo_trajeto, local_destino, local_endereco";

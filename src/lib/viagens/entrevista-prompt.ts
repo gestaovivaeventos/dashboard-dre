@@ -28,7 +28,14 @@ export interface ViagemContexto {
   companyName: string;
   /** Vazio quando a empresa não orça por setor. */
   setorNome: string;
+  /**
+   * Nome da categoria da DRE. Vai no prompt como INFORMAÇÃO de contexto, não como
+   * assunto: quem monta a viagem fala em TIPO, e a categoria é derivada dele pelo
+   * de-para do admin.
+   */
   categoryName: string;
+  /** Tipo da viagem (consultoria, treinamento…) — a língua de quem cadastra. */
+  tipoNome: string;
   year: number;
   /** Título já dado à viagem (a linha existe antes da conversa). */
   titulo: string;
@@ -130,7 +137,10 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
     "CONTEXTO:",
     `- empresa: ${c.companyName}`,
     c.setorNome ? `- setor: ${c.setorNome}` : "- a empresa não orça por setor",
-    `- categoria de despesa onde a viagem entra na DRE: ${c.categoryName}`,
+    `- tipo da viagem: ${c.tipoNome || "ainda não definido"}`,
+    // A categoria é consequência do tipo. Vai aqui só para a IA não ficar cega ao
+    // contexto contábil, com a instrução de não levar a conversa para lá.
+    `- (cai na categoria "${c.categoryName}" da DRE — consequência do tipo, não assunto da conversa)`,
     `- ano do orçamento: ${c.year}`,
     `- viagem: "${c.titulo}"`,
     `- origem: ${c.origem || "ainda não informada"}`,
@@ -237,7 +247,9 @@ export function buildPromptViagem(opts: BuildPromptViagemInput): string {
     "- não propõe cortar pessoas, noites ou destinos por conta própria. Pode PERGUNTAR se o número de",
     "  noites casa com o que será feito lá — isso é levantar fato, não cortar.",
     "- não inventa cidade, hotel, fornecedor nem valor que o gestor não citou.",
-    `- não fala de outras despesas do orçamento: aqui é só esta viagem, na categoria ${c.categoryName}.`,
+    "- não fala de outras despesas do orçamento: aqui é só esta viagem.",
+    "- não discute em que categoria da DRE a viagem cai nem sugere trocá-la. Isso vem do TIPO, e o",
+    "  de-para tipo → categoria é cadastro do administrador. Se o gestor perguntar, diga isso.",
     "",
   ];
 
