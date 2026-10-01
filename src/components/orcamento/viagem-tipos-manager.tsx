@@ -12,6 +12,7 @@ import {
   type TiposViagemSetup,
 } from "@/lib/orcamento/actions/viagens-tipos";
 import { workspaceConfigSecaoHref } from "@/lib/orcamento/workspace-tabs";
+import { MigrationAviso } from "@/components/orcamento/migration-aviso";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -122,12 +123,10 @@ export function ViagemTiposManager({
 
   if (setup?.needsMigration) {
     return (
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-        <p className="font-semibold">Falta aplicar a migration dos tipos de viagem.</p>
-        <p className="text-muted-foreground">
-          A tabela <code>orcamento_viagem_tipos</code> ainda não existe neste banco.
-        </p>
-      </div>
+      <MigrationAviso
+        migration="20261001140000_orcamento_viagem_tipos.sql"
+        tabela="orcamento_viagem_tipos"
+      />
     );
   }
 

@@ -8,6 +8,7 @@ import {
   setMetodoVisivel,
   type MetodosPorEmpresaResult,
 } from "@/lib/orcamento/actions/metodos-empresa";
+import { MigrationAviso } from "@/components/orcamento/migration-aviso";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -70,12 +71,10 @@ export function MetodosEmpresaManager() {
 
   if (dados?.needsMigration) {
     return (
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-        <p className="font-semibold">Falta aplicar a migration.</p>
-        <p className="text-muted-foreground">
-          A tabela <code>orcamento_metodos_ocultos</code> ainda não existe neste banco.
-        </p>
-      </div>
+      <MigrationAviso
+        migration="20261001150000_orcamento_metodos_ocultos.sql"
+        tabela="orcamento_metodos_ocultos"
+      />
     );
   }
 

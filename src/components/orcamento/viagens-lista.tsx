@@ -18,6 +18,7 @@ import { finalizacaoDe, indexarFinalizacoes, type Finalizacao } from "@/lib/orca
 import { formatBRL } from "@/lib/orcamento/format";
 import { viagemHref, workspaceConfigSecaoHref } from "@/lib/orcamento/workspace-tabs";
 import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
+import { MigrationAviso } from "@/components/orcamento/migration-aviso";
 import { PlanejamentoPreviaSetor } from "@/components/orcamento/planejamento-previa-setor";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,12 +169,10 @@ export function ViagensLista({ companyId, year }: { companyId: string; year: num
 
   if (needsMigration) {
     return (
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-        <p className="font-semibold">Falta aplicar a migration das viagens.</p>
-        <p className="text-muted-foreground">
-          As tabelas <code>orcamento_viagens</code> e companhia ainda não existem neste banco.
-        </p>
-      </div>
+      <MigrationAviso
+        migration="20261001120000_orcamento_viagens.sql"
+        tabela="orcamento_viagens"
+      />
     );
   }
 
