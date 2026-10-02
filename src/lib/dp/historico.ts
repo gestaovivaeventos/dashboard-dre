@@ -27,7 +27,11 @@ export type DpCampoRastreado =
   | "data_admissao"
   | "salario"
   | "data_desligamento"
-  | "endereco";
+  | "endereco"
+  | "data_nascimento"
+  | "experiencia_fim"
+  | "dependentes"
+  | "beneficios";
 
 export type DpEventoTipo = "entrada" | "desligamento" | "reativacao" | "alteracao";
 
@@ -39,11 +43,20 @@ export interface DpEventoNovo {
   valor_novo: unknown;
 }
 
+/**
+ * Versão do conjunto de campos que a sincronização grava hoje. Campo marcado
+ * com `desde` maior que a versão já gravada na linha NÃO é comparado: na
+ * primeira leitura dele não existe "antes", e comparar com o vazio da coluna
+ * recém-criada registraria, por exemplo, "nascimento: — → 12/03/1990" para o
+ * quadro inteiro. Ao acrescentar campo novo, suba a versão e marque o `desde`.
+ */
+export const FICHA_VERSAO_ATUAL = 2;
+
 /** O que está gravado hoje (as colunas que o histórico compara). */
-export type DpSnapshot = DpColaboradorBase & DpColaboradorFicha & { ativo: boolean };
+export type DpSnapshot = DpColaboradorBase & DpColaboradorFicha & { ativo: boolean; ficha_versao: number };
 
 /** Campos da LISTA: sempre chegam, então sempre podem ser comparados. */
-const CAMPOS_LISTA: Array<{ campo: DpCampoRastreado; valor: (c: DpColaboradorBase) => unknown }> = [
+const CAMPOS_LISTA: Array<{ campo: DpCampoRastreado; valor: (c: DpColaboradorBase) => unknown; desde?: number }> = [
   { campo: "nome", valor: (c) => c.nome },
   { campo: "cpf", valor: (c) => c.cpf },
   { campo: "email", valor: (c) => c.email },
@@ -55,13 +68,18 @@ const CAMPOS_LISTA: Array<{ campo: DpCampoRastreado; valor: (c: DpColaboradorBas
   { campo: "gestor", valor: (c) => (c.gestor_solides_id === null ? null : { id: c.gestor_solides_id, nome: c.gestor_nome }) },
   { campo: "tipo_contrato", valor: (c) => c.tipo_contrato },
   { campo: "data_admissao", valor: (c) => c.data_admissao },
+  { campo: "data_nascimento", valor: (c) => c.data_nascimento, desde: 2 },
 ];
 
 /** Campos da FICHA: só comparados quando a ficha foi lida nesta execução. */
-const CAMPOS_FICHA: Array<{ campo: DpCampoRastreado; valor: (c: DpColaboradorFicha) => unknown }> = [
+const CAMPOS_FICHA: Array<{ campo: DpCampoRastreado; valor: (c: DpColaboradorFicha) => unknown; desde?: number }> = [
   { campo: "salario", valor: (c) => c.salario },
   { campo: "data_desligamento", valor: (c) => c.data_desligamento },
   { campo: "endereco", valor: (c) => normalizarEndereco(c.endereco) },
+  { campo: "experiencia_fim", valor: (c) => c.experiencia_fim, desde: 2 },
+  // Listas comparadas inteiras (já vêm ordenadas por nome do parse).
+  { campo: "dependentes", valor: (c) => c.dependentes ?? [], desde: 2 },
+  { campo: "beneficios", valor: (c) => c.beneficios_solides ?? [], desde: 2 },
 ];
 
 function normalizarEndereco(e: DpEndereco | null): DpEndereco | null {
@@ -93,8 +111,9 @@ export function diffColaborador(
       out.push({ solides_id: depois.solides_id, tipo: "alteracao", campo, valor_anterior: de ?? null, valor_novo: para ?? null });
     }
   };
-  for (const { campo, valor } of CAMPOS_LISTA) add(campo, valor(antes), valor(depois));
-  if (ficha) for (const { campo, valor } of CAMPOS_FICHA) add(campo, valor(antes), valor(ficha));
+  const lido = (desde?: number) => (desde ?? 1) <= (antes.ficha_versao ?? 1);
+  for (const { campo, valor, desde } of CAMPOS_LISTA) if (lido(desde)) add(campo, valor(antes), valor(depois));
+  if (ficha) for (const { campo, valor, desde } of CAMPOS_FICHA) if (lido(desde)) add(campo, valor(antes), valor(ficha));
   return out;
 }
 
@@ -152,6 +171,10 @@ export const ROTULO_CAMPO: Record<DpCampoRastreado, string> = {
   salario: "Salário",
   data_desligamento: "Data de desligamento",
   endereco: "Endereço",
+  data_nascimento: "Data de nascimento",
+  experiencia_fim: "Fim da experiência",
+  dependentes: "Dependentes",
+  beneficios: "Benefícios (Sólides)",
 };
 
 const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -165,7 +188,13 @@ function dia(v: unknown): string | null {
 export function formatarValor(campo: DpCampoRastreado | null, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (campo === "salario") return typeof v === "number" ? BRL.format(v) : String(v);
-  if (campo === "data_admissao" || campo === "data_desligamento" || campo === null) return dia(v) ?? String(v);
+  if (campo === "data_admissao" || campo === "data_desligamento" || campo === "data_nascimento" || campo === "experiencia_fim" || campo === null) {
+    return dia(v) ?? String(v);
+  }
+  if (campo === "dependentes" || campo === "beneficios") {
+    const lista = Array.isArray(v) ? (v as Array<{ nome?: string }>) : [];
+    return lista.length === 0 ? "nenhum" : lista.map((x) => x.nome ?? "?").join(", ");
+  }
   if (campo === "endereco" && typeof v === "object") {
     const e = v as DpEndereco;
     return [e.logradouro, e.numero, e.cidade, e.uf].filter(Boolean).join(", ") || "—";

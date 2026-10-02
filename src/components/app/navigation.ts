@@ -4,6 +4,7 @@ import {
   Bell,
   BookOpen,
   Brain,
+  Calculator,
   Calendar,
   CheckSquare,
   ClipboardCheck,
@@ -50,7 +51,9 @@ import {
   DP_NAV_KEY_EMPRESAS,
   DP_NAV_KEY_INDICADORES,
   DP_NAV_KEY_OVERVIEW,
+  DP_NAV_KEY_SIMULACOES,
   DP_PATH,
+  DP_SIMULACOES_PATH,
 } from "@/lib/auth/dp";
 import {
   VB_NAV_KEY_OMIE,
@@ -422,6 +425,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: DP_NAV_KEY_COLABORADORES, title: "Colaboradores", icon: Users, scope: "global", href: DP_COLABORADORES_PATH, dpAccess: true },
       { key: DP_NAV_KEY_INDICADORES, title: "Indicadores", icon: BarChart3, scope: "global", href: DP_INDICADORES_PATH, dpAccess: true },
       { key: DP_NAV_KEY_CARGOS, title: "Cargos e salários", icon: Sliders, scope: "global", href: DP_CARGOS_PATH, dpAccess: true },
+      { key: DP_NAV_KEY_SIMULACOES, title: "Simulações", icon: Calculator, scope: "global", href: DP_SIMULACOES_PATH, dpAccess: true },
       // De-para unidade/departamento da Sólides → empresa do Control Hub.
       { key: DP_NAV_KEY_EMPRESAS, title: "Empresas (de-para)", icon: GitMerge, scope: "global", href: DP_EMPRESAS_PATH, dpAccess: true },
     ],

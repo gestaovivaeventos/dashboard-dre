@@ -12,6 +12,7 @@ import { GRUPOS_VIAGEM, type GrupoViagem } from "@/lib/viagens/custo/tipos";
 import {
   alimentacaoSugerida,
   referenciasPorDestino,
+  transporteLocalSugerido,
   type ReajustesPorGrupo,
   type ReferenciaHistorico,
   type ViagemRealizada,
@@ -47,7 +48,7 @@ function db() {
 }
 
 const HIST_COLS =
-  "id, year, cidade, mes, pessoas, noites, pessoas_por_quarto, diarias, modal, custo_passagem, custo_hospedagem, custo_alimentacao, observacao";
+  "id, year, cidade, mes, pessoas, noites, pessoas_por_quarto, diarias, modal, custo_passagem, custo_hospedagem, custo_alimentacao, custo_transporte_local, observacao";
 
 /** Uma linha do histórico, como a tela a lista. */
 export interface LinhaHistorico extends ViagemRealizada {
@@ -63,6 +64,7 @@ export interface DestinoHistorico {
   passagemPorPessoa: number | null;
   diariaPorQuarto: number | null;
   alimentacaoPorPessoaDia: number | null;
+  transporteLocalPorPessoaDia: number | null;
   viagens: number;
   viagensPassagem: number;
   meses: number[];
@@ -78,6 +80,8 @@ export interface HistoricoSetup {
   reajustes: ReajustesPorGrupo;
   /** Sugestão para o parâmetro de alimentação da empresa, do próprio histórico. */
   alimentacaoSugerida: number | null;
+  /** Transporte local + translado por pessoa/dia — informação, não parâmetro. */
+  transporteLocalSugerido: number | null;
   isAdmin: boolean;
   error?: string;
   needsMigration?: boolean;
@@ -90,6 +94,7 @@ const VAZIO: HistoricoSetup = {
   destinos: [],
   reajustes: {},
   alimentacaoSugerida: null,
+  transporteLocalSugerido: null,
   isAdmin: false,
 };
 
@@ -107,6 +112,7 @@ function linhaDaRow(r: Record<string, unknown>): LinhaHistorico {
     custoPassagem: num(r.custo_passagem),
     custoHospedagem: num(r.custo_hospedagem),
     custoAlimentacao: num(r.custo_alimentacao),
+    custoTransporteLocal: num(r.custo_transporte_local),
     observacao: texto(r.observacao) || null,
   };
 }
@@ -196,6 +202,7 @@ export async function getHistoricoViagens(
     ),
     reajustes,
     alimentacaoSugerida: alimentacaoSugerida(refs, reajustes),
+    transporteLocalSugerido: transporteLocalSugerido(refs, reajustes),
     isAdmin: auth.user.isAdmin,
   };
 }

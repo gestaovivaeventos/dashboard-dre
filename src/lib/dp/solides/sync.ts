@@ -2,7 +2,7 @@ import "server-only";
 
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { buscarFicha, listarColaboradores } from "@/lib/dp/solides/client";
-import { eventosDaSincronizacao, type DpSnapshot } from "@/lib/dp/historico";
+import { eventosDaSincronizacao, FICHA_VERSAO_ATUAL, type DpSnapshot } from "@/lib/dp/historico";
 import { parseDetail, parseListItem, type DpColaboradorFicha } from "@/lib/dp/solides/parse";
 
 // ============================================================================
@@ -45,7 +45,7 @@ export interface DpSyncResult {
 // String literal ÚNICA: o client tipado do Supabase analisa o select em tempo
 // de compilação e não entende concatenação.
 const SNAPSHOT_COLUMNS =
-  "solides_id, ativo, nome, cpf, email, unidade_id, unidade_nome, departamento_id, departamento_nome, cargo_id, cargo_nome, tipo_contrato, data_admissao, gestor_solides_id, gestor_nome, solides_atualizado_em, salario, data_desligamento, endereco";
+  "solides_id, ativo, nome, cpf, email, unidade_id, unidade_nome, departamento_id, departamento_nome, cargo_id, cargo_nome, tipo_contrato, data_admissao, gestor_solides_id, gestor_nome, solides_atualizado_em, salario, data_desligamento, endereco, data_nascimento, experiencia_fim, experiencia_duracao, dependentes, beneficios_solides, ficha_versao";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toSnapshot(r: any): DpSnapshot {
@@ -70,6 +70,12 @@ function toSnapshot(r: any): DpSnapshot {
     salario: n(r.salario),
     data_desligamento: r.data_desligamento,
     endereco: r.endereco ?? null,
+    data_nascimento: r.data_nascimento ?? null,
+    experiencia_fim: r.experiencia_fim ?? null,
+    experiencia_duracao: r.experiencia_duracao ?? null,
+    dependentes: r.dependentes ?? [],
+    beneficios_solides: r.beneficios_solides ?? [],
+    ficha_versao: Number(r.ficha_versao ?? 1),
   };
 }
 
@@ -169,7 +175,8 @@ export async function runDpSolidesSync(
     for (let i = 0; i < lista.length; i++) {
       const base = { ...lista[i], ativo: true, desligado_detectado_em: null, sincronizado_em: agora, updated_at: agora };
       const ficha = fichas[i];
-      if (ficha) comFicha.push({ ...base, ...ficha, ficha_sincronizada_em: agora });
+      // A versão só sobe quando a FICHA foi lida: é ela que traz os campos novos.
+      if (ficha) comFicha.push({ ...base, ...ficha, ficha_sincronizada_em: agora, ficha_versao: FICHA_VERSAO_ATUAL });
       else semFicha.push(base); // mantém salário/endereço da última ficha boa
     }
 
@@ -193,7 +200,7 @@ export async function runDpSolidesSync(
           ativo: false,
           desligado_detectado_em: agora,
           updated_at: agora,
-          ...(ficha ? { ...ficha, ficha_sincronizada_em: agora } : {}),
+          ...(ficha ? { ...ficha, ficha_sincronizada_em: agora, ficha_versao: FICHA_VERSAO_ATUAL } : {}),
         })
         .eq("solides_id", id);
       if (error) throw new Error(`dp_colaboradores desligar: ${error.message}`);

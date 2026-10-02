@@ -39,6 +39,7 @@ export interface HistoricoXlsxRow {
   custoPassagem: number | null;
   custoHospedagem: number | null;
   custoAlimentacao: number | null;
+  custoTransporteLocal: number | null;
   observacao: string | null;
 }
 
@@ -121,6 +122,7 @@ type Campo =
   | "passagem"
   | "hospedagem"
   | "alimentacao"
+  | "local"
   | "observacao";
 
 const ALIAS: Record<Campo, string[]> = {
@@ -147,6 +149,15 @@ const ALIAS: Record<Campo, string[]> = {
   passagem: ["passagem", "passagens", "passagem total", "aereo", "aéreo", "transporte intercidades"],
   hospedagem: ["hospedagem", "hotel", "hospedagem total", "hoteis", "hotéis"],
   alimentacao: ["alimentacao", "alimentação", "refeicoes", "refeições", "alimentacao total"],
+  local: [
+    "transporte local",
+    "transporte local / translado",
+    "translado",
+    "uber",
+    "uber / taxi",
+    "deslocamento local",
+    "local",
+  ],
   observacao: ["observacao", "observação", "obs", "observacoes", "observações", "nota"],
 };
 
@@ -167,6 +178,7 @@ function colsVazias(): Record<Campo, number> {
     passagem: -1,
     hospedagem: -1,
     alimentacao: -1,
+    local: -1,
     observacao: -1,
   };
 }
@@ -221,6 +233,7 @@ export function parseHistoricoXlsx(
     const passagem = lerDinheiro(celula(row, "passagem"));
     const hospedagem = lerDinheiro(celula(row, "hospedagem"));
     const alimentacao = lerDinheiro(celula(row, "alimentacao"));
+    const local = lerDinheiro(celula(row, "local"));
     const pessoas = lerInteiro(celula(row, "pessoas"));
     const noites = lerInteiro(celula(row, "noites"));
 
@@ -230,7 +243,8 @@ export function parseHistoricoXlsx(
       noites == null &&
       passagem == null &&
       hospedagem == null &&
-      alimentacao == null;
+      alimentacao == null &&
+      local == null;
     // Linha totalmente vazia é separador, não erro.
     if (vazia) continue;
 
@@ -244,7 +258,12 @@ export function parseHistoricoXlsx(
       problemas.push(`Linha ${numeroLinha} (${cidade}): sem o número de pessoas.`);
       continue;
     }
-    if ((passagem ?? 0) <= 0 && (hospedagem ?? 0) <= 0 && (alimentacao ?? 0) <= 0) {
+    if (
+      (passagem ?? 0) <= 0 &&
+      (hospedagem ?? 0) <= 0 &&
+      (alimentacao ?? 0) <= 0 &&
+      (local ?? 0) <= 0
+    ) {
       problemas.push(`Linha ${numeroLinha} (${cidade}): sem nenhum custo informado.`);
       continue;
     }
@@ -270,6 +289,7 @@ export function parseHistoricoXlsx(
       custoPassagem: (passagem ?? 0) > 0 ? passagem : null,
       custoHospedagem: (hospedagem ?? 0) > 0 ? hospedagem : null,
       custoAlimentacao: (alimentacao ?? 0) > 0 ? alimentacao : null,
+      custoTransporteLocal: (local ?? 0) > 0 ? local : null,
       observacao: String(celula(row, "observacao") ?? "").trim() || null,
     });
   }

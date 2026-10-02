@@ -431,12 +431,24 @@ export function ViagemHistoricoManager({
               </tbody>
             </table>
           </div>
-          {setup?.alimentacaoSugerida != null && (
-            <p className="text-xs text-muted-foreground">
-              O histórico também sugere <strong>{formatBRL(setup.alimentacaoSugerida)}</strong> de
-              alimentação por pessoa por dia. Quem define esse número é você, em Parâmetros de
-              viagem — aqui é só a leitura do que foi gasto.
-            </p>
+          {(setup?.alimentacaoSugerida != null || setup?.transporteLocalSugerido != null) && (
+            <div className="space-y-1 text-xs text-muted-foreground">
+              {setup?.alimentacaoSugerida != null && (
+                <p>
+                  O histórico sugere <strong>{formatBRL(setup.alimentacaoSugerida)}</strong> de
+                  alimentação por pessoa por dia. Quem define esse número é você, em Parâmetros de
+                  viagem — aqui é só a leitura do que foi gasto.
+                </p>
+              )}
+              {setup?.transporteLocalSugerido != null && (
+                <p>
+                  E <strong>{formatBRL(setup.transporteLocalSugerido)}</strong> de transporte local
+                  (uber, táxi, transfer, estacionamento) por pessoa por dia. Esse não é parâmetro de
+                  empresa: o motor pede trajetos × custo por trajeto em cada viagem, então o número
+                  serve de referência para quem preenche a linha — nunca é aplicado sozinho.
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -459,6 +471,7 @@ export function ViagemHistoricoManager({
                   <th className="px-3 py-2 text-right font-medium">Passagem</th>
                   <th className="px-3 py-2 text-right font-medium">Hotel</th>
                   <th className="px-3 py-2 text-right font-medium">Alim.</th>
+                  <th className="px-3 py-2 text-right font-medium">Local</th>
                   <th className="px-3 py-2 text-right font-medium">= por pessoa (ida)</th>
                   {isAdmin && <th className="px-3 py-2" />}
                 </tr>
@@ -483,6 +496,9 @@ export function ViagemHistoricoManager({
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {l.custoAlimentacao == null ? "—" : formatBRL(l.custoAlimentacao)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        {l.custoTransporteLocal == null ? "—" : formatBRL(l.custoTransporteLocal)}
                       </td>
                       <td
                         className={cn(

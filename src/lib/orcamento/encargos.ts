@@ -74,6 +74,27 @@ export function fatorInss(values: EncargoValues): number {
   return (values.inss_patronal + values.rat_fap + values.terceiros) / 100;
 }
 
+/**
+ * Alíquotas de uma empresa a partir da linha gravada (orcamento_encargos) e do
+ * regime tributário. Sem linha → o padrão do regime; coluna nula (encargo nunca
+ * preenchido) → o padrão daquele encargo. Fonte ÚNICA desta regra: o Orçamento
+ * (actions/encargos) e o Departamento Pessoal (simulações) chamam esta função,
+ * para o custo de uma pessoa não sair diferente nos dois módulos.
+ */
+export function resolverEncargos(
+  row: Record<string, unknown> | undefined | null,
+  regimeTributario: string | null,
+): { values: EncargoValues; usandoPadrao: boolean } {
+  const padrao = encargosPadrao(regimeTributario);
+  if (!row) return { values: padrao, usandoPadrao: true };
+  const values = { ...padrao };
+  for (const meta of ENCARGOS) {
+    const raw = row[meta.key];
+    if (raw != null) values[meta.key] = Number(raw);
+  }
+  return { values, usandoPadrao: false };
+}
+
 /** Fração (não percentual) do FGTS. */
 export function fatorFgts(values: EncargoValues): number {
   return values.fgts / 100;

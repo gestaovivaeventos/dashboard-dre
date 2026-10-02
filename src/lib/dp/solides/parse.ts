@@ -10,7 +10,10 @@
 //
 // Só entram os campos decididos pelo dono do projeto. Conta bancária, RG, PIS,
 // CTPS, filiação e título de eleitor chegam na ficha e são DESCARTADOS aqui, de
-// propósito — não acrescente sem decisão explícita.
+// propósito — não acrescente sem decisão explícita. Liberados em 02/10/2026
+// (reunião com o DP): data de nascimento, dependentes, experiência e os
+// benefícios da ficha. Férias e exames (`vacations`, `healthAndSafety`) também
+// chegam e continuam descartados até decisão própria.
 // ============================================================================
 
 export interface SolidesRef {
@@ -29,6 +32,7 @@ export interface SolidesListItem {
   updated_at?: string | null;
   active?: boolean | null;
   senior?: SolidesRef | null;
+  birthDate?: string | null;
   department?: SolidesRef | null;
   position?: SolidesRef | null;
   unity?: SolidesRef | null;
@@ -49,6 +53,35 @@ export interface SolidesDetail extends Omit<SolidesListItem, "department" | "idN
     city?: { name?: string | null; state?: { name?: string | null; initials?: string | null } | null } | null;
   } | null;
   documents?: { idNumber?: string | null } | null;
+  contractExpirationDate?: string | null;
+  durationContract?: string | null;
+  dependents?: Array<{ name?: string | null; IdNumber?: string | null; birthDate?: string | null; relationship?: string | null }> | null;
+  benefits?: Array<{
+    benefitName?: string | null;
+    typeBenefit?: string | null;
+    value?: string | null;
+    valueDiscount?: string | null;
+    benefitAppliedAs?: string | null;
+    discountOption?: string | null;
+  }> | null;
+}
+
+/** Dependente como fica no espelho (sem RG — a Sólides traz o campo, quase sempre vazio, e não foi pedido). */
+export interface DpDependente {
+  nome: string;
+  cpf: string | null;
+  nascimento: string | null;
+  parentesco: string | null;
+}
+
+/** Benefício como cadastrado na ficha da Sólides. Valores em reais; 0 é zero (não "não informado"). */
+export interface DpBeneficioSolides {
+  nome: string;
+  tipo: string | null;
+  valor: number | null;
+  desconto: number | null;
+  aplicadoComo: string | null;
+  opcaoDesconto: string | null;
 }
 
 export interface DpEndereco {
@@ -78,6 +111,7 @@ export interface DpColaboradorBase {
   gestor_solides_id: number | null;
   gestor_nome: string | null;
   solides_atualizado_em: string | null;
+  data_nascimento: string | null;
 }
 
 /** Campos que só a FICHA traz. */
@@ -85,6 +119,13 @@ export interface DpColaboradorFicha {
   data_desligamento: string | null;
   salario: number | null;
   endereco: DpEndereco | null;
+  /** Fim do 1º período de experiência (contractExpirationDate). */
+  experiencia_fim: string | null;
+  /** "2 x 45 dias", "Indeterminado"… texto da Sólides. */
+  experiencia_duracao: string | null;
+  /** Sempre lista (vazia quando não há): null fica para "nunca lido". */
+  dependentes: DpDependente[];
+  beneficios_solides: DpBeneficioSolides[];
 }
 
 function text(v: string | null | undefined): string | null {
@@ -145,7 +186,46 @@ export function parseListItem(item: SolidesListItem): DpColaboradorBase {
     gestor_solides_id: gestor.id,
     gestor_nome: gestor.nome,
     solides_atualizado_em: parseDataBR(item.updated_at),
+    data_nascimento: parseDataBR(item.birthDate),
   };
+}
+
+/** "R$ 120,00" → 120; "R$ 0,00" → 0 (num benefício zero é zero); ilegível → null. */
+export function parseValorBR(v: string | null | undefined): number | null {
+  const s = (v ?? "").replace(/R\$/i, "").replace(/\s/g, "");
+  if (!s) return null;
+  const n = Number(s.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+}
+
+// Ordem estável: o histórico compara a lista inteira, e a Sólides não promete
+// devolver na mesma ordem — sem ordenar, uma reordenação viraria "mudança".
+const porNome = <T extends { nome: string }>(a: T, b: T) => a.nome.localeCompare(b.nome, "pt-BR");
+
+export function parseDependentes(d: SolidesDetail["dependents"]): DpDependente[] {
+  return (d ?? [])
+    .map((x) => ({
+      nome: text(x?.name) ?? "",
+      cpf: parseCpf(x?.IdNumber),
+      nascimento: parseDataBR(x?.birthDate),
+      parentesco: text(x?.relationship),
+    }))
+    .filter((x) => x.nome)
+    .sort(porNome);
+}
+
+export function parseBeneficios(b: SolidesDetail["benefits"]): DpBeneficioSolides[] {
+  return (b ?? [])
+    .map((x) => ({
+      nome: text(x?.benefitName) ?? "",
+      tipo: text(x?.typeBenefit),
+      valor: parseValorBR(x?.value),
+      desconto: parseValorBR(x?.valueDiscount),
+      aplicadoComo: text(x?.benefitAppliedAs),
+      opcaoDesconto: text(x?.discountOption),
+    }))
+    .filter((x) => x.nome)
+    .sort(porNome);
 }
 
 export function parseEndereco(a: SolidesDetail["address"]): DpEndereco | null {
@@ -168,5 +248,9 @@ export function parseDetail(d: SolidesDetail): DpColaboradorFicha {
     data_desligamento: parseDataBR(d.dateDismissal),
     salario: parseMoedaBR(d.salary),
     endereco: parseEndereco(d.address),
+    experiencia_fim: parseDataBR(d.contractExpirationDate),
+    experiencia_duracao: text(d.durationContract),
+    dependentes: parseDependentes(d.dependents),
+    beneficios_solides: parseBeneficios(d.benefits),
   };
 }

@@ -68,6 +68,16 @@ export interface ViagemRealizada {
   custoPassagem: number | null;
   custoHospedagem: number | null;
   custoAlimentacao: number | null;
+  /**
+   * Uber, táxi, transfer e estacionamento da viagem — UMA coluna, não duas.
+   *
+   * O motor separa `translado` (casa ↔ terminal) de `transporte_local` (o dia a dia
+   * no destino), e com razão. Mas o controle de viagem escreve "Deslocamento de
+   * uber", "Transfer" e "Estacionamento" sem dizer qual é qual, e dividir isso por
+   * palpite produziria dois números errados em vez de um certo. Uma coluna honesta
+   * vale mais: dela sai a sugestão de quanto reservar por pessoa por dia.
+   */
+  custoTransporteLocal: number | null;
 }
 
 /** Quantas pessoas por quarto quando a planilha não diz. */
@@ -110,6 +120,8 @@ export interface CustosUnitarios {
   diariaPorQuarto: number | null;
   /** R$ por pessoa por dia (dias = noites + 1). */
   alimentacaoPorPessoaDia: number | null;
+  /** Transporte local e translado, por pessoa por dia. */
+  transporteLocalPorPessoaDia: number | null;
 }
 
 /**
@@ -128,6 +140,7 @@ export function custosUnitarios(v: ViagemRealizada): CustosUnitarios {
   const passagem = positivo(v.custoPassagem);
   const hospedagem = positivo(v.custoHospedagem);
   const alimentacao = positivo(v.custoAlimentacao);
+  const local = positivo(v.custoTransporteLocal);
   // As diárias informadas vencem o derivado: elas JÁ são quartos × noites.
   const diarias = positivo(v.diarias) > 0 ? Math.round(positivo(v.diarias)) : noites * quartos;
 
@@ -139,6 +152,7 @@ export function custosUnitarios(v: ViagemRealizada): CustosUnitarios {
     diariaPorQuarto: hospedagem > 0 && diarias > 0 ? hospedagem / diarias : null,
     alimentacaoPorPessoaDia:
       alimentacao > 0 ? alimentacao / (pessoas * (noites + 1)) : null,
+    transporteLocalPorPessoaDia: local > 0 ? local / (pessoas * (noites + 1)) : null,
   };
 }
 
@@ -149,6 +163,7 @@ export interface ReferenciaHistorico {
   passagemPorPessoa: number | null;
   diariaPorQuarto: number | null;
   alimentacaoPorPessoaDia: number | null;
+  transporteLocalPorPessoaDia: number | null;
   /** Quantas viagens àquele destino entraram. */
   viagens: number;
   /** Quantas delas serviram à passagem (carro e van ficam fora). */
@@ -197,6 +212,9 @@ export function referenciasPorDestino(
       diariaPorQuarto: medianaDosPrecos(unitarios.map((u) => u.diariaPorQuarto ?? 0)),
       alimentacaoPorPessoaDia: medianaDosPrecos(
         unitarios.map((u) => u.alimentacaoPorPessoaDia ?? 0),
+      ),
+      transporteLocalPorPessoaDia: medianaDosPrecos(
+        unitarios.map((u) => u.transporteLocalPorPessoaDia ?? 0),
       ),
       viagens: lista.length,
       viagensPassagem: unitarios.filter((u) => u.passagemPorPessoa != null).length,
@@ -363,4 +381,24 @@ export function alimentacaoSugerida(
   const mediana = medianaDosPrecos(valores);
   if (mediana == null) return null;
   return reajustar(mediana, percentualDoGrupo(reajustes, "alimentacao"));
+}
+
+/**
+ * Transporte local e translado sugeridos, por pessoa por dia.
+ *
+ * Mesma natureza da alimentação: é informação para quem preenche o campo de
+ * translado/transporte local da viagem, não um valor que o motor aplique sozinho —
+ * o motor pede trajetos × custo por trajeto, que é outra unidade. Sem o número a
+ * pessoa chuta; com ele, parte do que o grupo de fato gastou.
+ */
+export function transporteLocalSugerido(
+  refs: ReadonlyMap<string, ReferenciaHistorico>,
+  reajustes: ReajustesPorGrupo,
+): number | null {
+  const valores = Array.from(refs.values())
+    .map((r) => r.transporteLocalPorPessoaDia)
+    .filter((v): v is number => v != null);
+  const mediana = medianaDosPrecos(valores);
+  if (mediana == null) return null;
+  return reajustar(mediana, percentualDoGrupo(reajustes, "transporte_local"));
 }

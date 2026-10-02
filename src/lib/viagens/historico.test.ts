@@ -18,6 +18,7 @@ import {
   referenciaDePassagem,
   referenciasPorDestino,
   rotuloDaReferencia,
+  transporteLocalSugerido,
   type ViagemRealizada,
 } from "./historico";
 
@@ -33,6 +34,7 @@ function viagem(p: Partial<ViagemRealizada> = {}): ViagemRealizada {
     custoPassagem: 4000,
     custoHospedagem: 640,
     custoAlimentacao: 360,
+    custoTransporteLocal: null,
     ...p,
   };
 }
@@ -253,4 +255,31 @@ test("sem diárias, cai no derivado de noites × quartos", () => {
 test("diária com ZERO diárias informadas não divide por zero", () => {
   const u = custosUnitarios(viagem({ noites: 0, diarias: 0, custoHospedagem: 500 }));
   assert.equal(u.diariaPorQuarto, null);
+});
+
+// ─── Transporte local ───────────────────────────────────────────────────────
+
+test("transporte local vira R$ por pessoa por DIA, como a alimentação", () => {
+  // É sugestão para quem preenche o campo de translado/transporte local da viagem.
+  // O motor pede trajetos × custo por trajeto, que é outra unidade — então este
+  // número informa, nunca é aplicado sozinho.
+  const u = custosUnitarios(
+    viagem({ pessoas: 2, noites: 2, custoTransporteLocal: 240 }),
+  );
+  assert.equal(u.transporteLocalPorPessoaDia, 40, "240 / (2 pessoas × 3 dias)");
+});
+
+test("sem transporte local informado, não inventa zero", () => {
+  const u = custosUnitarios(viagem({ custoTransporteLocal: null }));
+  assert.equal(u.transporteLocalPorPessoaDia, null);
+});
+
+test("o transporte local sugerido usa o reajuste do PRÓPRIO grupo", () => {
+  const refs = referenciasPorDestino([
+    viagem({ cidade: "Recife", pessoas: 2, noites: 2, custoTransporteLocal: 240 }),
+    viagem({ cidade: "Natal", pessoas: 2, noites: 2, custoTransporteLocal: 360 }),
+  ]);
+  assert.equal(transporteLocalSugerido(refs, {}), 50, "mediana de 40 e 60");
+  assert.equal(transporteLocalSugerido(refs, { transporte_local: 10 }), 55);
+  assert.equal(transporteLocalSugerido(refs, { alimentacao: 100 }), 50, "não é o da alimentação");
 });

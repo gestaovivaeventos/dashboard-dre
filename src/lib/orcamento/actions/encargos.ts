@@ -7,7 +7,7 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { getOrcamentoAdmin, getOrcamentoUser, podeVerEmpresa, SEM_ACESSO } from "@/lib/orcamento/auth";
 import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
-import { ENCARGOS, encargosPadrao, type EncargoValues } from "@/lib/orcamento/encargos";
+import { ENCARGOS, resolverEncargos, type EncargoValues } from "@/lib/orcamento/encargos";
 
 const PATH = "/orcamento/configuracoes/encargos";
 
@@ -28,22 +28,10 @@ function db() {
 
 const ENCARGO_COLS = "company_id, inss_patronal, rat_fap, terceiros, fgts";
 
-/** Lê a linha de encargos de uma empresa/ano, caindo no padrão do regime. */
-function readValues(
-  row: Record<string, unknown> | undefined,
-  regimeTributario: string | null,
-): { values: EncargoValues; usandoPadrao: boolean } {
-  const padrao = encargosPadrao(regimeTributario);
-  if (!row) return { values: padrao, usandoPadrao: true };
-
-  const values = { ...padrao };
-  for (const meta of ENCARGOS) {
-    const raw = row[meta.key];
-    // Coluna nula (encargo nunca preenchido) mantém o padrão do regime.
-    if (raw != null) values[meta.key] = Number(raw);
-  }
-  return { values, usandoPadrao: false };
-}
+/** Lê a linha de encargos de uma empresa/ano, caindo no padrão do regime.
+ * A regra mora em @/lib/orcamento/encargos (`resolverEncargos`), pura, porque o
+ * Departamento Pessoal faz a MESMA conta com o próprio acesso. */
+const readValues = resolverEncargos;
 
 /** Alíquotas de todas as empresas ativas no ano, já resolvidas contra o padrão
  * do regime tributário de cada uma. */

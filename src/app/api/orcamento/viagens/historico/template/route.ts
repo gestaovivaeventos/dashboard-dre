@@ -71,18 +71,19 @@ export async function GET(request: Request) {
     "Passagem",
     "Hospedagem",
     "Alimentação",
+    "Transporte local / translado",
     "Observação",
   ];
 
   const ordenadas = Array.from(cidades).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const linhas: unknown[][] = [cabecalho];
   for (const cidade of ordenadas) {
-    linhas.push([cidade, "", "", "", "", "", "", "", "", "", ""]);
+    linhas.push([cidade, "", "", "", "", "", "", "", "", "", "", ""]);
   }
   // Sem destino nenhum ainda: três linhas em branco, para a planilha não chegar
   // com só o cabeçalho e parecer quebrada.
   if (ordenadas.length === 0) {
-    for (let i = 0; i < 3; i += 1) linhas.push(["", "", "", "", "", "", "", "", "", "", ""]);
+    for (let i = 0; i < 3; i += 1) linhas.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
   }
 
   const ajuda: unknown[][] = [
@@ -111,6 +112,10 @@ export async function GET(request: Request) {
     ],
     ["Hospedagem", "Total pago de hotel na viagem (todas as noites, todos os quartos)."],
     ["Alimentação", "Total pago de alimentação na viagem (todas as pessoas, todos os dias)."],
+    [
+      "Transporte local / translado",
+      "Uber, táxi, transfer e estacionamento. NÃO entra no preço da passagem nem da diária: dele sai a sugestão de quanto reservar por pessoa por dia.",
+    ],
     ["Observação", "Opcional. Ex.: 'congresso', 'compra de última hora'."],
     [],
     ["Em branco = não informado, que é diferente de zero. Deixe em branco o que não souber."],
@@ -130,6 +135,7 @@ export async function GET(request: Request) {
     { wch: 14 },
     { wch: 14 },
     { wch: 14 },
+    { wch: 26 },
     { wch: 28 },
   ];
   XLSX.utils.book_append_sheet(wb, ws, "Viagens");

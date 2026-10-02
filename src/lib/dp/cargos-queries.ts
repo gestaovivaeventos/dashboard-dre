@@ -3,6 +3,7 @@ import "server-only";
 import { enquadrar, rotuloLinha, sugerirLinha, type DpEnquadramento, type DpLinhaSalarial } from "@/lib/dp/cargos";
 import { indexarRegras, resolverEmpresa } from "@/lib/dp/empresa";
 import { DpNaoInstaladoError, listDpRegras } from "@/lib/dp/queries";
+import { resolverCentroCusto, resolverLinha, type DpOrigemCentro, type DpOrigemLinha } from "@/lib/dp/vinculo";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 // Leituras da tela de cargos e salários. Admin client DEPOIS de getDpUser(),
@@ -10,8 +11,16 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+export interface DpCentroCusto {
+  id: string;
+  codigo: string;
+  nome: string;
+}
+
 export interface DpTabelaLinha extends DpLinhaSalarial {
   ordem: number;
+  /** Centro de custo PADRÃO de quem está nesta linha (exceção por pessoa vence). */
+  centroCustoId: string | null;
   /** Ativos desta empresa vinculados a esta linha (via cargo da Sólides). */
   pessoas: number;
 }
@@ -30,8 +39,20 @@ export interface DpEnquadramentoRow {
   colaboradorId: string;
   nome: string;
   departamento: string | null;
+  tipoContrato: string | null;
   cargoSolides: string | null;
   linhaRotulo: string | null;
+  /** Linha que vale para a pessoa (exceção ?? cargo). */
+  linhaId: string | null;
+  /** Linha pela regra do cargo — o "automático", mostrado mesmo quando há exceção. */
+  linhaDoCargoId: string | null;
+  /** "cargo" = pela regra do cargo da Sólides; "excecao" = ajuste manual da pessoa. */
+  origemLinha: DpOrigemLinha | null;
+  centroId: string | null;
+  /** Centro padrão da linha que vale — o "automático" do centro de custo. */
+  centroDaLinhaId: string | null;
+  centroCusto: string | null;
+  origemCentro: DpOrigemCentro | null;
   salario: number | null;
   salarioTabela: number | null;
   enquadramento: DpEnquadramento;
@@ -48,6 +69,7 @@ export interface DpReajusteRow {
 
 export interface DpCargosPagina {
   tabela: DpTabelaLinha[];
+  centros: DpCentroCusto[];
   cargosSolides: DpCargoSolidesUso[];
   enquadramento: DpEnquadramentoRow[];
   /** Ativos da empresa sem cargo na Sólides — não há o que vincular. */
@@ -59,10 +81,13 @@ function ausente(error: { code?: string } | null): boolean {
   return error?.code === "PGRST205" || error?.code === "42P01";
 }
 
-export async function getDpTabela(db: AdminClient, companyId: string): Promise<Array<DpLinhaSalarial & { ordem: number }>> {
+export async function getDpTabela(
+  db: AdminClient,
+  companyId: string,
+): Promise<Array<DpLinhaSalarial & { ordem: number; centroCustoId: string | null }>> {
   const { data, error } = await db
     .from("dp_tabela_salarial")
-    .select("id, setor, cargo, salario, ordem")
+    .select("id, setor, cargo, salario, ordem, centro_custo_id")
     .eq("company_id", companyId)
     .order("ordem")
     .order("created_at");
@@ -74,17 +99,65 @@ export async function getDpTabela(db: AdminClient, companyId: string): Promise<A
     cargo: r.cargo as string,
     salario: Number(r.salario),
     ordem: Number(r.ordem),
+    centroCustoId: (r.centro_custo_id as string | null) ?? null,
   }));
 }
 
+export async function listDpCentrosCusto(db: AdminClient, companyId: string): Promise<DpCentroCusto[]> {
+  const { data, error } = await db
+    .from("dp_centros_custo")
+    .select("id, codigo, nome")
+    .eq("company_id", companyId)
+    .eq("ativo", true)
+    .order("codigo")
+    .order("nome");
+  if (ausente(error)) throw new DpNaoInstaladoError();
+  if (error) throw new Error(`dp_centros_custo: ${error.message}`);
+  return (data ?? []).map((c) => ({ id: c.id as string, codigo: (c.codigo as string) ?? "", nome: c.nome as string }));
+}
+
+/** "001 · Comercial" (ou só o nome, sem código). */
+export function rotuloCentro(c: Pick<DpCentroCusto, "codigo" | "nome">): string {
+  return c.codigo.trim() ? `${c.codigo} · ${c.nome}` : c.nome;
+}
+
+export interface DpAjusteRow {
+  linhaId: string | null;
+  linhaMotivo: string | null;
+  centroId: string | null;
+  centroMotivo: string | null;
+}
+
+export async function listDpAjustes(db: AdminClient, solidesIds: number[]): Promise<Map<number, DpAjusteRow>> {
+  if (solidesIds.length === 0) return new Map();
+  const { data, error } = await db
+    .from("dp_colaborador_ajustes")
+    .select("solides_id, linha_id, linha_motivo, centro_custo_id, centro_motivo")
+    .in("solides_id", solidesIds);
+  if (ausente(error)) throw new DpNaoInstaladoError();
+  if (error) throw new Error(`dp_colaborador_ajustes: ${error.message}`);
+  return new Map(
+    (data ?? []).map((a) => [
+      Number(a.solides_id),
+      {
+        linhaId: (a.linha_id as string | null) ?? null,
+        linhaMotivo: (a.linha_motivo as string | null) ?? null,
+        centroId: (a.centro_custo_id as string | null) ?? null,
+        centroMotivo: (a.centro_motivo as string | null) ?? null,
+      },
+    ]),
+  );
+}
+
 export async function getDpCargosPagina(db: AdminClient, companyId: string): Promise<DpCargosPagina> {
-  const [tabela, regras, vinculosRes, colabsRes, reajustesRes] = await Promise.all([
+  const [tabela, centros, regras, vinculosRes, colabsRes, reajustesRes] = await Promise.all([
     getDpTabela(db, companyId),
+    listDpCentrosCusto(db, companyId),
     listDpRegras(db),
     db.from("dp_cargo_vinculos").select("solides_cargo_id, linha_id").eq("company_id", companyId),
     db
       .from("dp_colaboradores")
-      .select("id, nome, unidade_id, departamento_id, departamento_nome, cargo_id, cargo_nome, salario")
+      .select("id, solides_id, nome, unidade_id, departamento_id, departamento_nome, cargo_id, cargo_nome, salario, tipo_contrato")
       .eq("ativo", true)
       .order("nome"),
     db
@@ -116,20 +189,33 @@ export async function getDpCargosPagina(db: AdminClient, companyId: string): Pro
       ).companyId === companyId,
   );
 
+  const ajustes = await listDpAjustes(db, daEmpresa.map((r) => Number(r.solides_id)));
+  const centroPorId = new Map(centros.map((c) => [c.id, c]));
+
   const usos = new Map<number, DpCargoSolidesUso>();
   const pessoasPorLinha = new Map<string, number>();
   let semCargo = 0;
   const enquadramento: DpEnquadramentoRow[] = daEmpresa.map((r) => {
     const cargoId = r.cargo_id === null ? null : Number(r.cargo_id);
-    const linhaId = cargoId === null ? null : vinculo.get(cargoId) ?? null;
-    const linha = linhaId ? porId.get(linhaId) ?? null : null;
+    const vinculoCargo = cargoId === null ? null : vinculo.get(cargoId) ?? null;
+    const linhaDoCargo = vinculoCargo && porId.has(vinculoCargo) ? vinculoCargo : null;
+    const ajuste = ajustes.get(Number(r.solides_id)) ?? null;
+    // Exceção só vale se a linha ainda é desta empresa (a tabela pode ter sido apagada/trocada).
+    const excecao = ajuste?.linhaId && porId.has(ajuste.linhaId) ? ajuste.linhaId : null;
+    const resolvida = resolverLinha({ excecaoLinhaId: excecao, linhaDoCargoId: linhaDoCargo });
+    const linha = resolvida.linhaId ? porId.get(resolvida.linhaId) ?? null : null;
+    const centroAjuste = ajuste?.centroId && centroPorId.has(ajuste.centroId) ? ajuste.centroId : null;
+    const centroLinha = linha?.centroCustoId && centroPorId.has(linha.centroCustoId) ? linha.centroCustoId : null;
+    const centro = resolverCentroCusto({ excecaoCentroId: centroAjuste, centroDaLinhaId: centroLinha });
+    const centroObj = centro.centroId ? centroPorId.get(centro.centroId) ?? null : null;
     if (cargoId === null) semCargo += 1;
     else {
+      // O de-para é por CARGO: mostra a linha do cargo, não a exceção de uma pessoa.
       const u = usos.get(cargoId) ?? {
         solidesCargoId: cargoId,
         nome: r.cargo_nome ?? `Cargo ${cargoId}`,
         colaboradores: 0,
-        linhaId: linha ? linha.id : null,
+        linhaId: linhaDoCargo,
         sugestaoLinhaId: null,
       };
       u.colaboradores += 1;
@@ -141,8 +227,16 @@ export async function getDpCargosPagina(db: AdminClient, companyId: string): Pro
       colaboradorId: r.id as string,
       nome: r.nome as string,
       departamento: r.departamento_nome,
+      tipoContrato: r.tipo_contrato,
       cargoSolides: r.cargo_nome,
       linhaRotulo: linha ? rotuloLinha(linha) : null,
+      linhaId: linha?.id ?? null,
+      linhaDoCargoId: linhaDoCargo,
+      origemLinha: linha ? resolvida.origem : null,
+      centroId: centroObj?.id ?? null,
+      centroDaLinhaId: centroLinha,
+      centroCusto: centroObj ? rotuloCentro(centroObj) : null,
+      origemCentro: centroObj ? centro.origem : null,
       salario,
       salarioTabela: linha?.salario ?? null,
       enquadramento: enquadrar({ temEmpresa: true, salario, salarioNivel: linha?.salario ?? null }),
@@ -173,6 +267,7 @@ export async function getDpCargosPagina(db: AdminClient, companyId: string): Pro
 
   return {
     tabela: tabela.map((l) => ({ ...l, pessoas: pessoasPorLinha.get(l.id) ?? 0 })),
+    centros,
     cargosSolides,
     enquadramento,
     semCargo,

@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS public.orcamento_viagem_historico (
   custo_passagem numeric(15,2),
   custo_hospedagem numeric(15,2),
   custo_alimentacao numeric(15,2),
+  -- Uber, táxi, transfer e estacionamento: UMA coluna, não duas. O motor separa
+  -- translado (casa <-> terminal) de transporte local (o dia a dia no destino), mas o
+  -- controle de viagem não distingue os dois nos rótulos, e dividir por palpite daria
+  -- dois números errados em vez de um certo. Daqui sai a sugestão por pessoa/dia.
+  custo_transporte_local numeric(15,2),
 
   observacao text,
   created_at timestamptz NOT NULL DEFAULT now(),

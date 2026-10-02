@@ -115,6 +115,7 @@ export async function POST(request: Request) {
       custo_passagem: r.custoPassagem,
       custo_hospedagem: r.custoHospedagem,
       custo_alimentacao: r.custoAlimentacao,
+      custo_transporte_local: r.custoTransporteLocal,
       observacao: r.observacao,
       created_by: admin.userId,
     })),
