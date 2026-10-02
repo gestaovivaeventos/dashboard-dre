@@ -132,3 +132,63 @@ export function opcoesSdk(
     ...(opts.maxOutputTokens != null ? { maxOutputTokens: opts.maxOutputTokens } : {}),
   };
 }
+
+// =============================================================================
+// FERRAMENTAS: alguns modelos só as aceitam na Responses API
+//
+// Medido contra a API real em 02/10/2026, com `gpt-6-luna`:
+//
+//   POST /v1/chat/completions + tools                      → 400
+//   ... + reasoning_effort: "low"                          → 400
+//   ... + reasoning_effort: "none"                         → 200 (tool_calls=1)
+//   POST /v1/responses + tools                             → 200 (function_call=1)
+//
+// A mensagem do 400 é explícita: "Function tools with reasoning_effort are not
+// supported for gpt-6-luna in /v1/chat/completions. To use function tools, use
+// /v1/responses or set reasoning_effort".
+//
+// Entre os dois caminhos que funcionam, a escolha não é indiferente:
+// `reasoning_effort: "none"` DESLIGA o raciocínio, e num agente que precisa
+// comparar alternativas (carro × avião, aeroporto vizinho, ordem das paradas)
+// isso troca um defeito por outro. Então o caminho é a Responses API.
+//
+// ── Isto só vale para a OpenAI de verdade ─────────────────────────────────
+// DeepSeek e Gemini entram pelo `createOpenAI` com `baseURL` própria, e
+// `/v1/responses` não existe lá — mandar a requisição para esse caminho daria 404.
+// Por isso a decisão precisa do PROVEDOR, não só do nome do modelo.
+//
+// É o mesmo enquadramento do resto deste arquivo: a família do modelo muda a
+// forma da requisição, o painel deixa cadastrar QUALQUER modelo, então não há
+// lista completa possível — há um palpite pelo nome e uma regra de quando ele vale.
+// =============================================================================
+
+/**
+ * Famílias da OpenAI que recusam ferramenta em `/v1/chat/completions`.
+ *
+ * Mesma lista de nomes que já recusa `max_tokens` e `temperature`: são os
+ * modelos de raciocínio. Reaproveitar `usaMaxCompletionTokens` seria tentador,
+ * mas as duas regras podem divergir num modelo futuro — e conflá-las esconderia
+ * qual delas quebrou.
+ */
+export function modeloExigeResponsesParaTools(modelName: string): boolean {
+  const m = (modelName ?? "").toLowerCase();
+  if (!m) return false;
+  if (m.includes("luna")) return true;
+  if (/^o\d/.test(m)) return true; // o1, o3, o4…
+  if (/gpt-[5-9]/.test(m)) return true;
+  return false;
+}
+
+/**
+ * O caminho a usar quando o turno tem FERRAMENTA.
+ *
+ * `"responses"` → `provider.responses(modelo)`; `"chat"` → `provider.chat(modelo)`.
+ * Provedor que não é OpenAI sempre fica em `"chat"`: ele não tem Responses API.
+ */
+export function caminhoParaTools(
+  providerName: string,
+  modelName: string,
+): "responses" | "chat" {
+  if (providerName !== "openai") return "chat";
+  return modeloExigeResponsesParaTools(modelName) ? "responses" : "chat";
+}

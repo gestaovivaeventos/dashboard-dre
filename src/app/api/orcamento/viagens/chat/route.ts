@@ -3,7 +3,7 @@ import { stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 
 import { mensagemDeFalha } from "@/lib/ai/erros";
-import { opcoesSdk } from "@/lib/ai/parametros-chat";
+import { caminhoParaTools, opcoesSdk } from "@/lib/ai/parametros-chat";
 import { logResolvedUsage, resolveAiProvider } from "@/lib/ai/provider";
 import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
 import {
@@ -189,8 +189,20 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   let erroDoTurno: string | null = null;
 
+  // ── O CAMINHO do modelo quando o turno tem FERRAMENTA ──
+  // `gpt-6-luna` RECUSA tools em /v1/chat/completions com HTTP 400 (medido em
+  // 02/10/2026). Foi esse 400 que fez o primeiro uso real parecer travado: o erro
+  // não chegava à tela. A Responses API aceita, mantendo o raciocínio — a outra
+  // saída que funciona (`reasoning_effort: "none"`) o desligaria, e num agente que
+  // compara alternativas isso trocaria um defeito por outro. Ver `caminhoParaTools`.
+  const caminho = caminhoParaTools(resolved.providerName, resolved.modelName);
+  const modelo =
+    caminho === "responses"
+      ? resolved.provider.responses(resolved.modelName)
+      : resolved.provider.chat(resolved.modelName);
+
   const result = streamText({
-    model: resolved.provider.chat(resolved.modelName),
+    model: modelo,
     system: prep.system,
     messages: prep.messages,
     tools: { buscar_precos: buscarPrecosTool },

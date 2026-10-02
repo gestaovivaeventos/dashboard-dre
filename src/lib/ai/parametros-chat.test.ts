@@ -15,6 +15,8 @@ import {
   parametrosChat,
   tetoDeTokens,
   usaMaxCompletionTokens,
+  caminhoParaTools,
+  modeloExigeResponsesParaTools,
 } from "./parametros-chat";
 
 test("as famílias novas da OpenAI usam max_completion_tokens", () => {
@@ -112,4 +114,42 @@ test("o SDK segue recebendo os dois nos modelos antigos e no DeepSeek", () => {
 test("opção ausente não vira undefined explícito", () => {
   assert.deepEqual(opcoesSdk("gpt-4o", {}), {});
   assert.deepEqual(opcoesSdk("gpt-4o", { temperature: 0 }), { temperature: 0 });
+});
+
+// ─── Ferramentas: chat/completions × responses ──────────────────────────────
+// Medido contra a API real (02/10/2026): `gpt-6-luna` + tools em
+// /v1/chat/completions devolve 400, e em /v1/responses funciona. Errar aqui faz
+// o turno morrer CALADO — foi assim que o agente de viagem "travou" no primeiro
+// uso real.
+
+test("gpt-6-luna exige a Responses API para ferramenta", () => {
+  assert.equal(modeloExigeResponsesParaTools("gpt-6-luna"), true);
+  assert.equal(caminhoParaTools("openai", "gpt-6-luna"), "responses");
+});
+
+test("os modelos de raciocínio da OpenAI também", () => {
+  for (const m of ["o1", "o3-mini", "gpt-5-mini", "gpt-6-luna"]) {
+    assert.equal(modeloExigeResponsesParaTools(m), true, m);
+  }
+});
+
+test("gpt-4o e família antiga seguem no chat/completions", () => {
+  for (const m of ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]) {
+    assert.equal(modeloExigeResponsesParaTools(m), false, m);
+    assert.equal(caminhoParaTools("openai", m), "chat");
+  }
+});
+
+test("provedor que NÃO é OpenAI nunca vai para responses", () => {
+  // DeepSeek e Gemini entram pela camada de compatibilidade (baseURL própria) e
+  // não têm /v1/responses: mandar para lá daria 404.
+  for (const p of ["deepseek", "gemini"]) {
+    assert.equal(caminhoParaTools(p, "gpt-6-luna"), "chat", p);
+    assert.equal(caminhoParaTools(p, "deepseek-v4-flash"), "chat", p);
+  }
+});
+
+test("nome vazio não decide nada", () => {
+  assert.equal(modeloExigeResponsesParaTools(""), false);
+  assert.equal(caminhoParaTools("openai", ""), "chat");
 });
