@@ -34,6 +34,16 @@ export interface PlanoLinhaBruta {
   faixaHospedagem: string | null;
   modal: string | null;
   finalidade: string | null;
+  /**
+   * Etiqueta das cidades de uma MESMA ida.
+   *
+   * A grade tem uma cidade por linha, então uma ida a duas cidades volta como
+   * duas linhas — e cada uma recebe uma passagem. Isso DOBRA a passagem, e é por
+   * isso que a etiqueta existe: ela vira aviso. Descartar a 2a cidade seria pior
+   * (o gestor acharia que orçou algo que não orçou), e somar as duas numa linha
+   * esconderia a 2a cidade da conferência.
+   */
+  junto: string | null;
 }
 
 /** Normaliza para casar nome: sem acento, sem caixa, sem espaço sobrando. */
@@ -125,6 +135,7 @@ export function parsePlanoViagens(bruto: unknown): PlanoLinhaBruta[] {
       faixaHospedagem: texto(o.faixaHospedagem) ?? texto(o.hotel),
       modal: texto(o.modal),
       finalidade: texto(o.finalidade),
+      junto: texto(o.junto) ?? texto(o.mesma_viagem),
     });
   }
   return out;
@@ -220,6 +231,23 @@ export function resolverPlano(
       modal: b.modal,
       finalidade: b.finalidade,
     });
+  }
+
+  // Cidades de uma MESMA ida: viraram linhas separadas, e cada linha leva uma
+  // passagem. O aviso nomeia as cidades em vez de a tela mostrar duas passagens
+  // que o gestor não pediu.
+  const juntas = new Map<string, string[]>();
+  for (const b of brutas) {
+    if (!b.junto) continue;
+    const k = chaveNome(b.junto);
+    juntas.set(k, [...(juntas.get(k) ?? []), b.destino]);
+  }
+  for (const destinos of Array.from(juntas.values())) {
+    if (destinos.length < 2) continue;
+    avisos.add(
+      `${destinos.join(" e ")} vieram como uma ida só — a grade tem uma cidade por linha, ` +
+        "então a passagem está contada em cada uma. Ajuste na linha ou monte a viagem multi-destino.",
+    );
   }
 
   return { linhas, avisos: Array.from(avisos) };

@@ -12,6 +12,7 @@ import {
   type TipoFaixa,
 } from "@/lib/orcamento/actions/viagens-faixas";
 import { MigrationAviso } from "@/components/orcamento/migration-aviso";
+import { ViagemFaixasCalibragem } from "@/components/orcamento/viagem-faixas-calibragem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -313,6 +314,11 @@ export function ViagemFaixasManager({
             preencher.
           </p>
         </div>
+      )}
+
+      {/* A busca na web trabalha aqui, nas ~10 faixas — não nas 50 viagens. */}
+      {items.length > 0 && setup?.isAdmin && (
+        <ViagemFaixasCalibragem companyId={companyId} year={year} onAplicado={() => void carregar()} />
       )}
 
       {secao(

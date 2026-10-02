@@ -169,3 +169,30 @@ test("chaveNome normaliza acento, caixa e espaço", () => {
   assert.equal(chaveNome("  Capital   NORDESTE "), "capital nordeste");
   assert.equal(chaveNome("Florianópolis"), "florianopolis");
 });
+
+test("cidades de uma MESMA ida viram duas linhas E um aviso", () => {
+  // Descartar a 2ª cidade seria pior (o gestor acharia que orçou e não orçou);
+  // somar as duas numa linha a esconderia da conferência. Então: duas linhas, e
+  // o aviso diz que a passagem está contada duas vezes.
+  const r = resolverPlano(
+    parsePlanoViagens([
+      { destino: "Curitiba", mes: 3, noites: 2, pessoas: 3, junto: "sul" },
+      { destino: "Florianópolis", mes: 3, noites: 2, pessoas: 3, junto: "sul" },
+      { destino: "Recife", mes: 5, noites: 3, pessoas: 2 },
+    ]),
+    CADASTROS,
+  );
+  assert.equal(r.linhas.length, 3);
+  const aviso = r.avisos.find((a) => a.includes("uma ida só"));
+  assert.ok(aviso, "o aviso tem de existir");
+  assert.match(aviso!, /Curitiba e Florianópolis/);
+  assert.match(aviso!, /passagem está contada em cada uma/);
+});
+
+test("etiqueta 'junto' com uma cidade só NÃO vira aviso", () => {
+  const r = resolverPlano(
+    parsePlanoViagens([{ destino: "Recife", mes: 5, noites: 2, pessoas: 2, junto: "nordeste" }]),
+    CADASTROS,
+  );
+  assert.deepEqual(r.avisos, []);
+});

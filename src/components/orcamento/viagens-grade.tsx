@@ -21,11 +21,13 @@ import {
 } from "@/lib/orcamento/actions/viagens-grade";
 import { removerViagem } from "@/lib/orcamento/actions/viagens";
 import { PESSOAS_POR_QUARTO_PADRAO, type LinhaViagemInput } from "@/lib/viagens/grade";
+import type { LinhaResolvida } from "@/lib/viagens/plano";
 import { formatBRL } from "@/lib/orcamento/format";
 import { workspaceConfigSecaoHref, viagemHref } from "@/lib/orcamento/workspace-tabs";
 import { DecisaoLinha } from "@/components/orcamento/decisao-linha";
 import { MigrationAviso } from "@/components/orcamento/migration-aviso";
 import { ViagensFinalizar } from "@/components/orcamento/viagens-finalizar";
+import { ViagensPlanoIntake } from "@/components/orcamento/viagens-plano-intake";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,6 +118,32 @@ function linhaVazia(padroes: { tipoId: string; faixaPassagemId: string; faixaHos
   };
 }
 
+/**
+ * Linha lida pela IA → rascunho da grade.
+ *
+ * Ela nasce SUJA: é o que faz "Salvar e calcular" enxergá-la. E nasce sem `id`,
+ * porque leitura cria viagem nova — nunca sobrescreve a que já está na grade.
+ */
+function doPlano(
+  l: LinhaResolvida,
+  padroes: { tipoId: string; faixaPassagemId: string; faixaHospedagemId: string },
+): Rascunho {
+  return {
+    key: novaKey(),
+    destino: l.destino,
+    mesIda: l.mesIda,
+    noites: l.noites,
+    pessoas: l.pessoas,
+    pessoasPorQuarto: l.pessoasPorQuarto ?? PESSOAS_POR_QUARTO_PADRAO,
+    tipoId: l.tipoId || padroes.tipoId,
+    faixaPassagemId: l.faixaPassagemId ?? (padroes.faixaPassagemId || null),
+    faixaHospedagemId: l.noites > 0 ? l.faixaHospedagemId ?? (padroes.faixaHospedagemId || null) : null,
+    modal: l.modal,
+    finalidade: l.finalidade,
+    sujo: true,
+  };
+}
+
 const ESTADO_MARCA: Record<string, { texto: string; classe: string }> = {
   aprovado: { texto: "aprovada", classe: "text-emerald-700 dark:text-emerald-400" },
   reprovado: { texto: "reprovada", classe: "text-red-700 dark:text-red-400" },
@@ -178,6 +206,19 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
 
   function acrescentar(quantas = 1) {
     setLinhas((ls) => [...ls, ...Array.from({ length: quantas }, () => linhaVazia(padroes))]);
+  }
+
+  /**
+   * O plano lido pela IA entra no FIM da grade, sem tocar no que já está lá.
+   *
+   * Substituir seria perder o que o gestor já digitou, e casar linha a linha com
+   * o que existe exigiria adivinhar qual viagem é qual — duas idas a São Paulo
+   * são indistinguíveis. Acrescentar é reversível: linha a mais ele exclui.
+   */
+  function receberPlano(lidas: LinhaResolvida[]) {
+    if (lidas.length === 0) return;
+    setErro(null);
+    setLinhas((ls) => [...ls, ...lidas.map((l) => doPlano(l, padroes))]);
   }
 
   async function salvar() {
@@ -282,6 +323,11 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
     );
   }
 
+  // Vocabulário do ditado: as cidades que já estão na grade. Nome próprio é
+  // exatamente para o que o vocabulário serve.
+  const cidadesConhecidas = Array.from(
+    new Set(linhas.map((l) => l.destino.trim()).filter((d) => d !== "")),
+  );
   const totalGrade = linhas.reduce((a, l) => a + (l.servidor?.custoTotal ?? 0), 0);
   const sujas = linhas.filter((l) => l.sujo).length;
   const podeEditarRecorte = setorEscolhido
@@ -386,6 +432,19 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
             .
           </p>
         </div>
+      )}
+
+      {/* ── O caminho principal com 50 viagens: ditar ou colar o plano ── */}
+      {podeEditarRecorte && tipos.length > 0 && (
+        <ViagensPlanoIntake
+          companyId={companyId}
+          year={year}
+          setorId={setorEscolhido}
+          origem={origem}
+          cidadesConhecidas={cidadesConhecidas}
+          disabled={salvando}
+          onLinhas={receberPlano}
+        />
       )}
 
       {/* ── A grade ── */}

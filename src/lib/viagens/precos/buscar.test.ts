@@ -13,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { mesAno, montarPerguntaPrecos, type TrechoParaCotar } from "./buscar";
+import { mesAno, mesAnoDoNumero, montarPerguntaPrecos, type TrechoParaCotar } from "./buscar";
 
 const TRECHOS: TrechoParaCotar[] = [
   { id: "p1", de: "Juiz de Fora", para: "Curitiba", modal: "aviao" },
@@ -108,4 +108,14 @@ test("mesAno devolve mês e ano, ou null", () => {
   assert.equal(mesAno("04/05/2027"), null);
   assert.equal(mesAno(""), null);
   assert.equal(mesAno(null), null);
+});
+
+test("mesAnoDoNumero rotula o mês da grade, que não tem data", () => {
+  // No orçamento do ano que vem só o mês é conhecido. Montar uma data falsa para
+  // reusar `mesAno` inventaria um dia que ninguém definiu.
+  assert.equal(mesAnoDoNumero(5, 2027), "maio de 2027");
+  assert.equal(mesAnoDoNumero(12, 2027), "dezembro de 2027");
+  for (const v of [null, undefined, 0, 13, 3.5]) {
+    assert.equal(mesAnoDoNumero(v as number | null, 2027), null, String(v));
+  }
 });

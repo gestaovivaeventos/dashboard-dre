@@ -113,6 +113,17 @@ export function mesAno(iso: string | null | undefined): string | null {
   return `${MESES[mes - 1]} de ${m[1]}`;
 }
 
+/**
+ * O mesmo rótulo, a partir do MÊS e do ano.
+ *
+ * A grade guarda mês (`mes_ida`), não data: num orçamento do ano que vem só o mês
+ * é conhecido. Montar uma data falsa só para reusar `mesAno` inventaria um dia.
+ */
+export function mesAnoDoNumero(mes: number | null | undefined, ano: number): string | null {
+  if (mes == null || !Number.isInteger(mes) || mes < 1 || mes > 12) return null;
+  return `${MESES[mes - 1]} de ${ano}`;
+}
+
 /** Só http(s): estas URLs viram link na tela. */
 function fontesLimpas(brutas: unknown[]): string[] {
   return Array.from(
