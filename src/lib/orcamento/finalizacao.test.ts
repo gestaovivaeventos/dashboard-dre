@@ -19,6 +19,7 @@ import {
   sourceFinalizacao,
   travaDaFinalizacao,
   type Finalizacao,
+  type AlvoFinalizacao,
 } from "./finalizacao";
 
 const alvo = (metodo: "media" | "pessoal" | "valor_fixo" | "planejamento_socios", cat: string, setor: string | null) =>
@@ -131,5 +132,41 @@ test("só os métodos com tela são finalizáveis", () => {
   // Os métodos de VE seguem sem tela: finalizar um deles publicaria vazio.
   for (const m of ["marketing_ve", "endomarketing_ve", "", null, 7]) {
     assert.equal(isMetodoFinalizavel(m), false, String(m));
+  }
+});
+
+// ─── A source tem de caber no CHECK do banco ────────────────────────────────
+// `budget_uploads_raw.source` tem CHECK (`source = 'planilha' OR source LIKE
+// 'orc:%'`, migration 20261002120000). A primeira versão do Finalizar gerava uma
+// source que o CHECK recusava, e clicar no botão devolvia 23514 sem publicar
+// nada. Este teste é o que impede a quinta repetição da mesma classe de defeito:
+// valor novo inventado no código sem conferir a constraint da coluna.
+
+/** O mesmo predicado da constraint, em JS. Mudar um exige mudar o outro. */
+function cabeNoCheckDoBanco(source: string): boolean {
+  return source === "planilha" || source.startsWith("orc:");
+}
+
+test("toda source gerada cabe no CHECK de budget_uploads_raw", () => {
+  const alvos: AlvoFinalizacao[] = [
+    { metodo: "pessoal", categoryCode: CATEGORIA_METODO_INTEIRO, setorId: "s1" },
+    { metodo: "pessoal", categoryCode: CATEGORIA_METODO_INTEIRO, setorId: null },
+    { metodo: "media", categoryCode: "2.01.98", setorId: "s1" },
+    { metodo: "valor_fixo", categoryCode: "2.01.91 (*)", setorId: null },
+    { metodo: "planejamento_socios", categoryCode: "2.01.04", setorId: "s2" },
+    { metodo: "viagens", categoryCode: "2.01.98", setorId: "s3" },
+  ];
+  for (const alvo of alvos) {
+    const s = sourceFinalizacao(alvo);
+    assert.ok(cabeNoCheckDoBanco(s), `source recusada pelo banco: ${s}`);
+  }
+});
+
+test("a source começa com `orc:` mesmo com categoria estranha", () => {
+  // O `category_code` vem da Omie: espaço, parêntese e acento acontecem. O CHECK
+  // é por PREFIXO justamente para nenhum deles derrubar o Finalizar.
+  for (const code of ["2.01.98", "2.01.91 (*)", "A B C", "çã/o", ""]) {
+    const s = sourceFinalizacao({ metodo: "viagens", categoryCode: code, setorId: null });
+    assert.ok(cabeNoCheckDoBanco(s), code);
   }
 });
