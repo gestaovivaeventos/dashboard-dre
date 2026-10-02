@@ -1,15 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import * as XLSX from "xlsx";
 
 import { DP_CARGOS_PATH } from "@/lib/auth/dp";
 import { requireDpUser } from "@/lib/dp/auth";
 import { chaveNome } from "@/lib/dp/cargos";
+import { getDpTabela } from "@/lib/dp/cargos-queries";
+import { lerPercentual, ordemEntre, parseTabelaPlanilha, planejarImportacao } from "@/lib/dp/tabela-salarial";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Escrita da estrutura de cargos e salários e do de-para Sólides → nível.
-// Toda action passa por requireDpUser() e grava com o admin client — as
-// tabelas dp_* não têm policy de escrita.
+// Escrita da tabela salarial e do de-para Sólides → linha. Toda action passa
+// por requireDpUser() e grava com o admin client — as tabelas dp_* não têm
+// policy de escrita.
 
 export type DpCargoResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -17,18 +20,17 @@ type Admin = ReturnType<typeof createAdminClient>;
 
 function falha(error: unknown): { ok: false; error: string } {
   const e = error as { code?: string; message?: string } | null;
-  if (e?.code === "23505") return { ok: false, error: "Já existe um cadastro com esse nome aqui." };
-  if (e?.code === "PGRST205" || e?.code === "42P01") {
-    return { ok: false, error: "Cargos e salários ainda não instalados no banco (migration 20261002120000)." };
+  if (e?.code === "23505") return { ok: false, error: "Já existe outra linha com o mesmo setor, cargo e step nesta empresa." };
+  if (e?.code === "PGRST205" || e?.code === "42P01" || e?.code === "PGRST202") {
+    return { ok: false, error: "Tabela salarial ainda não instalada no banco (migration 20261002130000)." };
   }
   return { ok: false, error: e?.message || "Erro inesperado." };
 }
 
-function nomeValido(nome: string, oQue: string): string {
-  const n = nome.replace(/\s+/g, " ").trim();
-  if (!n) throw new Error(`Informe o nome do ${oQue}.`);
-  if (n.length > 120) throw new Error(`O nome do ${oQue} passa de 120 caracteres.`);
-  return n;
+function texto(v: string, max = 120): string {
+  const t = (v ?? "").replace(/\s+/g, " ").trim();
+  if (t.length > max) throw new Error(`Texto passa de ${max} caracteres.`);
+  return t;
 }
 
 function salarioValido(v: number): number {
@@ -37,36 +39,53 @@ function salarioValido(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
-/** A qual empresa o nível pertence (via cargo) — a trava contra vincular nível de outra empresa. */
-async function empresaDoNivel(admin: Admin, nivelId: string): Promise<string | null> {
-  const { data, error } = await admin.from("dp_cargo_niveis").select("dp_cargos(company_id)").eq("id", nivelId).maybeSingle();
-  if (error) throw error;
-  const cargo = (data as { dp_cargos?: { company_id?: string } | Array<{ company_id?: string }> } | null)?.dp_cargos;
-  const c = Array.isArray(cargo) ? cargo[0] : cargo;
-  return c?.company_id ?? null;
+function campos(input: { setor: string; cargo: string; step: string; salario: number }) {
+  const setor = texto(input.setor);
+  const cargo = texto(input.cargo);
+  const step = texto(input.step);
+  if (!cargo) throw new Error("Informe o cargo.");
+  return {
+    setor,
+    setor_chave: chaveNome(setor),
+    cargo,
+    cargo_chave: chaveNome(cargo),
+    step,
+    step_chave: chaveNome(step),
+    salario: salarioValido(input.salario),
+  };
+}
+
+async function exigirEmpresa(admin: Admin, companyId: string) {
+  const { data } = await admin.from("companies").select("id").eq("id", companyId).maybeSingle();
+  if (!data) throw new Error("Empresa não encontrada.");
 }
 
 function revalidar() {
   revalidatePath(DP_CARGOS_PATH);
 }
 
-export async function salvarCargo(input: { companyId: string; id?: string; nome: string }): Promise<DpCargoResult<{ id: string }>> {
+export async function criarLinha(input: {
+  companyId: string;
+  setor: string;
+  cargo: string;
+  step: string;
+  salario: number;
+  /** Insere logo abaixo desta linha; ausente = no fim da tabela. */
+  depoisDeId?: string | null;
+}): Promise<DpCargoResult<{ id: string }>> {
   try {
     const user = await requireDpUser();
     const admin = createAdminClient();
-    const nome = nomeValido(input.nome, "cargo");
-    const row = { nome, nome_chave: chaveNome(nome), updated_by: user.id, updated_at: new Date().toISOString() };
-    if (input.id) {
-      const { error } = await admin.from("dp_cargos").update(row).eq("id", input.id).eq("company_id", input.companyId);
-      if (error) throw error;
-      revalidar();
-      return { ok: true, data: { id: input.id } };
-    }
-    const { data: company } = await admin.from("companies").select("id").eq("id", input.companyId).maybeSingle();
-    if (!company) throw new Error("Empresa não encontrada.");
+    await exigirEmpresa(admin, input.companyId);
+    const tabela = await getDpTabela(admin, input.companyId);
+    const i = input.depoisDeId ? tabela.findIndex((l) => l.id === input.depoisDeId) : -1;
+    const ordem =
+      i >= 0
+        ? ordemEntre(tabela[i].ordem, tabela[i + 1]?.ordem ?? null)
+        : ordemEntre(tabela.length ? tabela[tabela.length - 1].ordem : null, null);
     const { data, error } = await admin
-      .from("dp_cargos")
-      .insert({ ...row, company_id: input.companyId })
+      .from("dp_tabela_salarial")
+      .insert({ ...campos(input), company_id: input.companyId, ordem, updated_by: user.id })
       .select("id")
       .single();
     if (error) throw error;
@@ -77,11 +96,21 @@ export async function salvarCargo(input: { companyId: string; id?: string; nome:
   }
 }
 
-/** Exclui o cargo com os níveis e os vínculos dele (cascata) — a tela confirma antes. */
-export async function excluirCargo(input: { companyId: string; id: string }): Promise<DpCargoResult> {
+export async function salvarLinha(input: {
+  companyId: string;
+  id: string;
+  setor: string;
+  cargo: string;
+  step: string;
+  salario: number;
+}): Promise<DpCargoResult> {
   try {
-    await requireDpUser();
-    const { error } = await createAdminClient().from("dp_cargos").delete().eq("id", input.id).eq("company_id", input.companyId);
+    const user = await requireDpUser();
+    const { error } = await createAdminClient()
+      .from("dp_tabela_salarial")
+      .update({ ...campos(input), updated_by: user.id, updated_at: new Date().toISOString() })
+      .eq("id", input.id)
+      .eq("company_id", input.companyId);
     if (error) throw error;
     revalidar();
     return { ok: true, data: undefined };
@@ -90,65 +119,53 @@ export async function excluirCargo(input: { companyId: string; id: string }): Pr
   }
 }
 
-export async function salvarNivel(input: {
-  companyId: string;
-  cargoId: string;
-  id?: string;
-  nome: string;
-  salario: number;
-}): Promise<DpCargoResult<{ id: string }>> {
+/** Exclui a linha; quem estava vinculado a ela volta a "cargo sem linha na tabela" (cascata). */
+export async function excluirLinha(input: { companyId: string; id: string }): Promise<DpCargoResult> {
   try {
-    const user = await requireDpUser();
-    const admin = createAdminClient();
-    const { data: cargo } = await admin
-      .from("dp_cargos")
-      .select("id")
-      .eq("id", input.cargoId)
-      .eq("company_id", input.companyId)
-      .maybeSingle();
-    if (!cargo) throw new Error("Cargo não encontrado nesta empresa.");
-    const nome = nomeValido(input.nome, "nível");
-    const row = {
-      nome,
-      nome_chave: chaveNome(nome),
-      salario: salarioValido(input.salario),
-      updated_by: user.id,
-      updated_at: new Date().toISOString(),
-    };
-    if (input.id) {
-      const { error } = await admin.from("dp_cargo_niveis").update(row).eq("id", input.id).eq("cargo_id", input.cargoId);
-      if (error) throw error;
-      revalidar();
-      return { ok: true, data: { id: input.id } };
-    }
-    // Novo nível entra por último na ordem do cargo.
-    const { data: ult } = await admin
-      .from("dp_cargo_niveis")
-      .select("ordem")
-      .eq("cargo_id", input.cargoId)
-      .order("ordem", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const { data, error } = await admin
-      .from("dp_cargo_niveis")
-      .insert({ ...row, cargo_id: input.cargoId, ordem: ((ult?.ordem as number | undefined) ?? -1) + 1 })
-      .select("id")
-      .single();
+    await requireDpUser();
+    const { error } = await createAdminClient()
+      .from("dp_tabela_salarial")
+      .delete()
+      .eq("id", input.id)
+      .eq("company_id", input.companyId);
     if (error) throw error;
     revalidar();
-    return { ok: true, data: { id: data.id as string } };
+    return { ok: true, data: undefined };
   } catch (error) {
     return falha(error);
   }
 }
 
-/** Exclui o nível; quem estava vinculado a ele volta para "cargo sem nível definido" (cascata). */
-export async function excluirNivel(input: { companyId: string; cargoId: string; id: string }): Promise<DpCargoResult> {
+/** Sobe ou desce uma linha, trocando a ordem com a vizinha. */
+export async function moverLinha(input: { companyId: string; id: string; direcao: "cima" | "baixo" }): Promise<DpCargoResult> {
   try {
     await requireDpUser();
     const admin = createAdminClient();
-    if ((await empresaDoNivel(admin, input.id)) !== input.companyId) throw new Error("Nível não encontrado nesta empresa.");
-    const { error } = await admin.from("dp_cargo_niveis").delete().eq("id", input.id).eq("cargo_id", input.cargoId);
+    const tabela = await getDpTabela(admin, input.companyId);
+    const i = tabela.findIndex((l) => l.id === input.id);
+    const j = input.direcao === "cima" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= tabela.length) return { ok: true, data: undefined };
+    const a = tabela[i];
+    const b = tabela[j];
+    // Ordens iguais (linhas inseridas ao mesmo tempo) não se trocam: afasta meio ponto.
+    const novaA = a.ordem === b.ordem ? b.ordem + (input.direcao === "cima" ? -0.5 : 0.5) : b.ordem;
+    const novaB = a.ordem === b.ordem ? b.ordem : a.ordem;
+    for (const [id, ordem] of [[a.id, novaA], [b.id, novaB]] as const) {
+      const { error } = await admin.from("dp_tabela_salarial").update({ ordem }).eq("id", id).eq("company_id", input.companyId);
+      if (error) throw error;
+    }
+    revalidar();
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return falha(error);
+  }
+}
+
+/** "Ordenar por setor, cargo e step": renumera a tabela inteira no banco. */
+export async function ordenarTabela(input: { companyId: string }): Promise<DpCargoResult> {
+  try {
+    await requireDpUser();
+    const { error } = await createAdminClient().rpc("dp_ordenar_tabela", { p_company_id: input.companyId });
     if (error) throw error;
     revalidar();
     return { ok: true, data: undefined };
@@ -158,14 +175,124 @@ export async function excluirNivel(input: { companyId: string; cargoId: string; 
 }
 
 /**
- * De-para de UM ou VÁRIOS cargos da Sólides → nível desta empresa. `nivelId`
- * null remove o vínculo. Vários de uma vez é o "Aplicar sugestões": a tela só
- * manda o que mostrou, e cada nível é conferido contra a empresa — vínculo para
- * nível de outra empresa enquadraria a pessoa na tabela errada.
+ * Reajuste % sobre TODOS os salários da tabela da empresa. Sempre >= 0
+ * (`lerPercentual` aqui e o CHECK da função no banco). Tudo ou nada: o UPDATE e
+ * o registro em dp_tabela_reajustes rodam na mesma transação.
+ */
+export async function aplicarReajuste(input: {
+  companyId: string;
+  percentual: string;
+}): Promise<DpCargoResult<{ linhas: number; antes: number; depois: number; percentual: number }>> {
+  try {
+    const user = await requireDpUser();
+    const lido = lerPercentual(input.percentual);
+    if ("erro" in lido) throw new Error(lido.erro);
+    const admin = createAdminClient();
+    await exigirEmpresa(admin, input.companyId);
+    const { data, error } = await admin.rpc("dp_aplicar_reajuste", {
+      p_company_id: input.companyId,
+      p_percentual: lido.ok,
+      p_user_id: user.id,
+    });
+    if (error) throw error;
+    const r = (Array.isArray(data) ? data[0] : data) as { linhas: number; total_antes: number; total_depois: number } | null;
+    revalidar();
+    return {
+      ok: true,
+      data: {
+        linhas: Number(r?.linhas ?? 0),
+        antes: Number(r?.total_antes ?? 0),
+        depois: Number(r?.total_depois ?? 0),
+        percentual: lido.ok,
+      },
+    };
+  } catch (error) {
+    return falha(error);
+  }
+}
+
+export interface DpImportacaoResultado {
+  inseridas: number;
+  atualizadas: number;
+  iguais: number;
+  foraDaPlanilha: number;
+  problemas: string[];
+}
+
+/**
+ * Importa a planilha `Setor | Cargo | Step | Salário` de UMA empresa.
+ * Aditiva e idempotente (ver `planejarImportacao`): atualiza o salário do que
+ * já existe, acrescenta o novo e NÃO apaga o que ficou fora da planilha.
+ * Falha por linha, nunca pelo arquivo.
+ */
+export async function importarTabela(form: FormData): Promise<DpCargoResult<DpImportacaoResultado>> {
+  try {
+    const user = await requireDpUser();
+    const companyId = String(form.get("companyId") ?? "");
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new Error("Envie a planilha (.xlsx).");
+    if (file.size > 5 * 1024 * 1024) throw new Error("Planilha maior que 5 MB.");
+    const admin = createAdminClient();
+    await exigirEmpresa(admin, companyId);
+
+    let data: unknown[][];
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("Planilha vazia.");
+      data = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: true, defval: "" });
+    } catch {
+      throw new Error("Não consegui ler o arquivo. Ele é um .xlsx (ou .xls/.csv)?");
+    }
+    const lido = parseTabelaPlanilha(data);
+    if ("erro" in lido) throw new Error(lido.erro);
+
+    const existentes = await getDpTabela(admin, companyId);
+    const plano = planejarImportacao(lido.ok.linhas, existentes);
+    const agora = new Date().toISOString();
+
+    for (const a of plano.atualizar) {
+      const { error } = await admin
+        .from("dp_tabela_salarial")
+        .update({ salario: a.salario, updated_by: user.id, updated_at: agora })
+        .eq("id", a.id)
+        .eq("company_id", companyId);
+      if (error) throw error;
+    }
+    if (plano.inserir.length > 0) {
+      // Novas entram no fim, na ordem em que estão na planilha.
+      let ordem = existentes.length ? existentes[existentes.length - 1].ordem : 0;
+      const rows = plano.inserir.map((l) => {
+        ordem += 1;
+        return { ...campos(l), company_id: companyId, ordem, updated_by: user.id };
+      });
+      const { error } = await admin.from("dp_tabela_salarial").insert(rows);
+      if (error) throw error;
+    }
+    revalidar();
+    return {
+      ok: true,
+      data: {
+        inseridas: plano.inserir.length,
+        atualizadas: plano.atualizar.length,
+        iguais: plano.iguais,
+        foraDaPlanilha: plano.foraDaPlanilha,
+        problemas: lido.ok.problemas,
+      },
+    };
+  } catch (error) {
+    return falha(error);
+  }
+}
+
+/**
+ * De-para de UM ou VÁRIOS cargos da Sólides → linha da tabela desta empresa.
+ * `linhaId` null remove o vínculo. Cada linha é conferida contra a empresa:
+ * vínculo para linha de outra empresa enquadraria a pessoa na tabela errada.
  */
 export async function vincularCargosSolides(input: {
   companyId: string;
-  itens: Array<{ solidesCargoId: number; solidesCargoNome: string; nivelId: string | null }>;
+  itens: Array<{ solidesCargoId: number; solidesCargoNome: string; linhaId: string | null }>;
 }): Promise<DpCargoResult<{ gravados: number }>> {
   try {
     const user = await requireDpUser();
@@ -173,12 +300,18 @@ export async function vincularCargosSolides(input: {
     if (input.itens.length === 0) return { ok: true, data: { gravados: 0 } };
     if (input.itens.length > 500) throw new Error("Lote grande demais.");
 
-    const nivelIds = Array.from(new Set(input.itens.map((i) => i.nivelId).filter((v): v is string => Boolean(v))));
-    for (const id of nivelIds) {
-      if ((await empresaDoNivel(admin, id)) !== input.companyId) throw new Error("Nível não pertence a esta empresa.");
+    const linhaIds = Array.from(new Set(input.itens.map((i) => i.linhaId).filter((v): v is string => Boolean(v))));
+    if (linhaIds.length > 0) {
+      const { data, error } = await admin
+        .from("dp_tabela_salarial")
+        .select("id")
+        .eq("company_id", input.companyId)
+        .in("id", linhaIds);
+      if (error) throw error;
+      if ((data ?? []).length !== linhaIds.length) throw new Error("Linha da tabela não pertence a esta empresa.");
     }
 
-    const remover = input.itens.filter((i) => !i.nivelId).map((i) => i.solidesCargoId);
+    const remover = input.itens.filter((i) => !i.linhaId).map((i) => i.solidesCargoId);
     if (remover.length > 0) {
       const { error } = await admin
         .from("dp_cargo_vinculos")
@@ -189,12 +322,12 @@ export async function vincularCargosSolides(input: {
     }
     const agora = new Date().toISOString();
     const gravar = input.itens
-      .filter((i) => i.nivelId && Number.isInteger(i.solidesCargoId))
+      .filter((i) => i.linhaId && Number.isInteger(i.solidesCargoId))
       .map((i) => ({
         company_id: input.companyId,
         solides_cargo_id: i.solidesCargoId,
         solides_cargo_nome: i.solidesCargoNome.trim() || `Cargo ${i.solidesCargoId}`,
-        nivel_id: i.nivelId as string,
+        linha_id: i.linhaId as string,
         updated_by: user.id,
         updated_at: agora,
       }));

@@ -1,6 +1,6 @@
 // ============================================================================
 // Cargos e salários do DP — regras puras e testadas: a chave de nome, a
-// sugestão do de-para Sólides → nível e o enquadramento de cada pessoa.
+// sugestão do de-para Sólides → linha da tabela e o enquadramento de cada pessoa.
 // ============================================================================
 
 /**
@@ -18,30 +18,40 @@ export function chaveNome(nome: string): string {
     .trim();
 }
 
-export interface DpEstruturaCargo {
-  cargoId: string;
-  cargoNome: string;
-  niveis: Array<{ id: string; nome: string; salario: number }>;
+/** Uma linha da tabela salarial, no formato que a sugestão e o enquadramento usam. */
+export interface DpLinhaSalarial {
+  id: string;
+  setor: string;
+  cargo: string;
+  step: string;
+  salario: number;
+}
+
+/** "Cargo — Step" (ou só o cargo, quando não há step): como a linha aparece nos seletores. */
+export function rotuloLinha(l: Pick<DpLinhaSalarial, "cargo" | "step">): string {
+  return l.step.trim() ? `${l.cargo} — ${l.step}` : l.cargo;
 }
 
 /**
- * Nível sugerido para um cargo da Sólides, ou null. Só sugere quando há UM
- * candidato: o nome da Sólides é "cargo + nível" ("Analista Comercial Pleno III"
- * = cargo "Analista Comercial" + nível "Pleno III"), ou é o nome do cargo e ele
- * tem um nível só. Dois candidatos = nenhuma sugestão: chutar entre eles
- * enquadraria a pessoa no salário errado sem ninguém perceber.
+ * Linha sugerida para um cargo da Sólides, ou null. Só sugere quando há UM
+ * candidato: o nome da Sólides é "cargo + step" ("Analista Comercial Pleno III"
+ * = cargo "Analista Comercial" + step "Pleno III"), ou é o nome do cargo e ele
+ * tem uma linha só. Dois candidatos (o mesmo cargo em dois setores, por
+ * exemplo) = nenhuma sugestão: chutar entre eles enquadraria a pessoa no
+ * salário errado sem ninguém perceber.
  */
-export function sugerirNivel(nomeSolides: string, estrutura: DpEstruturaCargo[]): string | null {
+export function sugerirLinha(nomeSolides: string, linhas: DpLinhaSalarial[]): string | null {
   const alvo = chaveNome(nomeSolides);
   if (!alvo) return null;
   const candidatos = new Set<string>();
-  for (const c of estrutura) {
-    const cargo = chaveNome(c.cargoNome);
-    for (const n of c.niveis) {
-      if (chaveNome(`${c.cargoNome} ${n.nome}`) === alvo) candidatos.add(n.id);
-    }
-    if (cargo === alvo && c.niveis.length === 1) candidatos.add(c.niveis[0].id);
+  const porCargo = new Map<string, DpLinhaSalarial[]>();
+  for (const l of linhas) {
+    const cargo = chaveNome(l.cargo);
+    porCargo.set(cargo, [...(porCargo.get(cargo) ?? []), l]);
+    if (chaveNome(`${l.cargo} ${l.step}`) === alvo) candidatos.add(l.id);
   }
+  const doCargo = porCargo.get(alvo) ?? [];
+  if (doCargo.length === 1) candidatos.add(doCargo[0].id);
   return candidatos.size === 1 ? Array.from(candidatos)[0] : null;
 }
 
@@ -54,22 +64,22 @@ export type DpEnquadramentoStatus =
   | "sem_empresa";
 
 export const ROTULO_ENQUADRAMENTO: Record<DpEnquadramentoStatus, string> = {
-  no_nivel: "No salário do nível",
-  abaixo: "Abaixo do nível",
-  acima: "Acima do nível",
+  no_nivel: "No salário da tabela",
+  abaixo: "Abaixo da tabela",
+  acima: "Acima da tabela",
   sem_salario: "Sem salário na Sólides",
-  sem_vinculo: "Cargo sem nível definido",
+  sem_vinculo: "Cargo sem linha na tabela",
   sem_empresa: "Sem empresa definida",
 };
 
-/** Diferença menor que isto (em reais) conta como "no salário do nível": arredondamento, não desvio. */
+/** Diferença menor que isto (em reais) conta como "no salário da tabela": arredondamento, não desvio. */
 export const TOLERANCIA_REAIS = 1;
 
 export interface DpEnquadramento {
   status: DpEnquadramentoStatus;
-  /** Salário real − salário do nível; null quando não há os dois. */
+  /** Salário real − salário da tabela; null quando não há os dois. */
   diferenca: number | null;
-  /** Diferença em % do salário do nível; null quando não há os dois ou o nível é zero. */
+  /** Diferença em % do salário da tabela; null quando não há os dois ou ele é zero. */
   percentual: number | null;
 }
 

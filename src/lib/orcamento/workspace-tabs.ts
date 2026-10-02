@@ -188,9 +188,14 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     desc: "De-para tipo de viagem → categoria da DRE. É o que destrava o cadastro de viagens.",
   },
   {
+    slug: "viagem-faixas",
+    label: "Faixas de custo de viagem",
+    desc: "As ~10 referências de passagem e hotel de onde sai o custo de cada viagem.",
+  },
+  {
     slug: "viagem-parametros",
     label: "Parâmetros de viagem",
-    desc: "R$ por km, diária de hotel e alimentação que ancoram a estimativa.",
+    desc: "Alimentação por dia e R$/km de carro próprio — os dois parâmetros da empresa.",
   },
 ] as const;
 

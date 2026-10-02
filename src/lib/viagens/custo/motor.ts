@@ -2,6 +2,7 @@ import {
   GRUPOS_VIAGEM,
   GRUPO_LABEL,
   MODAL_LABEL,
+  type FaixaReferencia,
   type GrupoCusto,
   type GrupoViagem,
   type LinhaCusto,
@@ -79,6 +80,7 @@ function custoDoTrecho(
   pessoas: number,
   params: ParametrosViagem,
   acc: Acumulador,
+  faixa: FaixaReferencia | null | undefined,
 ): { valor: number; descricao: string } {
   const rota = `${trecho.de} → ${trecho.para}`;
   const modal = MODAL_LABEL[trecho.modal] ?? trecho.modal;
@@ -119,7 +121,25 @@ function custoDoTrecho(
     };
   }
 
-  // ── Avião, ônibus e "outro" SEM preço: custo ZERO e premissa alta ──
+  // ── Avião, ônibus e "outro" sem cotação: a FAIXA de referência ──
+  // É o que torna viável orçar ~50 viagens a destinos que não se repetem: o
+  // número vem de ~10 linhas que o admin cura uma vez, não de 50 pesquisas. Não
+  // confunda com o R$/km de avião removido em 01/10/2026 — aquele era um valor por
+  // quilômetro, que não distingue janeiro de julho; esta é uma referência curada
+  // por região, e a premissa diz de qual faixa ela saiu.
+  if (faixa && positivo(faixa.valor) > 0) {
+    const v = positivo(faixa.valor) * pessoas;
+    acc.premissas.push(
+      `Trecho ${rota}: sem cotação — usou a faixa "${faixa.nome}" ` +
+        `(${brl(positivo(faixa.valor))} por pessoa).`,
+    );
+    return {
+      valor: v,
+      descricao: `${modal} ${rota}: ${brl(positivo(faixa.valor))} × ${pessoas} pessoa(s) — faixa "${faixa.nome}"`,
+    };
+  }
+
+  // ── Sem cotação E sem faixa: custo ZERO e premissa alta ──
   // Não existe R$/km para passagem, e isso é decisão (01/10/2026): o preço de
   // passagem tem sazonalidade enorme, e um valor por km não distingue janeiro de
   // julho nem rota concorrida de rota sem concorrência. Ele sairia plausível e
@@ -129,7 +149,7 @@ function custoDoTrecho(
   // nenhuma das duas o trecho entra em zero DITO — que é o que faz alguém ir
   // cotar, em vez de aprovar um número inventado.
   acc.premissas.push(
-    `Trecho ${rota} (${modal}): SEM PREÇO, entrou como ZERO. Passagem não tem ` +
+    `Trecho ${rota} (${modal}): SEM PREÇO e SEM FAIXA, entrou como ZERO. Passagem não tem ` +
       `estimativa por quilometragem — o preço tem sazonalidade grande, e um valor ` +
       `por km sairia plausível sem ninguém conseguir conferi-lo. Use "Buscar ` +
       `preços" ou informe a cotação.` +
@@ -143,8 +163,9 @@ function lancarTrecho(
   trecho: TrechoViagem,
   pessoas: number,
   params: ParametrosViagem,
+  faixa: FaixaReferencia | null | undefined,
 ) {
-  const { valor, descricao } = custoDoTrecho(trecho, pessoas, params, acc);
+  const { valor, descricao } = custoDoTrecho(trecho, pessoas, params, acc, faixa);
   lancar(acc, "passagem", descricao, valor);
   const pedagios = positivo(trecho.pedagios);
   if (pedagios > 0) {
@@ -154,18 +175,31 @@ function lancarTrecho(
 
 // `params` saiu da assinatura: hospedagem não tem mais diária padrão, então a
 // estadia não depende de parâmetro nenhum.
-function lancarEstadia(acc: Acumulador, parada: ParadaViagem, quartos: number) {
+function lancarEstadia(
+  acc: Acumulador,
+  parada: ParadaViagem,
+  quartos: number,
+  faixa: FaixaReferencia | null | undefined,
+) {
   const noites = Math.max(0, Math.round(num(parada.noites)));
   if (noites === 0) return;
 
   // Hotel também não tem valor arbitrado: diária de hotel é preço de mercado, e
   // varia por cidade e por data como a passagem. Sem diária informada o custo é
   // ZERO dito, e a busca é o caminho para preenchê-la.
-  const diaria = positivo(parada.diariaHotel);
+  const propria = positivo(parada.diariaHotel);
+  const daFaixa = faixa && positivo(faixa.valor) > 0 ? positivo(faixa.valor) : 0;
+  const diaria = propria > 0 ? propria : daFaixa;
+  if (propria === 0 && daFaixa > 0) {
+    acc.premissas.push(
+      `Hospedagem em ${parada.cidade}: sem diária informada — usou a faixa ` +
+        `"${faixa!.nome}" (${brl(daFaixa)} por quarto).`,
+    );
+  }
   if (diaria === 0) {
     acc.premissas.push(
-      `Hospedagem em ${parada.cidade}: SEM DIÁRIA informada — use "Buscar preços" ou ` +
-        `informe o valor. ${noites} noite(s) entraram como ZERO.`,
+      `Hospedagem em ${parada.cidade}: SEM DIÁRIA e SEM FAIXA — informe o valor ou ` +
+        `escolha a faixa de hospedagem. ${noites} noite(s) entraram como ZERO.`,
     );
   } else {
     lancar(
@@ -215,9 +249,9 @@ export function calcularViagem(spec: ViagemSpec, params: ParametrosViagem): Resu
 
   // ── Trechos: chegada de cada parada + a volta ──
   for (const parada of paradas) {
-    if (parada.chegada) lancarTrecho(acc, parada.chegada, pessoas, params);
+    if (parada.chegada) lancarTrecho(acc, parada.chegada, pessoas, params, spec.faixaPassagem);
   }
-  if (spec.volta) lancarTrecho(acc, spec.volta, pessoas, params);
+  if (spec.volta) lancarTrecho(acc, spec.volta, pessoas, params, spec.faixaPassagem);
 
   // ── Translado casa ↔ terminal ──
   const t = spec.translado;
@@ -232,7 +266,7 @@ export function calcularViagem(spec: ViagemSpec, params: ParametrosViagem): Resu
   }
 
   // ── Estadia e deslocamento local em cada parada ──
-  for (const parada of paradas) lancarEstadia(acc, parada, quartos);
+  for (const parada of paradas) lancarEstadia(acc, parada, quartos, spec.faixaHospedagem);
 
   // ── Alimentação ──
   lancar(
@@ -260,9 +294,9 @@ export function calcularViagem(spec: ViagemSpec, params: ParametrosViagem): Resu
   const total = round2(grupos.reduce((a, g) => a + g.total, 0));
 
   const meses = Array<number>(12).fill(0);
-  const mes = mesDaData(spec.dataIda);
+  const mes = mesValido(spec.mesIda);
   if (mes != null) meses[mes - 1] = total;
-  else acc.premissas.push("Sem data de partida: o custo não foi distribuído em nenhum mês.");
+  else acc.premissas.push("Sem mês de partida: o custo não foi distribuído em nenhum mês.");
 
   return {
     grupos,
@@ -275,10 +309,22 @@ export function calcularViagem(spec: ViagemSpec, params: ParametrosViagem): Resu
   };
 }
 
-/** Mês 1..12 de uma data ISO, ou null quando a data não serve. */
+/** Mês 1..12, ou null. Fracionário e fora da faixa não viram mês. */
+export function mesValido(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  return n >= 1 && n <= 12 ? n : null;
+}
+
+/**
+ * Mês 1..12 de uma data ISO, ou null.
+ *
+ * Fica para LER o que já está gravado em `data_ida` (as viagens criadas antes de
+ * 02/10/2026) e para a busca de preços, que precisa do mês a partir de uma data.
+ * O orçamento não usa mais data.
+ */
 export function mesDaData(iso: string | null | undefined): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso ?? "").trim());
   if (!m) return null;
-  const mes = Number(m[2]);
-  return mes >= 1 && mes <= 12 ? mes : null;
+  return mesValido(Number(m[2]));
 }

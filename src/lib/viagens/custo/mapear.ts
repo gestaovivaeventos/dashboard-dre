@@ -1,4 +1,11 @@
-import { GRUPOS_VIAGEM, type ParametrosViagem, type ResultadoViagem, type ViagemSpec } from "./tipos";
+import { mesDaData } from "./motor";
+import {
+  GRUPOS_VIAGEM,
+  type FaixaReferencia,
+  type ParametrosViagem,
+  type ResultadoViagem,
+  type ViagemSpec,
+} from "./tipos";
 import type { ModalTrecho, ParadaViagem, TrechoViagem } from "./tipos";
 
 // =============================================================================
@@ -55,6 +62,15 @@ export function parametrosDaLinha(row: Record<string, unknown> | null | undefine
 export function specDaViagem(
   viagem: Record<string, unknown>,
   paradasRaw: ReadonlyArray<Record<string, unknown>>,
+  /**
+   * As faixas que precificam ESTA viagem, já resolvidas pela action
+   * (`orcamento_viagem_faixas`). Ausentes = trecho sem cotação entra zero, dito
+   * em premissa — é o que faz a falta de cadastro aparecer em vez de sumir.
+   */
+  faixas?: {
+    passagem?: FaixaReferencia | null;
+    hospedagem?: FaixaReferencia | null;
+  },
 ): ViagemSpec {
   const origem = texto(viagem.origem);
   const paradasOrdenadas = [...(paradasRaw ?? [])].sort(
@@ -104,7 +120,9 @@ export function specDaViagem(
 
   return {
     origem,
-    dataIda: texto(viagem.data_ida),
+    // `mes_ida` é a fonte; `data_ida` só responde pelas viagens gravadas antes de
+    // 02/10/2026, quando o campo era uma data completa.
+    mesIda: n(viagem.mes_ida) ?? mesDaData(texto(viagem.data_ida)),
     pessoas: n(viagem.pessoas) ?? 1,
     pessoasPorQuarto: n(viagem.pessoas_por_quarto) ?? 1,
     paradas,
@@ -125,7 +143,22 @@ export function specDaViagem(
         ? { custoPorTrajeto: translCusto, trajetos: translTrajetos }
         : null,
     outros: lerOutros(viagem.outros),
+    faixaPassagem: faixas?.passagem ?? null,
+    faixaHospedagem: faixas?.hospedagem ?? null,
   };
+}
+
+/** Uma linha de `orcamento_viagem_faixas` como referência para o motor. */
+export function faixaDaLinha(
+  row: Record<string, unknown> | null | undefined,
+): FaixaReferencia | null {
+  if (!row) return null;
+  const nome = texto(row.nome);
+  const valor = n(row.valor);
+  // Faixa sem nome ou sem valor não precifica: valor 0 tratado como preço faria a
+  // viagem sair de graça com aparência de referência.
+  if (!nome || valor == null || valor <= 0) return null;
+  return { nome, valor };
 }
 
 /** `outros` é jsonb livre — entra validado, nunca confiando no formato. */

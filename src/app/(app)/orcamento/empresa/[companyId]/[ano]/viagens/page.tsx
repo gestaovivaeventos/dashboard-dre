@@ -1,5 +1,5 @@
 import { guardMetodoDaEmpresa } from "@/lib/orcamento/guard-metodo";
-import { ViagensLista } from "@/components/orcamento/viagens-lista";
+import { ViagensGrade } from "@/components/orcamento/viagens-grade";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +25,12 @@ export default async function WorkspaceViagensPage({
       <div>
         <h2 className="text-xl font-bold tracking-tight">Viagens</h2>
         <p className="text-sm text-muted-foreground">
-          Diga para onde, quantos dias, quantas pessoas e se dividem quarto — o agente de viagem
-          pesquisa passagem e hotel, compara as formas de ir e monta o roteiro. O custo é calculado
-          pelo sistema a partir dele, nunca digitado, e tudo o que for estimado aparece dito.
+          Uma linha por viagem: destino, mês, noites e pessoas. O custo vem das faixas de referência
+          da empresa — nunca digitado — e cada linha abre na árvore de grupos. Para uma viagem
+          multi-destino, abra a viagem e monte o roteiro lá.
         </p>
       </div>
-      <ViagensLista companyId={params.companyId} year={Number(params.ano)} />
+      <ViagensGrade companyId={params.companyId} year={Number(params.ano)} />
     </div>
   );
 }

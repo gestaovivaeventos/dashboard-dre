@@ -22,7 +22,7 @@ import {
 /** Linha de viagem como o PostgREST a entrega — `numeric` vem em string. */
 const VIAGEM = {
   origem: "Juiz de Fora",
-  data_ida: "2027-05-04",
+  mes_ida: 5,
   pessoas: "2",
   pessoas_por_quarto: "2",
   translado_custo_trajeto: "40",
@@ -60,7 +60,7 @@ test("a viagem COMPLETA atravessa o mapeamento sem perder pedaço", () => {
   assert.equal(spec.origem, "Juiz de Fora");
   assert.equal(spec.pessoas, 2);
   assert.equal(spec.pessoasPorQuarto, 2);
-  assert.equal(spec.dataIda, "2027-05-04");
+  assert.equal(spec.mesIda, 5);
   assert.deepEqual(spec.translado, { custoPorTrajeto: 40, trajetos: 2 });
   assert.deepEqual(spec.outros, [{ descricao: "Seguro viagem", valor: 120 }]);
 
@@ -108,7 +108,7 @@ test("o número em STRING soma, não concatena", () => {
   // km (01/10/2026): ele entra zero, dito em premissa.
   const passagem = r.grupos.find((g) => g.grupo === "passagem");
   assert.equal(passagem?.total, 3400);
-  assert.ok(r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)));
+  assert.ok(r.premissas.some((p) => /SEM PREÇO e SEM FAIXA/.test(p)));
 });
 
 test("viagem SEM volta não inventa trecho de retorno", () => {

@@ -11,8 +11,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 
 /**
- * Cargos e salários, por empresa: a estrutura (cargo → níveis → salário), o
- * de-para dos cargos da Sólides para um nível e o enquadramento de cada pessoa.
+ * Cargos e salários, por empresa: a tabela salarial (Setor | Cargo | Step |
+ * Salário), o de-para dos cargos da Sólides para uma linha dela e o
+ * enquadramento de cada pessoa.
  */
 export default async function DpCargosPage({ searchParams }: { searchParams: { empresa?: string } }) {
   const user = await getDpUser();
@@ -34,7 +35,7 @@ export default async function DpCargosPage({ searchParams }: { searchParams: { e
           <div>
             <h1 className="text-xl font-semibold text-ink-primary">Cargos e salários</h1>
             <p className="text-sm text-ink-muted">
-              A estrutura de cada empresa e onde cada pessoa está em relação a ela.
+              A tabela salarial de cada empresa e onde cada pessoa está em relação a ela.
             </p>
           </div>
           {escolhida && <DpEmpresaSelect empresas={empresas} value={escolhida.id} />}
@@ -47,7 +48,7 @@ export default async function DpCargosPage({ searchParams }: { searchParams: { e
       </div>
     );
   } catch (error) {
-    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado migration="20261002120000_dp_cargos_salarios.sql" />;
+    if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado migration="20261002130000_dp_tabela_salarial.sql" />;
     throw error;
   }
 }

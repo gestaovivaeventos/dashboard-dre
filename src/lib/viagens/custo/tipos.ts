@@ -104,8 +104,15 @@ export interface ViagemSpec {
   paradas: ParadaViagem[];
   /** O trecho de volta à origem. */
   volta: TrechoViagem | null;
-  /** Data de partida (ISO `AAAA-MM-DD`) — define o MÊS do orçamento. */
-  dataIda: string;
+  /**
+   * MÊS da partida (1..12) — é ele que define em que mês do orçamento a viagem
+   * cai.
+   *
+   * Era uma data ISO completa até 02/10/2026, e virou mês a pedido: no orçamento
+   * ninguém sabe o dia. A data exigia um dia que o gestor inventava, e um dia
+   * inventado parece informação. `null` = mês ainda não definido.
+   */
+  mesIda: number | null;
   pessoas: number;
   /**
    * Quantas pessoas por quarto. 1 = cada um no seu; 2 = dividindo.
@@ -117,6 +124,24 @@ export interface ViagemSpec {
   translado?: { custoPorTrajeto: number; trajetos: number } | null;
   /** Linhas avulsas que não cabem em grupo nenhum (inscrição, seguro, bagagem). */
   outros?: Array<{ descricao: string; valor: number }>;
+  /**
+   * FAIXA de passagem: valor de referência por pessoa, SÓ IDA, curado pelo admin
+   * (`orcamento_viagem_faixas`). Entra quando ninguém cotou o trecho — e só em
+   * avião/ônibus/outro: carro e van têm o km, que é o driver real do custo deles.
+   *
+   * O nome vem junto porque a premissa precisa DIZER de qual faixa o número saiu.
+   * "R$ 620 por pessoa" sem a origem é o tipo de valor que ninguém consegue
+   * conferir, que é o que este motor existe para evitar.
+   */
+  faixaPassagem?: FaixaReferencia | null;
+  /** FAIXA de hospedagem: diária por QUARTO, quando a parada não tem diária própria. */
+  faixaHospedagem?: FaixaReferencia | null;
+}
+
+/** Um valor de referência curado pelo admin, com o nome de onde ele veio. */
+export interface FaixaReferencia {
+  nome: string;
+  valor: number;
 }
 
 /**

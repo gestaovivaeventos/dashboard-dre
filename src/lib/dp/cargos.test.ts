@@ -1,28 +1,30 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { chaveNome, enquadrar, sugerirNivel, type DpEstruturaCargo } from "@/lib/dp/cargos";
+import { chaveNome, enquadrar, sugerirLinha, type DpLinhaSalarial } from "@/lib/dp/cargos";
 
 test("chaveNome: caixa, acento, (a) e espaços não importam", () => {
   assert.equal(chaveNome("Consultor(a) de  Relacionamento Sênior II"), "consultor de relacionamento senior ii");
   assert.equal(chaveNome(" Analista  Comercial "), chaveNome("analista comercial"));
 });
 
-const estrutura: DpEstruturaCargo[] = [
-  { cargoId: "c1", cargoNome: "Analista Comercial", niveis: [{ id: "n1", nome: "Pleno I", salario: 4000 }, { id: "n2", nome: "Pleno III", salario: 5000 }] },
-  { cargoId: "c2", cargoNome: "Motorista", niveis: [{ id: "n3", nome: "Único", salario: 2500 }] },
-  { cargoId: "c3", cargoNome: "Designer", niveis: [{ id: "n4", nome: "I", salario: 3000 }, { id: "n5", nome: "II", salario: 3500 }] },
+const linhas: DpLinhaSalarial[] = [
+  { id: "n1", setor: "Comercial", cargo: "Analista Comercial", step: "Pleno I", salario: 4000 },
+  { id: "n2", setor: "Comercial", cargo: "Analista Comercial", step: "Pleno III", salario: 5000 },
+  { id: "n3", setor: "Operacional", cargo: "Motorista", step: "", salario: 2500 },
+  { id: "n4", setor: "Marketing", cargo: "Designer", step: "I", salario: 3000 },
+  { id: "n5", setor: "Eventos", cargo: "Designer", step: "I", salario: 3200 },
 ];
 
-test("sugerirNivel: cargo + nível no nome da Sólides", () => {
-  assert.equal(sugerirNivel("Analista Comercial Pleno III", estrutura), "n2");
-  assert.equal(sugerirNivel("analista comercial pleno i", estrutura), "n1");
+test("sugerirLinha: cargo + step no nome da Sólides", () => {
+  assert.equal(sugerirLinha("Analista Comercial Pleno III", linhas), "n2");
+  assert.equal(sugerirLinha("analista comercial pleno i", linhas), "n1");
 });
 
-test("sugerirNivel: nome do cargo só vale quando há um nível", () => {
-  assert.equal(sugerirNivel("Motorista", estrutura), "n3");
-  assert.equal(sugerirNivel("Designer", estrutura), null);
-  assert.equal(sugerirNivel("Gerente Geral", estrutura), null);
+test("sugerirLinha: só o cargo vale quando ele tem uma linha; ambíguo não sugere", () => {
+  assert.equal(sugerirLinha("Motorista", linhas), "n3");
+  assert.equal(sugerirLinha("Designer I", linhas), null); // o mesmo cargo+step em dois setores
+  assert.equal(sugerirLinha("Gerente Geral", linhas), null);
 });
 
 test("enquadrar: tolerância de arredondamento, abaixo/acima e os casos sem dado", () => {

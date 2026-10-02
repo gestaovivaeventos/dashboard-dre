@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { calcularViagem, mesDaData } from "./motor";
+import { calcularViagem, mesDaData, mesValido } from "./motor";
 import type { ParametrosViagem, ViagemSpec } from "./tipos";
 
 const P: ParametrosViagem = {
@@ -20,7 +20,7 @@ const P: ParametrosViagem = {
 function simples(over: Partial<ViagemSpec> = {}): ViagemSpec {
   return {
     origem: "Juiz de Fora",
-    dataIda: "2027-03-10",
+    mesIda: 3,
     pessoas: 2,
     pessoasPorQuarto: 2,
     paradas: [
@@ -108,7 +108,7 @@ test("PASSAGEM sem preço é ZERO, mesmo com a distância informada", () => {
     );
     assert.equal(grupo(r, "passagem"), undefined, `${modal} não podia produzir valor`);
     assert.ok(
-      r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)),
+      r.premissas.some((p) => /SEM PREÇO e SEM FAIXA/.test(p)),
       `${modal} sem premissa`,
     );
     assert.ok(
@@ -156,7 +156,7 @@ test("MULTI-DESTINO soma os trechos na ordem do roteiro", () => {
   const r = calcularViagem(
     {
       origem: "Juiz de Fora",
-      dataIda: "2027-05-04",
+      mesIda: 5,
       pessoas: 2,
       pessoasPorQuarto: 2,
       paradas: [
@@ -237,8 +237,7 @@ test("NÃO existe mais diária de hotel padrão — sem valor, hospedagem é ZER
     P,
   );
   assert.equal(grupo(r, "hospedagem"), undefined);
-  assert.ok(r.premissas.some((p) => /SEM DIÁRIA informada/.test(p)));
-  assert.ok(r.premissas.some((p) => /Buscar preços/.test(p)));
+  assert.ok(r.premissas.some((p) => /SEM DIÁRIA e SEM FAIXA/.test(p)));
 });
 
 test("passagem aérea sem cotação NÃO é estimada — entra zero e avisa", () => {
@@ -255,7 +254,7 @@ test("passagem aérea sem cotação NÃO é estimada — entra zero e avisa", ()
     }),
     P,
   );
-  assert.ok(r.premissas.some((p) => /SEM PREÇO, entrou como ZERO/.test(p)));
+  assert.ok(r.premissas.some((p) => /SEM PREÇO e SEM FAIXA/.test(p)));
   assert.ok(r.premissas.some((p) => /Buscar preços/.test(p)));
   assert.equal(grupo(r, "passagem"), undefined);
 });
@@ -302,7 +301,7 @@ test("transporte local conta os DIAS, não as noites", () => {
 });
 
 test("o custo cai no MÊS DA PARTIDA, inteiro", () => {
-  const r = calcularViagem(simples({ dataIda: "2027-03-10" }), P);
+  const r = calcularViagem(simples({ mesIda: 3 }), P);
   assert.equal(r.meses[2], r.total, "março é o índice 2");
   assert.equal(r.meses.filter((v) => v !== 0).length, 1);
   assert.equal(
@@ -312,17 +311,26 @@ test("o custo cai no MÊS DA PARTIDA, inteiro", () => {
 });
 
 test("viagem que atravessa a virada do mês NÃO é rateada", () => {
-  // Decisão: a DRE é caixa, e passagem e hotel são pagos antes de viajar.
-  const r = calcularViagem(simples({ dataIda: "2027-01-31" }), P);
+  // Decisão: a DRE é caixa, e passagem e hotel são pagos antes de viajar. Com o
+  // orçamento guardando só o MÊS (02/10/2026), nem há dia para ratear.
+  const r = calcularViagem(simples({ mesIda: 1 }), P);
   assert.equal(r.meses[0], r.total);
   assert.equal(r.meses[1], 0);
 });
 
-test("sem data não distribui, e diz por quê", () => {
-  const r = calcularViagem(simples({ dataIda: "" }), P);
+test("sem MÊS não distribui, e diz por quê", () => {
+  const r = calcularViagem(simples({ mesIda: null }), P);
   assert.equal(r.meses.reduce((a, b) => a + b, 0), 0);
   assert.ok(r.premissas.some((p) => /não foi distribuído/i.test(p)));
   assert.ok(r.total > 0, "o total continua valendo — só a distribuição falta");
+});
+
+test("mês fora da faixa ou fracionário não distribui", () => {
+  // Vem de digitação e de JSON de IA: 0, 13 e 3,5 não são meses.
+  for (const m of [0, 13, -1, 3.5] as number[]) {
+    const r = calcularViagem(simples({ mesIda: m }), P);
+    assert.equal(r.meses.reduce((a, b) => a + b, 0), 0, String(m));
+  }
 });
 
 test("linha de valor ZERO não polui a abertura", () => {
@@ -343,11 +351,161 @@ test("valor inválido não contamina o total com NaN", () => {
   assert.equal(r.total, 2600);
 });
 
-test("mesDaData aceita só ISO válido", () => {
+test("mesValido recusa o que não é mês", () => {
+  assert.equal(mesValido(3), 3);
+  assert.equal(mesValido(12), 12);
+  assert.equal(mesValido("5"), 5, "numeric em string vem do PostgREST");
+  for (const v of [0, 13, -1, 3.5, Number.NaN, null, undefined, "", "mar"]) {
+    assert.equal(mesValido(v), null, String(v));
+  }
+});
+
+test("mesDaData fica para LER o que já está gravado em data_ida", () => {
+  // As viagens criadas antes de 02/10/2026 têm data completa; o orçamento não
+  // usa mais data, mas continua tendo de somá-las no mês certo.
   assert.equal(mesDaData("2027-03-10"), 3);
   assert.equal(mesDaData("2027-12-01"), 12);
   assert.equal(mesDaData("2027-13-01"), null);
   assert.equal(mesDaData("10/03/2027"), null);
   assert.equal(mesDaData(""), null);
   assert.equal(mesDaData(null), null);
+});
+
+// ─── FAIXAS de referência (02/10/2026) ──────────────────────────────────────
+// A faixa é o que torna viável orçar ~50 viagens a destinos que não se repetem:
+// o número vem de ~10 linhas curadas pelo admin, não de 50 pesquisas. O que estes
+// testes protegem é a PRECEDÊNCIA — quem vence quem — e o fato de a premissa
+// sempre dizer de onde o número saiu.
+
+const FAIXA_AEREA = { nome: "Capital Sul", valor: 620 };
+const FAIXA_HOTEL = { nome: "Capital", valor: 310 };
+
+function aereo(over: Partial<ViagemSpec> = {}): ViagemSpec {
+  return simples({
+    paradas: [
+      {
+        cidade: "Curitiba",
+        noites: 2,
+        chegada: { de: "Juiz de Fora", para: "Curitiba", modal: "aviao" },
+      },
+    ],
+    volta: { de: "Curitiba", para: "Juiz de Fora", modal: "aviao" },
+    ...over,
+  });
+}
+
+test("sem cotação, a FAIXA precifica a passagem — ida e volta, por pessoa", () => {
+  const r = calcularViagem(aereo({ faixaPassagem: FAIXA_AEREA }), P);
+  // 620 × 2 pessoas × 2 trechos (ida + volta) = 2.480.
+  assert.equal(grupo(r, "passagem")?.total, 2480);
+});
+
+test("a premissa DIZ de qual faixa o número saiu", () => {
+  // "R$ 620 por pessoa" sem origem é o valor que ninguém consegue conferir.
+  const r = calcularViagem(aereo({ faixaPassagem: FAIXA_AEREA }), P);
+  assert.ok(r.premissas.some((p) => /faixa "Capital Sul"/.test(p)));
+  assert.ok(r.premissas.some((p) => /R\$ 620,00 por pessoa/.test(p)));
+});
+
+test("COTAÇÃO vence a faixa", () => {
+  // Quem cotou tem o número na mão; a faixa é referência para quem não tem.
+  const r = calcularViagem(
+    aereo({
+      faixaPassagem: FAIXA_AEREA,
+      paradas: [
+        {
+          cidade: "Curitiba",
+          noites: 2,
+          chegada: {
+            de: "Juiz de Fora",
+            para: "Curitiba",
+            modal: "aviao",
+            precoPorPessoa: 800,
+          },
+        },
+      ],
+      volta: null,
+    }),
+    P,
+  );
+  assert.equal(grupo(r, "passagem")?.total, 1600, "800 × 2, não a faixa");
+  // Estreito de propósito: o aviso de hotel sem diária cita "faixa de
+  // hospedagem", e um /faixa/ solto casaria com ele.
+  assert.equal(
+    r.premissas.some((p) => /usou a faixa/.test(p)),
+    false,
+    "trecho cotado não gera premissa de faixa",
+  );
+});
+
+test("CARRO e VAN ignoram a faixa — ali o km é o driver do custo", () => {
+  // A faixa é preço de passagem; no carro o custo é combustível e desgaste, que
+  // são proporcionais à distância, com um R$/km que a empresa define.
+  for (const modal of ["carro", "van"] as const) {
+    const r = calcularViagem(
+      simples({
+        faixaPassagem: FAIXA_AEREA,
+        paradas: [
+          {
+            cidade: "São Paulo",
+            noites: 1,
+            diariaHotel: 200,
+            chegada: { de: "Juiz de Fora", para: "São Paulo", modal, distanciaKm: 500 },
+          },
+        ],
+        volta: null,
+      }),
+      P,
+    );
+    assert.equal(grupo(r, "passagem")?.total, 1000, `${modal}: 500 km × R$ 2`);
+  }
+});
+
+test("a FAIXA de hospedagem entra quando a parada não tem diária", () => {
+  const r = calcularViagem(aereo({ faixaHospedagem: FAIXA_HOTEL }), P);
+  // 2 noites × 310 × 1 quarto (2 pessoas dividindo).
+  assert.equal(grupo(r, "hospedagem")?.total, 620);
+  assert.ok(r.premissas.some((p) => /faixa "Capital"/.test(p)));
+});
+
+test("a diária da PARADA vence a faixa de hospedagem", () => {
+  const r = calcularViagem(
+    aereo({
+      faixaHospedagem: FAIXA_HOTEL,
+      paradas: [
+        {
+          cidade: "Curitiba",
+          noites: 2,
+          diariaHotel: 450,
+          chegada: { de: "Juiz de Fora", para: "Curitiba", modal: "aviao" },
+        },
+      ],
+      volta: null,
+    }),
+    P,
+  );
+  assert.equal(grupo(r, "hospedagem")?.total, 900);
+  assert.equal(
+    r.premissas.some((p) => /faixa "Capital"/.test(p)),
+    false,
+  );
+});
+
+test("faixa com valor ZERO não precifica — e o aviso é o de SEM FAIXA", () => {
+  // Faixa cadastrada e ainda sem valor é o estado normal de quem acabou de criar
+  // a linha. Tratá-la como R$ 0 faria a viagem sair de graça, dito como se fosse
+  // referência.
+  const r = calcularViagem(
+    aereo({ faixaPassagem: { nome: "Nordeste", valor: 0 }, faixaHospedagem: null }),
+    P,
+  );
+  assert.equal(grupo(r, "passagem"), undefined);
+  assert.ok(r.premissas.some((p) => /SEM PREÇO e SEM FAIXA/.test(p)));
+});
+
+test("a faixa NÃO mexe no total quando tudo já está cotado", () => {
+  // Garante que acrescentar faixa a uma viagem já pronta não muda número nenhum.
+  const cotada = simples({ faixaPassagem: FAIXA_AEREA, faixaHospedagem: FAIXA_HOTEL });
+  const sem = simples();
+  assert.equal(calcularViagem(cotada, P).total, calcularViagem(sem, P).total);
 });
