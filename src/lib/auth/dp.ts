@@ -36,6 +36,8 @@ export const DP_NAV_KEY_COLABORADORES = "dp-colaboradores";
 export const DP_COLABORADORES_PATH = "/dp/colaboradores";
 export const DP_NAV_KEY_EMPRESAS = "dp-empresas";
 export const DP_EMPRESAS_PATH = "/dp/empresas";
+export const DP_NAV_KEY_INDICADORES = "dp-indicadores";
+export const DP_INDICADORES_PATH = "/dp/indicadores";
 
 /**
  * Há concessão do módulo? Aceita o select enxuto do middleware e da root page

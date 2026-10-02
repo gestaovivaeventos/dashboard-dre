@@ -9,6 +9,7 @@ import {
   type DpRegraOrigem,
 } from "@/lib/dp/empresa";
 import type { DpCampoRastreado, DpEventoTipo } from "@/lib/dp/historico";
+import type { DpIndicadorEntrada } from "@/lib/dp/indicadores";
 import type { DpEndereco } from "@/lib/dp/solides/parse";
 
 // Leituras das telas do DP. Todas com o admin client DEPOIS de getDpUser():
@@ -290,4 +291,38 @@ export async function listDpAcessos(db: AdminClient, colaboradorId: string, limi
 export async function registrarAcessoFicha(db: AdminClient, userId: string, colaboradorId: string): Promise<void> {
   const { error } = await db.from("dp_acessos").insert({ user_id: userId, colaborador_id: colaboradorId, acao: "ficha" });
   if (error && !ausente(error)) console.error("[dp] registrar acesso falhou:", error.message);
+}
+
+/**
+ * Entradas dos indicadores, com SALÁRIO. Consulta separada da lista de
+ * propósito: a lista vai para o navegador (componente client), e levar o
+ * salário de cada pessoa até lá só para somar seria expor o dado individual
+ * sem necessidade. Esta roda no servidor e só os totais saem da página.
+ */
+export async function listDpIndicadorEntradas(db: AdminClient): Promise<DpIndicadorEntrada[]> {
+  const [{ data, error }, ctx] = await Promise.all([
+    db
+      .from("dp_colaboradores")
+      .select("ativo, unidade_id, departamento_id, tipo_contrato, salario, data_admissao, data_desligamento, desligado_detectado_em"),
+    contexto(db),
+  ]);
+  check(error, "dp_colaboradores");
+  return (data ?? []).map((r) => {
+    const empresa = resolverEmpresa(
+      {
+        unidadeId: r.unidade_id === null ? null : Number(r.unidade_id),
+        departamentoId: r.departamento_id === null ? null : Number(r.departamento_id),
+      },
+      ctx.idx,
+    );
+    return {
+      ativo: Boolean(r.ativo),
+      companyName: empresa.companyId ? ctx.names.get(empresa.companyId) ?? null : null,
+      tipoContrato: r.tipo_contrato,
+      salario: r.salario === null ? null : Number(r.salario),
+      dataAdmissao: r.data_admissao,
+      dataDesligamento: r.data_desligamento,
+      desligadoDetectadoEm: r.desligado_detectado_em,
+    };
+  });
 }

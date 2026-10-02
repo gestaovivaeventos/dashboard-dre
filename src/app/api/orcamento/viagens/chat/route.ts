@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 
+import { mensagemDeFalha } from "@/lib/ai/erros";
 import { opcoesSdk } from "@/lib/ai/parametros-chat";
 import { logResolvedUsage, resolveAiProvider } from "@/lib/ai/provider";
 import { getOrcamentoUser, SEM_ACESSO } from "@/lib/orcamento/auth";
@@ -10,6 +11,7 @@ import {
   persistirConversaViagem,
 } from "@/lib/orcamento/actions/viagens-entrevista";
 import { buscarPrecos, mesAno } from "@/lib/viagens/precos/buscar";
+import { marcarStatus } from "@/lib/viagens/stream-status";
 import { extrairCartaoViagem, type MensagemViagem } from "@/lib/viagens/cartao";
 
 // Streaming de UM turno do AGENTE DE VIAGEM.
@@ -21,22 +23,30 @@ import { extrairCartaoViagem, type MensagemViagem } from "@/lib/viagens/cartao";
 //
 // ── A FERRAMENTA de busca de preços ───────────────────────────────────────
 // O agente não é um entrevistador: ele PESQUISA antes de propor. Por isso o turno
-// tem a tool `buscar_precos`, e `stopWhen: stepCountIs(4)` para o modelo poder
-// chamá-la (às vezes mais de uma vez, comparando duas formas de fazer o trajeto)
-// e depois continuar escrevendo a resposta. Sem o `stopWhen`, o SDK para no
-// primeiro passo e a chamada da ferramenta nunca viraria texto.
+// tem a tool `buscar_precos`, e `stopWhen` para o modelo poder chamá-la e depois
+// continuar escrevendo. Sem o `stopWhen`, o SDK para no primeiro passo e a
+// chamada da ferramenta nunca viraria texto.
 //
-// Consequência de UX assumida: a busca na web leva dezenas de segundos, e o
-// stream fica em silêncio enquanto ela roda. A tela avisa isso — é o preço de o
-// preço ser pesquisado em vez de inventado.
+// ── Por que existe um canal de STATUS (02/10/2026) ────────────────────────
+// Enquanto a busca roda, o `textStream` fica em SILÊNCIO TOTAL — nenhum token sai
+// até o modelo voltar a escrever. No primeiro uso real isso foi lido como "a IA
+// travou", e com razão: eram dezenas de segundos sem sinal nenhum. Agora a tool
+// escreve marcas de status no MESMO stream (ver `stream-status.ts`) e a tela as
+// mostra como linha de progresso. Três travas vieram junto:
+//
+//   1. teto CURTO na busca dentro da conversa (a pessoa está olhando a tela);
+//   2. `stopWhen: stepCountIs(3)` — no máximo duas buscas, não quatro;
+//   3. falha no meio do turno vira TEXTO para o usuário, nunca silêncio.
 //
 // NADA é gravado no orçamento por aqui: o cartão só vira roteiro quando o gestor
 // clica, e a gravação passa por `salvarViagem`, onde o custo é calculado e as
 // travas valem.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// A busca na web é lenta; o teto da Vercel para esta rota precisa acomodá-la.
 export const maxDuration = 300;
+
+/** Teto da busca DENTRO da conversa, por tentativa. Fora dela o padrão é maior. */
+const BUSCA_TIMEOUT_CHAT_MS = 45_000;
 
 interface ChatBody {
   companyId?: string;
@@ -83,6 +93,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const textoUsuario = (texto ?? "").trim();
+  const encoder = new TextEncoder();
+
+  // ── O canal de status ──
+  // A tool escreve aqui; o stream da resposta drena. Quando a tool roda ANTES de
+  // o controller existir, a marca fica na fila e sai assim que ele abre.
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const fila: string[] = [];
+  const emitirStatus = (txt: string) => {
+    const marca = marcarStatus(txt);
+    if (controller) {
+      try {
+        controller.enqueue(encoder.encode(marca));
+        return;
+      } catch {
+        // Stream já fechado (cliente desistiu): status não tem para onde ir.
+        return;
+      }
+    }
+    fila.push(marca);
+  };
 
   /**
    * A busca de preços, como ferramenta do agente.
@@ -121,16 +151,30 @@ export async function POST(req: NextRequest): Promise<Response> {
         .describe("Cidades com pernoite, para a diária de hotel. Vazio se não houver."),
     }),
     execute: async ({ quando, trechos, cidades }) => {
+      // O usuário tem de SABER que a espera é pesquisa, e sobre o quê.
+      const alvos = [
+        trechos.length > 0 ? `${trechos.length} trecho(s)` : null,
+        cidades.length > 0 ? `hotel em ${cidades.length} cidade(s)` : null,
+      ]
+        .filter(Boolean)
+        .join(" e ");
+      emitirStatus(`pesquisando preços na web — ${alvos || "nada a cotar"}`);
+
       const res = await buscarPrecos({
         trechos,
         cidades: cidades.filter((c) => c.noites > 0),
         quando: mesAno(quando),
+        timeoutMs: BUSCA_TIMEOUT_CHAT_MS,
       });
+
       if (!res.ok) {
+        emitirStatus("a pesquisa não achou preço — seguindo sem ele");
         // O erro volta ao MODELO como resultado, não como exceção: assim ele diz
         // ao gestor que não achou, em vez de o turno inteiro morrer.
         return { encontrado: false, motivo: res.error };
       }
+
+      emitirStatus("preços encontrados — montando a proposta");
       return {
         encontrado: true,
         trechos: res.data.trechos,
@@ -143,22 +187,33 @@ export async function POST(req: NextRequest): Promise<Response> {
     },
   });
 
+  let erroDoTurno: string | null = null;
+
   const result = streamText({
     model: resolved.provider.chat(resolved.modelName),
     system: prep.system,
     messages: prep.messages,
     tools: { buscar_precos: buscarPrecosTool },
-    // O agente precisa de passos para pesquisar e DEPOIS responder. Quatro cobre
-    // duas buscas (comparar duas formas de ir) mais a resposta final.
-    stopWhen: stepCountIs(4),
+    // Duas buscas no máximo (comparar duas formas de ir) mais a resposta. Era 4;
+    // baixou para 3 porque cada passo com busca é tempo de alguém esperando.
+    stopWhen: stepCountIs(3),
     // Resposta idêntica a cada rodada soaria de formulário. As famílias novas da
     // OpenAI RECUSAM `temperature` e o stream volta vazio, sem erro visível: por
     // isso passa por `opcoesSdk`.
     ...opcoesSdk(resolved.modelName, { temperature: 0.4 }),
+    // Sem isto a falha do provedor (sem crédito, parâmetro recusado, modelo sem
+    // suporte a tool) encerrava o stream CALADO — a tela ficava girando e o
+    // terminal não dizia nada.
+    onError: ({ error }) => {
+      erroDoTurno = error instanceof Error ? error.message : String(error);
+      console.error("[orcamento/viagens] falha no turno do agente:", erroDoTurno);
+    },
     onFinish: async ({ text, usage }) => {
       // Guarda a mensagem SEM os marcadores: o transcript é o que a diretoria
       // pode ler na validação, e [[VIAGEM]]{…} ali seria ruído.
       const { texto: limpo } = extrairCartaoViagem(text);
+      if (!limpo.trim()) return; // turno sem resposta não entra no transcript
+
       const novaConversa: MensagemViagem[] = [
         ...(Array.isArray(conversa) ? conversa : []),
         ...(textoUsuario ? [{ role: "user" as const, content: textoUsuario }] : []),
@@ -172,5 +227,51 @@ export async function POST(req: NextRequest): Promise<Response> {
     },
   });
 
-  return result.toTextStreamResponse();
+  // Stream montado à mão (em vez de `toTextStreamResponse()`) por dois motivos:
+  // as marcas de status precisam entrar no mesmo canal, e a falha no meio do
+  // turno tem de chegar ao usuário como TEXTO em vez de encerrar em silêncio.
+  const stream = new ReadableStream<Uint8Array>({
+    async start(c) {
+      controller = c;
+      for (const marca of fila) c.enqueue(encoder.encode(marca));
+      fila.length = 0;
+
+      let escreveu = false;
+      try {
+        for await (const parte of result.textStream) {
+          if (parte) escreveu = true;
+          c.enqueue(encoder.encode(parte));
+        }
+      } catch (err) {
+        erroDoTurno = err instanceof Error ? err.message : String(err);
+        console.error("[orcamento/viagens] stream do agente interrompido:", erroDoTurno);
+      }
+
+      // Resposta vazia é o pior resultado: a tela mostraria uma bolha em branco
+      // e ninguém saberia por quê. Diz o motivo.
+      if (!escreveu) {
+        // `mensagemDeFalha` traduz o que tem conserto conhecido (sem crédito,
+        // chave recusada, limite) e deixa o resto cru — mensagem técnica é feia
+        // mas diz algo, e "erro inesperado" não diz nada.
+        const motivo = erroDoTurno
+          ? mensagemDeFalha(erroDoTurno)
+          : "Não consegui responder agora (o provedor de IA devolveu uma resposta vazia). Tente de novo.";
+        c.enqueue(encoder.encode(marcarStatus("erro")));
+        c.enqueue(encoder.encode(motivo));
+      }
+
+      controller = null;
+      c.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+      // Impede buffering de proxy: sem isto as marcas de status só chegariam
+      // junto com o resto, e o canal de progresso não serviria para nada.
+      "x-accel-buffering": "no",
+    },
+  });
 }

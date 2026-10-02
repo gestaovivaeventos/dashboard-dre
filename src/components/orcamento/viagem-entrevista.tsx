@@ -8,6 +8,7 @@ import {
   salvarEnderecoViagem,
 } from "@/lib/orcamento/actions/viagens-entrevista";
 import { extrairCartaoViagem, type CartaoViagem, type MensagemViagem } from "@/lib/viagens/cartao";
+import { separarStatus } from "@/lib/viagens/stream-status";
 import { BotaoDitado } from "@/components/orcamento/botao-ditado";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -122,6 +123,12 @@ export function ViagemEntrevista({
   const [podeFechar, setPodeFechar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [guardarEnderecos, setGuardarEnderecos] = useState(true);
+  // O que o servidor está fazendo agora, e por quanto tempo. Sem os dois, a
+  // espera da busca na web (dezenas de segundos sem um token) é indistinguível
+  // de travado — foi o que aconteceu no primeiro uso real.
+  const [status, setStatus] = useState<string | null>(null);
+  const [segundos, setSegundos] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
   const rolagemRef = useRef<HTMLDivElement>(null);
   const caixaRef = useRef<HTMLTextAreaElement>(null);
   const assinaturaRef = useRef(assinatura(conversa));
@@ -147,6 +154,16 @@ export function ViagemEntrevista({
     if (el) el.scrollTop = el.scrollHeight;
   }, [mensagens, parcial]);
 
+  // Cronômetro do turno: é o que transforma "travado" em "está trabalhando".
+  useEffect(() => {
+    if (!streaming) {
+      setSegundos(0);
+      return;
+    }
+    const t = setInterval(() => setSegundos((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [streaming]);
+
   async function enviar(conteudo: string) {
     if (streaming) return;
     setErro(null);
@@ -160,11 +177,18 @@ export function ViagemEntrevista({
       setTexto("");
     }
 
+    const abort = new AbortController();
+    abortRef.current = abort;
+    // Teto do cliente: a busca tem teto no servidor, mas rede pendurada não —
+    // e uma aba girando para sempre é o que o usuário chama de travado.
+    const corta = setTimeout(() => abort.abort(), 180_000);
+
     try {
       const resp = await fetch("/api/orcamento/viagens/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ companyId, year, viagemId, conversa: historico, texto: conteudo }),
+        signal: abort.signal,
       });
       if (!resp.ok || !resp.body) {
         const j = (await resp.json().catch(() => null)) as { error?: string } | null;
@@ -180,20 +204,39 @@ export function ViagemEntrevista({
         const { done, value } = await reader.read();
         if (done) break;
         bruto += decoder.decode(value, { stream: true });
-        // A cada quadro o texto é relido inteiro: marcador pela metade não casa,
-        // e nada pisca na tela.
-        setParcial(extrairCartaoViagem(bruto).texto);
+        // Duas camadas, nesta ordem: tira as marcas de STATUS (canal do servidor)
+        // e só então corta no primeiro "[[" do cartão. Invertendo, o envelope do
+        // status apareceria na tela.
+        const semStatus = separarStatus(bruto);
+        if (semStatus.status !== null) setStatus(semStatus.status);
+        setParcial(extrairCartaoViagem(semStatus.texto).texto);
       }
 
-      const final = extrairCartaoViagem(bruto);
+      const limpo = separarStatus(bruto);
+      const final = extrairCartaoViagem(limpo.texto);
       setParcial("");
+      setStatus(null);
       setPodeFechar(final.podeFechar);
       setCartao(final.cartao);
-      setMensagens((m) => [...m, { role: "assistant", content: final.texto }]);
+      // Resposta vazia não vira bolha em branco: o servidor manda o motivo, mas
+      // se nem isso chegou, o erro é dito aqui.
+      if (!final.texto.trim()) {
+        setErro("A IA não respondeu nada desta vez. Tente enviar de novo.");
+      } else {
+        setMensagens((m) => [...m, { role: "assistant", content: final.texto }]);
+      }
       onConversaMudou?.();
-    } catch {
-      setErro("A conexão caiu no meio da resposta. Tente de novo.");
+    } catch (err) {
+      const abortado = err instanceof DOMException && err.name === "AbortError";
+      setErro(
+        abortado
+          ? "A resposta demorou demais e foi interrompida. A pesquisa de preços na web pode estar fora do ar — tente de novo, ou informe os preços à mão."
+          : "A conexão caiu no meio da resposta. Tente de novo.",
+      );
     } finally {
+      clearTimeout(corta);
+      abortRef.current = null;
+      setStatus(null);
       setStreaming(false);
     }
   }
@@ -291,10 +334,23 @@ export function ViagemEntrevista({
               {comNegrito(parcial)}
             </div>
           )}
-          {streaming && !parcial && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {streaming && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              pensando…
+              <span>
+                {status ??
+                  (segundos >= 8
+                    ? "pesquisando — pode levar até um minuto"
+                    : "pensando…")}
+              </span>
+              {segundos > 2 && <span className="tabular-nums opacity-60">{segundos}s</span>}
+              <button
+                type="button"
+                onClick={() => abortRef.current?.abort()}
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                cancelar
+              </button>
             </div>
           )}
         </div>

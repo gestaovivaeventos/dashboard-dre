@@ -80,14 +80,11 @@ export type BuscaPrecosOutcome =
   | { ok: true; data: PrecosEncontrados; fontes: string[]; engine: string }
   | { ok: false; error: string };
 
-function withTimeout<T>(p: Promise<T>): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     p,
     new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`busca de preços excedeu ${HARD_TIMEOUT_MS}ms`)),
-        HARD_TIMEOUT_MS,
-      ),
+      setTimeout(() => reject(new Error(`busca de preços excedeu ${ms}ms`)), ms),
     ),
   ]);
 }
@@ -207,6 +204,12 @@ export async function buscarPrecos(params: {
   cidades: readonly CidadeParaCotar[];
   /** Mês da viagem, já formatado por `mesAno`. */
   quando: string | null;
+  /**
+   * Teto por tentativa. O padrão é generoso (uso fora de conversa); a CONVERSA
+   * passa um valor curto, porque lá a pessoa está olhando a tela esperando — e
+   * silêncio longo é lido como travado, não como pesquisa.
+   */
+  timeoutMs?: number;
 }): Promise<BuscaPrecosOutcome> {
   if (params.trechos.length === 0 && params.cidades.length === 0) {
     return { ok: false, error: "Nada para cotar: o roteiro não tem trecho de avião/ônibus nem noite de hotel." };
@@ -223,6 +226,7 @@ export async function buscarPrecos(params: {
     "REAIS e ATUAIS, em reais. Reporte apenas o que encontrar de fato, sempre com o valor e a fonte. " +
     "Quando não encontrar, diga que não encontrou — nunca estime.";
   const prompt = montarPerguntaPrecos(params);
+  const teto = params.timeoutMs ?? HARD_TIMEOUT_MS;
 
   const attempts: Array<{
     engine: string;
@@ -239,6 +243,7 @@ export async function buscarPrecos(params: {
             tools: { web_search: provider.tools.webSearch({ searchContextSize: "high" }) },
             toolChoice: { type: "tool", toolName: "web_search" },
           }),
+          teto,
         ),
     },
     {
@@ -253,6 +258,7 @@ export async function buscarPrecos(params: {
             prompt,
             tools: { web_search_preview: provider.tools.webSearchPreview({}) },
           }),
+          teto,
         ),
     },
   ];
