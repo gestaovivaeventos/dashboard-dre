@@ -47,7 +47,7 @@ function db() {
 }
 
 const HIST_COLS =
-  "id, year, cidade, mes, pessoas, noites, pessoas_por_quarto, modal, custo_passagem, custo_hospedagem, custo_alimentacao, observacao";
+  "id, year, cidade, mes, pessoas, noites, pessoas_por_quarto, diarias, modal, custo_passagem, custo_hospedagem, custo_alimentacao, observacao";
 
 /** Uma linha do histórico, como a tela a lista. */
 export interface LinhaHistorico extends ViagemRealizada {
@@ -102,6 +102,7 @@ function linhaDaRow(r: Record<string, unknown>): LinhaHistorico {
     pessoas: num(r.pessoas) ?? 1,
     noites: num(r.noites) ?? 0,
     pessoasPorQuarto: num(r.pessoas_por_quarto),
+    diarias: num(r.diarias),
     modal: texto(r.modal) || null,
     custoPassagem: num(r.custo_passagem),
     custoHospedagem: num(r.custo_hospedagem),

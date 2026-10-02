@@ -66,6 +66,7 @@ export async function GET(request: Request) {
     "Pessoas",
     "Noites",
     "Pessoas por quarto",
+    "Diárias (quartos x noites)",
     "Modal",
     "Passagem",
     "Hospedagem",
@@ -76,12 +77,12 @@ export async function GET(request: Request) {
   const ordenadas = Array.from(cidades).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const linhas: unknown[][] = [cabecalho];
   for (const cidade of ordenadas) {
-    linhas.push([cidade, "", "", "", "", "", "", "", "", ""]);
+    linhas.push([cidade, "", "", "", "", "", "", "", "", "", ""]);
   }
   // Sem destino nenhum ainda: três linhas em branco, para a planilha não chegar
   // com só o cabeçalho e parecer quebrada.
   if (ordenadas.length === 0) {
-    for (let i = 0; i < 3; i += 1) linhas.push(["", "", "", "", "", "", "", "", "", ""]);
+    for (let i = 0; i < 3; i += 1) linhas.push(["", "", "", "", "", "", "", "", "", "", ""]);
   }
 
   const ajuda: unknown[][] = [
@@ -99,6 +100,10 @@ export async function GET(request: Request) {
     ],
     ["Noites", "Noites fora. 0 em bate-volta."],
     ["Pessoas por quarto", "1 = cada um no seu quarto. Em branco assume 2. Muda a diária em até 2x."],
+    [
+      "Diárias (quartos x noites)",
+      "Se você souber, prefira esta coluna: soma das diárias de TODAS as reservas (2 quartos por 3 noites = 6). Preenchida, ela vence pessoas/ocupação no cálculo da diária.",
+    ],
     ["Modal", "Avião, Ônibus, Carro ou Van. Carro e van não viram preço de passagem (lá vale o R$/km)."],
     [
       "Passagem",
@@ -120,6 +125,7 @@ export async function GET(request: Request) {
     { wch: 9 },
     { wch: 8 },
     { wch: 18 },
+    { wch: 24 },
     { wch: 10 },
     { wch: 14 },
     { wch: 14 },

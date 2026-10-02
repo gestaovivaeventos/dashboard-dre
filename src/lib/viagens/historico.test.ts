@@ -28,6 +28,7 @@ function viagem(p: Partial<ViagemRealizada> = {}): ViagemRealizada {
     pessoas: 2,
     noites: 2,
     pessoasPorQuarto: 2,
+    diarias: null,
     modal: "aviao",
     custoPassagem: 4000,
     custoHospedagem: 640,
@@ -228,4 +229,28 @@ test("a alimentação sugerida é a mediana de todos os destinos", () => {
   assert.equal(alimentacaoSugerida(refs, {}), 80);
   assert.equal(alimentacaoSugerida(refs, { alimentacao: 5 }), 84);
   assert.equal(alimentacaoSugerida(new Map(), {}), null);
+});
+
+// ─── As diárias informadas ──────────────────────────────────────────────────
+
+test("DIÁRIAS informadas vencem pessoas × ocupação", () => {
+  // Um controle de viagem lista uma linha por reserva ("Hotel Ronin: 3 diárias",
+  // "Hotel - Renato e Humberto: 2 diárias"), e a soma é exata. Derivar de pessoas
+  // e ocupação erraria justamente aí: gente que fica menos dias que o grupo.
+  const u = custosUnitarios(
+    viagem({ pessoas: 6, pessoasPorQuarto: 2, noites: 3, diarias: 10, custoHospedagem: 3140.6 }),
+  );
+  assert.equal(u.diariaPorQuarto, 314.06, "3140,60 / 10 diárias");
+});
+
+test("sem diárias, cai no derivado de noites × quartos", () => {
+  const u = custosUnitarios(
+    viagem({ pessoas: 4, pessoasPorQuarto: 2, noites: 2, diarias: null, custoHospedagem: 1280 }),
+  );
+  assert.equal(u.diariaPorQuarto, 320);
+});
+
+test("diária com ZERO diárias informadas não divide por zero", () => {
+  const u = custosUnitarios(viagem({ noites: 0, diarias: 0, custoHospedagem: 500 }));
+  assert.equal(u.diariaPorQuarto, null);
 });

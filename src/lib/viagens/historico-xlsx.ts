@@ -33,6 +33,8 @@ export interface HistoricoXlsxRow {
   pessoas: number;
   noites: number;
   pessoasPorQuarto: number | null;
+  /** Quartos × noites, somados — a planilha costuma saber isso melhor que a ocupação. */
+  diarias: number | null;
   modal: string | null;
   custoPassagem: number | null;
   custoHospedagem: number | null;
@@ -114,6 +116,7 @@ type Campo =
   | "pessoas"
   | "noites"
   | "pessoasPorQuarto"
+  | "diarias"
   | "modal"
   | "passagem"
   | "hospedagem"
@@ -131,6 +134,14 @@ const ALIAS: Record<Campo, string[]> = {
     "pessoas quarto",
     "ocupacao",
     "ocupação",
+  ],
+  diarias: [
+    "diarias",
+    "diárias",
+    "diarias (quartos x noites)",
+    "diárias (quartos x noites)",
+    "quartos x noites",
+    "room nights",
   ],
   modal: ["modal", "transporte", "meio de transporte", "como foi", "via"],
   passagem: ["passagem", "passagens", "passagem total", "aereo", "aéreo", "transporte intercidades"],
@@ -151,6 +162,7 @@ function colsVazias(): Record<Campo, number> {
     pessoas: -1,
     noites: -1,
     pessoasPorQuarto: -1,
+    diarias: -1,
     modal: -1,
     passagem: -1,
     hospedagem: -1,
@@ -253,6 +265,7 @@ export function parseHistoricoXlsx(
       pessoas,
       noites: noitesOk,
       pessoasPorQuarto: lerInteiro(celula(row, "pessoasPorQuarto")),
+      diarias: lerInteiro(celula(row, "diarias")),
       modal: lerModal(celula(row, "modal")),
       custoPassagem: (passagem ?? 0) > 0 ? passagem : null,
       custoHospedagem: (hospedagem ?? 0) > 0 ? hospedagem : null,

@@ -52,6 +52,18 @@ export interface ViagemRealizada {
   pessoasPorQuarto: number | null;
   /** Modal da ida. Carro e van NÃO alimentam referência de passagem. */
   modal: string | null;
+  /**
+   * DIÁRIAS da viagem = quartos × noites, somadas.
+   *
+   * Quando a planilha sabe esse número, ele é melhor do que `noites × quartos`
+   * derivado de pessoas e ocupação — e não é raro: um controle de viagem lista uma
+   * linha por reserva ("Hotel Ronin: 3 diárias", "Hotel - Renato e Humberto: 2
+   * diárias"), e a soma é exata. Derivar daria errado justamente nos casos reais:
+   * gente que fica menos dias que o resto do grupo, ou dois hotéis na mesma ida.
+   *
+   * `null` = a planilha não diz, e aí vale `noites × ceil(pessoas / porQuarto)`.
+   */
+  diarias: number | null;
   /** Total pago na viagem, por grupo de custo. `null` = não informado. */
   custoPassagem: number | null;
   custoHospedagem: number | null;
@@ -116,13 +128,15 @@ export function custosUnitarios(v: ViagemRealizada): CustosUnitarios {
   const passagem = positivo(v.custoPassagem);
   const hospedagem = positivo(v.custoHospedagem);
   const alimentacao = positivo(v.custoAlimentacao);
+  // As diárias informadas vencem o derivado: elas JÁ são quartos × noites.
+  const diarias = positivo(v.diarias) > 0 ? Math.round(positivo(v.diarias)) : noites * quartos;
 
   return {
     passagemPorPessoa:
       passagem > 0 && modalCotavel(v.modal)
         ? passagem / pessoas / TRECHOS_IDA_E_VOLTA
         : null,
-    diariaPorQuarto: hospedagem > 0 && noites > 0 ? hospedagem / (noites * quartos) : null,
+    diariaPorQuarto: hospedagem > 0 && diarias > 0 ? hospedagem / diarias : null,
     alimentacaoPorPessoaDia:
       alimentacao > 0 ? alimentacao / (pessoas * (noites + 1)) : null,
   };

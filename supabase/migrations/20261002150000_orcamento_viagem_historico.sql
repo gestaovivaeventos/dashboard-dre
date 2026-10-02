@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS public.orcamento_viagem_historico (
   -- 1 = cada um no seu quarto. NULL = não informado (a leitura assume 2, a
   -- convenção do módulo). Muda a hospedagem em até 2×.
   pessoas_por_quarto smallint CHECK (pessoas_por_quarto IS NULL OR pessoas_por_quarto >= 1),
+  -- DIÁRIAS = quartos × noites, somadas. Quando a planilha sabe (um controle de
+  -- viagem lista uma linha por reserva), é um número exato e vence o derivado de
+  -- pessoas × ocupação — que erraria justamente nos casos reais: gente que fica
+  -- menos dias que o grupo, ou dois hotéis na mesma ida.
+  diarias smallint CHECK (diarias IS NULL OR diarias >= 0),
   -- Carro e van NÃO alimentam referência de passagem: ali o custo é km × R$/km, e
   -- deixar entrar faria o dia em que alguém for de avião ao mesmo destino sair com
   -- o custo do carro. A HOSPEDAGEM dessas viagens conta normalmente.

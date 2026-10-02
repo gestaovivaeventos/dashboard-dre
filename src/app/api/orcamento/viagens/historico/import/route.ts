@@ -110,6 +110,7 @@ export async function POST(request: Request) {
       pessoas: r.pessoas,
       noites: r.noites,
       pessoas_por_quarto: r.pessoasPorQuarto,
+      diarias: r.diarias,
       modal: r.modal,
       custo_passagem: r.custoPassagem,
       custo_hospedagem: r.custoHospedagem,
