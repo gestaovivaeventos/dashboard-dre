@@ -9,12 +9,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 
 /**
- * Modelo .xlsx da tabela salarial de UMA empresa (`Setor | Cargo | Step | Salário`).
+ * Modelo .xlsx da tabela salarial de UMA empresa (`Setor | Cargo | Salário`).
  *
  * Vem PREENCHIDO: com a tabela atual, quando ela existe (baixar, ajustar e
  * reimportar é o caminho de quem prefere o Excel); senão, com os cargos que os
  * ativos da empresa têm na Sólides e o departamento como setor — falta só o
- * step e o salário. Copiar nome de cargo à mão é de onde vem o erro de
+ * salário. Copiar nome de cargo à mão é de onde vem o erro de
  * digitação que depois impede a sugestão do de-para de casar.
  */
 export async function GET(request: Request) {
@@ -30,11 +30,11 @@ export async function GET(request: Request) {
   try {
     const tabela = await getDpTabela(db, companyId);
     if (tabela.length > 0) {
-      linhas = tabela.map((l) => [l.setor, l.cargo, l.step, l.salario]);
+      linhas = tabela.map((l) => [l.setor, l.cargo, l.salario]);
     } else {
       const cargos = await listDpCargosSolidesDaEmpresa(db, companyId);
       // "COMERCIAL - VIVA BH" → "COMERCIAL": o sufixo é a empresa, que a planilha já é.
-      linhas = cargos.map((c) => [(c.departamento ?? "").replace(/\s+-\s+.*$/, "").trim(), c.cargo, "", ""]);
+      linhas = cargos.map((c) => [(c.departamento ?? "").replace(/\s+-\s+.*$/, "").trim(), c.cargo, ""]);
     }
   } catch (error) {
     if (error instanceof DpNaoInstaladoError) {
@@ -43,8 +43,8 @@ export async function GET(request: Request) {
     throw error;
   }
 
-  const ws = XLSX.utils.aoa_to_sheet([["Setor", "Cargo", "Step", "Salário"], ...linhas]);
-  ws["!cols"] = [{ wch: 26 }, { wch: 44 }, { wch: 16 }, { wch: 14 }];
+  const ws = XLSX.utils.aoa_to_sheet([["Setor", "Cargo", "Salário"], ...linhas]);
+  ws["!cols"] = [{ wch: 26 }, { wch: 48 }, { wch: 14 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Tabela salarial");
   const buffer = XLSX.write(wb, { bookType: "xlsx", type: "buffer" }) as Buffer;

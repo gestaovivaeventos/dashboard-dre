@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  cargoComStep,
   lerPercentual,
   lerSalario,
   ordemEntre,
@@ -24,27 +25,44 @@ test("parse: acha o cabeçalho depois de um título, colunas em qualquer ordem",
   const r = parseTabelaPlanilha([
     ["Tabela salarial — Spot"],
     [],
-    ["Salário", "Cargo", "Step", "Setor"],
-    [4000, "Analista Comercial", "Pleno I", "Comercial"],
-    ["", "", "", ""],
-    ["R$ 2.500,00", "Motorista", "", "Operacional"],
+    ["Salário", "Cargo", "Setor"],
+    [4000, "Analista Comercial 1", "Comercial"],
+    ["", "", ""],
+    ["R$ 2.500,00", "Motorista", "Operacional"],
   ]);
   assert.ok("ok" in r);
   if (!("ok" in r)) return;
-  assert.deepEqual(r.ok.linhas.map((l) => [l.linha, l.setor, l.cargo, l.step, l.salario]), [
-    [4, "Comercial", "Analista Comercial", "Pleno I", 4000],
-    [6, "Operacional", "Motorista", "", 2500],
+  assert.deepEqual(r.ok.linhas.map((l) => [l.linha, l.setor, l.cargo, l.salario]), [
+    [4, "Comercial", "Analista Comercial 1", 4000],
+    [6, "Operacional", "Motorista", 2500],
   ]);
   assert.deepEqual(r.ok.problemas, []);
 });
 
-test("parse: falha por LINHA, nunca pelo arquivo", () => {
+test("parse: planilha antiga com coluna Step — o step é JUNTADO ao cargo, não colide", () => {
   const r = parseTabelaPlanilha([
     ["Setor", "Cargo", "Step", "Salário"],
-    ["TI", "", "I", 3000],
-    ["TI", "Dev", "I", ""],
-    ["TI", "Dev", "I", 3000],
-    ["ti", "dev", "i", 3200],
+    ["Adm", "Auxiliar Administrativo", "1", 2000],
+    ["Adm", "Auxiliar Administrativo", "2", 2200],
+    ["Adm", "Motorista", "", 2500],
+    ["Adm", "", "3", 2400],
+  ]);
+  assert.ok("ok" in r);
+  if (!("ok" in r)) return;
+  assert.deepEqual(r.ok.linhas.map((l) => l.cargo), ["Auxiliar Administrativo 1", "Auxiliar Administrativo 2", "Motorista"]);
+  // Step sem cargo continua sendo linha sem cargo — não vira um cargo chamado "3".
+  assert.deepEqual(r.ok.problemas, ["Linha 5: sem cargo."]);
+  assert.equal(cargoComStep("Auxiliar", " 4 "), "Auxiliar 4");
+  assert.equal(cargoComStep("Auxiliar", ""), "Auxiliar");
+});
+
+test("parse: falha por LINHA, nunca pelo arquivo", () => {
+  const r = parseTabelaPlanilha([
+    ["Setor", "Cargo", "Salário"],
+    ["TI", "", 3000],
+    ["TI", "Dev 1", ""],
+    ["TI", "Dev 1", 3000],
+    ["ti", "DEV 1", 3200],
   ]);
   assert.ok("ok" in r);
   if (!("ok" in r)) return;
@@ -56,25 +74,25 @@ test("parse: falha por LINHA, nunca pelo arquivo", () => {
 test("parse: sem Cargo/Salário no cabeçalho é erro do arquivo", () => {
   // "Valor" é aceito como Salário, mas falta Cargo.
   assert.ok("erro" in parseTabelaPlanilha([["Nome", "Valor"]]));
-  assert.ok("erro" in parseTabelaPlanilha([["Setor", "Step"]]));
+  assert.ok("erro" in parseTabelaPlanilha([["Setor", "Cargo"]]));
   assert.ok("ok" in parseTabelaPlanilha([["Função", "Valor"]]));
 });
 
 test("importação: atualiza, insere e MANTÉM o que ficou fora da planilha", () => {
   const plano = planejarImportacao(
     [
-      { linha: 2, setor: "Comercial", cargo: "Analista", step: "I", salario: 4200 },
-      { linha: 3, setor: "Comercial", cargo: "Analista", step: "II", salario: 5000 },
-      { linha: 4, setor: "comercial", cargo: "ANALISTA", step: "III", salario: 6000 },
+      { linha: 2, setor: "Comercial", cargo: "Analista 1", salario: 4200 },
+      { linha: 3, setor: "Comercial", cargo: "Analista 2", salario: 5000 },
+      { linha: 4, setor: "comercial", cargo: "ANALISTA 3", salario: 6000 },
     ],
     [
-      { id: "a", setor: "Comercial", cargo: "Analista", step: "I", salario: 4000 },
-      { id: "b", setor: "Comercial", cargo: "Analista", step: "II", salario: 5000 },
-      { id: "c", setor: "TI", cargo: "Dev", step: "", salario: 7000 },
+      { id: "a", setor: "Comercial", cargo: "Analista 1", salario: 4000 },
+      { id: "b", setor: "Comercial", cargo: "Analista 2", salario: 5000 },
+      { id: "c", setor: "TI", cargo: "Dev", salario: 7000 },
     ],
   );
   assert.deepEqual(plano.atualizar, [{ id: "a", salario: 4200, de: 4000 }]);
-  assert.deepEqual(plano.inserir.map((l) => l.step), ["III"]);
+  assert.deepEqual(plano.inserir.map((l) => l.cargo), ["ANALISTA 3"]);
   assert.equal(plano.iguais, 1);
   assert.equal(plano.foraDaPlanilha, 1);
 });

@@ -84,7 +84,7 @@ function TabelaSalarial({
   const visiveis = useMemo(() => {
     const q = chaveNome(busca);
     if (!q) return tabela;
-    return tabela.filter((l) => chaveNome(`${l.setor} ${l.cargo} ${l.step}`).includes(q));
+    return tabela.filter((l) => chaveNome(`${l.setor} ${l.cargo}`).includes(q));
   }, [tabela, busca]);
 
   const aplicar = () => {
@@ -134,7 +134,7 @@ function TabelaSalarial({
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Tabela salarial — {companyName}</CardTitle>
         <p className="text-sm text-ink-muted">
-          Setor, cargo, step e salário. Todas as células são editáveis e salvam ao sair do campo.
+          Setor, cargo e salário (o step, quando há, faz parte do nome do cargo — ex.: “Auxiliar Administrativo 1”). Todas as células são editáveis e salvam ao sair do campo.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -177,7 +177,7 @@ function TabelaSalarial({
             type="button"
             className={botaoCls}
             disabled={pending || tabela.length < 2}
-            onClick={() => rodar(() => ordenarTabela({ companyId }), () => "Tabela ordenada por setor, cargo e step")}
+            onClick={() => rodar(() => ordenarTabela({ companyId }), () => "Tabela ordenada por setor e cargo")}
           >
             <ArrowUpDown className="h-4 w-4" /> Ordenar A–Z
           </button>
@@ -186,7 +186,7 @@ function TabelaSalarial({
             <input
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar setor, cargo ou step"
+              placeholder="Buscar setor ou cargo"
               className="w-60 rounded-md border border-input bg-background py-1.5 pl-7 pr-2 text-sm"
             />
           </div>
@@ -224,13 +224,12 @@ function TabelaSalarial({
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="text-left text-ink-muted">
               <tr className="border-b border-border">
                 <th className="w-16 py-2 pr-2 font-medium" />
                 <th className="py-2 pr-2 font-medium">Setor</th>
                 <th className="py-2 pr-2 font-medium">Cargo</th>
-                <th className="w-36 py-2 pr-2 font-medium">Step</th>
                 <th className="w-36 py-2 pr-2 text-right font-medium">Salário</th>
                 <th className="w-20 py-2 pr-2 text-right font-medium" title="Ativos desta empresa vinculados a esta linha">
                   Pessoas
@@ -241,7 +240,7 @@ function TabelaSalarial({
             <tbody>
               {visiveis.map((l, i) => (
                 <FragmentoLinha
-                  key={`${l.id}:${l.setor}:${l.cargo}:${l.step}:${l.salario}`}
+                  key={`${l.id}:${l.setor}:${l.cargo}:${l.salario}`}
                   companyId={companyId}
                   linha={l}
                   primeira={i === 0}
@@ -257,7 +256,7 @@ function TabelaSalarial({
               )}
               {visiveis.length === 0 && rascunhoDepoisDe === undefined && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-ink-muted">
+                  <td colSpan={6} className="py-6 text-center text-ink-muted">
                     {tabela.length === 0 ? "Tabela vazia. Importe a planilha ou adicione a primeira linha." : "Nenhuma linha corresponde à busca."}
                   </td>
                 </tr>
@@ -314,7 +313,6 @@ function LinhaEditavel({
 }) {
   const [setor, setSetor] = useState(linha.setor);
   const [cargo, setCargo] = useState(linha.cargo);
-  const [step, setStep] = useState(linha.step);
   const [salario, setSalario] = useState(fmtSalario(linha.salario));
   const { pending, rodar, showToast } = useAcao();
 
@@ -331,8 +329,8 @@ function LinhaEditavel({
       return;
     }
     const mudou =
-      setor.trim() !== linha.setor || cargo.trim() !== linha.cargo || step.trim() !== linha.step || Math.abs(v - linha.salario) >= 0.005;
-    if (mudou) rodar(() => salvarLinha({ companyId, id: linha.id, setor, cargo, step, salario: v }));
+      setor.trim() !== linha.setor || cargo.trim() !== linha.cargo || Math.abs(v - linha.salario) >= 0.005;
+    if (mudou) rodar(() => salvarLinha({ companyId, id: linha.id, setor, cargo, salario: v }));
   };
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
 
@@ -365,9 +363,6 @@ function LinhaEditavel({
       </td>
       <td className="py-1 pr-2">
         <input value={cargo} onChange={(e) => setCargo(e.target.value)} onBlur={salvar} onKeyDown={onKey} className={inputCls} disabled={pending} aria-label="Cargo" />
-      </td>
-      <td className="py-1 pr-2">
-        <input value={step} onChange={(e) => setStep(e.target.value)} onBlur={salvar} onKeyDown={onKey} className={inputCls} disabled={pending} aria-label="Step" />
       </td>
       <td className="py-1 pr-2">
         <input
@@ -408,7 +403,6 @@ function LinhaEditavel({
 function LinhaNova({ companyId, depoisDeId, fechar }: { companyId: string; depoisDeId: string | null; fechar: () => void }) {
   const [setor, setSetor] = useState("");
   const [cargo, setCargo] = useState("");
-  const [step, setStep] = useState("");
   const [salario, setSalario] = useState("");
   const { pending, rodar, showToast } = useAcao();
   const salvar = () => {
@@ -417,7 +411,7 @@ function LinhaNova({ companyId, depoisDeId, fechar }: { companyId: string; depoi
       showToast({ title: "Preencha o cargo e o salário", variant: "destructive" });
       return;
     }
-    rodar(() => criarLinha({ companyId, setor, cargo, step, salario: v, depoisDeId }), () => {
+    rodar(() => criarLinha({ companyId, setor, cargo, salario: v, depoisDeId }), () => {
       fechar();
       return null;
     });
@@ -433,10 +427,7 @@ function LinhaNova({ companyId, depoisDeId, fechar }: { companyId: string; depoi
         <input autoFocus value={setor} onChange={(e) => setSetor(e.target.value)} onKeyDown={onKey} placeholder="Setor" className={inputCls} disabled={pending} />
       </td>
       <td className="py-1 pr-2">
-        <input value={cargo} onChange={(e) => setCargo(e.target.value)} onKeyDown={onKey} placeholder="Cargo" className={inputCls} disabled={pending} />
-      </td>
-      <td className="py-1 pr-2">
-        <input value={step} onChange={(e) => setStep(e.target.value)} onKeyDown={onKey} placeholder="Step" className={inputCls} disabled={pending} />
+        <input value={cargo} onChange={(e) => setCargo(e.target.value)} onKeyDown={onKey} placeholder="Cargo (ex.: Auxiliar Administrativo 1)" className={inputCls} disabled={pending} />
       </td>
       <td className="py-1 pr-2">
         <input value={salario} onChange={(e) => setSalario(e.target.value)} onKeyDown={onKey} placeholder="0,00" inputMode="decimal" className={`${inputCls} text-right`} disabled={pending} />
@@ -461,7 +452,7 @@ function LinhaNova({ companyId, depoisDeId, fechar }: { companyId: string; depoi
 function DeParaSolides({ companyId, tabela, cargos }: { companyId: string; tabela: DpTabelaLinha[]; cargos: DpCargoSolidesUso[] }) {
   const { pending, rodar } = useAcao();
   const rotulo = useMemo(
-    () => new Map(tabela.map((l) => [l.id, `${l.setor ? `${l.setor} · ` : ""}${rotuloLinha(l)} (${formatBRL(l.salario)})`])),
+    () => new Map(tabela.map((l) => [l.id, `${rotuloLinha(l)} (${formatBRL(l.salario)})`])),
     [tabela],
   );
   // Opções agrupadas por setor, na ordem da tabela.
@@ -539,7 +530,7 @@ function DeParaSolides({ companyId, tabela, cargos }: { companyId: string; tabel
                           <optgroup key={setor} label={setor}>
                             {ls.map((l) => (
                               <option key={l.id} value={l.id}>
-                                {rotuloLinha(l)} ({formatBRL(l.salario)})
+                                {l.cargo} ({formatBRL(l.salario)})
                               </option>
                             ))}
                           </optgroup>

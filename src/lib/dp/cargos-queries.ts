@@ -62,7 +62,7 @@ function ausente(error: { code?: string } | null): boolean {
 export async function getDpTabela(db: AdminClient, companyId: string): Promise<Array<DpLinhaSalarial & { ordem: number }>> {
   const { data, error } = await db
     .from("dp_tabela_salarial")
-    .select("id, setor, cargo, step, salario, ordem")
+    .select("id, setor, cargo, salario, ordem")
     .eq("company_id", companyId)
     .order("ordem")
     .order("created_at");
@@ -72,7 +72,6 @@ export async function getDpTabela(db: AdminClient, companyId: string): Promise<A
     id: r.id as string,
     setor: (r.setor as string) ?? "",
     cargo: r.cargo as string,
-    step: (r.step as string) ?? "",
     salario: Number(r.salario),
     ordem: Number(r.ordem),
   }));
@@ -143,7 +142,7 @@ export async function getDpCargosPagina(db: AdminClient, companyId: string): Pro
       nome: r.nome as string,
       departamento: r.departamento_nome,
       cargoSolides: r.cargo_nome,
-      linhaRotulo: linha ? `${linha.setor ? `${linha.setor} · ` : ""}${rotuloLinha(linha)}` : null,
+      linhaRotulo: linha ? rotuloLinha(linha) : null,
       salario,
       salarioTabela: linha?.salario ?? null,
       enquadramento: enquadrar({ temEmpresa: true, salario, salarioNivel: linha?.salario ?? null }),

@@ -4,7 +4,7 @@
 // ============================================================================
 
 /**
- * Forma normalizada de um nome (cargo, nível, cargo da Sólides): minúsculas,
+ * Forma normalizada de um nome (setor, cargo, cargo da Sólides): minúsculas,
  * sem acento, sem o "(a)" de gênero, espaço único. É a que leva o UNIQUE no
  * banco — "Analista  Comercial" e "analista comercial" são o mesmo cargo.
  */
@@ -18,41 +18,34 @@ export function chaveNome(nome: string): string {
     .trim();
 }
 
-/** Uma linha da tabela salarial, no formato que a sugestão e o enquadramento usam. */
+/**
+ * Uma linha da tabela salarial, no formato que a sugestão e o enquadramento
+ * usam. Não há step: desde 02/10/2026 ele compõe o NOME do cargo
+ * ("Auxiliar Administrativo 1").
+ */
 export interface DpLinhaSalarial {
   id: string;
   setor: string;
   cargo: string;
-  step: string;
   salario: number;
 }
 
-/** "Cargo — Step" (ou só o cargo, quando não há step): como a linha aparece nos seletores. */
-export function rotuloLinha(l: Pick<DpLinhaSalarial, "cargo" | "step">): string {
-  return l.step.trim() ? `${l.cargo} — ${l.step}` : l.cargo;
+/** Como a linha aparece nos seletores: "Setor · Cargo" (ou só o cargo, sem setor). */
+export function rotuloLinha(l: Pick<DpLinhaSalarial, "setor" | "cargo">): string {
+  return l.setor.trim() ? `${l.setor} · ${l.cargo}` : l.cargo;
 }
 
 /**
- * Linha sugerida para um cargo da Sólides, ou null. Só sugere quando há UM
- * candidato: o nome da Sólides é "cargo + step" ("Analista Comercial Pleno III"
- * = cargo "Analista Comercial" + step "Pleno III"), ou é o nome do cargo e ele
- * tem uma linha só. Dois candidatos (o mesmo cargo em dois setores, por
- * exemplo) = nenhuma sugestão: chutar entre eles enquadraria a pessoa no
- * salário errado sem ninguém perceber.
+ * Linha sugerida para um cargo da Sólides, ou null: o nome da Sólides é o
+ * nome do cargo na tabela (com o step dentro, se houver). Só sugere quando há
+ * UM candidato — o mesmo cargo em dois setores não sugere nada, porque chutar
+ * entre eles enquadraria a pessoa no salário errado sem ninguém perceber.
  */
 export function sugerirLinha(nomeSolides: string, linhas: DpLinhaSalarial[]): string | null {
   const alvo = chaveNome(nomeSolides);
   if (!alvo) return null;
-  const candidatos = new Set<string>();
-  const porCargo = new Map<string, DpLinhaSalarial[]>();
-  for (const l of linhas) {
-    const cargo = chaveNome(l.cargo);
-    porCargo.set(cargo, [...(porCargo.get(cargo) ?? []), l]);
-    if (chaveNome(`${l.cargo} ${l.step}`) === alvo) candidatos.add(l.id);
-  }
-  const doCargo = porCargo.get(alvo) ?? [];
-  if (doCargo.length === 1) candidatos.add(doCargo[0].id);
-  return candidatos.size === 1 ? Array.from(candidatos)[0] : null;
+  const candidatos = linhas.filter((l) => chaveNome(l.cargo) === alvo);
+  return candidatos.length === 1 ? candidatos[0].id : null;
 }
 
 export type DpEnquadramentoStatus =

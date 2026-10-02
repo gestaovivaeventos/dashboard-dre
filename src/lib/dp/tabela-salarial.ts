@@ -2,10 +2,16 @@
 // Tabela salarial do DP — leitura da planilha, plano de importação, reajuste e
 // ordem das linhas. Puro e testado (sem I/O).
 //
-// Formato: `Setor | Cargo | Step | Salário`, uma planilha por empresa. O
-// cabeçalho é procurado nas primeiras linhas e a ordem das colunas é livre
-// (mesma convenção das planilhas do Orçamento). Cargo e Salário são
-// obrigatórios; Setor e Step podem ficar vazios.
+// Formato: `Setor | Cargo | Salário`, uma planilha por empresa. O cabeçalho é
+// procurado nas primeiras linhas e a ordem das colunas é livre (mesma convenção
+// das planilhas do Orçamento). Cargo e Salário são obrigatórios; Setor pode
+// ficar vazio.
+//
+// STEP: saiu da tabela em 02/10/2026 e passou a compor o nome do cargo
+// ("Auxiliar Administrativo 1"). Planilha antiga que ainda traga a coluna Step
+// continua servindo — o step é JUNTADO ao cargo na leitura, pela mesma regra
+// da migration 20261002140000, em vez de ser ignorado (o que faria os 5 steps
+// de um cargo colidirem como linha repetida).
 // ============================================================================
 
 import { chaveNome } from "@/lib/dp/cargos";
@@ -15,7 +21,6 @@ export interface DpTabelaPlanilhaLinha {
   linha: number;
   setor: string;
   cargo: string;
-  step: string;
   salario: number;
 }
 
@@ -25,9 +30,15 @@ export interface DpTabelaPlanilha {
   problemas: string[];
 }
 
-/** Chave de casamento de uma linha: setor + cargo + step normalizados. */
-export function chaveLinha(l: { setor: string; cargo: string; step: string }): string {
-  return `${chaveNome(l.setor)}|${chaveNome(l.cargo)}|${chaveNome(l.step)}`;
+/** Chave de casamento de uma linha: setor + cargo normalizados. */
+export function chaveLinha(l: { setor: string; cargo: string }): string {
+  return `${chaveNome(l.setor)}|${chaveNome(l.cargo)}`;
+}
+
+/** Cargo com o step no fim do nome ("Auxiliar Administrativo" + "1"). Step vazio não muda nada. */
+export function cargoComStep(cargo: string, step: string): string {
+  const s = step.trim();
+  return s ? `${cargo.trim()} ${s}` : cargo.trim();
 }
 
 const ALIAS = {
@@ -83,35 +94,37 @@ export function parseTabelaPlanilha(data: unknown[][]): { ok: DpTabelaPlanilha }
     const row = data[i] ?? [];
     const numero = i + 1;
     const setor = texto(row, cols.setor);
-    const cargo = texto(row, cols.cargo);
     const step = texto(row, cols.step);
+    const cargoBruto = texto(row, cols.cargo);
     const bruto = cols.salario >= 0 ? row[cols.salario] : "";
     // Linha inteira vazia é separador, não erro.
-    if (!setor && !cargo && !step && String(bruto ?? "").trim() === "") continue;
+    if (!setor && !cargoBruto && !step && String(bruto ?? "").trim() === "") continue;
 
-    if (!cargo) {
+    // Step sem cargo não vira um "cargo" chamado "1": continua sendo linha sem cargo.
+    if (!cargoBruto) {
       problemas.push(`Linha ${numero}: sem cargo.`);
       continue;
     }
+    const cargo = cargoComStep(cargoBruto, step);
     const salario = lerSalario(bruto);
     if (salario === null) {
-      problemas.push(`Linha ${numero} (${cargo}${step ? ` ${step}` : ""}): salário vazio ou ilegível.`);
+      problemas.push(`Linha ${numero} (${cargo}): salário vazio ou ilegível.`);
       continue;
     }
     if (salario < 0) {
-      problemas.push(`Linha ${numero} (${cargo}${step ? ` ${step}` : ""}): salário negativo.`);
+      problemas.push(`Linha ${numero} (${cargo}): salário negativo.`);
       continue;
     }
-    const chave = chaveLinha({ setor, cargo, step });
+    const chave = chaveLinha({ setor, cargo });
     const anterior = vistas.get(chave);
     if (anterior !== undefined) {
       // A mesma linha duas vezes com salários diferentes não tem como ser
       // decidida aqui: fica a primeira, e o usuário é avisado.
-      problemas.push(`Linha ${numero}: repete a linha ${anterior} (mesmo setor, cargo e step) e foi ignorada.`);
+      problemas.push(`Linha ${numero}: repete a linha ${anterior} (mesmo setor e cargo) e foi ignorada.`);
       continue;
     }
     vistas.set(chave, numero);
-    linhas.push({ linha: numero, setor, cargo, step, salario: Math.round(salario * 100) / 100 });
+    linhas.push({ linha: numero, setor, cargo, salario: Math.round(salario * 100) / 100 });
   }
   return { ok: { linhas, problemas } };
 }
@@ -120,7 +133,6 @@ export interface DpTabelaExistente {
   id: string;
   setor: string;
   cargo: string;
-  step: string;
   salario: number;
 }
 
@@ -134,7 +146,7 @@ export interface DpPlanoImportacao {
 }
 
 /**
- * O que importar faz: casa por setor + cargo + step, ATUALIZA o salário do que
+ * O que importar faz: casa por setor + cargo, ATUALIZA o salário do que
  * já existe, INSERE o que é novo e NÃO APAGA o que ficou fora da planilha.
  * Aditivo e idempotente, como as importações do Orçamento: reimportar o mesmo
  * arquivo não muda nada, e uma planilha parcial nunca esvazia a tabela.

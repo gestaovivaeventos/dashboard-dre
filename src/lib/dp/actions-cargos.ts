@@ -20,7 +20,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 
 function falha(error: unknown): { ok: false; error: string } {
   const e = error as { code?: string; message?: string } | null;
-  if (e?.code === "23505") return { ok: false, error: "Já existe outra linha com o mesmo setor, cargo e step nesta empresa." };
+  if (e?.code === "23505") return { ok: false, error: "Já existe outra linha com o mesmo setor e cargo nesta empresa." };
   if (e?.code === "PGRST205" || e?.code === "42P01" || e?.code === "PGRST202") {
     return { ok: false, error: "Tabela salarial ainda não instalada no banco (migration 20261002130000)." };
   }
@@ -39,18 +39,15 @@ function salarioValido(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
-function campos(input: { setor: string; cargo: string; step: string; salario: number }) {
+function campos(input: { setor: string; cargo: string; salario: number }) {
   const setor = texto(input.setor);
   const cargo = texto(input.cargo);
-  const step = texto(input.step);
   if (!cargo) throw new Error("Informe o cargo.");
   return {
     setor,
     setor_chave: chaveNome(setor),
     cargo,
     cargo_chave: chaveNome(cargo),
-    step,
-    step_chave: chaveNome(step),
     salario: salarioValido(input.salario),
   };
 }
@@ -68,7 +65,6 @@ export async function criarLinha(input: {
   companyId: string;
   setor: string;
   cargo: string;
-  step: string;
   salario: number;
   /** Insere logo abaixo desta linha; ausente = no fim da tabela. */
   depoisDeId?: string | null;
@@ -101,7 +97,6 @@ export async function salvarLinha(input: {
   id: string;
   setor: string;
   cargo: string;
-  step: string;
   salario: number;
 }): Promise<DpCargoResult> {
   try {
@@ -161,7 +156,7 @@ export async function moverLinha(input: { companyId: string; id: string; direcao
   }
 }
 
-/** "Ordenar por setor, cargo e step": renumera a tabela inteira no banco. */
+/** "Ordenar por setor e cargo" (número do fim do nome em ordem numérica): renumera no banco. */
 export async function ordenarTabela(input: { companyId: string }): Promise<DpCargoResult> {
   try {
     await requireDpUser();
@@ -220,7 +215,8 @@ export interface DpImportacaoResultado {
 }
 
 /**
- * Importa a planilha `Setor | Cargo | Step | Salário` de UMA empresa.
+ * Importa a planilha `Setor | Cargo | Salário` de UMA empresa (coluna Step,
+ * se vier, é juntada ao nome do cargo — ver @/lib/dp/tabela-salarial).
  * Aditiva e idempotente (ver `planejarImportacao`): atualiza o salário do que
  * já existe, acrescenta o novo e NÃO apaga o que ficou fora da planilha.
  * Falha por linha, nunca pelo arquivo.
