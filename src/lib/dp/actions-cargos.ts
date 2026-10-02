@@ -131,6 +131,33 @@ export async function excluirLinha(input: { companyId: string; id: string }): Pr
   }
 }
 
+/** Palavra que a tela pede para digitar antes de apagar a tabela inteira. */
+const CONFIRMACAO_APAGAR = "APAGAR";
+
+/**
+ * Apaga TODAS as linhas da tabela salarial da empresa. Os vínculos com a
+ * Sólides vão junto (cascata) — todo mundo volta a "cargo sem linha na
+ * tabela". O histórico de reajustes é mantido: ele registra o que aconteceu,
+ * não depende das linhas. A confirmação digitada é conferida AQUI também, não
+ * só no botão: é o único gesto do módulo que apaga tudo de uma vez.
+ */
+export async function apagarTabela(input: { companyId: string; confirmacao: string }): Promise<DpCargoResult<{ apagadas: number }>> {
+  try {
+    await requireDpUser();
+    if (input.confirmacao.trim().toUpperCase() !== CONFIRMACAO_APAGAR) {
+      throw new Error(`Digite ${CONFIRMACAO_APAGAR} para confirmar.`);
+    }
+    const admin = createAdminClient();
+    await exigirEmpresa(admin, input.companyId);
+    const { data, error } = await admin.from("dp_tabela_salarial").delete().eq("company_id", input.companyId).select("id");
+    if (error) throw error;
+    revalidar();
+    return { ok: true, data: { apagadas: (data ?? []).length } };
+  } catch (error) {
+    return falha(error);
+  }
+}
+
 /** Sobe ou desce uma linha, trocando a ordem com a vizinha. */
 export async function moverLinha(input: { companyId: string; id: string; direcao: "cima" | "baixo" }): Promise<DpCargoResult> {
   try {

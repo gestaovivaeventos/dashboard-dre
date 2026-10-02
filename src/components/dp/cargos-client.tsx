@@ -3,12 +3,14 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Percent, Plus, Search, Trash2, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Download, Percent, Plus, Search, Trash2, Upload, Wand2, X } from "lucide-react";
 
 import { FilterTable, type FilterColumn } from "@/components/data-table/filter-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toaster";
 import {
+  apagarTabela,
   aplicarReajuste,
   criarLinha,
   excluirLinha,
@@ -181,6 +183,7 @@ function TabelaSalarial({
           >
             <ArrowUpDown className="h-4 w-4" /> Ordenar A–Z
           </button>
+          <ApagarTudo companyId={companyId} companyName={companyName} tabela={tabela} />
           <div className="relative ml-auto">
             <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-ink-muted" />
             <input
@@ -275,6 +278,104 @@ function TabelaSalarial({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+const PALAVRA_CONFIRMACAO = "APAGAR";
+
+/**
+ * "Apagar todas": apaga a tabela inteira da empresa. É o único gesto do módulo
+ * que remove tudo de uma vez e não tem desfazer, por isso o pop-up pede para
+ * DIGITAR a palavra (um clique distraído em "Confirmar" não basta), mostra o
+ * que se perde e oferece baixar a tabela antes. A action confere a palavra de
+ * novo no servidor.
+ */
+function ApagarTudo({ companyId, companyName, tabela }: { companyId: string; companyName: string; tabela: DpTabelaLinha[] }) {
+  const [aberto, setAberto] = useState(false);
+  const [texto, setTexto] = useState("");
+  const { pending, rodar } = useAcao();
+  const pessoas = tabela.reduce((s, l) => s + l.pessoas, 0);
+  const liberado = texto.trim().toUpperCase() === PALAVRA_CONFIRMACAO;
+
+  const fechar = (v: boolean) => {
+    setAberto(v);
+    if (!v) setTexto("");
+  };
+  const apagar = () =>
+    rodar(
+      () => apagarTabela({ companyId, confirmacao: texto }),
+      (d) => {
+        fechar(false);
+        return `${d.apagadas} linha(s) apagada(s)`;
+      },
+    );
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending || tabela.length === 0}
+        onClick={() => setAberto(true)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40"
+      >
+        <Trash2 className="h-4 w-4" /> Apagar todas
+      </button>
+      <Dialog open={aberto} onOpenChange={fechar}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-600" /> Apagar toda a tabela salarial?
+            </DialogTitle>
+            <DialogDescription>
+              Isto apaga as <strong>{tabela.length} linhas</strong> da tabela de <strong>{companyName}</strong>, e não tem como
+              desfazer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            {pessoas > 0 && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-amber-900 dark:text-amber-200">
+                {pessoas} pessoa(s) estão vinculadas a linhas desta tabela e voltarão a ficar sem linha — o de-para com a
+                Sólides desta empresa também é apagado.
+              </p>
+            )}
+            <p className="text-ink-muted">
+              Se quiser guardar uma cópia antes,{" "}
+              <a href={`/api/dp/tabela-salarial/modelo?companyId=${companyId}`} className="font-medium text-ink-primary underline">
+                baixe a tabela atual
+              </a>
+              . O histórico de reajustes é mantido.
+            </p>
+            <label className="block">
+              <span className="text-ink-muted">
+                Para confirmar, digite <strong className="text-ink-primary">{PALAVRA_CONFIRMACAO}</strong>:
+              </span>
+              <input
+                autoFocus
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && liberado && apagar()}
+                className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                disabled={pending}
+                aria-label={`Digite ${PALAVRA_CONFIRMACAO} para confirmar`}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <button type="button" className={botaoCls} disabled={pending} onClick={() => fechar(false)}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={pending || !liberado}
+              onClick={apagar}
+              className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" /> {pending ? "Apagando…" : `Apagar ${tabela.length} linhas`}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
