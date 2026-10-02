@@ -9,6 +9,8 @@ import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { numDaLinha as num, textoDaLinha as texto } from "@/lib/viagens/colunas";
 import { buscarPrecos, mesAnoDoNumero, type TrechoParaCotar } from "@/lib/viagens/precos/buscar";
+import { lerHistoricoParaCalculo } from "@/lib/orcamento/actions/viagens-historico";
+import { faixaSugeridaDoHistorico } from "@/lib/viagens/historico";
 import {
   mesDominante,
   pesoDasFaixas,
@@ -315,4 +317,89 @@ export async function aplicarValorDaFaixa(
   }
   revalidatePath("/orcamento");
   return {};
+}
+
+export interface SugestaoDoHistorico {
+  faixaId: string;
+  nome: string;
+  tipo: "passagem" | "hospedagem";
+  valorAtual: number;
+  valorSugerido: number;
+  /** Os destinos observados que produziram o número — a tela os mostra. */
+  destinos: string[];
+}
+
+export interface SugestoesHistoricoResult {
+  sugestoes?: SugestaoDoHistorico[];
+  /** Ano-base usado, para a tela dizer de quando é o número. */
+  anoBase?: number;
+  /** Faixas que nenhuma cidade com histórico alcança — essas seguem na web. */
+  semHistorico?: string[];
+  error?: string;
+  needsMigration?: boolean;
+}
+
+/**
+ * O valor de cada faixa, calculado a partir do HISTÓRICO das cidades dela.
+ *
+ * É o segundo uso do histórico e o que fecha o pedido do admin: ele não digita o
+ * valor de dez faixas — cada faixa recebe a mediana das cidades que apontam para
+ * ela e que têm viagem realizada, já reajustada.
+ *
+ * Não grava nada: devolve a proposta, e a tela aplica faixa a faixa pelo mesmo
+ * `aplicarValorDaFaixa` da calibragem na web. Um botão que sobrescrevesse as dez
+ * de uma vez mudaria o custo de todas as linhas sem ninguém ver o antes.
+ */
+export async function sugerirFaixasDoHistorico(
+  companyId: string,
+  year: number,
+): Promise<SugestoesHistoricoResult> {
+  const admin = await getOrcamentoAdmin();
+  if (!admin) return { error: SEM_ACESSO_ADMIN };
+  if (!companyId) return { error: "Empresa inválida." };
+  if (!isValidBudgetYear(year)) return { error: "Ano do orçamento inválido." };
+
+  const supabase = (db() ?? (await createClient())) as Supa;
+  const ctx = await lerContexto(supabase, companyId, year);
+  if (!ctx.ok) return { error: ctx.error, needsMigration: ctx.needsMigration };
+
+  const historico = await lerHistoricoParaCalculo(supabase, companyId, year);
+  if (!historico) {
+    return {
+      error:
+        "Não há histórico de viagens cadastrado. Suba a planilha em Configuração › Histórico de viagens.",
+    };
+  }
+
+  const sugestoes: SugestaoDoHistorico[] = [];
+  const semHistorico: string[] = [];
+
+  for (const f of ctx.faixas) {
+    // Carro e van não têm preço de passagem — ali o custo é km × R$/km.
+    if (f.tipo === "passagem" && f.modal !== "aviao" && f.modal !== "onibus") continue;
+    // Todas as cidades da faixa, não só as 4 que iriam à web: aqui não há custo
+    // por observação, e mais destinos fazem a mediana regional melhor.
+    const cidades = rotasDaFaixa(ctx.linhas, f, 999);
+    const sug = faixaSugeridaDoHistorico(
+      historico.refs,
+      cidades,
+      f.tipo,
+      historico.anoBase,
+      historico.reajustes,
+    );
+    if (!sug) {
+      semHistorico.push(f.nome);
+      continue;
+    }
+    sugestoes.push({
+      faixaId: f.id,
+      nome: f.nome,
+      tipo: f.tipo,
+      valorAtual: f.valor,
+      valorSugerido: sug.valor,
+      destinos: sug.destinos,
+    });
+  }
+
+  return { sugestoes, anoBase: historico.anoBase, semHistorico };
 }

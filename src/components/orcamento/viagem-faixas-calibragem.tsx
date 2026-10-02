@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Globe, Loader2, TrendingDown, TrendingUp } from "lucide-react";
+import { Check, Globe, History, Loader2, TrendingDown, TrendingUp } from "lucide-react";
 
 import {
   aplicarValorDaFaixa,
   calibrarFaixaViagem,
   getCalibragemFaixas,
+  sugerirFaixasDoHistorico,
   type CalibragemSetup,
+  type SugestaoDoHistorico,
 } from "@/lib/orcamento/actions/viagens-calibragem";
 import type { PropostaFaixa } from "@/lib/viagens/calibragem";
 import { formatBRL } from "@/lib/orcamento/format";
@@ -51,6 +53,10 @@ export function ViagemFaixasCalibragem({
   const [erros, setErros] = useState<Record<string, string>>({});
   const [erro, setErro] = useState<string | null>(null);
   const [aplicando, setAplicando] = useState<string | null>(null);
+  const [historico, setHistorico] = useState<Record<string, SugestaoDoHistorico>>({});
+  const [anoBase, setAnoBase] = useState<number | null>(null);
+  const [semHistorico, setSemHistorico] = useState<string[]>([]);
+  const [lendoHistorico, setLendoHistorico] = useState(false);
 
   const carregar = useCallback(async () => {
     const res = await getCalibragemFaixas(companyId, year);
@@ -89,6 +95,29 @@ export function ViagemFaixasCalibragem({
     setLote(null);
   }
 
+  /**
+   * O histórico primeiro, a web depois.
+   *
+   * É de graça, é instantâneo e é um número melhor: a web dá preço de mercado de
+   * uma rota, o histórico dá o que este time pagou de fato. A busca fica para as
+   * faixas que nenhuma cidade com histórico alcança — e a tela nomeia quais são.
+   */
+  async function puxarDoHistorico() {
+    setLendoHistorico(true);
+    setErro(null);
+    const res = await sugerirFaixasDoHistorico(companyId, year);
+    setLendoHistorico(false);
+    if (res.error) {
+      setErro(res.error);
+      return;
+    }
+    const mapa: Record<string, SugestaoDoHistorico> = {};
+    for (const s of res.sugestoes ?? []) mapa[s.faixaId] = s;
+    setHistorico(mapa);
+    setAnoBase(res.anoBase ?? null);
+    setSemHistorico(res.semHistorico ?? []);
+  }
+
   async function aplicar(faixaId: string, valor: number) {
     setAplicando(faixaId);
     const res = await aplicarValorDaFaixa(companyId, year, faixaId, valor);
@@ -98,6 +127,7 @@ export function ViagemFaixasCalibragem({
       return;
     }
     setPropostas((p) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== faixaId)));
+    setHistorico((h) => Object.fromEntries(Object.entries(h).filter(([k]) => k !== faixaId)));
     onAplicado();
     void carregar();
   }
@@ -158,8 +188,23 @@ export function ViagemFaixasCalibragem({
               </>
             )}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void puxarDoHistorico()}
+            disabled={lendoHistorico || Boolean(buscando)}
+          >
+            {lendoHistorico ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <History className="mr-2 h-4 w-4" />
+            )}
+            Preencher do histórico
+          </Button>
           <span className="text-xs text-muted-foreground">
-            Cada busca leva algum tempo. Elas correm uma após a outra.
+            O histórico é instantâneo e melhor. A busca na web leva tempo e serve ao que não tem
+            histórico.
           </span>
         </div>
       )}
@@ -216,6 +261,38 @@ export function ViagemFaixasCalibragem({
               </div>
 
               {msg && <p className="text-xs text-amber-700 dark:text-amber-500">{msg}</p>}
+
+              {historico[f.id] && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2 text-sm">
+                  <span className="text-xs font-medium uppercase text-emerald-700 dark:text-emerald-400">
+                    histórico{anoBase ? ` ${anoBase}` : ""}
+                  </span>
+                  <span className="text-muted-foreground">
+                    hoje {formatBRL(historico[f.id].valorAtual)} →
+                  </span>
+                  <strong className="tabular-nums">
+                    {formatBRL(historico[f.id].valorSugerido)}
+                  </strong>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={aplicando === f.id}
+                    onClick={() => void aplicar(f.id, historico[f.id].valorSugerido)}
+                  >
+                    {aplicando === f.id ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    Usar
+                  </Button>
+                  <span className="w-full text-xs text-muted-foreground">
+                    mediana de {historico[f.id].destinos.length} destino(s) observado(s):{" "}
+                    {historico[f.id].destinos.join(", ")}
+                  </span>
+                </div>
+              )}
 
               {p && (
                 <div className="space-y-1 rounded-md border bg-muted/30 p-2">
@@ -281,6 +358,13 @@ export function ViagemFaixasCalibragem({
           );
         })}
       </div>
+
+      {semHistorico.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Sem histórico nenhum destino alcança{" "}
+          <strong>{semHistorico.join(", ")}</strong> — essas são as que vale pesquisar na web.
+        </p>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Aceitar um valor <strong>não recalcula</strong> as viagens já salvas: cada uma guarda o

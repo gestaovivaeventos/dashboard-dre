@@ -188,9 +188,14 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     desc: "De-para tipo de viagem → categoria da DRE. É o que destrava o cadastro de viagens.",
   },
   {
+    slug: "viagem-historico",
+    label: "Histórico de viagens",
+    desc: "O que foi gasto no ano passado + o reajuste. É daqui que sai o custo de quem repete destino.",
+  },
+  {
     slug: "viagem-faixas",
     label: "Faixas de custo de viagem",
-    desc: "As ~10 referências de passagem e hotel de onde sai o custo de cada viagem.",
+    desc: "A rede para destino SEM histórico: ~10 referências de passagem e hotel.",
   },
   {
     slug: "viagem-parametros",

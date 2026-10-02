@@ -138,10 +138,22 @@ export interface ViagemSpec {
   faixaHospedagem?: FaixaReferencia | null;
 }
 
-/** Um valor de referência curado pelo admin, com o nome de onde ele veio. */
+/**
+ * Um valor de referência, com o nome de onde ele veio.
+ *
+ * `origem` existe para a PREMISSA usar o verbo certo: "usou a faixa X" e "usou o
+ * histórico de X" descrevem confianças diferentes, e quem valida precisa
+ * distinguir número curado por região de número observado naquele destino.
+ *
+ * O motor continua com UM slot de referência por grupo: quem escolhe entre
+ * histórico e faixa é o servidor, ao montar o retrato. Um nível de precedência
+ * novo dentro do motor não compraria nada e teria de ser mantido em dois lugares.
+ */
 export interface FaixaReferencia {
   nome: string;
   valor: number;
+  /** Ausente = faixa (era a única fonte até 02/10/2026). */
+  origem?: "faixa" | "historico";
 }
 
 /**

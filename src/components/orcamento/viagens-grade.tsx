@@ -421,8 +421,9 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
           <p className="font-semibold">Nenhuma faixa de custo tem valor cadastrado.</p>
           <p className="mt-1 text-muted-foreground">
-            Sem elas toda viagem sai com custo zero (dito em premissa, nunca escondido). O custo vem
-            de ~10 faixas que o administrador cura uma vez por ano, em{" "}
+            Destino com <strong>histórico</strong> de viagem realizada é precificado mesmo assim (a
+            etiqueta <em>hist</em> marca quais). Os outros saem com custo zero — dito em premissa,
+            nunca escondido. A faixa é a rede para eles, em{" "}
             <Link
               href={workspaceConfigSecaoHref(companyId, year, "viagem-faixas")}
               className="font-medium underline underline-offset-2"
@@ -504,13 +505,26 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                       </button>
                     </td>
                     <td className="px-2 py-1">
-                      <Input
-                        value={l.destino}
-                        disabled={!editavel}
-                        onChange={(e) => mexer(l.key, { destino: e.target.value })}
-                        placeholder="Cidade"
-                        className="h-8 min-w-[9rem]"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={l.destino}
+                          disabled={!editavel}
+                          onChange={(e) => mexer(l.key, { destino: e.target.value })}
+                          placeholder="Cidade"
+                          className="h-8 min-w-[9rem]"
+                        />
+                        {/* Custo OBSERVADO naquele destino, não estimado por região:
+                            é a leitura que diz quanto do orçamento está ancorado em
+                            fato. A premissa da linha tem a conta inteira. */}
+                        {s?.temHistorico && (
+                          <span
+                            title="O custo deste destino vem do histórico de viagens realizadas, reajustado."
+                            className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:text-emerald-400"
+                          >
+                            hist
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-1">
                       <select

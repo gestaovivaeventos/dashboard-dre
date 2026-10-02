@@ -20,6 +20,9 @@ import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
 import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
 import { lerFaixasParaCalculo } from "@/lib/orcamento/actions/viagens-faixas";
+import { lerHistoricoParaCalculo } from "@/lib/orcamento/actions/viagens-historico";
+import { referenciaDeHospedagem, referenciaDePassagem } from "@/lib/viagens/historico";
+import { chaveNome } from "@/lib/viagens/plano";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { categoriaDoTipo, tiposOferecidos, type TipoViagem } from "@/lib/viagens/tipos";
 import { numDaLinha as num, textoDaLinha as texto } from "@/lib/viagens/colunas";
@@ -94,6 +97,8 @@ export interface LinhaGrade {
   grupos: GrupoDaLinha[];
   premissas: string[];
   status: "rascunho" | "enviada";
+  /** Este destino tem histórico de viagem realizada — o custo dele é observado. */
+  temHistorico: boolean;
   setorId: string | null;
   categoryCode: string;
   /** Validação da diretoria. */
@@ -287,6 +292,11 @@ export async function getGradeViagens(
     }
   }
 
+  // O histórico é lido junto para a tela poder dizer, linha a linha, se o custo
+  // daquele destino é OBSERVADO ou estimado por faixa. É a leitura que diz ao admin
+  // quanto do orçamento está ancorado em fato.
+  const historico = await lerHistoricoParaCalculo(supabase, companyId, year);
+
   const decisoes = await lerDecisoes(supabase, companyId, year, "viagem", ids);
   const nomeDoTipo = new Map(tipos.map((t) => [t.id, t.nome] as const));
 
@@ -330,6 +340,7 @@ export async function getGradeViagens(
       grupos: gruposDaLinhaJson(r.grupos),
       premissas: premissasJson(r.premissas),
       status: r.status === "enviada" ? "enviada" : "rascunho",
+      temHistorico: historico ? historico.refs.has(chaveNome(p?.cidade ?? texto(r.titulo))) : false,
       setorId: sId,
       categoryCode: texto(r.category_code),
       estado: linha.estado,
@@ -391,9 +402,10 @@ export async function salvarGradeViagens(
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, auth.user.userId);
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { ...vazio, error: SEM_ACESSO_SETOR };
 
-  const [tipos, faixas, paramRow] = await Promise.all([
+  const [tipos, faixas, historico, paramRow] = await Promise.all([
     lerTipos(supabase, companyId, year),
     lerFaixasParaCalculo(supabase, companyId, year),
+    lerHistoricoParaCalculo(supabase, companyId, year),
     supabase
       .from("orcamento_viagem_parametros")
       .select("*")
@@ -450,6 +462,20 @@ export async function salvarGradeViagens(
     const faixaPassagem = l.faixaPassagemId ? faixas.get(l.faixaPassagemId) : undefined;
     const faixaHospedagem = l.faixaHospedagemId ? faixas.get(l.faixaHospedagemId) : undefined;
     const modal = modalDaLinhaDaGrade(l, faixaPassagem?.modal ?? null);
+
+    // ── O HISTÓRICO do destino vence a faixa ──
+    // A faixa é uma referência REGIONAL curada; o histórico é o que este time
+    // pagou para ir NAQUELA cidade. Quando existe, ele é a melhor estimativa que o
+    // sistema tem — e a premissa do motor diz de onde o número veio, com a
+    // mediana, os meses observados e o reajuste. A faixa continua sendo a rede
+    // para destino sem histórico.
+    const refHistorico = historico ? historico.refs.get(chaveNome(l.destino)) : undefined;
+    const passagemDoHistorico = historico
+      ? referenciaDePassagem(refHistorico, historico.anoBase, historico.reajustes)
+      : null;
+    const hospedagemDoHistorico = historico
+      ? referenciaDeHospedagem(refHistorico, historico.anoBase, historico.reajustes)
+      : null;
     const cabecalho = viagemRowDaLinha(l, modal, transladoCustoTrajeto);
     const parada = paradaRowDaLinha(l, origem, modal);
 
@@ -458,10 +484,14 @@ export async function salvarGradeViagens(
       { ...cabecalho, origem } as unknown as Record<string, unknown>,
       [parada],
       {
-        passagem: faixaPassagem ? { nome: faixaPassagem.nome, valor: faixaPassagem.valor } : null,
-        hospedagem: faixaHospedagem
-          ? { nome: faixaHospedagem.nome, valor: faixaHospedagem.valor }
-          : null,
+        passagem:
+          passagemDoHistorico ??
+          (faixaPassagem ? { nome: faixaPassagem.nome, valor: faixaPassagem.valor } : null),
+        hospedagem:
+          hospedagemDoHistorico ??
+          (faixaHospedagem
+            ? { nome: faixaHospedagem.nome, valor: faixaHospedagem.valor }
+            : null),
       },
     );
     const resultado = calcularViagem(spec, params);
