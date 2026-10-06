@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -93,8 +93,6 @@ function doServidor(l: LinhaGrade): Rascunho {
     pessoas: l.pessoas,
     pessoasPorQuarto: l.pessoasPorQuarto,
     tipoId: l.tipoId ?? "",
-    faixaPassagemId: l.faixaPassagemId,
-    faixaHospedagemId: l.faixaHospedagemId,
     modal: l.modal,
     distanciaKm: l.distanciaKm,
     finalidade: l.finalidade,
@@ -103,7 +101,7 @@ function doServidor(l: LinhaGrade): Rascunho {
   };
 }
 
-function linhaVazia(padroes: { tipoId: string; faixaPassagemId: string; faixaHospedagemId: string }): Rascunho {
+function linhaVazia(padroes: { tipoId: string }): Rascunho {
   return {
     key: novaKey(),
     destino: "",
@@ -112,8 +110,6 @@ function linhaVazia(padroes: { tipoId: string; faixaPassagemId: string; faixaHos
     pessoas: 1,
     pessoasPorQuarto: PESSOAS_POR_QUARTO_PADRAO,
     tipoId: padroes.tipoId,
-    faixaPassagemId: padroes.faixaPassagemId || null,
-    faixaHospedagemId: padroes.faixaHospedagemId || null,
     sujo: true,
   };
 }
@@ -126,7 +122,7 @@ function linhaVazia(padroes: { tipoId: string; faixaPassagemId: string; faixaHos
  */
 function doPlano(
   l: LinhaResolvida,
-  padroes: { tipoId: string; faixaPassagemId: string; faixaHospedagemId: string },
+  padroes: { tipoId: string },
 ): Rascunho {
   return {
     key: novaKey(),
@@ -136,8 +132,6 @@ function doPlano(
     pessoas: l.pessoas,
     pessoasPorQuarto: l.pessoasPorQuarto ?? PESSOAS_POR_QUARTO_PADRAO,
     tipoId: l.tipoId || padroes.tipoId,
-    faixaPassagemId: l.faixaPassagemId ?? (padroes.faixaPassagemId || null),
-    faixaHospedagemId: l.noites > 0 ? l.faixaHospedagemId ?? (padroes.faixaHospedagemId || null) : null,
     modal: l.modal,
     finalidade: l.finalidade,
     sujo: true,
@@ -182,21 +176,8 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
   }, [carregar]);
 
   const tipos = setup?.tipos ?? [];
-  const faixasPassagem = useMemo(
-    () => (setup?.faixas ?? []).filter((f) => f.tipo === "passagem"),
-    [setup?.faixas],
-  );
-  const faixasHospedagem = useMemo(
-    () => (setup?.faixas ?? []).filter((f) => f.tipo === "hospedagem"),
-    [setup?.faixas],
-  );
-
-  /** Padrões da linha nova: o primeiro de cada cadastro. Evita três cliques por linha. */
-  const padroes = {
-    tipoId: tipos[0]?.id ?? "",
-    faixaPassagemId: faixasPassagem[0]?.id ?? "",
-    faixaHospedagemId: faixasHospedagem[0]?.id ?? "",
-  };
+  /** Padrão da linha nova: o primeiro tipo. O preço vem do destino, não de cadastro. */
+  const padroes = { tipoId: tipos[0]?.id ?? "" };
 
   function mexer(key: string, patch: Partial<LinhaViagemInput>) {
     setLinhas((ls) =>
@@ -249,8 +230,6 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
         pessoas: l.pessoas,
         pessoasPorQuarto: l.pessoasPorQuarto,
         tipoId: l.tipoId,
-        faixaPassagemId: l.faixaPassagemId,
-        faixaHospedagemId: l.faixaHospedagemId,
         modal: l.modal,
         distanciaKm: l.distanciaKm,
         finalidade: l.finalidade,
@@ -322,6 +301,11 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
       />
     );
   }
+
+  // Os destinos sem número de onde partir. Vem do servidor (`pendencia`), que o
+  // calcula com a MESMA função da lista da Controladoria — duas contas divergiriam
+  // justamente aqui, e a faixa regional que existia antes calava o aviso.
+  const semDados = linhas.filter((l) => l.servidor?.pendencia);
 
   // Vocabulário do ditado: as cidades que já estão na grade. Nome próprio é
   // exatamente para o que o vocabulário serve.
@@ -417,20 +401,26 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
           </p>
         </div>
       )}
-      {setup?.semFaixas && tipos.length > 0 && (
+      {semDados.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
-          <p className="font-semibold">Nenhuma faixa de custo tem valor cadastrado.</p>
+          <p className="font-semibold">
+            {semDados.length === 1
+              ? "1 destino sem histórico de viagem registrado"
+              : `${semDados.length} destinos sem histórico de viagem registrado`}
+            : {semDados.map((l) => l.destino).join(", ")}
+          </p>
           <p className="mt-1 text-muted-foreground">
-            Destino com <strong>histórico</strong> de viagem realizada é precificado mesmo assim (a
-            etiqueta <em>hist</em> marca quais). Os outros saem com custo zero — dito em premissa,
-            nunca escondido. A faixa é a rede para eles, em{" "}
+            A viagem pode ser cadastrada e enviada normalmente — o que falta é o valor, não o
+            cadastro. <strong>Avise a Controladoria</strong> para informar a passagem e a diária
+            desses destinos em{" "}
             <Link
-              href={workspaceConfigSecaoHref(companyId, year, "viagem-faixas")}
+              href={workspaceConfigSecaoHref(companyId, year, "viagem-historico")}
               className="font-medium underline underline-offset-2"
             >
-              Configuração › Faixas de custo
+              Configuração › Histórico de viagens
             </Link>
-            .
+            ; o custo passa a aparecer sozinho. Até lá essas linhas somam zero, dito na premissa —
+            o sistema não estima por trás.
           </p>
         </div>
       )}
@@ -460,8 +450,6 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
               <th className="px-2 py-2 text-right font-medium">Pessoas</th>
               <th className="px-2 py-2 text-right font-medium">Quartos</th>
               <th className="px-2 py-2 text-left font-medium">Tipo</th>
-              <th className="px-2 py-2 text-left font-medium">Faixa</th>
-              <th className="px-2 py-2 text-left font-medium">Hotel</th>
               <th className="px-2 py-2 text-left font-medium">Modal</th>
               <th className="px-2 py-2 text-right font-medium">Custo</th>
               <th className="px-2 py-2" />
@@ -513,17 +501,25 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                           placeholder="Cidade"
                           className="h-8 min-w-[9rem]"
                         />
-                        {/* Custo OBSERVADO naquele destino, não estimado por região:
-                            é a leitura que diz quanto do orçamento está ancorado em
-                            fato. A premissa da linha tem a conta inteira. */}
-                        {s?.temHistorico && (
+                        {/* De onde vem o custo deste destino, numa etiqueta: é a
+                            leitura que diz quanto do orçamento está ancorado em fato
+                            e o que ainda depende da Controladoria. A premissa da
+                            linha traz a conta inteira. */}
+                        {s?.pendencia ? (
+                          <span
+                            title={`Este destino não tem histórico (${s.pendencia}). A viagem pode ser cadastrada; avise a Controladoria para informar os valores.`}
+                            className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[10px] font-semibold uppercase text-amber-700 dark:text-amber-500"
+                          >
+                            sem dados
+                          </span>
+                        ) : s?.temHistorico ? (
                           <span
                             title="O custo deste destino vem do histórico de viagens realizadas, reajustado."
                             className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:text-emerald-400"
                           >
                             hist
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-2 py-1">
@@ -592,36 +588,6 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                         {tipos.map((t) => (
                           <option key={t.id} value={t.id}>
                             {t.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1">
-                      <select
-                        value={l.faixaPassagemId ?? ""}
-                        disabled={!editavel}
-                        onChange={(e) => mexer(l.key, { faixaPassagemId: e.target.value || null })}
-                        className="h-8 min-w-[9rem] rounded-md border border-input bg-background px-1 text-sm disabled:opacity-50"
-                      >
-                        <option value="">—</option>
-                        {faixasPassagem.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1">
-                      <select
-                        value={l.faixaHospedagemId ?? ""}
-                        disabled={!editavel || Number(l.noites) <= 0}
-                        onChange={(e) => mexer(l.key, { faixaHospedagemId: e.target.value || null })}
-                        className="h-8 min-w-[7rem] rounded-md border border-input bg-background px-1 text-sm disabled:opacity-50"
-                      >
-                        <option value="">—</option>
-                        {faixasHospedagem.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.nome}
                           </option>
                         ))}
                       </select>

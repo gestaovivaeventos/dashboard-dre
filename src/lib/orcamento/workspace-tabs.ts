@@ -193,9 +193,9 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
     desc: "O que foi gasto no ano passado + o reajuste. É daqui que sai o custo de quem repete destino.",
   },
   {
-    slug: "viagem-faixas",
-    label: "Faixas de custo de viagem",
-    desc: "A rede para destino SEM histórico: ~10 referências de passagem e hotel.",
+    slug: "viagem-referencia",
+    label: "Destinos sem histórico",
+    desc: "A fila da Controladoria: destino novo que as viagens pedem e espera passagem e diária.",
   },
   {
     slug: "viagem-parametros",

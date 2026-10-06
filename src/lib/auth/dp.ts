@@ -42,6 +42,8 @@ export const DP_NAV_KEY_CARGOS = "dp-cargos";
 export const DP_CARGOS_PATH = "/dp/cargos";
 export const DP_NAV_KEY_SIMULACOES = "dp-simulacoes";
 export const DP_SIMULACOES_PATH = "/dp/simulacoes";
+export const DP_NAV_KEY_CENTROS = "dp-centros-custo";
+export const DP_CENTROS_PATH = "/dp/centros-custo";
 
 /**
  * Há concessão do módulo? Aceita o select enxuto do middleware e da root page

@@ -131,11 +131,16 @@ function custoDoTrecho(
     const v = positivo(faixa.valor) * pessoas;
     // O verbo muda com a origem: histórico é observação daquele destino, faixa é
     // referência regional curada. Quem valida precisa distinguir as duas.
-    const fonte = faixa.origem === "historico" ? "o histórico" : `a faixa "${faixa.nome}"`;
-    const detalhe = faixa.origem === "historico" ? `${faixa.nome}` : `faixa "${faixa.nome}"`;
+    const proprio = faixa.origem === "historico" || faixa.origem === "informada";
+    const fonte = proprio
+      ? faixa.origem === "historico"
+        ? "o histórico"
+        : "o valor informado"
+      : `a faixa "${faixa.nome}"`;
+    const detalhe = proprio ? `${faixa.nome}` : `faixa "${faixa.nome}"`;
     acc.premissas.push(
       `Trecho ${rota}: sem cotação — usou ${fonte}` +
-        (faixa.origem === "historico" ? ` — ${faixa.nome}` : "") +
+        (proprio ? ` — ${faixa.nome}` : "") +
         ` (${brl(positivo(faixa.valor))} por pessoa).`,
     );
     return {
@@ -197,9 +202,14 @@ function lancarEstadia(
   const diaria = propria > 0 ? propria : daFaixa;
   if (propria === 0 && daFaixa > 0) {
     const doHistorico = faixa!.origem === "historico";
+    const doInformado = faixa!.origem === "informada";
     acc.premissas.push(
-      `Hospedagem em ${parada.cidade}: sem diária informada — usou ` +
-        (doHistorico ? `o histórico — ${faixa!.nome}` : `a faixa "${faixa!.nome}"`) +
+      `Hospedagem em ${parada.cidade}: sem diária informada na linha — usou ` +
+        (doHistorico
+          ? `o histórico — ${faixa!.nome}`
+          : doInformado
+            ? `o valor informado — ${faixa!.nome}`
+            : `a faixa "${faixa!.nome}"`) +
         ` (${brl(daFaixa)} por quarto).`,
     );
   }

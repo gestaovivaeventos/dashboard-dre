@@ -19,9 +19,15 @@ import { orcaPorSetor, setorParaGravar } from "@/lib/orcamento/setor-gravacao";
 import { registrarAlteracao } from "@/lib/orcamento/actions/trilha";
 import { travaDaValidacao } from "@/lib/orcamento/actions/validacao-diretoria";
 import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
-import { lerFaixasParaCalculo } from "@/lib/orcamento/actions/viagens-faixas";
 import { lerHistoricoParaCalculo } from "@/lib/orcamento/actions/viagens-historico";
+import { lerReferenciasInformadas } from "@/lib/orcamento/actions/viagens-referencia";
 import { referenciaDeHospedagem, referenciaDePassagem } from "@/lib/viagens/historico";
+import {
+  destinosPendentes,
+  hospedagemInformada,
+  passagemInformada,
+  type ReferenciaInformada,
+} from "@/lib/viagens/referencia-destino";
 import { chaveNome } from "@/lib/viagens/plano";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { categoriaDoTipo, tiposOferecidos, type TipoViagem } from "@/lib/viagens/tipos";
@@ -99,6 +105,15 @@ export interface LinhaGrade {
   status: "rascunho" | "enviada";
   /** Este destino tem histórico de viagem realizada — o custo dele é observado. */
   temHistorico: boolean;
+  /**
+   * Falta número para este destino, e a tela diz isso na linha.
+   *
+   * Não bloqueia nada: a viagem é cadastrada e entra na fila do diretor. O que falta
+   * é o valor, que a Controladoria informa depois (decisão de 02/10/2026). Antes
+   * havia uma faixa regional que preenchia por trás — e era ela que CALAVA este
+   * aviso, dando à viagem um número plausível que ninguém pediu.
+   */
+  pendencia: string | null;
   setorId: string | null;
   categoryCode: string;
   /** Validação da diretoria. */
@@ -292,10 +307,13 @@ export async function getGradeViagens(
     }
   }
 
-  // O histórico é lido junto para a tela poder dizer, linha a linha, se o custo
-  // daquele destino é OBSERVADO ou estimado por faixa. É a leitura que diz ao admin
-  // quanto do orçamento está ancorado em fato.
-  const historico = await lerHistoricoParaCalculo(supabase, companyId, year);
+  // O histórico e o que a Controladoria informou são lidos juntos: é o que permite
+  // dizer, linha a linha, se o custo daquele destino é OBSERVADO, INFORMADO ou se
+  // ainda falta — e a terceira é a que precisa aparecer.
+  const [historico, informadas] = await Promise.all([
+    lerHistoricoParaCalculo(supabase, companyId, year),
+    lerReferenciasInformadas(supabase, companyId, year),
+  ]);
 
   const decisoes = await lerDecisoes(supabase, companyId, year, "viagem", ids);
   const nomeDoTipo = new Map(tipos.map((t) => [t.id, t.nome] as const));
@@ -341,6 +359,7 @@ export async function getGradeViagens(
       premissas: premissasJson(r.premissas),
       status: r.status === "enviada" ? "enviada" : "rascunho",
       temHistorico: historico ? historico.refs.has(chaveNome(p?.cidade ?? texto(r.titulo))) : false,
+      pendencia: null,
       setorId: sId,
       categoryCode: texto(r.category_code),
       estado: linha.estado,
@@ -350,6 +369,30 @@ export async function getGradeViagens(
       atualizadoEm: (r.updated_at as string | null) ?? null,
     };
   });
+
+  // A pendência sai de `destinosPendentes`, a mesma função que monta a lista da
+  // Controladoria — uma fonte só, senão a linha diria uma coisa e a lista outra.
+  const pendentes = destinosPendentes(
+    linhas.map((l) => ({
+      destino: l.destino,
+      noites: l.noites,
+      modal: l.modal,
+      temPrecoProprio: false,
+    })),
+    historico?.refs ?? new Map(),
+    informadas,
+  );
+  const pendentePorChave = new Map(pendentes.map((pd) => [pd.cidadeChave, pd] as const));
+  for (const l of linhas) {
+    const pd = pendentePorChave.get(chaveNome(l.destino));
+    if (!pd) continue;
+    l.pendencia =
+      pd.faltaPassagem && pd.faltaHospedagem
+        ? "sem passagem e sem diária"
+        : pd.faltaPassagem
+          ? "sem passagem"
+          : "sem diária";
+  }
 
   return {
     orcaPorSetor: porSetor,
@@ -402,9 +445,9 @@ export async function salvarGradeViagens(
   const alvo = await setorParaGravar(supabase, companyId, year, setorId, auth.user.userId);
   if (!podeEscreverNoSetor(auth.setores, alvo.id)) return { ...vazio, error: SEM_ACESSO_SETOR };
 
-  const [tipos, faixas, historico, paramRow] = await Promise.all([
+  const [tipos, informadas, historico, paramRow] = await Promise.all([
     lerTipos(supabase, companyId, year),
-    lerFaixasParaCalculo(supabase, companyId, year),
+    lerReferenciasInformadas(supabase, companyId, year),
     lerHistoricoParaCalculo(supabase, companyId, year),
     supabase
       .from("orcamento_viagem_parametros")
@@ -459,23 +502,27 @@ export async function salvarGradeViagens(
       continue;
     }
 
-    const faixaPassagem = l.faixaPassagemId ? faixas.get(l.faixaPassagemId) : undefined;
-    const faixaHospedagem = l.faixaHospedagemId ? faixas.get(l.faixaHospedagemId) : undefined;
-    const modal = modalDaLinhaDaGrade(l, faixaPassagem?.modal ?? null);
+    // ── A ordem: HISTÓRICO, depois o que a Controladoria INFORMOU, depois nada ──
+    // O histórico é o que este time pagou para ir naquela cidade; o informado é o
+    // número que a Controladoria digitou para um destino onde ninguém foi ainda. O
+    // histórico vem primeiro porque é fato, não opinião. Não havendo nenhum dos
+    // dois, a viagem sai ZERO com premissa — e a linha ganha a pendência. Não há
+    // mais plano B regional: ele calava justamente o aviso.
+    const chaveDestino = chaveNome(l.destino);
+    const refHistorico = historico ? historico.refs.get(chaveDestino) : undefined;
+    const refInformada: ReferenciaInformada | undefined = informadas.get(chaveDestino);
 
-    // ── O HISTÓRICO do destino vence a faixa ──
-    // A faixa é uma referência REGIONAL curada; o histórico é o que este time
-    // pagou para ir NAQUELA cidade. Quando existe, ele é a melhor estimativa que o
-    // sistema tem — e a premissa do motor diz de onde o número veio, com a
-    // mediana, os meses observados e o reajuste. A faixa continua sendo a rede
-    // para destino sem histórico.
-    const refHistorico = historico ? historico.refs.get(chaveNome(l.destino)) : undefined;
+    const modal = modalDaLinhaDaGrade(l, refInformada?.modal ?? null);
+
     const passagemDoHistorico = historico
       ? referenciaDePassagem(refHistorico, historico.anoBase, historico.reajustes)
       : null;
     const hospedagemDoHistorico = historico
       ? referenciaDeHospedagem(refHistorico, historico.anoBase, historico.reajustes)
       : null;
+    // O REAJUSTE não se aplica ao informado: ele já é um número do ano do orçamento.
+    const passagemInformadaRef = passagemInformada(refInformada);
+    const hospedagemInformadaRef = hospedagemInformada(refInformada);
     const cabecalho = viagemRowDaLinha(l, modal, transladoCustoTrajeto);
     const parada = paradaRowDaLinha(l, origem, modal);
 
@@ -484,14 +531,8 @@ export async function salvarGradeViagens(
       { ...cabecalho, origem } as unknown as Record<string, unknown>,
       [parada],
       {
-        passagem:
-          passagemDoHistorico ??
-          (faixaPassagem ? { nome: faixaPassagem.nome, valor: faixaPassagem.valor } : null),
-        hospedagem:
-          hospedagemDoHistorico ??
-          (faixaHospedagem
-            ? { nome: faixaHospedagem.nome, valor: faixaHospedagem.valor }
-            : null),
+        passagem: passagemDoHistorico ?? passagemInformadaRef,
+        hospedagem: hospedagemDoHistorico ?? hospedagemInformadaRef,
       },
     );
     const resultado = calcularViagem(spec, params);

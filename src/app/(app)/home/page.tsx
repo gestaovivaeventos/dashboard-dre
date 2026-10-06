@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { HomeView } from "@/components/app/home-view";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { listarAlertasExperiencia, type DpAlertaExperienciaComEmpresa } from "@/lib/dp/alertas";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   deriveCtrlCaps,
   loadHomeCtrlData,
@@ -42,12 +44,21 @@ export default async function HomePage() {
     });
   }
 
+  // Departamento Pessoal (sigiloso): o bloco só é montado para quem tem a
+  // concessão do módulo — nome de colaborador não aparece para mais ninguém.
+  // Falha na leitura nunca derruba a tela inicial.
+  let dpExperiencia: DpAlertaExperienciaComEmpresa[] | null = null;
+  if (modules?.dp) {
+    dpExperiencia = await listarAlertasExperiencia(createAdminClient()).catch(() => null);
+  }
+
   return (
     <HomeView
       userName={userName}
       caps={caps}
       ctrlData={ctrlData}
       isAdmin={Boolean(isAdmin)}
+      dpExperiencia={dpExperiencia}
     />
   );
 }

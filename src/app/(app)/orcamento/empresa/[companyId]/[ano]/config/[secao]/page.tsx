@@ -12,7 +12,7 @@ import { EmpresaEncargosManager } from "@/components/orcamento/empresa-encargos-
 import { EncargosManager } from "@/components/orcamento/encargos-manager";
 import { ViagemParametrosManager } from "@/components/orcamento/viagem-parametros-manager";
 import { ViagemTiposManager } from "@/components/orcamento/viagem-tipos-manager";
-import { ViagemFaixasManager } from "@/components/orcamento/viagem-faixas-manager";
+import { ViagemReferenciaManager } from "@/components/orcamento/viagem-referencia-manager";
 import { ViagemHistoricoManager } from "@/components/orcamento/viagem-historico-manager";
 
 export const dynamic = "force-dynamic";
@@ -53,8 +53,8 @@ export default async function OrcamentoConfigSecaoPage({
     body = <GruposArvoreManager key={key} fixedCompanyId={companyId} fixedYear={year} />;
   } else if (secao === "viagem-historico") {
     body = <ViagemHistoricoManager key={key} companyId={companyId} year={year} />;
-  } else if (secao === "viagem-faixas") {
-    body = <ViagemFaixasManager key={key} companyId={companyId} year={year} />;
+  } else if (secao === "viagem-referencia") {
+    body = <ViagemReferenciaManager key={key} companyId={companyId} year={year} />;
   } else if (secao === "viagem-tipos") {
     body = <ViagemTiposManager key={key} companyId={companyId} year={year} />;
   } else if (secao === "viagem-parametros") {

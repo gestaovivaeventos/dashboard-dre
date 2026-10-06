@@ -10,6 +10,8 @@ import { WidgetFornecedores } from "@/components/app/home/widget-fornecedores";
 import { WidgetMinhasRequisicoes } from "@/components/app/home/widget-minhas-requisicoes";
 import { WidgetOrcamento } from "@/components/app/home/widget-orcamento";
 import type { HomeCtrlCaps, HomeCtrlData } from "@/lib/home/ctrl-widgets";
+import { DpListaAlertasExperiencia } from "@/components/dp/alertas-experiencia";
+import type { DpAlertaExperienciaComEmpresa } from "@/lib/dp/alertas";
 
 interface Indicator {
   name: string;
@@ -42,6 +44,11 @@ interface HomeViewProps {
    * pode agir sobre ela. A geração dos alertas não mudou — só quem os enxerga.
    */
   isAdmin: boolean;
+  /**
+   * Experiência vencendo (Departamento Pessoal). Só vem preenchido para quem
+   * tem o módulo DP — a página nem lê para os outros. null/vazio = sem bloco.
+   */
+  dpExperiencia?: DpAlertaExperienciaComEmpresa[] | null;
 }
 
 function getGreeting(): string {
@@ -51,7 +58,7 @@ function getGreeting(): string {
   return "Boa noite";
 }
 
-export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
+export function HomeView({ userName, caps, ctrlData, isAdmin, dpExperiencia }: HomeViewProps) {
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -146,6 +153,14 @@ export function HomeView({ userName, caps, ctrlData, isAdmin }: HomeViewProps) {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {/* Departamento Pessoal — só para quem tem o módulo (sigiloso). */}
+      {dpExperiencia && dpExperiencia.length > 0 && (
+        <section className="ch-band">
+          <SectionHead title="Experiência vencendo (15 dias)" />
+          <DpListaAlertasExperiencia alertas={dpExperiencia} />
         </section>
       )}
 

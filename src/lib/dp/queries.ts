@@ -10,7 +10,7 @@ import {
 } from "@/lib/dp/empresa";
 import type { DpCampoRastreado, DpEventoTipo } from "@/lib/dp/historico";
 import type { DpIndicadorEntrada } from "@/lib/dp/indicadores";
-import type { DpEndereco } from "@/lib/dp/solides/parse";
+import type { DpBeneficioSolides, DpDependente, DpEndereco } from "@/lib/dp/solides/parse";
 
 // Leituras das telas do DP. Todas com o admin client DEPOIS de getDpUser():
 // mesmo enquadramento do Caixa — quem tem o módulo vê o grupo inteiro, e o
@@ -69,6 +69,11 @@ export interface DpColaboradorRow {
 export interface DpColaboradorFichaRow extends DpColaboradorRow {
   salario: number | null;
   endereco: DpEndereco | null;
+  dataNascimento: string | null;
+  experienciaFim: string | null;
+  experienciaDuracao: string | null;
+  dependentes: DpDependente[];
+  beneficiosSolides: DpBeneficioSolides[];
   fichaSincronizadaEm: string | null;
   sincronizadoEm: string;
 }
@@ -153,7 +158,9 @@ export async function getDpColaborador(db: AdminClient, id: string): Promise<DpC
   const [{ data, error }, ctx] = await Promise.all([
     db
       .from("dp_colaboradores")
-      .select(`${LIST_COLUMNS}, salario, endereco, ficha_sincronizada_em, sincronizado_em`)
+      .select(
+        `${LIST_COLUMNS}, salario, endereco, ficha_sincronizada_em, sincronizado_em, data_nascimento, experiencia_fim, experiencia_duracao, dependentes, beneficios_solides`,
+      )
       .eq("id", id)
       .maybeSingle(),
     contexto(db),
@@ -166,6 +173,11 @@ export async function getDpColaborador(db: AdminClient, id: string): Promise<DpC
     ...toRow(r, ctx.idx, ctx.names),
     salario: r.salario === null ? null : Number(r.salario),
     endereco: r.endereco ?? null,
+    dataNascimento: r.data_nascimento ?? null,
+    experienciaFim: r.experiencia_fim ?? null,
+    experienciaDuracao: r.experiencia_duracao ?? null,
+    dependentes: Array.isArray(r.dependentes) ? r.dependentes : [],
+    beneficiosSolides: Array.isArray(r.beneficios_solides) ? r.beneficios_solides : [],
     fichaSincronizadaEm: r.ficha_sincronizada_em,
     sincronizadoEm: r.sincronizado_em,
   };

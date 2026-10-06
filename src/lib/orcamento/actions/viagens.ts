@@ -24,9 +24,10 @@ import { travaDeFinalizacao } from "@/lib/orcamento/actions/finalizacao";
 import { estadoDaLinha, lerDecisoes } from "@/lib/orcamento/decisoes-linha";
 import { getCategoriasOrcamento } from "@/lib/orcamento/actions/categoria-metodo";
 import { calcularViagem } from "@/lib/viagens/custo/motor";
-import { lerFaixasParaCalculo } from "@/lib/orcamento/actions/viagens-faixas";
 import { lerHistoricoParaCalculo } from "@/lib/orcamento/actions/viagens-historico";
+import { lerReferenciasInformadas } from "@/lib/orcamento/actions/viagens-referencia";
 import { referenciaDeHospedagem, referenciaDePassagem } from "@/lib/viagens/historico";
+import { hospedagemInformada, passagemInformada } from "@/lib/viagens/referencia-destino";
 import { chaveNome } from "@/lib/viagens/plano";
 import {
   PARAMETROS_PADRAO,
@@ -658,17 +659,14 @@ export async function salvarViagem(
   // ── O CUSTO: calculado aqui, nunca recebido da tela ──
   const { params } = await lerParametros(supabase, companyId, year);
 
-  // ── As REFERÊNCIAS de preço (histórico e faixa) ──
-  // Esta tela não as passava ao motor, e era um defeito calado: abrir aqui uma
-  // linha criada na grade e salvar RECALCULAVA sem referência nenhuma, então a
-  // passagem e a hospedagem caíam a ZERO sem ninguém pedir. As duas entram agora,
-  // com o histórico vencendo a faixa, como na grade.
-  const [faixas, historico] = await Promise.all([
-    lerFaixasParaCalculo(supabase, companyId, year),
+  // ── As REFERÊNCIAS de preço (histórico e valor informado) ──
+  // Esta tela não passava referência nenhuma ao motor, e era um defeito calado:
+  // abrir aqui uma linha criada na grade e salvar RECALCULAVA sem referência, então
+  // a passagem e a hospedagem caíam a ZERO sem ninguém pedir.
+  const [informadas, historico] = await Promise.all([
+    lerReferenciasInformadas(supabase, companyId, year),
     lerHistoricoParaCalculo(supabase, companyId, year),
   ]);
-  const faixaPassagem = faixas.get((atual.faixa_passagem_id as string | null) ?? "");
-  const faixaHospedagem = faixas.get((atual.faixa_hospedagem_id as string | null) ?? "");
 
   const paradasParaGravar = (input.paradas ?? []).map((p, i) => ({
     viagem_id: viagemId,
@@ -720,10 +718,9 @@ export async function salvarViagem(
   // hotel de outra — então multi-destino fica com a faixa, que é regional e não
   // promete precisão de cidade. É a exceção da exceção.
   const umaParada = paradasParaGravar.length === 1;
-  const refHistorico =
-    historico && umaParada
-      ? historico.refs.get(chaveNome(texto(paradasParaGravar[0].cidade)))
-      : undefined;
+  const chaveDestino = umaParada ? chaveNome(texto(paradasParaGravar[0].cidade)) : "";
+  const refHistorico = historico && umaParada ? historico.refs.get(chaveDestino) : undefined;
+  const refInformada = umaParada ? informadas.get(chaveDestino) : undefined;
   const passagemDoHistorico = historico
     ? referenciaDePassagem(refHistorico, historico.anoBase, historico.reajustes)
     : null;
@@ -735,12 +732,8 @@ export async function salvarViagem(
     cabecalho as unknown as Record<string, unknown>,
     paradasParaGravar,
     {
-      passagem:
-        passagemDoHistorico ??
-        (faixaPassagem ? { nome: faixaPassagem.nome, valor: faixaPassagem.valor } : null),
-      hospedagem:
-        hospedagemDoHistorico ??
-        (faixaHospedagem ? { nome: faixaHospedagem.nome, valor: faixaHospedagem.valor } : null),
+      passagem: passagemDoHistorico ?? passagemInformada(refInformada),
+      hospedagem: hospedagemDoHistorico ?? hospedagemInformada(refInformada),
     },
   );
   const resultado = calcularViagem(spec, params);

@@ -43,10 +43,12 @@ import { CAIXA_NAV_KEY_REAL, CAIXA_REAL_PATH } from "@/lib/auth/caixa";
 import { CONTRATOS_NAV_KEY, CONTRATOS_PATH } from "@/lib/auth/contratos";
 import {
   DP_CARGOS_PATH,
+  DP_CENTROS_PATH,
   DP_COLABORADORES_PATH,
   DP_EMPRESAS_PATH,
   DP_INDICADORES_PATH,
   DP_NAV_KEY_CARGOS,
+  DP_NAV_KEY_CENTROS,
   DP_NAV_KEY_COLABORADORES,
   DP_NAV_KEY_EMPRESAS,
   DP_NAV_KEY_INDICADORES,
@@ -425,6 +427,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { key: DP_NAV_KEY_COLABORADORES, title: "Colaboradores", icon: Users, scope: "global", href: DP_COLABORADORES_PATH, dpAccess: true },
       { key: DP_NAV_KEY_INDICADORES, title: "Indicadores", icon: BarChart3, scope: "global", href: DP_INDICADORES_PATH, dpAccess: true },
       { key: DP_NAV_KEY_CARGOS, title: "Cargos e salários", icon: Sliders, scope: "global", href: DP_CARGOS_PATH, dpAccess: true },
+      { key: DP_NAV_KEY_CENTROS, title: "Centros de custo", icon: Target, scope: "global", href: DP_CENTROS_PATH, dpAccess: true },
       { key: DP_NAV_KEY_SIMULACOES, title: "Simulações", icon: Calculator, scope: "global", href: DP_SIMULACOES_PATH, dpAccess: true },
       // De-para unidade/departamento da Sólides → empresa do Control Hub.
       { key: DP_NAV_KEY_EMPRESAS, title: "Empresas (de-para)", icon: GitMerge, scope: "global", href: DP_EMPRESAS_PATH, dpAccess: true },

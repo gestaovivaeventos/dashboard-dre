@@ -23,7 +23,8 @@ import {
   type DpImportacaoResultado,
 } from "@/lib/dp/actions-cargos";
 import { chaveNome, rotuloLinha, ROTULO_ENQUADRAMENTO, type DpEnquadramentoStatus } from "@/lib/dp/cargos";
-import type { DpCargoSolidesUso, DpCargosPagina, DpEnquadramentoRow, DpReajusteRow, DpTabelaLinha } from "@/lib/dp/cargos-queries";
+import { definirCentroDaLinha } from "@/lib/dp/actions-cadastro";
+import type { DpCargoSolidesUso, DpCargosPagina, DpCentroCusto, DpEnquadramentoRow, DpReajusteRow, DpTabelaLinha } from "@/lib/dp/cargos-queries";
 import { formatDateTimeBR } from "@/lib/ctrl/datetime";
 import { lerPercentual, lerSalario, previaReajuste } from "@/lib/dp/tabela-salarial";
 import { formatBRL } from "@/lib/orcamento/format";
@@ -54,7 +55,7 @@ function useAcao() {
 export function DpCargosClient({ companyId, companyName, pagina }: { companyId: string; companyName: string; pagina: DpCargosPagina }) {
   return (
     <div className="space-y-6">
-      <TabelaSalarial companyId={companyId} companyName={companyName} tabela={pagina.tabela} reajustes={pagina.reajustes} />
+      <TabelaSalarial companyId={companyId} companyName={companyName} tabela={pagina.tabela} centros={pagina.centros} reajustes={pagina.reajustes} />
       <DeParaSolides companyId={companyId} tabela={pagina.tabela} cargos={pagina.cargosSolides} />
       <Enquadramento rows={pagina.enquadramento} semCargo={pagina.semCargo} />
     </div>
@@ -67,11 +68,13 @@ function TabelaSalarial({
   companyId,
   companyName,
   tabela,
+  centros,
   reajustes,
 }: {
   companyId: string;
   companyName: string;
   tabela: DpTabelaLinha[];
+  centros: DpCentroCusto[];
   reajustes: DpReajusteRow[];
 }) {
   const { pending, rodar, showToast, router, start } = useAcao();
@@ -234,6 +237,9 @@ function TabelaSalarial({
                 <th className="py-2 pr-2 font-medium">Setor</th>
                 <th className="py-2 pr-2 font-medium">Cargo</th>
                 <th className="w-36 py-2 pr-2 text-right font-medium">Salário</th>
+                <th className="w-48 py-2 pr-2 font-medium" title="Centro de custo padrão de quem está nesta linha">
+                  Centro de custo
+                </th>
                 <th className="w-20 py-2 pr-2 text-right font-medium" title="Ativos desta empresa vinculados a esta linha">
                   Pessoas
                 </th>
@@ -243,8 +249,9 @@ function TabelaSalarial({
             <tbody>
               {visiveis.map((l, i) => (
                 <FragmentoLinha
-                  key={`${l.id}:${l.setor}:${l.cargo}:${l.salario}`}
+                  key={`${l.id}:${l.setor}:${l.cargo}:${l.salario}:${l.centroCustoId ?? ""}`}
                   companyId={companyId}
+                  centros={centros}
                   linha={l}
                   primeira={i === 0}
                   ultima={i === visiveis.length - 1}
@@ -259,7 +266,7 @@ function TabelaSalarial({
               )}
               {visiveis.length === 0 && rascunhoDepoisDe === undefined && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-ink-muted">
+                  <td colSpan={7} className="py-6 text-center text-ink-muted">
                     {tabela.length === 0 ? "Tabela vazia. Importe a planilha ou adicione a primeira linha." : "Nenhuma linha corresponde à busca."}
                   </td>
                 </tr>
@@ -381,6 +388,7 @@ function ApagarTudo({ companyId, companyName, tabela }: { companyId: string; com
 
 function FragmentoLinha(props: {
   companyId: string;
+  centros: DpCentroCusto[];
   linha: DpTabelaLinha;
   primeira: boolean;
   ultima: boolean;
@@ -399,6 +407,7 @@ function FragmentoLinha(props: {
 
 function LinhaEditavel({
   companyId,
+  centros,
   linha,
   primeira,
   ultima,
@@ -406,6 +415,7 @@ function LinhaEditavel({
   abrirRascunho,
 }: {
   companyId: string;
+  centros: DpCentroCusto[];
   linha: DpTabelaLinha;
   primeira: boolean;
   ultima: boolean;
@@ -477,6 +487,23 @@ function LinhaEditavel({
           aria-label="Salário"
         />
       </td>
+      <td className="py-1 pr-2">
+        <select
+          value={linha.centroCustoId ?? ""}
+          disabled={pending || centros.length === 0}
+          onChange={(e) => rodar(() => definirCentroDaLinha({ companyId, linhaId: linha.id, centroId: e.target.value || null }))}
+          className={inputCls}
+          aria-label="Centro de custo padrão"
+          title={centros.length === 0 ? "Cadastre os centros de custo desta empresa primeiro" : undefined}
+        >
+          <option value="">—</option>
+          {centros.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.codigo ? `${c.codigo} · ${c.nome}` : c.nome}
+            </option>
+          ))}
+        </select>
+      </td>
       <td className="py-1 pr-2 text-right tabular-nums text-ink-muted">{linha.pessoas || "—"}</td>
       <td className="py-1">
         <div className="flex justify-end">
@@ -533,6 +560,7 @@ function LinhaNova({ companyId, depoisDeId, fechar }: { companyId: string; depoi
       <td className="py-1 pr-2">
         <input value={salario} onChange={(e) => setSalario(e.target.value)} onKeyDown={onKey} placeholder="0,00" inputMode="decimal" className={`${inputCls} text-right`} disabled={pending} />
       </td>
+      <td />
       <td />
       <td className="py-1">
         <div className="flex justify-end gap-1">
@@ -678,7 +706,40 @@ function Enquadramento({ rows, semCargo }: { rows: DpEnquadramentoRow[]; semCarg
         ),
       },
       { key: "cargo", label: "Cargo na Sólides", plain: (r) => r.cargoSolides ?? "—", sortVal: (r) => (r.cargoSolides ?? "").toLowerCase() },
-      { key: "linha", label: "Linha da tabela", plain: (r) => r.linhaRotulo ?? "—", sortVal: (r) => (r.linhaRotulo ?? "").toLowerCase() },
+      {
+        key: "linha",
+        label: "Linha da tabela",
+        plain: (r) => (r.linhaRotulo ? `${r.linhaRotulo}${r.origemLinha === "excecao" ? " (exceção)" : ""}` : "—"),
+        sortVal: (r) => (r.linhaRotulo ?? "").toLowerCase(),
+        cell: (r) =>
+          r.linhaRotulo ? (
+            <span>
+              {r.linhaRotulo}
+              {r.origemLinha === "excecao" && (
+                <span className="ml-1.5 rounded bg-amber-500/10 px-1 py-0.5 text-xs text-amber-800 dark:text-amber-300">exceção</span>
+              )}
+            </span>
+          ) : (
+            "—"
+          ),
+      },
+      {
+        key: "centro",
+        label: "Centro de custo",
+        plain: (r) => r.centroCusto ?? "—",
+        sortVal: (r) => (r.centroCusto ?? "").toLowerCase(),
+        cell: (r) =>
+          r.centroCusto ? (
+            <span>
+              {r.centroCusto}
+              {r.origemCentro === "excecao" && (
+                <span className="ml-1.5 rounded bg-amber-500/10 px-1 py-0.5 text-xs text-amber-800 dark:text-amber-300">exceção</span>
+              )}
+            </span>
+          ) : (
+            "—"
+          ),
+      },
       {
         key: "salario",
         label: "Salário",

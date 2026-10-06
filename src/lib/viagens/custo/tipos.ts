@@ -152,8 +152,14 @@ export interface ViagemSpec {
 export interface FaixaReferencia {
   nome: string;
   valor: number;
-  /** Ausente = faixa (era a única fonte até 02/10/2026). */
-  origem?: "faixa" | "historico";
+  /**
+   * De onde o valor veio. Ausente = faixa (a única fonte até 02/10/2026).
+   *
+   * `historico` = observado numa viagem que aconteceu. `informada` = digitado
+   * pela Controladoria para um destino onde ninguém foi ainda. A premissa usa
+   * verbos diferentes porque as duas confianças são diferentes.
+   */
+  origem?: "faixa" | "historico" | "informada";
 }
 
 /**

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DpListaAlertasExperiencia } from "@/components/dp/alertas-experiencia";
 import { DpNaoInstalado } from "@/components/dp/nao-instalado";
 import { DpSyncPanel } from "@/components/dp/sync-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTimeBR } from "@/lib/ctrl/datetime";
+import { listarAlertasExperiencia } from "@/lib/dp/alertas";
 import { getDpUser } from "@/lib/dp/auth";
 import { descreverEvento } from "@/lib/dp/historico";
 import { DpNaoInstaladoError, lastDpSyncRun, listDpColaboradores, listDpEventosRecentes } from "@/lib/dp/queries";
@@ -22,12 +24,18 @@ export default async function DpOverviewPage() {
   let loaded;
   try {
     const desde = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    loaded = await Promise.all([listDpColaboradores(db), lastDpSyncRun(db), listDpEventosRecentes(db, desde)]);
+    loaded = await Promise.all([
+      listDpColaboradores(db),
+      lastDpSyncRun(db),
+      listDpEventosRecentes(db, desde),
+      // Coluna da base cadastral ausente (migration 20261002150000) não derruba a Visão geral.
+      listarAlertasExperiencia(db).catch(() => null),
+    ]);
   } catch (error) {
     if (error instanceof DpNaoInstaladoError) return <DpNaoInstalado />;
     throw error;
   }
-  const [rows, lastRun, eventos] = loaded;
+  const [rows, lastRun, eventos, alertasExp] = loaded;
 
   const ativos = rows.filter((r) => r.ativo);
   const semEmpresa = ativos.filter((r) => !r.companyName).length;
@@ -81,6 +89,17 @@ export default async function DpOverviewPage() {
           </CardContent>
         </Card>
       )}
+      {alertasExp && alertasExp.length > 0 && (
+        <Card className="border-amber-500/40">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Experiência vencendo nos próximos 15 dias</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DpListaAlertasExperiencia alertas={alertasExp} />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Movimentações dos últimos 30 dias</CardTitle>
