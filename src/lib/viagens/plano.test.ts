@@ -14,14 +14,6 @@ const CADASTROS = {
     { id: "t-cons", nome: "Consultoria" },
     { id: "t-trein", nome: "Treinamento" },
   ],
-  faixasPassagem: [
-    { id: "f-se", nome: "Capital Sudeste" },
-    { id: "f-ne", nome: "Capital Nordeste" },
-  ],
-  faixasHospedagem: [
-    { id: "h-cap", nome: "Capital" },
-    { id: "h-int", nome: "Interior" },
-  ],
 };
 
 // ─── O parser ───────────────────────────────────────────────────────────────
@@ -66,8 +58,6 @@ test("os sinônimos de campo que o modelo usa são aceitos", () => {
   assert.equal(r[0].mes, 5);
   assert.equal(r[0].noites, 3);
   assert.equal(r[0].pessoasPorQuarto, 1);
-  assert.equal(r[0].faixaPassagem, "Nordeste");
-  assert.equal(r[0].faixaHospedagem, "Capital");
 });
 
 test("faltando pessoas e noites, assume 1 — nunca zero", () => {
@@ -86,27 +76,27 @@ test("JSON quebrado ou vazio não explode", () => {
 
 // ─── O casamento com os cadastros ───────────────────────────────────────────
 
-test("casa o tipo e as faixas por nome, ignorando acento e caixa", () => {
+test("casa o tipo por nome, ignorando acento e caixa", () => {
   const r = resolverPlano(
     parsePlanoViagens([
-      { destino: "Recife", mes: 5, noites: 3, pessoas: 2, tipo: "TREINAMENTO", faixa: "capital nordeste", hotel: "capital" },
+      { destino: "Recife", mes: 5, noites: 3, pessoas: 2, tipo: "TREINAMENTO" },
     ]),
     CADASTROS,
   );
   assert.equal(r.linhas[0].tipoId, "t-trein");
-  assert.equal(r.linhas[0].faixaPassagemId, "f-ne");
-  assert.equal(r.linhas[0].faixaHospedagemId, "h-cap");
   assert.deepEqual(r.avisos, []);
 });
 
 test("casa por CONTINÊNCIA depois do exato", () => {
-  // A IA escreve "Nordeste" para "Capital Nordeste" com frequência; recusar
-  // perderia a faixa e a linha sairia com o padrão errado, calada.
+  // A IA descreve o tipo em vez de copiá-lo ("Treinamento de vendas" para
+  // "Treinamento"); recusar perderia o tipo e a linha cairia no padrão, calada.
   const r = resolverPlano(
-    parsePlanoViagens([{ destino: "Natal", mes: 6, noites: 2, pessoas: 1, faixa: "Nordeste" }]),
+    parsePlanoViagens([
+      { destino: "Natal", mes: 6, noites: 2, pessoas: 1, tipo: "Treinamento de vendas" },
+    ]),
     CADASTROS,
   );
-  assert.equal(r.linhas[0].faixaPassagemId, "f-ne");
+  assert.equal(r.linhas[0].tipoId, "t-trein");
 });
 
 test("tipo inexistente cai no PADRÃO e AVISA", () => {
@@ -118,23 +108,6 @@ test("tipo inexistente cai no PADRÃO e AVISA", () => {
   );
   assert.equal(r.linhas[0].tipoId, "t-cons", "o primeiro do cadastro");
   assert.match(r.avisos.join(" | "), /Tipo "Auditoria" não existe/);
-});
-
-test("faixa inexistente AVISA e deixa o gestor escolher", () => {
-  const r = resolverPlano(
-    parsePlanoViagens([{ destino: "Manaus", mes: 7, noites: 2, pessoas: 2, faixa: "Capital Norte" }]),
-    CADASTROS,
-  );
-  assert.match(r.avisos.join(" | "), /Faixa de passagem "Capital Norte" não existe/);
-});
-
-test("BATE-VOLTA não recebe faixa de hospedagem", () => {
-  // Hotel em viagem sem pernoite somaria hospedagem que não existe.
-  const r = resolverPlano(
-    parsePlanoViagens([{ destino: "Barbacena", mes: 3, noites: 0, pessoas: 2, hotel: "Capital" }]),
-    CADASTROS,
-  );
-  assert.equal(r.linhas[0].faixaHospedagemId, null);
 });
 
 test("mês ausente vira AVISO, não erro — a linha fica rascunho", () => {
@@ -157,10 +130,7 @@ test("o mesmo aviso não se repete em 50 linhas", () => {
 });
 
 test("sem tipo cadastrado, avisa em vez de inventar id", () => {
-  const r = resolverPlano(
-    parsePlanoViagens([{ destino: "Recife", mes: 5 }]),
-    { tipos: [], faixasPassagem: [], faixasHospedagem: [] },
-  );
+  const r = resolverPlano(parsePlanoViagens([{ destino: "Recife", mes: 5 }]), { tipos: [] });
   assert.equal(r.linhas[0].tipoId, "");
   assert.match(r.avisos.join(" | "), /Não há tipo de viagem cadastrado/);
 });

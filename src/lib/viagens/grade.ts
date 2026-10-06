@@ -1,28 +1,20 @@
-import { modalDaLinha } from "@/lib/viagens/colunas";
-import type { ModalTrecho } from "@/lib/viagens/custo/tipos";
+import { PESSOAS_POR_QUARTO_HISTORICO } from "@/lib/viagens/historico";
+import { faltaParaOk, type DadosBasicos } from "@/lib/viagens/fluxo";
 
 // =============================================================================
-// A GRADE: uma linha por viagem (02/10/2026).
+// A GRADE de viagens — a parte PURA (reescrita em 06/10/2026).
 //
-// ── Por que a grade existe ────────────────────────────────────────────────
-// Um gestor de Consultoria orça ~50 viagens por ano, a destinos que quase não se
-// repetem. O desenho anterior — uma conversa e um formulário de 40 campos por
-// viagem — custava minutos por linha, o que dá horas. A grade pede QUATRO coisas
-// por viagem (destino, mês, noites, pessoas) e deriva o resto.
+// ── O que esta versão deixou de fazer ─────────────────────────────────────
+// Ela montava as colunas que o MOTOR de custo precisava: trechos, veículos,
+// pedágios, translado derivado do modal, faixa de preço. Nada disso existe mais no
+// caminho — o custo vem da cotação externa, lançada por grupo de despesa. O que
+// sobrou é o que descreve a viagem para alguém conseguir cotá-la, e é curto:
+// destino, UF, mês, noites, pessoas, ocupação, modal, tipo e finalidade.
 //
-// ── Uma viagem simples é UMA parada ───────────────────────────────────────
-// Não há modelo novo: a linha da grade é escrita no mesmo `orcamento_viagens` +
-// uma única `orcamento_viagem_paradas`. O motor, o retrato, os grupos e a
-// validação continuam exatamente como estão — a grade é só um jeito rápido de
-// escrever no modelo que já existe. O roteiro multi-destino segue existindo, pela
-// tela da viagem, para a exceção.
-//
-// ── O que a grade NÃO pede, e de onde vem ────────────────────────────────
-//   quartos        → ceil(pessoas / pessoasPorQuarto), com pessoasPorQuarto = 2
-//   modal          → da faixa de passagem escolhida
-//   trajetos/dia   → padrão do perfil (2 por dia, hotel ↔ compromisso)
-//   translado      → 2 trajetos quando o modal é aéreo
-//   preço          → da faixa; cotação real é refinamento opcional
+// ── Falha POR LINHA, nunca pelo lote ─────────────────────────────────────
+// Destino errado na linha 30 não pode custar as 49 certas, e a linha recusada volta
+// com o ÍNDICE para a tela apontar onde foi. Mesma regra da importação do plano de
+// cargos e dos grupos de despesa.
 //
 // Módulo PURO e testado.
 // =============================================================================
@@ -32,7 +24,9 @@ export interface LinhaViagemInput {
   id?: string | null;
   /** Cidade de destino. É o mínimo da linha. */
   destino: string;
-  /** Mês da partida, 1..12. `null` = ainda não definido (a linha fica rascunho). */
+  /** UF do destino — "São Paulo" e "São Paulo do Potengi" cotam muito diferente. */
+  uf?: string | null;
+  /** Mês da partida, 1..12. `null` = ainda não definido. */
   mesIda: number | null;
   noites: number;
   pessoas: number;
@@ -40,97 +34,83 @@ export interface LinhaViagemInput {
   pessoasPorQuarto?: number | null;
   /** Tipo da viagem — resolve a categoria da DRE pelo de-para. */
   tipoId: string;
-  faixaPassagemId?: string | null;
-  faixaHospedagemId?: string | null;
-  /**
-   * Modal do trecho. Vem da faixa por padrão; a linha pode sobrescrever (um
-   * destino de 400 km com 4 pessoas pode compensar de carro).
-   */
+  /** Como o grupo vai (avião, ônibus, carro…). Informação para quem cota. */
   modal?: string | null;
-  /** Só pesa em carro/van, onde o custo é km × R$/km. */
-  distanciaKm?: number | null;
-  /** Uma linha: é o que o diretor lê para aprovar. */
+  /** Uma linha: é o que a diretoria lê para aprovar. Obrigatória para dar OK. */
   finalidade?: string | null;
-  /** Deslocamento diário hotel ↔ compromisso. Padrão do perfil. */
-  localTrajetosDia?: number | null;
-  localCustoTrajeto?: number | null;
 }
 
-/** Quantos trajetos por dia entre hotel e compromisso, quando ninguém diz. */
-export const TRAJETOS_DIA_PADRAO = 2;
-/** Translado casa ↔ aeroporto, nas duas pontas. */
-export const TRANSLADO_TRAJETOS_AEREO = 2;
-export const PESSOAS_POR_QUARTO_PADRAO = 2;
+export const PESSOAS_POR_QUARTO_PADRAO = PESSOAS_POR_QUARTO_HISTORICO;
 
 function texto(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+function numOuNulo(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  return null;
+}
+
 function inteiro(v: unknown, minimo: number, padrao: number): number {
+  // `null` e `""` são AUSÊNCIA e caem no padrão. Sem este teste, `Number(null)`
+  // devolve 0 (não NaN) e o padrão nunca é usado: ocupação em branco virava 1
+  // pessoa por quarto, dobrando os quartos que vão no .xls da cotação.
+  if (v === null || v === undefined || v === "") return padrao;
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return padrao;
   return Math.max(minimo, Math.round(n));
 }
 
-function numOuNulo(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
 /**
- * O que impede de GRAVAR a linha.
+ * O mínimo para GRAVAR um rascunho: o destino.
  *
- * Deliberadamente curto: a grade é preenchida de cima para baixo, e barrar por
- * campo incompleto faria o gestor perder as 49 linhas certas por causa de uma.
- * Sem destino não há viagem; o resto se completa depois. Quem cobra o conjunto é
- * o envio (`enviarViagem`), que exige mês e custo.
+ * É de propósito mais frouxo que `faltaParaOk`: montar 50 linhas leva várias idas
+ * e vindas, e barrar a gravação a cada campo em branco obrigaria a preencher na
+ * ordem do sistema. O rigor fica no OK, que é quando a viagem sai da mão do gestor.
  */
 export function validarLinhaViagem(l: LinhaViagemInput): string | null {
-  if (!texto(l.destino)) return "Informe a cidade de destino.";
+  if (!texto(l.destino)) return "Informe o destino.";
   if (!texto(l.tipoId)) return "Escolha o tipo da viagem.";
-  if (l.mesIda != null && !(Number.isInteger(l.mesIda) && l.mesIda >= 1 && l.mesIda <= 12)) {
-    return "Mês inválido.";
-  }
-  if (inteiro(l.noites, 0, 0) < 0) return "As noites não podem ser negativas.";
-  if (inteiro(l.pessoas, 1, 1) < 1) return "A viagem tem de ter pelo menos uma pessoa.";
   return null;
 }
 
-/** Título padrão: o destino. O mês e as pessoas já aparecem no detalhe da Prévia. */
-export function tituloDaLinha(l: LinhaViagemInput): string {
-  return texto(l.destino) || "Viagem sem destino";
+/** O que o OK exige, lido da mesma fonte que a tela usa para habilitar o botão. */
+export function faltaParaOkDaLinha(l: LinhaViagemInput): string | null {
+  const d: DadosBasicos = {
+    destino: texto(l.destino),
+    uf: texto(l.uf) || null,
+    mesIda: l.mesIda ?? null,
+    noites: inteiro(l.noites, 0, 0),
+    pessoas: inteiro(l.pessoas, 1, 1),
+    pessoasPorQuarto: numOuNulo(l.pessoasPorQuarto),
+    modal: texto(l.modal) || null,
+    finalidade: texto(l.finalidade) || null,
+    tipoId: texto(l.tipoId) || null,
+  };
+  return faltaParaOk(d);
 }
 
-/** Quartos que a linha consome — a conta que o motor também faz. */
+export function tituloDaLinha(l: LinhaViagemInput): string {
+  const destino = texto(l.destino) || "Viagem";
+  const uf = texto(l.uf);
+  return uf ? `${destino} (${uf})` : destino;
+}
+
+/** Quartos da viagem — entra no .xls da cotação, que precisa saber quantos reservar. */
 export function quartosDaLinha(l: LinhaViagemInput): number {
   const pessoas = inteiro(l.pessoas, 1, 1);
   const porQuarto = inteiro(l.pessoasPorQuarto, 1, PESSOAS_POR_QUARTO_PADRAO);
   return Math.ceil(pessoas / porQuarto);
 }
 
-/** O modal efetivo: o da linha, senão o da faixa, senão avião. */
-export function modalDaLinhaDaGrade(
-  l: LinhaViagemInput,
-  modalDaFaixa: string | null | undefined,
-): ModalTrecho {
-  const escolhido = texto(l.modal) || texto(modalDaFaixa);
-  return escolhido ? modalDaLinha(escolhido) : "aviao";
-}
-
 /**
  * As colunas de `orcamento_viagens` que a linha escreve.
  *
- * O TRANSLADO é derivado do modal: viagem aérea tem casa ↔ aeroporto nas duas
- * pontas, viagem de carro não tem. É uma suposição, e por isso o custo dela
- * aparece como linha própria na árvore — o diretor vê o que foi assumido.
+ * Só dados BÁSICOS: o custo não passa por aqui. Os campos do desenho antigo
+ * (`volta_*`, `translado_*`, `outros`) ficaram na tabela sem leitor — o translado
+ * virou um grupo da cotação, que é onde ele de fato aparece agora.
  */
-export function viagemRowDaLinha(
-  l: LinhaViagemInput,
-  modal: ModalTrecho,
-  custoTransladoTrajeto: number | null,
-): Record<string, unknown> {
-  const aereo = modal === "aviao";
+export function viagemRowDaLinha(l: LinhaViagemInput): Record<string, unknown> {
   return {
     titulo: tituloDaLinha(l),
     finalidade: texto(l.finalidade) || null,
@@ -138,69 +118,41 @@ export function viagemRowDaLinha(
     pessoas: inteiro(l.pessoas, 1, 1),
     pessoas_por_quarto: inteiro(l.pessoasPorQuarto, 1, PESSOAS_POR_QUARTO_PADRAO),
     tipo_id: texto(l.tipoId),
-    faixa_passagem_id: texto(l.faixaPassagemId) || null,
-    faixa_hospedagem_id: texto(l.faixaHospedagemId) || null,
-    translado_custo_trajeto: aereo ? custoTransladoTrajeto : null,
-    translado_trajetos: aereo && custoTransladoTrajeto != null ? TRANSLADO_TRAJETOS_AEREO : null,
-    // A VOLTA é sempre o mesmo modal da ida: o gestor respondeu "voltam direto".
-    // Multi-destino e volta diferente são a exceção, pela tela da viagem.
-    volta_modal: modal,
-    volta_distancia_km: numOuNulo(l.distanciaKm),
-    outros: [],
+    volta_modal: texto(l.modal) || null,
   };
 }
 
-/** A única parada da viagem simples. */
-export function paradaRowDaLinha(
-  l: LinhaViagemInput,
-  origem: string,
-  modal: ModalTrecho,
-): Record<string, unknown> {
-  const noites = inteiro(l.noites, 0, 0);
-  const trajetos = numOuNulo(l.localTrajetosDia) ?? (noites > 0 ? TRAJETOS_DIA_PADRAO : null);
+/**
+ * A única parada da viagem.
+ *
+ * Uma linha = uma cidade, por decisão de 06/10/2026: viagem que passa por duas
+ * cidades vira duas linhas. É mais simples de entender e de cotar, e como quem
+ * digita os valores é a Controladoria, a passagem contada uma vez só fica sob o
+ * controle dela (lança numa linha e deixa a outra sem).
+ */
+export function paradaRowDaLinha(l: LinhaViagemInput, origem: string): Record<string, unknown> {
   return {
     ordem: 1,
     cidade: texto(l.destino),
-    noites,
-    chegada_de: texto(origem),
-    chegada_modal: modal,
-    chegada_distancia_km: numOuNulo(l.distanciaKm),
-    // Preço fica VAZIO de propósito: ele vem da faixa no motor, ou de uma cotação
-    // real depois. Gravar o valor da faixa aqui o congelaria, e mudar a faixa
-    // deixaria de refletir nas viagens que ainda não foram fechadas.
-    chegada_preco_pessoa: null,
-    chegada_preco_total: null,
-    chegada_pedagios: null,
-    chegada_veiculos: null,
-    diaria_hotel: null,
-    local_trajetos_dia: trajetos,
-    local_custo_trajeto: numOuNulo(l.localCustoTrajeto),
-    local_destino: null,
-    local_endereco: null,
+    uf: texto(l.uf).toUpperCase().slice(0, 2) || null,
+    noites: inteiro(l.noites, 0, 0),
+    chegada_de: texto(origem) || null,
+    chegada_modal: texto(l.modal) || null,
   };
 }
 
 export interface ResultadoLinha {
-  /** Índice da linha na grade — é como a tela aponta o erro. */
+  /** Posição na lista enviada — é como a tela devolve o erro à linha certa. */
   indice: number;
   id?: string;
   erro?: string;
-  custoTotal?: number;
 }
 
 export interface ResumoLote {
   gravadas: number;
   comErro: number;
-  total: number;
 }
 
-/**
- * O resumo que a tela mostra depois do lote.
- *
- * A grade grava LINHA A LINHA e nunca derruba o lote: destino errado na linha 30
- * não pode custar as 49 certas. É a mesma regra da importação de planilha do plano
- * de cargos, e pelo mesmo motivo.
- */
 export function resumirLote(resultados: readonly ResultadoLinha[]): ResumoLote {
   let gravadas = 0;
   let comErro = 0;
@@ -208,5 +160,5 @@ export function resumirLote(resultados: readonly ResultadoLinha[]): ResumoLote {
     if (r.erro) comErro += 1;
     else gravadas += 1;
   }
-  return { gravadas, comErro, total: resultados.length };
+  return { gravadas, comErro };
 }

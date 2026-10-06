@@ -82,7 +82,7 @@ export function describeUserExceptions(user: UserRef): UserException[] {
       title: "Alçada de aprovação restrita",
       detail:
         `Mesmo vinculado a outros setores na tela de Usuários (o que ele precisa para CRIAR ` +
-        `requisições), só responde por: ${restriction.allowedSectorNames.join(", ")}. ` +
+        `requisições), só responde por: ${restriction.allowedSectors.map((s) => s.name).join(", ")}. ` +
         `Vale na tela de Aprovações, nas ações do servidor e no lembrete diário por e-mail — e ` +
         `também na tela de Requisições, onde estes setores (e não os vínculos) definem quais ` +
         `requisições de terceiros ele enxerga.`,
@@ -100,7 +100,7 @@ export function describeUserExceptions(user: UserRef): UserException[] {
       title: "Cobertura temporária de aprovações (férias/ausência)",
       detail:
         `Enquanto ${cov.coveredEmail} está fora, recebe os lembretes diários da etapa de gerente ` +
-        `dos setores: ${cov.managerSectorNames.join(", ")}. Aprova pelo próprio perfil (não muda ` +
+        `dos setores: ${cov.managerSectors.map((s) => s.name).join(", ")}. Aprova pelo próprio perfil (não muda ` +
         `alçada). Desde ${cov.since}; retorno: ${cov.until}. TEMPORÁRIO — remover no retorno.`,
       source: "src/lib/ctrl/routing.ts (APPROVAL_COVERAGE)",
     });
@@ -116,7 +116,7 @@ export function describeUserExceptions(user: UserRef): UserException[] {
       title: "Relatório: enxerga setores extras",
       detail:
         `Só na tela de Relatórios: além das próprias requisições, vê TODAS as requisições ` +
-        `(qualquer criador) dos setores ${rule.sectorNames.join(", ")}. Não vale em Requisições ` +
+        `(qualquer criador) dos setores ${rule.sectors.map((s) => s.name).join(", ")}. Não vale em Requisições ` +
         `nem em Aprovações. ${rule.reason}`,
       source: "src/lib/ctrl/routing.ts (REPORT_EXTRA_SECTORS)",
     });
@@ -132,7 +132,7 @@ export function describeUserExceptions(user: UserRef): UserException[] {
       scope: "Compras",
       title: "Diretor responsável por setores (sem o perfil Diretor)",
       detail:
-        `Responsável pela aprovação de: ${highlight.sectorNames.join(", ")}. ` +
+        `Responsável pela aprovação de: ${highlight.sectors.map((s) => s.name).join(", ")}. ` +
         `Esses setores aparecem destacados como "Do seu setor" na tela de Aprovações e ele ` +
         `entra na etapa do DIRETOR do lembrete diário por e-mail, restrito a eles — ou seja, ` +
         `recebe o aviso quando o gerente já aprovou e a requisição desses setores aguarda o diretor.`,

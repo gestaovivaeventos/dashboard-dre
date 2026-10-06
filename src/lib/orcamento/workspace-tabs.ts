@@ -185,22 +185,7 @@ export const CONFIG_SECOES: readonly ConfigSecao[] = [
   {
     slug: "viagem-tipos",
     label: "Tipos de viagem",
-    desc: "De-para tipo de viagem → categoria da DRE. É o que destrava o cadastro de viagens.",
-  },
-  {
-    slug: "viagem-historico",
-    label: "Histórico de viagens",
-    desc: "O que foi gasto no ano passado + o reajuste. É daqui que sai o custo de quem repete destino.",
-  },
-  {
-    slug: "viagem-referencia",
-    label: "Destinos sem histórico",
-    desc: "A fila da Controladoria: destino novo que as viagens pedem e espera passagem e diária.",
-  },
-  {
-    slug: "viagem-parametros",
-    label: "Parâmetros de viagem",
-    desc: "Alimentação por dia e R$/km de carro próprio — os dois parâmetros da empresa.",
+    desc: "De-para tipo de viagem → categoria da DRE. É o único cadastro que a viagem precisa.",
   },
 ] as const;
 

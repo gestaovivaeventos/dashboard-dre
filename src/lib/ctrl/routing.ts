@@ -196,29 +196,26 @@ export function isForcedDirectorRouting(input: {
 // Este override separa a alçada de aprovação sem mexer nos vínculos: o usuário
 // segue com todos os setores para criar requisições, mas na tela de Aprovações
 // (e nas ações de aprovação no servidor) só enxerga/age nos setores listados
-// aqui. Identificamos por e-mail (chave natural estável); os setores são casados
-// por NOME (ctrl_sectors.name é único), de forma resiliente a acento/caixa.
+// aqui. Identificamos por e-mail (chave natural estável); os setores são fixados
+// por ID (`name` só para leitura humana). O ID é estável a renomeação e, quando
+// o Compras passar a atender mais de uma empresa, IMPOSSÍVEL de colidir com um
+// setor de mesmo nome de outra empresa — um nome ("Diretoria", "Despesas Gerais")
+// casaria nas duas; o id pertence a um setor só.
 export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
   email: string;
-  allowedSectorNames: readonly string[];
+  allowedSectors: readonly { id: string; name: string }[];
 }> = [
   {
     // Regis Adriano Da Costa — solicita em todos os setores, mas como gerente só
-    // aprova estes quatro. "Despesas Gerais" entrou em 03/08/2026.
-    //
-    // O setor chama-se "Bem Laranja" na base; a regra nasceu com
-    // "Associação Bem Laranja", que não casava com nada — o casamento é por nome
-    // exato (normalizado só para acento/caixa), então a alçada desse setor ficava
-    // órfã em silêncio: ele não via nem aprovava as requisições dele. Os dois nomes
-    // ficam listados para a regra sobreviver a uma renomeação em qualquer direção —
-    // nome que não existe não resolve setor nenhum e é inofensivo.
+    // aprova estes quatro. "Despesas Gerais" entrou em 03/08/2026. (Antes casava
+    // por nome e listava "Associação Bem Laranja" + "Bem Laranja" para sobreviver
+    // a rename; fixado no id, o rename deixou de ser problema.)
     email: "regis@vivaeventos.com.br",
-    allowedSectorNames: [
-      "Gestão de Pessoas",
-      "Associação Bem Laranja",
-      "Bem Laranja",
-      "Eventos Oficiais",
-      "Despesas Gerais",
+    allowedSectors: [
+      { id: "b4acc15b-0414-443a-a6db-fb541cfc0bd0", name: "Gestão de Pessoas" },
+      { id: "444e3b49-b040-4ff8-87c5-53c73a551237", name: "Bem Laranja" },
+      { id: "6f4ee76a-d98c-4ceb-8041-6b03c77a1cf0", name: "Eventos Oficiais" },
+      { id: "4e7709a5-e68b-41c1-83ba-5387bcbd017d", name: "Despesas Gerais" },
     ],
   },
 ];
@@ -233,8 +230,9 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
 //
 // Este override marca, por e-mail, os setores que tais usuários dirigem, ligando
 // o mesmo destaque visual sem alterar seu perfil nem sua visibilidade (seguem
-// vendo TODAS as requisições). Setores casados por NOME (ctrl_sectors.name é
-// único), resiliente a acento/caixa, como no restante deste módulo.
+// vendo TODAS as requisições). Setores fixados por ID (`name` só para leitura) —
+// estável a rename e sem colidir com setor de mesmo nome de outra empresa quando
+// o Compras for multiempresa.
 //
 // ATENÇÃO — esta lista tem DOIS efeitos hoje: além do destaque na tela, ela
 // coloca o usuário na etapa do DIRETOR do lembrete diário por e-mail
@@ -242,7 +240,7 @@ export const APPROVER_SECTOR_RESTRICTIONS: ReadonlyArray<{
 // seja, incluir um e-mail nesta lista passa a gerar e-mail diário para ele.
 export const DIRECTOR_HIGHLIGHT_SECTORS: ReadonlyArray<{
   email: string;
-  sectorNames: readonly string[];
+  sectors: readonly { id: string; name: string }[];
 }> = [
   {
     // Marcelo Gonçalves — admin (todas as permissões) e diretor responsável pela
@@ -251,15 +249,20 @@ export const DIRECTOR_HIGHLIGHT_SECTORS: ReadonlyArray<{
     // setor já era roteado direto ao diretor (APPROVAL_ROUTING.directorSector),
     // mas sem ninguém vinculado a ele o e-mail não tinha destinatário.
     email: "marcelo@quokka.net.br",
-    sectorNames: ["TI", "Financeiro Cash Out", "Financeiro CSC", "Diretoria"],
+    sectors: [
+      { id: "08811ab5-488d-4ad6-854f-f4432dcb2b1e", name: "TI" },
+      { id: "1834b0a9-f568-404a-95e0-7087a8f6243a", name: "Financeiro Cash Out" },
+      { id: "db2c9dbb-0c13-4781-aee9-0f7be4c8960f", name: "Financeiro CSC" },
+      { id: "306ef9b3-7895-446d-b9d3-5537942627b2", name: "Diretoria" },
+    ],
   },
 ];
 
 /**
- * Conjunto (normalizado) de nomes de setor que o usuário DIRIGE para fins de
- * destaque na tela de Aprovações, quando há um override configurado para ele.
- * Retorna `null` quando não há override — nesse caso o destaque segue os vínculos
- * normais (user_sectors) e só se aplica ao perfil diretor.
+ * Conjunto de IDs de setor que o usuário DIRIGE para fins de destaque na tela de
+ * Aprovações, quando há um override configurado para ele. Retorna `null` quando
+ * não há override — nesse caso o destaque segue os vínculos normais (user_sectors)
+ * e só se aplica ao perfil diretor.
  */
 export function directorHighlightSectorsFor(user: {
   email?: string | null;
@@ -270,7 +273,7 @@ export function directorHighlightSectorsFor(user: {
     (r) => r.email.trim().toLowerCase() === email,
   );
   if (!rule) return null;
-  return new Set(rule.sectorNames.map(normalizeSectorName));
+  return new Set(rule.sectors.map((s) => s.id));
 }
 
 // Faixa Unicode de marcas diacríticas combinantes (U+0300–U+036F), construída
@@ -290,9 +293,9 @@ export function normalizeSectorName(name: string): string {
 }
 
 /**
- * Conjunto (normalizado) de nomes de setor que o usuário PODE aprovar, quando há
- * uma restrição de alçada configurada para ele. Retorna `null` quando o usuário
- * não tem restrição — nesse caso a alçada segue os vínculos normais.
+ * Conjunto de IDs de setor que o usuário PODE aprovar, quando há uma restrição de
+ * alçada configurada para ele. Retorna `null` quando o usuário não tem restrição
+ * — nesse caso a alçada segue os vínculos normais.
  */
 export function approverSectorRestrictionFor(user: {
   email?: string | null;
@@ -303,7 +306,7 @@ export function approverSectorRestrictionFor(user: {
     (r) => r.email.trim().toLowerCase() === email,
   );
   if (!rule) return null;
-  return new Set(rule.allowedSectorNames.map(normalizeSectorName));
+  return new Set(rule.allowedSectors.map((s) => s.id));
 }
 
 // ─── Relatórios: setores extras visíveis (exceção nominal, por e-mail) ─────────
@@ -318,19 +321,19 @@ export function approverSectorRestrictionFor(user: {
 //    src/lib/auth/user-exceptions.ts ("Regras especiais" da tela de Usuários).
 export const REPORT_EXTRA_SECTORS: ReadonlyArray<{
   email: string;
-  /** Setores (por NOME) que o e-mail vê por inteiro no relatório. */
-  sectorNames: readonly string[];
+  /** Setores que o e-mail vê por inteiro no relatório. Fixados por ID (`name` só p/ leitura). */
+  sectors: readonly { id: string; name: string }[];
   reason: string;
 }> = [
   {
     // Larissa Militino (perfil solicitante).
     email: "administrativo@vivaeventos.com.br",
-    sectorNames: [
-      "Bem Laranja",
-      "Despesas Gerais",
-      "Diretoria",
-      "Eventos Oficiais",
-      "Gestão de Pessoas",
+    sectors: [
+      { id: "444e3b49-b040-4ff8-87c5-53c73a551237", name: "Bem Laranja" },
+      { id: "4e7709a5-e68b-41c1-83ba-5387bcbd017d", name: "Despesas Gerais" },
+      { id: "306ef9b3-7895-446d-b9d3-5537942627b2", name: "Diretoria" },
+      { id: "6f4ee76a-d98c-4ceb-8041-6b03c77a1cf0", name: "Eventos Oficiais" },
+      { id: "b4acc15b-0414-443a-a6db-fb541cfc0bd0", name: "Gestão de Pessoas" },
     ],
     reason:
       "Larissa Militino: além das próprias requisições, acompanha no relatório todas as " +
@@ -340,12 +343,12 @@ export const REPORT_EXTRA_SECTORS: ReadonlyArray<{
     // TESTE — "Teste Controladoria" (perfil solicitante). Mesma exceção da Larissa,
     // só para validar o comportamento. REMOVER ao concluir os testes.
     email: "lucasm.quokka@gmail.com",
-    sectorNames: [
-      "Bem Laranja",
-      "Despesas Gerais",
-      "Diretoria",
-      "Eventos Oficiais",
-      "Gestão de Pessoas",
+    sectors: [
+      { id: "444e3b49-b040-4ff8-87c5-53c73a551237", name: "Bem Laranja" },
+      { id: "4e7709a5-e68b-41c1-83ba-5387bcbd017d", name: "Despesas Gerais" },
+      { id: "306ef9b3-7895-446d-b9d3-5537942627b2", name: "Diretoria" },
+      { id: "6f4ee76a-d98c-4ceb-8041-6b03c77a1cf0", name: "Eventos Oficiais" },
+      { id: "b4acc15b-0414-443a-a6db-fb541cfc0bd0", name: "Gestão de Pessoas" },
     ],
     reason:
       "Usuário de teste: mesma exceção de relatório da Larissa Militino, para validação. " +
@@ -354,19 +357,19 @@ export const REPORT_EXTRA_SECTORS: ReadonlyArray<{
 ];
 
 /**
- * Setores (normalizados) que este e-mail vê POR INTEIRO apenas na tela de
- * Relatórios (além das próprias requisições). `null` quando não há exceção.
+ * IDs de setor que este e-mail vê POR INTEIRO apenas na tela de Relatórios (além
+ * das próprias requisições). `null` quando não há exceção.
  */
 export function reportExtraSectorsFor(user: {
   email?: string | null;
 }): Set<string> | null {
   const email = user.email?.trim().toLowerCase();
   if (!email) return null;
-  const names = REPORT_EXTRA_SECTORS.filter(
+  const ids = REPORT_EXTRA_SECTORS.filter(
     (r) => r.email.trim().toLowerCase() === email,
-  ).flatMap((r) => r.sectorNames);
-  if (names.length === 0) return null;
-  return new Set(names.map(normalizeSectorName));
+  ).flatMap((r) => r.sectors.map((s) => s.id));
+  if (ids.length === 0) return null;
+  return new Set(ids);
 }
 
 // ─── Cobertura temporária de aprovações (férias / ausências) ──────────────────
@@ -391,8 +394,8 @@ export const APPROVAL_COVERAGE: ReadonlyArray<{
   coveringEmail: string;
   /** Quem está AUSENTE (dono original dos fluxos). */
   coveredEmail: string;
-  /** Setores (por NOME) cuja etapa de GERENTE o coveringEmail passa a receber no lembrete diário. */
-  managerSectorNames: readonly string[];
+  /** Setores cuja etapa de GERENTE o coveringEmail passa a receber no lembrete diário. Fixados por ID (`name` só p/ leitura). */
+  managerSectors: readonly { id: string; name: string }[];
   since: string;
   /** Retorno previsto — lembrete, não expiração automática. */
   until: string;
@@ -401,11 +404,11 @@ export const APPROVAL_COVERAGE: ReadonlyArray<{
   {
     coveringEmail: "vitor@vivaeventos.com.br",
     coveredEmail: "regis@vivaeventos.com.br",
-    managerSectorNames: [
-      "Gestão de Pessoas",
-      "Bem Laranja",
-      "Eventos Oficiais",
-      "Despesas Gerais",
+    managerSectors: [
+      { id: "b4acc15b-0414-443a-a6db-fb541cfc0bd0", name: "Gestão de Pessoas" },
+      { id: "444e3b49-b040-4ff8-87c5-53c73a551237", name: "Bem Laranja" },
+      { id: "6f4ee76a-d98c-4ceb-8041-6b03c77a1cf0", name: "Eventos Oficiais" },
+      { id: "4e7709a5-e68b-41c1-83ba-5387bcbd017d", name: "Despesas Gerais" },
     ],
     since: "2026-09-21",
     until: "2026-10-05",
@@ -417,17 +420,17 @@ export const APPROVAL_COVERAGE: ReadonlyArray<{
 ];
 
 /**
- * Setores (normalizados) cuja etapa de GERENTE este e-mail está COBRINDO no
- * lembrete diário. `null` quando o usuário não cobre ninguém.
+ * IDs de setor cuja etapa de GERENTE este e-mail está COBRINDO no lembrete
+ * diário. `null` quando o usuário não cobre ninguém.
  */
 export function managerCoverageSectorsFor(user: {
   email?: string | null;
 }): Set<string> | null {
   const email = user.email?.trim().toLowerCase();
   if (!email) return null;
-  const names = APPROVAL_COVERAGE.filter(
+  const ids = APPROVAL_COVERAGE.filter(
     (c) => c.coveringEmail.trim().toLowerCase() === email,
-  ).flatMap((c) => c.managerSectorNames);
-  if (names.length === 0) return null;
-  return new Set(names.map(normalizeSectorName));
+  ).flatMap((c) => c.managerSectors.map((s) => s.id));
+  if (ids.length === 0) return null;
+  return new Set(ids);
 }

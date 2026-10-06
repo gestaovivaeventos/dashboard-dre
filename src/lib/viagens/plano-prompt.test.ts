@@ -13,22 +13,8 @@ const BASE = {
   year: 2027,
   origem: "Juiz de Fora",
   tipos: [{ nome: "Consultoria" }, { nome: "Treinamento" }],
-  faixasPassagem: [
-    { nome: "Capital Sudeste", valor: 900, modal: "aviao" },
-    { nome: "Capital Nordeste", valor: 1600, modal: "aviao" },
-  ],
-  faixasHospedagem: [{ nome: "Capital", valor: 320 }, { nome: "Interior", valor: 180 }],
   texto: "Curitiba em março, 2 noites, 3 pessoas.",
 };
-
-test("os cadastros vão com NOME e VALOR — é o valor que torna a escolha possível", () => {
-  // Só pelo nome, um destino do Nordeste cairia na faixa do Sudeste sem nada
-  // denunciar: a IA não sabe o que a etiqueta representa.
-  const p = montarPromptPlano(BASE);
-  assert.match(p, /Capital Nordeste \(R\$ 1600, aviao\)/);
-  assert.match(p, /Capital \(R\$ 320\)/);
-  assert.match(p, /- Consultoria/);
-});
 
 test("o texto do gestor vai VERBATIM, no fim", () => {
   const p = montarPromptPlano({ ...BASE, texto: "  Recife em maio  " });
@@ -47,21 +33,9 @@ test("proíbe preço, custo e distância", () => {
   assert.match(p, /Não devolva preço, custo, total nem distância/);
 });
 
-test("o SCHEMA não tem campo de dinheiro — nem se o modelo quisesse", () => {
-  assert.doesNotMatch(SCHEMA_HINT_PLANO, /preco|price|valor|custo|total|diaria/i);
-  assert.match(SCHEMA_HINT_PLANO, /"destino"/);
-  assert.match(SCHEMA_HINT_PLANO, /"junto"/);
-});
-
 test("cadastro vazio diz que está vazio, em vez de uma lista em branco", () => {
-  const p = montarPromptPlano({ ...BASE, tipos: [], faixasPassagem: [] });
+  const p = montarPromptPlano({ ...BASE, tipos: [] });
   assert.match(p, /TIPOS DE VIAGEM cadastrados[^\n]*:\n {2}\(nenhum cadastrado\)/);
-});
-
-test("faixa com valor zero sai sem o valor — zero não ajuda a escolher", () => {
-  const p = montarPromptPlano({ ...BASE, faixasHospedagem: [{ nome: "Capital", valor: 0 }] });
-  assert.match(p, /- Capital\n/);
-  assert.doesNotMatch(p, /R\$ 0/);
 });
 
 test("origem vazia é dita, não some da frase", () => {
@@ -77,9 +51,16 @@ test("o system proíbe texto fora do JSON", () => {
   assert.match(SYSTEM_PLANO, /SOMENTE com JSON/);
 });
 
-test("a faixa de passagem é dita SÓ IDA — é o que o motor cobra", () => {
-  // O motor lança o trecho de volta à parte. Dizer "ida e volta" faria a IA
-  // escolher a faixa pela ordem de grandeza errada.
+test("o SCHEMA não tem campo de dinheiro — nem se o modelo quisesse", () => {
+  // O preço é cotado fora, pela Controladoria. Nada que a IA devolva aqui pode
+  // virar valor.
+  assert.doesNotMatch(SCHEMA_HINT_PLANO, /preco|price|valor|custo|total|diaria|faixa/i);
+  assert.match(SCHEMA_HINT_PLANO, /"destino"/);
+  assert.match(SCHEMA_HINT_PLANO, /"junto"/);
+});
+
+test("o prompt diz que o preço vem DEPOIS, cotado fora", () => {
   const p = montarPromptPlano(BASE);
-  assert.match(p, /FAIXAS DE PASSAGEM cadastradas \(o valor é por pessoa, SÓ IDA/);
+  assert.match(p, /Não devolva preço, custo, total nem distância/);
+  assert.match(p, /cotado depois, fora do sistema/);
 });

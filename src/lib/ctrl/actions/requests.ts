@@ -10,7 +10,6 @@ import {
   approverSectorRestrictionFor,
   isBudgetExemptSector,
   isManagerFinalSector,
-  normalizeSectorName,
   reportExtraSectorsFor,
 } from "@/lib/ctrl/routing";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
@@ -1333,17 +1332,6 @@ export async function getRequests(filters?: {
     return parts.join(",");
   };
 
-  // Ids dos setores cujo NOME está no conjunto informado (alçada nominal —
-  // casada por nome, resiliente a acento/caixa).
-  const sectorIdsByName = async (names: Set<string>): Promise<string[]> => {
-    const { data: allSectors } = await supabase
-      .from("ctrl_sectors")
-      .select("id, name");
-    return (allSectors ?? [])
-      .filter((s) => s.name != null && names.has(normalizeSectorName(s.name)))
-      .map((s) => s.id as string);
-  };
-
   // Escopo efetivo — devolvido à tela para rotular a listagem.
   let scope: RequestsVisibilityScope = "todas";
 
@@ -1364,7 +1352,7 @@ export async function getRequests(filters?: {
       scope = "todas";
     } else if (reportBySector) {
       const restriction = approverSectorRestrictionFor(ctx);
-      const sectorIds = restriction ? await sectorIdsByName(restriction) : ctx.sectorIds;
+      const sectorIds = restriction ? Array.from(restriction) : ctx.sectorIds;
       if (sectorIds.length > 0) {
         const rateioIds = await rateioReqIdsForSectors(sectorIds);
         query = query.or(sectorOrRateio(sectorIds, rateioIds));
@@ -1378,7 +1366,7 @@ export async function getRequests(filters?: {
       // Solicitante: só as próprias — salvo exceção nominal de relatório.
       const extra = reportExtraSectorsFor(ctx);
       if (extra) {
-        const extraIds = await sectorIdsByName(extra);
+        const extraIds = Array.from(extra);
         const rateioIds = extraIds.length ? await rateioReqIdsForSectors(extraIds) : [];
         // Próprias OU (requisição/parcela de rateio nos setores extras).
         const parts = [`created_by.eq.${ctx.id}`];
@@ -1399,9 +1387,7 @@ export async function getRequests(filters?: {
       // vínculos aqui — é ela que diz de quais setores ele é o aprovador. Falha
       // fechada: nenhum nome casou => cai para as próprias requisições.
       const restriction = approverSectorRestrictionFor(ctx);
-      const sectorIds = restriction
-        ? await sectorIdsByName(restriction)
-        : ctx.sectorIds;
+      const sectorIds = restriction ? Array.from(restriction) : ctx.sectorIds;
       if (sectorIds.length > 0) {
         const rateioIds = await rateioReqIdsForSectors(sectorIds);
         query = query.or(
@@ -1433,9 +1419,9 @@ export async function getRequests(filters?: {
   // Restrição de alçada de aprovação (só na tela de Aprovações): usuários com
   // vínculo em vários setores para CRIAR requisições mas alçada de aprovação
   // limitada a um subconjunto. Intersecta a visibilidade com os setores
-  // permitidos por NOME. Falha fechada: se nenhum setor casar, não mostra nada.
+  // permitidos (por ID). Falha fechada: se não houver setor, não mostra nada.
   if (filters?.approvalScope && approverSectorRestrictionFor(ctx)) {
-    const allowedIds = await sectorIdsByName(approverSectorRestrictionFor(ctx)!);
+    const allowedIds = Array.from(approverSectorRestrictionFor(ctx)!);
     if (allowedIds.length === 0) {
       query = query.in("sector_id", allowedIds); // falha fechada (nada)
     } else {
@@ -1523,16 +1509,11 @@ async function approverSectorBlock(
   ctx: Awaited<ReturnType<typeof requireCtrlRole>>,
   sectorId: string | null | undefined,
 ): Promise<string | null> {
-  const allowedNames = approverSectorRestrictionFor(ctx);
-  if (!allowedNames) return null; // sem restrição → segue as regras normais
+  void supabase; // alçada agora casa por ID — não precisa resolver o nome do setor
+  const allowedIds = approverSectorRestrictionFor(ctx);
+  if (!allowedIds) return null; // sem restrição → segue as regras normais
   if (!sectorId) return "Setor da requisição não identificado.";
-  const { data: sec } = await supabase
-    .from("ctrl_sectors")
-    .select("name")
-    .eq("id", sectorId)
-    .single();
-  const name = sec?.name;
-  if (name && allowedNames.has(normalizeSectorName(name))) return null;
+  if (allowedIds.has(sectorId)) return null;
   return "Você não tem alçada para aprovar requisições deste setor.";
 }
 
@@ -1794,21 +1775,9 @@ async function approveRateio(
   const managerSectors = ctx.sectorIds ?? [];
   const managesAll = isManager && managerSectors.length === 0; // sem vínculo → fallback
 
-  // Alçada por nome de setor (se o usuário tiver restrição): resolve os setores
-  // permitidos entre os do rateio.
-  const allowedNames = approverSectorRestrictionFor(ctx);
-  let allowedSectorIds: Set<string> | null = null;
-  if (allowedNames) {
-    const { data: secs } = await supabase
-      .from("ctrl_sectors")
-      .select("id, name")
-      .in("id", rows.map((r) => r.sector_id as string));
-    allowedSectorIds = new Set(
-      (secs ?? [])
-        .filter((s) => s.name && allowedNames.has(normalizeSectorName(s.name)))
-        .map((s) => s.id as string),
-    );
-  }
+  // Alçada por setor (se o usuário tiver restrição), fixada por ID — cada parcela
+  // é checada contra o conjunto permitido no laço abaixo.
+  const allowedSectorIds = approverSectorRestrictionFor(ctx);
 
   const now = new Date().toISOString();
   let advanced = 0;

@@ -1,17 +1,16 @@
-// A grade de viagens.
+// A grade de viagens — a parte pura, depois de o custo sair do caminho.
 //
-// Ela existe porque ~50 viagens por ano, a destinos que não se repetem, não cabem
-// em 50 conversas. O que estes testes protegem é o que a grade DERIVA — e cada
-// derivação é uma suposição que, errada, muda o orçamento em silêncio.
+// O que sobrou aqui descreve a viagem para alguém conseguir COTÁ-LA. Então o que
+// se trava é: o rascunho grava frouxo (montar 50 linhas leva idas e vindas), o OK
+// é rigoroso (dali a viagem sai da mão do gestor), e o que vai para o banco não
+// perde nada que a cotação externa precise.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   PESSOAS_POR_QUARTO_PADRAO,
-  TRAJETOS_DIA_PADRAO,
-  TRANSLADO_TRAJETOS_AEREO,
-  modalDaLinhaDaGrade,
+  faltaParaOkDaLinha,
   paradaRowDaLinha,
   quartosDaLinha,
   resumirLote,
@@ -21,148 +20,103 @@ import {
   type LinhaViagemInput,
 } from "./grade";
 
-const LINHA: LinhaViagemInput = {
-  destino: "Curitiba",
-  mesIda: 3,
-  noites: 2,
-  pessoas: 3,
-  tipoId: "t1",
-  faixaPassagemId: "f-aerea",
-  faixaHospedagemId: "f-hotel",
-};
-
-// ─── O que basta para gravar ────────────────────────────────────────────────
-
-test("só DESTINO e TIPO são obrigatórios para gravar a linha", () => {
-  // A grade é preenchida de cima para baixo: barrar por campo incompleto faria o
-  // gestor perder as 49 linhas certas por causa de uma. Quem cobra o conjunto é o
-  // envio, que exige mês e custo.
-  assert.equal(validarLinhaViagem({ destino: "Recife", mesIda: null, noites: 0, pessoas: 1, tipoId: "t1" }), null);
-  assert.match(validarLinhaViagem({ ...LINHA, destino: "  " })!, /cidade de destino/);
-  assert.match(validarLinhaViagem({ ...LINHA, tipoId: "" })!, /tipo da viagem/);
-});
-
-test("mês fora da faixa é erro; mês AUSENTE não é", () => {
-  // Ausente é estado legítimo (o gestor ainda não decidiu); 13 é digitação errada.
-  assert.equal(validarLinhaViagem({ ...LINHA, mesIda: null }), null);
-  assert.match(validarLinhaViagem({ ...LINHA, mesIda: 13 })!, /Mês inválido/);
-  assert.match(validarLinhaViagem({ ...LINHA, mesIda: 0 })!, /Mês inválido/);
-  assert.match(validarLinhaViagem({ ...LINHA, mesIda: 3.5 })!, /Mês inválido/);
-});
-
-// ─── O que a grade DERIVA ───────────────────────────────────────────────────
-
-test("quartos = ceil(pessoas / porQuarto), com 2 por quarto por padrão", () => {
-  assert.equal(PESSOAS_POR_QUARTO_PADRAO, 2);
-  assert.equal(quartosDaLinha({ ...LINHA, pessoas: 3 }), 2, "3 pessoas em duplo = 2 quartos");
-  assert.equal(quartosDaLinha({ ...LINHA, pessoas: 4 }), 2);
-  assert.equal(quartosDaLinha({ ...LINHA, pessoas: 4, pessoasPorQuarto: 1 }), 4, "individual");
-  assert.equal(quartosDaLinha({ ...LINHA, pessoas: 1 }), 1);
-});
-
-test("o modal vem da FAIXA, e a linha pode sobrescrever", () => {
-  // Um destino de 400 km com 4 pessoas pode compensar de carro, contra o aéreo
-  // que a faixa pressupõe.
-  assert.equal(modalDaLinhaDaGrade(LINHA, "aviao"), "aviao");
-  assert.equal(modalDaLinhaDaGrade({ ...LINHA, modal: "carro" }, "aviao"), "carro");
-  // Sem faixa e sem escolha, avião é o padrão (é o caso dominante).
-  assert.equal(modalDaLinhaDaGrade(LINHA, null), "aviao");
-  // Modal inventado não vira undefined.
-  assert.equal(modalDaLinhaDaGrade({ ...LINHA, modal: "foguete" }, null), "outro");
-});
-
-test("TRANSLADO só existe em viagem aérea", () => {
-  // Casa ↔ aeroporto não acontece em viagem de carro. É suposição, e por isso o
-  // custo dela aparece como linha própria na árvore.
-  const aereo = viagemRowDaLinha(LINHA, "aviao", 40);
-  assert.equal(aereo.translado_custo_trajeto, 40);
-  assert.equal(aereo.translado_trajetos, TRANSLADO_TRAJETOS_AEREO);
-
-  const carro = viagemRowDaLinha(LINHA, "carro", 40);
-  assert.equal(carro.translado_custo_trajeto, null);
-  assert.equal(carro.translado_trajetos, null);
-});
-
-test("sem custo de translado cadastrado, não se inventa trajeto", () => {
-  // Trajetos sem custo somariam zero e poluiriam a árvore com uma linha vazia.
-  const r = viagemRowDaLinha(LINHA, "aviao", null);
-  assert.equal(r.translado_custo_trajeto, null);
-  assert.equal(r.translado_trajetos, null);
-});
-
-test("a VOLTA usa o mesmo modal da ida", () => {
-  // O gestor respondeu "voltam direto": volta diferente é exceção, pela tela da
-  // viagem.
-  assert.equal(viagemRowDaLinha(LINHA, "onibus", null).volta_modal, "onibus");
-});
-
-test("a parada leva trajetos/dia só quando há PERNOITE", () => {
-  // Hotel ↔ compromisso não existe em bate-volta.
-  assert.equal(paradaRowDaLinha(LINHA, "Juiz de Fora", "aviao").local_trajetos_dia, TRAJETOS_DIA_PADRAO);
-  assert.equal(
-    paradaRowDaLinha({ ...LINHA, noites: 0 }, "Juiz de Fora", "aviao").local_trajetos_dia,
-    null,
-  );
-  // O que o gestor digitou vence o padrão, inclusive zero.
-  assert.equal(
-    paradaRowDaLinha({ ...LINHA, localTrajetosDia: 0 }, "Juiz de Fora", "aviao").local_trajetos_dia,
-    0,
-  );
-});
-
-test("a parada nasce SEM preço — ele vem da faixa, no motor", () => {
-  // Gravar o valor da faixa aqui o congelaria: mudar a faixa deixaria de refletir
-  // nas viagens que ainda não foram fechadas.
-  const p = paradaRowDaLinha(LINHA, "Juiz de Fora", "aviao");
-  assert.equal(p.chegada_preco_pessoa, null);
-  assert.equal(p.chegada_preco_total, null);
-  assert.equal(p.diaria_hotel, null);
-});
-
-test("a parada carrega a ORIGEM e é sempre a ordem 1", () => {
-  const p = paradaRowDaLinha(LINHA, "Juiz de Fora", "aviao");
-  assert.equal(p.chegada_de, "Juiz de Fora");
-  assert.equal(p.cidade, "Curitiba");
-  assert.equal(p.ordem, 1);
-});
-
-test("a distância só é gravada quando informada", () => {
-  // Ela só pesa em carro/van; no aéreo o motor a ignora e diz isso na premissa.
-  assert.equal(paradaRowDaLinha(LINHA, "JF", "carro").chegada_distancia_km, null);
-  assert.equal(
-    paradaRowDaLinha({ ...LINHA, distanciaKm: 420 }, "JF", "carro").chegada_distancia_km,
-    420,
-  );
-});
-
-test("número em string não quebra as derivações", () => {
-  // A grade é uma tela: tudo chega como string do input.
-  const l = {
-    ...LINHA,
-    noites: "2" as unknown as number,
-    pessoas: "3" as unknown as number,
-    pessoasPorQuarto: "2" as unknown as number,
+function linha(p: Partial<LinhaViagemInput> = {}): LinhaViagemInput {
+  return {
+    destino: "Recife",
+    uf: "PE",
+    mesIda: 5,
+    noites: 3,
+    pessoas: 2,
+    pessoasPorQuarto: 2,
+    tipoId: "t-1",
+    modal: "aviao",
+    finalidade: "Implantação da unidade",
+    ...p,
   };
-  assert.equal(quartosDaLinha(l), 2);
-  assert.equal(viagemRowDaLinha(l, "aviao", null).pessoas, 3);
-  assert.equal(paradaRowDaLinha(l, "JF", "aviao").noites, 2);
+}
+
+// ─── Gravar rascunho × dar OK ───────────────────────────────────────────────
+
+test("o rascunho grava com destino e tipo — o resto pode faltar", () => {
+  // Barrar a gravação a cada campo em branco obrigaria a preencher na ordem do
+  // sistema, e são 50 linhas.
+  assert.equal(validarLinhaViagem(linha({ mesIda: null, finalidade: null })), null);
+  assert.match(validarLinhaViagem(linha({ destino: "  " }))!, /destino/);
+  assert.match(validarLinhaViagem(linha({ tipoId: "" }))!, /tipo/);
 });
 
-test("o título padrão é o destino", () => {
-  assert.equal(tituloDaLinha(LINHA), "Curitiba");
-  assert.equal(tituloDaLinha({ ...LINHA, destino: "   " }), "Viagem sem destino");
+test("o OK é mais rigoroso que o rascunho, e lê da MESMA fonte do fluxo", () => {
+  assert.equal(faltaParaOkDaLinha(linha()), null);
+  assert.match(faltaParaOkDaLinha(linha({ mesIda: null }))!, /mês/);
+  assert.match(faltaParaOkDaLinha(linha({ finalidade: "" }))!, /para que serve/);
+});
+
+// ─── O que vai para o banco ─────────────────────────────────────────────────
+
+test("o título carrega a UF — é o que distingue duas cidades homônimas", () => {
+  assert.equal(tituloDaLinha(linha()), "Recife (PE)");
+  assert.equal(tituloDaLinha(linha({ uf: null })), "Recife");
+  assert.equal(tituloDaLinha(linha({ destino: "  ", uf: null })), "Viagem");
+});
+
+test("a linha da viagem leva só dados BÁSICOS, nenhum custo", () => {
+  const row = viagemRowDaLinha(linha());
+  assert.equal(row.mes_ida, 5);
+  assert.equal(row.pessoas, 2);
+  assert.equal(row.pessoas_por_quarto, 2);
+  assert.equal(row.tipo_id, "t-1");
+  assert.equal(row.finalidade, "Implantação da unidade");
+  // O custo vem da cotação, não daqui.
+  for (const chave of Object.keys(row)) {
+    assert.doesNotMatch(chave, /custo|cot_|preco|valor/, chave);
+  }
+});
+
+test("pessoas e ocupação têm piso 1, e ocupação ausente assume 2", () => {
+  const row = viagemRowDaLinha(linha({ pessoas: 0, pessoasPorQuarto: null }));
+  assert.equal(row.pessoas, 1);
+  assert.equal(row.pessoas_por_quarto, PESSOAS_POR_QUARTO_PADRAO);
+});
+
+test("a parada leva cidade, UF e noites — e a UF sai normalizada", () => {
+  const p = paradaRowDaLinha(linha({ uf: "pe" }), "Juiz de Fora");
+  assert.equal(p.ordem, 1);
+  assert.equal(p.cidade, "Recife");
+  assert.equal(p.uf, "PE");
+  assert.equal(p.noites, 3);
+  assert.equal(p.chegada_de, "Juiz de Fora");
+  assert.equal(p.chegada_modal, "aviao");
+});
+
+test("UF maior que dois caracteres é cortada, e vazia fica nula", () => {
+  assert.equal(paradaRowDaLinha(linha({ uf: "Pernambuco" }), "JF").uf, "PE");
+  assert.equal(paradaRowDaLinha(linha({ uf: "  " }), "JF").uf, null);
+});
+
+test("bate-volta grava zero noites, não nulo", () => {
+  assert.equal(paradaRowDaLinha(linha({ noites: 0 }), "JF").noites, 0);
+});
+
+// ─── Quartos ────────────────────────────────────────────────────────────────
+
+test("os quartos entram no .xls — quem cota precisa saber quantos reservar", () => {
+  assert.equal(quartosDaLinha(linha({ pessoas: 4, pessoasPorQuarto: 2 })), 2);
+  assert.equal(quartosDaLinha(linha({ pessoas: 4, pessoasPorQuarto: 1 })), 4);
+  assert.equal(quartosDaLinha(linha({ pessoas: 3, pessoasPorQuarto: 2 })), 2, "arredonda acima");
+  assert.equal(quartosDaLinha(linha({ pessoas: 2, pessoasPorQuarto: null })), 1, "padrão 2");
 });
 
 // ─── O lote ─────────────────────────────────────────────────────────────────
 
-test("o lote falha POR LINHA, e o resumo conta as duas pontas", () => {
-  // Destino errado na linha 30 não pode custar as 49 certas — é a mesma regra da
-  // importação do plano de cargos.
+test("o resumo do lote separa gravadas de recusadas", () => {
   const r = resumirLote([
-    { indice: 0, id: "a", custoTotal: 100 },
-    { indice: 1, erro: "Informe a cidade de destino." },
-    { indice: 2, id: "c", custoTotal: 200 },
+    { indice: 0, id: "a" },
+    { indice: 1, erro: "sem destino" },
+    { indice: 2, id: "c" },
   ]);
-  assert.deepEqual(r, { gravadas: 2, comErro: 1, total: 3 });
-  assert.deepEqual(resumirLote([]), { gravadas: 0, comErro: 0, total: 0 });
+  assert.deepEqual(r, { gravadas: 2, comErro: 1 });
+});
+
+test("lote vazio não é erro", () => {
+  assert.deepEqual(resumirLote([]), { gravadas: 0, comErro: 0 });
 });

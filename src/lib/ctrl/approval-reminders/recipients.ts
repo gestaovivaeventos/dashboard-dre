@@ -53,7 +53,6 @@ import {
   directorHighlightSectorsFor,
   isForcedDirectorRouting,
   managerCoverageSectorsFor,
-  normalizeSectorName,
 } from "@/lib/ctrl/routing";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -360,7 +359,7 @@ export async function buildApprovalReminderPlan(
   const approverIds = Array.from(allApprovers.keys());
   const sectorLinks = await loadSectorLinks(db, approverIds);
 
-  // Alçada e destaque por e-mail (casados por NOME de setor).
+  // Alçada e destaque por e-mail (conjuntos de IDs de setor).
   const restrictions = new Map<string, Set<string> | null>();
   const highlights = new Map<string, Set<string> | null>();
   for (const u of Array.from(allApprovers.values())) {
@@ -398,8 +397,8 @@ export async function buildApprovalReminderPlan(
         // cadastrado não há notificação — a requisição vira `orphan`.
         candidateIds = directorCandidates
           .filter((u) => {
-            const overrideNames = highlights.get(u.id) ?? null;
-            if (overrideNames) return overrideNames.has(normalizeSectorName(sectorName));
+            const overrideIds = highlights.get(u.id) ?? null;
+            if (overrideIds) return overrideIds.has(sectorId);
             return sectorLinks.get(u.id)?.has(sectorId) ?? false;
           })
           .map((u) => u.id);
@@ -418,10 +417,7 @@ export async function buildApprovalReminderPlan(
         // muda alçada — só notificação (aprovar segue pelo perfil próprio).
         const covering = Array.from(allApprovers.values())
           .filter(
-            (u) =>
-              managerCoverageSectorsFor({ email: u.email })?.has(
-                normalizeSectorName(sectorName),
-              ) ?? false,
+            (u) => managerCoverageSectorsFor({ email: u.email })?.has(sectorId) ?? false,
           )
           .map((u) => u.id);
         candidateIds = Array.from(new Set([...base, ...covering]));
@@ -458,7 +454,7 @@ export async function buildApprovalReminderPlan(
 
         // 2) Alçada: se o usuário não poderia aprovar este setor, não é notificado.
         const allowedSectors = restrictions.get(userId) ?? null;
-        if (allowedSectors && !allowedSectors.has(normalizeSectorName(sectorName))) continue;
+        if (allowedSectors && !allowedSectors.has(sectorId)) continue;
 
         assigned += 1;
 

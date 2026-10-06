@@ -9,9 +9,15 @@
 // colado do WhatsApp do Case, que já se provou.
 //
 // ── A IA devolve NOMES, não ids ──────────────────────────────────────────
-// O modelo não conhece uuid. Ele diz "Capital Nordeste" e "Treinamento"; o
-// casamento nome → id acontece aqui, com normalização (sem acento, sem caixa), e
-// o que não casar volta como AVISO em vez de virar linha errada em silêncio.
+// O modelo não conhece uuid. Ele diz "Treinamento"; o casamento nome → id acontece
+// aqui, com normalização (sem acento, sem caixa), e o que não casar volta como AVISO
+// em vez de virar linha errada em silêncio.
+//
+// ── Preço NÃO passa por aqui (06/10/2026) ───────────────────────────────
+// A leitura do plano descreve a viagem; o custo vem da cotação externa, lançada
+// depois por grupo de despesa. As faixas de preço saíram do intake junto com o resto
+// da estimativa — pedir à IA que escolha faixa era pedir que ela opinasse sobre
+// preço, que é exatamente o que este módulo deixou de fazer.
 //
 // ── Nada é gravado ───────────────────────────────────────────────────────
 // A leitura preenche a grade; gravar continua sendo o botão "Salvar e calcular",
@@ -28,10 +34,6 @@ export interface PlanoLinhaBruta {
   pessoasPorQuarto: number | null;
   /** Nome do tipo, como a IA o leu. */
   tipo: string | null;
-  /** Nome da faixa de passagem. */
-  faixaPassagem: string | null;
-  /** Nome da faixa de hospedagem. */
-  faixaHospedagem: string | null;
   modal: string | null;
   finalidade: string | null;
   /**
@@ -131,8 +133,6 @@ export function parsePlanoViagens(bruto: unknown): PlanoLinhaBruta[] {
         return inteiro(v, 1, 2);
       })(),
       tipo: texto(o.tipo),
-      faixaPassagem: texto(o.faixaPassagem) ?? texto(o.faixa),
-      faixaHospedagem: texto(o.faixaHospedagem) ?? texto(o.hotel),
       modal: texto(o.modal),
       finalidade: texto(o.finalidade),
       junto: texto(o.junto) ?? texto(o.mesma_viagem),
@@ -153,8 +153,6 @@ export interface LinhaResolvida {
   pessoas: number;
   pessoasPorQuarto: number | null;
   tipoId: string;
-  faixaPassagemId: string | null;
-  faixaHospedagemId: string | null;
   modal: string | null;
   finalidade: string | null;
 }
@@ -186,11 +184,7 @@ function casar(cadastro: readonly Cadastro[], nome: string | null): Cadastro | n
  */
 export function resolverPlano(
   brutas: readonly PlanoLinhaBruta[],
-  cadastros: {
-    tipos: readonly Cadastro[];
-    faixasPassagem: readonly Cadastro[];
-    faixasHospedagem: readonly Cadastro[];
-  },
+  cadastros: { tipos: readonly Cadastro[] },
 ): ResolucaoPlano {
   const avisos = new Set<string>();
   const linhas: LinhaResolvida[] = [];
@@ -201,18 +195,6 @@ export function resolverPlano(
       avisos.add("Não há tipo de viagem cadastrado — as linhas vieram sem tipo.");
     } else if (b.tipo && chaveNome(tipo.nome) !== chaveNome(b.tipo)) {
       avisos.add(`Tipo "${b.tipo}" não existe; usei "${tipo.nome}".`);
-    }
-
-    const fp = casar(cadastros.faixasPassagem, b.faixaPassagem);
-    if (b.faixaPassagem && !fp) {
-      avisos.add(`Faixa de passagem "${b.faixaPassagem}" não existe — escolha na linha.`);
-    }
-
-    // Só se há pernoite: faixa de hotel em bate-volta somaria hospedagem que não
-    // existe.
-    const fh = b.noites > 0 ? casar(cadastros.faixasHospedagem, b.faixaHospedagem) : null;
-    if (b.noites > 0 && b.faixaHospedagem && !fh) {
-      avisos.add(`Faixa de hospedagem "${b.faixaHospedagem}" não existe — escolha na linha.`);
     }
 
     if (b.mes == null) {
@@ -226,8 +208,6 @@ export function resolverPlano(
       pessoas: b.pessoas,
       pessoasPorQuarto: b.pessoasPorQuarto,
       tipoId: tipo?.id ?? "",
-      faixaPassagemId: fp?.id ?? cadastros.faixasPassagem[0]?.id ?? null,
-      faixaHospedagemId: b.noites > 0 ? (fh?.id ?? cadastros.faixasHospedagem[0]?.id ?? null) : null,
       modal: b.modal,
       finalidade: b.finalidade,
     });

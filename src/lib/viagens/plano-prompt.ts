@@ -9,11 +9,11 @@
 // Case: leitura é SUGESTÃO, nada é gravado, e o gestor confere na tela.
 //
 // ── A IA devolve NOMES, nunca ids nem números de dinheiro ─────────────────
-// Ela escolhe o tipo e a faixa da LISTA que vai no prompt, copiando o nome; o
-// casamento nome → id é do `plano.ts`, que avisa o que não casou. E não há campo
-// de preço no schema de propósito: o custo é do motor, a partir da faixa que o
-// admin curou. Preço vindo do modelo é plausível e ninguém confere — foi para
-// não depender disso que o cálculo saiu do modelo de linguagem.
+// Ela escolhe o tipo da LISTA que vai no prompt, copiando o nome; o casamento
+// nome → id é do `plano.ts`, que avisa o que não casou. E não há campo de preço no
+// schema, de propósito: desde 06/10/2026 o custo vem da COTAÇÃO externa, lançada
+// pela Controladoria por grupo de despesa. Preço vindo do modelo é plausível e
+// ninguém confere — foi para não depender disso que ele saiu do caminho.
 //
 // ── O que não foi dito fica VAZIO ────────────────────────────────────────
 // Mês que a pessoa não disse volta nulo e a linha aparece pedindo o mês. Mês
@@ -47,8 +47,6 @@ export const SCHEMA_HINT_PLANO = JSON.stringify(
             pessoas: { type: ["integer", "null"] },
             pessoasPorQuarto: { type: ["integer", "null"], description: "1 = quarto individual." },
             tipo: { type: ["string", "null"], description: "Nome copiado da lista de tipos." },
-            faixaPassagem: { type: ["string", "null"], description: "Nome copiado da lista de faixas de passagem." },
-            faixaHospedagem: { type: ["string", "null"], description: "Nome copiado da lista de faixas de hospedagem." },
             modal: {
               type: ["string", "null"],
               enum: ["aviao", "onibus", "carro", "van", "outro", null],
@@ -96,8 +94,6 @@ export interface PromptPlanoInput {
   /** Cidade de partida do time. Entra para a IA não confundir origem com destino. */
   origem: string;
   tipos: readonly CadastroPrompt[];
-  faixasPassagem: readonly CadastroPrompt[];
-  faixasHospedagem: readonly CadastroPrompt[];
   /** O que o gestor colou ou ditou, como veio. */
   texto: string;
 }
@@ -121,12 +117,6 @@ export function montarPromptPlano(input: PromptPlanoInput): string {
     "",
     "TIPOS DE VIAGEM cadastrados (copie o nome EXATAMENTE):",
     lista(input.tipos),
-    "",
-    "FAIXAS DE PASSAGEM cadastradas (o valor é por pessoa, SÓ IDA — o motor cobra a volta à parte):",
-    lista(input.faixasPassagem),
-    "",
-    "FAIXAS DE HOSPEDAGEM cadastradas (o valor é a diária do quarto):",
-    lista(input.faixasHospedagem),
   );
 
   partes.push(
@@ -137,11 +127,11 @@ export function montarPromptPlano(input: PromptPlanoInput): string {
     "3. O MÊS é o campo que mais importa: o custo da viagem cai inteiro no mês da partida. " +
       'Se a pessoa não disse o mês ("no segundo semestre", "em algum momento"), devolva null — ' +
       "nunca escolha um mês por ela.",
-    "4. Escolha o tipo e as faixas da lista acima, pelo destino e pelo que foi dito, copiando o " +
-      "nome exatamente. Se nenhuma servir, devolva null em vez de inventar nome.",
-    "5. Não devolva preço, custo, total nem distância: não há campo para isso, e o cálculo é do " +
-      "sistema a partir das faixas.",
-    "6. Bate-volta (sem pernoite) tem noites = 0 e nenhuma faixa de hospedagem.",
+    "4. Escolha o tipo da lista acima, pelo que foi dito, copiando o nome exatamente. Se " +
+      "nenhum servir, devolva null em vez de inventar nome.",
+    "5. Não devolva preço, custo, total nem distância: não há campo para isso. O preço é " +
+      "cotado depois, fora do sistema, pela Controladoria.",
+    "6. Bate-volta (sem pernoite) tem noites = 0.",
     '7. Se uma mesma ida passar por mais de uma cidade, emita UMA LINHA POR CIDADE com a mesma ' +
       'etiqueta em "junto" — a grade tem uma cidade por linha, e quem confere precisa ver as duas.',
     "8. O que não foi dito fica null (ou fora do objeto). Não preencha por simetria com as outras " +

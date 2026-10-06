@@ -7,7 +7,7 @@ import { isSchemaMissing } from "@/lib/orcamento/errors";
 import { isValidBudgetYear } from "@/lib/orcamento/years";
 import { generateJsonViaChat, logResolvedUsage, resolveAiProvider } from "@/lib/ai/provider";
 import { mensagemDeFalha } from "@/lib/ai/erros";
-import { numDaLinha as num, textoDaLinha as texto } from "@/lib/viagens/colunas";
+import { textoDaLinha as texto } from "@/lib/viagens/colunas";
 import { SCHEMA_HINT_PLANO, SYSTEM_PLANO, montarPromptPlano } from "@/lib/viagens/plano-prompt";
 import { parsePlanoViagens, resolverPlano, type LinhaResolvida } from "@/lib/viagens/plano";
 
@@ -82,7 +82,7 @@ export async function interpretarPlanoViagens(
     return { error: SEM_ACESSO };
   }
 
-  const [tipoRes, faixaRes, empresaRes] = await Promise.all([
+  const [tipoRes, empresaRes] = await Promise.all([
     supabase
       .from("orcamento_viagem_tipos")
       .select("id, nome, category_code, ativo")
@@ -90,14 +90,6 @@ export async function interpretarPlanoViagens(
       .eq("year", year)
       .eq("ativo", true)
       .order("nome"),
-    supabase
-      .from("orcamento_viagem_faixas")
-      .select("id, tipo, nome, valor, modal, ativo, ordem")
-      .eq("company_id", companyId)
-      .eq("year", year)
-      .eq("ativo", true)
-      .order("tipo")
-      .order("ordem"),
     supabase
       .from("orcamento_viagens")
       .select("origem")
@@ -108,11 +100,7 @@ export async function interpretarPlanoViagens(
       .maybeSingle(),
   ]);
 
-  // Qualquer das duas tabelas faltando é a mesma resposta para a tela: falta
-  // migration. Conferir só as faixas deixaria o erro cru de `tipos` subir.
-  for (const e of [faixaRes.error, tipoRes.error]) {
-    if (e && isSchemaMissing(e.message)) return { needsMigration: true };
-  }
+  if (tipoRes.error && isSchemaMissing(tipoRes.error.message)) return { needsMigration: true };
 
   // Tipo SEM categoria mapeada não é oferecido: a viagem sairia órfã da Prévia e
   // quem a cadastrou não saberia por quê. Mesmo recorte de `tiposOferecidos`.
@@ -126,15 +114,6 @@ export async function interpretarPlanoViagens(
     };
   }
 
-  const faixas = ((faixaRes.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-    id: r.id as string,
-    tipo: r.tipo === "hospedagem" ? ("hospedagem" as const) : ("passagem" as const),
-    nome: texto(r.nome),
-    valor: num(r.valor) ?? 0,
-    modal: texto(r.modal) || null,
-  }));
-  const faixasPassagem = faixas.filter((f) => f.tipo === "passagem");
-  const faixasHospedagem = faixas.filter((f) => f.tipo === "hospedagem");
 
   const resolved = await resolveAiProvider({ capability: "text" }).catch(() => null);
   if (!resolved) {
@@ -145,8 +124,6 @@ export async function interpretarPlanoViagens(
     year,
     origem: texto(origem) || texto(empresaRes.data?.origem),
     tipos,
-    faixasPassagem: faixasPassagem.map((f) => ({ nome: f.nome, valor: f.valor, modal: f.modal })),
-    faixasHospedagem: faixasHospedagem.map((f) => ({ nome: f.nome, valor: f.valor })),
     texto: bruto,
   });
 
@@ -177,11 +154,7 @@ export async function interpretarPlanoViagens(
     };
   }
 
-  const { linhas, avisos } = resolverPlano(brutas, {
-    tipos,
-    faixasPassagem: faixasPassagem.map((f) => ({ id: f.id, nome: f.nome })),
-    faixasHospedagem: faixasHospedagem.map((f) => ({ id: f.id, nome: f.nome })),
-  });
+  const { linhas, avisos } = resolverPlano(brutas, { tipos });
 
   return { linhas, avisos };
 }
