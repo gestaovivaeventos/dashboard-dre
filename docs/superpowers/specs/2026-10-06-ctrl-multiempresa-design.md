@@ -78,7 +78,7 @@ Mesma mecânica de `company_excluded_projects`:
 
 1. Cria uma org **"Viva Company"** e semeia seus 5 CNPJs em `ctrl_org_companies`.
 2. Concede a org Viva a **todos os usuários atuais** do Compras (`ctrl_user_orgs`).
-3. Adiciona `org_id` **nullable** nas 5 tabelas → **backfill de TODAS as linhas para a org Viva** → `set not null` + FK + índice.
+3. Adiciona `org_id` **nullable, com DEFAULT = Viva** nas 5 tabelas → **backfill de TODAS as linhas para a org Viva** → FK + índice. O `NOT NULL` + `DROP DEFAULT` fica para depois do código (expand/contract — pôr `NOT NULL` antes do código quebraria toda criação, que ainda não passa `org_id`; o DEFAULT mantém a janela B→C segura, com linha nova caindo na Viva e visível).
 4. Toda query do módulo ganha `and org_id = <org ativa>`, e a **org ativa de todo usuário atual = Viva**.
 
 **Prova de diff zero:** com só a org Viva existindo, todos granted em Viva e org ativa = Viva, cada query escopada devolve exatamente as linhas de hoje (todas são `org = viva`). A Feat nasce vazia. As permissões isolam sozinhas porque **id de setor é único por org**: o `user_sectors` de um usuário Viva aponta para setores Viva; os setores da Feat são ids novos que ele nunca alcança.
@@ -137,11 +137,11 @@ As policies de `ctrl_sectors`/`_expense_types`/`_requests`/`_events`/`_suppliers
 
 ## 8. Ordem de implantação (etapas independentes e reversíveis)
 
-1. **Migration A** — `ctrl_orgs` + `ctrl_org_companies` + `ctrl_user_orgs`; semeia org Viva + 5 CNPJs + concede Viva a todos os usuários com papel CTRL. *(Nada lê ainda → sem efeito.)*
-2. **Migration B** — `org_id` nullable nas 5 tabelas → backfill = Viva → `not null` + FK + índice. *(Nada filtra ainda → sem efeito.)*
-3. **Código** — contexto de org (cookie, `getCtrlUser`, layout, seletor escondido p/ 1 org), escopo por org em todas as queries, `org_id` nos inserts, picker de pagador restrito. Org ativa padrão = Viva → Viva idêntica.
-4. **Migration C** — policies ganham `ctrl_has_org`. *(Viva já concedida → idêntico.)*
-5. **Cadastro da Feat** — cria org Feat + 1 CNPJ (+ `ctrl_company_omie_config`), setores e tipos da Feat, concede a org Feat aos usuários da Feat. Orçamento depois.
+1. **Migration A** (`20261006130000`) — `ctrl_orgs` + `ctrl_org_companies` + `ctrl_user_orgs`; semeia org Viva + 5 CNPJs + concede Viva a todos os usuários com papel CTRL. *(Nada lê ainda → sem efeito.)* ✅ **APLICADA 06/10/2026** (verificado: 1 org, 5 CNPJs certos, 37 usuários).
+2. **Migration B** (`20261006140000`) — `org_id` **nullable + DEFAULT Viva** nas 5 tabelas → backfill = Viva → FK + índice. **Sem `NOT NULL` ainda.** *(Nada filtra nem grava explicitamente ainda → sem efeito.)*
+3. **Código (etapa C)** — contexto de org (cookie, `getCtrlUser`, layout, seletor escondido p/ 1 org), escopo por org em todas as queries, `org_id` nos inserts, picker de pagador restrito, lembrete um e-mail por empresa. Org ativa padrão = Viva → Viva idêntica. (Não é migration; vai no working tree para revisão, validado com lint/build/testes.)
+4. **Migration D** — `set not null` + `drop default` de `org_id` nas 5 tabelas (agora o código grava) + policies ganham `ctrl_has_org` + `ctrl_approval_email_log` ganha a empresa na chave de duplicidade. *(Viva já concedida → idêntico.)*
+5. **Cadastro da Feat (etapa E)** — cria org Feat + 1 CNPJ (+ `ctrl_company_omie_config`), setores e tipos da Feat, concede a org Feat aos usuários da Feat. Orçamento e usuários depois.
 
 Até a etapa 5 só existe a org Viva; a partir dela a Feat existe mas os usuários Viva não a veem. Cada etapa é deployável e reversível isoladamente.
 
