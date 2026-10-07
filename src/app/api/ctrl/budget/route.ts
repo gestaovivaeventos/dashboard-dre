@@ -225,6 +225,10 @@ export async function POST(request: Request) {
   if (!hasCtrlRole(ctx, "csc", "admin")) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
+  // Multiempresa: setores/tipos e os tipos auto-criados são da empresa ativa.
+  if (!ctx.orgId) {
+    return NextResponse.json({ error: "Empresa ativa não identificada." }, { status: 400 });
+  }
 
   const db = createAdminClientIfAvailable() ?? (await createClient());
 
@@ -266,10 +270,11 @@ export async function POST(request: Request) {
     );
   }
 
-  // Resolve setor / tipo names against the catalog.
+  // Resolve setor / tipo names against the catalog DA EMPRESA ATIVA (multiempresa):
+  // nomes se repetem entre empresas, então o casamento por nome tem de ser por empresa.
   const [sectorsRes, typesRes] = await Promise.all([
-    db.from("ctrl_sectors").select("id, name"),
-    db.from("ctrl_expense_types").select("id, name, active"),
+    db.from("ctrl_sectors").select("id, name").eq("org_id", ctx.orgId),
+    db.from("ctrl_expense_types").select("id, name, active").eq("org_id", ctx.orgId),
   ]);
   if (sectorsRes.error || typesRes.error) {
     return NextResponse.json(
@@ -310,7 +315,10 @@ export async function POST(request: Request) {
   }
   const createdTypes: string[] = [];
   if (missingTypes.size > 0) {
-    const toInsert = Array.from(missingTypes.values()).map((name) => ({ name }));
+    const toInsert = Array.from(missingTypes.values()).map((name) => ({
+      name,
+      org_id: ctx.orgId, // empresa ativa (multiempresa)
+    }));
     const { data: inserted, error: insertTypeErr } = await db
       .from("ctrl_expense_types")
       .insert(toInsert)
