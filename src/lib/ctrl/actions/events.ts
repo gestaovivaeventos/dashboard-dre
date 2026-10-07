@@ -19,12 +19,14 @@ export async function createEvent(formData: FormData) {
   const name = (formData.get("name") as string)?.trim();
   if (!name) return { error: "Nome é obrigatório." };
 
+  if (!ctx.orgId) return { error: "Empresa ativa não identificada." };
   const supabase = await getAdminSupabase();
   const { error } = await supabase.from("ctrl_events").insert({
     name,
     description: (formData.get("description") as string)?.trim() || null,
     is_active: true,
     created_by: ctx.id,
+    org_id: ctx.orgId, // empresa ativa (multiempresa)
   });
 
   if (error) return { error: error.message };

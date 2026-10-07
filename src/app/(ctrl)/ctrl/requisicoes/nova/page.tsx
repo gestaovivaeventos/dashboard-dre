@@ -8,12 +8,14 @@ import { getSuppliers } from "@/lib/ctrl/actions/suppliers";
 import { getUsdConversion } from "@/lib/ai/usd";
 import { createClient } from "@/lib/supabase/server";
 
-async function getActiveEvents() {
+async function getActiveEvents(orgId: string | null) {
+  if (!orgId) return [];
   const supabase = await createClient();
   const { data } = await supabase
     .from("ctrl_events")
     .select("id, name, description, is_active, created_by, created_at, updated_at")
     .eq("is_active", true)
+    .eq("org_id", orgId) // empresa ativa (multiempresa)
     .order("name");
   return data ?? [];
 }
@@ -38,7 +40,7 @@ export default async function NovaRequisicaoPage() {
       // do fornecedor foi movida para o Contas a Pagar (envio para pagamento).
       // Rejeitado continua fora da lista.
       getSuppliers(["aprovado", "pendente"]),
-      getActiveEvents(),
+      getActiveEvents(ctx.orgId),
       getUsdConversion(),
     ]);
 

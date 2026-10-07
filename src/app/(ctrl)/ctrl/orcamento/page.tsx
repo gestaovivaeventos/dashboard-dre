@@ -17,23 +17,29 @@ async function getOrcamentoData(
   year: number,
   sectorFilter: string[] | null,
   throughMonth: number,
+  orgId: string | null,
 ) {
   const supabase = await createClient();
+  if (!orgId) return { rows: [] as OrcamentoRow[] };
 
   // "Até o mês atual" fecha o orçado/realizado da planilha no mês corrente
   // (a planilha-base é mensal, com period_month). "Ano completo" (throughMonth=12)
   // não corta nada. O realizado/pendente dinâmico é fechado no mesmo mês pela
   // janela do countsTowardBudget, mantendo os dois lados no mesmo corte.
+  // Escopo por EMPRESA (multiempresa): ctrl_requests tem org_id direto; ctrl_budget
+  // deriva via setor (join interno); as parcelas do rateio, via requisição-mãe.
   let budgetQuery = supabase
     .from("ctrl_budget")
-    .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name)")
+    .select("expense_type_id, sector_id, amount, realized, ctrl_expense_types(name), ctrl_sectors!inner(org_id)")
     .eq("period_year", year)
+    .eq("ctrl_sectors.org_id", orgId)
     .lte("period_month", throughMonth);
   // Requisições de 1 setor (is_rateio = false). As rateadas entram pelas suas
   // parcelas (rateioQuery), cada uma no orçamento do SEU setor.
   let requestsQuery = supabase
     .from("ctrl_requests")
     .select("expense_type_id, sector_id, status, amount, due_date, created_at")
+    .eq("org_id", orgId)
     .not("status", "in", '("rejeitado","estornado","inativado_csc")')
     .is("deleted_at", null) // exclui requisições excluídas logicamente
     .eq("is_rateio", false)
@@ -42,11 +48,12 @@ async function getOrcamentoData(
   // da requisição) — assim o gerente escopado vê a parte que cai no setor dele.
   let rateioQuery = supabase
     .from("ctrl_request_sectors")
-    .select("sector_id, amount, ctrl_requests!inner(expense_type_id, status, due_date, created_at, reference_year, deleted_at)")
+    .select("sector_id, amount, ctrl_requests!inner(expense_type_id, status, due_date, created_at, reference_year, deleted_at, org_id)")
+    .eq("ctrl_requests.org_id", orgId)
     .not("ctrl_requests.status", "in", '("rejeitado","estornado","inativado_csc")')
     .is("ctrl_requests.deleted_at", null)
     .eq("ctrl_requests.reference_year", year);
-  let sectorsQuery = supabase.from("ctrl_sectors").select("id, name");
+  let sectorsQuery = supabase.from("ctrl_sectors").select("id, name").eq("org_id", orgId);
 
   // Escopo por setor: linhas sem setor ("Sem setor") também ficam de fora,
   // já que não pertencem a nenhum setor do usuário.
@@ -61,7 +68,7 @@ async function getOrcamentoData(
     budgetQuery,
     requestsQuery,
     rateioQuery,
-    supabase.from("ctrl_expense_types").select("id, name").order("name"),
+    supabase.from("ctrl_expense_types").select("id, name").eq("org_id", orgId).order("name"),
     sectorsQuery,
   ]);
 
@@ -196,7 +203,7 @@ export default async function OrcamentoPage({
   const { rows = [], error } =
     sectorScoped && ctx.sectorIds.length === 0
       ? { rows: [] as OrcamentoRow[], error: undefined }
-      : await getOrcamentoData(year, sectorFilter, throughMonth);
+      : await getOrcamentoData(year, sectorFilter, throughMonth, ctx.orgId);
 
   const grandOrcado = rows.reduce((s, r) => s + r.orcado, 0);
   const grandRealizado = rows.reduce((s, r) => s + r.realizado, 0);

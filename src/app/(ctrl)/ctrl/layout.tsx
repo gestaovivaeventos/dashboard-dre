@@ -6,6 +6,7 @@ import { getSessionContext } from "@/lib/auth/session";
 import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
+import { getCtrlOrgContext } from "@/lib/ctrl/orgs";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -65,6 +66,9 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
     ? await getUnreadNotificationsCount(profile.id)
     : 0;
 
+  // Empresas do Compras (multiempresa) para o seletor do cabeçalho.
+  const orgCtx = await getCtrlOrgContext(supabase);
+
   return (
     <AppShell
       userName={userName}
@@ -83,6 +87,8 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
       activeModule={activeModule}
       availableModules={availableModules}
       activeSegmentSlug={activeSegmentSlug}
+      ctrlOrgs={orgCtx.orgs}
+      activeCtrlOrgSlug={orgCtx.activeOrg?.slug ?? null}
       canBiValidation={canAccessBiValidation(profile)}
       // Visão completa do módulo Compras (override nominal): só faz sentido
       // para quem já tem o módulo — não concede o módulo a ninguém.

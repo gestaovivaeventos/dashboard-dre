@@ -133,7 +133,8 @@ export interface OmieMappingData {
 export async function getOmieMappingData(
   companyId: string,
 ): Promise<OmieMappingData | { error: string }> {
-  await requireCtrlRole("admin", "csc", "contas_a_pagar");
+  const ctx = await requireCtrlRole("admin", "csc", "contas_a_pagar");
+  if (!ctx.orgId) return { error: "Empresa ativa não identificada." };
   const db = createAdminClient();
 
   // Cached options
@@ -168,9 +169,14 @@ export async function getOmieMappingData(
     const withFlag = await db
       .from("ctrl_expense_types")
       .select("id, name, categoria_no_envio")
+      .eq("org_id", ctx.orgId)
       .order("name");
     if ((withFlag.error as { code?: string } | null)?.code === "42703") {
-      const fallback = await db.from("ctrl_expense_types").select("id, name").order("name");
+      const fallback = await db
+        .from("ctrl_expense_types")
+        .select("id, name")
+        .eq("org_id", ctx.orgId)
+        .order("name");
       if (fallback.error) return { error: fallback.error.message };
       expenseTypesRaw = (fallback.data ?? []) as typeof expenseTypesRaw;
     } else if (withFlag.error) {
@@ -180,11 +186,12 @@ export async function getOmieMappingData(
     }
   }
 
-  // Sectors (active only)
+  // Sectors (active only) — escopados pela empresa ativa (multiempresa).
   const { data: sectorsRaw, error: secErr } = await db
     .from("ctrl_sectors")
     .select("id, name")
     .eq("active", true)
+    .eq("org_id", ctx.orgId)
     .order("name");
 
   if (secErr) return { error: secErr.message };

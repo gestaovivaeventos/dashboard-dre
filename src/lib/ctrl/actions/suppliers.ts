@@ -36,6 +36,10 @@ export async function getSuppliers(
     ? createAdminClientIfAvailable() ?? (await createClient())
     : await createClient();
 
+  // Escopo por EMPRESA (multiempresa): fornecedores são independentes por empresa
+  // (decisão do dono). Sem empresa ativa → nada (falha fechada). Hoje = Viva → inerte.
+  if (!ctx.orgId) return { suppliers: [] as CtrlSupplier[] };
+
   // A API limita 1000 linhas/requisição e já há >1000 fornecedores — pagina em
   // blocos para não cortar a cauda da lista (nomes com "T" em diante sumiam).
   const pageSize = 1000;
@@ -44,6 +48,7 @@ export async function getSuppliers(
     let query = supabase
       .from("ctrl_suppliers")
       .select("*, ctrl_supplier_expense_types(ctrl_expense_types(id, name))")
+      .eq("org_id", ctx.orgId)
       .order("name")
       .range(from, from + pageSize - 1);
     if (Array.isArray(status)) {
@@ -592,6 +597,7 @@ export async function createSupplier(data: {
   cep?: string;
 }) {
   const ctx = await requireCtrlRole("solicitante", "gerente", "diretor", "csc", "admin");
+  if (!ctx.orgId) return { error: "Empresa ativa não identificada." };
 
   const isEstrangeiro = !!data.estrangeiro;
 
@@ -743,6 +749,7 @@ export async function createSupplier(data: {
       status: "pendente",
       omie_sync_required: true,
       created_by: ctx.id,
+      org_id: ctx.orgId, // empresa ativa (multiempresa) — fornecedores por empresa
   };
   if (attachmentPaths.length > 0) insertPayload.attachment_paths = attachmentPaths;
 

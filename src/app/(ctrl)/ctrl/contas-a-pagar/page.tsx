@@ -6,13 +6,22 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { ContasAPagarTable, type ContasRequest } from "@/components/ctrl/contas-a-pagar-table";
 
-async function getCompanies() {
+async function getCompanies(orgId: string | null) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
+  // Multiempresa: o pagador só pode ser um CNPJ da empresa ativa do Compras.
+  if (!orgId) return [];
+  const { data: links } = await supabase
+    .from("ctrl_org_companies")
+    .select("company_id")
+    .eq("org_id", orgId);
+  const orgCompanyIds = (links ?? []).map((l) => l.company_id as string);
+  if (orgCompanyIds.length === 0) return [];
   const { data, error } = await supabase
     .from("companies")
     .select("id, name")
     .eq("active", true)
+    .in("id", orgCompanyIds)
     .not("omie_app_key", "is", null)
     .not("omie_app_secret", "is", null)
     .order("name");
@@ -23,7 +32,8 @@ async function getCompanies() {
   return (data ?? []) as { id: string; name: string }[];
 }
 
-async function getContasAPagar() {
+async function getContasAPagar(orgId: string | null) {
+  if (!orgId) return { requests: [], error: null as string | null };
   // Admin client (service role) para que o join embutido em `users` resolva
   // criador/aprovador — a RLS de `users` só expõe a própria linha a não-admins,
   // o que zeraria "Criado por"/"Aprovado por". A autorização já é feita na
@@ -96,6 +106,7 @@ async function getContasAPagar() {
     `)
     .in("status", ["aprovado", "agendado", "info_pagamento_pendente"])
     .is("deleted_at", null) // exclui requisições excluídas logicamente
+    .eq("org_id", orgId) // empresa ativa (multiempresa)
     .order("due_date", { ascending: true, nullsFirst: false });
 
   if (error) return { error: error.message };
@@ -203,11 +214,12 @@ async function getContasAPagar() {
 // Cadastros para o modal de correção de setor/tipo. Busca TODOS os ativos via
 // admin client — o perfil contas_a_pagar não é coberto pelo gate de getSectors/
 // getExpenseTypes (e getSectors ainda filtraria por vínculo de setor do usuário).
-async function getCadastros() {
+async function getCadastros(orgId: string | null) {
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  if (!orgId) return { sectors: [], expenseTypes: [] };
   const [sec, exp] = await Promise.all([
-    supabase.from("ctrl_sectors").select("id, name").eq("active", true).order("name"),
-    supabase.from("ctrl_expense_types").select("id, name").eq("active", true).order("name"),
+    supabase.from("ctrl_sectors").select("id, name").eq("active", true).eq("org_id", orgId).order("name"),
+    supabase.from("ctrl_expense_types").select("id, name").eq("active", true).eq("org_id", orgId).order("name"),
   ]);
   return {
     sectors: (sec.data ?? []) as { id: string; name: string }[],
@@ -235,9 +247,9 @@ export default async function ContasAPagarPage() {
   // demais recebem listas vazias.
   const canEditRouting = canOperate;
   const [{ requests = [], error }, companies, cadastros] = await Promise.all([
-    getContasAPagar(),
-    getCompanies(),
-    canEditRouting ? getCadastros() : Promise.resolve({ sectors: [], expenseTypes: [] }),
+    getContasAPagar(ctx.orgId),
+    getCompanies(ctx.orgId),
+    canEditRouting ? getCadastros(ctx.orgId) : Promise.resolve({ sectors: [], expenseTypes: [] }),
   ]);
 
   const fmt = new Intl.NumberFormat("pt-BR", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 });

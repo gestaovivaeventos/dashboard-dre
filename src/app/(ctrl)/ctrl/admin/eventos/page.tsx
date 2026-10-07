@@ -5,11 +5,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createEvent, updateEvent, toggleEventActive } from "@/lib/ctrl/actions/events";
 import { EventosClient } from "@/components/ctrl/eventos-client";
 
-async function getEvents() {
+async function getEvents(orgId: string | null) {
+  if (!orgId) return { events: [] };
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("ctrl_events")
     .select("id, name, description, is_active, created_at")
+    .eq("org_id", orgId) // empresa ativa (multiempresa)
     .order("name");
   if (error) return { error: error.message };
   return { events: data ?? [] };
@@ -25,7 +27,7 @@ export default async function EventosPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const { events = [], error } = await getEvents();
+  const { events = [], error } = await getEvents(ctx.orgId);
 
   return (
     <div className="space-y-6">

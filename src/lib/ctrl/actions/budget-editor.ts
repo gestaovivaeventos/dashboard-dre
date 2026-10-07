@@ -114,12 +114,16 @@ export interface BudgetLineSummary {
 export async function listBudgetLines(
   year: number,
 ): Promise<{ error: string } | { lines: BudgetLineSummary[] }> {
-  await requireCtrlRole("csc", "admin");
+  const ctx = await requireCtrlRole("csc", "admin");
+  if (!ctx.orgId) return { lines: [] };
   const supabase = createAdminClientIfAvailable() ?? (await createClient());
+  // Escopo por EMPRESA (multiempresa): ctrl_budget não tem org_id — deriva do
+  // setor. Join interno filtra as linhas pelos setores da empresa ativa.
   const { data, error } = await supabase
     .from("ctrl_budget")
-    .select("sector_id, expense_type_id, amount, realized, ctrl_sectors(name), ctrl_expense_types(name)")
-    .eq("period_year", year);
+    .select("sector_id, expense_type_id, amount, realized, ctrl_sectors!inner(name, org_id), ctrl_expense_types(name)")
+    .eq("period_year", year)
+    .eq("ctrl_sectors.org_id", ctx.orgId);
   if (error) return { error: error.message };
 
   const map = new Map<string, BudgetLineSummary>();

@@ -5,14 +5,23 @@ import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { OmieMapeamentoClient } from "@/components/ctrl/omie-mapeamento-client";
 
-async function getOmieCompanies() {
+async function getOmieCompanies(orgId: string | null) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
+  // Multiempresa: só os CNPJs da empresa ativa do Compras.
+  if (!orgId) return [];
+  const { data: links } = await supabase
+    .from("ctrl_org_companies")
+    .select("company_id")
+    .eq("org_id", orgId);
+  const ids = (links ?? []).map((l) => l.company_id as string);
+  if (ids.length === 0) return [];
 
   const { data } = await supabase
     .from("companies")
     .select("id, name")
     .eq("active", true)
+    .in("id", ids)
     .not("omie_app_key", "is", null)
     .not("omie_app_secret", "is", null)
     .order("name");
@@ -30,7 +39,7 @@ export default async function OmieMapeamentoPage() {
     redirect("/ctrl/requisicoes");
   }
 
-  const companies = await getOmieCompanies();
+  const companies = await getOmieCompanies(ctx.orgId);
 
   return (
     <div className="space-y-6">

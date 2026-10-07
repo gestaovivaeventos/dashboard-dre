@@ -47,12 +47,15 @@ function db() {
 
 /** Lista TODOS os registros (ativos e inativos) da entidade — admin/csc. */
 export async function getCadastros(entity: CadastroEntity) {
-  await requireCtrlRole("csc", "admin");
+  const ctx = await requireCtrlRole("csc", "admin");
   const cfg = CONFIG[entity];
+  if (!ctx.orgId) return { items: [] as CadastroItem[] };
   const supabase = db() ?? (await createClient());
+  // Escopo por EMPRESA (multiempresa): só os cadastros da empresa ativa.
   const { data, error } = await supabase
     .from(cfg.table)
     .select("id, name, active")
+    .eq("org_id", ctx.orgId)
     .order("active", { ascending: false })
     .order("name");
   if (error) return { error: error.message };
@@ -60,12 +63,13 @@ export async function getCadastros(entity: CadastroEntity) {
 }
 
 export async function createCadastro(entity: CadastroEntity, name: string) {
-  await requireCtrlRole("csc", "admin");
+  const ctx = await requireCtrlRole("csc", "admin");
   const cfg = CONFIG[entity];
   const clean = name.trim();
   if (!clean) return { error: `Informe o nome do ${cfg.label}.` };
+  if (!ctx.orgId) return { error: "Empresa ativa não identificada." };
   const supabase = db() ?? (await createClient());
-  const { error } = await supabase.from(cfg.table).insert({ name: clean });
+  const { error } = await supabase.from(cfg.table).insert({ name: clean, org_id: ctx.orgId });
   if (error) return { error: friendlyError(error.message, cfg.label) };
   revalidatePath(cfg.path);
   return { ok: true as const };

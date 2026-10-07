@@ -9,8 +9,8 @@ import {
   resolveCompanyPeriodFloor,
 } from "@/lib/dashboard/company-period-limits";
 import { resolveUserSegments } from "@/lib/context/user-segments";
+import { resultadoExercicioCodeFor } from "@/lib/dashboard/resultado-exercicio";
 import {
-  DRE_RESULTADO_EXERCICIO_CODE,
   SCOPED_DRE_ACCOUNTS_SELECT,
   aggregateDreRows,
   aggregateDreRowsByCompany,
@@ -252,31 +252,14 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
     dreScope.coreAccounts,
   );
 
-  // === Override EXCLUSIVO da SGX ============================================
-  // Por padrão a linha "Resultado do Exercício" do Fluxo de Caixa puxa o code
-  // "11" do DRE (DRE_RESULTADO_EXERCICIO_CODE). SOMENTE para a SGX o produto
-  // quer que essa linha reflita o "Resultado 4 - Locação + Operacional +
-  // Projetos" (code "15" no plano custom da SGX), em vez do "Resultado 2 -
-  // Locação + Operacional" (code "11").
-  //
-  // Aplica-se apenas quando a SGX é a ÚNICA empresa selecionada — que é
-  // exatamente quando o escopo do DRE (`dreScope`) é o plano custom da SGX,
-  // onde o code "15" existe (isCoreDreCode permite top-level 1..19). Em
-  // consolidado/comparativo multiempresa o escopo cai no plano global (sem
-  // code 15), então mantemos o code "11" padrão — sem afetar nenhuma outra
-  // empresa nem o cálculo geral. Como o "Resultado" alimenta Caixa Gerado →
-  // Caixa Final → Saldo Inicial, usar o code 15 em `computeDreResultado`
-  // mantém toda a matemática do caixa da SGX internamente consistente.
-  const SGX_RESULTADO_EXERCICIO_CODE = "15";
-  const sgxCompanyId =
-    companies.find((c) => c.name.trim().toUpperCase() === "SGX")?.id ?? null;
-  const isSgxOnly =
-    sgxCompanyId !== null &&
-    filter.selectedCompanyIds.length === 1 &&
-    filter.selectedCompanyIds[0] === sgxCompanyId;
-  const resultadoExercicioCode = isSgxOnly
-    ? SGX_RESULTADO_EXERCICIO_CODE
-    : DRE_RESULTADO_EXERCICIO_CODE;
+  // Conta do DRE lida como "Resultado do Exercício": "11" por padrão, "15" na
+  // SGX, na Spot e na Express (ver src/lib/dashboard/resultado-exercicio.ts —
+  // o plano da Spot/Express não tem code 11, e a linha saía ZERO). Resolvida
+  // sobre o MESMO conjunto que montou `dreScope`, para o code existir no plano
+  // em que é procurado. Como o "Resultado" alimenta Caixa Gerado → Caixa Final
+  // → Saldo Inicial, usar o mesmo code em todo `computeDreResultado` mantém a
+  // matemática do caixa internamente consistente.
+  const resultadoExercicioCode = resultadoExercicioCodeFor(filter.selectedCompanyIds);
 
   if (filter.selectedCompanyIds.length === 0 || periodOutsideFloor) {
     return (
@@ -314,7 +297,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
   // cálculo aqui: a tela do Dashboard DRE usa o MESMO `aggregateDreRows`
   // + `findResultadoExercicio`, então qualquer mudança futura na regra do
   // DRE se propaga automaticamente para o Fluxo de Caixa. O code de resultado
-  // (`resultadoExercicioCode`) é "11" por padrão e "15" só no escopo da SGX.
+  // (`resultadoExercicioCode`) é "11" por padrão e "15" na SGX/Spot/Express.
   const computeDreResultado = async (
     bucket: CashFlowPeriodBucket,
     companies: string[] = filter.selectedCompanyIds,
@@ -877,6 +860,7 @@ export default async function CashFlowPage({ searchParams, params }: CashFlowPag
         const companyAmounts = amountsByCompanyId.get(companyId) ?? new Map();
         const companyResultado = findResultadoExercicio(
           dreRowsByCompany.get(companyId) ?? [],
+          resultadoExercicioCode,
         );
 
         const companyOpenings = openingByCompanyMonth.get(companyId) ?? new Map<string, number>();

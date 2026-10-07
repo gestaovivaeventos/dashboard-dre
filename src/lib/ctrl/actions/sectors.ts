@@ -23,10 +23,15 @@ export async function getSectors() {
     ? createAdminClientIfAvailable() ?? (await createClient())
     : await createClient();
 
+  // Escopo por EMPRESA (multiempresa): só os setores da empresa ativa. Sem
+  // empresa ativa → nada (falha fechada). Hoje resolve para a Viva → inerte.
+  if (!ctx.orgId) return { sectors: [] as CtrlSector[] };
+
   let query = supabase
     .from("ctrl_sectors")
     .select("*")
     .eq("active", true)
+    .eq("org_id", ctx.orgId)
     .order("name");
 
   // admin e contas_a_pagar veem todos os setores ativos: o Contas a Pagar opera
@@ -49,12 +54,13 @@ export async function getSectors() {
 }
 
 export async function createSector(name: string) {
-  await requireCtrlRole("admin");
+  const ctx = await requireCtrlRole("admin");
   const supabase = await createClient();
+  if (!ctx.orgId) return { error: "Empresa ativa não identificada." };
 
   const { data, error } = await supabase
     .from("ctrl_sectors")
-    .insert({ name })
+    .insert({ name, org_id: ctx.orgId })
     .select("id")
     .single();
 

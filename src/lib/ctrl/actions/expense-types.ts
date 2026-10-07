@@ -20,10 +20,15 @@ export async function getExpenseTypes() {
     ? createAdminClientIfAvailable() ?? (await createClient())
     : await createClient();
 
+  // Escopo por EMPRESA (multiempresa): só os tipos da empresa ativa. Sem empresa
+  // ativa → nada (falha fechada). Hoje resolve para a Viva → inerte.
+  if (!ctx.orgId) return { expenseTypes: [] as CtrlExpenseType[] };
+
   const { data, error } = await supabase
     .from("ctrl_expense_types")
     .select("id, name, created_at, active")
     .eq("active", true)
+    .eq("org_id", ctx.orgId)
     .order("name");
 
   if (error) return { error: error.message };

@@ -4,6 +4,7 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { CtrlOrgSwitcher } from "@/components/app/ctrl-org-switcher";
 import { Logo, LogoFull } from "@/components/app/logo";
 import { NavLinks, visibleNavKeys } from "@/components/app/nav-links";
 import { NotificationsLink } from "@/components/app/notifications-link";
@@ -43,6 +44,10 @@ interface AppShellProps {
   activeModule: ActiveModule;
   availableModules: ModuleDefinition[];
   activeSegmentSlug: string | null;
+  /** Empresas do Compras do usuário (multiempresa) — alimenta o seletor no topo. */
+  ctrlOrgs?: { id: string; nome: string; slug: string }[];
+  /** Slug da empresa ativa do Compras. */
+  activeCtrlOrgSlug?: string | null;
   contractsOnly?: boolean;
   isFranqueado?: boolean;
   /** Perfil 'csc' — cópia do franqueado + tela "Validação Relatório". */
@@ -82,11 +87,12 @@ export function AppShell({
   orcamentoPapel,
   canDp,
   segments,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   availableModules,
   activeSegmentSlug,
+  ctrlOrgs,
+  activeCtrlOrgSlug,
   contractsOnly,
   isFranqueado,
   isCsc,
@@ -283,6 +289,11 @@ export function AppShell({
                 linha de descrição abaixo dele). Repetir o nome na topbar
                 deixava o mesmo texto duas vezes no topo de toda página. */}
             <div className="ch-topbar__right">
+              {/* Empresa ativa do Compras (multiempresa): só aparece no módulo
+                  Compras e quando o usuário acessa mais de uma empresa. */}
+              {activeModule === "ctrl" && (
+                <CtrlOrgSwitcher orgs={ctrlOrgs ?? []} activeSlug={activeCtrlOrgSlug ?? null} />
+              )}
               {/* Sino: módulo Compras (padrão) ou, para quem só valida
                   relatórios BI (perfil CSC, sem Compras), a própria tela de
                   Validação Relatório — onde a pendência é resolvida. */}

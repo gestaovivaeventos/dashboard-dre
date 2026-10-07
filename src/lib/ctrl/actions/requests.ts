@@ -366,6 +366,27 @@ function dueDateForRecurrence(
 }
 
 // ─── Create Request (rateio entre setores) ────────────────────────────────────
+// Guarda de EMPRESA: garante que os setores escolhidos pertencem à empresa ativa
+// do solicitante. O formulário só oferece setores da empresa ativa, mas um envio
+// forjado poderia mandar setor de outra empresa — e o cálculo de orçamento roda
+// por setor, então um setor de fora daria número errado. Hoje (empresa única) é
+// inerte; passa a importar quando houver mais de uma empresa. Retorna a mensagem
+// de erro, ou null quando ok.
+async function assertSectorsInOrg(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string | null,
+  sectorIds: Array<string | null | undefined>,
+): Promise<string | null> {
+  if (!orgId) return "Empresa ativa não identificada.";
+  const ids = Array.from(new Set(sectorIds.filter((s): s is string => Boolean(s))));
+  if (ids.length === 0) return null;
+  const { data } = await supabase.from("ctrl_sectors").select("id, org_id").in("id", ids);
+  const rows = (data ?? []) as Array<{ id: string; org_id: string | null }>;
+  if (rows.length !== ids.length) return "Setor inválido para esta empresa.";
+  if (rows.some((s) => s.org_id !== orgId)) return "Setor de outra empresa.";
+  return null;
+}
+
 //
 // Cria UMA requisição dividida entre vários setores. Cada setor tem seu VALOR e
 // sua APROVAÇÃO própria (ctrl_request_sectors): o nível (dentro/fora do orçamento)
@@ -386,6 +407,8 @@ async function createRateioRequest(
   if (new Set(parts.map((p) => p.sector_id)).size !== parts.length) {
     return { error: "Cada setor só pode aparecer uma vez no rateio." };
   }
+  const rateioSectorErr = await assertSectorsInOrg(supabase, ctx.orgId, parts.map((p) => p.sector_id));
+  if (rateioSectorErr) return { error: rateioSectorErr };
   if (!data.expense_type_id) return { error: "Selecione o tipo de despesa para ratear." };
   if (data.reference_month < 1 || data.reference_month > 12) {
     return { error: "Mês de referência inválido." };
@@ -468,6 +491,7 @@ async function createRateioRequest(
       invoice_attachment_path: data.invoice_attachment_path ?? null,
       extra_attachment_paths: data.extra_attachment_paths ?? [],
       needs_credit_card: data.needs_credit_card ?? null,
+      org_id: ctx.orgId, // empresa ativa do Compras (multiempresa)
       is_rateio: true,
       is_budgeted: perSector.every((s) => s.isBudgeted),
       approval_tier: anyOverBudget ? "nivel_3" : "nivel_2",
@@ -550,6 +574,10 @@ export async function createRequest(data: CreateRequestInput) {
   if (data.is_rateio) {
     return createRateioRequest(supabase, ctx, data);
   }
+
+  // Empresa (multiempresa): o setor escolhido tem de ser da empresa ativa.
+  const sectorOrgErr = await assertSectorsInOrg(supabase, ctx.orgId, [data.sector_id]);
+  if (sectorOrgErr) return { error: sectorOrgErr };
 
   // Compra em dólar: o valor efetivo (amount, em BRL) é RECALCULADO no servidor a
   // partir de USD × câmbio × (1 + IOF). A partir daqui o BRL é a fonte de verdade
@@ -709,6 +737,10 @@ export async function createRequest(data: CreateRequestInput) {
   const baseFields = {
     title: data.title,
     description: data.description ?? null,
+    // Empresa do Compras (multiempresa): grava a empresa ativa em todas as
+    // requisições/parcelas. Hoje = Viva (default do banco já seria Viva); setar
+    // explícito é o que permite a etapa D tirar o DEFAULT e isolar a Feat.
+    org_id: ctx.orgId,
     sector_id: data.sector_id,
     expense_type_id: data.expense_type_id ?? null,
     supplier_id: data.supplier_id ?? null,
@@ -1265,6 +1297,11 @@ export async function getRequests(filters?: {
     // que passam por aqui).
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  // Escopo por EMPRESA (multiempresa): só as requisições da empresa ativa. Hoje
+  // resolve para a Viva (única empresa), então é inerte; isola quando houver
+  // outra. Sem empresa ativa → nada (falha fechada).
+  query = ctx.orgId ? query.eq("org_id", ctx.orgId) : query.in("org_id", []);
 
   if (filters?.status) query = query.eq("status", filters.status);
   if (filters?.statuses?.length) query = query.in("status", filters.statuses);
@@ -2872,6 +2909,19 @@ export async function enqueueSendToPayment(
   if (compErr || !company) return { error: "Empresa pagadora não encontrada." };
   if (!company.omie_app_key || !company.omie_app_secret) {
     return { error: "Empresa pagadora sem conexão Omie." };
+  }
+
+  // Multiempresa: o pagador tem de ser um CNPJ da empresa ativa do Compras.
+  // Defesa de servidor — o picker já só oferece os CNPJs da empresa. Hoje (empresa
+  // única) é inerte. Falha fechada se não há empresa ativa.
+  const { data: orgLink } = await supabase
+    .from("ctrl_org_companies")
+    .select("company_id")
+    .eq("org_id", ctx.orgId ?? "")
+    .eq("company_id", payingCompanyId)
+    .maybeSingle();
+  if (!orgLink) {
+    return { error: "Empresa pagadora não pertence à empresa ativa do Compras." };
   }
 
   // ── Trava do fornecedor ────────────────────────────────────────────────────
