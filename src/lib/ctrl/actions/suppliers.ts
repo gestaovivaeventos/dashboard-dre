@@ -407,7 +407,7 @@ export async function updateSupplier(
     if (normalizedDoc) {
       const { data: existing, error: dupErr } = await supabase.rpc(
         "ctrl_find_supplier_by_doc",
-        { p_doc: payload.cnpj_cpf as string },
+        { p_doc: payload.cnpj_cpf as string, p_org: ctx.orgId },
       );
       if (dupErr) return { error: dupErr.message };
       const match = ((existing ?? []) as Array<{ id: string; name: string; status: string }>)
@@ -698,9 +698,11 @@ export async function createSupplier(data: {
   // fornecedores, documentos além desse limite escapavam e permitiam recadastro.
   const normalizedDoc = normalizeDoc(data.cnpj_cpf);
   if (normalizedDoc) {
+    // Dedupe por CNPJ/CPF DENTRO da empresa ativa (multiempresa): a Feat pode ter
+    // um fornecedor com o mesmo documento da Viva. p_org null (código antigo) = global.
     const { data: existing, error: dupErr } = await supabase.rpc(
       "ctrl_find_supplier_by_doc",
-      { p_doc: data.cnpj_cpf },
+      { p_doc: data.cnpj_cpf, p_org: ctx.orgId },
     );
     if (dupErr) return { error: dupErr.message };
     const match = (existing ?? [])[0] as
