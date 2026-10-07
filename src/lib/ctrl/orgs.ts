@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { readActiveCtrlOrgSlug } from "@/lib/context/active-context";
+import { isCtrlOrgRole, type CtrlOrgRole } from "@/lib/ctrl/roles";
 
 // Empresa do Compras (a "organização de compras" — grupo de CNPJs). Ver
 // docs/superpowers/specs/2026-10-06-ctrl-multiempresa-design.md.
@@ -18,6 +19,13 @@ export interface CtrlOrgContext {
   /** Empresa ativa (cookie validado contra `orgs`; senão a 1ª). null só se não há empresa. */
   activeOrgId: string | null;
   activeOrg: CtrlOrg | null;
+  /**
+   * Papel do Compras do usuário NA empresa ativa (override de `ctrl_user_orgs.role`),
+   * ou null = usa o perfil global. Consumido só por `resolveCtrlRolesForOrg`
+   * (@/lib/ctrl/roles). Para admin vem null (admin é global) ou simplesmente é
+   * ignorado na resolução. Ver o spec de 2026-10-07.
+   */
+  activeOrgRole: CtrlOrgRole | null;
 }
 
 /**
@@ -44,8 +52,17 @@ export async function getCtrlOrgContext(supabase: SupabaseClient): Promise<CtrlO
   // Servem para o DEFAULT: o admin VÊ todas as empresas, mas o padrão deve ser
   // uma empresa CONCEDIDA a ele — senão uma empresa nova e vazia (ex.: a Feat,
   // primeira por ordem alfabética) viraria o padrão e a tela abriria sem dados.
-  const { data: grantRows } = await supabase.from("ctrl_user_orgs").select("org_id");
+  // O `role` é o override de papel POR EMPRESA (null = usa o perfil global).
+  const { data: grantRows } = await supabase
+    .from("ctrl_user_orgs")
+    .select("org_id, role");
   const grantedIds = new Set((grantRows ?? []).map((r) => r.org_id as string));
+  const roleByOrg = new Map<string, CtrlOrgRole>();
+  (grantRows ?? []).forEach((r) => {
+    const orgId = r.org_id as string;
+    const role = (r as { role?: string | null }).role ?? null;
+    if (isCtrlOrgRole(role)) roleByOrg.set(orgId, role);
+  });
 
   const slug = await readActiveCtrlOrgSlug();
   const byCookie = slug ? orgs.find((o) => o.slug === slug) : undefined;
@@ -58,6 +75,9 @@ export async function getCtrlOrgContext(supabase: SupabaseClient): Promise<CtrlO
     orgIds,
     activeOrgId: active?.id ?? null,
     activeOrg: active ?? null,
+    // Admin pode não ter linha para a empresa ativa (vê todas via RLS) → null,
+    // que a resolução trata como "usa o global" (e admin é ignorado de todo jeito).
+    activeOrgRole: active ? roleByOrg.get(active.id) ?? null : null,
   };
 }
 

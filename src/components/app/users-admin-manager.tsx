@@ -44,6 +44,7 @@ import {
   isOrcamentoEligibleProfile,
   type OrcamentoSetoresPorEmpresa,
 } from "@/lib/auth/orcamento";
+import { CTRL_ORG_ROLE_VALUES, type CtrlOrgRole } from "@/lib/ctrl/roles";
 import {
   describeUserExceptions,
   findOrphanExceptionRules,
@@ -86,6 +87,12 @@ interface UserItem {
   sector_ids: string[];
   /** Empresas do COMPRAS (multiempresa) concedidas — ctrl_user_orgs. */
   ctrl_org_ids: string[];
+  /**
+   * Papel do Compras POR EMPRESA (override de ctrl_user_orgs.role). empresa →
+   * papel; AUSÊNCIA = usa o perfil global (comportamento de hoje). Só os 5
+   * papéis do Compras, nunca 'admin'. Ver src/lib/ctrl/roles.ts.
+   */
+  ctrl_org_roles: Record<string, CtrlOrgRole>;
 }
 
 interface SimpleOption {
@@ -240,6 +247,8 @@ interface FormState {
   company_ids: string[];
   /** Empresas do COMPRAS (multiempresa). */
   ctrl_org_ids: string[];
+  /** Papel do Compras por empresa (override). Ausência = usa o perfil global. */
+  ctrl_org_roles: Record<string, CtrlOrgRole>;
 }
 
 const emptyForm: FormState = {
@@ -260,6 +269,7 @@ const emptyForm: FormState = {
   sector_ids: [],
   company_ids: [],
   ctrl_org_ids: [],
+  ctrl_org_roles: {},
 };
 
 function userToForm(u: UserItem): FormState {
@@ -283,6 +293,7 @@ function userToForm(u: UserItem): FormState {
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
     ctrl_org_ids: [...(u.ctrl_org_ids ?? [])],
+    ctrl_org_roles: { ...(u.ctrl_org_roles ?? {}) },
   };
 }
 
@@ -450,6 +461,7 @@ export function UsersAdminManager({
         next.sector_ids = [];
         next.company_ids = [];
         next.ctrl_org_ids = [];
+        next.ctrl_org_roles = {};
       }
       // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case
       // e a Validação de Contratos.
@@ -469,6 +481,7 @@ export function UsersAdminManager({
         next.can_viagens_aprovar = false;
         next.sector_ids = [];
         next.ctrl_org_ids = [];
+        next.ctrl_org_roles = {};
       }
       // Saiu do perfil isolado de validador → o módulo deixa de ser implícito
       // e volta a depender da marcação em "Módulos visíveis".
@@ -487,6 +500,7 @@ export function UsersAdminManager({
       // módulo que a pessoa não tem voltaria a valer sozinho numa reconcessão.
       if (key === "can_compras" && value === false) {
         next.ctrl_org_ids = [];
+        next.ctrl_org_roles = {};
       }
       return next;
     });
@@ -512,7 +526,8 @@ export function UsersAdminManager({
 
   function toggleCtrlOrg(id: string) {
     setForm((prev) => {
-      const nextOrgs = prev.ctrl_org_ids.includes(id)
+      const removing = prev.ctrl_org_ids.includes(id);
+      const nextOrgs = removing
         ? prev.ctrl_org_ids.filter((o) => o !== id)
         : [...prev.ctrl_org_ids, id];
       // Tirar uma empresa tira junto os setores dela (os setores são por
@@ -522,7 +537,22 @@ export function UsersAdminManager({
         const org = orgOf.get(sid);
         return org == null || nextOrgs.includes(org);
       });
-      return { ...prev, ctrl_org_ids: nextOrgs, sector_ids: nextSectors };
+      // E tira o override de papel daquela empresa (não há onde editá-lo sem a
+      // empresa; deixar pendurado gravaria papel numa empresa não concedida).
+      const nextRoles = { ...prev.ctrl_org_roles };
+      if (removing) delete nextRoles[id];
+      return { ...prev, ctrl_org_ids: nextOrgs, sector_ids: nextSectors, ctrl_org_roles: nextRoles };
+    });
+  }
+
+  // Papel do Compras numa empresa específica (override). role = null → volta a
+  // "Usar o perfil" (remove a entrada), que é o padrão de hoje.
+  function setCtrlOrgRole(orgId: string, role: CtrlOrgRole | null) {
+    setForm((prev) => {
+      const nextRoles = { ...prev.ctrl_org_roles };
+      if (role == null) delete nextRoles[orgId];
+      else nextRoles[orgId] = role;
+      return { ...prev, ctrl_org_roles: nextRoles };
     });
   }
 
@@ -550,6 +580,7 @@ export function UsersAdminManager({
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
         ctrl_org_ids?: string[];
+        ctrl_org_roles?: Record<string, CtrlOrgRole>;
       }>;
     };
     setUsers(
@@ -573,6 +604,7 @@ export function UsersAdminManager({
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
         ctrl_org_ids: u.ctrl_org_ids ?? [],
+        ctrl_org_roles: u.ctrl_org_roles ?? {},
       })),
     );
   }
@@ -642,6 +674,7 @@ export function UsersAdminManager({
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
         ctrl_org_ids: form.ctrl_org_ids,
+        ctrl_org_roles: form.ctrl_org_roles,
       }),
     });
     setLoading(false);
@@ -684,6 +717,7 @@ export function UsersAdminManager({
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
         ctrl_org_ids: form.ctrl_org_ids,
+        ctrl_org_roles: form.ctrl_org_roles,
       }),
     });
     setLoading(false);
@@ -974,6 +1008,7 @@ export function UsersAdminManager({
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
             onToggleCtrlOrg={toggleCtrlOrg}
+            onSetCtrlOrgRole={setCtrlOrgRole}
             onSubmit={handleInviteSubmit}
           />
           <DialogFooter>
@@ -1011,6 +1046,7 @@ export function UsersAdminManager({
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
             onToggleCtrlOrg={toggleCtrlOrg}
+            onSetCtrlOrgRole={setCtrlOrgRole}
             onSubmit={handleEditSubmit}
           />
           <DialogFooter className="justify-between">
@@ -1185,6 +1221,7 @@ function UserForm({
   onToggleSector,
   onToggleCompany,
   onToggleCtrlOrg,
+  onSetCtrlOrgRole,
   onSubmit,
 }: {
   form: FormState;
@@ -1198,6 +1235,7 @@ function UserForm({
   onToggleSector: (id: string) => void;
   onToggleCompany: (id: string) => void;
   onToggleCtrlOrg: (id: string) => void;
+  onSetCtrlOrgRole: (orgId: string, role: CtrlOrgRole | null) => void;
   onSubmit: (e: FormEvent) => void;
 }) {
   const showSectors = profileShowsSectors(form.profile);
@@ -1211,6 +1249,10 @@ function UserForm({
   const ctrlOrgOptions = ctrlOrgs.map((o) => ({ id: o.id, name: o.nome }));
   const orgNameById = new Map(ctrlOrgs.map((o) => [o.id, o.nome]));
   const multiOrg = form.ctrl_org_ids.length > 1;
+  // Rótulos para o papel por empresa (reusa os labels da lista de perfis).
+  const profileLabel = PROFILES.find((p) => p.value === form.profile)?.label ?? form.profile;
+  const ctrlOrgRoleLabel = (r: CtrlOrgRole) =>
+    PROFILES.find((p) => p.value === r)?.label ?? r;
   // Setores oferecidos = só os das empresas concedidas (sem empresa, nenhum).
   // Com mais de uma empresa, o nome do setor leva a empresa para não confundir
   // dois "Diretoria" de empresas diferentes.
@@ -1474,6 +1516,42 @@ function UserForm({
             Define quais empresas a pessoa acessa no Compras. Os <strong>setores</strong> abaixo
             são escolhidos dentro das empresas marcadas aqui.
           </p>
+
+          {/* Papel POR EMPRESA (override). Só aparece com empresa marcada. O
+              padrão "Usar o perfil" grava NULL = segue o perfil global — não
+              muda nada do que existe hoje. Ver src/lib/ctrl/roles.ts. */}
+          {form.ctrl_org_ids.length > 0 && (
+            <div className="mt-1 space-y-2 rounded-md border p-2.5">
+              <p className="text-xs text-muted-foreground">
+                Papel em cada empresa. O padrão <strong>“Usar o perfil”</strong> segue o
+                perfil acima (<strong>{profileLabel}</strong>); escolha um papel diferente só
+                se esta empresa precisar (ex.: Contas a Pagar numa, Solicitante na outra).
+              </p>
+              {form.ctrl_org_ids.map((orgId) => (
+                <div key={orgId} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm">{orgNameById.get(orgId) ?? orgId}</span>
+                  <Select
+                    value={form.ctrl_org_roles[orgId] ?? "__profile__"}
+                    onValueChange={(v) =>
+                      onSetCtrlOrgRole(orgId, v === "__profile__" ? null : (v as CtrlOrgRole))
+                    }
+                  >
+                    <SelectTrigger className="h-8 w-56 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__profile__">Usar o perfil ({profileLabel})</SelectItem>
+                      {CTRL_ORG_ROLE_VALUES.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {ctrlOrgRoleLabel(r)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

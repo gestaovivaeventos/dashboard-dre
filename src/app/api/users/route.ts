@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/orcamento";
 import { fetchContratosGrantUserIds } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { isCtrlOrgRole } from "@/lib/ctrl/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET() {
@@ -38,7 +39,7 @@ export async function GET() {
     adminClient.from("user_sectors").select("user_id,sector_id"),
     supabase.from("companies").select("id,name").eq("active", true),
     supabase.from("ctrl_sectors").select("id,name").eq("active", true),
-    adminClient.from("ctrl_user_orgs").select("user_id,org_id"),
+    adminClient.from("ctrl_user_orgs").select("user_id,org_id,role"),
   ]);
 
   if (error) {
@@ -93,13 +94,22 @@ export async function GET() {
     userSectors.set(uid, list);
   });
 
-  // Empresas do Compras (multiempresa) concedidas por usuário.
+  // Empresas do Compras (multiempresa) concedidas por usuário + o papel por
+  // empresa (override). role NULL/ausente = usa o perfil global.
   const userCtrlOrgs = new Map<string, string[]>();
+  const userCtrlOrgRoles = new Map<string, Record<string, string>>();
   (ctrlOrgAccessData ?? []).forEach((row) => {
     const uid = row.user_id as string;
+    const orgId = row.org_id as string;
     const list = userCtrlOrgs.get(uid) ?? [];
-    list.push(row.org_id as string);
+    list.push(orgId);
     userCtrlOrgs.set(uid, list);
+    const role = (row as { role?: string | null }).role ?? null;
+    if (isCtrlOrgRole(role)) {
+      const roles = userCtrlOrgRoles.get(uid) ?? {};
+      roles[orgId] = role;
+      userCtrlOrgRoles.set(uid, roles);
+    }
   });
 
   const users = (data ?? []).map((item) => ({
@@ -135,6 +145,7 @@ export async function GET() {
     companies: userCompanies.get(item.id as string) ?? [],
     sectors: userSectors.get(item.id as string) ?? [],
     ctrl_org_ids: userCtrlOrgs.get(item.id as string) ?? [],
+    ctrl_org_roles: userCtrlOrgRoles.get(item.id as string) ?? {},
   }));
 
   return NextResponse.json({ users });

@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/orcamento";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { isCtrlOrgRole } from "@/lib/ctrl/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -54,6 +55,8 @@ export async function POST(request: Request) {
     company_ids?: string[];
     /** Empresas do Compras (ctrl_user_orgs) — multiempresa. */
     ctrl_org_ids?: string[];
+    /** Papel do Compras por empresa (ctrl_user_orgs.role). Ausência = perfil global. */
+    ctrl_org_roles?: Record<string, string>;
   };
 
   const email = body.email?.trim().toLowerCase();
@@ -222,13 +225,20 @@ export async function POST(request: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  // Empresas do Compras (ctrl_user_orgs) — multiempresa
+  // Empresas do Compras (ctrl_user_orgs) — multiempresa, com o papel por empresa
+  // (override). NULL = usa o perfil global. Admin é global: nunca grava override.
   if (ctrlOrgIds.length > 0) {
+    const orgRoles = body.ctrl_org_roles ?? {};
+    const forceNullRole = userProfile === "admin";
     const { error } = await adminClient.from("ctrl_user_orgs").insert(
-      Array.from(new Set(ctrlOrgIds)).map((orgId) => ({
-        user_id: newUserId,
-        org_id: orgId,
-      })),
+      Array.from(new Set(ctrlOrgIds)).map((orgId) => {
+        const raw = forceNullRole ? null : orgRoles[orgId] ?? null;
+        return {
+          user_id: newUserId,
+          org_id: orgId,
+          role: isCtrlOrgRole(raw) ? raw : null,
+        };
+      }),
     );
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   }

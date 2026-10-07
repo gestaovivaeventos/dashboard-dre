@@ -6,6 +6,7 @@ import { hasContratosGrant } from "@/lib/auth/contratos";
 import { hasCaixaGrant } from "@/lib/auth/caixa";
 import { resolveOrcamentoPapel } from "@/lib/auth/orcamento";
 import { hasDpGrant } from "@/lib/auth/dp";
+import { ctrlRolesFromProfile } from "@/lib/ctrl/roles";
 import { resolveVbRole } from "@/lib/auth/vb";
 import { hasSeenTour } from "@/lib/tour/seen";
 import { VIAGENS_ENABLED } from "@/lib/viagens/flags";
@@ -311,25 +312,12 @@ function deriveCtrlRoles(
   if (profile === "franqueado" || profile === "csc") return [];
   if (!canCompras && profile !== "admin") return [];
 
-  switch (profile) {
-    case "admin":
-      return ["admin"];
-    case "contas_a_pagar":
-      // 'contas_a_pagar' now absorbs csc + aprovacao_fornecedor permissions.
-      return ["contas_a_pagar", "csc", "aprovacao_fornecedor"];
-    case "diretor":
-      return ["diretor"];
-    case "gerente":
-    // "Gerente" (gerente_setor) tem as MESMAS permissões do "Gerente Sócio".
-    // A restrição por setor dele vive só na tela /ctrl/orcamento, que lê
-    // profile.profile — não passa por CtrlRole.
-    case "gerente_setor":
-      return ["gerente"];
-    case "solicitante":
-      return ["solicitante"];
-    default:
-      return [];
-  }
+  // O mapeamento perfil → CtrlRole vive em @/lib/ctrl/roles (puro), para ser
+  // reusado pelo override por empresa (ctrl_user_orgs.role) sem duplicar a
+  // regra. "Gerente" (gerente_setor) tem as MESMAS permissões do "Gerente
+  // Sócio"; a restrição por setor dele vive só na tela /ctrl/orcamento, que lê
+  // profile.profile — não passa por CtrlRole.
+  return ctrlRolesFromProfile(profile);
 }
 
 /**

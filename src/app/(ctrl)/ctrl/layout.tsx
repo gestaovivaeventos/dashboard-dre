@@ -7,6 +7,7 @@ import { resolveLayoutContext } from "@/lib/context/modules";
 import { resolveUserSegments } from "@/lib/context/user-segments";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getCtrlOrgContext } from "@/lib/ctrl/orgs";
+import { resolveCtrlRolesForOrg } from "@/lib/ctrl/roles";
 import { getUnreadNotificationsCount } from "@/lib/ctrl/notifications";
 
 export default async function CtrlLayout({ children }: { children: React.ReactNode }) {
@@ -69,12 +70,24 @@ export default async function CtrlLayout({ children }: { children: React.ReactNo
   // Empresas do Compras (multiempresa) para o seletor do cabeçalho.
   const orgCtx = await getCtrlOrgContext(supabase);
 
+  // Papéis do Compras NA EMPRESA ATIVA — alimentam o MENU lateral do Compras
+  // (quais itens aparecem). O override por empresa estreita aqui; com override
+  // NULL, é igual ao global. A DISPONIBILIDADE do módulo (resolveLayoutContext
+  // acima) segue no papel GLOBAL, de propósito: o usuário tem de poder entrar no
+  // Compras e trocar de empresa independentemente da empresa ativa. Como o papel
+  // por empresa nunca é vazio para quem tem o módulo, isso nunca o esconde.
+  const ctrlRolesActiveOrg = resolveCtrlRolesForOrg(
+    profile?.profile ?? null,
+    ctrlRoles,
+    orgCtx.activeOrgRole,
+  );
+
   return (
     <AppShell
       userName={userName}
       userEmail={userEmail}
       userRole={navDreRole}
-      ctrlRoles={ctrlRoles}
+      ctrlRoles={ctrlRolesActiveOrg}
       canCase={canCase}
       canViagens={canViagens}
       canViagensAprovar={canViagensAprovar}

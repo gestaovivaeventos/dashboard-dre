@@ -8,6 +8,7 @@ import {
 } from "@/lib/auth/orcamento";
 import { setContratosGrant } from "@/lib/auth/contratos";
 import { getCurrentSessionContext } from "@/lib/auth/session";
+import { isCtrlOrgRole } from "@/lib/ctrl/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UserProfileType } from "@/lib/supabase/types";
 
@@ -68,6 +69,12 @@ export async function PATCH(request: Request, { params }: Params) {
      * do módulo Compras o usuário acessa. [] = limpa. undefined = não altera.
      */
     ctrl_org_ids?: string[];
+    /**
+     * Papel do Compras POR EMPRESA (ctrl_user_orgs.role). empresa → papel;
+     * ausência = usa o perfil global (NULL). Valores fora do vocabulário são
+     * ignorados (gravam NULL). Ver src/lib/ctrl/roles.ts.
+     */
+    ctrl_org_roles?: Record<string, string>;
   };
 
   if (body.profile !== undefined && !ASSIGNABLE_PROFILES.includes(body.profile)) {
@@ -205,9 +212,20 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const orgIds = clearCtrlOrgs ? [] : Array.from(new Set(body.ctrl_org_ids ?? []));
     if (orgIds.length > 0) {
-      const { error: insErr } = await adminClient
-        .from("ctrl_user_orgs")
-        .insert(orgIds.map((orgId) => ({ user_id: params.userId, org_id: orgId })));
+      // Papel por empresa (override). NULL = usa o perfil global. Admin é
+      // global: nunca grava override (a resolução o ignoraria de qualquer forma).
+      const orgRoles = body.ctrl_org_roles ?? {};
+      const forceNullRole = body.profile === "admin";
+      const { error: insErr } = await adminClient.from("ctrl_user_orgs").insert(
+        orgIds.map((orgId) => {
+          const raw = forceNullRole ? null : orgRoles[orgId] ?? null;
+          return {
+            user_id: params.userId,
+            org_id: orgId,
+            role: isCtrlOrgRole(raw) ? raw : null,
+          };
+        }),
+      );
       if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
     }
   }

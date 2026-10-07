@@ -1,6 +1,7 @@
 import { getSessionContext } from "@/lib/auth/session";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
 import { getCtrlOrgContext, type CtrlOrg } from "@/lib/ctrl/orgs";
+import { resolveCtrlRolesForOrg } from "@/lib/ctrl/roles";
 import type { CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 export interface CtrlUserContext {
@@ -38,13 +39,24 @@ export async function getCtrlUser(): Promise<CtrlUserContext | null> {
   // Empresa ativa do Compras (RLS de ctrl_orgs recorta ao que o usuário acessa).
   const orgCtx = await getCtrlOrgContext(ctx.supabase);
 
+  // Papéis do Compras NA EMPRESA ATIVA: o override de ctrl_user_orgs.role
+  // estreita o papel por empresa; sem override (null) cai no papel global de
+  // hoje. Admin é ignorado (segue global). Este é o ÚNICO ponto em que o papel
+  // por empresa entra no módulo — todo requireCtrlRole/hasCtrlRole/getRequests
+  // herda daqui. Ver docs/.../2026-10-07-ctrl-papel-por-empresa-usuarios.md.
+  const ctrlRoles = resolveCtrlRolesForOrg(
+    ctx.profile.profile,
+    ctx.modules.ctrl.roles,
+    orgCtx.activeOrgRole,
+  );
+
   return {
     id: ctx.profile.id,
     name: ctx.profile.name,
     email: ctx.profile.email,
     dreRole: ctx.profile.role,
     profile: ctx.profile.profile,
-    ctrlRoles: ctx.modules.ctrl.roles,
+    ctrlRoles,
     sectorIds: ctx.profile.sector_ids ?? [],
     orgs: orgCtx.orgs,
     orgIds: orgCtx.orgIds,
