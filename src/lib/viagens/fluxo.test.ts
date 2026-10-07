@@ -28,6 +28,7 @@ import {
   roteiroMudouDepoisDaCotacao,
   temCotacao,
   totalCotado,
+  type AcaoFluxo,
   type DadosBasicos,
   type EstadoViagem,
 } from "./fluxo";
@@ -36,6 +37,7 @@ function basicos(p: Partial<DadosBasicos> = {}): DadosBasicos {
   return {
     destino: "Recife",
     uf: "PE",
+    origem: "Juiz de Fora",
     mesIda: 5,
     noites: 3,
     pessoas: 2,
@@ -158,6 +160,7 @@ test("o .xls leva SÓ as fechadas", () => {
 test("o OK exige o mínimo para alguém conseguir COTAR", () => {
   assert.equal(faltaParaOk(basicos()), null);
   assert.match(faltaParaOk(basicos({ destino: "  " }))!, /destino/);
+  assert.match(faltaParaOk(basicos({ origem: null }))!, /parte/);
   assert.match(faltaParaOk(basicos({ mesIda: null }))!, /mês/);
   assert.match(faltaParaOk(basicos({ pessoas: 0 }))!, /pessoas/);
   assert.match(faltaParaOk(basicos({ tipoId: null }))!, /tipo/);
@@ -175,6 +178,13 @@ test("devolve a PRIMEIRA falta, não a lista", () => {
   // Cinco erros de uma vez em 50 linhas não se leem.
   const falta = faltaParaOk(basicos({ destino: "", mesIda: null, finalidade: "" }));
   assert.match(falta!, /destino/);
+});
+
+test("a ORIGEM é obrigatória: um trecho é um par, e em casada ela muda", () => {
+  // Faltando a partida, quem cota escolhe uma por conta e ninguém vê que escolheu.
+  const falta = faltaParaOk(basicos({ origem: "   " }));
+  assert.match(falta!, /parte/);
+  assert.match(falta!, /passagem/);
 });
 
 test("UF e modal são opcionais para o OK", () => {
@@ -276,20 +286,39 @@ test("a contagem por estado cobre os cinco, com zero onde não há", () => {
 });
 
 test("o lote alcança só as linhas em que a ação existe", () => {
-  const linhas = [
-    { id: "a", estado: "aguardando_cotacao" as EstadoViagem },
-    { id: "b", estado: "rascunho" as EstadoViagem },
-    { id: "c", estado: "aguardando_cotacao" as EstadoViagem },
-    { id: "d", estado: "em_aprovacao" as EstadoViagem },
+  const estados: Array<[string, EstadoViagem]> = [
+    ["a", "aguardando_cotacao"],
+    ["b", "rascunho"],
+    ["c", "aguardando_cotacao"],
+    ["d", "em_aprovacao"],
   ];
+  const como = (papel: "admin" | "gestor") =>
+    estados.map(([id, estado]) => ({ id, estado, acoes: acoesDisponiveis(estado, papel) }));
+
   assert.deepEqual(
-    alvosDoLote(linhas, "fechar", "admin").map((l) => l.id),
+    alvosDoLote(como("admin"), "fechar").map((l) => l.id),
     ["a", "c"],
   );
-  assert.deepEqual(alvosDoLote(linhas, "fechar", "gestor"), [], "fechar é do admin");
+  assert.deepEqual(alvosDoLote(como("gestor"), "fechar"), [], "fechar é do admin");
   assert.deepEqual(
-    alvosDoLote(linhas, "ok", "gestor").map((l) => l.id),
+    alvosDoLote(como("gestor"), "ok").map((l) => l.id),
     ["b"],
+  );
+});
+
+test("o lote obedece a PERMISSÃO da linha, não só o estado dela", () => {
+  // O diretor LÊ a empresa inteira e ESCREVE só nos setores vinculados a ele, então
+  // a linha de outro setor chega com `acoes` vazia do servidor. Recalcular pelo
+  // papel fazia o botão contar as 50 visíveis e devolver 40 recusas no clique —
+  // nada era gravado, mas a tela oferecia o que o servidor recusa.
+  const linhas: Array<{ id: string; estado: EstadoViagem; acoes: AcaoFluxo[] }> = [
+    { id: "meu-setor", estado: "rascunho", acoes: ["ok"] },
+    { id: "outro-setor", estado: "rascunho", acoes: [] },
+    { id: "finalizada", estado: "rascunho", acoes: [] },
+  ];
+  assert.deepEqual(
+    alvosDoLote(linhas, "ok").map((l) => l.id),
+    ["meu-setor"],
   );
 });
 

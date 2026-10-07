@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   PESSOAS_POR_QUARTO_PADRAO,
   faltaParaOkDaLinha,
+  origemMaisUsada,
   paradaRowDaLinha,
   quartosDaLinha,
   resumirLote,
@@ -22,6 +23,7 @@ import {
 
 function linha(p: Partial<LinhaViagemInput> = {}): LinhaViagemInput {
   return {
+    origem: "Juiz de Fora",
     destino: "Recife",
     uf: "PE",
     mesIda: 5,
@@ -79,7 +81,7 @@ test("pessoas e ocupação têm piso 1, e ocupação ausente assume 2", () => {
 });
 
 test("a parada leva cidade, UF e noites — e a UF sai normalizada", () => {
-  const p = paradaRowDaLinha(linha({ uf: "pe" }), "Juiz de Fora");
+  const p = paradaRowDaLinha(linha({ uf: "pe" }));
   assert.equal(p.ordem, 1);
   assert.equal(p.cidade, "Recife");
   assert.equal(p.uf, "PE");
@@ -89,12 +91,53 @@ test("a parada leva cidade, UF e noites — e a UF sai normalizada", () => {
 });
 
 test("UF maior que dois caracteres é cortada, e vazia fica nula", () => {
-  assert.equal(paradaRowDaLinha(linha({ uf: "Pernambuco" }), "JF").uf, "PE");
-  assert.equal(paradaRowDaLinha(linha({ uf: "  " }), "JF").uf, null);
+  assert.equal(paradaRowDaLinha(linha({ uf: "Pernambuco" })).uf, "PE");
+  assert.equal(paradaRowDaLinha(linha({ uf: "  " })).uf, null);
 });
 
 test("bate-volta grava zero noites, não nulo", () => {
-  assert.equal(paradaRowDaLinha(linha({ noites: 0 }), "JF").noites, 0);
+  assert.equal(paradaRowDaLinha(linha({ noites: 0 })).noites, 0);
+});
+
+// ─── A partida, que é de cada LINHA ─────────────────────────────────────────
+
+test("a partida vai para a viagem E para a parada, e vem da própria linha", () => {
+  // Era um campo do cabeçalho da grade, valendo para as 50. Viagem casada desmente
+  // isso: quem vai a Recife e de lá a Natal tem dois trechos com partidas
+  // diferentes, e o cabeçalho mandava cotar o segundo saindo de casa.
+  const l = linha({ origem: " Recife " });
+  assert.equal(viagemRowDaLinha(l).origem, "Recife");
+  assert.equal(paradaRowDaLinha(l).chegada_de, "Recife");
+});
+
+test("rascunho sem partida grava vazio; é o OK que a cobra", () => {
+  // A coluna é NOT NULL, e barrar a gravação obrigaria a preencher na ordem do
+  // sistema — são 50 linhas montadas em várias idas e vindas.
+  assert.equal(validarLinhaViagem(linha({ origem: null })), null);
+  assert.equal(viagemRowDaLinha(linha({ origem: null })).origem, "");
+  assert.equal(paradaRowDaLinha(linha({ origem: null })).chegada_de, null);
+  assert.match(faltaParaOkDaLinha(linha({ origem: null }))!, /parte/);
+});
+
+test("a partida que pré-preenche linha nova é a MAIS USADA, não a da primeira", () => {
+  // Com viagem casada na grade, a primeira linha pode ser uma perna intermediária
+  // (partindo de Recife): usá-la faria toda viagem nova nascer saindo da cidade
+  // errada.
+  const linhas = [
+    { origem: "Recife" },
+    { origem: "Juiz de Fora" },
+    { origem: "juiz de fora" },
+    { origem: null },
+    { origem: "  " },
+  ];
+  assert.equal(origemMaisUsada(linhas), "Juiz de Fora");
+  assert.equal(origemMaisUsada([]), "", "grade vazia não inventa cidade");
+  assert.equal(origemMaisUsada([{ origem: null }]), "");
+  assert.equal(
+    origemMaisUsada([{ origem: "Belo Horizonte" }, { origem: "Recife" }]),
+    "Belo Horizonte",
+    "empate fica com a primeira vista",
+  );
 });
 
 // ─── Quartos ────────────────────────────────────────────────────────────────

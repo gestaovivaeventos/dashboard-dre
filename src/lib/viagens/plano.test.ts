@@ -156,7 +156,8 @@ test("cidades de uma MESMA ida viram duas linhas E um aviso", () => {
   const aviso = r.avisos.find((a) => a.includes("uma ida só"));
   assert.ok(aviso, "o aviso tem de existir");
   assert.match(aviso!, /Curitiba e Florianópolis/);
-  assert.match(aviso!, /passagem está contada em cada uma/);
+  assert.match(aviso!, /partida do trecho dela/);
+  assert.match(aviso!, /volta para casa/);
 });
 
 test("etiqueta 'junto' com uma cidade só NÃO vira aviso", () => {
@@ -165,4 +166,18 @@ test("etiqueta 'junto' com uma cidade só NÃO vira aviso", () => {
     CADASTROS,
   );
   assert.deepEqual(r.avisos, []);
+});
+
+test("a PARTIDA de cada trecho atravessa a leitura", () => {
+  // Em ida casada o 2º trecho parte da cidade do 1º — é o que diz a quem cota qual
+  // passagem comprar. Sem isso o 2º sairia saindo de casa, calado.
+  const r = resolverPlano(
+    parsePlanoViagens([
+      { destino: "Recife", mes: 3, noites: 2, pessoas: 2, junto: "nordeste" },
+      { destino: "Natal", mes: 3, noites: 1, pessoas: 2, junto: "nordeste", origem: "Recife" },
+    ]),
+    CADASTROS,
+  );
+  assert.equal(r.linhas[0].origem, null, "o 1º trecho sai da cidade-base");
+  assert.equal(r.linhas[1].origem, "Recife");
 });

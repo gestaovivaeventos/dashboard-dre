@@ -39,6 +39,12 @@ export const SCHEMA_HINT_PLANO = JSON.stringify(
           type: "object",
           properties: {
             destino: { type: "string", description: "Cidade de destino. Obrigatório." },
+            origem: {
+              type: ["string", "null"],
+              description:
+                "Cidade de PARTIDA deste trecho. Em ida casada, a partida de um trecho é a " +
+                "cidade do trecho anterior. null quando o time sai da cidade-base.",
+            },
             mes: {
               type: ["integer", "null"],
               description: "Mês da ida, 1 a 12. null quando não foi dito.",
@@ -101,10 +107,13 @@ export interface PromptPlanoInput {
 /**
  * Monta a pergunta: os cadastros disponíveis, as regras e o texto do gestor.
  *
- * Os cadastros vão com o VALOR da faixa porque é assim que a escolha fica
- * possível: "Capital Nordeste (R$ 1.200, aviao)" diz à IA o que aquela etiqueta
- * representa. Sem o valor, ela escolheria pelo nome e um destino do Nordeste
- * poderia cair na faixa do Sudeste sem nada denunciar.
+ * O único cadastro que vai é o de TIPOS, porque é o que resolve a categoria da DRE.
+ * As faixas de preço saíram em 06/10/2026 junto com a estimativa — pedir à IA que
+ * escolhesse faixa era pedir que ela opinasse sobre preço.
+ *
+ * A cidade-base vai no cabeçalho para a IA não confundir partida com destino, e a
+ * partida de cada trecho volta no campo `origem` de cada linha: em ida casada ela
+ * muda a cada perna.
  */
 export function montarPromptPlano(input: PromptPlanoInput): string {
   const partes: string[] = [];
@@ -134,7 +143,10 @@ export function montarPromptPlano(input: PromptPlanoInput): string {
     "6. Bate-volta (sem pernoite) tem noites = 0.",
     '7. Se uma mesma ida passar por mais de uma cidade, emita UMA LINHA POR CIDADE com a mesma ' +
       'etiqueta em "junto" — a grade tem uma cidade por linha, e quem confere precisa ver as duas.',
-    "8. O que não foi dito fica null (ou fora do objeto). Não preencha por simetria com as outras " +
+    '8. Nessa ida casada, preencha "origem" de cada trecho: o primeiro parte da cidade-base, e ' +
+      "cada trecho seguinte parte da cidade do anterior. É o que diz a quem cota qual passagem " +
+      "comprar — sem isso o segundo trecho sairia saindo de casa.",
+    "9. O que não foi dito fica null (ou fora do objeto). Não preencha por simetria com as outras " +
       "linhas.",
   );
 

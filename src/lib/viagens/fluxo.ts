@@ -206,6 +206,8 @@ export function rotuloDaAcao(acao: AcaoFluxo): string {
 export interface DadosBasicos {
   destino: string;
   uf: string | null;
+  /** Cidade de partida DESTE trecho. Varia de linha para linha em viagem casada. */
+  origem: string | null;
   mesIda: number | null;
   noites: number;
   pessoas: number;
@@ -223,11 +225,17 @@ export interface DadosBasicos {
  * noites não há hotel. E a **finalidade** entra porque é o que o diretor lê para
  * aprovar — sem ela ele decide sobre um número sem saber para que serve.
  *
+ * A ORIGEM é exigida junto com o destino (07/10/2026): um trecho é um par, e em
+ * viagem casada a partida muda a cada perna — não dá para herdá-la de um cabeçalho
+ * da grade. Faltando ela, quem cota escolhe uma por conta e ninguém vê que
+ * escolheu.
+ *
  * Devolve a primeira coisa que falta, não a lista: a tela aponta o próximo passo,
  * e cinco erros de uma vez em 50 linhas não se leem.
  */
 export function faltaParaOk(d: DadosBasicos): string | null {
   if (!d.destino?.trim()) return "Informe o destino.";
+  if (!d.origem?.trim()) return "Informe de onde este trecho parte — sem isso não há passagem para cotar.";
   if (d.mesIda == null) return "Escolha o mês da viagem.";
   if (!Number.isFinite(d.pessoas) || d.pessoas < 1) return "Informe quantas pessoas vão.";
   if (!Number.isFinite(d.noites) || d.noites < 0) return "Informe quantos dias de viagem.";
@@ -344,15 +352,25 @@ export function contarPorEstado(
   return out;
 }
 
-/** As que uma ação em LOTE alcançaria, a partir do estado de cada uma. */
-export function alvosDoLote<T extends { estado: EstadoViagem }>(
+/**
+ * As que uma ação em LOTE alcançaria.
+ *
+ * Lê as `acoes` que o SERVIDOR já resolveu para cada linha — não recalcula
+ * `acoesDisponiveis` a partir do papel. A diferença não é estilo: `acoes` embute o
+ * escopo de SETOR e o fecho da finalização, que o papel sozinho não conhece.
+ *
+ * Era recalculado, e isso abria um buraco de desenho (07/10/2026): o DIRETOR (e o
+ * Gerente Sócio) LÊ a empresa inteira mas só ESCREVE nos setores vinculados a ele,
+ * então o botão de lote contava as 50 viagens visíveis e, ao clicar, 40 voltavam
+ * recusadas com "você só pode alterar os setores vinculados a você". Nada era
+ * gravado — a action confere setor por linha —, mas a tela oferecia o que o
+ * servidor recusa, que é exatamente o que esta grade se proibiu de fazer.
+ */
+export function alvosDoLote<T extends { estado: EstadoViagem; acoes: readonly AcaoFluxo[] }>(
   linhas: readonly T[],
   acao: AcaoFluxo,
-  papel: PapelFluxo,
 ): T[] {
-  return linhas.filter(
-    (l) => acoesDisponiveis(l.estado, papel).includes(acao) && destinoDaAcao(l.estado, acao),
-  );
+  return linhas.filter((l) => l.acoes.includes(acao) && destinoDaAcao(l.estado, acao));
 }
 
 // ─── O retrato do custo ──────────────────────────────────────────────────────

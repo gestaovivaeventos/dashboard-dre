@@ -11,6 +11,13 @@ import { faltaParaOk, type DadosBasicos } from "@/lib/viagens/fluxo";
 // sobrou é o que descreve a viagem para alguém conseguir cotá-la, e é curto:
 // destino, UF, mês, noites, pessoas, ocupação, modal, tipo e finalidade.
 //
+// ── A ORIGEM é por LINHA (07/10/2026) ────────────────────────────────────
+// Ela era um campo do cabeçalho da grade, valendo para as 50 linhas, porque é
+// sempre o mesmo time saindo da mesma cidade. Viagem CASADA desmente isso: quem vai
+// a Recife e de lá a Natal tem dois trechos com partidas diferentes, e o cabeçalho
+// mandava cotar o segundo saindo de casa. Agora cada linha carrega a sua, e a linha
+// nova herda a da anterior — o atalho continua, sem a mentira.
+//
 // ── Falha POR LINHA, nunca pelo lote ─────────────────────────────────────
 // Destino errado na linha 30 não pode custar as 49 certas, e a linha recusada volta
 // com o ÍNDICE para a tela apontar onde foi. Mesma regra da importação do plano de
@@ -22,6 +29,16 @@ import { faltaParaOk, type DadosBasicos } from "@/lib/viagens/fluxo";
 export interface LinhaViagemInput {
   /** Viagem existente; ausente = criar. */
   id?: string | null;
+  /**
+   * Cidade de partida DESTE trecho.
+   *
+   * É por LINHA, não por grade (07/10/2026). Em viagem casada o time segue de uma
+   * cidade para a outra, então a partida do 2º trecho é a cidade do 1º — e um
+   * cabeçalho único mandava para a cotação um trecho que não existe (a 2ª perna
+   * saindo de casa), sem nada denunciar. A linha nova herda a partida da anterior
+   * na tela, para as 50 viagens de sempre não custarem 50 digitações.
+   */
+  origem?: string | null;
   /** Cidade de destino. É o mínimo da linha. */
   destino: string;
   /** UF do destino — "São Paulo" e "São Paulo do Potengi" cotam muito diferente. */
@@ -79,6 +96,7 @@ export function faltaParaOkDaLinha(l: LinhaViagemInput): string | null {
   const d: DadosBasicos = {
     destino: texto(l.destino),
     uf: texto(l.uf) || null,
+    origem: texto(l.origem) || null,
     mesIda: l.mesIda ?? null,
     noites: inteiro(l.noites, 0, 0),
     pessoas: inteiro(l.pessoas, 1, 1),
@@ -114,6 +132,9 @@ export function viagemRowDaLinha(l: LinhaViagemInput): Record<string, unknown> {
   return {
     titulo: tituloDaLinha(l),
     finalidade: texto(l.finalidade) || null,
+    // A coluna é NOT NULL: rascunho sem partida grava string vazia, e o OK é que
+    // cobra o preenchimento. Barrar aqui obrigaria a preencher na ordem do sistema.
+    origem: texto(l.origem),
     mes_ida: l.mesIda ?? null,
     pessoas: inteiro(l.pessoas, 1, 1),
     pessoas_por_quarto: inteiro(l.pessoasPorQuarto, 1, PESSOAS_POR_QUARTO_PADRAO),
@@ -130,15 +151,46 @@ export function viagemRowDaLinha(l: LinhaViagemInput): Record<string, unknown> {
  * digita os valores é a Controladoria, a passagem contada uma vez só fica sob o
  * controle dela (lança numa linha e deixa a outra sem).
  */
-export function paradaRowDaLinha(l: LinhaViagemInput, origem: string): Record<string, unknown> {
+export function paradaRowDaLinha(l: LinhaViagemInput): Record<string, unknown> {
   return {
     ordem: 1,
     cidade: texto(l.destino),
     uf: texto(l.uf).toUpperCase().slice(0, 2) || null,
     noites: inteiro(l.noites, 0, 0),
-    chegada_de: texto(origem) || null,
+    chegada_de: texto(l.origem) || null,
     chegada_modal: texto(l.modal) || null,
   };
+}
+
+/**
+ * A cidade de onde o time costuma partir, para pré-preencher linha NOVA.
+ *
+ * É a mais FREQUENTE, não a da primeira linha: com viagem casada na grade, a
+ * primeira linha pode ser uma perna intermediária (partindo de Recife), e usá-la
+ * faria toda viagem nova nascer saindo da cidade errada. Empate fica com a
+ * primeira vista, que é a ordem que a tela mostra.
+ */
+export function origemMaisUsada(
+  linhas: ReadonlyArray<{ origem?: string | null }>,
+): string {
+  const contagem = new Map<string, { nome: string; vezes: number }>();
+  for (const l of linhas) {
+    const nome = texto(l.origem);
+    if (!nome) continue;
+    const k = nome.toLocaleLowerCase("pt-BR");
+    const atual = contagem.get(k);
+    if (atual) atual.vezes += 1;
+    else contagem.set(k, { nome, vezes: 1 });
+  }
+  let melhor = "";
+  let vezes = 0;
+  for (const c of Array.from(contagem.values())) {
+    if (c.vezes > vezes) {
+      melhor = c.nome;
+      vezes = c.vezes;
+    }
+  }
+  return melhor;
 }
 
 export interface ResultadoLinha {

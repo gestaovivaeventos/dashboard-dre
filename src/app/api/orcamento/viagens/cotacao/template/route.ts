@@ -168,6 +168,11 @@ export async function GET(request: Request) {
       "ID (não apague)",
       "A chave que liga a linha à viagem no sistema. Apagar ou alterar faz a linha ser recusada na volta.",
     ],
+    [
+      "Origem",
+      "De onde o trecho parte. Em viagem casada cada linha é um trecho (a partida de uma é a " +
+        "cidade da anterior), e a volta para casa entra na cotação de um dos trechos.",
+    ],
     ["Mês / Dias / Pessoas / Quartos", "São os dados que o gestor informou. Não precisa mexer."],
     ...GRUPOS_COTACAO.map((g) => [
       GRUPO_LABEL[g],

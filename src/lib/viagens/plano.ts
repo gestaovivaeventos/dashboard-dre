@@ -36,14 +36,18 @@ export interface PlanoLinhaBruta {
   tipo: string | null;
   modal: string | null;
   finalidade: string | null;
+  /** Partida DESTE trecho; `null` = a cidade-base do time. */
+  origem: string | null;
   /**
    * Etiqueta das cidades de uma MESMA ida.
    *
-   * A grade tem uma cidade por linha, então uma ida a duas cidades volta como
-   * duas linhas — e cada uma recebe uma passagem. Isso DOBRA a passagem, e é por
-   * isso que a etiqueta existe: ela vira aviso. Descartar a 2a cidade seria pior
-   * (o gestor acharia que orçou algo que não orçou), e somar as duas numa linha
-   * esconderia a 2a cidade da conferência.
+   * A grade tem uma cidade por linha, então uma ida a duas cidades volta como duas
+   * linhas — cada uma com a PARTIDA do trecho dela (desde 07/10/2026), o que as
+   * torna dois trechos reais em vez de duas passagens iguais. A etiqueta continua
+   * existindo porque ela vira aviso: quem confere precisa ver que as duas linhas
+   * são uma viagem só, e decidir em qual delas a VOLTA para casa é cotada.
+   * Descartar a 2a cidade seria pior (o gestor acharia que orçou algo que não
+   * orçou), e somar as duas numa linha esconderia a 2a da conferência.
    */
   junto: string | null;
 }
@@ -135,6 +139,7 @@ export function parsePlanoViagens(bruto: unknown): PlanoLinhaBruta[] {
       tipo: texto(o.tipo),
       modal: texto(o.modal),
       finalidade: texto(o.finalidade),
+      origem: texto(o.origem) ?? texto(o.partida) ?? texto(o.saindo_de),
       junto: texto(o.junto) ?? texto(o.mesma_viagem),
     });
   }
@@ -148,6 +153,8 @@ export interface Cadastro {
 
 export interface LinhaResolvida {
   destino: string;
+  /** Partida do trecho; `null` deixa a tela cair na cidade-base. */
+  origem: string | null;
   mesIda: number | null;
   noites: number;
   pessoas: number;
@@ -203,6 +210,7 @@ export function resolverPlano(
 
     linhas.push({
       destino: b.destino,
+      origem: b.origem,
       mesIda: b.mes,
       noites: b.noites,
       pessoas: b.pessoas,
@@ -213,9 +221,9 @@ export function resolverPlano(
     });
   }
 
-  // Cidades de uma MESMA ida: viraram linhas separadas, e cada linha leva uma
-  // passagem. O aviso nomeia as cidades em vez de a tela mostrar duas passagens
-  // que o gestor não pediu.
+  // Cidades de uma MESMA ida: viraram linhas separadas, cada uma com a partida do
+  // trecho dela. O aviso nomeia as cidades porque sobra uma decisão que só quem
+  // confere pode tomar — em qual trecho a VOLTA para casa é cotada.
   const juntas = new Map<string, string[]>();
   for (const b of brutas) {
     if (!b.junto) continue;
@@ -226,7 +234,8 @@ export function resolverPlano(
     if (destinos.length < 2) continue;
     avisos.add(
       `${destinos.join(" e ")} vieram como uma ida só — a grade tem uma cidade por linha, ` +
-        "então a passagem está contada em cada uma. Ajuste na linha ou monte a viagem multi-destino.",
+        "então cada linha ficou com a partida do trecho dela. Confira a partida de cada uma e " +
+        "lembre que a volta para casa precisa entrar na cotação de um dos trechos.",
     );
   }
 

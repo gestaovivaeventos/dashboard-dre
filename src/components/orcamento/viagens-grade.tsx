@@ -120,6 +120,7 @@ function doServidor(l: LinhaGrade): Rascunho {
   return {
     key: l.id,
     id: l.id,
+    origem: l.origem,
     destino: l.destino,
     uf: l.uf,
     mesIda: l.mesIda,
@@ -134,9 +135,17 @@ function doServidor(l: LinhaGrade): Rascunho {
   };
 }
 
-function linhaVazia(tipoId: string): Rascunho {
+/**
+ * A linha nova herda a PARTIDA que vem de fora (a da linha anterior).
+ *
+ * São ~50 viagens saindo quase sempre da mesma cidade: pedir a partida em branco a
+ * cada uma devolveria à tela o trabalho que a grade existe para tirar. Em viagem
+ * casada é só trocar a célula.
+ */
+function linhaVazia(tipoId: string, origem: string): Rascunho {
   return {
     key: novaKey(),
+    origem: origem || null,
     destino: "",
     uf: null,
     mesIda: null,
@@ -148,9 +157,12 @@ function linhaVazia(tipoId: string): Rascunho {
   };
 }
 
-function doPlano(l: LinhaResolvida, tipoId: string): Rascunho {
+function doPlano(l: LinhaResolvida, tipoId: string, origem: string): Rascunho {
   return {
     key: novaKey(),
+    // A IA devolve a partida do trecho quando a ida é casada ("de lá para Natal");
+    // quando não devolve, é a cidade do time.
+    origem: l.origem || origem || null,
     destino: l.destino,
     uf: null,
     mesIda: l.mesIda,
@@ -181,7 +193,6 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
   const [setup, setSetup] = useState<GradeSetup | null>(null);
   const [setorId, setSetorId] = useState<string>(SEM_SETOR);
   const [linhas, setLinhas] = useState<Rascunho[]>([]);
-  const [origem, setOrigem] = useState("");
   const [filtro, setFiltro] = useState<EstadoViagem | null>(null);
   const [abertas, setAbertas] = useState<Set<string>>(new Set());
   const [carregando, setCarregando] = useState(true);
@@ -203,7 +214,6 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
     if (res.error) setErro(res.error);
     setSetup(res);
     setLinhas((res.linhas ?? []).map(doServidor));
-    setOrigem(res.origemPadrao ?? "");
     setCotacao({});
     setCarregando(false);
   }, [companyId, year, setorEscolhido]);
@@ -214,6 +224,8 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
 
   const tipos = setup?.tipos ?? [];
   const isAdmin = setup?.isAdmin ?? false;
+  /** Só pré-preenche linha nova e informa a IA do plano; o que vale é a da linha. */
+  const origemPadrao = setup?.origemPadrao ?? "";
   const tipoPadrao = tipos[0]?.id ?? "";
 
   const visiveis = filtro ? linhas.filter((l) => l.servidor?.estado === filtro) : linhas;
@@ -229,7 +241,15 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
   }
 
   function acrescentar(quantas = 1) {
-    setLinhas((ls) => [...ls, ...Array.from({ length: quantas }, () => linhaVazia(tipoPadrao))]);
+    setLinhas((ls) => {
+      // A da linha anterior, não a mais usada da grade: quem acabou de montar um
+      // trecho de viagem casada quer continuar dali.
+      const partida = (ls[ls.length - 1]?.origem ?? "").trim() || origemPadrao;
+      return [
+        ...ls,
+        ...Array.from({ length: quantas }, () => linhaVazia(tipoPadrao, partida)),
+      ];
+    });
   }
 
   /**
@@ -240,17 +260,13 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
   function receberPlano(lidas: LinhaResolvida[]) {
     if (lidas.length === 0) return;
     setErro(null);
-    setLinhas((ls) => [...ls, ...lidas.map((l) => doPlano(l, tipoPadrao))]);
+    setLinhas((ls) => [...ls, ...lidas.map((l) => doPlano(l, tipoPadrao, origemPadrao))]);
   }
 
   async function salvar() {
     const paraSalvar = linhas.filter((l) => l.sujo);
     if (paraSalvar.length === 0) {
       setAviso("Nada mudou.");
-      return;
-    }
-    if (!origem.trim()) {
-      setErro("Informe a cidade de partida do time, no topo.");
       return;
     }
     setOcupado(true);
@@ -262,9 +278,9 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
       companyId,
       year,
       setorEscolhido,
-      origem.trim(),
       paraSalvar.map((l) => ({
         id: l.id,
+        origem: l.origem,
         destino: l.destino,
         uf: l.uf,
         mesIda: l.mesIda,
@@ -426,9 +442,9 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
 
   return (
     <div className="space-y-4">
-      {/* ── Contexto do time: origem e setor valem para a grade inteira ── */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
-        {setup?.orcaPorSetor && (
+      {/* ── O recorte: o setor. A PARTIDA é de cada linha, não daqui (07/10/2026) ── */}
+      {setup?.orcaPorSetor && (
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
           <div className="space-y-1">
             <Label htmlFor="grade-setor" className="text-xs">
               Setor
@@ -447,23 +463,8 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
               ))}
             </select>
           </div>
-        )}
-        <div className="space-y-1">
-          <Label htmlFor="grade-origem" className="text-xs">
-            Cidade de partida
-          </Label>
-          <Input
-            id="grade-origem"
-            value={origem}
-            onChange={(e) => setOrigem(e.target.value)}
-            placeholder="Juiz de Fora"
-            className="h-9 w-48"
-          />
         </div>
-        <p className="flex-1 text-xs text-muted-foreground">
-          A partida é a mesma para a grade inteira — é sempre o mesmo time saindo da mesma cidade.
-        </p>
-      </div>
+      )}
 
       {/* ── Contadores por estado, que também filtram ── */}
       {contagem && linhas.length > 0 && (
@@ -540,7 +541,7 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
           companyId={companyId}
           year={year}
           setorId={setorEscolhido}
-          origem={origem}
+          origem={origemPadrao}
           cidadesConhecidas={Array.from(
             new Set(linhas.map((l) => l.destino.trim()).filter((d) => d !== "")),
           )}
@@ -557,11 +558,12 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
           </span>
           {(["ok", "fechar", "seguir", "reabrir", "voltar", "editar"] as AcaoFluxo[]).map((acao) => {
             const alvos = alvosDoLote(
+              // `acoes` vem do servidor e já embute o escopo de SETOR: o diretor lê a
+              // empresa inteira, mas o lote dele não alcança a viagem de outro setor.
               visiveis
                 .filter((l) => l.servidor)
-                .map((l) => ({ id: l.id!, estado: l.servidor!.estado })),
+                .map((l) => ({ id: l.id!, estado: l.servidor!.estado, acoes: l.servidor!.acoes })),
               acao,
-              isAdmin ? "admin" : "gestor",
             );
             if (alvos.length === 0) return null;
             return (
@@ -612,6 +614,12 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
             <tr>
               <th className="w-6 px-1 py-2" />
               <th className="px-2 py-2 text-left font-medium">Estado</th>
+              <th
+                className="px-2 py-2 text-left font-medium"
+                title="De onde o trecho parte. A linha nova já vem com a partida da anterior; em viagem casada, troque pela cidade do trecho anterior."
+              >
+                Origem
+              </th>
               <th className="px-2 py-2 text-left font-medium">Destino</th>
               <th className="px-2 py-2 text-left font-medium">UF</th>
               <th className="px-2 py-2 text-left font-medium">Mês</th>
@@ -680,6 +688,15 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                           cotação antiga
                         </span>
                       )}
+                    </td>
+                    <td className="px-2 py-1">
+                      <Input
+                        value={l.origem ?? ""}
+                        disabled={!editavel || ocupado}
+                        onChange={(e) => mexer(l.key, { origem: e.target.value || null })}
+                        placeholder="Partida"
+                        className="h-8 min-w-[8rem]"
+                      />
                     </td>
                     <td className="px-2 py-1">
                       <Input
@@ -853,7 +870,7 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                   {l.erro && (
                     <tr key={`${l.key}-erro`} className="border-t bg-destructive/5">
                       <td />
-                      <td colSpan={12} className="px-2 py-1 text-xs text-destructive">
+                      <td colSpan={13} className="px-2 py-1 text-xs text-destructive">
                         {l.erro}
                       </td>
                     </tr>
@@ -862,7 +879,7 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                   {aberta && s && (
                     <tr key={`${l.key}-detalhe`} className="border-t bg-muted/20">
                       <td />
-                      <td colSpan={12} className="px-3 py-3">
+                      <td colSpan={13} className="px-3 py-3">
                         <div className="space-y-3">
                           {s.comentario && (
                             <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
@@ -921,7 +938,7 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
             })}
             {visiveis.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={14} className="px-3 py-8 text-center text-sm text-muted-foreground">
                   {filtro
                     ? "Nenhuma viagem neste estado."
                     : "Nenhuma viagem ainda. Acrescente uma linha ou dite o plano do ano."}

@@ -47,6 +47,7 @@ import {
 } from "@/lib/viagens/fluxo";
 import {
   faltaParaOkDaLinha,
+  origemMaisUsada,
   paradaRowDaLinha,
   resumirLote,
   validarLinhaViagem,
@@ -102,6 +103,8 @@ export interface GrupoDaLinha {
 export interface LinhaGrade {
   id: string;
   estado: EstadoViagem;
+  /** De onde ESTE trecho parte — por linha, por causa da viagem casada. */
+  origem: string | null;
   destino: string;
   uf: string | null;
   mesIda: number | null;
@@ -153,7 +156,10 @@ export interface GradeSetup {
   linhas: LinhaGrade[];
   contagem: ContagemPorEstado;
   categorias: Array<{ categoryCode: string; categoryName: string }>;
-  /** Cidade de partida do time — da última viagem gravada, editável na tela. */
+  /**
+   * A partida mais usada na grade. Serve só para pré-preencher linha NOVA e para
+   * dizer à IA do plano de onde o time sai; a partida que vale é a de cada linha.
+   */
   origemPadrao: string;
   podeEditar: boolean;
   podeValidar: boolean;
@@ -337,8 +343,6 @@ export async function getGradeViagens(
   ]);
   const nomeDoTipo = new Map(tipos.map((t) => [t.id, t.nome] as const));
 
-  let origemPadrao = "";
-
   const linhas: LinhaGrade[] = rows.map((r) => {
     const id = r.id as string;
     const p = paradas.get(id);
@@ -349,8 +353,6 @@ export async function getGradeViagens(
       (r.updated_at as string | null) ?? null,
       auth.user.papel,
     );
-    if (!origemPadrao) origemPadrao = texto(r.origem);
-
     const valores = valoresDaRow(r);
     const noSetor = podeEscreverNoSetor(escrita, sId);
     const finalizado = fechadas.has(`${texto(r.category_code)}|${sId ?? "-"}`);
@@ -363,6 +365,9 @@ export async function getGradeViagens(
 
     const basicos: LinhaViagemInput = {
       id,
+      // A partida vive na viagem (`origem`) e é espelhada na parada (`chegada_de`);
+      // a viagem é a fonte, que é a coluna que o .xls da cotação exporta.
+      origem: texto(r.origem) || null,
       destino: p?.cidade ?? texto(r.titulo),
       uf: p?.uf ?? null,
       mesIda: num(r.mes_ida),
@@ -377,6 +382,7 @@ export async function getGradeViagens(
     return {
       id,
       estado,
+      origem: basicos.origem ?? null,
       destino: basicos.destino,
       uf: basicos.uf ?? null,
       mesIda: basicos.mesIda,
@@ -431,7 +437,7 @@ export async function getGradeViagens(
       categoryCode: c.categoryCode,
       categoryName: c.categoryName,
     })),
-    origemPadrao,
+    origemPadrao: origemMaisUsada(linhas),
     podeEditar: escrita === null || escrita.length > 0,
     podeValidar: podeValidarOrcamento(auth.user),
     isAdmin,
@@ -453,12 +459,15 @@ export interface SalvarGradeResult {
  * Só dados BÁSICOS — o custo entra por `lancarValoresViagens`. Cada gravação toca
  * `basico_alterado_em`, que é o que permite a linha avisar depois que o roteiro
  * mudou em relação à cotação já feita.
+ *
+ * A ORIGEM vem em cada linha, não num parâmetro do lote (07/10/2026): viagem casada
+ * tem uma partida por trecho, e um valor só para as 50 linhas gravava trecho que
+ * não existe.
  */
 export async function salvarGradeViagens(
   companyId: string,
   year: number,
   setorId: string | null,
-  origem: string,
   linhas: LinhaViagemInput[],
 ): Promise<SalvarGradeResult> {
   const vazio = { resultados: [], resumo: resumirLote([]) };
@@ -507,7 +516,7 @@ export async function salvarGradeViagens(
     }
 
     const cabecalho = viagemRowDaLinha(l);
-    const parada = paradaRowDaLinha(l, origem);
+    const parada = paradaRowDaLinha(l);
     let viagemId = texto(l.id);
 
     if (viagemId) {
@@ -597,7 +606,6 @@ export async function salvarGradeViagens(
         .update({
           ...cabecalho,
           category_code: categoryCode,
-          origem,
           status: estadoNovo,
           basico_alterado_em: agora,
           custo_total: retrato.custo_total,
@@ -629,7 +637,6 @@ export async function salvarGradeViagens(
           year,
           setor_id: alvo.id,
           category_code: categoryCode,
-          origem,
           status: "rascunho",
           basico_alterado_em: agora,
           ...cabecalho,
@@ -730,7 +737,7 @@ export async function moverFluxoViagens(
   const { data: rows, error } = await supabase
     .from("orcamento_viagens")
     .select(
-      "id, titulo, status, setor_id, category_code, mes_ida, pessoas, pessoas_por_quarto, tipo_id, finalidade",
+      "id, titulo, status, setor_id, category_code, origem, mes_ida, pessoas, pessoas_por_quarto, tipo_id, finalidade",
     )
     .eq("company_id", companyId)
     .eq("year", year)
@@ -794,6 +801,7 @@ export async function moverFluxoViagens(
       const falta = faltaParaOk({
         destino: p?.cidade ?? texto(r.titulo),
         uf: p?.uf ?? null,
+        origem: texto(r.origem) || null,
         mesIda: num(r.mes_ida),
         noites: p?.noites ?? 0,
         pessoas: num(r.pessoas) ?? 1,
