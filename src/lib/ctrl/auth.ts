@@ -1,5 +1,6 @@
 import { getSessionContext } from "@/lib/auth/session";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
+import { getCtrlOrgContext, type CtrlOrg } from "@/lib/ctrl/orgs";
 import type { CtrlRole, UserProfileType } from "@/lib/supabase/types";
 
 export interface CtrlUserContext {
@@ -18,6 +19,13 @@ export interface CtrlUserContext {
   ctrlRoles: CtrlRole[];
   /** Setores aos quais o usuario esta vinculado (user_sectors). Vazio = sem vinculo. */
   sectorIds: string[];
+  // ── Empresa do Compras (multiempresa — ver src/lib/ctrl/orgs.ts) ──────────
+  /** Empresas que o usuário pode acessar (admin → todas as ativas). */
+  orgs: CtrlOrg[];
+  /** Ids das empresas acessíveis. */
+  orgIds: string[];
+  /** Empresa ATIVA (cookie validado contra orgs; senão a 1ª). null só se não há empresa. */
+  orgId: string | null;
 }
 
 /** Retorna o contexto do usuário na Controladoria, ou null se sem acesso. */
@@ -27,6 +35,9 @@ export async function getCtrlUser(): Promise<CtrlUserContext | null> {
     return null;
   }
 
+  // Empresa ativa do Compras (RLS de ctrl_orgs recorta ao que o usuário acessa).
+  const orgCtx = await getCtrlOrgContext(ctx.supabase);
+
   return {
     id: ctx.profile.id,
     name: ctx.profile.name,
@@ -35,6 +46,9 @@ export async function getCtrlUser(): Promise<CtrlUserContext | null> {
     profile: ctx.profile.profile,
     ctrlRoles: ctx.modules.ctrl.roles,
     sectorIds: ctx.profile.sector_ids ?? [],
+    orgs: orgCtx.orgs,
+    orgIds: orgCtx.orgIds,
+    orgId: orgCtx.activeOrgId,
   };
 }
 

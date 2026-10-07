@@ -3,6 +3,7 @@
 - **Criado em:** 21/09/2026
 - **Motivo:** Régis Adriano Da Costa (perfil *gerente*) está de férias; Vitor de Oliveira Pedrosa (perfil *diretor*) assume as aprovações no período.
 - **Retorno do Régis:** **05/10/2026** → nesse dia (ou logo após), executar o "Rollback" abaixo.
+- **✅ Rollback feito em 07/10/2026** (no código; vale a partir do deploy). Até o deploy, a produção segue com a cobertura — e nos dias 05–07/10 o Régis já tinha voltado e o lembrete dos 4 setores ia para os dois. O perfil de diretor do Vitor não foi tocado em momento nenhum.
 
 ## Pessoas
 

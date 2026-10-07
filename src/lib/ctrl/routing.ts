@@ -24,12 +24,9 @@ export const APPROVAL_ROUTING = {
   // Tipo de despesa cuja etapa de gerente é direcionada a este gerente.
   expenseTypeManager: {
     expenseTypeId: "7233530b-fb16-441d-a22c-9611ddedf1ab", // Capacitações e Treinamentos
-    // ⚠️ COBERTURA DE FÉRIAS (desde 21/09/2026): temporariamente com o Vitor
-    // (Diretor), enquanto o Régis está de férias. ORIGINAL (Régis Adriano Da
-    // Costa): "bcacac55-230e-447c-bb7c-c0ff63ce18ee". Para reverter no retorno do
-    // Régis, restaure o ID original e esvazie APPROVAL_COVERAGE (ver abaixo e
-    // docs/ferias-regis-vitor.md).
-    managerId: "f159c959-55c2-4cc9-a1e4-acc4b2ab69c3", // Vitor de Oliveira Pedrosa (cobertura de férias)
+    // Régis Adriano Da Costa. Esteve com o Vitor de 21/09 a 07/10/2026 (cobertura
+    // de férias — ver docs/ferias-regis-vitor.md).
+    managerId: "bcacac55-230e-447c-bb7c-c0ff63ce18ee",
   },
   // Setor cujas requisições vão sempre direto ao diretor, mesmo com orçamento
   // aprovado (pula o gerente). Notifica todos os diretores.
@@ -401,22 +398,8 @@ export const APPROVAL_COVERAGE: ReadonlyArray<{
   until: string;
   reason: string;
 }> = [
-  {
-    coveringEmail: "vitor@vivaeventos.com.br",
-    coveredEmail: "regis@vivaeventos.com.br",
-    managerSectors: [
-      { id: "b4acc15b-0414-443a-a6db-fb541cfc0bd0", name: "Gestão de Pessoas" },
-      { id: "444e3b49-b040-4ff8-87c5-53c73a551237", name: "Bem Laranja" },
-      { id: "6f4ee76a-d98c-4ceb-8041-6b03c77a1cf0", name: "Eventos Oficiais" },
-      { id: "4e7709a5-e68b-41c1-83ba-5387bcbd017d", name: "Despesas Gerais" },
-    ],
-    since: "2026-09-21",
-    until: "2026-10-05",
-    reason:
-      "Férias do Régis — Vitor (Diretor) assume as aprovações: recebe os lembretes " +
-      "diários da etapa de gerente destes setores; o roteamento do tipo Capacitações e " +
-      "Treinamentos foi passado ao Vitor em APPROVAL_ROUTING.expenseTypeManager.",
-  },
+  // Vazio: nenhuma cobertura vigente. A última (Vitor cobrindo o Régis, de 21/09
+  // a 07/10/2026) está registrada em docs/ferias-regis-vitor.md.
 ];
 
 /**

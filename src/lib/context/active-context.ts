@@ -8,6 +8,11 @@ export const ACTIVE_SEGMENT_COOKIE = "active_segment_slug";
 // cliente. O nome e duplicado em `shared-company-filter.ts` (modulo client-only,
 // que nao pode importar `next/headers`) — manter os dois em sincronia.
 export const ACTIVE_COMPANY_IDS_COOKIE = "active_company_ids";
+// Empresa ativa do módulo Compras (a "organização de compras" — ver
+// docs/superpowers/specs/2026-10-06-ctrl-multiempresa-design.md). Guarda o SLUG
+// da org. O chamador valida o slug contra as empresas que o usuário realmente
+// pode acessar (ctrl_user_orgs / admin) antes de usar.
+export const ACTIVE_CTRL_ORG_COOKIE = "active_ctrl_org";
 
 export type ActiveModule = "dre" | "ctrl" | "case" | "viagens" | "vb" | "caixa" | "dp";
 
@@ -31,6 +36,15 @@ export async function readActiveModule(): Promise<ActiveModule | null> {
 export async function readActiveSegmentSlug(): Promise<string | null> {
   const store = await cookies();
   return store.get(ACTIVE_SEGMENT_COOKIE)?.value ?? null;
+}
+
+/**
+ * Lê o slug da empresa ativa do Compras do cookie. Retorna null se ausente.
+ * O chamador valida o slug contra as empresas que o usuário pode acessar.
+ */
+export async function readActiveCtrlOrgSlug(): Promise<string | null> {
+  const store = await cookies();
+  return store.get(ACTIVE_CTRL_ORG_COOKIE)?.value ?? null;
 }
 
 /**
