@@ -23,6 +23,8 @@ export default async function UsuariosPage() {
     { data: sectors },
     { data: compAccessData },
     { data: sectorAccessData },
+    { data: ctrlOrgsData },
+    { data: ctrlOrgAccessData },
   ] = await Promise.all([
     adminClient
       .from("users")
@@ -31,9 +33,13 @@ export default async function UsuariosPage() {
       )
       .order("name", { ascending: true, nullsFirst: false }),
     adminClient.from("companies").select("id,name").eq("active", true).order("name"),
-    adminClient.from("ctrl_sectors").select("id,name").eq("active", true).order("name"),
+    // org_id em ctrl_sectors (multiempresa): o seletor da tela agrupa por empresa.
+    adminClient.from("ctrl_sectors").select("id,name,org_id").eq("active", true).order("name"),
     adminClient.from("user_company_access").select("user_id,company_id"),
     adminClient.from("user_sectors").select("user_id,sector_id"),
+    // Empresas do Compras (multiempresa) e as concessões por usuário.
+    adminClient.from("ctrl_orgs").select("id,nome,slug").eq("ativo", true).order("nome"),
+    adminClient.from("ctrl_user_orgs").select("user_id,org_id"),
   ]);
 
   // Módulo Validação de Contratos: a concessão mora em user_module_roles, não
@@ -65,6 +71,18 @@ export default async function UsuariosPage() {
     const list = userSectors.get(uid) ?? [];
     list.push(sid);
     userSectors.set(uid, list);
+  });
+
+  // Empresas do Compras (multiempresa) concedidas por usuário.
+  const orgById = new Map((ctrlOrgsData ?? []).map((o) => [o.id as string, o]));
+  const userCtrlOrgs = new Map<string, string[]>();
+  (ctrlOrgAccessData ?? []).forEach((row) => {
+    const uid = row.user_id as string;
+    const oid = row.org_id as string;
+    if (!orgById.has(oid)) return;
+    const list = userCtrlOrgs.get(uid) ?? [];
+    list.push(oid);
+    userCtrlOrgs.set(uid, list);
   });
 
   // Uma consulta para a lista inteira: a tela abre com o mapa pronto, e buscar
@@ -128,6 +146,9 @@ export default async function UsuariosPage() {
     active: Boolean(item.active),
     company_ids: userCompanies.get(item.id as string) ?? [],
     sector_ids: userSectors.get(item.id as string) ?? [],
+    // Empresas do Compras (multiempresa). Admin herda todas via RLS — não precisa
+    // de linha; para os demais, é o que define o acesso por empresa.
+    ctrl_org_ids: userCtrlOrgs.get(item.id as string) ?? [],
   }));
 
   return (
@@ -135,7 +156,16 @@ export default async function UsuariosPage() {
       initialUsers={usersData}
       companies={(companies ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))}
       orcamentoSetores={orcamentoSetoresPorEmpresa}
-      sectors={(sectors ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))}
+      sectors={(sectors ?? []).map((s) => ({
+        id: s.id as string,
+        name: s.name as string,
+        orgId: (s.org_id as string | null) ?? null,
+      }))}
+      ctrlOrgs={(ctrlOrgsData ?? []).map((o) => ({
+        id: o.id as string,
+        nome: o.nome as string,
+        slug: o.slug as string,
+      }))}
     />
   );
 }

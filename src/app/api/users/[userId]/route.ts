@@ -63,6 +63,11 @@ export async function PATCH(request: Request, { params }: Params) {
     sector_ids?: string[];
     /** Lista de IDs de empresas (unidades). [] = limpa. undefined = não altera. */
     company_ids?: string[];
+    /**
+     * Empresas do COMPRAS (ctrl_user_orgs). Multiempresa: define quais empresas
+     * do módulo Compras o usuário acessa. [] = limpa. undefined = não altera.
+     */
+    ctrl_org_ids?: string[];
   };
 
   if (body.profile !== undefined && !ASSIGNABLE_PROFILES.includes(body.profile)) {
@@ -182,6 +187,27 @@ export async function PATCH(request: Request, { params }: Params) {
       const { error: insErr } = await adminClient.from("user_sectors").insert(
         sectorIds.map((sectorId) => ({ user_id: params.userId, sector_id: sectorId })),
       );
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
+    }
+  }
+
+  // ── Sync empresas do Compras (ctrl_user_orgs) ──
+  // Multiempresa: define a quais empresas do Compras o usuário tem acesso. Tirar
+  // o módulo Compras limpa as concessões junto (escopo de módulo que a pessoa não
+  // tem é cadastro invisível, que voltaria a valer sozinho numa reconcessão).
+  const clearCtrlOrgs = body.can_compras === false;
+  if (clearCtrlOrgs || body.ctrl_org_ids !== undefined) {
+    const { error: delErr } = await adminClient
+      .from("ctrl_user_orgs")
+      .delete()
+      .eq("user_id", params.userId);
+    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 400 });
+
+    const orgIds = clearCtrlOrgs ? [] : Array.from(new Set(body.ctrl_org_ids ?? []));
+    if (orgIds.length > 0) {
+      const { error: insErr } = await adminClient
+        .from("ctrl_user_orgs")
+        .insert(orgIds.map((orgId) => ({ user_id: params.userId, org_id: orgId })));
       if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
     }
   }

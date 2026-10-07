@@ -84,6 +84,8 @@ interface UserItem {
   active: boolean;
   company_ids: string[];
   sector_ids: string[];
+  /** Empresas do COMPRAS (multiempresa) concedidas — ctrl_user_orgs. */
+  ctrl_org_ids: string[];
 }
 
 interface SimpleOption {
@@ -91,11 +93,25 @@ interface SimpleOption {
   name: string;
 }
 
+/** Setor do Compras com a empresa a que pertence (multiempresa). */
+interface CtrlSectorOption extends SimpleOption {
+  orgId: string | null;
+}
+
+/** Empresa do Compras (a "organização de compras"). */
+interface CtrlOrgOption {
+  id: string;
+  nome: string;
+  slug: string;
+}
+
 interface Props {
   initialUsers: UserItem[];
   companies: SimpleOption[];
-  /** Setores do COMPRAS (`ctrl_sectors`) — alçada, Aprovações, lembrete. */
-  sectors: SimpleOption[];
+  /** Setores do COMPRAS (`ctrl_sectors`) — alçada, Aprovações, lembrete. Com a empresa. */
+  sectors: CtrlSectorOption[];
+  /** Empresas do Compras (multiempresa) para conceder acesso por empresa. */
+  ctrlOrgs: CtrlOrgOption[];
   /**
    * Setores do ORÇAMENTO por empresa, pelo NOME. Cadastro diferente do de
    * cima: o orçamento tem os próprios setores por empresa × ano, e nem todos
@@ -222,6 +238,8 @@ interface FormState {
   orcamento_setores: OrcamentoSetoresPorEmpresa;
   sector_ids: string[];
   company_ids: string[];
+  /** Empresas do COMPRAS (multiempresa). */
+  ctrl_org_ids: string[];
 }
 
 const emptyForm: FormState = {
@@ -241,6 +259,7 @@ const emptyForm: FormState = {
   orcamento_setores: {},
   sector_ids: [],
   company_ids: [],
+  ctrl_org_ids: [],
 };
 
 function userToForm(u: UserItem): FormState {
@@ -263,6 +282,7 @@ function userToForm(u: UserItem): FormState {
     ),
     sector_ids: [...u.sector_ids],
     company_ids: [...u.company_ids],
+    ctrl_org_ids: [...(u.ctrl_org_ids ?? [])],
   };
 }
 
@@ -272,6 +292,7 @@ export function UsersAdminManager({
   initialUsers,
   companies,
   sectors,
+  ctrlOrgs,
   orcamentoSetores,
 }: Props) {
   const [users, setUsers] = useState(initialUsers);
@@ -428,6 +449,7 @@ export function UsersAdminManager({
         next.can_orcamento = false;
         next.sector_ids = [];
         next.company_ids = [];
+        next.ctrl_org_ids = [];
       }
       // Admin: força módulos visíveis = true (atalho de UX). Admin já vê o Case
       // e a Validação de Contratos.
@@ -446,6 +468,7 @@ export function UsersAdminManager({
         next.can_viagens = false;
         next.can_viagens_aprovar = false;
         next.sector_ids = [];
+        next.ctrl_org_ids = [];
       }
       // Saiu do perfil isolado de validador → o módulo deixa de ser implícito
       // e volta a depender da marcação em "Módulos visíveis".
@@ -459,6 +482,11 @@ export function UsersAdminManager({
       // Sem Financeiro → limpa unidades
       if (key === "can_financeiro" && value === false) {
         next.company_ids = [];
+      }
+      // Sem Compras → limpa as empresas do Compras (multiempresa). Escopo de um
+      // módulo que a pessoa não tem voltaria a valer sozinho numa reconcessão.
+      if (key === "can_compras" && value === false) {
+        next.ctrl_org_ids = [];
       }
       return next;
     });
@@ -480,6 +508,22 @@ export function UsersAdminManager({
         ? prev.company_ids.filter((c) => c !== id)
         : [...prev.company_ids, id],
     }));
+  }
+
+  function toggleCtrlOrg(id: string) {
+    setForm((prev) => {
+      const nextOrgs = prev.ctrl_org_ids.includes(id)
+        ? prev.ctrl_org_ids.filter((o) => o !== id)
+        : [...prev.ctrl_org_ids, id];
+      // Tirar uma empresa tira junto os setores dela (os setores são por
+      // empresa): senão sobraria setor de uma empresa que a pessoa não acessa.
+      const orgOf = new Map(sectors.map((s) => [s.id, s.orgId]));
+      const nextSectors = prev.sector_ids.filter((sid) => {
+        const org = orgOf.get(sid);
+        return org == null || nextOrgs.includes(org);
+      });
+      return { ...prev, ctrl_org_ids: nextOrgs, sector_ids: nextSectors };
+    });
   }
 
   async function refresh() {
@@ -505,6 +549,7 @@ export function UsersAdminManager({
         active: boolean;
         sectors: Array<{ id: string; name: string }>;
         companies: Array<{ id: string; name: string }>;
+        ctrl_org_ids?: string[];
       }>;
     };
     setUsers(
@@ -527,6 +572,7 @@ export function UsersAdminManager({
         active: u.active,
         sector_ids: u.sectors.map((s) => s.id),
         company_ids: u.companies.map((c) => c.id),
+        ctrl_org_ids: u.ctrl_org_ids ?? [],
       })),
     );
   }
@@ -550,6 +596,12 @@ export function UsersAdminManager({
       form.profile !== "admin"
     ) {
       return "Marque ao menos um módulo (Financeiro, Compras, Case ou Validação de Contratos).";
+    }
+    // Multiempresa: quem tem o Compras precisa de pelo menos uma empresa — senão
+    // o módulo abre vazio (as telas filtram pela empresa ativa). Admin vê todas;
+    // validador é ilha.
+    if (form.can_compras && form.profile !== "admin" && form.ctrl_org_ids.length === 0) {
+      return "Selecione pelo menos uma empresa do Compras.";
     }
     if (profileNeedsSectors(form.profile) && form.sector_ids.length === 0) {
       return "Gerente e Solicitante precisam de pelo menos um setor.";
@@ -589,6 +641,7 @@ export function UsersAdminManager({
         orcamento_setores: form.orcamento_setores,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
+        ctrl_org_ids: form.ctrl_org_ids,
       }),
     });
     setLoading(false);
@@ -630,6 +683,7 @@ export function UsersAdminManager({
         orcamento_setores: form.orcamento_setores,
         sector_ids: form.sector_ids,
         company_ids: form.company_ids,
+        ctrl_org_ids: form.ctrl_org_ids,
       }),
     });
     setLoading(false);
@@ -914,10 +968,12 @@ export function UsersAdminManager({
             includesEmail
             companies={companies}
             sectors={sectors}
+            ctrlOrgs={ctrlOrgs}
             orcamentoSetores={orcamentoSetores}
             onChange={updateField}
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
+            onToggleCtrlOrg={toggleCtrlOrg}
             onSubmit={handleInviteSubmit}
           />
           <DialogFooter>
@@ -949,10 +1005,12 @@ export function UsersAdminManager({
             includesEmail={false}
             companies={companies}
             sectors={sectors}
+            ctrlOrgs={ctrlOrgs}
             orcamentoSetores={orcamentoSetores}
             onChange={updateField}
             onToggleSector={toggleSector}
             onToggleCompany={toggleCompany}
+            onToggleCtrlOrg={toggleCtrlOrg}
             onSubmit={handleEditSubmit}
           />
           <DialogFooter className="justify-between">
@@ -1121,25 +1179,47 @@ function UserForm({
   includesEmail,
   companies,
   sectors,
+  ctrlOrgs,
   orcamentoSetores,
   onChange,
   onToggleSector,
   onToggleCompany,
+  onToggleCtrlOrg,
   onSubmit,
 }: {
   form: FormState;
   error: string | null;
   includesEmail: boolean;
   companies: SimpleOption[];
-  sectors: SimpleOption[];
+  sectors: CtrlSectorOption[];
+  ctrlOrgs: CtrlOrgOption[];
   orcamentoSetores: Record<string, string[]>;
   onChange: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   onToggleSector: (id: string) => void;
   onToggleCompany: (id: string) => void;
+  onToggleCtrlOrg: (id: string) => void;
   onSubmit: (e: FormEvent) => void;
 }) {
   const showSectors = profileShowsSectors(form.profile);
   const sectorsRequired = profileNeedsSectors(form.profile);
+  // Empresas do Compras (multiempresa): aparece para quem tem o módulo Compras
+  // (menos admin, que vê todas por natureza, e o validador, que é ilha). É o que
+  // define quais empresas a pessoa acessa no Compras. Com uma empresa só, o
+  // seletor ainda aparece — é como o admin concede a Viva a um novo usuário.
+  const showCtrlOrgs =
+    form.can_compras && form.profile !== "admin" && form.profile !== "validador_contrato";
+  const ctrlOrgOptions = ctrlOrgs.map((o) => ({ id: o.id, name: o.nome }));
+  const orgNameById = new Map(ctrlOrgs.map((o) => [o.id, o.nome]));
+  const multiOrg = form.ctrl_org_ids.length > 1;
+  // Setores oferecidos = só os das empresas concedidas (sem empresa, nenhum).
+  // Com mais de uma empresa, o nome do setor leva a empresa para não confundir
+  // dois "Diretoria" de empresas diferentes.
+  const sectorOptions = sectors
+    .filter((s) => s.orgId != null && form.ctrl_org_ids.includes(s.orgId))
+    .map((s) => ({
+      id: s.id,
+      name: multiOrg ? `${s.name} · ${orgNameById.get(s.orgId as string) ?? ""}` : s.name,
+    }));
   // O Orçamento também se recorta por empresa (`podeVerEmpresa` lê
   // `user_company_access`), então o seletor precisa aparecer com ele marcado
   // mesmo sem Financeiro — um Gerente de Compras + Orçamento ficava sem
@@ -1379,16 +1459,38 @@ function UserForm({
         </div>
       )}
 
+      {showCtrlOrgs && (
+        <div className="space-y-1.5">
+          <Label>
+            Empresas do Compras <span className="text-destructive">*</span>
+          </Label>
+          <PillMultiSelect
+            options={ctrlOrgOptions}
+            selected={form.ctrl_org_ids}
+            onToggle={onToggleCtrlOrg}
+            emptyMessage="Nenhuma empresa do Compras cadastrada."
+          />
+          <p className="text-xs text-muted-foreground">
+            Define quais empresas a pessoa acessa no Compras. Os <strong>setores</strong> abaixo
+            são escolhidos dentro das empresas marcadas aqui.
+          </p>
+        </div>
+      )}
+
       {showSectors && (
         <div className="space-y-1.5">
           <Label>
             Setores {sectorsRequired && <span className="text-destructive">*</span>}
           </Label>
           <PillMultiSelect
-            options={sectors}
+            options={sectorOptions}
             selected={form.sector_ids}
             onToggle={onToggleSector}
-            emptyMessage="Nenhum setor cadastrado."
+            emptyMessage={
+              form.ctrl_org_ids.length === 0
+                ? "Marque uma empresa do Compras acima para ver os setores."
+                : "Nenhum setor cadastrado nesta empresa."
+            }
           />
           {form.profile === "diretor" && (
             <p className="text-xs text-muted-foreground">

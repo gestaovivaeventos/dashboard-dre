@@ -26,6 +26,7 @@ export async function GET() {
     { data: sectorAccessData },
     { data: companiesData },
     { data: sectorsData },
+    { data: ctrlOrgAccessData },
   ] = await Promise.all([
     supabase
       .from("users")
@@ -37,6 +38,7 @@ export async function GET() {
     adminClient.from("user_sectors").select("user_id,sector_id"),
     supabase.from("companies").select("id,name").eq("active", true),
     supabase.from("ctrl_sectors").select("id,name").eq("active", true),
+    adminClient.from("ctrl_user_orgs").select("user_id,org_id"),
   ]);
 
   if (error) {
@@ -91,6 +93,15 @@ export async function GET() {
     userSectors.set(uid, list);
   });
 
+  // Empresas do Compras (multiempresa) concedidas por usuário.
+  const userCtrlOrgs = new Map<string, string[]>();
+  (ctrlOrgAccessData ?? []).forEach((row) => {
+    const uid = row.user_id as string;
+    const list = userCtrlOrgs.get(uid) ?? [];
+    list.push(row.org_id as string);
+    userCtrlOrgs.set(uid, list);
+  });
+
   const users = (data ?? []).map((item) => ({
     id: item.id as string,
     email: item.email as string,
@@ -123,6 +134,7 @@ export async function GET() {
     contracts_only: Boolean(item.contracts_only),
     companies: userCompanies.get(item.id as string) ?? [],
     sectors: userSectors.get(item.id as string) ?? [],
+    ctrl_org_ids: userCtrlOrgs.get(item.id as string) ?? [],
   }));
 
   return NextResponse.json({ users });

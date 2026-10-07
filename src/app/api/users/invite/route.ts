@@ -52,6 +52,8 @@ export async function POST(request: Request) {
     orcamento_setores?: OrcamentoSetoresPorEmpresa;
     sector_ids?: string[];
     company_ids?: string[];
+    /** Empresas do Compras (ctrl_user_orgs) — multiempresa. */
+    ctrl_org_ids?: string[];
   };
 
   const email = body.email?.trim().toLowerCase();
@@ -100,6 +102,10 @@ export async function POST(request: Request) {
       ? []
       : body.sector_ids ?? [];
   const companyIds = userProfile === "validador_contrato" ? [] : body.company_ids ?? [];
+  // Empresas do Compras: só fazem sentido com o módulo Compras. validador_contrato
+  // é ilha; sem can_compras não concede empresa nenhuma.
+  const ctrlOrgIds =
+    userProfile === "validador_contrato" || !canCompras ? [] : body.ctrl_org_ids ?? [];
 
   // Gerente (sócio e de setor) e Solicitante precisam de pelo menos um setor.
   if (
@@ -211,6 +217,17 @@ export async function POST(request: Request) {
       Array.from(new Set(companyIds)).map((companyId) => ({
         user_id: newUserId,
         company_id: companyId,
+      })),
+    );
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  // Empresas do Compras (ctrl_user_orgs) — multiempresa
+  if (ctrlOrgIds.length > 0) {
+    const { error } = await adminClient.from("ctrl_user_orgs").insert(
+      Array.from(new Set(ctrlOrgIds)).map((orgId) => ({
+        user_id: newUserId,
+        org_id: orgId,
       })),
     );
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
