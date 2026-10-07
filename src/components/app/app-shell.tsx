@@ -87,6 +87,7 @@ export function AppShell({
   orcamentoPapel,
   canDp,
   segments,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeModule,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   availableModules,
@@ -289,11 +290,12 @@ export function AppShell({
                 linha de descrição abaixo dele). Repetir o nome na topbar
                 deixava o mesmo texto duas vezes no topo de toda página. */}
             <div className="ch-topbar__right">
-              {/* Empresa ativa do Compras (multiempresa): só aparece no módulo
-                  Compras e quando o usuário acessa mais de uma empresa. */}
-              {activeModule === "ctrl" && (
-                <CtrlOrgSwitcher orgs={ctrlOrgs ?? []} activeSlug={activeCtrlOrgSlug ?? null} />
-              )}
+              {/* Empresa ativa do Compras (multiempresa). Só o layout do Compras
+                  passa `ctrlOrgs`; nos demais módulos a lista vem vazia e o
+                  seletor se esconde sozinho (assim como com uma empresa só). NÃO
+                  gatear por `activeModule` aqui: ele reflete o cookie do último
+                  módulo aberto, não a rota — e escondia o seletor no Compras. */}
+              <CtrlOrgSwitcher orgs={ctrlOrgs ?? []} activeSlug={activeCtrlOrgSlug ?? null} />
               {/* Sino: módulo Compras (padrão) ou, para quem só valida
                   relatórios BI (perfil CSC, sem Compras), a própria tela de
                   Validação Relatório — onde a pendência é resolvida. */}

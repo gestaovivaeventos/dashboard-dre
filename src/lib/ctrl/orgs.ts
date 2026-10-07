@@ -40,8 +40,18 @@ export async function getCtrlOrgContext(supabase: SupabaseClient): Promise<CtrlO
   const orgs = ((data ?? []) as CtrlOrg[]) ?? [];
   const orgIds = orgs.map((o) => o.id);
 
+  // Concessões EXPLÍCITAS do usuário (ctrl_user_orgs; a RLS devolve só as dele).
+  // Servem para o DEFAULT: o admin VÊ todas as empresas, mas o padrão deve ser
+  // uma empresa CONCEDIDA a ele — senão uma empresa nova e vazia (ex.: a Feat,
+  // primeira por ordem alfabética) viraria o padrão e a tela abriria sem dados.
+  const { data: grantRows } = await supabase.from("ctrl_user_orgs").select("org_id");
+  const grantedIds = new Set((grantRows ?? []).map((r) => r.org_id as string));
+
   const slug = await readActiveCtrlOrgSlug();
-  const active = (slug ? orgs.find((o) => o.slug === slug) : undefined) ?? orgs[0] ?? null;
+  const byCookie = slug ? orgs.find((o) => o.slug === slug) : undefined;
+  const firstGranted = orgs.find((o) => grantedIds.has(o.id));
+  // Precedência: cookie válido → 1ª empresa concedida → 1ª visível (fallback).
+  const active = byCookie ?? firstGranted ?? orgs[0] ?? null;
 
   return {
     orgs,
