@@ -29,6 +29,7 @@ import {
   ESTADO_VIAGEM_LABEL,
   GRUPOS_COTACAO,
   alvosDoLote,
+  porQueSemDecisao,
   rotuloDaAcao,
   totalCotado,
   type AcaoFluxo,
@@ -927,6 +928,30 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
                                   <li key={p}>{p}</li>
                                 ))}
                               </ul>
+                            </div>
+                          )}
+
+                          {/* ── Onde está a decisão da diretoria ──
+                              Nas outras telas ela está sempre na linha. Aqui ela só
+                              existe em `em_aprovacao`, e a ausência calada faz quem
+                              olha concluir que a tela quebrou. O passo que falta vem
+                              com o botão que o executa, para a resposta estar onde a
+                              pergunta nasce. */}
+                          {!s.podeDecidir && porQueSemDecisao(s.estado) && (
+                            <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+                              <p className="text-xs text-muted-foreground">
+                                {porQueSemDecisao(s.estado)}
+                              </p>
+                              {s.acoes.includes("seguir") && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={ocupado}
+                                  onClick={() => void mover("seguir", [s.id])}
+                                >
+                                  {rotuloDaAcao("seguir")}
+                                </Button>
+                              )}
                             </div>
                           )}
                         </div>

@@ -138,6 +138,36 @@ export function entraNaExportacao(estado: EstadoViagem): boolean {
   return estado === "em_cotacao";
 }
 
+/**
+ * Por que o ✓/✗/💬 da diretoria NÃO aparece nesta linha — ou `null` quando aparece.
+ *
+ * Nas outras telas do orçamento a decisão está sempre na linha, porque não há
+ * máquina de estados: o item existe, logo é decidível. Aqui ela só existe em
+ * `em_aprovacao`, e a ausência SEM EXPLICAÇÃO faz quem olha concluir que a tela
+ * quebrou — foi exatamente o que aconteceu em 07/10/2026, com cinco viagens
+ * `cotada` e nenhum botão à vista.
+ *
+ * O texto diz o estado E o próximo passo, porque é o passo que falta, não o estado,
+ * que a pessoa precisa saber.
+ */
+export function porQueSemDecisao(estado: EstadoViagem): string | null {
+  switch (estado) {
+    case "em_aprovacao":
+      return null;
+    case "cotada":
+      return (
+        "Cotada. A aprovação da diretoria abre quando a Controladoria clicar em " +
+        "\u201cSeguir para a diretoria\u201d — até lá a viagem não entra na prévia do setor."
+      );
+    case "em_cotacao":
+      return "Em cotação pela Controladoria. A diretoria decide depois de os valores entrarem.";
+    case "aguardando_cotacao":
+      return "Aguardando a Controladoria fechar e cotar. A diretoria decide depois disso.";
+    default:
+      return "Em rascunho. A diretoria decide depois do OK, do fecho e da cotação.";
+  }
+}
+
 // ─── As transições ───────────────────────────────────────────────────────────
 
 export type AcaoFluxo = "ok" | "editar" | "fechar" | "reabrir" | "seguir" | "voltar";

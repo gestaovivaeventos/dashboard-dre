@@ -23,6 +23,7 @@ import {
   faltaParaOk,
   gestorPodeEditar,
   normalizarEstado,
+  porQueSemDecisao,
   podeLancarValores,
   retratoDaCotacao,
   roteiroMudouDepoisDaCotacao,
@@ -419,4 +420,20 @@ test("roteiro alterado depois da cotação vira premissa ALTA", () => {
     roteiroMudou: true,
   });
   assert.match(r.premissas.join(" "), /alterado DEPOIS da cotação/);
+});
+
+// ─── A ausência da decisão se explica ───────────────────────────────────────
+
+test("a linha diz POR QUE o botao da diretoria nao esta ali, e qual e o passo", () => {
+  // Nas outras telas do orçamento a decisão está sempre na linha. Aqui ela só
+  // existe em `em_aprovacao`, e a ausência calada fez concluir que a tela quebrou.
+  assert.equal(porQueSemDecisao("em_aprovacao"), null, "aqui o botao aparece");
+
+  const cotada = porQueSemDecisao("cotada")!;
+  assert.match(cotada, /Seguir para a diretoria/);
+  assert.match(cotada, /prévia do setor/, "diz tambem que ate la nao entra na previa");
+
+  for (const e of ["rascunho", "aguardando_cotacao", "em_cotacao"] as EstadoViagem[]) {
+    assert.ok(porQueSemDecisao(e), `${e} ficou sem explicacao`);
+  }
 });

@@ -445,10 +445,24 @@ export async function getPreviaOrcamento(
   // estaria no mapeamento categoria→conta e a viagem viraria órfã.
   const { data: viagemRows, error: viagemErr } = await supabase
     .from("orcamento_viagens")
-    .select("id, category_code, setor_id, titulo, data_ida, pessoas, meses, updated_at")
+    .select("id, category_code, setor_id, titulo, mes_ida, data_ida, pessoas, meses, updated_at")
     .eq("company_id", companyId)
     .eq("year", year)
-    .eq("status", "enviada");
+    // ── SÓ as que estão COM A DIRETORIA (corrigido em 07/10/2026) ──
+    // Era `status = "enviada"`, e `enviada` deixou de existir: a migration do fluxo
+    // (20261006120000) converteu aquele valor para `aguardando_cotacao` e o CHECK
+    // novo nem o aceita. Resultado, em silêncio: NENHUMA viagem chegava à Prévia
+    // desde 06/10 — o bloco voltava vazio, o total do setor saía menor sem motivo e
+    // o painel de validação não tinha viagem nenhuma para o diretor decidir, que foi
+    // o sintoma relatado.
+    //
+    // `em_aprovacao` é o sucessor exato de `enviada`: antes dela a viagem não tem
+    // número (rascunho, OK, em cotação) ou ainda está na mão da Controladoria
+    // (`cotada`). Deixar `cotada` entrar ofereceria o ✓ no painel do setor a uma
+    // viagem que o fluxo ainda não liberou — e aí a prévia e a máquina de estados
+    // discordariam sobre quem decide, que é o tipo de divergência que este módulo
+    // não pode ter.
+    .eq("status", "em_aprovacao");
   // Migration pendente não derruba a Prévia: sem viagem, o resto continua.
   if (viagemErr && !isSchemaMissing(viagemErr.message)) return { error: viagemErr.message };
   const viagensLinhas = ((viagemRows ?? []) as Array<Record<string, unknown>>).filter((r) => {
@@ -884,9 +898,13 @@ export async function getPreviaOrcamento(
         const setorDaViagem = (r.setor_id as string | null) ?? null;
         const pessoas = Number(r.pessoas);
         const quantas = Number.isFinite(pessoas) ? Math.max(1, Math.round(pessoas)) : 1;
+        // O mês vem de `mes_ida` (o orçamento conhece o mês, não o dia); `data_ida`
+        // fica como leitura das linhas antigas, mesmo fallback de `mapear.ts`.
+        const mesIda = Number(r.mes_ida);
         const data = typeof r.data_ida === "string" ? r.data_ida : "";
-        const mes = /^\d{4}-(\d{2})-\d{2}$/.exec(data)?.[1];
-        const quando = mes ? ` · ${MESES_CURTO[Number(mes) - 1]}` : "";
+        const daData = Number(/^\d{4}-(\d{2})-\d{2}$/.exec(data)?.[1] ?? 0);
+        const mes = mesIda >= 1 && mesIda <= 12 ? mesIda : daData;
+        const quando = mes >= 1 && mes <= 12 ? ` · ${MESES_CURTO[mes - 1]}` : "";
 
         const code = texto(r.category_code);
         const lista = viagensByCode.get(code) ?? [];

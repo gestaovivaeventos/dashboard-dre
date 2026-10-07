@@ -1254,13 +1254,22 @@ function UserForm({
   const ctrlOrgRoleLabel = (r: CtrlOrgRole) =>
     PROFILES.find((p) => p.value === r)?.label ?? r;
   // Setores oferecidos = só os das empresas concedidas (sem empresa, nenhum).
-  // Com mais de uma empresa, o nome do setor leva a empresa para não confundir
-  // dois "Diretoria" de empresas diferentes.
+  // Com UMA empresa, lista simples (sem sufixo). Com MAIS DE UMA, agrupa em
+  // blocos por empresa (ver sectorsByOrg) — a lista achatada com "· Empresa"
+  // ficava ilegível. Os ids de setor são únicos por empresa, então o mesmo
+  // `form.sector_ids` seleciona certo em cada bloco.
   const sectorOptions = sectors
     .filter((s) => s.orgId != null && form.ctrl_org_ids.includes(s.orgId))
-    .map((s) => ({
-      id: s.id,
-      name: multiOrg ? `${s.name} · ${orgNameById.get(s.orgId as string) ?? ""}` : s.name,
+    .map((s) => ({ id: s.id, name: s.name }));
+  // Blocos por empresa, na ordem alfabética das empresas (ctrlOrgs já vem por
+  // nome). Só as marcadas em "Empresas do Compras".
+  const sectorsByOrg = ctrlOrgs
+    .filter((o) => form.ctrl_org_ids.includes(o.id))
+    .map((o) => ({
+      org: o,
+      options: sectors
+        .filter((s) => s.orgId === o.id)
+        .map((s) => ({ id: s.id, name: s.name })),
     }));
   // O Orçamento também se recorta por empresa (`podeVerEmpresa` lê
   // `user_company_access`), então o seletor precisa aparecer com ele marcado
@@ -1560,16 +1569,36 @@ function UserForm({
           <Label>
             Setores {sectorsRequired && <span className="text-destructive">*</span>}
           </Label>
-          <PillMultiSelect
-            options={sectorOptions}
-            selected={form.sector_ids}
-            onToggle={onToggleSector}
-            emptyMessage={
-              form.ctrl_org_ids.length === 0
-                ? "Marque uma empresa do Compras acima para ver os setores."
-                : "Nenhum setor cadastrado nesta empresa."
-            }
-          />
+          {form.ctrl_org_ids.length === 0 ? (
+            <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              Marque uma empresa do Compras acima para ver os setores.
+            </p>
+          ) : multiOrg ? (
+            // Mais de uma empresa: um bloco por empresa (os setores são os
+            // departamentos de cada empresa; a Viva tem o mapeamento dela).
+            <div className="space-y-3">
+              {sectorsByOrg.map(({ org, options }) => (
+                <div key={org.id} className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {org.nome}
+                  </p>
+                  <PillMultiSelect
+                    options={options}
+                    selected={form.sector_ids}
+                    onToggle={onToggleSector}
+                    emptyMessage="Nenhum setor cadastrado nesta empresa."
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <PillMultiSelect
+              options={sectorOptions}
+              selected={form.sector_ids}
+              onToggle={onToggleSector}
+              emptyMessage="Nenhum setor cadastrado nesta empresa."
+            />
+          )}
           {form.profile === "diretor" && (
             <p className="text-xs text-muted-foreground">
               Selecione os setores para restringir as aprovações do diretor. Sem
