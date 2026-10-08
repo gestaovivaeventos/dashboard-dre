@@ -2,10 +2,12 @@ import { Truck } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { getCtrlUser, hasCtrlRole } from "@/lib/ctrl/auth";
+import { getOrgCompanyIds } from "@/lib/ctrl/orgs";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FornecedoresTable } from "@/components/ctrl/fornecedores-table";
 import { CriarFornecedorButton } from "@/components/ctrl/criar-fornecedor-button";
+import { ImportarOmieButton } from "@/components/ctrl/importar-omie-button";
 
 // `cep` e `bairro` chegaram na migration 20260730120000. Enquanto ela não é
 // aplicada, uma coluna inexistente derruba o SELECT inteiro (42703) e a tela
@@ -24,7 +26,7 @@ const suppliersSelect = (comEndereco: boolean) =>
 // mais de 1000 fornecedores, paginamos em blocos para não cortar a cauda da
 // lista (ex.: nomes com "T" em diante sumiam da tela e da busca).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAllSuppliers(supabase: any, comEndereco = true) {
+async function fetchAllSuppliers(supabase: any, orgId: string, comEndereco = true) {
   const pageSize = 1000;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: any[] = [];
@@ -32,12 +34,16 @@ async function fetchAllSuppliers(supabase: any, comEndereco = true) {
     const { data, error } = await supabase
       .from("ctrl_suppliers")
       .select(suppliersSelect(comEndereco))
+      // Multiempresa: só os fornecedores da empresa ATIVA. A tela lê com o admin
+      // client (ignora RLS), então o recorte por empresa é explícito aqui — sem
+      // isso, a Feat mostrava os ~1.195 fornecedores da Viva.
+      .eq("org_id", orgId)
       .order("name")
       .range(from, from + pageSize - 1);
     if (error) {
       // 42703 = coluna inexistente: migration 20260730120000 ainda não aplicada.
       // Recarrega sem cep/bairro para a tela continuar de pé.
-      if (comEndereco && error.code === "42703") return fetchAllSuppliers(supabase, false);
+      if (comEndereco && error.code === "42703") return fetchAllSuppliers(supabase, orgId, false);
       return { data: all, error };
     }
     all.push(...(data ?? []));
@@ -46,19 +52,36 @@ async function fetchAllSuppliers(supabase: any, comEndereco = true) {
   return { data: all, error: null };
 }
 
-async function getData() {
+async function getData(orgId: string | null) {
   const adminClient = createAdminClientIfAvailable();
   const supabase = adminClient ?? (await createClient());
 
+  // Sem empresa ativa (não deveria ocorrer para quem tem o módulo): nada a listar.
+  if (!orgId) {
+    return {
+      suppliersError: null,
+      suppliers: [] as never[],
+      expenseTypes: [] as Array<{ id: string; name: string }>,
+      omieCompanies: [] as Array<{ id: string; name: string }>,
+      linksBySupplier: new Map<string, Array<{ company_id: string; sync_status: string; sync_error: string | null }>>(),
+    };
+  }
+
+  // CNPJs da empresa ativa — os únicos para onde um fornecedor dela sincroniza.
+  const orgCompanyIds = await getOrgCompanyIds(supabase, orgId);
+
   const [suppliersResult, expenseTypesResult, omieCompaniesResult, linksResult] = await Promise.all([
-    fetchAllSuppliers(supabase),
-    supabase.from("ctrl_expense_types").select("id, name").order("name"),
+    // Fornecedores e tipos de despesa são POR EMPRESA (migration multiempresa).
+    fetchAllSuppliers(supabase, orgId),
+    supabase.from("ctrl_expense_types").select("id, name").eq("org_id", orgId).order("name"),
     supabase
       .from("companies")
       .select("id, name")
       .eq("active", true)
       .not("omie_app_key", "is", null)
       .not("omie_app_secret", "is", null)
+      // Só os CNPJs da empresa ativa. Lista vazia → `.in("id", [])` não casa nada.
+      .in("id", orgCompanyIds)
       .order("name"),
     supabase
       .from("ctrl_supplier_omie_links")
@@ -151,8 +174,12 @@ export default async function FornecedoresPage({ searchParams }: FornecedoresPag
   }
 
   const canApprove = hasCtrlRole(ctx, "gerente", "csc", "admin", "aprovacao_fornecedor");
+  // Importar da Omie é operação de cadastro em lote — admin/Contas a Pagar, os
+  // mesmos que operam o Mapeamento Omie. Escopada pela empresa ativa.
+  const canImportOmie = hasCtrlRole(ctx, "admin", "contas_a_pagar");
+  const activeOrgName = ctx.orgs.find((o) => o.id === ctx.orgId)?.nome ?? "esta empresa";
 
-  const { suppliers, expenseTypes, suppliersError, omieCompanies, linksBySupplier } = await getData();
+  const { suppliers, expenseTypes, suppliersError, omieCompanies, linksBySupplier } = await getData(ctx.orgId);
 
   const statusParam = firstParam(searchParams?.status);
   const initialTab =
@@ -172,7 +199,10 @@ export default async function FornecedoresPage({ searchParams }: FornecedoresPag
             Gestão de fornecedores aprovados para pagamento
           </p>
         </div>
-        <CriarFornecedorButton expenseTypes={expenseTypes} />
+        <div className="flex items-center gap-2">
+          {canImportOmie && <ImportarOmieButton orgName={activeOrgName} />}
+          <CriarFornecedorButton expenseTypes={expenseTypes} />
+        </div>
       </div>
 
       {suppliersError ? (

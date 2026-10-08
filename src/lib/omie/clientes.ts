@@ -18,6 +18,8 @@ export interface OmiePartner {
   titular_banco: string | null;
   doc_titular: string | null;
   chave_pix: string | null;
+  /** "Usar transferência como forma de pagamento padrão" na Omie (dadosBancarios.transf_padrao "S"/"N"). */
+  transf_padrao: boolean;
   endereco: string | null;
   cidade_estado: string | null;
   cep: string | null;
@@ -51,6 +53,7 @@ export function mapCadastro(c: Record<string, unknown>): OmiePartner {
     titular_banco: nn(banc.nome_titular),
     doc_titular: nn(banc.doc_titular),
     chave_pix: nn(banc.cChavePix),
+    transf_padrao: String(banc.transf_padrao ?? "").toUpperCase() === "S",
     endereco: nn(c.endereco),
     cidade_estado: cidadeEstado,
     cep: nn(c.cep),
