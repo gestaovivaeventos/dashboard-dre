@@ -3,6 +3,7 @@
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
+import { ctrlReadClient } from "@/lib/ctrl/injected-identity";
 import type { CtrlExpenseType } from "@/lib/supabase/types";
 
 export async function getExpenseTypes() {
@@ -18,7 +19,7 @@ export async function getExpenseTypes() {
   // lista volta vazia e a Nova Requisicao fica sem tipo de despesa.
   const supabase = hasCtrlRole(ctx, "contas_a_pagar")
     ? createAdminClientIfAvailable() ?? (await createClient())
-    : await createClient();
+    : await ctrlReadClient();
 
   // Escopo por EMPRESA (multiempresa): só os tipos da empresa ativa. Sem empresa
   // ativa → nada (falha fechada). Hoje resolve para a Viva → inerte.

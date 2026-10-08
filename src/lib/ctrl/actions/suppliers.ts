@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
+import { ctrlReadClient } from "@/lib/ctrl/injected-identity";
 import { normalizePixTelefone } from "@/lib/ctrl/bancos";
 import { CNPJ_LENGTH, CPF_LENGTH, normalizeDoc, semDocumentoError } from "@/lib/ctrl/cnpj";
 import { enderecoMissing, hasAnyEndereco, maskCep } from "@/lib/ctrl/endereco";
@@ -34,7 +35,7 @@ export async function getSuppliers(
   // enxerga o modulo inteiro, entao le pelo admin client.
   const supabase = hasCtrlRole(ctx, "contas_a_pagar")
     ? createAdminClientIfAvailable() ?? (await createClient())
-    : await createClient();
+    : await ctrlReadClient();
 
   // Escopo por EMPRESA (multiempresa): fornecedores são independentes por empresa
   // (decisão do dono). Sem empresa ativa → nada (falha fechada). Hoje = Viva → inerte.

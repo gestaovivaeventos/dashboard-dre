@@ -1,5 +1,6 @@
 import { getSessionContext } from "@/lib/auth/session";
 import { hasCtrlFullView } from "@/lib/ctrl/full-view";
+import { getInjectedCtrlUser } from "@/lib/ctrl/injected-identity";
 import { getCtrlOrgContext, type CtrlOrg } from "@/lib/ctrl/orgs";
 import { resolveCtrlRolesForOrg } from "@/lib/ctrl/roles";
 import type { CtrlRole, UserProfileType } from "@/lib/supabase/types";
@@ -31,6 +32,9 @@ export interface CtrlUserContext {
 
 /** Retorna o contexto do usuário na Controladoria, ou null se sem acesso. */
 export async function getCtrlUser(): Promise<CtrlUserContext | null> {
+  const injected = getInjectedCtrlUser();
+  if (injected) return injected;
+
   const ctx = await getSessionContext();
   if (!ctx.user || !ctx.profile || !ctx.modules?.ctrl || ctx.modules.ctrl.roles.length === 0) {
     return null;
