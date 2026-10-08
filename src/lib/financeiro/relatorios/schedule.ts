@@ -5,12 +5,14 @@
 // código). Ao mudar um dia aqui, mude a expressão cron correspondente lá — as
 // duas coisas TÊM de casar:
 //
-//   BI_GENERATION_DAY  →  "/api/cron/bi-monthly-validation"  →  "0 12 D * *"
+//   BI_GENERATION_DAY  →  "/api/cron/bi-monthly-validation"  →  "*/10 12-13 D * *"
 //                         (e a janela de 6 meses do "/api/cron/sync-all",
 //                          que roda ANTES, no mesmo dia)
 //   BI_AUTOSEND_DAY    →  "/api/cron/bi-monthly-autosend"    →  "0 12 D * *"
 //
-// O horário é 12:00 UTC = 09:00 BRT (cron da Vercel é sempre UTC).
+// O horário é 12:00 UTC = 09:00 BRT (cron da Vercel é sempre UTC). A geração
+// dispara a cada 10 min até 13:50 UTC porque a leva inteira não cabe nos 300s
+// de uma invocação — cada disparo continua de onde o anterior parou.
 //
 // Existe para os textos de tela/e-mail não ficarem com o dia escrito à mão em
 // dezenas de lugares: já aconteceu de a rotina mudar e a legenda continuar

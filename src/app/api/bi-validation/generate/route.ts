@@ -4,6 +4,7 @@ import { canAccessBiValidation } from "@/lib/auth/bi-validation";
 import { getCurrentSessionContext } from "@/lib/auth/session";
 import { getPreviousMonthRange } from "@/lib/financeiro/relatorios/monthly-bi-sender";
 import {
+  countPendingMonthlyGeneration,
   notifyCscPendingValidation,
   runMonthlyGeneration,
   type ValidationActor,
@@ -27,6 +28,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // Relatórios JÁ ENVIADOS nunca são regerados, nem com force.
 //
 // Acesso: CSC, admin e os e-mails nominais.
+//
+// GET /api/bi-validation/generate — quantas empresas ainda faltam no período.
+// A leva inteira não cabe nos 300s da Vercel; quando o POST é cortado no meio
+// não chega resposta nenhuma ao navegador, então a tela pergunta aqui quanto
+// falta para avisar "faltam N, clique de novo".
 // ============================================================================
 
 export const runtime = "nodejs";
@@ -34,6 +40,27 @@ export const maxDuration = 300;
 
 interface Body {
   force?: boolean;
+}
+
+export async function GET() {
+  const { user, profile } = await getCurrentSessionContext();
+  if (!user || !profile) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+  }
+  if (!canAccessBiValidation(profile)) {
+    return NextResponse.json({ error: "Acesso restrito." }, { status: 403 });
+  }
+
+  const range = getPreviousMonthRange(new Date());
+  try {
+    const status = await countPendingMonthlyGeneration(createAdminClient(), range);
+    return NextResponse.json({ period: range.periodLabel, ...status });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Falha ao contar pendentes." },
+      { status: 400 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
