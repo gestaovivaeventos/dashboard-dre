@@ -276,10 +276,21 @@ export function BudgetForecastView({
     open: boolean;
     contaNome: string;
     periodo: string;
-    itens: { nome: string; valor: number }[];
+    // Por SETOR: numa conta que vários setores alimentam, a lista corrida dizia
+    // quanto foi orçado sem dizer por quem.
+    grupos: { setor: string; semSetor: boolean; total: number; itens: { nome: string; valor: number }[] }[];
+    despesas: number;
     total: number;
     carregando: boolean;
-  }>({ open: false, contaNome: "", periodo: "", itens: [], total: 0, carregando: false });
+  }>({
+    open: false,
+    contaNome: "",
+    periodo: "",
+    grupos: [],
+    despesas: 0,
+    total: 0,
+    carregando: false,
+  });
 
   const abrirOrcado = async (
     row: BudgetForecastDisplayRow,
@@ -292,7 +303,8 @@ export function BudgetForecastView({
       open: true,
       contaNome: `${row.code} - ${row.name}`,
       periodo: bucket.label,
-      itens: [],
+      grupos: [],
+      despesas: 0,
       total: 0,
       carregando: true,
     });
@@ -307,10 +319,20 @@ export function BudgetForecastView({
       const r = await fetch(`/api/orcamento/budget-detalhe?${params.toString()}`, {
         cache: "no-store",
       });
-      const j = (await r.json()) as { itens?: { nome: string; valor: number }[]; total?: number };
+      const j = (await r.json()) as {
+        grupos?: {
+          setor: string;
+          semSetor: boolean;
+          total: number;
+          itens: { nome: string; valor: number }[];
+        }[];
+        total?: number;
+        despesas?: number;
+      };
       setOrcado((p) => ({
         ...p,
-        itens: j.itens ?? [],
+        grupos: j.grupos ?? [],
+        despesas: j.despesas ?? 0,
         total: j.total ?? 0,
         carregando: false,
       }));
@@ -1133,7 +1155,7 @@ export function BudgetForecastView({
 
             {orcado.carregando ? (
               <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>
-            ) : orcado.itens.length === 0 ? (
+            ) : orcado.grupos.length === 0 ? (
               <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
                 Nada finalizado nesta conta e período. A abertura por despesa aparece depois que um
                 administrador usa <strong>Finalizar orçamento</strong> no módulo Orçamento; valor
@@ -1141,16 +1163,35 @@ export function BudgetForecastView({
               </p>
             ) : (
               <>
-                <ul className="divide-y rounded-lg border">
-                  {orcado.itens.map((i) => (
-                    <li key={i.nome} className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm">
-                      <span className="min-w-0 truncate">{i.nome}</span>
-                      <span className="shrink-0 tabular-nums">{formatCurrency(i.valor)}</span>
-                    </li>
+                <div className="space-y-3">
+                  {orcado.grupos.map((g) => (
+                    <div key={g.setor} className="rounded-lg border">
+                      {/* O setor é CABEÇALHO, com o total dele: é o que responde
+                          "quem orçou isto", que a lista corrida não respondia. */}
+                      <div className="flex items-baseline justify-between gap-3 border-b bg-muted/40 px-3 py-2">
+                        <span className="min-w-0 truncate text-sm font-semibold">{g.setor}</span>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums">
+                          {formatCurrency(g.total)}
+                        </span>
+                      </div>
+                      <ul className="divide-y">
+                        {g.itens.map((i) => (
+                          <li
+                            key={i.nome}
+                            className="flex items-baseline justify-between gap-3 px-3 py-2 text-sm"
+                          >
+                            <span className="min-w-0 truncate">{i.nome}</span>
+                            <span className="shrink-0 tabular-nums">{formatCurrency(i.valor)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                </div>
                 <div className="flex items-baseline justify-between px-3 text-sm font-semibold">
-                  <span>{orcado.itens.length} despesa(s)</span>
+                  <span>
+                    {orcado.despesas} despesa(s) · {orcado.grupos.length} setor(es)
+                  </span>
                   <span className="tabular-nums">{formatCurrency(orcado.total)}</span>
                 </div>
               </>
