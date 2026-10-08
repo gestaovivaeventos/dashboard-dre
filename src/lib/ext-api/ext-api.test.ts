@@ -99,6 +99,9 @@ const BASE = {
   reference_month: 10,
   reference_year: 2026,
   payment_method: "pix",
+  expense_type_id: "t1",
+  supplier_id: "f1",
+  supplier_issues_invoice: "nao",
 };
 
 test("parseCreateRequest: corpo válido passa e campos desconhecidos caem", () => {
@@ -154,4 +157,17 @@ test("respostaPendente e safeFileName", () => {
   assert.equal(safeFileName("../../etc/passwd").includes("/"), false);
   assert.equal(safeFileName("../../etc/passwd").includes(".."), false);
   assert.equal(safeFileName("///"), "arquivo");
+});
+
+test("parseCreateRequest: obrigatórios do formulário do Compras", () => {
+  assert.equal(parseCreateRequest({ ...BASE, supplier_id: undefined }, ctxDe()).ok, false);
+  assert.equal(parseCreateRequest({ ...BASE, expense_type_id: "" }, ctxDe()).ok, false);
+  assert.equal(parseCreateRequest({ ...BASE, supplier_issues_invoice: "talvez" }, ctxDe()).ok, false);
+  // Boleto exige o anexo; NF "sim" exige a nota; "após pagamento" não.
+  assert.equal(parseCreateRequest({ ...BASE, payment_method: "boleto" }, ctxDe()).ok, false);
+  assert.ok(parseCreateRequest({ ...BASE, payment_method: "boleto", attachment_path: `${U1}/1791491752532-b.pdf` }, ctxDe()).ok);
+  assert.equal(parseCreateRequest({ ...BASE, supplier_issues_invoice: "sim" }, ctxDe()).ok, false);
+  assert.ok(parseCreateRequest({ ...BASE, supplier_issues_invoice: "sim_apos_pagamento" }, ctxDe()).ok);
+  assert.equal(parseCreateRequest({ ...BASE, payment_method: "pix_copia_cola" }, ctxDe()).ok, false);
+  assert.ok(parseCreateRequest({ ...BASE, payment_method: "cartao_prepago" }, ctxDe()).ok);
 });

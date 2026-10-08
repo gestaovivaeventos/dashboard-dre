@@ -92,3 +92,22 @@ export async function getOwnRequest(ctx: CtrlUserContext, id: string): Promise<R
   if (error) throw new Error(error.message);
   return data ? toView(data as unknown as Row) : null;
 }
+
+/**
+ * Fornecedor e tipo de despesa têm de ser da empresa da chave. createRequest
+ * confere só o setor; a tela nunca oferece cadastro de outra empresa, mas uma
+ * chamada direta poderia mandar um fornecedor da Viva numa despesa da Feat.
+ */
+export async function catalogOutsideOrg(
+  ctx: CtrlUserContext,
+  ids: { supplierId: string; expenseTypeId: string },
+): Promise<string | null> {
+  const admin = createAdminClient();
+  const [{ data: supplier }, { data: type }] = await Promise.all([
+    admin.from("ctrl_suppliers").select("org_id").eq("id", ids.supplierId).maybeSingle(),
+    admin.from("ctrl_expense_types").select("org_id, active").eq("id", ids.expenseTypeId).maybeSingle(),
+  ]);
+  if (!supplier || supplier.org_id !== ctx.orgId) return "Fornecedor não encontrado nesta empresa.";
+  if (!type || type.org_id !== ctx.orgId || !type.active) return "Tipo de despesa não encontrado nesta empresa.";
+  return null;
+}

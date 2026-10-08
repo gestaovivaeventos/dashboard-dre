@@ -7,7 +7,12 @@ import type { CtrlRequestStatus } from "@/lib/supabase/types";
 // testado: a action continua sendo a dona da regra de negócio; aqui só se fecha
 // o que uma chamada direta conseguiria passar.
 
-const PAYMENT_METHODS = ["boleto", "pix", "transferencia", "cartao_credito", "dinheiro"] as const;
+const PAYMENT_METHODS = [
+  "boleto", "pix", "pix_copia_cola", "transferencia", "cartao_credito", "cartao_prepago", "dinheiro",
+] as const;
+
+/** Respostas de "o fornecedor emite nota fiscal?" — as mesmas do formulário do Compras. */
+const EMITE_NF = ["sim", "sim_apos_pagamento", "nao"] as const;
 
 /** Campos que a API aceita na criação. O resto do corpo é ignorado. */
 const ALLOWED_FIELDS = [
@@ -59,6 +64,25 @@ export function parseCreateRequest(body: unknown, ctx: CtrlUserContext): ParsedC
   }
   if (!PAYMENT_METHODS.includes(data.payment_method as (typeof PAYMENT_METHODS)[number])) {
     return { ok: false, error: `Forma de pagamento inválida. Use: ${PAYMENT_METHODS.join(", ")}.` };
+  }
+  // Obrigatórios no formulário do Compras (validados só na tela até aqui).
+  if (typeof data.expense_type_id !== "string" || !data.expense_type_id) {
+    return { ok: false, error: "Selecione o tipo de despesa." };
+  }
+  if (typeof data.supplier_id !== "string" || !data.supplier_id) {
+    return { ok: false, error: "Selecione um fornecedor." };
+  }
+  if (!EMITE_NF.includes(data.supplier_issues_invoice as (typeof EMITE_NF)[number])) {
+    return { ok: false, error: `Informe se o fornecedor emite nota fiscal: ${EMITE_NF.join(", ")}.` };
+  }
+  if (data.payment_method === "boleto" && !data.attachment_path) {
+    return { ok: false, error: "Anexe o boleto antes de enviar." };
+  }
+  if (data.supplier_issues_invoice === "sim" && !data.invoice_attachment_path) {
+    return { ok: false, error: "O fornecedor emite nota fiscal — anexe a nota fiscal antes de enviar." };
+  }
+  if (data.payment_method === "pix_copia_cola" && !data.pix_key?.trim()) {
+    return { ok: false, error: "Cole o código PIX copia e cola antes de enviar." };
   }
   if (data.extra_attachment_paths != null && !Array.isArray(data.extra_attachment_paths)) {
     return { ok: false, error: "extra_attachment_paths deve ser uma lista." };

@@ -4,7 +4,7 @@ import { createRequest } from "@/lib/ctrl/actions/requests";
 import { extError, withExtCtrl } from "@/lib/ext-api/handler";
 import { withIdempotency } from "@/lib/ext-api/idempotency";
 import { parseCreateRequest, type Etapa } from "@/lib/ext-api/requisicoes";
-import { getOwnRequest, listOwnRequests } from "@/lib/ext-api/requisicoes-db";
+import { catalogOutsideOrg, getOwnRequest, listOwnRequests } from "@/lib/ext-api/requisicoes-db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,11 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     const parsed = parseCreateRequest(body, ctx);
     if (!parsed.ok) return extError(400, parsed.error);
+    const outside = await catalogOutsideOrg(ctx, {
+      supplierId: parsed.input.supplier_id!,
+      expenseTypeId: parsed.input.expense_type_id!,
+    });
+    if (outside) return extError(400, outside);
 
     return withIdempotency(request, client.id, ctx.id, body, async () => {
       const result = await createRequest(parsed.input);
