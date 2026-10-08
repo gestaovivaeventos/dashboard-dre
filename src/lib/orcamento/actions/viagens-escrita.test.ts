@@ -85,3 +85,21 @@ test("lançar os valores da cotação é da CONTROLADORIA, não do gestor do set
   assert.ok(lancar, "lancarValoresViagens não existe mais");
   assert.match(lancar!.corpo, /SEM_ACESSO_ADMIN/);
 });
+
+test("toda action de escrita de viagem respeita a TRAVA de finalização", () => {
+  // Finalizar faz duas coisas: publica no Budget o que a diretoria aprovou e
+  // TRAVA a fatia para todo mundo — inclusive para o admin que clicou. É a
+  // diferença deliberada para a trava da validação, onde admin e diretoria sempre
+  // passam: finalizar é um fecho, não uma alçada. Caminho de escrita que esqueça a
+  // conferência publica um número no Budget e deixa a origem dele mudar depois,
+  // sem nada avisar.
+  for (const { nome, corpo } of corpoDasActions("viagens-grade.ts")) {
+    const escreve = VERBOS.some((v) => nome.toLowerCase().startsWith(v));
+    if (!escreve) continue;
+    assert.ok(
+      corpo.includes("fechadas") || corpo.includes("travaDeFinalizacao"),
+      `${nome} grava sem conferir a fatia finalizada.`,
+    );
+  }
+});
+

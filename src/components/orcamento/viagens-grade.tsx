@@ -1002,6 +1002,7 @@ export function ViagensGrade({ companyId, year }: { companyId: string; year: num
           setorNome={setorNome}
           categorias={setup.categorias}
           codigosEmUso={codigosEmUso}
+          orcaPorSetor={setup.orcaPorSetor}
           isAdmin={isAdmin}
           onMudou={() => void carregar()}
         />

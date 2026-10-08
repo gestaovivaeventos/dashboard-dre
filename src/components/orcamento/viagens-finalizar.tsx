@@ -13,8 +13,19 @@ import { BotaoFinalizar } from "@/components/orcamento/botao-finalizar";
  * tela principal — a alternativa era duplicá-lo ou engordar a grade, que já
  * carrega 50 linhas editáveis.
  *
- * A fatia é (categoria × setor), como nos outros métodos: sem um setor resolvido
- * não há fatia a fechar, então o bloco não aparece em "Todos os setores".
+ * A fatia é (categoria × setor), como nos outros métodos.
+ *
+ * ── Setor NULO e "Todos os setores" são coisas DIFERENTES (07/10/2026) ──────
+ * O bloco testava só `!setorId` e sumia nos dois casos. Mas `null` cobre dois
+ * estados que `setor-filtro.ts` já separava para o Pessoal:
+ *
+ *   empresa NÃO orça por setor  → a fatia é (categoria, ∅) e FECHA normalmente
+ *   "Todos os setores"          → a visão cruza setores; não há UMA fatia a fechar
+ *
+ * Conflá-los deixava a empresa que não orça por setor **sem nenhum caminho** para
+ * finalizar viagem — o valor ficava na Prévia e nunca chegava ao Budget, sem nada
+ * na tela dizendo por quê. Por isso entra `orcaPorSetor`, e o caso que de fato
+ * bloqueia passa a ser DITO em vez de sumir.
  */
 export function ViagensFinalizar({
   companyId,
@@ -23,16 +34,20 @@ export function ViagensFinalizar({
   setorNome,
   categorias,
   codigosEmUso,
+  orcaPorSetor,
   isAdmin,
   onMudou,
 }: {
   companyId: string;
   year: number;
+  /** Setor da fatia. `null` = a empresa não orça por setor OU é a visão "Todos". */
   setorId: string | null;
   setorNome: string;
   categorias: Array<{ categoryCode: string; categoryName: string }>;
   /** Categorias que têm viagem neste recorte — é por elas que se finaliza. */
   codigosEmUso: string[];
+  /** A empresa orça por setor? É o que distingue `null` de "Todos os setores". */
+  orcaPorSetor: boolean;
   isAdmin: boolean;
   onMudou: () => void;
 }) {
@@ -47,7 +62,24 @@ export function ViagensFinalizar({
     void carregar();
   }, [carregar]);
 
-  if (!setorId || codigosEmUso.length === 0) return null;
+  // Sem viagem no recorte não há fatia: nada a fechar, e um bloco vazio só ocupa
+  // espaço na tela que já carrega 50 linhas.
+  if (codigosEmUso.length === 0) return null;
+
+  // A visão cruza setores: fechar daqui publicaria fatia de setor que o admin não
+  // está olhando. Dizer isso é melhor que sumir — some era o que fazia procurar
+  // defeito num botão que a tela só não tinha como oferecer.
+  if (orcaPorSetor && !setorId) {
+    return (
+      <div className="rounded-lg border p-4">
+        <p className="text-sm font-semibold">Finalizar</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Escolha um setor no topo da tela. A fatia que se fecha é (categoria × setor), e em
+          &ldquo;Todos os setores&rdquo; não há uma só para publicar no Budget.
+        </p>
+      </div>
+    );
+  }
 
   const indice = indexarFinalizacoes(finalizacoes);
 
