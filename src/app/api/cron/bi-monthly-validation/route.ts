@@ -21,18 +21,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //   2. ESTA rotina gera os relatorios do MES ANTERIOR de TODAS as empresas
 //      ativas com sync ligado (ter destinatario cadastrado NAO e requisito —
 //      o e-mail so importa no envio) e os coloca na fila de validacao
-//      (12:00 UTC / 09:00 BRT)
+//      (a cada 10 min entre 12:00 e 13:50 UTC / 09:00–10:50 BRT)
 //   3. cria a pendencia/notificacao no Control Hub para os usuarios CSC
 //
 // Os relatorios NAO sao enviados aqui: ficam em /financeiro/validacao-relatorio
 // aguardando o aceite do CSC. Sem aceite ate o dia BI_AUTOSEND_DAY, o cron
 // /api/cron/bi-monthly-autosend envia automaticamente.
 //
-// RETOMAVEL: `runMonthlyGeneration` pula quem ja tem relatorio pronto no
-// periodo. Se esta invocacao estourar o teto de 300s da Vercel no meio da
-// lista, basta chama-la de novo (ou esperar o proximo disparo) que ela conclui
-// a cauda sem refazer o que ja deu certo — e sem gastar IA duas vezes. Falhas
-// individuais sao retentadas uma vez ao final da leva.
+// RETOMAVEL — E POR ISSO DISPARA VARIAS VEZES NO DIA: a leva inteira (~30
+// empresas x 20–50s de IA cada) NAO cabe nos 300s da Vercel. Em 05/10/2026 o
+// disparo unico foi cortado depois da 9a empresa (ordem alfabetica) e as
+// outras 21 ficaram sem relatorio, sem alerta nenhum. `runMonthlyGeneration`
+// pula quem ja tem relatorio pronto no periodo, entao cada disparo do
+// vercel.json ("*/10 12-13 D * *") conclui um pedaco da cauda sem refazer o
+// que ja deu certo — e sem gastar IA duas vezes; quando tudo ja esta pronto o
+// disparo nao faz nada. Falhas individuais sao retentadas uma vez ao final da
+// leva (e de novo no disparo seguinte).
 // ============================================================================
 
 export const runtime = "nodejs";

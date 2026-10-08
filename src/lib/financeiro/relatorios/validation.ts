@@ -401,6 +401,57 @@ export interface MonthlyRunResult {
 }
 
 /**
+ * Empresas que ja tem relatorio pronto (ou ja enviado) no periodo — as que a
+ * leva pula. Enviado nunca e regerado, nem com force.
+ */
+async function loadAlreadyDoneCompanyIds(
+  admin: SupabaseClient,
+  range: MonthRange,
+  force?: boolean,
+): Promise<Set<string>> {
+  const { data: existingRows } = await admin
+    .from("bi_report_validations")
+    .select("company_id, status, report_json, sent_at")
+    .eq("period_from", range.dateFrom)
+    .eq("period_to", range.dateTo);
+
+  const alreadyDone = new Set<string>();
+  for (const row of (existingRows ?? []) as Array<{
+    company_id: string;
+    status: ValidationStatus;
+    report_json: unknown;
+    sent_at: string | null;
+  }>) {
+    if (row.sent_at) {
+      alreadyDone.add(row.company_id);
+      continue;
+    }
+    if (!force && row.report_json && row.status !== "erro_geracao") {
+      alreadyDone.add(row.company_id);
+    }
+  }
+  return alreadyDone;
+}
+
+/**
+ * Quantas empresas elegiveis ainda NAO tem relatorio pronto no periodo — o que
+ * a proxima leva (cron ou botao "Gerar") vai tentar. Existe porque a leva
+ * inteira nao cabe nos 300s da Vercel: quando a requisicao e cortada no meio
+ * ela nao devolve resposta, e a tela precisa perguntar a parte quanto falta.
+ */
+export async function countPendingMonthlyGeneration(
+  admin: SupabaseClient,
+  range: MonthRange,
+): Promise<{ eligible: number; pending: number; pendingNames: string[] }> {
+  const companies = await listCompaniesForMonthlyCycle(admin);
+  const alreadyDone = await loadAlreadyDoneCompanyIds(admin, range);
+  const pendingNames = companies
+    .filter((c) => !alreadyDone.has(c.companyId))
+    .map((c) => c.companyName);
+  return { eligible: companies.length, pending: pendingNames.length, pendingNames };
+}
+
+/**
  * Gera a leva do mês para TODAS as empresas ativas com sync ligado — com ou
  * sem destinatário cadastrado (ver `listCompaniesForMonthlyCycle`). Quem ainda
  * não tem e-mail cadastrado entra na fila do CSC do mesmo jeito; só o envio
@@ -427,30 +478,7 @@ export async function runMonthlyGeneration(
 ): Promise<MonthlyRunResult[]> {
   const { range, actor, force } = params;
   const companies = await listCompaniesForMonthlyCycle(admin);
-
-  // Empresas que ja tem relatorio pronto (ou ja enviado) neste periodo.
-  const { data: existingRows } = await admin
-    .from("bi_report_validations")
-    .select("company_id, status, report_json, sent_at")
-    .eq("period_from", range.dateFrom)
-    .eq("period_to", range.dateTo);
-
-  const alreadyDone = new Set<string>();
-  for (const row of (existingRows ?? []) as Array<{
-    company_id: string;
-    status: ValidationStatus;
-    report_json: unknown;
-    sent_at: string | null;
-  }>) {
-    // Enviado nunca e regerado, nem com force.
-    if (row.sent_at) {
-      alreadyDone.add(row.company_id);
-      continue;
-    }
-    if (!force && row.report_json && row.status !== "erro_geracao") {
-      alreadyDone.add(row.company_id);
-    }
-  }
+  const alreadyDone = await loadAlreadyDoneCompanyIds(admin, range, force);
 
   const results: MonthlyRunResult[] = [];
   const retryQueue: CompanyRecipients[] = [];

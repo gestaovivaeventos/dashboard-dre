@@ -13,7 +13,7 @@
     },
     {
       "path": "/api/cron/bi-monthly-validation",
-      "schedule": "0 12 5 * *"
+      "schedule": "*/10 12-13 5 * *"
     },
     {
       "path": "/api/cron/bi-monthly-autosend",

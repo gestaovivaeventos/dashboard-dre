@@ -420,37 +420,81 @@ export function ValidacaoRelatorioClient({
     }
   };
 
+  /**
+   * Quantas empresas ainda estão sem relatório no período. Consultado depois de
+   * todo "Gerar": a leva inteira não cabe nos 300s da Vercel, e quando o POST é
+   * cortado no meio ele volta sem resposta (504) — só esta contagem diz quanto
+   * falta. null = não deu para saber.
+   */
+  const fetchPendingCount = async (): Promise<number | null> => {
+    try {
+      const r = await fetch("/api/bi-validation/generate", { cache: "no-store" });
+      if (!r.ok) return null;
+      const payload = (await r.json().catch(() => null)) as { pending?: number } | null;
+      return typeof payload?.pending === "number" ? payload.pending : null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleGenerateMonth = async () => {
     setGenerating(true);
+    type GeneratePayload = {
+      error?: string;
+      generated?: number;
+      skipped?: number;
+      failed?: number;
+      period?: string;
+    };
+    let payload = null as GeneratePayload | null;
+    let requestError: string | null = null;
     try {
       const r = await fetch("/api/bi-validation/generate", { method: "POST" });
-      const payload = (await r.json().catch(() => null)) as
-        | {
-            error?: string;
-            generated?: number;
-            skipped?: number;
-            failed?: number;
-            period?: string;
-          }
-        | null;
-      if (!r.ok) throw new Error(payload?.error ?? `Falha (HTTP ${r.status}).`);
-      const partes = [
-        `${payload?.generated ?? 0} gerado(s)`,
-        payload?.skipped ? `${payload.skipped} já pronto(s)` : null,
-        payload?.failed ? `${payload.failed} com falha` : null,
-      ].filter(Boolean);
-      showToast({
-        title: `Relatórios de ${payload?.period ?? "período"}`,
-        description: `${partes.join(" • ")}.`,
-        variant: payload?.failed ? "destructive" : "success",
-      });
-      router.refresh();
+      payload = (await r.json().catch(() => null)) as GeneratePayload | null;
+      if (!r.ok) requestError = payload?.error ?? `Falha (HTTP ${r.status}).`;
     } catch (err) {
-      showToast({
-        title: "Falha ao gerar relatórios",
-        description: err instanceof Error ? err.message : "Erro inesperado.",
-        variant: "destructive",
-      });
+      requestError = err instanceof Error ? err.message : "Erro inesperado.";
+    }
+
+    try {
+      const pending = await fetchPendingCount();
+
+      if (pending !== null && pending > 0) {
+        // Leva incompleta: a parte gerada já está salva e o próximo clique
+        // continua de onde parou, sem refazer quem já está pronto.
+        // Sem erro na requisição = a leva terminou e o que falta são falhas de
+        // geração; com erro (504) = foi cortada pelo limite de tempo.
+        showToast({
+          title: `Faltam ${pending} relatório(s)`,
+          description: requestError
+            ? "A geração foi interrompida pelo limite de tempo do servidor. O que já foi " +
+              "gerado está salvo — clique em Gerar de novo para continuar de onde parou."
+            : `${payload?.generated ?? 0} gerado(s), mas ${pending} empresa(s) ficaram com ` +
+              "falha — clique em Gerar de novo para tentar outra vez.",
+          variant: "default",
+        });
+      } else if (requestError) {
+        showToast({
+          title: "Falha ao gerar relatórios",
+          description:
+            pending === 0
+              ? `${requestError} Ainda assim, todas as empresas já têm relatório no período.`
+              : requestError,
+          variant: pending === 0 ? "default" : "destructive",
+        });
+      } else {
+        const partes = [
+          `${payload?.generated ?? 0} gerado(s)`,
+          payload?.skipped ? `${payload.skipped} já pronto(s)` : null,
+          payload?.failed ? `${payload.failed} com falha` : null,
+        ].filter(Boolean);
+        showToast({
+          title: `Relatórios de ${payload?.period ?? "período"}`,
+          description: `${partes.join(" • ")}.`,
+          variant: payload?.failed ? "destructive" : "success",
+        });
+      }
+      router.refresh();
     } finally {
       setGenerating(false);
     }
