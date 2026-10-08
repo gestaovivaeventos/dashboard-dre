@@ -240,6 +240,8 @@ interface ValorFixoSnapshotRow {
 }
 interface CategoryMappingRow {
   omie_category_code: string;
+  /** Nome da categoria na Omie — o rótulo de quem não tem método marcado. */
+  omie_category_name: string | null;
   dre_account_id: string | null;
   company_id: string | null;
 }
@@ -539,15 +541,25 @@ export async function getPreviaOrcamento(
     // Mapeamento categoria→conta (override da empresa > global), uma vez só.
     const { data: mapRows, error: mapErr } = await supabase
       .from("category_mapping")
-      .select("omie_category_code, dre_account_id, company_id")
+      .select("omie_category_code, omie_category_name, dre_account_id, company_id")
       .in("omie_category_code", allCodes)
       .or(`company_id.eq.${companyId},company_id.is.null`);
     if (mapErr) return { error: mapErr.message };
     const mapByCode = new Map<string, string | null>();
+    // O NOME da categoria na Omie, para a linha que não tem método marcado — o
+    // caso normal da VIAGEM, cuja categoria vem do de-para tipo → categoria e não
+    // da marcação. Sem isto a prévia do setor rotula o grupo com o código cru
+    // ("2.01.98"), e quem valida não sabe que conta está aprovando.
+    const nomeByCode = new Map<string, string>();
     for (const r of (mapRows ?? []) as CategoryMappingRow[]) {
       // Override da empresa tem prioridade: sobrescreve o global.
       if (r.company_id === companyId) mapByCode.set(r.omie_category_code, r.dre_account_id);
       else if (!mapByCode.has(r.omie_category_code)) mapByCode.set(r.omie_category_code, r.dre_account_id);
+
+      const nome = texto(r.omie_category_name);
+      if (!nome) continue;
+      if (r.company_id === companyId) nomeByCode.set(r.omie_category_code, nome);
+      else if (!nomeByCode.has(r.omie_category_code)) nomeByCode.set(r.omie_category_code, nome);
     }
 
     // Resolve o code para a folha escopada; empurra os 12 meses ou registra o órfão.
@@ -929,10 +941,18 @@ export async function getPreviaOrcamento(
         for (const it of itens) {
           for (let m = 0; m < 12; m += 1) meses[m] += it.meses[m] ?? 0;
         }
-        // O nome vem do cadastro de categorias; o vínculo de método pode nem
-        // existir para esta conta, e o código sozinho não diz nada a ninguém.
+        // O rótulo, em ordem: o cadastro de método (que já passou por
+        // `unificarGemeas`), depois o nome da categoria na Omie — que é para onde o
+        // de-para tipo → categoria aponta — e só então o código cru.
+        //
+        // A viagem quase nunca tem vínculo de método: a categoria dela vem do
+        // de-para, não da marcação (regra de 01/10/2026). Caindo direto no código, a
+        // prévia do setor mostrava "2.01.98" como nome do grupo, e o diretor aprovava
+        // sem saber em que conta a viagem cai.
         const nome =
-          metodoCatsTodas.find((c) => c.category_code === code)?.category_name ?? code;
+          metodoCatsTodas.find((c) => c.category_code === code)?.category_name ??
+          nomeByCode.get(code) ??
+          code;
         aplicar(code, nome, meses, "viagens", itens);
       }
     }

@@ -83,3 +83,22 @@ test("a Prévia NÃO soma viagem que ainda não foi à diretoria", () => {
   }
   assert.match(consulta, /"em_aprovacao"/);
 });
+
+test("a viagem é rotulada pela CATEGORIA, nunca pelo código cru", () => {
+  // A categoria da viagem vem do de-para tipo -> categoria, e essa conta quase
+  // nunca tem método marcado (a viagem não depende da marcação, regra de
+  // 01/10/2026). Caindo direto no código, a prévia do setor rotulava o grupo
+  // "2.01.98" e o diretor aprovava sem saber em que conta a viagem cai.
+  const texto = fs.readFileSync(ARQUIVO, "utf8");
+  assert.match(
+    texto,
+    /omie_category_name/,
+    "o nome da categoria saiu do select de category_mapping",
+  );
+  assert.match(
+    texto,
+    /nomeByCode\.get\(code\)/,
+    "o bloco de viagens parou de usar o nome da Omie como rótulo",
+  );
+});
+
