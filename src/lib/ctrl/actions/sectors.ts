@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hasCtrlRole, requireCtrlRole } from "@/lib/ctrl/auth";
+import { ctrlReadClient } from "@/lib/ctrl/injected-identity";
 import type { CtrlSector } from "@/lib/supabase/types";
 
 export async function getSectors() {
@@ -21,7 +22,7 @@ export async function getSectors() {
   // a lista voltaria vazia. Mesmo caminho ja usado na tela de Contas a Pagar.
   const supabase = hasCtrlRole(ctx, "contas_a_pagar")
     ? createAdminClientIfAvailable() ?? (await createClient())
-    : await createClient();
+    : await ctrlReadClient();
 
   // Escopo por EMPRESA (multiempresa): só os setores da empresa ativa. Sem
   // empresa ativa → nada (falha fechada). Hoje resolve para a Viva → inerte.

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClientIfAvailable } from "@/lib/supabase/admin";
 import { requireCtrlRole, requireCtrlRoleOrFullView } from "@/lib/ctrl/auth";
+import { ctrlReadClient } from "@/lib/ctrl/injected-identity";
 import {
   APPROVAL_ROUTING,
   approverSectorRestrictionFor,
@@ -1091,7 +1092,7 @@ export async function getRequestAttachmentUrl(requestId: string) {
     "contas_a_pagar",
     "admin",
   );
-  const supabase = await createClient();
+  const supabase = await ctrlReadClient();
 
   const { data: req, error } = await supabase
     .from("ctrl_requests")
@@ -1136,7 +1137,7 @@ export async function getRequestExtraAttachments(
     "contas_a_pagar",
     "admin",
   );
-  const supabase = await createClient();
+  const supabase = await ctrlReadClient();
 
   const { data: req, error } = await supabase
     .from("ctrl_requests")
