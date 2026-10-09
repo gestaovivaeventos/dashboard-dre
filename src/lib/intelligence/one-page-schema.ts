@@ -165,9 +165,6 @@ export const FeatContasReceberAbertoSchema = z.object({
   referencia: z.string().min(1).max(80),
   total_em_aberto: z.number(),
   total_em_atraso: z.number(),
-  // Parcela dos totais acima que vem de PERMUTA (Nota Fiscal = "PERMUTA").
-  permuta_em_aberto: z.number(),
-  permuta_em_atraso: z.number(),
   percentual_em_atraso: z.number(),
   titulos_em_aberto: z.number(),
   titulos_em_atraso: z.number(),

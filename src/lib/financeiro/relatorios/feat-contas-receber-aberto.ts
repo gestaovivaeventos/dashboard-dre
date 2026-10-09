@@ -86,8 +86,8 @@ export interface FeatContaReceberDetalhe {
   cliente: string; // nome fantasia (fallback: razão social)
   projeto: string;
   categoria: string;
-  // Número da nota fiscal (numero_documento_fiscal). "PERMUTA" nos títulos de
-  // permuta; vazio quando não preenchido no Omie.
+  // Número da nota fiscal (numero_documento_fiscal); vazio quando não
+  // preenchido no Omie. Títulos "PERMUTA" nunca chegam aqui (excluídos).
   notaFiscal: string;
   dataVencimento: string | null;
   dataPrevisao: string | null;
@@ -100,10 +100,11 @@ export interface FeatContasReceberAbertoPayload {
   referenciaLabel: string;
   totalEmAberto: number;
   totalEmAtraso: number;
-  // Parcela dos totais acima que vem de PERMUTA (Nota Fiscal = "PERMUTA").
-  // Detalhamento gerencial pedido pela Feat, exibido abaixo de cada total.
-  permutaEmAberto: number;
-  permutaEmAtraso: number;
+  // Títulos de PERMUTA (Nota Fiscal = "PERMUTA") ficam FORA de todos os totais,
+  // do aging, do ranking e do detalhamento exportado — não são caixa a receber.
+  // Sempre true nos payloads novos; a tela usa para exibir a observação ao
+  // usuário. Ausente = relatório antigo (gerado quando a permuta ainda entrava).
+  permutasExcluidas: true;
   percentualEmAtraso: number;
   titulosEmAberto: number;
   titulosEmAtraso: number;
@@ -123,8 +124,6 @@ export interface FeatContasReceberAbertoResumoIA {
   referencia: string;
   total_em_aberto: number;
   total_em_atraso: number;
-  permuta_em_aberto: number;
-  permuta_em_atraso: number;
   percentual_em_atraso: number;
   titulos_em_aberto: number;
   titulos_em_atraso: number;
@@ -229,10 +228,11 @@ function isCategoriaSistema(categoria: string): boolean {
   return /\(\s*\*\s*\)\s*$/.test(categoria);
 }
 
-// Detalhamento pedido pelo gestor da Feat: dentro dos totais em aberto/atraso,
-// quanto vem de PERMUTA. A Feat registra isso no campo Nota Fiscal
-// (numero_documento_fiscal) preenchido com "PERMUTA". Casamento por texto
-// normalizado (sem acento, minúsculo) para tolerar variações ("Permuta" etc.).
+// PERMUTA não é recebível em dinheiro: pedido do gestor da Feat, esses títulos
+// ficam FORA da visão inteira (totais, aging, clientes e planilha exportada). A
+// Feat registra a permuta no campo Nota Fiscal (numero_documento_fiscal)
+// preenchido com "PERMUTA". Casamento por texto normalizado (sem acento,
+// minúsculo) para tolerar variações ("Permuta" etc.).
 function isPermuta(notaFiscal: string | null): boolean {
   return notaFiscal ? normalizeName(notaFiscal).includes("permuta") : false;
 }
@@ -543,8 +543,6 @@ interface TituloNormalizado {
   diasAtraso: number;
   // Número da nota fiscal (numero_documento_fiscal), como veio do Omie.
   notaFiscal: string;
-  // Título de permuta (Nota Fiscal preenchida com "PERMUTA" no contareceber).
-  emPermuta: boolean;
 }
 
 function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
@@ -557,8 +555,7 @@ function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
       referenciaLabel,
       totalEmAberto: 0,
       totalEmAtraso: 0,
-      permutaEmAberto: 0,
-      permutaEmAtraso: 0,
+      permutasExcluidas: true,
       percentualEmAtraso: 0,
       titulosEmAberto: 0,
       titulosEmAtraso: 0,
@@ -575,8 +572,6 @@ function emptyResult(referenciaLabel: string): FeatContasReceberAbertoResult {
       referencia: referenciaLabel,
       total_em_aberto: 0,
       total_em_atraso: 0,
-      permuta_em_aberto: 0,
-      permuta_em_atraso: 0,
       percentual_em_atraso: 0,
       titulos_em_aberto: 0,
       titulos_em_atraso: 0,
@@ -639,6 +634,9 @@ export async function buildFeatContasReceberAberto(
     for (const mov of movimentos) {
       const extra = mov.tituloCode ? extraPorTitulo.get(mov.tituloCode) : undefined;
 
+      // Permuta não compõe o contas a receber (nem aberto, nem atraso, nem export).
+      if (isPermuta(extra?.notaFiscal ?? null)) continue;
+
       // Filtro por departamento: mantém só a fração do título que cai em
       // departamentos selecionados na tela. Título 100% em departamento não
       // selecionado (ex.: SIRENA desmarcada) → includedPercent 0 → descartado.
@@ -679,7 +677,6 @@ export async function buildFeatContasReceberAberto(
         emAtraso,
         diasAtraso: emAtraso ? diasEmAtraso(vencimento) : 0,
         notaFiscal: extra?.notaFiscal ?? "",
-        emPermuta: isPermuta(extra?.notaFiscal ?? null),
       });
     }
 
@@ -739,19 +736,6 @@ export async function buildFeatContasReceberAberto(
     const percentualEmAtraso =
       totalEmAberto > 0 ? round2((totalEmAtraso / totalEmAberto) * 100) : 0;
 
-    // Detalhamento de PERMUTA dentro dos totais (mesma base de títulos que já
-    // compõe aberto/atraso — só recorta pelos títulos marcados como permuta).
-    const permutaEmAberto = round2(
-      normalizados
-        .filter((t) => t.emPermuta)
-        .reduce((sum, t) => sum + t.valorEmAberto, 0),
-    );
-    const permutaEmAtraso = round2(
-      normalizados
-        .filter((t) => t.emAtraso && t.emPermuta)
-        .reduce((sum, t) => sum + t.valorEmAberto, 0),
-    );
-
     const clientesVisiveis = clientesOrdenados.slice(0, MAX_CLIENTES_VISUAIS);
     const restanteValor = round2(
       clientesOrdenados.slice(MAX_CLIENTES_VISUAIS).reduce((sum, c) => sum + c.valorEmAberto, 0),
@@ -783,8 +767,7 @@ export async function buildFeatContasReceberAberto(
         referenciaLabel,
         totalEmAberto,
         totalEmAtraso,
-        permutaEmAberto,
-        permutaEmAtraso,
+        permutasExcluidas: true,
         percentualEmAtraso,
         titulosEmAberto: normalizados.length,
         titulosEmAtraso,
@@ -801,8 +784,6 @@ export async function buildFeatContasReceberAberto(
         referencia: referenciaLabel,
         total_em_aberto: totalEmAberto,
         total_em_atraso: totalEmAtraso,
-        permuta_em_aberto: permutaEmAberto,
-        permuta_em_atraso: permutaEmAtraso,
         percentual_em_atraso: percentualEmAtraso,
         titulos_em_aberto: normalizados.length,
         titulos_em_atraso: titulosEmAtraso,

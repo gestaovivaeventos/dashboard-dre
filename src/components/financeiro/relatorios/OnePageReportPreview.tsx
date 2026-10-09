@@ -16,7 +16,10 @@ import {
   YAxis,
 } from "recharts";
 
-import { downloadFeatContasReceberXlsx } from "@/lib/financeiro/relatorios/feat-contas-receber-export";
+import {
+  downloadFeatContasReceberXlsx,
+  FEAT_PERMUTA_OBSERVACAO,
+} from "@/lib/financeiro/relatorios/feat-contas-receber-export";
 
 // ============================================================================
 // RELATÓRIO FINANCEIRO MENSAL — One Page Report (documento A4).
@@ -155,8 +158,12 @@ export interface FeatContasReceberAbertoBlock {
   referenciaLabel: string;
   totalEmAberto: number;
   totalEmAtraso: number;
-  permutaEmAberto: number;
-  permutaEmAtraso: number;
+  // true = títulos de PERMUTA ficaram fora de todos os valores (regra atual).
+  // Relatórios antigos não têm o campo e trazem, em vez dele, a parcela de
+  // permuta DENTRO dos totais (permutaEmAberto/permutaEmAtraso).
+  permutasExcluidas?: boolean;
+  permutaEmAberto?: number;
+  permutaEmAtraso?: number;
   percentualEmAtraso: number;
   titulosEmAberto: number;
   titulosEmAtraso: number;
@@ -2686,15 +2693,15 @@ function agingSev(faixa: string): SevKey {
 
 function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock }) {
   const pctAtrasoLabel = fmtPctPtBr(data.percentualEmAtraso);
-  // Detalhamento de PERMUTA (Nota Fiscal = "PERMUTA") dentro de cada total. Só
-  // exibido quando há valor de permuta a destacar.
+  // Relatório antigo (antes de a permuta sair do cálculo): mantém o
+  // detalhamento "Inclui R$ X de Permuta" que ele trazia dentro dos totais.
   const permutaAbertoLabel =
-    data.permutaEmAberto > 0
-      ? `Inclui ${fmtMoneyFull(data.permutaEmAberto)} de Permuta`
+    !data.permutasExcluidas && (data.permutaEmAberto ?? 0) > 0
+      ? `Inclui ${fmtMoneyFull(data.permutaEmAberto ?? 0)} de Permuta`
       : undefined;
   const permutaAtrasoLabel =
-    data.permutaEmAtraso > 0
-      ? `Inclui ${fmtMoneyFull(data.permutaEmAtraso)} de Permuta`
+    !data.permutasExcluidas && (data.permutaEmAtraso ?? 0) > 0
+      ? `Inclui ${fmtMoneyFull(data.permutaEmAtraso ?? 0)} de Permuta`
       : undefined;
   const resumo: Array<{
     label: string;
@@ -2787,6 +2794,11 @@ function QuadroContasReceberFeat({ data }: { data: FeatContasReceberAbertoBlock 
         filtrado pelos departamentos selecionados e consolidado por cliente e faixa de
         atraso. Use “Exportar detalhamento” para a planilha título a título.
       </div>
+      {data.permutasExcluidas ? (
+        <div style={{ fontSize: 10, color: C.body, fontWeight: 600, marginBottom: 8 }}>
+          {FEAT_PERMUTA_OBSERVACAO}
+        </div>
+      ) : null}
 
       {/* Resumo — indicadores principais */}
       <div

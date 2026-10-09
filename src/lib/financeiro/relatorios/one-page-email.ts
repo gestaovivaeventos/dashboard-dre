@@ -17,6 +17,7 @@ import type {
   PrevRealChart,
   PrevistoRealizadoItem,
 } from "@/components/financeiro/relatorios/OnePageReportPreview";
+import { FEAT_PERMUTA_OBSERVACAO } from "@/lib/financeiro/relatorios/feat-contas-receber-export";
 import { svgToPng } from "@/lib/financeiro/relatorios/one-page-chart-png";
 import {
   columnsChartSvg,
@@ -1063,15 +1064,15 @@ function renderFeatContasReceber(block: FeatContasReceberAbertoBlock): string {
       indicatorCard("Total em aberto", fmtMoneyFull(block.totalEmAberto), {
         hint: `${block.titulosEmAberto} títulos · ${block.clientesEmAberto} clientes`,
         footer:
-          block.permutaEmAberto > 0
-            ? `Inclui ${fmtMoneyFull(block.permutaEmAberto)} de Permuta`
+          !block.permutasExcluidas && (block.permutaEmAberto ?? 0) > 0
+            ? `Inclui ${fmtMoneyFull(block.permutaEmAberto ?? 0)} de Permuta`
             : undefined,
       }),
       indicatorCard("Total em atraso", fmtMoneyFull(block.totalEmAtraso), {
         hint: `${fmtPctPtBr(block.percentualEmAtraso)} do aberto`,
         footer:
-          block.permutaEmAtraso > 0
-            ? `Inclui ${fmtMoneyFull(block.permutaEmAtraso)} de Permuta`
+          !block.permutasExcluidas && (block.permutaEmAtraso ?? 0) > 0
+            ? `Inclui ${fmtMoneyFull(block.permutaEmAtraso ?? 0)} de Permuta`
             : undefined,
         critical: block.totalEmAtraso > 0,
       }),
@@ -1122,7 +1123,13 @@ function renderFeatContasReceber(block: FeatContasReceberAbertoBlock): string {
 
   return `${sectionTitle("Contas a receber em aberto — Feat Produções")}${caption(
     "Saldo em aberto dos títulos da Feat na Omie (líquido de recebimentos parciais), filtrado pelos departamentos selecionados e consolidado por cliente e faixa de atraso.",
-  )}${resumo}${panel(
+  )}${
+    block.permutasExcluidas
+      ? `<div style="font-family:${FF};font-size:10px;font-weight:600;color:${C.body};margin:-4px 0 10px;">${esc(
+          FEAT_PERMUTA_OBSERVACAO,
+        )}</div>`
+      : ""
+  }${resumo}${panel(
     `<div style="font-family:${FF};font-size:12px;font-weight:700;color:${C.ink};margin-bottom:10px;">Faixas de atraso</div>${agingBars}`,
   )}<div style="height:10px;font-size:0;">&nbsp;</div>${panel(
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">

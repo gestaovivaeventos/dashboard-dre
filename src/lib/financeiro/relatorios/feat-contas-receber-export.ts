@@ -8,6 +8,12 @@ import type { FeatContaReceberDetalhe } from "@/lib/financeiro/relatorios/feat-c
 // (campo `detalhes`), sem rota nova nem chamada extra à Omie.
 // ============================================================================
 
+// Observação exibida no quadro (tela, PDF e e-mail) quando a permuta ficou fora
+// do cálculo. Mora aqui (módulo sem "use client" nem dependência de servidor)
+// para a tela e o e-mail usarem exatamente o mesmo texto.
+export const FEAT_PERMUTA_OBSERVACAO =
+  "Observação: os lançamentos de permuta não compõem os valores exibidos (em aberto e em atraso) nem o detalhamento exportado.";
+
 function sanitizeFilenamePart(value: string): string {
   return value
     .replace(/[^a-zA-Z0-9]+/g, "_")

@@ -65,7 +65,7 @@ COMO INTERPRETAR (anti-alarmismo, tom executivo e equilibrado):
 8. Use SOMENTE os números do bloco; não invente eventos nem margens. Ao citar valores, copie-os literalmente.
 
 CONTAS A RECEBER EM ABERTO (campo "feat_contas_receber_aberto" do input — quando presente):
-Este bloco vem da API da Omie (Movimentos Financeiros), apenas para a Feat Produções, filtrado pelos departamentos selecionados da empresa. Usa o SALDO EM ABERTO de cada título (líquido de recebimentos parciais), consolidado por CLIENTE e por FAIXA DE ATRASO (aging). Não confunda com receita realizada, margem apurada ou resultado consolidado.
+Este bloco vem da API da Omie (Movimentos Financeiros), apenas para a Feat Produções, filtrado pelos departamentos selecionados da empresa. Usa o SALDO EM ABERTO de cada título (líquido de recebimentos parciais), consolidado por CLIENTE e por FAIXA DE ATRASO (aging). Títulos de PERMUTA já estão EXCLUÍDOS de todos os valores (não são caixa a receber) — não some nem estime permuta. Não confunda com receita realizada, margem apurada ou resultado consolidado.
 - total_em_aberto: saldo total ainda a receber (inclui a parte não recebida de títulos com recebimento parcial).
 - total_em_atraso: parte do saldo em aberto já vencida (data de vencimento anterior a hoje). percentual_em_atraso = quanto o atraso representa do total em aberto (%).
 - titulos_em_aberto / titulos_em_atraso: quantidade de títulos abertos e, destes, quantos estão em atraso.
